@@ -462,15 +462,34 @@ nonparametric branching process with no closed-form fit:
 | --- | --- |
 | `roots.count` | distinct keys at the **root boundary**, which is not always depth 0 — see below |
 | `roots.popularity` | histogram of sessions per root |
-| `shared_depth` | longest common prefix of each request against all earlier requests *within one `wss_window`* |
+| `shared_depth` | longest common prefix *within one `wss_window`* of each session's **turn-1 request only** — the space the parameter is drawn in, not the space it is validated in; see below |
 | `branching` | the **width-by-depth profile** `w(d) = distinct keys at depth d that **two or more sessions** reached`, segmented per `research.md` § The branching segmentation rule; each segment's fanout is the geometric mean of the ratios inside it |
 | `branch_skew` | Zipf exponent fitted to the visit-count distribution over the keys at one depth, per segment |
 | `private_depth` | path depth of the **lowest-numbered turn** − that request's longest common prefix |
 | `growth_per_turn` | path-depth increment between consecutive turns of one session, **in turn-index order**, accumulated **per session-length band** — see below |
 | `churn.half_life` | **not fittable from a trace of ordinary length** — see below |
 
-`shared_depth` **is** the FR-056 validation statistic, so the model is parameterised in the
-space it is validated in, and `empirical` is the natural default rather than an escape hatch.
+`shared_depth` is emitted as `empirical` because it **is** the FR-056 validation statistic's
+quantity, so a parametric shape would be a worse model that looked more confident.
+
+It is **not**, however, fitted over the validation statistic's population, and the distinction
+costs a constant on every generated path if it is missed. `shared_depth` is drawn **once per
+session** and every turn of that session then re-walks the same trunk prefix, so the parameter is a
+per-session quantity while the statistic is a per-request one. The generator turns the first into
+the second itself; fitting from the per-request histogram applies the turn weighting twice, and
+because sessions that share more deeply also run longer, the doubled weighting biases it upward — by
++33.3, +74.6 and +238.1 blocks on every request of three agentic traces measured. `private_depth` is
+`turn-1 depth − turn-1's own prefix`, so that bias lands on FR-014a's path in full.
+
+**The two spaces cannot both be matched exactly, and the residual is a model limitation.** The
+generated per-request histogram is the turn-weighted image of the per-session draw, so it equals the
+trace's only where the trace's sharing is constant within a session. Real traces have two departures
+from that, and `fit --explain` separates them because they call for different things: sessions that
+share more deeply running longer is a **correlation** the model could express by conditioning
+`shared_depth` on `turns`, while sharing that **deepens along the conversation** cannot be expressed
+by any single per-session draw. Measured as KS distances, conditioning on `turns` would take the
+sharing divergence from 0.0646 to 0.0488 on one trace and from 0.0954 to 0.0234 on another, and from
+0.3409 only to 0.2311 on a third.
 
 **Two of these are measured along the turn chain and the rest along the arrival stream, and the
 difference is load-bearing.** A reader hands invocations over in timestamp order, which is correct

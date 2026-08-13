@@ -1849,7 +1849,46 @@ report segments statistics into before/after windows around the event.
   real trace (0.21–0.88), which is the same finding from the other end — too few distinct keys
   concentrates references onto them and shortens every distance between repeats. That points at the
   shared-prefix mismatch FR-054d prints as term 1, worth +33.3 and +74.6 blocks per request on the two
-  traces measured, and **not** at growth, which FR-054f has now accounted for.
+  traces measured, and **not** at growth, which FR-054f has now accounted for. **Closed by FR-054h**
+  for the mismatch itself; the reuse-distance bias recorded here is unaffected by it, as expected —
+  correcting the reference count further moved reuse further from its optimum.
+- **FR-054h**: `fit` MUST measure `shared_depth` from the realised shared prefix of each session's
+  **turn-1 request**, not from the sharing histogram over every request. This closes FR-054d's
+  term 1.
+  The rule it follows is general: **a parameter must be fitted in the space it is drawn in.**
+  `shared_depth` is drawn once per session, at birth, and every turn of that session then re-walks the
+  same trunk prefix — so the parameter is a per-session quantity even though the statistic that
+  validates it is a per-request one. The generator converts the first into the second itself, by
+  replaying the drawn prefix on every turn. Fitting from the per-request histogram therefore applies
+  the turn weighting **twice**, and since sessions that share more deeply also run longer, the doubled
+  weighting biases the parameter upward: sharing over all turns means 417.2, 473.4 and 791.8 blocks
+  against 383.9, 398.8 and 553.7 over turn-1 requests alone. Because `private_depth` is
+  `turn-1 depth − turn-1's own prefix`, that excess lands on FR-014a's path in full — **+33.3, +74.6
+  and +238.1 blocks on every request generated**, before a single increment of growth.
+  The identity this restores is `E[shared_depth drawn] == E[turn-1 shared prefix subtracted]`, and it
+  now holds exactly rather than approximately. Measured over three agentic traces and three seeds,
+  synthetic reference counts go from 1.05–1.11x the trace's to **0.95–1.03x**, and `request_length`
+  improves in five of six cells, on one trace to 0.026 against a 0.02 tolerance.
+  **The `sharing_depth` statistic gets worse, and that is the honest price of the two spaces not being
+  reconcilable.** It goes from 0.021–0.041 to 0.073–0.114 against a 0.05 tolerance. The generated
+  per-request histogram is the turn-weighted image of the per-session draw, so it can equal the
+  trace's only where the trace's sharing is constant within a session, and on real traces it is not.
+  `fit --explain` MUST therefore separate the two departures, because they call for different things
+  and have the same symptom:
+  | trace | length-to-sharing correlation | within-session deepening |
+  | --- | --- | --- |
+  | tau2_airline | +13.5 (41%) | +19.7 (59%) |
+  | tau2_retail | +64.0 (86%) | +10.6 (14%) |
+  | tau2_telecom | +168.3 (71%) | +69.8 (29%) |
+  The first is a correlation the model **could** express, by conditioning `shared_depth` on `turns` as
+  FR-054f conditions `growth_per_turn`. The second cannot be expressed by any single per-session draw
+  and is a limitation of the model (FR-054a).
+  `fit --explain` MUST also report both as **KS distances** and not only as differences of means,
+  because the two measures disagree about which half is worth closing and only one of them is gated.
+  Conditioning on `turns` would take the sharing divergence from 0.0646 to 0.0488, from 0.0954 to
+  0.0234, and from 0.3409 only to 0.2311 — so it crosses the tolerance on two traces and nowhere near
+  on the third, while the mean-space split attributes just 41% of the first trace's gap to that half.
+  Reporting only the means would have made the smallest available win look like the largest.
 - **FR-055**: `fit` MUST accept the trace format of `contracts/trace-io.md` in **either container**,
   parquet or JSONL, and with **either block-encoding population pattern**, detected per trace rather
   than assumed, and MUST emit a schema-valid YAML. The two population patterns are not two schemas —

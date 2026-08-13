@@ -10,13 +10,20 @@
 //! | `think_time` | `request_start` delta between consecutive turns of one session |
 //! | `private_depth` | turn-1 path depth − that request's longest common prefix |
 //! | `growth_per_turn` | path-depth increment between consecutive turns |
-//! | `shared_depth` | the realised prefix-sharing histogram, from `stats::sharing` |
+//! | `shared_depth` | the realised prefix-sharing of each session's **turn-1** request |
 //!
 //! The longest-common-prefix rule is **not** reimplemented: it is read from
 //! [`Sharing::last_prefix_len`](crate::stats::sharing::Sharing::last_prefix_len), so
 //! the `private_depth` this emits and the `shared_depth` a validator checks are on
 //! one definition. Two of them would make FR-057's divergence a comparison of
 //! definitions rather than of measurements.
+//!
+//! `shared_depth` is that one definition applied to **turn-1 requests only**, because it
+//! is drawn once per session and a parameter has to be fitted in the space it is drawn in
+//! (FR-054h). The validator's population is every request, which is the same measurement
+//! turn-weighted — and the generator applies that weighting itself by replaying the drawn
+//! prefix on every turn, so fitting from the weighted form applies it twice and adds a
+//! constant to every generated path.
 //!
 //! # What is emitted as `empirical`, and why that is not a cop-out
 //!
@@ -160,6 +167,21 @@ pub struct SessionShapes {
     /// report can account for a mean-length gap by arithmetic. See [`PathBudget`].
     requests: u64,
     weighted_turn_one_depth: u64,
+    /// Turn-1 sharing, each session's value repeated once per turn.
+    ///
+    /// The turn-weighted image of the per-session `shared_depth` population — which is
+    /// exactly what the generator's all-requests sharing would look like if
+    /// `shared_depth` were conditioned on session length. Kept so the fit can report how
+    /// much of the sharing gap that conditioning would actually close; see
+    /// [`SessionShapes::shared_depth_buckets_turn_weighted`].
+    t1_weighted: Hist,
+    /// `Σ turns × turn-1 realised shared prefix`.
+    ///
+    /// Beside the unweighted mean this says whether the all-requests sharing histogram
+    /// differs from the per-session one because sharing **grows within** a session, or
+    /// only because sessions that share more deeply run longer. Those have different
+    /// fixes and the same symptom — see [`PathBudget::turn_one_shared_weighted`].
+    weighted_turn_one_shared: u64,
     accumulated_growth: u64,
     accumulated_steps: u64,
     /// `growth_per_turn` increments, split by the session-length band the session that
@@ -268,6 +290,9 @@ impl SessionShapes {
                     self.prefix_longer_than_path += 1;
                 }
                 self.turn_one.push((path_len, shared_len));
+                for _ in 0..live.turns {
+                    self.t1_weighted.add(shared_len);
+                }
             }
             self.turns.add(live.turns);
             // Stable by turn index. A trace with duplicate indices within a session
@@ -284,6 +309,8 @@ impl SessionShapes {
             }
             self.requests += live.turns;
             self.weighted_turn_one_depth += live.turns * turn_one_depth;
+            self.weighted_turn_one_shared +=
+                live.turns * live.first.map(|(_, _, sh)| sh).unwrap_or(0);
             self.accumulated_steps += live.turns * live.turns.saturating_sub(1) / 2;
             for (_, p) in &live.chain {
                 self.accumulated_growth += p.saturating_sub(turn_one_depth);
@@ -383,6 +410,7 @@ impl SessionShapes {
             turns: self.turns.mean(),
             requests: self.requests,
             weighted_turn_one_depth: self.weighted_turn_one_depth,
+            weighted_turn_one_shared: self.weighted_turn_one_shared,
             accumulated_growth: self.accumulated_growth,
             accumulated_steps: self.accumulated_steps,
         }
@@ -625,12 +653,84 @@ impl SessionShapes {
         empirical_from(&h)
     }
 
+    /// `shared_depth` — the realised shared prefix of each session's **turn-1** request
+    /// (FR-054h).
+    ///
+    /// Not the sharing histogram over every request, which is the same measurement over
+    /// a larger population and is what a validator recomputes. The distinction is which
+    /// **space** the parameter is drawn in, and getting it wrong adds a constant to every
+    /// generated path.
+    ///
+    /// The generator draws `shared_depth` **once per session**, at birth, and every one
+    /// of that session's turns then re-walks the same trunk prefix. So the all-requests
+    /// sharing distribution the generator produces is already the *turn-weighted image*
+    /// of this per-session draw — the generator applies the weighting itself. Fitting the
+    /// draw from the trace's all-requests histogram therefore applies that weighting
+    /// **twice**, and since sessions that share more deeply also tend to run longer, the
+    /// doubled weighting biases it upward.
+    ///
+    /// Measured on two agentic traces the gap is large and one-directional: sharing over
+    /// all turns means 417.2 and 383.9 blocks against 383.9 and 309.3 over turn-1
+    /// requests alone. Because `private_depth` is `turn-1 depth − turn-1's own prefix`,
+    /// the excess lands on FR-014a's path in full — +33.3 and +74.6 blocks on every
+    /// request generated.
+    ///
+    /// So this is not a trade of one statistic against another: the parameter belongs in
+    /// the per-session space because that is where it is drawn, and the FR-056 statistic
+    /// over all requests is then reproduced by the generator's own replay across turns
+    /// rather than by fitting it directly.
+    pub fn shared_depth(&mut self) -> Option<Dist> {
+        self.seal();
+        let mut h = Hist::new();
+        for (_, shared_len) in &self.turn_one {
+            h.add(*shared_len);
+        }
+        empirical_from(&h)
+    }
+
+    /// The emitted `shared_depth` population, as buckets plus a total.
+    ///
+    /// The same measurement [`SessionShapes::shared_depth`] fits, in the form the
+    /// divergence code compares.
+    pub fn shared_depth_buckets(&mut self) -> (Vec<(u64, u64, u64)>, u64) {
+        self.seal();
+        let mut h = Hist::new();
+        for (_, sh) in &self.turn_one {
+            h.add(*sh);
+        }
+        (h.buckets(), h.count())
+    }
+
+    /// The same population **turn-weighted**, which bounds what conditioning
+    /// `shared_depth` on session length could achieve.
+    ///
+    /// The FR-056 sharing statistic is measured over every request while the parameter is
+    /// drawn once per session, so the two live in different spaces and the fit cannot be
+    /// exact in both. The KS distance from the all-requests histogram to *this* is the
+    /// floor a `turns`-conditioned `shared_depth` would leave — everything below it is
+    /// within-session deepening of sharing, which one per-session draw cannot express at
+    /// all.
+    ///
+    /// Reported as a **KS distance** rather than as a difference of means, because that is
+    /// the measure FR-056 gates on and the two disagree about what is worth doing: on one
+    /// agentic trace the mean-space split attributes only 41% of the gap to the
+    /// expressible half, while in KS terms closing that half is what crosses the
+    /// tolerance.
+    pub fn shared_depth_buckets_turn_weighted(&mut self) -> (Vec<(u64, u64, u64)>, u64) {
+        self.seal();
+        (self.t1_weighted.buckets(), self.t1_weighted.count())
+    }
+
     /// Freeze into a fitted set of parameters.
     ///
-    /// `sharing` supplies `shared_depth`, so that the emitted parameter and the
-    /// statistic a validator recomputes are the same measurement. Borrows rather than
-    /// consumes, so a caller iterating on the attempted sharing can keep calling
-    /// [`SessionShapes::private_depth_at`] against the same measurements.
+    /// `sharing` supplies the requests that shared nothing, which is a property of the
+    /// whole stream rather than of turn 1 and is reported as a limit on `shared_depth`'s
+    /// support. It no longer supplies `shared_depth` itself — see
+    /// [`SessionShapes::shared_depth`] for why that has to be measured over turn-1
+    /// requests, in the space the generator draws it in.
+    ///
+    /// Borrows rather than consumes, so a caller iterating on the attempted sharing can
+    /// keep calling [`SessionShapes::private_depth_at`] against the same measurements.
     pub fn finish(&mut self, sharing: &SharingReport) -> FittedSessions {
         self.seal();
         FittedSessions {
@@ -640,7 +740,7 @@ impl SessionShapes {
             growth_per_turn: self.fit_growth(),
             // Seconds, which is what `think_time` is in (`SessionParams::think_time_s`).
             think_time: empirical_from(&self.think_ms).map(|d| scale(&d, 1.0 / 1000.0)),
-            shared_depth: empirical_from_buckets(&sharing.depth_buckets),
+            shared_depth: self.shared_depth(),
             unshared_requests: sharing.unshared_requests,
             max_depth: self.emitted_max_depth(),
             out_of_order_turns: self.out_of_order,
@@ -676,6 +776,9 @@ pub struct PathBudget {
     /// contributes many requests, so the plain mean of turn-1 depth is not the amount
     /// of turn-1 depth a request carries.
     pub weighted_turn_one_depth: u64,
+    /// `Σ turns × turn-1 realised shared prefix`. See
+    /// [`PathBudget::turn_one_shared_weighted`].
+    pub weighted_turn_one_shared: u64,
     /// `Σ over sessions Σ over turns (this turn's depth − turn 1's depth)`.
     ///
     /// What the trace's accumulated growth actually totals, which is the quantity the
@@ -690,6 +793,33 @@ pub struct PathBudget {
 }
 
 impl PathBudget {
+    /// Turn-1 realised sharing, **turn-weighted** — the diagnostic that separates two
+    /// causes of one symptom.
+    ///
+    /// The sharing histogram over *all* requests exceeds the one over turn-1 requests on
+    /// every real trace measured, and there are two possible reasons. Either sharing
+    /// **grows within** a session, which this model cannot express at all — a session
+    /// walks one trunk prefix of `shared_depth` blocks and every turn re-walks exactly
+    /// that — or sessions that share more deeply simply **run longer**, so the
+    /// all-requests histogram weights their deeper sharing more heavily.
+    ///
+    /// This figure tells them apart. It applies the turn weighting to turn-1's sharing
+    /// and nothing else, so:
+    ///
+    /// - if it matches the all-requests mean, sharing is constant within a session and
+    ///   the whole gap is the length-to-sharing correlation, which is expressible —
+    ///   `shared_depth` has to be conditioned on session length the way FR-054f
+    ///   conditions `growth_per_turn`;
+    /// - if it falls short of the all-requests mean, sharing also deepens along the
+    ///   conversation, and that part is a limit of the model rather than a fitting error.
+    pub fn turn_one_shared_weighted(&self) -> f64 {
+        if self.requests == 0 {
+            0.0
+        } else {
+            self.weighted_turn_one_shared as f64 / self.requests as f64
+        }
+    }
+
     /// Accumulated growth per request, as the trace has it.
     pub fn accumulated_per_request(&self) -> f64 {
         if self.requests == 0 {
@@ -1237,26 +1367,94 @@ mod tests {
         assert!(f.caveats().iter().any(|c| c.contains("impossible")));
     }
 
-    #[test]
-    fn shared_depth_comes_from_the_sharing_histogram_it_will_be_validated_against() {
-        let mut h = Hist::new();
-        for d in [4u64, 4, 18, 18, 18, 40] {
-            h.add(d);
+    /// Two populations whose per-session and all-requests sharing disagree.
+    ///
+    /// Short sessions share shallowly, long ones share deeply — the correlation real
+    /// traces have — so the all-requests histogram is dominated by the long sessions'
+    /// deeper sharing while the per-session one is not. Returns the accumulator and the
+    /// matching all-requests `SharingReport`.
+    fn correlated_sharing() -> (SessionShapes, SharingReport) {
+        let mut s = SessionShapes::new();
+        let mut all = Vec::new();
+        for i in 0..30u32 {
+            s.observe(i, 0, 50, 10, None);
+            all.push(10);
         }
-        h.seal();
-        let sharing = SharingReport {
-            requests: 6,
-            sharing_requests: 6,
-            unshared_requests: 0,
-            shared_fraction: Some(1.0),
-            realised_depth: h.summary(),
-            depth_buckets: h.buckets(),
-        };
-        let f = SessionShapes::new().finish(&sharing);
+        for i in 0..30u32 {
+            for t in 0..9u32 {
+                s.observe(1000 + i, t, 60 + u64::from(t) * 5, 30, None);
+                all.push(30);
+            }
+        }
+        (s, sharing_with(&all))
+    }
+
+    #[test]
+    fn shared_depth_is_fitted_in_the_space_the_generator_draws_it_in() {
+        // FR-054h. `shared_depth` is drawn ONCE PER SESSION, so the parameter is the
+        // per-session distribution — turn 1's realised prefix. The all-requests histogram
+        // is the same measurement turn-weighted, and the generator applies that weighting
+        // itself by replaying the drawn prefix on every turn; fitting from the weighted
+        // form applies it twice.
+        let (mut s, sharing) = correlated_sharing();
+        let f = s.finish(&sharing);
         let d = f.shared_depth.expect("fitted");
-        // The median of that histogram is 18, and the emitted empirical must agree.
-        assert_eq!(d.quantile(0.5), Some(18.0));
-        assert_eq!(d.quantile(1.0), Some(40.0));
+        // Per session the population is 30 at 10 and 30 at 30, so the median is 10.
+        assert_eq!(d.quantile(0.5), Some(10.0));
+        // Over all 300 requests it would be 30 — 270 of them belong to the long
+        // sessions. That is the value this must NOT come back with.
+        assert_eq!(
+            sharing.realised_depth.p50,
+            Some(30),
+            "fixture must actually disagree, or this test proves nothing"
+        );
+    }
+
+    #[test]
+    fn what_shared_depth_draws_equals_what_private_depth_subtracts() {
+        // The identity term 1 exists to enforce: FR-014a builds
+        // `shared_depth + private_depth + Σ growth`, while `private_depth` is measured as
+        // `turn-1 depth − turn-1's own prefix`. If the drawn prefix and the subtracted one
+        // have different means, the difference lands on every generated path as a
+        // constant — +33.3 and +74.6 blocks per request on two real traces.
+        let (mut s, sharing) = correlated_sharing();
+        let budget = s.path_budget();
+        let f = s.finish(&sharing);
+        let drawn = f
+            .shared_depth
+            .as_ref()
+            .and_then(|d| d.mean())
+            .expect("a mean");
+        assert!(
+            (drawn - budget.turn_one_shared).abs() < 1e-9,
+            "drawn {drawn} against subtracted {}",
+            budget.turn_one_shared
+        );
+    }
+
+    #[test]
+    fn the_sharing_gap_is_split_into_the_expressible_part_and_the_rest() {
+        // Two causes, one symptom, different fixes — so the budget has to separate them.
+        // In this fixture sharing is constant within each session and only the
+        // length-to-sharing correlation is present, so the turn-weighted turn-1 figure
+        // must account for the whole gap to the all-requests mean and leave nothing over.
+        let (mut s, sharing) = correlated_sharing();
+        let budget = s.path_budget();
+        let all_mean = sharing.realised_depth.mean.expect("a mean");
+        let weighted = budget.turn_one_shared_weighted();
+        // 30 requests at 10 and 270 at 30.
+        let expect = (30.0 * 10.0 + 270.0 * 30.0) / 300.0;
+        assert!(
+            (all_mean - expect).abs() < 0.5,
+            "all-requests mean {all_mean}"
+        );
+        assert!(
+            (weighted - all_mean).abs() < 0.5,
+            "sharing is constant within a session here, so the turn-weighted turn-1 mean \
+             {weighted} should account for the all-requests mean {all_mean} entirely"
+        );
+        // And the correlation half is the whole gap from the unweighted figure.
+        assert!(weighted - budget.turn_one_shared > 7.0);
     }
 
     #[test]

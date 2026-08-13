@@ -778,6 +778,7 @@ fn cmd_fit(
 
     if explain {
         print_path_budget(&trace_report, &synthetic, &shapes.path_budget());
+        print_sharing_spaces(&trace_report, &mut shapes);
         print_explanation(&synthetic, &trace_report, &d, "synthetic", "trace");
     }
 
@@ -880,6 +881,56 @@ fn trace_report(
 /// increment of growth. It is worth printing precisely because it is invisible in every
 /// distributional check: both sides can be individually well-fitted measurements of
 /// *different populations*.
+/// How much of the sharing divergence is a difference of **space** rather than of fit.
+///
+/// `shared_depth` is drawn once per session; the FR-056 sharing statistic is measured over
+/// every request. The generator turns the first into the second by replaying the drawn
+/// prefix on every turn, so it produces the *turn-weighted* image of its per-session draw
+/// — and that can only equal the trace's all-requests histogram if the trace's sharing is
+/// constant within a session.
+///
+/// Two KS distances say what is available. The first is what the fit leaves today. The
+/// second is the floor that conditioning `shared_depth` on session length would leave,
+/// which is the part of the gap that is within-session deepening and therefore not
+/// expressible by any single per-session draw. Printed as KS rather than as means because
+/// that is what FR-056 gates on, and the mean-space split in the path budget above
+/// disagrees with it about which half is worth closing.
+fn print_sharing_spaces(trace: &Report, shapes: &mut workload_model::fit::sessions::SessionShapes) {
+    use workload_model::stats::divergence::ks_from_buckets;
+    let all = &trace.sharing.depth_buckets;
+    let all_total: u64 = all.iter().map(|(_, _, c)| *c).sum();
+    let (per_session, n1) = shapes.shared_depth_buckets();
+    let (weighted, n2) = shapes.shared_depth_buckets_turn_weighted();
+    if all_total == 0 || n1 == 0 {
+        return;
+    }
+    let now = ks_from_buckets(all, all_total, &per_session, n1);
+    let floor = ks_from_buckets(all, all_total, &weighted, n2);
+    println!("\n    term 1b: sharing is validated over REQUESTS, drawn per SESSION");
+    println!(
+        "    {:<46} {:>10}",
+        "  KS all-requests vs the per-session fit",
+        format!("{now:.5}")
+    );
+    println!(
+        "    {:<46} {:>10}   conditioning `shared_depth` on `turns`",
+        "  KS all-requests vs that fit turn-weighted",
+        format!("{floor:.5}")
+    );
+    println!(
+        "    {:<46} {:>36}",
+        "", "closes the difference between these two;"
+    );
+    println!(
+        "    {:<46} {:>36}",
+        "", "the lower figure is within-session deepening,"
+    );
+    println!(
+        "    {:<46} {:>36}",
+        "", "which one per-session draw cannot express"
+    );
+}
+
 fn print_path_budget(
     trace: &Report,
     synthetic: &Report,
@@ -960,13 +1011,56 @@ fn print_path_budget(
     );
     println!(
         "    {:<46} {:>10}",
-        "  DRAWN by the generator (all turns)",
-        format!("{all_shared_mean:.1}")
+        "  DRAWN by the generator (per session, turn 1)",
+        format!("{:.1}", budget.turn_one_shared)
     );
     println!(
         "    {:<46} {:>10}   added to every path",
         "  mismatch",
-        format!("{:+.1}", all_shared_mean - budget.turn_one_shared)
+        format!("{:+.1}", 0.0)
+    );
+    // The FR-056 statistic lives in a different space from the parameter, and the two
+    // rows below are what say whether the model can hold both at once. `shared_depth` is
+    // drawn once per session, so the generator's all-requests histogram is the
+    // turn-weighted image of that draw -- which can only match the trace's if the
+    // trace's sharing is constant within a session.
+    println!(
+        "    {:<46} {:>10}   the FR-056 statistic's space",
+        "  for reference, sharing over ALL turns",
+        format!("{all_shared_mean:.1}")
+    );
+    // Split into its two causes rather than judged against a threshold. Both are
+    // typically non-zero, and a binary verdict on a continuum reads as "this one does not
+    // apply" when it means "this one is smaller" -- so the two magnitudes are printed and
+    // the reader is told which fix each calls for.
+    let weighted_turn_one_shared = budget.turn_one_shared_weighted();
+    let correlation = weighted_turn_one_shared - budget.turn_one_shared;
+    let within = all_shared_mean - weighted_turn_one_shared;
+    let total = (correlation + within).abs().max(1e-9);
+    println!(
+        "    {:<46} {:>10}",
+        "    turn-1 sharing, turn-WEIGHTED",
+        format!("{weighted_turn_one_shared:.1}")
+    );
+    println!(
+        "    {:<46} {:>10}   {:.0}% — sessions that share more deeply run",
+        "    of the gap: length-to-sharing correlation",
+        format!("{correlation:+.1}"),
+        100.0 * correlation / total
+    );
+    println!(
+        "    {:<46} {:>36}",
+        "", "longer. EXPRESSIBLE: condition on `turns`"
+    );
+    println!(
+        "    {:<46} {:>10}   {:.0}% — sharing deepens along the conversation.",
+        "    of the gap: within-session growth",
+        format!("{within:+.1}"),
+        100.0 * within / total
+    );
+    println!(
+        "    {:<46} {:>36}",
+        "", "NOT EXPRESSIBLE: one per-session draw cannot"
     );
 
     println!("\n    term 2: accumulated growth, true against i.i.d. per turn");
