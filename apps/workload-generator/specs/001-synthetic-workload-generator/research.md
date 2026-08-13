@@ -611,6 +611,68 @@ re-derived without re-reading 800 MB:
 censoring correction and the occupancy floor both need them and a width profile alone cannot be read
 honestly.
 
+## The whole-corpus fit matrix (FR-055f, T102a)
+
+`research/corpus_matrix.py` fits every trace in the corpus and tabulates the outcome. It exists
+because every model change up to FR-054h was measured on `exgentic_tau2_{airline,retail,telecom}` —
+three task domains of **one** benchmark, same harness and same agent scaffold. Reporting "three
+traces, three seeds, nine cells" made that read as nine observations; the seeds only quantify
+generator noise, so the effective sample was **one workload family**.
+
+Measured 2026-08-13, 24 traces, `--block-bytes 131072 --wss-window 5000 --seed 4242`, divergences
+against the FR-056 defaults (`req_len` 0.02, `share` 0.05, `reuse` 0.02, `uniq` 0.15):
+
+| trace | sessions | refs | req_len | share | reuse | uniq |
+| --- | --- | --- | --- | --- | --- | --- |
+| exgentic_browsecompplus | 1 948 | 0.985 | 0.083 | 0.122 | 0.090 | 0.689 |
+| exgentic_swebench | 1 959 | 1.002 | 0.036 | 0.203 | 0.093 | 0.154 |
+| exgentic_tau2_airline | 957 | 1.027 | 0.026 | 0.073 | 0.024 | 0.219 |
+| exgentic_tau2_retail | 1 848 | 0.966 | 0.062 | 0.114 | 0.040 | 0.513 |
+| exgentic_tau2_telecom | 1 844 | 0.990 | 0.159 | 0.199 | 0.033 | 0.746 |
+| qwen_code | 26 406 | 1.166 | 0.131 | 0.094 | 0.062 | **0.103** |
+| qwen_reasoning | 9 612 | 1.006 | 0.139 | 0.133 | 0.030 | 0.532 |
+| qwen_toc | 23 101 | 1.006 | 0.024 | **0.028** | 0.029 | **0.079** |
+| wildchat | 826 319 | 1.059 | 0.082 | 0.111 | 0.024 | 0.353 |
+
+**Only 9 of 24 traces fit and compare, and within tolerance: `request_length` 0/9, `sharing_depth`
+1/9, `reuse_distance_objects` 0/9, `unique_keys` 2/9.** The reference *count* is within ±3.5% on 7 of
+9, so volume is calibrated while the **shapes** are not — and the `tau2` traces are the optimistic
+end of this table rather than typical of it. Read with FR-054a: each of these is a limitation of the
+model, and the table is the honest statement of how much of the corpus it can currently express.
+
+The 15 refusals, by FR-054b classification rather than dropped, because a MODEL LIMITATION that
+becomes a fit is progress and a fit that becomes a refusal is a regression: 7 `metadata_only` sources
+carry no block data; `mooncake_agent` and `mooncake_conv` carry no session identity;
+`exgentic_appworld` has 1 747 requests that shared nothing at all against `shared_depth`'s support
+starting at 1; `qwen_tob`, `ragbench`, `ragbench_canonical` and `swe_agent` cannot supply
+**`think_time`** — all four the same parameter, measured, none of them the arrival-rate variant of
+that refusal (their timestamps are absent or unusable, § Threats to validity item 3); and
+`paper_review_dag` is CALLER INPUT, carrying four blockings with no default.
+
+Two errors this sweep found on its first run, both of them **labels rather than numbers**, which is
+the more damaging kind because a bad number invites another measurement while a bad label redirects
+the work:
+
+- **FR-054g had been stated wider than its evidence.** The reuse-distance U-shape with a floor near
+  1.18× the reference count holds on `tau2`; `browsecompplus` and `swebench` sit at reuse 0.090 and
+  0.093 — 4.5× the tolerance — with their reference counts already at 0.985 and 1.002. Volume is not
+  their problem, so raising it cannot be their fix. The requirement is now scoped to that family.
+- **Seven traces were misclassified as CALLER INPUT.** Every `metadata_only` source reported "several
+  blockings — `[]` tokens — name one with `--block-size`", and following that advice produced a bare
+  `No such file or directory`. An empty list of blockings is not ambiguity. Note the boundary: an
+  absent default is *not* the discriminator, since `paper_review_dag` also declares none but lists
+  four, and must still be refused as CALLER INPUT.
+
+The sweep then found a third of the same kind: `FitError::{Unmeasured, NoArrivalRate}` named no
+FR-054b outcome at all, so the four traces hitting them were reported as **`OK`** — a refusal reading
+as success. Both are case 2 by the requirement's own words, a parameter whose source field the trace
+does not carry being the model requiring something the trace was never obliged to record.
+
+The exposure that remains, and the reason this is a standing requirement rather than a one-off audit,
+is not in any single parameter — every parameter is fitted — but in **prioritisation**: which residual
+gets chased is set by whichever traces are in front of whoever is looking, and on a differently-shaped
+workload the dominant term may be a different one entirely.
+
 ## Threats to validity
 
 1. **Convenience sample.** 24 traces, chosen by availability. Shapes are likely to recur; the

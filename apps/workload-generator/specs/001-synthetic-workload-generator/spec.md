@@ -1816,14 +1816,27 @@ report segments statistics into before/after windows around the event.
   rule 8's branching profile: a table that does not ascend, or that starts above the shortest session,
   silently routes some sessions to the wrong band, and every path they generate is then wrong in a way
   no later check attributes back to here.
-- **FR-054g**: **`reuse_distance_objects` is minimised where the generated stream carries about 18%
-  *more* references than the trace, not at parity — so a correctly calibrated model cannot satisfy it,
-  and this is a limitation of the statistic as tolerance-checked here rather than of any model that
-  fails it** (FR-054a). Recorded because the surface appearance is the exact opposite: adopting
-  FR-054f took this statistic from inside tolerance to outside it on 8 of 9 trace-seed cells, which
-  reads as a regression caused by banding and is not one.
-  The evidence is a sweep of 19 configurations over three traces, and its point is that the divergence
-  is a function of the **reference volume alone**. Driving the volume by three unrelated mechanisms —
+- **FR-054g**: **On the `tau2` family, `reuse_distance_objects` is minimised where the generated
+  stream carries about 18% *more* references than the trace, not at parity — so on those traces a
+  correctly calibrated model cannot satisfy it, and that is a limitation of the statistic as
+  tolerance-checked here rather than of any model that fails it** (FR-054a). Recorded because the
+  surface appearance is the exact opposite: adopting FR-054f took this statistic from inside tolerance
+  to outside it on 8 of 9 trace-seed cells, which reads as a regression caused by banding and is not
+  one.
+  **Scope, stated because it was first written wider than the evidence.** The sweep below covers
+  `tau2_airline`, `tau2_retail` and `tau2_telecom` — three task domains of **one** benchmark, same
+  harness and same agent scaffold, so they are near-siblings rather than three independent workloads,
+  and the three seeds per trace quantify generator noise rather than adding trace diversity. The
+  effective sample is one workload family. The corpus matrix of FR-055f puts two agentic traces from
+  other families at reuse divergences of 0.090 and 0.093 — 4.5x the tolerance, far outside the
+  0.024–0.040 the `tau2` traces show — while their reference counts sit within 1.5% of parity. Whether
+  raising *their* reference volume would improve reuse the way it does on `tau2` is **untested**, so
+  the U-shape below MUST NOT be assumed for a trace outside that family until it has been reproduced
+  there. What generalises is the weaker and still useful claim: reuse divergence is sensitive to
+  reference volume, so a change that moves the volume must be judged on reuse at matched volume.
+  The evidence is a sweep of 19 configurations over those three traces, and its point is that the
+  divergence is a function of the **reference volume alone**. Driving the volume by three unrelated
+  mechanisms —
   scaling a pooled distribution, scaling a banded one, and changing the band ladder — traces one
   U-shaped curve with its floor at about 1.18x:
   | mechanism | references vs trace | reuse distance |
@@ -1897,6 +1910,30 @@ report segments statistics into before/after windows around the event.
   leak into each statistic. Container support MUST be symmetric with FR-021a's output modes:
   the generator emits JSONL, so refusing to read JSONL would leave its own output unconsumable by its
   own tools and would make the FR-058a round trip impossible.
+- **FR-055f**: a change to `fit` or to the generator MUST be judged against **every trace in the
+  corpus**, not against the traces it was developed on, and any claim it produces about the model MUST
+  NOT be stated wider than the trace families it was measured over. `research/corpus_matrix.py` is the
+  executable form: one row per trace, the four gated divergences with their FR-056 verdicts, the
+  reference ratio, and — for a trace that did not fit — its **FR-054b classification rather than
+  omission**, because a change that turns a MODEL LIMITATION into a fit is progress, a change that
+  turns a fit into a refusal is a regression, and a table containing only the traces that fitted shows
+  neither.
+  **The reason this is a requirement and not merely good practice is that its absence cost two
+  specific errors, of two different kinds.** Every model change through FR-054h was measured on
+  `tau2_airline`, `tau2_retail` and `tau2_telecom` — three task domains of one benchmark, same harness
+  and same agent scaffold. Reporting "three traces, three seeds, nine cells" made that read as nine
+  observations when the seeds only quantify generator noise, so the effective sample was **one workload
+  family**. From that sample, FR-054g's reuse-distance U-shape was written as a property of the model;
+  two agentic traces from other families sit at 4.5x the reuse tolerance with their reference counts
+  already at parity, so it does not transfer, and no `tau2`-only workflow could have shown that. In the
+  same blind spot, **seven `metadata_only` traces were misclassified as `CALLER INPUT`** and it went
+  unnoticed for as long as the corpus went unswept.
+  Consequently a **wrong classification MUST be treated as more serious than a wrong divergence**: a
+  number that is off invites another measurement, whereas a label that is off redirects the work,
+  since the label is what a reader uses to decide what to build next. And the residual exposure this
+  check addresses is not in any single parameter — every parameter is fitted — but in
+  **prioritisation**: which residual gets chased is set by whichever traces are in front of whoever is
+  looking, and on a differently-shaped workload the dominant term may be a different one entirely.
 - **FR-055e**: `fit` MUST **refuse to fit from a partial trace**, and MUST determine partiality by
   comparing the records it consumed against the manifest's declared
   `block_stats.<block_size>.invocations` rather than by a filename convention. The

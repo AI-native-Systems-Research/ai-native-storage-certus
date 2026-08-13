@@ -174,6 +174,15 @@ impl std::fmt::Display for ReadError {
                  {available:?}. Reading a different one would answer a question that was not \
                  asked, since block size sets every depth and every path length"
             ),
+            // The empty case is spelled out separately because "several blockings — `[]`
+            // tokens" is a sentence that contradicts itself, and a reader who sees it has
+            // no way to tell which half is wrong.
+            ReadError::AmbiguousBlocking { available } if available.is_empty() => write!(
+                f,
+                "CALLER INPUT: this trace declares no blocking and lists none available, yet its \
+                 manifest does claim populated block fields, so name one with --block-size. \
+                 Choosing for you would be choosing the structure the fit measures"
+            ),
             ReadError::AmbiguousBlocking { available } => write!(
                 f,
                 "CALLER INPUT: this trace carries several blockings — {available:?} tokens — and \
@@ -606,6 +615,29 @@ pub fn resolve_block_size(m: &TraceManifest, requested: Option<u32>) -> Result<u
         v
     };
     let avail = available(m);
+    // An empty list is **not** ambiguity. It says the trace carries no blocking at all,
+    // which on a `metadata_only` source means no block data — a model limitation, not a
+    // flag the caller forgot (FR-054b). Checked here rather than left to `assemble`
+    // because resolution runs first, and reporting it as ambiguity was wrong twice over:
+    // the message contradicted itself ("several blockings — `[]` tokens") and following
+    // its own advice produced a bare `No such file or directory`, the least informative
+    // outcome in the taxonomy. Measured across the shipped corpus, this mislabelled 7 of
+    // 24 traces as the caller's mistake rather than the model's limit — and that label is
+    // exactly what a reader uses to decide what to build next.
+    //
+    // Exactly 7, and the boundary is worth keeping: those are the `metadata_only` sources,
+    // which declare no default blocking AND list none available. `paper_review_dag` also
+    // declares no default but lists four, so it stays genuine ambiguity and must still be
+    // refused as CALLER INPUT — an absent default is not the discriminator, an empty list
+    // of alternatives is.
+    //
+    // Deferring to the encoding check rather than reporting `NoBlockData` directly keeps
+    // one definition of "carries block data": if the manifest does declare a populated
+    // block field while listing no blocking, that is a different and rarer thing, and the
+    // arms below still handle it.
+    if avail.is_empty() {
+        Encoding::from_manifest(m)?;
+    }
     match requested {
         Some(r) if avail.is_empty() || avail.contains(&r) => Ok(r),
         Some(r) => Err(ReadError::NoSuchBlocking {
@@ -878,6 +910,101 @@ mod tests {
             msg.contains("The trace is valid"),
             "the trace is valid and its arrival and size distributions are measurable: {msg}"
         );
+    }
+
+    /// A `metadata_only` manifest: no block data, and no blocking to name.
+    fn metadata_only() -> workload_model::trace::TraceManifest {
+        let mut m = manifest(Encoding::Full, 1);
+        m.source_class = "metadata_only".into();
+        m.block_size = None;
+        m.block_sizes_available = vec![];
+        m.block_stats = Default::default();
+        for f in ["full_input_blocks", "new_input_blocks"] {
+            m.field_status.insert(f.into(), "unavailable".into());
+        }
+        m
+    }
+
+    #[test]
+    fn a_trace_with_no_blocking_at_all_is_a_model_limitation_not_a_missing_flag() {
+        // Regression, measured across the shipped corpus: 7 of 24 traces reported
+        // "this trace carries several blockings — [] tokens — name one with --block-size".
+        // That sentence contradicts itself, and the advice in it produced a bare
+        // `No such file or directory`. An empty list of blockings is not ambiguity; on a
+        // metadata_only source it means no block data, which FR-054b classifies as a
+        // limit of the model rather than the caller's mistake.
+        let m = metadata_only();
+        let e = resolve_block_size(&m, None).expect_err("must refuse");
+        let msg = e.to_string();
+        assert!(msg.contains("MODEL LIMITATION"), "{msg}");
+        assert!(!msg.contains("several blockings"), "{msg}");
+        assert!(
+            !msg.contains("--block-size"),
+            "must not send the reader after a flag that cannot help: {msg}"
+        );
+    }
+
+    #[test]
+    fn naming_a_blocking_on_a_trace_that_has_none_is_refused_the_same_way() {
+        // The old code accepted any requested size here and failed later opening a
+        // partition that cannot exist, so the outcome depended on whether the reader had
+        // taken the message's advice yet. Both paths must give the same classification.
+        let m = metadata_only();
+        let msg = resolve_block_size(&m, Some(16))
+            .expect_err("must refuse")
+            .to_string();
+        assert!(msg.contains("MODEL LIMITATION"), "{msg}");
+        assert!(msg.contains("metadata_only"), "{msg}");
+    }
+
+    #[test]
+    fn a_trace_that_does_carry_block_data_still_resolves_its_blocking() {
+        // The guard above must not swallow the ordinary cases: one declared blocking
+        // resolves, a request for one the trace lacks is still CALLER INPUT.
+        let m = manifest(Encoding::Full, 1);
+        assert_eq!(resolve_block_size(&m, None).expect("declared"), 16);
+        assert_eq!(resolve_block_size(&m, Some(16)).expect("requested"), 16);
+        let msg = resolve_block_size(&m, Some(999))
+            .expect_err("must refuse")
+            .to_string();
+        assert!(msg.contains("CALLER INPUT"), "{msg}");
+    }
+
+    #[test]
+    fn no_default_blocking_but_several_available_is_still_caller_input() {
+        // The `paper_review_dag` shape, and the boundary the empty-list guard must not
+        // cross. An absent default is NOT what makes a trace a model limitation — an empty
+        // list of alternatives is. This trace has four, so naming one is genuinely the
+        // caller's to do, and the guard swallowing it would send a reader looking for
+        // missing block data that is right there.
+        let mut m = manifest(Encoding::Full, 1);
+        m.block_size = None;
+        m.block_sizes_available = vec![16, 32, 64, 128];
+        let msg = resolve_block_size(&m, None)
+            .expect_err("four blockings and no default is ambiguous")
+            .to_string();
+        assert!(msg.contains("CALLER INPUT"), "{msg}");
+        assert!(msg.contains("several blockings"), "{msg}");
+        assert!(msg.contains("--block-size"), "{msg}");
+        // And naming one of them resolves.
+        assert_eq!(resolve_block_size(&m, Some(64)).expect("named"), 64);
+    }
+
+    #[test]
+    fn a_trace_declaring_block_data_but_listing_no_blocking_gets_the_empty_case_message() {
+        // Keeps the separate empty-list arm honest: it is reachable only here, where the
+        // manifest claims a populated block field yet lists no blocking to read it at.
+        // That is self-contradictory on the trace's part rather than a model limit, so it
+        // stays CALLER INPUT — but it must not be described as "several blockings — []".
+        let mut m = manifest(Encoding::Full, 1);
+        m.block_size = None;
+        m.block_sizes_available = vec![];
+        let msg = resolve_block_size(&m, None)
+            .expect_err("nothing to read at")
+            .to_string();
+        assert!(msg.contains("CALLER INPUT"), "{msg}");
+        assert!(!msg.contains("several blockings"), "{msg}");
+        assert!(msg.contains("declares no blocking"), "{msg}");
     }
 
     #[test]

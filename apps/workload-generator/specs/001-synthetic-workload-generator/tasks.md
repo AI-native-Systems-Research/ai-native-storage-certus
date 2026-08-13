@@ -302,6 +302,13 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
   documentation and asserts it both parses and validates — neither of the two defects this
   closes was catchable by reading
 - [ ] T101 [P] Verify SC-001: a realistic sharing workload in under 60 lines of YAML, and a variation in under 10 using `extends`
+- [X] T102a [P] Sweep the **whole corpus** before and after any change to `fit` or the generator, and
+  judge the change on that table rather than on the traces it was developed against (FR-055f).
+  `research/corpus_matrix.py` is its executable form: it reports refusals by their FR-054b
+  classification instead of dropping them, so a MODEL LIMITATION that becomes a fit and a fit that
+  becomes a refusal are both visible. It exists because a `tau2`-only workflow had already stated
+  FR-054g wider than its evidence and left seven `metadata_only` traces misclassified as `CALLER
+  INPUT`; the standing exposure it covers is prioritisation, not any single parameter
 - [ ] T102 Update `research.md` § Open derivations as each item is discharged, and close out the remaining one — the occupancy-bound derivation (FR-009f/FR-009g). The `GetIoStats` cross-check tolerance that used to be listed there is discharged by removal
 - [ ] T103 Run `component-check-leakage` and the repo's doc-sync skills, then re-verify `fmt`, `clippy -D warnings` and `cargo doc` across all four crates
 

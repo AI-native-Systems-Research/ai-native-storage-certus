@@ -166,17 +166,28 @@ pub enum FitError {
 impl std::fmt::Display for FitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            // Both variants are FR-054b case 2, and both MUST say so. The schema requires a
+            // parameter the trace was never obliged to record, which is the model asking for
+            // something the data does not owe it — not a defect in the trace and not
+            // something the caller can fix by passing a different flag. Leaving the
+            // classification off made these two the only refusals in the taxonomy that named
+            // no outcome at all, and a corpus sweep then reported them as `OK` (FR-055f):
+            // silent success is the worst available reading of a refusal.
             FitError::Unmeasured(what) => write!(
                 f,
-                "{what} could not be measured from this trace, and the schema requires it. \
+                "MODEL LIMITATION (FR-054a), not a defect in the trace: `{what}` could not be \
+                 measured from it and this model's schema requires it, so the binding \
+                 restriction is that the schema admits no document with `{what}` absent. \
                  Refusing rather than emitting a default, which in the output YAML would be \
                  indistinguishable from a measurement (FR-055)"
             ),
             FitError::NoArrivalRate => write!(
                 f,
-                "the trace has no usable timestamps, so the arrival rate is not measurable. \
-                 Supply one, or fit a trace whose `request_start` is native: an invented rate \
-                 would change the plan's whole time axis while looking fitted"
+                "MODEL LIMITATION (FR-054a), not a defect in the trace: it carries no usable \
+                 timestamps, so the arrival rate is not measurable, and this model has no \
+                 timeless form — `run.arrival` is required and sets the plan's whole time \
+                 axis. Supply a rate explicitly, or fit a trace whose `request_start` is \
+                 native: an invented rate would look fitted"
             ),
         }
     }
@@ -512,9 +523,14 @@ mod tests {
             true,
         )
         .expect_err("must refuse");
-        assert!(e
-            .to_string()
-            .contains("would change the plan's whole time axis"));
+        // Asserts what the refusal must convey, not the sentence conveying it: the outcome
+        // it classifies as, and that it says an invented rate would pass for a fitted one.
+        // The previous version pinned a phrase and so failed on a reword that strengthened
+        // the message.
+        let msg = e.to_string();
+        assert!(msg.contains("MODEL LIMITATION"), "{msg}");
+        assert!(msg.contains("time axis"), "{msg}");
+        assert!(msg.contains("fitted"), "{msg}");
     }
 
     #[test]
@@ -571,5 +587,30 @@ mod tests {
         .expect_err("must refuse");
         assert!(e.to_string().contains("turns"), "{e}");
         assert!(e.to_string().contains("FR-055"), "{e}");
+        assert!(e.to_string().contains("MODEL LIMITATION"), "{e}");
+    }
+
+    #[test]
+    fn every_refusal_names_its_fr_054b_outcome() {
+        // Asserts the classification rather than the prose, so a reword cannot quietly drop
+        // it. These two were the only refusals in the taxonomy carrying no outcome at all,
+        // and a corpus sweep consequently reported the traces hitting them as `OK` — a
+        // refusal reading as success. FR-054b case 2 covers both: a parameter whose source
+        // field the trace does not carry is the model requiring something the trace was
+        // never obliged to record.
+        for e in [FitError::Unmeasured("think_time"), FitError::NoArrivalRate] {
+            let msg = e.to_string();
+            assert!(msg.contains("MODEL LIMITATION"), "{msg}");
+            // Case 2 additionally requires the restriction to be named, so the message must
+            // say more than which outcome it is.
+            assert!(
+                msg.contains("this model"),
+                "must name the binding restriction: {msg}"
+            );
+            assert!(
+                !msg.contains("CALLER INPUT") && !msg.contains("CORRUPT TRACE"),
+                "exactly one outcome: {msg}"
+            );
+        }
     }
 }
