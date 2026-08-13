@@ -121,12 +121,14 @@ pub struct SessionShapes {
     out_of_order: u64,
     /// Adjacent turns **in chain order** whose path got shorter.
     ///
-    /// This is the genuine FR-014a violation, and the one the old `out_of_order`
-    /// caveat was reaching for and getting wrong: turn n+1's path must extend turn
-    /// n's, so a decrease along the *chain* means the trace is not the strict chain
-    /// the model assumes. Measured on the three agentic traces this was blamed for,
-    /// it is **zero** — they are perfect chains, and only the arrival order was
-    /// disordered.
+    /// This is the genuine binding restriction, and the one the old `out_of_order`
+    /// caveat was reaching for and getting wrong: FR-014a's path can only grow, so a
+    /// decrease along the *chain* is something the model cannot express. A
+    /// conversation whose context shrinks — a trimmed history, a dropped tool result —
+    /// is a real workload, so a non-zero count here is a limit of this model rather
+    /// than a fault in the trace (FR-054a). Measured on the three agentic traces the
+    /// old caveat blamed, it is **zero**: they are perfect chains, and only their
+    /// arrival order was disordered.
     non_monotone_steps: u64,
     /// Whether [`SessionShapes::seal`] has folded the chains in already.
     sealed: bool,
@@ -323,10 +325,13 @@ pub struct FittedSessions {
     /// Not folded into `shared_depth`: "shares nothing" and "shares one block" are
     /// different workloads, and the emitted distribution's support starts at 1.
     pub unshared_requests: u64,
-    /// Turns that arrived out of order, which FR-014a's strict chain forbids.
+    /// Turns whose arrival order disagreed with their turn index.
+    ///
+    /// Informational: it affects no fitted parameter, since `growth_per_turn` is
+    /// differenced along the chain and `think_time` along the stream.
     pub out_of_order_turns: u64,
-    /// Adjacent turns **in chain order** whose path got shorter — the genuine FR-014a
-    /// violation, and non-zero only when the trace really is not a strict chain.
+    /// Adjacent turns **in chain order** whose path got shorter — a workload FR-014a's
+    /// grow-only path cannot express, and so a limit of the model (FR-054a).
     pub non_monotone_steps: u64,
     /// Turn-1 requests whose prefix exceeded their path — impossible, so non-zero
     /// means the two measurements disagree.
@@ -339,9 +344,11 @@ impl FittedSessions {
         let mut out = Vec::new();
         if self.think_time.is_none() {
             out.push(
-                "think_time is unset: the trace carries no usable per-request timestamps, so \
-                 the gap between turns is not measurable. Left unset rather than defaulted, \
-                 since a default would be indistinguishable from a measurement (FR-055)"
+                "MODEL LIMITATION (FR-054a): think_time is unset because the trace carries no \
+                 usable per-request timestamps. A trace is under no obligation to record them, \
+                 and this model requires an arrival process, so the gap is left unset rather \
+                 than defaulted — a default would be indistinguishable from a measurement \
+                 (FR-055)"
                     .to_string(),
             );
         }
@@ -358,11 +365,13 @@ impl FittedSessions {
         }
         if self.non_monotone_steps > 0 {
             out.push(format!(
-                "{} adjacent turns get SHORTER along the turn chain. FR-014a makes turn n+1's \
-                 path a strict extension of turn n's, so this trace is not the strict chain the \
-                 model assumes and growth_per_turn fitted from it is describing something the \
-                 model cannot express. The decrease is clamped to zero, which understates growth \
-                 for those turns rather than inventing a negative one",
+                "MODEL LIMITATION (FR-054a): {} adjacent turns get shorter along the turn chain, \
+                 and FR-014a's path model can only grow — turn n+1's path is a strict extension \
+                 of turn n's. A conversation whose context shrinks is a real thing (a trimmed or \
+                 summarised history, a tool result dropped) and this model has no way to say it, \
+                 so growth_per_turn fitted here understates those turns: the decrease is clamped \
+                 to zero rather than inventing a negative growth. The trace is not at fault; the \
+                 model's path formula is too narrow for it",
                 self.non_monotone_steps
             ));
         }
@@ -376,9 +385,12 @@ impl FittedSessions {
         }
         if self.unshared_requests > 0 {
             out.push(format!(
-                "{} requests shared nothing at all and are not in shared_depth's support, \
-                 which starts at 1. A generated model will therefore give every session \
-                 some sharing where this trace gave those requests none",
+                "MODEL LIMITATION (FR-054a): {} requests shared nothing at all, and \
+                 `shared_depth`'s support starts at 1 — this model has no way to say that a \
+                 request shares no prefix with anything. A generated model will therefore give \
+                 every session some sharing where this trace gave those requests none. \
+                 Cold-start requests are ordinary workload, so the gap is in the model's support, \
+                 not in the trace",
                 self.unshared_requests
             ));
         }
@@ -657,10 +669,19 @@ mod tests {
             .caveats()
             .iter()
             .any(|c| c.contains("disagrees with their turn indices")));
-        // And it must NOT claim the model cannot express this trace, which is what the
-        // old caveat said and what sent the first investigation down the wrong path.
+        // And no caveat may report the *chain* as something the model cannot express,
+        // which is what the old caveat did and what sent the first investigation down
+        // the wrong path. Arrival disorder now affects no fitted parameter, so there is
+        // nothing for the model to be short of here.
+        //
+        // Scoped to the chain rather than asserting no limitation at all: this fixture
+        // passes no timestamps, so `think_time` is legitimately unset and reports its
+        // own limitation. An earlier, broader version of this assertion failed on that
+        // and would have been satisfied by weakening the wrong message.
         assert!(
-            !f.caveats().iter().any(|c| c.contains("cannot express")),
+            !f.caveats()
+                .iter()
+                .any(|c| c.contains("MODEL LIMITATION") && c.contains("turn chain")),
             "arrival disorder is not a model-expressiveness problem: {:?}",
             f.caveats()
         );
@@ -669,15 +690,23 @@ mod tests {
     #[test]
     fn a_path_that_shrinks_along_the_chain_is_the_real_violation() {
         // Distinguished from mere arrival disorder above: here turn 1's path is
-        // genuinely shorter than turn 0's, which FR-014a forbids, so the model really
-        // cannot express it and the caveat must say so.
+        // genuinely shorter than turn 0's, which FR-014a's grow-only path cannot
+        // express. FR-054a makes that a limitation of the model, so the caveat must be
+        // classified as one — the trace is a perfectly ordinary shrinking context.
         let mut s = SessionShapes::new();
         s.observe(7, 0, 20, 0, None);
         s.observe(7, 1, 18, 0, None);
         let f = s.finish(&empty_sharing());
         assert_eq!(f.non_monotone_steps, 1);
         assert_eq!(f.out_of_order_turns, 0, "these arrived in chain order");
-        assert!(f.caveats().iter().any(|c| c.contains("cannot express")));
+        assert!(f.caveats().iter().any(|c| c.contains("MODEL LIMITATION")));
+        assert!(
+            f.caveats()
+                .iter()
+                .any(|c| c.contains("The trace is not at fault")),
+            "FR-054a: a trace we cannot express is a limit of the model: {:?}",
+            f.caveats()
+        );
         // A shrinking path floors at zero growth rather than producing a negative.
         assert_eq!(quantile_of(&f.growth_per_turn, 0.5), 0.0);
     }

@@ -1680,6 +1680,32 @@ report segments statistics into before/after windows around the event.
 
 ### Fitting and validation
 
+- **FR-054a**: **A real trace is ground truth. A trace this tool cannot fit is evidence of a
+  limitation in the *model*, not a defect in the data**, and `fit` MUST attribute it that way. The
+  only thing a trace may be blamed for is being **corrupt** — self-inconsistent, meaning its own rows
+  contradict the invariants its own manifest declares. Every other failure to fit MUST name the model
+  restriction that is binding and, where it can, what the model would have to admit in order to
+  express the trace.
+  This is not a matter of tone. The traces are the only evidence available about what real
+  inferencing workloads look like, and the model is a hypothesis about them; a message that reads as
+  "this trace is unsuitable" inverts that relationship and directs the reader to find better data
+  when the finding is that the model is too narrow. It has already cost real time here: a caveat
+  asserting that a trace "is not the strict chain the model assumes" was emitted for three traces
+  that are *perfect* strict chains, and the defect was in the fit's own ordering. The wording sent
+  the first investigation of that gap in the wrong direction.
+  Concretely: refusing to *emit* a model that does not resemble its source remains required
+  (FR-057) — a plausible YAML nobody can tell is wrong is worse than none. What FR-054a governs is
+  what the report says about **why**, and it MUST NOT be a verdict on the trace.
+- **FR-054b**: `fit` MUST distinguish three outcomes in its report, because they call for different
+  actions from the reader and conflating them makes all three useless:
+  1. **Corrupt trace** — rows contradict the manifest's declared invariants. The data cannot be
+     interpreted at all. This is the only outcome that is about the trace.
+  2. **Model limitation** — the trace is valid and understood, and some restriction of the schema or
+     the generator cannot represent it. The report MUST name the restriction. A parameter whose
+     source field the trace does not carry is this case too: it is the model requiring something the
+     trace was never obliged to record.
+  3. **Caller input** — an ambiguous or absent option, a partial file, a blocking the trace does not
+     carry. Fixable by the person running the command, and about neither the model nor the data.
 - **FR-055**: `fit` MUST accept the trace format of `contracts/trace-io.md` in **either container**,
   parquet or JSONL, and with **either block-encoding population pattern**, detected per trace rather
   than assumed, and MUST emit a schema-valid YAML. The two population patterns are not two schemas —

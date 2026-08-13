@@ -123,7 +123,7 @@ mod tests {
     fn reading_fewer_rows_than_declared_is_refused() {
         let rows = vec![row("a", 0, &[1, 2, 3])];
         let e = round_trip(&rows, 500).expect_err("must refuse a sample");
-        assert!(e.to_string().contains("1 of 500"), "{e}");
+        assert!(e.to_string().contains("1 of the 500"), "{e}");
     }
 
     #[test]

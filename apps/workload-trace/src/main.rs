@@ -366,10 +366,12 @@ fn cmd_fit(
         read::read_trace(trace_path, allow_partial, block_size).map_err(|e| e.to_string())?;
     if !trace.capabilities.trunk_fittable() {
         return Err(
-            "this trace has no session identity, so cross-session sharing is invisible and \
-             occupancy has no denominator: the trunk cannot be fitted from it at all. Arrival \
-             and size parameters would still be available, which is `supports: R = partial` \
-             doing what it says"
+            "MODEL LIMITATION (FR-054a): this trace carries no session identity, and this \
+             model's corpus is defined in terms of sessions — cross-session sharing is what \
+             distinguishes a trunk from one long private path, and occupancy has no denominator \
+             without it. The trace is valid and its arrival and size distributions are \
+             measurable, which is `supports: R = partial` doing what it says; what is missing is \
+             a corpus model that can be fitted without session grouping"
                 .into(),
         );
     }
@@ -545,7 +547,16 @@ fn cmd_fit(
     }
 
     if !rejections.is_empty() {
-        println!("\n  REFUSED: the fitted document does not pass the schema");
+        // FR-054a: the trace is ground truth, so a fitted document that fails our own
+        // schema is this model's restrictions failing to cover a real workload. Rule 16
+        // in particular is the generator's occupancy floor — a statement about what the
+        // generator can realise, not about what a trace is allowed to contain.
+        println!(
+            "\n  MODEL LIMITATION (FR-054a): the measured parameters do not satisfy this \
+             model's own constraints, so the generator could not realise them. The trace is \
+             ground truth here — what follows is a restriction of the model that a real \
+             workload does not respect, not a defect in the data"
+        );
         for r in &rejections {
             println!("    {r}");
         }
@@ -721,9 +732,12 @@ fn cmd_fit(
 
     if !d.within_tolerance() {
         println!(
-            "\n  REFUSED: the fitted model's synthetic output does not resemble its source. \
-             FR-057 fails rather than emitting it — a plausible YAML nobody can tell is wrong \
-             is worse than no YAML"
+            "\n  MODEL LIMITATION (FR-054a): the best fit this model admits does not reproduce \
+             the trace, so the model cannot express this workload to within the stated \
+             tolerances. The divergences above are the measure of the shortfall, and the trace \
+             is ground truth — this is not a verdict on the data.\n  Nothing is written: FR-057 \
+             refuses to emit a model whose output does not resemble its source, because a \
+             plausible YAML nobody can tell is wrong is worse than no YAML"
         );
         return Ok(false);
     }

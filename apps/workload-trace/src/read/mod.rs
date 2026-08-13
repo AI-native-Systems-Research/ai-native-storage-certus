@@ -142,37 +142,43 @@ impl std::fmt::Display for ReadError {
                 source_class,
             } => write!(
                 f,
-                "{trace} is `{source_class}` and carries no block data, so prefix structure \
-                 cannot be fitted from it. Arrival and size parameters are still available; \
-                 refusing rather than fitting a corpus from empty block lists"
+                "MODEL LIMITATION, not a defect in {trace}: it is `{source_class}` and carries \
+                 no block data, and this model has no way to express a workload whose prefix \
+                 structure is unknown — `corpus.trees` is required and every structural \
+                 parameter is derived from block lists. The trace is valid and its arrival and \
+                 size distributions are measurable; what is missing is a model that can be \
+                 fitted from those alone (FR-054a)"
             ),
             ReadError::PartialTrace { consumed, declared } => write!(
                 f,
-                "read {consumed} of {declared} declared invocations. A fit from an excerpt is \
-                 not a fit of the workload: sharing, width and reuse distance are all \
-                 properties of the whole stream, and every one of them is understated by a \
-                 prefix of it (FR-055e)"
+                "CALLER INPUT: this file holds {consumed} of the {declared} invocations its own \
+                 manifest declares, so it is an excerpt of a valid trace rather than the trace. \
+                 Sharing, width and reuse distance are properties of the whole stream and every \
+                 one is understated by a prefix of it, so point `fit` at the full trace, or pass \
+                 --allow-partial to accept a weaker claim (FR-055e)"
             ),
             ReadError::UnsupportedIdentity(s) => write!(
                 f,
-                "id_semantics is `{s}`, not `rolling_prefix`: without prefix-derived identity a \
-                 shared block id does not imply a shared path, so no structural parameter is \
-                 recoverable"
+                "MODEL LIMITATION, not a defect in the trace: its `id_semantics` is `{s}` and \
+                 this model is built on `rolling_prefix` identity (FR-008), under which a shared \
+                 block id implies a shared path. Under `{s}` that implication does not hold, so \
+                 the model cannot interpret the sharing the trace does have. Admitting this \
+                 trace would need a corpus model whose keys are not prefix-derived (FR-054a)"
             ),
             ReadError::NoSuchBlocking {
                 requested,
                 available,
             } => write!(
                 f,
-                "this trace carries no {requested}-token blocking; it has {available:?}. \
-                 Refusing rather than reading a different one: block size sets every depth and \
-                 every path length, so the fit would answer a question that was not asked"
+                "CALLER INPUT: this trace carries no {requested}-token blocking; it has \
+                 {available:?}. Reading a different one would answer a question that was not \
+                 asked, since block size sets every depth and every path length"
             ),
             ReadError::AmbiguousBlocking { available } => write!(
                 f,
-                "this trace carries several blockings — {available:?} tokens — and declares no \
-                 default, so name one with --block-size. Choosing for you would be choosing the \
-                 structure the fit measures"
+                "CALLER INPUT: this trace carries several blockings — {available:?} tokens — and \
+                 declares no default, so name one with --block-size. Choosing for you would be \
+                 choosing the structure the fit measures"
             ),
             ReadError::ParquetUnavailable { path } => write!(
                 f,
@@ -188,9 +194,11 @@ impl std::fmt::Display for ReadError {
                 example,
             } => write!(
                 f,
-                "{rows} of {checked} rows contradict the {encoding} encoding's own length \
-                 invariant; refusing rather than reading block lists that are systematically \
-                 short or long. First: {example}"
+                "CORRUPT TRACE — the one thing a trace can be blamed for (FR-054a): {rows} of \
+                 {checked} rows contradict the length invariant of the {encoding} encoding their \
+                 own manifest declares, so the block lists cannot be interpreted at all. This is \
+                 self-inconsistency rather than unsuitability: the rows and the manifest \
+                 disagree, and nothing here can decide which is right. First: {example}"
             ),
         }
     }
@@ -415,8 +423,10 @@ impl std::fmt::Display for Unfittable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} cannot be fitted: its source field `{}` is {}. Left unset rather than \
-             defaulted, so the emitted model cannot pass a guess off as a measurement",
+            "MODEL LIMITATION (FR-054a): {} is required by the schema, and the trace does not \
+             carry the field it comes from — `{}` is {}. The trace was never obliged to record \
+             it, so this is the model asking for something it cannot always have. Left unset \
+             rather than defaulted, so the emitted model cannot pass a guess off as a measurement",
             self.parameter, self.field, self.status
         )
     }
@@ -859,9 +869,14 @@ mod tests {
         let e = Encoding::from_manifest(&m).expect_err("must refuse");
         let msg = e.to_string();
         assert!(msg.contains("metadata_only"), "{msg}");
+        // FR-054a: a trace this model cannot fit is a limitation of the model, and the
+        // message must say so rather than reading as a verdict on the data. Asserted on
+        // the classification rather than the prose, so a reword cannot quietly turn it
+        // back into "this trace is unsuitable".
+        assert!(msg.contains("MODEL LIMITATION"), "{msg}");
         assert!(
-            msg.contains("Arrival and size parameters are still available"),
-            "{msg}"
+            msg.contains("The trace is valid"),
+            "the trace is valid and its arrival and size distributions are measurable: {msg}"
         );
     }
 
@@ -916,8 +931,15 @@ mod tests {
             .collect();
         let e = normalise(&rows, &caps).expect_err("must refuse");
         let msg = e.to_string();
-        assert!(msg.contains("contradict the full encoding"), "{msg}");
-        assert!(msg.contains("systematically"), "{msg}");
+        assert!(
+            msg.contains("contradict the length invariant of the full encoding"),
+            "{msg}"
+        );
+        // The ONE case FR-054a lets us blame the trace for, and it must name itself as
+        // such: the rows contradict the manifest, which is self-inconsistency rather
+        // than the trace being unsuitable for this model.
+        assert!(msg.contains("CORRUPT TRACE"), "{msg}");
+        assert!(msg.contains("self-inconsistency"), "{msg}");
     }
 
     #[test]
@@ -925,8 +947,10 @@ mod tests {
         let m = manifest(Encoding::Full, 10_000);
         let e = check_complete(2_500, &m, 16).expect_err("must refuse");
         let msg = e.to_string();
-        assert!(msg.contains("2500 of 10000"), "{msg}");
+        assert!(msg.contains("2500 of the 10000"), "{msg}");
         assert!(msg.contains("FR-055e"), "{msg}");
+        // Neither the model's fault nor the trace's: the wrong file was named.
+        assert!(msg.contains("CALLER INPUT"), "{msg}");
         assert!(check_complete(10_000, &m, 16).is_ok());
     }
 
@@ -951,6 +975,9 @@ mod tests {
         m.id_semantics = Some("opaque".into());
         let e = Capabilities::from_manifest(&m, 16).expect_err("must refuse");
         assert!(e.to_string().contains("rolling_prefix"), "{e}");
+        // The model is built on prefix-derived identity; a trace that uses another
+        // scheme is not defective (FR-054a).
+        assert!(e.to_string().contains("MODEL LIMITATION"), "{e}");
     }
 
     #[test]
