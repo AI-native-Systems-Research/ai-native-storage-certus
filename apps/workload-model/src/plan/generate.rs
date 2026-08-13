@@ -171,6 +171,12 @@ struct Live {
     shared_depth: u32,
     /// Path depth of the turn about to be issued.
     depth: u32,
+    /// Turn 1's depth, so the ceiling can never sit below it.
+    ///
+    /// `max_depth` bounds how far a conversation grows, not how much prefix it starts
+    /// with: clipping turn 1 would shorten a *shared* prefix and let a conversation-
+    /// length ceiling quietly edit the trunk.
+    turn_one_depth: u32,
     /// The session's own growth stream, consumed one draw per turn so that the
     /// realised series is FR-014a's sum accumulated rather than recomputed.
     growth: Stream,
@@ -491,9 +497,21 @@ impl Generator {
                 let think = (live.s.params.think_time_s * 1e9) as u64;
                 live.s.next_t_ns = live.s.next_t_ns.saturating_add(think);
                 let g = live.s.params.growth_per_turn.clone();
+                // The ceiling of `depth_at_turn`, applied to the incremental form. The
+                // draw happens either way so a capped session's stream position matches
+                // an uncapped one's; only the accumulation stops. Never below the
+                // session's turn-1 depth, which `live.depth` started at, so a path
+                // cannot shrink and FR-014a's strict extension holds.
+                let ceiling = live
+                    .s
+                    .params
+                    .max_depth
+                    .map(|c| c.max(live.turn_one_depth))
+                    .unwrap_or(u32::MAX);
                 live.depth = live
                     .depth
-                    .saturating_add(g.sample_u64(&mut live.growth).min(u64::from(u32::MAX)) as u32);
+                    .saturating_add(g.sample_u64(&mut live.growth).min(u64::from(u32::MAX)) as u32)
+                    .min(ceiling);
                 self.live.push(live);
             }
             // Retirement is simply dropping it: its private keys are dead from
@@ -550,9 +568,11 @@ impl Generator {
             params.private_depth,
             &params.growth_per_turn,
             1,
+            params.max_depth,
             &mut growth,
         );
         Live {
+            turn_one_depth: depth,
             s: Session {
                 id,
                 node,
@@ -777,7 +797,17 @@ run:
         // This module advances depth one draw per turn; FR-014a's formula lives
         // in session.rs. Two expressions of one formula is the shape of drift,
         // so the equivalence is asserted rather than trusted.
-        let mut g = Generator::new(&doc("requests: 200")).unwrap();
+        let d = doc("requests: 200");
+        // The drawn value, not the distribution: `depth_at_turn` takes the ceiling this
+        // session got. The fixture states none, so this is `None` and the equivalence is
+        // asserted for the uncapped path.
+        let max_depth = d
+            .workload
+            .sessions
+            .max_depth
+            .as_ref()
+            .map(|x| x.mean().unwrap_or(0.0) as u32);
+        let mut g = Generator::new(&d).unwrap();
         let ev = drain(&mut g);
         let shared = 6u32;
         let private = 3u32;
@@ -802,6 +832,7 @@ run:
                 private,
                 &growth,
                 *turn,
+                max_depth,
                 &mut Stream::new(g.seed ^ TAG_GROWTH, 0),
             );
             assert_eq!(*realised, stated, "turn {turn}");

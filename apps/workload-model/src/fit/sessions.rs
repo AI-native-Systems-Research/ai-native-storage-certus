@@ -139,6 +139,17 @@ pub struct SessionShapes {
     weighted_turn_one_depth: u64,
     accumulated_growth: u64,
     accumulated_steps: u64,
+    /// One `(turns, turn-1 depth)` pair per session, for fitting the depth ceiling.
+    ///
+    /// The ceiling is solved against the accumulation it governs, and that calculation
+    /// needs each session's length and starting depth — the same two numbers the
+    /// generator will build a path from. A pair per session, so this is the same order
+    /// of memory as `turn_one`.
+    shapes: Vec<(u64, u64)>,
+    /// The deepest path each session reached, so the fitted ceiling can be reported
+    /// beside where sessions actually topped out and be seen to have independent
+    /// meaning rather than being only the number that makes a sum work.
+    deepest: Hist,
     /// Turn-1 requests whose shared prefix exceeded their own path length.
     ///
     /// Impossible if the prefix is a prefix, so a non-zero count means the two
@@ -239,6 +250,10 @@ impl SessionShapes {
             // requests: what a *request* carries of turn-1 depth is the turn-weighted
             // mean, not the plain one.
             let turn_one_depth = live.chain.first().map(|(_, p)| *p).unwrap_or(0);
+            self.shapes.push((live.turns, turn_one_depth));
+            if let Some(deepest) = live.chain.iter().map(|(_, p)| *p).max() {
+                self.deepest.add(deepest);
+            }
             self.requests += live.turns;
             self.weighted_turn_one_depth += live.turns * turn_one_depth;
             self.accumulated_steps += live.turns * live.turns.saturating_sub(1) / 2;
@@ -329,6 +344,144 @@ impl SessionShapes {
         }
     }
 
+    /// Fit `sessions.max_depth` — the context window — against the accumulation it
+    /// governs (FR-054c).
+    ///
+    /// Solved rather than read off a quantile of observed depth, because the ceiling's
+    /// job is to reproduce **accumulated growth**, and a quantile is only a proxy for
+    /// that. The two agentic traces measured wanted a ceiling of about 1400 blocks while
+    /// their observed maximum depth had p75 near 1100 and p90 near 1550 — so no fixed
+    /// quantile would have been right for both, and picking one would have been fitting
+    /// a coincidence. The report prints those quantiles beside the answer anyway, so a
+    /// ceiling that does *not* resemble where sessions top out is visible as such.
+    ///
+    /// # The closed form
+    ///
+    /// With a constant increment `g` and a per-session ceiling `C = max(cap, first)`,
+    /// the turn with `k` increments applied sits at `min(first + k·g, C)`, so a session
+    /// of `T` turns accumulates `Σ over k in 0..T−1 of min(k·g, R)` where `R = C −
+    /// first`. Everything below `m = ⌊R/g⌋` increments is unclamped and everything above
+    /// it contributes `R`, giving
+    ///
+    /// ```text
+    /// J = min(m, T−1);   accumulated = g·J(J+1)/2 + R·(T−1−J)
+    /// ```
+    ///
+    /// which is why no generate-measure loop is needed: the quantity is monotone in
+    /// `cap` and computable directly, so a bisection settles it.
+    ///
+    /// Returns `None` when the trace shows no saturation — when even an unbounded model
+    /// accumulates no more than the trace did, there is no ceiling to report and
+    /// inventing one would constrain a workload the trace never constrained.
+    pub fn fit_max_depth(&mut self) -> Option<u32> {
+        self.seal();
+        let g = self.growth.mean()?;
+        if g <= 0.0 || self.shapes.is_empty() {
+            return None;
+        }
+        let target = self.accumulated_growth as f64;
+        let accumulated = |cap: u64| -> f64 {
+            self.shapes
+                .iter()
+                .map(|(turns, first)| {
+                    let k = turns.saturating_sub(1) as f64;
+                    let r = (cap.max(*first) - *first) as f64;
+                    let m = (r / g).floor();
+                    let j = m.min(k);
+                    g * j * (j + 1.0) / 2.0 + r * (k - j)
+                })
+                .sum()
+        };
+        // An unbounded model that already accumulates no more than the trace needs no
+        // ceiling. `hi` starts past the deepest observed path, so the bracket is known
+        // to contain the answer if one exists.
+        let hi = self.deepest.max().unwrap_or(0).saturating_mul(2).max(1);
+        if accumulated(hi) <= target {
+            return None;
+        }
+        let (mut lo, mut hi) = (0u64, hi);
+        while lo + 1 < hi {
+            let mid = lo + (hi - lo) / 2;
+            if accumulated(mid) < target {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        // `hi` is the smallest ceiling reaching the target; take whichever of the two
+        // brackets lands closer, since the function steps rather than being continuous.
+        let pick = if (accumulated(lo) - target).abs() <= (accumulated(hi) - target).abs() {
+            lo
+        } else {
+            hi
+        };
+        Some(pick.clamp(1, u64::from(u32::MAX)) as u32)
+    }
+
+    /// The depth ceiling as a distribution over blocks, drawn once per session.
+    ///
+    /// Fitted as the **empirical distribution of the depth each session actually
+    /// reached**, which is a measurement rather than a solve — and the reason a
+    /// measurement is admissible here is asymmetric: a ceiling drawn *above* what a
+    /// session would have reached has no effect, so over-estimating it for a session
+    /// that merely ran out of conversation costs nothing, while the sessions that do
+    /// saturate are exactly the ones whose observed maximum *is* their ceiling.
+    ///
+    /// [`SessionShapes::fit_max_depth`] solves for a single scalar instead, and that was
+    /// measured and rejected: one ceiling reproduced the accumulated depth well — 1.02x
+    /// on one trace — and destroyed the distribution, piling 1923 requests into the
+    /// bucket at the ceiling where the trace had 173 and leaving the tail above it
+    /// empty. `request_length` went from 0.058 to 0.108. It is kept for the report,
+    /// because a scalar and a distribution disagreeing is worth seeing, but it is not
+    /// what is emitted.
+    ///
+    /// `None` where the trace shows no saturation at all, so an unbounded model is left
+    /// unbounded rather than being given a ceiling it never demonstrated.
+    pub fn fit_max_depth_dist(&mut self) -> Option<Dist> {
+        self.seal();
+        self.fit_max_depth()?;
+        empirical_from_buckets(&self.deepest.buckets())
+    }
+
+    /// The ceiling `fit` actually emits, which is **nothing** — and the measurement is
+    /// why (FR-054c).
+    ///
+    /// A ceiling reproduces the accumulated depth and makes every gated statistic
+    /// *worse*, because the gate is a distributional distance and a ceiling's damage to
+    /// the shape exceeds its benefit to the mean. Measured on one agentic trace:
+    ///
+    /// | ceiling | references vs trace | `request_length` | `unique_keys` | reuse |
+    /// | --- | --- | --- | --- | --- |
+    /// | none | 1.210x | **0.058** | **0.135** | **0.010** |
+    /// | one scalar, 1362 | 1.021x | 0.108 | 0.268 | 0.030 |
+    /// | drawn per session | 0.875x | 0.113 | 0.565 | 0.047 |
+    ///
+    /// A single ceiling piles saturating sessions onto one depth — 1923 requests into
+    /// the bucket at the ceiling against the trace's 173, with the tail above it empty.
+    /// Drawing it per session from where sessions topped out spreads that spike but
+    /// over-truncates instead, because a long session can draw a short session's
+    /// ceiling and saturate far too early: the observed maximum of a session that simply
+    /// ran out of conversation is not a ceiling at all.
+    ///
+    /// So the ceiling exists as something a document may **state** — a real context
+    /// window is a real thing to model — and `fit` reports what it measured without
+    /// emitting it. Fitting it would trade a gated statistic for an ungated one, and
+    /// FR-054a asks for the limitation to be named rather than papered over. Closing
+    /// this properly needs the growth *rate* to depend on session length rather than
+    /// the depth to be clamped, which is a larger change.
+    pub fn emitted_max_depth(&mut self) -> Option<Dist> {
+        None
+    }
+
+    /// Quantiles of the deepest path each session reached.
+    ///
+    /// Reported beside [`SessionShapes::fit_max_depth`] so the fitted ceiling can be
+    /// compared against where sessions actually topped out.
+    pub fn deepest_depth(&mut self) -> crate::stats::hist::Quantiles {
+        self.seal();
+        self.deepest.summary()
+    }
+
     /// Turn-1 path lengths, for a report that wants to show what was subtracted from.
     pub fn turn_one_depth(&mut self) -> Option<Dist> {
         self.seal();
@@ -356,6 +509,7 @@ impl SessionShapes {
             think_time: empirical_from(&self.think_ms).map(|d| scale(&d, 1.0 / 1000.0)),
             shared_depth: empirical_from_buckets(&sharing.depth_buckets),
             unshared_requests: sharing.unshared_requests,
+            max_depth: self.emitted_max_depth(),
             out_of_order_turns: self.out_of_order,
             non_monotone_steps: self.non_monotone_steps,
             prefix_longer_than_path: self.prefix_longer_than_path,
@@ -456,6 +610,9 @@ pub struct FittedSessions {
     pub think_time: Option<Dist>,
     /// The realised sharing histogram, as the schema's `shared_depth`.
     pub shared_depth: Option<Dist>,
+    /// The fitted depth ceiling — a distribution over blocks, drawn once per session,
+    /// or `None` where the trace shows no saturation (FR-054c).
+    pub max_depth: Option<Dist>,
     /// Requests that shared nothing at all.
     ///
     /// Not folded into `shared_depth`: "shares nothing" and "shares one block" are

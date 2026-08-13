@@ -228,6 +228,12 @@ pub struct SessionParams {
     pub think_time_s: f64,
     /// Per-turn path growth.
     pub growth_per_turn: Dist,
+    /// Ceiling on this session's path depth, in blocks; `None` is unbounded.
+    ///
+    /// Carried on the session rather than read from the document at each turn so that
+    /// [`depth_at_turn`] takes every term of FR-014a's formula as an argument, which is
+    /// what keeps the formula stated exactly once.
+    pub max_depth: Option<u32>,
 }
 
 /// Resolve the mixture: pick an entry, then draw the session's parameters.
@@ -256,6 +262,14 @@ pub fn draw_params(w: &Workload, st: &mut Stream) -> SessionParams {
         private_depth: priv_d.sample_u64(st).min(u64::from(u32::MAX)) as u32,
         think_time_s: think_d.sample(st).max(0.0),
         growth_per_turn: growth_d,
+        // Drawn per session: a single ceiling piles every long conversation onto one
+        // depth, which is visible as a spike in `request_length` (see
+        // `Sessions::max_depth`). Not per-arm, though — a context window is a property
+        // of the model being served rather than of one arm of a workload.
+        max_depth: s
+            .max_depth
+            .as_ref()
+            .map(|d| d.sample_u64(st).min(u64::from(u32::MAX)) as u32),
     }
 }
 
@@ -290,16 +304,42 @@ fn pick_mix<'a>(mix: &'a [MixEntry], st: &mut Stream) -> (u8, Option<&'a MixEntr
 /// `0..n`, and `depth_at_turn(4, 30, .., 1, ..)` is 34 blocks of which 4 are
 /// shared. The floor of 1 is FR-009's zero-length-request clamp: a request for
 /// nothing is not a request, so a path that draws to zero becomes the root alone.
+///
+/// # The ceiling
+///
+/// `max_depth` is the context window (`Sessions::max_depth`): growth stops once the
+/// path reaches it, which is why a long conversation grows more slowly per turn than a
+/// short one. Two properties of how it is applied matter, and both are deliberate:
+///
+/// - **Turn 1 is never truncated.** The ceiling is raised to turn-1's own depth where
+///   that is already deeper, so `shared_depth + private_depth` is always realised in
+///   full. Clipping it instead would shorten a *shared prefix*, which changes what
+///   sharing the corpus realises and would make the cap interfere with `roots.count`
+///   and the FR-009f occupancy floor — a ceiling on conversation length would be
+///   quietly editing the trunk.
+/// - **The path never shrinks**, so FR-014a's strict-extension guarantee holds: turn
+///   n's path stays a prefix of turn n+1's, which the rolling-hash key requires.
+///
+/// Growth is still *drawn* per turn even once the ceiling is reached, so the stream
+/// position is unchanged — a session that hits its cap draws the same numbers it would
+/// have and simply does not use them. That keeps a capped run's keys comparable with an
+/// uncapped one's rather than shifting every subsequent draw.
 pub fn depth_at_turn(
     shared_depth: u32,
     private_depth: u32,
     growth: &Dist,
     turn: u16,
+    max_depth: Option<u32>,
     st: &mut Stream,
 ) -> u32 {
-    let mut d = shared_depth.saturating_add(private_depth);
+    let base = shared_depth.saturating_add(private_depth);
+    // Never below turn 1's own depth: the cap bounds how far a conversation grows, not
+    // how much prefix it starts with.
+    let ceiling = max_depth.map(|c| c.max(base)).unwrap_or(u32::MAX);
+    let mut d = base;
     for _ in 2..=turn {
-        d = d.saturating_add(growth.sample_u64(st).min(u64::from(u32::MAX)) as u32);
+        let g = growth.sample_u64(st).min(u64::from(u32::MAX)) as u32;
+        d = d.saturating_add(g).min(ceiling);
     }
     d.max(1)
 }
@@ -350,6 +390,7 @@ mod tests {
                 concurrency: None,
             },
             sessions: Sessions {
+                max_depth: None,
                 turns: Dist::Shaped(Shape::Geometric { mean: turns_mean }),
                 think_time: Dist::Scalar(think),
                 private_depth: Dist::Scalar(8.0),
@@ -436,11 +477,79 @@ mod tests {
         // FR-014a, and the strict-prefix property the rolling hash requires.
         let g = Dist::Scalar(6.0);
         let mut st = Stream::new(1, 1);
-        let d1 = depth_at_turn(18, 8, &g, 1, &mut st.clone());
-        let d6 = depth_at_turn(18, 8, &g, 6, &mut st);
+        let d1 = depth_at_turn(18, 8, &g, 1, None, &mut st.clone());
+        let d6 = depth_at_turn(18, 8, &g, 6, None, &mut st);
         assert_eq!(d1, 26);
         assert_eq!(d6, 26 + 5 * 6, "six turns adds five growth increments");
         assert!(d6 > d1);
+    }
+
+    #[test]
+    fn a_depth_ceiling_stops_growth_without_shortening_any_path() {
+        // FR-054c. Turn 1 is 26 blocks and growth is 6, so an uncapped session reaches
+        // 26 + 5*6 = 56 by turn 6. A ceiling of 40 stops it there.
+        let g = Dist::Scalar(6.0);
+        let cap = Some(40);
+        let st = Stream::new(1, 1);
+        assert_eq!(depth_at_turn(18, 8, &g, 1, cap, &mut st.clone()), 26);
+        assert_eq!(depth_at_turn(18, 8, &g, 3, cap, &mut st.clone()), 38);
+        assert_eq!(
+            depth_at_turn(18, 8, &g, 4, cap, &mut st.clone()),
+            40,
+            "44 uncapped, so the ceiling binds here"
+        );
+        assert_eq!(
+            depth_at_turn(18, 8, &g, 20, cap, &mut st.clone()),
+            40,
+            "and it stays there rather than creeping"
+        );
+
+        // Monotone throughout, which FR-014a's strict extension requires: a capped path
+        // must never be shorter than the turn before it, or the rolling-hash key of a
+        // later turn would not extend the earlier one.
+        let mut last = 0;
+        for turn in 1..=20 {
+            let d = depth_at_turn(18, 8, &g, turn, cap, &mut Stream::new(1, 1));
+            assert!(d >= last, "turn {turn} shrank from {last} to {d}");
+            last = d;
+        }
+    }
+
+    #[test]
+    fn a_ceiling_below_turn_ones_own_depth_never_truncates_it() {
+        // The ceiling bounds how far a conversation GROWS, not how much prefix it
+        // starts with. Clipping turn 1 would shorten a *shared* prefix, so a
+        // conversation-length ceiling would be quietly editing the trunk — changing
+        // what sharing the corpus realises and how `roots.count` and the FR-009f
+        // occupancy floor read.
+        let g = Dist::Scalar(6.0);
+        let st = Stream::new(1, 1);
+        assert_eq!(
+            depth_at_turn(18, 8, &g, 1, Some(5), &mut st.clone()),
+            26,
+            "turn 1 keeps its full shared + private depth"
+        );
+        assert_eq!(
+            depth_at_turn(18, 8, &g, 9, Some(5), &mut st.clone()),
+            26,
+            "and such a session simply never grows"
+        );
+    }
+
+    #[test]
+    fn an_unset_ceiling_generates_exactly_what_it_did_before() {
+        // The compatibility guarantee: `max_depth` unset must leave every existing
+        // document's stream untouched, so `None` cannot be quietly treated as some
+        // large finite bound.
+        let g = Dist::Shaped(Shape::Lognormal {
+            median: 6.0,
+            sigma: 0.5,
+        });
+        for turn in [1u16, 2, 7, 50] {
+            let uncapped = depth_at_turn(18, 8, &g, turn, None, &mut Stream::new(9, 9));
+            let huge = depth_at_turn(18, 8, &g, turn, Some(u32::MAX), &mut Stream::new(9, 9));
+            assert_eq!(uncapped, huge, "turn {turn}");
+        }
     }
 
     #[test]
@@ -542,6 +651,7 @@ mod tests {
             node: 0,
             root_index: 0,
             params: SessionParams {
+                max_depth: None,
                 mix_index: 0,
                 turns: 3,
                 private_depth: 4,

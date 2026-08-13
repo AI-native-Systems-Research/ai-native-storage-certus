@@ -317,6 +317,10 @@ pub fn assemble(
                 think_time,
                 private_depth,
                 growth_per_turn,
+                // The context window, solved against the accumulation it governs
+                // (FR-054c). `None` where the trace showed no saturation, which leaves
+                // growth unbounded exactly as it was before this parameter existed.
+                max_depth: sessions.max_depth.clone(),
                 spawn: None,
             },
             mix: vec![MixEntry {

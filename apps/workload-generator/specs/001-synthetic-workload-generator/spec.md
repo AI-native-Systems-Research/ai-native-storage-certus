@@ -1732,6 +1732,34 @@ report segments statistics into before/after windows around the event.
   turns contributes many requests, so the plain mean over sessions does not add up to the mean
   request length, and an unweighted version of this accounting predicted a mean *below* the trace's
   while the synthetic ran above it.
+- **FR-054e**: `sessions.max_depth` — a depth ceiling drawn per session, the context window — is
+  available for a document to **state**, and `fit` MUST NOT emit it. This is a **measured negative
+  result**, recorded because the reasoning that motivated it is sound and someone will otherwise
+  redo it.
+  The motivation was good: final depth visibly saturates in real agentic traces — mean final depth
+  plateaus around 1250 blocks whether a session runs 27 turns or 85 — and a single ceiling of about
+  1400 blocks reproduces the accumulated depth of two different traces to 1.028x and 0.976x, the same
+  value for both, which is the signature of a mechanism rather than a fudge factor. It does fix the
+  **mean**: synthetic references fell from 1.210x the trace's to 1.021x.
+  It nonetheless makes **every gated statistic worse**, because FR-056 gates on distributional
+  distance and a ceiling's damage to the shape exceeds its benefit to the mean:
+  | ceiling | references vs trace | `request_length` | `unique_keys` | reuse distance |
+  | --- | --- | --- | --- | --- |
+  | none | 1.210x | **0.058** | **0.135** | **0.010** |
+  | one scalar, 1362 blocks | 1.021x | 0.108 | 0.268 | 0.030 |
+  | drawn per session | 0.875x | 0.113 | 0.565 | 0.047 |
+  A single ceiling piles every saturating session onto one depth — **1923 requests in the bucket at
+  the ceiling against the trace's 173**, with the tail above it empty, which is the entire KS
+  distance. Drawing it per session from where sessions topped out spreads that spike and
+  over-truncates instead: a long session can draw a short session's ceiling and saturate far too
+  early, because **the observed maximum of a session that merely ran out of conversation is not a
+  ceiling at all**. Only saturating sessions reveal a ceiling, and which ones those are is not
+  observable.
+  So the parameter stays as a capability — a real context window is a real thing to model, and unset
+  it changes nothing — while `fit` reports the ceiling it measured without emitting it. Emitting it
+  would trade a gated statistic for an ungated one, and FR-054a asks for a limitation to be named
+  rather than papered over. **Closing FR-054c properly requires the growth rate to depend on session
+  length, rather than the depth to be clamped.**
 - **FR-054d**: `fit --explain` MUST print the path budget: the trace's mean request length decomposed
   into turn-weighted turn-1 depth and accumulated growth, the shared prefix **drawn** beside the one
   **subtracted** to form `private_depth`, and the accumulated growth an i.i.d. per-turn draw would

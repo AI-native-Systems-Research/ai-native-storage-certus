@@ -282,6 +282,46 @@ pub struct Sessions {
     pub private_depth: Dist,
     /// Blocks added by each turn after the first. Drawn per turn.
     pub growth_per_turn: Dist,
+    /// Ceiling on a session's path depth, in blocks — the context window.
+    ///
+    /// A prompt cannot exceed the model's context window, so a conversation that runs
+    /// many turns must grow more slowly per turn than a short one: it is pressed
+    /// against a ceiling. Without this, `growth_per_turn` accumulates without bound and
+    /// a long session's path grows linearly in its turn count forever.
+    ///
+    /// It was measured before it was added (FR-054c). A session's accumulated depth is
+    /// `Σᵢ (T − i)·gᵢ`, so an increment is inherited by every later turn and the total
+    /// is quadratic in the turn count; an unbounded i.i.d. draw overstated it by
+    /// **1.478x and 1.545x** on two agentic traces. In those traces mean final depth
+    /// plateaus — around 1250 blocks whether a session runs 27 turns or 85 — and one
+    /// ceiling of **1400 blocks reproduced the accumulation to 1.028x and 0.976x on
+    /// both**, which is why this is a ceiling rather than a per-session growth rate
+    /// conditioned on turn count. The same number fitting two traces is the difference
+    /// between a mechanism and a fudge factor; and a per-session rate drawn from its
+    /// own marginal was measured *worse* than the i.i.d. draw (1.590x), because the
+    /// unweighted mean of session rates exceeds the pooled mean of increments.
+    ///
+    /// **A distribution, drawn once per session, not a single value.** A single
+    /// ceiling was measured and rejected: it fixed the mean (synthetic references came
+    /// to 1.021x the trace's, from 1.210x) and **broke the shape**, piling 1923
+    /// requests into the bucket at the ceiling where the trace had 173 and emptying
+    /// the tail above it, which took `request_length` from 0.058 to 0.108. Real
+    /// sessions top out all over the place — p50 592, p90 1536, p99 2176, max 3583
+    /// blocks on one trace — so one number cannot describe where they stop.
+    ///
+    /// Drawing it per session is sound even though a session's *observed* maximum is
+    /// usually just where its conversation ended rather than where a window bound it:
+    /// a ceiling drawn above what a session would have reached has no effect at all,
+    /// so over-estimating it for a short session costs nothing, and only the sessions
+    /// that actually saturate are sensitive to the value.
+    ///
+    /// **Unset means unbounded**, so a document written before this existed generates
+    /// exactly the stream it always did.
+    ///
+    /// Not overridable per mixture arm: a context window is a property of the model
+    /// being served rather than of one arm of a workload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_depth: Option<Dist>,
     /// Agent fan-out. Disabled by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawn: Option<Spawn>,

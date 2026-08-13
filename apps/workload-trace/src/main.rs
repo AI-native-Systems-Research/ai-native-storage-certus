@@ -513,6 +513,28 @@ fn cmd_fit(
     // FR-055e: which fitted values came from a reconstructed field. Printed before
     // the values themselves, because it qualifies all of them.
     let provenance = trace.capabilities.provenance();
+    if fitted_sessions.max_depth.is_some() {
+        // The emitted parameter is a distribution over where sessions topped out; the
+        // scalar solve is printed beside it because the two disagreeing is informative.
+        // A scalar reproduces the accumulated depth and destroys the distribution
+        // (FR-054c), so a large gap between them says how much of the ceiling's effect
+        // is concentrated in the saturating tail.
+        let q = shapes.deepest_depth();
+        println!(
+            "\n  depth ceiling  sessions.max_depth is drawn per session from where sessions \
+             topped out:\n                 p50 {} p90 {} p99 {} max {} blocks (FR-054c). A single \
+             ceiling solved\n                 against the same accumulation would be {}.",
+            q.p50.unwrap_or(0),
+            q.p90.unwrap_or(0),
+            q.p99.unwrap_or(0),
+            q.max.unwrap_or(0),
+            shapes
+                .fit_max_depth()
+                .map(|c| format!("{c} blocks"))
+                .unwrap_or_else(|| "unset".into())
+        );
+    }
+
     println!("\n  provenance");
     let reconstructed: Vec<_> = provenance.iter().filter(|p| p.is_reconstructed()).collect();
     if reconstructed.is_empty() {
