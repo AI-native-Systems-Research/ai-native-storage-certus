@@ -1044,6 +1044,190 @@ impl IGpuServices for GpuServicesComponent {
             Ok(())
         }
     }
+
+    fn memcpy_batch_async(
+        &self,
+        ops: &[interfaces::GpuMemcpyBatchOp],
+        stream: interfaces::GpuStream,
+    ) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (ops, stream);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            if ops.is_empty() {
+                return Ok(());
+            }
+            if !self.is_initialized() {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+
+            // Try cuMemcpyBatchAsync (CUDA 12.8+) for non-null streams.
+            if !stream.0.is_null() {
+                if let Some(result) = self.try_batch_async(ops, stream) {
+                    return result;
+                }
+            }
+
+            // Fallback: individual cudaMemcpyAsync per op.
+            for (i, op) in ops.iter().enumerate() {
+                let kind = if op.src_access_order == interfaces::GpuMemcpySrcAccessOrder::Any {
+                    cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE
+                } else {
+                    cuda_ffi::CUDA_MEMCPY_DEVICE_TO_HOST
+                };
+                let err = unsafe {
+                    cuda_ffi::cudaMemcpyAsync(op.dst, op.src, op.size, kind, stream.0)
+                };
+                if err != cuda_ffi::CUDA_SUCCESS {
+                    return Err(format!(
+                        "cudaMemcpyAsync failed at op {i}: {}",
+                        cuda_ffi::cuda_error_string(err)
+                    ));
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl GpuServicesComponent {
+    /// Attempt cuMemcpyBatchAsync via dynamic symbol resolution.
+    /// Returns None if the symbol is unavailable (pre-12.8 driver).
+    fn try_batch_async(
+        &self,
+        ops: &[interfaces::GpuMemcpyBatchOp],
+        stream: interfaces::GpuStream,
+    ) -> Option<Result<(), String>> {
+        use std::sync::OnceLock;
+
+        // cuMemcpyBatchAsync signature (CUDA driver API, 12.8+):
+        //   CUresult cuMemcpyBatchAsync(
+        //     CUdeviceptr *dstPtrArray, CUdeviceptr *srcPtrArray,
+        //     size_t *sizeArray, size_t count,
+        //     CUmemcpyAttributes *attrArray, size_t *attrIdxArray,
+        //     size_t numAttrs, size_t *failIdx, CUstream stream)
+        type BatchFn = unsafe extern "C" fn(
+            dsts: *const *mut std::ffi::c_void,
+            srcs: *const *const std::ffi::c_void,
+            sizes: *const usize,
+            count: usize,
+            attrs: *const CuMemcpyAttributes,
+            attr_idxs: *const usize,
+            num_attrs: usize,
+            fail_idx: *mut usize,
+            stream: *mut std::ffi::c_void,
+        ) -> i32;
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct CuMemLocation {
+            type_: i32,
+            id: i32,
+        }
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct CuMemcpyAttributes {
+            src_access_order: i32,
+            src_loc_hint: CuMemLocation,
+            dst_loc_hint: CuMemLocation,
+            flags: u32,
+        }
+
+        const CU_MEMCPY_SRC_ACCESS_ORDER_STREAM: i32 = 0;
+        const CU_MEMCPY_SRC_ACCESS_ORDER_ANY: i32 = 2;
+
+        static BATCH_FN: OnceLock<Option<BatchFn>> = OnceLock::new();
+        let batch_fn = BATCH_FN.get_or_init(|| {
+            extern "C" {
+                fn cuGetProcAddress(
+                    symbol: *const std::ffi::c_char,
+                    pfn: *mut *mut std::ffi::c_void,
+                    cuda_version: i32,
+                    flags: u64,
+                    status: *mut i32,
+                ) -> i32;
+            }
+            let symbol = b"cuMemcpyBatchAsync\0";
+            let mut fn_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+            let mut status: i32 = 0;
+            let res = unsafe {
+                cuGetProcAddress(
+                    symbol.as_ptr() as *const std::ffi::c_char,
+                    &mut fn_ptr,
+                    12080, // minimum CUDA version
+                    0,     // CU_GET_PROC_ADDRESS_DEFAULT
+                    &mut status,
+                )
+            };
+            if res != 0 || fn_ptr.is_null() {
+                None
+            } else {
+                Some(unsafe { std::mem::transmute::<*mut std::ffi::c_void, BatchFn>(fn_ptr) })
+            }
+        });
+
+        let batch_fn = (*batch_fn)?;
+
+        let n = ops.len();
+        let mut srcs: Vec<*const std::ffi::c_void> = Vec::with_capacity(n);
+        let mut dsts: Vec<*mut std::ffi::c_void> = Vec::with_capacity(n);
+        let mut sizes: Vec<usize> = Vec::with_capacity(n);
+
+        for op in ops {
+            srcs.push(op.src);
+            dsts.push(op.dst);
+            sizes.push(op.size);
+        }
+
+        // Build attribute runs: group consecutive ops with the same access order.
+        let mut attrs: Vec<CuMemcpyAttributes> = Vec::new();
+        let mut attr_idxs: Vec<usize> = Vec::new();
+
+        for (i, op) in ops.iter().enumerate() {
+            let order = match op.src_access_order {
+                interfaces::GpuMemcpySrcAccessOrder::Any => CU_MEMCPY_SRC_ACCESS_ORDER_ANY,
+                interfaces::GpuMemcpySrcAccessOrder::Stream => CU_MEMCPY_SRC_ACCESS_ORDER_STREAM,
+            };
+            if i == 0 || order != attrs.last().unwrap().src_access_order {
+                attr_idxs.push(i);
+                attrs.push(CuMemcpyAttributes {
+                    src_access_order: order,
+                    src_loc_hint: CuMemLocation { type_: 0, id: 0 },
+                    dst_loc_hint: CuMemLocation { type_: 0, id: 0 },
+                    flags: 0,
+                });
+            }
+        }
+
+        let mut fail_idx: usize = 0;
+        let err = unsafe {
+            batch_fn(
+                dsts.as_ptr(),
+                srcs.as_ptr(),
+                sizes.as_ptr(),
+                n,
+                attrs.as_ptr(),
+                attr_idxs.as_ptr(),
+                attrs.len(),
+                &mut fail_idx,
+                stream.0,
+            )
+        };
+
+        Some(if err == 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "cuMemcpyBatchAsync failed at index {fail_idx} with error {err}"
+            ))
+        })
+    }
 }
 
 #[cfg(test)]

@@ -1043,25 +1043,26 @@ impl DispatcherComponent {
         let raw = warm_raw;
         if raw != 0 {
             let s = GpuStream(raw as *mut std::ffi::c_void);
+            let mut ops: Vec<interfaces::GpuMemcpyBatchOp> = Vec::with_capacity(regions.len());
             let mut off: usize = 0;
             for region in regions {
                 let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
                 if copy_size == 0 {
                     break;
                 }
-                gpu.memcpy_h2d_async(
-                    (pointer as usize + off) as *const std::ffi::c_void,
-                    region.address as *mut std::ffi::c_void,
-                    copy_size,
-                    s,
-                )
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "GPU DMA copy (memory-tier→device) failed: {e}"
-                    ))
-                })?;
+                ops.push(interfaces::GpuMemcpyBatchOp {
+                    src: (pointer as usize + off) as *const std::ffi::c_void,
+                    dst: region.address as *mut std::ffi::c_void,
+                    size: copy_size,
+                    src_access_order: interfaces::GpuMemcpySrcAccessOrder::Any,
+                });
                 off += region.size as usize;
             }
+            gpu.memcpy_batch_async(&ops, s).map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "GPU batch DMA copy (memory-tier→device) failed: {e}"
+                ))
+            })?;
             if synchronize {
                 gpu.stream_synchronize(s).map_err(|e| {
                     DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
@@ -2912,20 +2913,21 @@ impl IDispatcher for DispatcherComponent {
             stream
         };
 
+        let mut ops: Vec<interfaces::GpuMemcpyBatchOp> = Vec::with_capacity(regions.len());
         let mut off: usize = 0;
         for region in regions {
-            gpu.memcpy_d2h_async(
-                region.address as *const std::ffi::c_void,
-                (mem_ptr as usize + off) as *mut std::ffi::c_void,
-                region.size as usize,
-                effective_stream,
-            )
-            .map_err(|e| {
-                let _ = mt.remove(key);
-                DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
-            })?;
+            ops.push(interfaces::GpuMemcpyBatchOp {
+                src: region.address as *const std::ffi::c_void,
+                dst: (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                size: region.size as usize,
+                src_access_order: interfaces::GpuMemcpySrcAccessOrder::Stream,
+            });
             off += region.size as usize;
         }
+        gpu.memcpy_batch_async(&ops, effective_stream).map_err(|e| {
+            let _ = mt.remove(key);
+            DispatcherError::IoError(format!("GPU batch DMA copy failed: {e}"))
+        })?;
         // Synchronize after all regions are submitted so the DRAM slot is
         // fully populated when this function returns. Callers that pass their
         // own stream (populate_from_gpu) may sync externally; callers that
@@ -4155,6 +4157,20 @@ mod tests {
             _ptr: *mut std::ffi::c_void,
             _size: usize,
         ) -> Result<(), String> {
+            Ok(())
+        }
+        fn memcpy_batch_async(
+            &self,
+            ops: &[interfaces::GpuMemcpyBatchOp],
+            stream: interfaces::GpuStream,
+        ) -> Result<(), String> {
+            for op in ops {
+                if op.src_access_order == interfaces::GpuMemcpySrcAccessOrder::Any {
+                    self.memcpy_h2d_async(op.src, op.dst, op.size, stream)?;
+                } else {
+                    self.memcpy_d2h_async(op.src, op.dst, op.size, stream)?;
+                }
+            }
             Ok(())
         }
     }
