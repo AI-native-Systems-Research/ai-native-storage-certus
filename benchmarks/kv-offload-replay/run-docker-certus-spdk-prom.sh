@@ -34,11 +34,11 @@ PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
 
 DEVICE_PCI="${DEVICE_PCI:-0000:61:00.0 0000:62:00.0 0000:63:00.0}"  # vfio-pci NVMe group
 MEM_TIER_SIZE="${MEM_TIER_SIZE:-32G}"
-EVICT_THRESH="${EVICT_THRESH:-0.6}"
+EVICT_THRESH="${EVICT_THRESH:-0.9}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 SERVER_WAIT="${SERVER_WAIT:-180}"                  # seconds to wait for :50051
-NUMA_NODE="${NUMA_NODE:-0}"                         # pin server to the NVMe/hugepage node
+NUMA_NODE="${NUMA_NODE:-0}"                        # pin server to the NVMe/hugepage node
 SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/certus-server-yaml}"
 LOG="${LOG:-${SCRIPT_DIR}/certus-spdk-prom_$(stamp).log}"
 SERVER_LOG="${SERVER_LOG:-${SCRIPT_DIR}/server_$(stamp).log}"
