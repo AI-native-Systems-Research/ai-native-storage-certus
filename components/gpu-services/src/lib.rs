@@ -574,10 +574,18 @@ impl IGpuServices for GpuServicesComponent {
 
             let mut stream: cuda_ffi::CudaStream = std::ptr::null_mut();
             // SAFETY: stream is a valid pointer to a local CudaStream.
-            let err = unsafe { cuda_ffi::cudaStreamCreate(&mut stream) };
+            // NonBlocking avoids implicit synchronization with the legacy
+            // default stream, allowing independent load/store streams to
+            // truly overlap their DMA transfers.
+            let err = unsafe {
+                cuda_ffi::cudaStreamCreateWithFlags(
+                    &mut stream,
+                    cuda_ffi::CUDA_STREAM_NON_BLOCKING,
+                )
+            };
             if err != cuda_ffi::CUDA_SUCCESS {
                 return Err(format!(
-                    "cudaStreamCreate failed: {}",
+                    "cudaStreamCreateWithFlags(NonBlocking) failed: {}",
                     cuda_ffi::cuda_error_string(err)
                 ));
             }
