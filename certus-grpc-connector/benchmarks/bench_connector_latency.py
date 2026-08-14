@@ -56,18 +56,35 @@ from vllm.v1.kv_offload.base import GPULoadStoreSpec
 class LatencyFakeStub:
     """Fake gRPC stub that simulates RPC latency with configurable sleep."""
 
-    def __init__(self, store_latency_s: float = 0.010, load_latency_s: float = 0.005):
+    def __init__(self, store_latency_s: float = 0.010, load_latency_s: float = 0.005,
+                 straggler_rate: float = 0.0, straggler_multiplier: float = 10.0):
         self.store_latency_s = store_latency_s
         self.load_latency_s = load_latency_s
+        self.straggler_rate = straggler_rate
+        self.straggler_multiplier = straggler_multiplier
+        self._store_count = 0
+        self._load_count = 0
+
+    def _store_delay(self) -> float:
+        self._store_count += 1
+        if self.straggler_rate > 0 and random.random() < self.straggler_rate:
+            return self.store_latency_s * self.straggler_multiplier
+        return self.store_latency_s
+
+    def _load_delay(self) -> float:
+        self._load_count += 1
+        if self.straggler_rate > 0 and random.random() < self.straggler_rate:
+            return self.load_latency_s * self.straggler_multiplier
+        return self.load_latency_s
 
     def CopyToStore(self, req):
-        time.sleep(self.store_latency_s)
+        time.sleep(self._store_delay())
         return pb.BatchCopyToStoreResponse(
             results=[pb.EntryResult(key=e.key, success=True) for e in req.entries]
         )
 
     def Lookup(self, req):
-        time.sleep(self.load_latency_s)
+        time.sleep(self._load_delay())
         return pb.BatchLookupResponse(
             results=[pb.EntryResult(key=e.key, success=True) for e in req.entries]
         )
@@ -258,6 +275,267 @@ def scenario_baseline(stub, direction: str = "store", n_ops: int = 100,
     return total_ops, t_end - t_start
 
 
+# ── Additional Scenarios ──
+
+
+def scenario_straggler(stub, n_ops: int = 100, iterations: int = 5,
+                       store_workers: int = 4, load_workers: int = 4) -> tuple[list[float], list[float]]:
+    """Measure load p99 when 5% of store RPCs are 10x slower (stragglers).
+
+    Real gRPC systems get rare slow calls from server GC, TCP hiccups, GPU
+    contention. Tests whether one slow store within a direction ruins load
+    tail latency via intra-direction HOL (FIFO deque blocks fast completions
+    behind a straggler).
+    """
+    straggler_stub = LatencyFakeStub(
+        store_latency_s=stub.store_latency_s,
+        load_latency_s=stub.load_latency_s,
+        straggler_rate=0.05,
+        straggler_multiplier=10.0,
+    )
+    store_lats = []
+    load_lats = []
+    for trial in range(iterations):
+        worker = make_worker(straggler_stub, store_workers, load_workers)
+        pending: dict[int, tuple[str, float]] = {}
+        job_id = 0
+        for _ in range(n_ops):
+            if random.random() < 0.6:
+                src, dst = make_store_spec(trial * 1000 + job_id)
+                t = time.perf_counter()
+                worker.submit_store(job_id=job_id, src_spec=src, dst_spec=dst)
+                pending[job_id] = ("store", t)
+            else:
+                src, dst = make_load_spec(trial * 1000 + job_id)
+                t = time.perf_counter()
+                worker.submit_load(job_id=job_id, src_spec=src, dst_spec=dst)
+                pending[job_id] = ("load", t)
+            job_id += 1
+
+        worker.wait(set(pending.keys()))
+        t_now = time.perf_counter()
+        for jid, (direction, t_submit) in pending.items():
+            lat = (t_now - t_submit) * 1e6
+            if direction == "store":
+                store_lats.append(lat)
+            else:
+                load_lats.append(lat)
+    return store_lats, load_lats
+
+
+def scenario_burst_recovery(stub, burst_size: int = 60, iterations: int = 10,
+                            store_workers: int = 4, load_workers: int = 4) -> list[float]:
+    """Saturate with a burst of stores, idle briefly, then measure load latency.
+
+    Tests whether backlog from a previous burst contaminates subsequent loads
+    (e.g., unreaped futures, pool threads still occupied, deque not drained).
+    """
+    latencies = []
+    for trial in range(iterations):
+        worker = make_worker(stub, store_workers, load_workers)
+
+        for i in range(burst_size):
+            src, dst = make_store_spec(trial * 200 + i)
+            worker.submit_store(job_id=i, src_spec=src, dst_spec=dst)
+
+        time.sleep(0.005)
+        worker.get_finished()
+
+        load_src, load_dst = make_load_spec(trial * 200 + burst_size)
+        t_submit = time.perf_counter()
+        worker.submit_load(job_id=burst_size, src_spec=load_src, dst_spec=load_dst)
+        worker.wait({burst_size})
+        t_done = time.perf_counter()
+        latencies.append((t_done - t_submit) * 1e6)
+
+        worker.wait(set(range(burst_size + 1)))
+    return latencies
+
+
+def scenario_asymmetric_saturation(store_workers: int = 4, load_workers: int = 4,
+                                   iterations: int = 10) -> tuple[list[float], list[float]]:
+    """Slow stores (50ms) with fast loads (2ms) — the realistic production case.
+
+    Server-side GPU->host DMA is slow; DRAM-tier lookups are fast. Tests whether
+    abundant slow stores degrade fast load latency. Measures load completion time
+    independently (via polling) rather than waiting for all stores to finish.
+    """
+    asymmetric_stub = LatencyFakeStub(store_latency_s=0.050, load_latency_s=0.002)
+    store_lats = []
+    load_lats = []
+    for trial in range(iterations):
+        worker = make_worker(asymmetric_stub, store_workers, load_workers)
+        job_id = 0
+        load_ids = set()
+        store_ids = set()
+        submit_times: dict[int, float] = {}
+
+        for i in range(20):
+            src, dst = make_store_spec(trial * 100 + job_id)
+            submit_times[job_id] = time.perf_counter()
+            worker.submit_store(job_id=job_id, src_spec=src, dst_spec=dst)
+            store_ids.add(job_id)
+            job_id += 1
+
+        time.sleep(0.005)
+
+        for i in range(10):
+            src, dst = make_load_spec(trial * 100 + job_id)
+            submit_times[job_id] = time.perf_counter()
+            worker.submit_load(job_id=job_id, src_spec=src, dst_spec=dst)
+            load_ids.add(job_id)
+            job_id += 1
+
+        # Poll until all loads are reported (don't wait for stores)
+        reported_loads = set()
+        reported_stores = set()
+        while reported_loads != load_ids:
+            time.sleep(0.0005)
+            t_poll = time.perf_counter()
+            for r in worker.get_finished():
+                if r.job_id in load_ids and r.job_id not in reported_loads:
+                    reported_loads.add(r.job_id)
+                    load_lats.append((t_poll - submit_times[r.job_id]) * 1e6)
+                elif r.job_id in store_ids and r.job_id not in reported_stores:
+                    reported_stores.add(r.job_id)
+                    store_lats.append((t_poll - submit_times[r.job_id]) * 1e6)
+
+        # Drain remaining stores
+        worker.wait(store_ids)
+        t_final = time.perf_counter()
+        for r in worker.get_finished():
+            if r.job_id in store_ids and r.job_id not in reported_stores:
+                reported_stores.add(r.job_id)
+                store_lats.append((t_final - submit_times[r.job_id]) * 1e6)
+
+    return store_lats, load_lats
+
+
+def scenario_intra_direction_hol(stub, store_workers: int = 4, load_workers: int = 4,
+                                 iterations: int = 10) -> list[float]:
+    """One very slow store followed by many fast stores.
+
+    The FIFO deque within a direction means get_finished() can't report fast
+    stores that completed behind a straggler at position 0. This quantifies
+    the cost of intra-direction HOL — a fundamental property of the FIFO design.
+    """
+    slow_stub = LatencyFakeStub(store_latency_s=0.005, load_latency_s=0.002)
+    fast_lats = []
+    for trial in range(iterations):
+        worker = make_worker(slow_stub, store_workers, load_workers)
+
+        # Submit one "slow" store manually by using a special stub
+        # We'll submit job 0 to a separate slow path
+        slow_store_stub = LatencyFakeStub(store_latency_s=0.100, load_latency_s=0.002)
+        slow_worker = make_worker(slow_store_stub, store_workers, load_workers)
+
+        # Actually: use one worker, simulate by submitting many fast stores
+        # after one that will be slow (using straggler stub)
+        straggler_stub = LatencyFakeStub(
+            store_latency_s=0.005, load_latency_s=0.002,
+            straggler_rate=0.0,  # we'll make first one slow manually
+        )
+        # Simpler approach: first store sleeps 100ms, rest sleep 5ms
+        class FirstSlowStub:
+            def __init__(self):
+                self._call = 0
+            def CopyToStore(self, req):
+                self._call += 1
+                if self._call == 1:
+                    time.sleep(0.100)  # first store is 100ms
+                else:
+                    time.sleep(0.005)  # rest are 5ms
+                return pb.BatchCopyToStoreResponse(
+                    results=[pb.EntryResult(key=e.key, success=True) for e in req.entries]
+                )
+            def Lookup(self, req):
+                time.sleep(0.002)
+                return pb.BatchLookupResponse(
+                    results=[pb.EntryResult(key=e.key, success=True) for e in req.entries]
+                )
+            def AbortStore(self, req):
+                return pb.BatchAbortStoreResponse(
+                    results=[pb.EntryResult(key=k, success=True) for k in req.keys]
+                )
+
+        fs = FirstSlowStub()
+        worker = make_worker(fs, store_workers, load_workers)
+
+        # Submit 8 stores: first one gets the slow thread, rest are fast
+        n_stores = 8
+        t_submits = {}
+        for i in range(n_stores):
+            src, dst = make_store_spec(trial * 100 + i)
+            t_submits[i] = time.perf_counter()
+            worker.submit_store(job_id=i, src_spec=src, dst_spec=dst)
+
+        # Wait for all, then check when each was reportable
+        worker.wait(set(range(n_stores)))
+        t_done = time.perf_counter()
+        finished = worker.get_finished()
+
+        # All 8 stores should be done now. The fast ones (jobs 1-7) completed
+        # in 5ms but couldn't be reported until job 0 (100ms) finished — that's
+        # the intra-direction HOL cost.
+        for r in finished:
+            if r.job_id > 0:  # skip the straggler itself
+                lat = (t_done - t_submits[r.job_id]) * 1e6
+                fast_lats.append(lat)
+
+    return fast_lats
+
+
+def scenario_reaping_cadence(stub, poll_interval_ms: float = 1.0,
+                             n_ops: int = 50, store_workers: int = 4,
+                             load_workers: int = 4) -> tuple[list[float], list[float]]:
+    """Measure completed-but-unobserved delay at different polling intervals.
+
+    Work can be done but invisible to the scheduler until get_finished() is
+    called. This measures the gap between actual RPC completion and when the
+    connector reports it.
+    """
+    submit_times: dict[int, float] = {}
+    report_times: dict[int, float] = {}
+    directions: dict[int, str] = {}
+
+    worker = make_worker(stub, store_workers, load_workers)
+    job_id = 0
+
+    for i in range(n_ops):
+        if random.random() < 0.5:
+            src, dst = make_store_spec(job_id)
+            submit_times[job_id] = time.perf_counter()
+            directions[job_id] = "store"
+            worker.submit_store(job_id=job_id, src_spec=src, dst_spec=dst)
+        else:
+            src, dst = make_load_spec(job_id)
+            submit_times[job_id] = time.perf_counter()
+            directions[job_id] = "load"
+            worker.submit_load(job_id=job_id, src_spec=src, dst_spec=dst)
+        job_id += 1
+
+    # Poll at the given interval until all are reaped
+    reaped = set()
+    while len(reaped) < n_ops:
+        time.sleep(poll_interval_ms / 1000.0)
+        t_poll = time.perf_counter()
+        finished = worker.get_finished()
+        for r in finished:
+            if r.job_id not in reaped:
+                report_times[r.job_id] = t_poll
+                reaped.add(r.job_id)
+
+    store_lats = []
+    load_lats = []
+    for jid in range(n_ops):
+        lat = (report_times[jid] - submit_times[jid]) * 1e6
+        if directions[jid] == "store":
+            store_lats.append(lat)
+        else:
+            load_lats.append(lat)
+    return store_lats, load_lats
+
+
 # ── Main ──
 
 
@@ -343,6 +621,83 @@ def main():
             store_workers=args.store_workers, load_workers=args.load_workers,
         )
         print(f"  pure_{direction}s: {ops} ops in {elapsed:.3f}s = {ops/elapsed:.0f} ops/s")
+    print()
+
+    # Scenario E: Straggler injection
+    print("Scenario E: Straggler Injection (5% of RPCs are 10x slower)")
+    s_lats, l_lats = scenario_straggler(
+        stub, n_ops=args.n_ops, iterations=5,
+        store_workers=args.store_workers, load_workers=args.load_workers,
+    )
+    print_stats("stores (with stragglers)", s_lats)
+    print_stats("loads (with stragglers)", l_lats)
+    if l_lats:
+        p = percentiles(l_lats)
+        tail_ratio = p["p99"] / p["p50"] if p["p50"] > 0 else 0
+        print(f"  Load tail ratio (p99/p50): {tail_ratio:.1f}x")
+    print()
+
+    # Scenario F: Burst recovery
+    print("Scenario F: Burst Recovery (60 stores → idle → 1 load)")
+    recovery_lats = scenario_burst_recovery(
+        stub, burst_size=60, iterations=args.iterations,
+        store_workers=args.store_workers, load_workers=args.load_workers,
+    )
+    print_stats("post-burst load latency", recovery_lats)
+    p95 = percentiles(recovery_lats).get("p95", 0)
+    if p95 < max_acceptable_us:
+        print(f"  PASS (p95={p95:.0f}us < {max_acceptable_us:.0f}us)")
+    else:
+        print(f"  FAIL (p95={p95:.0f}us >= {max_acceptable_us:.0f}us)")
+        failures.append("Burst recovery")
+    print()
+
+    # Scenario G: Direction-asymmetric saturation
+    print("Scenario G: Asymmetric Saturation (stores=50ms, loads=2ms)")
+    asym_s, asym_l = scenario_asymmetric_saturation(
+        store_workers=args.store_workers, load_workers=args.load_workers,
+        iterations=args.iterations,
+    )
+    print_stats("stores (50ms RPC)", asym_s)
+    print_stats("loads (2ms RPC)", asym_l)
+    if asym_l:
+        p = percentiles(asym_l)
+        # Loads should stay near 2ms even under heavy store pressure
+        load_ceiling_us = 10000  # 10ms — loads at 2ms RPC should never hit this
+        if p["p95"] < load_ceiling_us:
+            print(f"  PASS: loads independent of slow stores (p95={p['p95']:.0f}us)")
+        else:
+            print(f"  FAIL: loads affected by slow stores (p95={p['p95']:.0f}us >= {load_ceiling_us}us)")
+            failures.append("Asymmetric saturation")
+    print()
+
+    # Scenario H: Intra-direction HOL
+    print("Scenario H: Intra-Direction HOL (1 slow store + 7 fast stores)")
+    intra_lats = scenario_intra_direction_hol(
+        stub, store_workers=args.store_workers, load_workers=args.load_workers,
+        iterations=10,
+    )
+    print_stats("fast stores behind straggler", intra_lats)
+    if intra_lats:
+        p = percentiles(intra_lats)
+        # These fast stores (5ms RPC) can't report until the 100ms straggler
+        # at deque position 0 finishes. Expected: ~100ms, not ~5ms.
+        print(f"  NOTE: FIFO deque cost — fast 5ms stores reported at ~{p['avg']/1000:.0f}ms")
+        print(f"  (intra-direction HOL is by design; this quantifies the cost)")
+    print()
+
+    # Scenario I: Reaping cadence sensitivity
+    print("Scenario I: Reaping Cadence Sensitivity")
+    for poll_ms in [1.0, 5.0, 10.0, 30.0]:
+        s_lats, l_lats = scenario_reaping_cadence(
+            stub, poll_interval_ms=poll_ms, n_ops=50,
+            store_workers=args.store_workers, load_workers=args.load_workers,
+        )
+        all_lats = s_lats + l_lats
+        p = percentiles(all_lats)
+        if p:
+            print(f"  poll={poll_ms:>5.1f}ms  avg={p['avg']:>8.0f}us  "
+                  f"p50={p['p50']:>8.0f}us  p95={p['p95']:>8.0f}us")
     print()
 
     print("=" * 78)
