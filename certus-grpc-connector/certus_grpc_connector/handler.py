@@ -171,25 +171,30 @@ def _build_worker_class():
         @staticmethod
         def _reap(pending: deque[_PendingJob], now: float, block_size: int) -> "list":
             results = []
-            while pending and pending[0].future.done():
-                job = pending.popleft()
-                try:
-                    success = bool(job.future.result())
-                except Exception as e:  # noqa: BLE001 - report as a failed transfer
-                    print(
-                        f"[certus-grpc] transfer job {job.job_id} failed: {e}",
-                        flush=True,
+            remaining: deque[_PendingJob] = deque()
+            for job in pending:
+                if job.future.done():
+                    try:
+                        success = bool(job.future.result())
+                    except Exception as e:  # noqa: BLE001 - report as a failed transfer
+                        print(
+                            f"[certus-grpc] transfer job {job.job_id} failed: {e}",
+                            flush=True,
+                        )
+                        success = False
+                    results.append(
+                        make_transfer_result(
+                            job_id=job.job_id,
+                            success=success,
+                            transfer_size=job.num_blocks * block_size,
+                            transfer_time=now - job.start_time,
+                            transfer_type=job.transfer_type,
+                        )
                     )
-                    success = False
-                results.append(
-                    make_transfer_result(
-                        job_id=job.job_id,
-                        success=success,
-                        transfer_size=job.num_blocks * block_size,
-                        transfer_time=now - job.start_time,
-                        transfer_type=job.transfer_type,
-                    )
-                )
+                else:
+                    remaining.append(job)
+            pending.clear()
+            pending.extend(remaining)
             return results
 
         def get_finished(self) -> "list":

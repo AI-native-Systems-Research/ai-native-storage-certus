@@ -415,36 +415,21 @@ def scenario_intra_direction_hol(stub, store_workers: int = 4, load_workers: int
                                  iterations: int = 10) -> list[float]:
     """One very slow store followed by many fast stores.
 
-    The FIFO deque within a direction means get_finished() can't report fast
-    stores that completed behind a straggler at position 0. This quantifies
-    the cost of intra-direction HOL — a fundamental property of the FIFO design.
+    Tests whether get_finished() can report fast completions that finished
+    before a straggler at an earlier position. With unordered reaping, fast
+    stores report at ~5ms. With FIFO reaping, they wait ~100ms.
     """
-    slow_stub = LatencyFakeStub(store_latency_s=0.005, load_latency_s=0.002)
     fast_lats = []
     for trial in range(iterations):
-        worker = make_worker(slow_stub, store_workers, load_workers)
-
-        # Submit one "slow" store manually by using a special stub
-        # We'll submit job 0 to a separate slow path
-        slow_store_stub = LatencyFakeStub(store_latency_s=0.100, load_latency_s=0.002)
-        slow_worker = make_worker(slow_store_stub, store_workers, load_workers)
-
-        # Actually: use one worker, simulate by submitting many fast stores
-        # after one that will be slow (using straggler stub)
-        straggler_stub = LatencyFakeStub(
-            store_latency_s=0.005, load_latency_s=0.002,
-            straggler_rate=0.0,  # we'll make first one slow manually
-        )
-        # Simpler approach: first store sleeps 100ms, rest sleep 5ms
         class FirstSlowStub:
             def __init__(self):
                 self._call = 0
             def CopyToStore(self, req):
                 self._call += 1
                 if self._call == 1:
-                    time.sleep(0.100)  # first store is 100ms
+                    time.sleep(0.100)
                 else:
-                    time.sleep(0.005)  # rest are 5ms
+                    time.sleep(0.005)
                 return pb.BatchCopyToStoreResponse(
                     results=[pb.EntryResult(key=e.key, success=True) for e in req.entries]
                 )
@@ -461,7 +446,6 @@ def scenario_intra_direction_hol(stub, store_workers: int = 4, load_workers: int
         fs = FirstSlowStub()
         worker = make_worker(fs, store_workers, load_workers)
 
-        # Submit 8 stores: first one gets the slow thread, rest are fast
         n_stores = 8
         t_submits = {}
         for i in range(n_stores):
@@ -469,18 +453,17 @@ def scenario_intra_direction_hol(stub, store_workers: int = 4, load_workers: int
             t_submits[i] = time.perf_counter()
             worker.submit_store(job_id=i, src_spec=src, dst_spec=dst)
 
-        # Wait for all, then check when each was reportable
-        worker.wait(set(range(n_stores)))
-        t_done = time.perf_counter()
-        finished = worker.get_finished()
+        # Poll get_finished() repeatedly to measure when fast stores report
+        reported: dict[int, float] = {}
+        while len(reported) < n_stores:
+            time.sleep(0.001)
+            t_poll = time.perf_counter()
+            for r in worker.get_finished():
+                if r.job_id not in reported:
+                    reported[r.job_id] = t_poll
 
-        # All 8 stores should be done now. The fast ones (jobs 1-7) completed
-        # in 5ms but couldn't be reported until job 0 (100ms) finished — that's
-        # the intra-direction HOL cost.
-        for r in finished:
-            if r.job_id > 0:  # skip the straggler itself
-                lat = (t_done - t_submits[r.job_id]) * 1e6
-                fast_lats.append(lat)
+        for jid in range(1, n_stores):  # skip straggler (job 0)
+            fast_lats.append((reported[jid] - t_submits[jid]) * 1e6)
 
     return fast_lats
 
@@ -682,8 +665,11 @@ def main():
         p = percentiles(intra_lats)
         # These fast stores (5ms RPC) can't report until the 100ms straggler
         # at deque position 0 finishes. Expected: ~100ms, not ~5ms.
-        print(f"  NOTE: FIFO deque cost — fast 5ms stores reported at ~{p['avg']/1000:.0f}ms")
-        print(f"  (intra-direction HOL is by design; this quantifies the cost)")
+        expected_ms = 5  # the fast stores' RPC time
+        if p['avg'] / 1000 < expected_ms * 4:
+            print(f"  PASS: fast stores report at ~{p['avg']/1000:.0f}ms (near {expected_ms}ms RPC time)")
+        else:
+            print(f"  WARN: fast stores delayed to ~{p['avg']/1000:.0f}ms (expected ~{expected_ms}ms)")
     print()
 
     # Scenario I: Reaping cadence sensitivity
