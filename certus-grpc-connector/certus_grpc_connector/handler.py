@@ -23,8 +23,9 @@ builds the subclass on first use) so the base that is absent on the other era
 is never imported.
 
 Each submit enqueues one gRPC call onto the pool and returns immediately;
-``get_finished`` reaps completed futures from both deques independently in
-per-direction FIFO order. Per block we build a proto ``IpcHandle`` sharing the
+``get_finished`` scans both deques and reaps any completed future regardless
+of submission order (unordered reaping — no straggler can block reporting of
+faster completions). Per block we build a proto ``IpcHandle`` sharing the
 KV-cache allocation's IPC handle with ``offset`` set to the block's byte
 offset, so the server DMAs at ``open(handle) + offset``.
 """
