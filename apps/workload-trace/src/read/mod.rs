@@ -27,7 +27,7 @@
 //! `unavailable` rather than default it, so [`Capabilities`] answers that question
 //! per parameter and the answer is a refusal a caller cannot ignore.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use workload_model::keys::{CacheKey, SessionId};
@@ -119,6 +119,17 @@ pub enum ReadError {
         /// The directory.
         path: String,
     },
+    /// A `rolling_prefix` trace repeated a block id inside one request's own path.
+    IdentityNotPrefixDerived {
+        /// How many rows contained a repeat.
+        rows: u64,
+        /// How many rows were checked.
+        checked: u64,
+        /// How many references were repeats, across all rows.
+        repeats: u64,
+        /// One offending row, for a reader to look at.
+        example: String,
+    },
     /// A block list contradicted its own `input_length` under the declared encoding.
     EncodingMismatch {
         /// Which encoding was declared.
@@ -195,6 +206,23 @@ impl std::fmt::Display for ReadError {
                  without the `parquet` feature. Rebuild with `--features parquet`. Not falling \
                  back to JSONL: the directory is the trace, and reading none of it would look \
                  like an empty one"
+            ),
+            ReadError::IdentityNotPrefixDerived {
+                rows,
+                checked,
+                repeats,
+                example,
+            } => write!(
+                f,
+                "CORRUPT TRACE — the one thing a trace can be blamed for (FR-054a): {rows} of \
+                 {checked} rows repeat a block id inside their own path ({repeats} repeated \
+                 references in total), which the `rolling_prefix` identity their own manifest \
+                 declares makes impossible. A rolling-prefix id is a hash over the whole prefix \
+                 ending at it, so two positions in one path have different prefixes and cannot \
+                 share an id — this is a logical contradiction rather than an unlikely collision, \
+                 and it is the signature of position-independent content hashing. Every path \
+                 measurement here — depth, width, sharing, occupancy — reads a position off the \
+                 id, so none of them mean anything on this trace. First: {example}"
             ),
             ReadError::EncodingMismatch {
                 encoding,
@@ -683,6 +711,27 @@ pub fn normalise(
     let mut checked = 0u64;
     let mut example = String::new();
 
+    // The rolling-prefix declaration, checked rather than trusted.
+    //
+    // `Capabilities::from_manifest` has already refused anything but
+    // `rolling_prefix`, so every trace reaching here claims that a block id is a hash
+    // over the whole prefix ending at it. Under that claim two positions in one path
+    // have different prefixes and so cannot share an id, which makes a repeat inside
+    // one request's own block list a contradiction of the manifest — not a collision to
+    // be weighed, an impossibility. Two corpus traces fail it (`qwen_toc` on 16.4% of
+    // rows, `qwen_tob` on 3.8%), and both were being silently fitted, with every path
+    // measurement reading a position off an id that does not encode one.
+    //
+    // This is a *necessary* condition, not a sufficient one: a trace could still repeat
+    // an id across requests at two different depths, which needs a map over every
+    // distinct key and costs gigabytes on the larger traces. `research/trie_profile.py`
+    // does the complete check offline; this is the part that is free, and it is the part
+    // the corpus's actual corruption trips.
+    let mut path_seen: HashSet<i64> = HashSet::new();
+    let mut prefix_bad_rows = 0u64;
+    let mut prefix_repeats = 0u64;
+    let mut prefix_example = String::new();
+
     for r in rows {
         let session_key = match r.session_id.as_deref() {
             Some(s) => s.to_string(),
@@ -750,11 +799,56 @@ pub fn normalise(
             }
         }
 
+        // A repeated id within one path contradicts `rolling_prefix` (see above).
+        path_seen.clear();
+        let mut repeats_here = 0u64;
+        let mut first_repeat: Option<(usize, i64)> = None;
+        for (pos, b) in blocks.iter().enumerate() {
+            if !path_seen.insert(*b) {
+                repeats_here += 1;
+                if first_repeat.is_none() {
+                    first_repeat = Some((pos, *b));
+                }
+            }
+        }
+        if repeats_here > 0 {
+            prefix_bad_rows += 1;
+            prefix_repeats += repeats_here;
+            if prefix_example.is_empty() {
+                let (pos, b) = first_repeat.expect("a repeat was counted");
+                let earlier = blocks.iter().position(|x| *x == b).unwrap_or(0);
+                prefix_example = format!(
+                    "session {:?} invocation {}: block {} appears at positions {} and {} of one \
+                     {}-block path",
+                    r.session_id,
+                    r.invocation_index,
+                    b,
+                    earlier,
+                    pos,
+                    blocks.len()
+                );
+            }
+        }
+
         out.push(NormalisedInvocation {
             session: SessionId(session),
             turn: r.invocation_index.max(0) as u32,
             request_start: r.request_start,
             blocks: blocks.into_iter().map(|b| CacheKey(b as u64)).collect(),
+        });
+    }
+
+    // Same threshold reasoning as the encoding check below, for the same reason: a
+    // handful of rows is damage, a large share is a trace whose ids are not what its
+    // manifest says. Judged against the rows that carried a path, since a row with no
+    // blocks cannot contradict anything.
+    let with_path = out.iter().filter(|i| !i.blocks.is_empty()).count() as u64;
+    if with_path > 0 && prefix_bad_rows * 100 > with_path {
+        return Err(ReadError::IdentityNotPrefixDerived {
+            rows: prefix_bad_rows,
+            checked: with_path,
+            repeats: prefix_repeats,
+            example: prefix_example,
         });
     }
 
@@ -1005,6 +1099,73 @@ mod tests {
         assert!(msg.contains("CALLER INPUT"), "{msg}");
         assert!(!msg.contains("several blockings"), "{msg}");
         assert!(msg.contains("declares no blocking"), "{msg}");
+    }
+
+    #[test]
+    fn a_block_id_repeated_inside_one_path_is_a_corrupt_trace() {
+        // `qwen_toc` and `qwen_tob` both declare `rolling_prefix` and both do this —
+        // 16.4% and 3.8% of rows — and both were fitted silently, with every path
+        // measurement reading a depth off an id that does not encode one.
+        let caps = Capabilities::from_manifest(&manifest(Encoding::Full, 1), 16).unwrap();
+        let mut rows = Vec::new();
+        for i in 0..10 {
+            let mut r = row("s", i);
+            // Block 7 twice in one path: impossible under a hash over the prefix.
+            r.full_input_blocks = vec![1, 7, 3, 7];
+            rows.push(r);
+        }
+        let msg = normalise(&rows, &caps)
+            .expect_err("a rolling-prefix contradiction must refuse")
+            .to_string();
+        assert!(msg.contains("CORRUPT TRACE"), "{msg}");
+        // The classification is what a reader acts on, and the substance is what makes
+        // it checkable: both, never the prose around them.
+        assert!(msg.contains("10 of 10 rows"), "{msg}");
+        assert!(msg.contains("positions 1 and 3"), "{msg}");
+    }
+
+    #[test]
+    fn a_single_damaged_row_does_not_condemn_a_trace_but_a_repeat_in_every_row_does() {
+        // The threshold, from both sides — the same 1% rule the encoding check uses. A
+        // handful of rows is damage; a large share is a trace whose ids are not what its
+        // manifest says. Without both directions this is a test of one branch.
+        let caps = Capabilities::from_manifest(&manifest(Encoding::Full, 1), 16).unwrap();
+        let mut rows = Vec::new();
+        for i in 0..300 {
+            let mut r = row("s", i);
+            r.full_input_blocks = vec![1000 + i, 2000 + i, 3000 + i];
+            rows.push(r);
+        }
+        // One row of 300 is 0.33%, under the threshold: read it and carry on.
+        rows[0].full_input_blocks = vec![5, 5, 6];
+        let ok = normalise(&rows, &caps).expect("one damaged row must not refuse");
+        assert_eq!(ok.len(), 300);
+        // Four of 300 is 1.33%, over it.
+        for r in rows.iter_mut().take(4) {
+            r.full_input_blocks = vec![5, 5, 6];
+        }
+        let msg = normalise(&rows, &caps)
+            .expect_err("above the threshold it must refuse")
+            .to_string();
+        assert!(msg.contains("CORRUPT TRACE"), "{msg}");
+        assert!(msg.contains("4 of 300 rows"), "{msg}");
+    }
+
+    #[test]
+    fn a_session_re_walking_its_own_path_across_turns_is_not_a_violation() {
+        // The check is per *path*, and it has to be: under the delta encoding turn n+1
+        // re-reads every block of turn n, so the same ids recur across rows by
+        // construction and FR-014a requires exactly that. A check that pooled ids across
+        // a session would condemn every multi-turn trace in the corpus.
+        let caps = Capabilities::from_manifest(&manifest(Encoding::Delta, 1), 16).unwrap();
+        let mut a = row("s", 0);
+        a.new_input_blocks = vec![1, 2];
+        a.new_output_blocks = vec![3];
+        let mut b = row("s", 1);
+        b.reuse_from = vec![0];
+        b.new_input_blocks = vec![4];
+        let out = normalise(&[a, b], &caps).expect("a re-walked path is not a repeat");
+        assert_eq!(out[1].blocks.len(), 4, "turn 1 must extend turn 0's path");
     }
 
     #[test]

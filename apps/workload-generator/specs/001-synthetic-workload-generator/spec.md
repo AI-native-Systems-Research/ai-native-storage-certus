@@ -1700,12 +1700,38 @@ report segments statistics into before/after windows around the event.
   actions from the reader and conflating them makes all three useless:
   1. **Corrupt trace** — rows contradict the manifest's declared invariants. The data cannot be
      interpreted at all. This is the only outcome that is about the trace.
+     Two invariants are checked, and both MUST be, because a trace can satisfy either alone: the
+     **length invariant** of the declared block encoding, and the **identity invariant** of
+     `id_semantics: rolling_prefix` (FR-054b1).
   2. **Model limitation** — the trace is valid and understood, and some restriction of the schema or
      the generator cannot represent it. The report MUST name the restriction. A parameter whose
      source field the trace does not carry is this case too: it is the model requiring something the
      trace was never obliged to record.
   3. **Caller input** — an ambiguous or absent option, a partial file, a blocking the trace does not
      carry. Fixable by the person running the command, and about neither the model nor the data.
+- **FR-054b1**: `fit` MUST **check the `rolling_prefix` identity it depends on** rather than trusting
+  the declaration, and MUST classify a contradiction as a corrupt trace (FR-054b case 1).
+  A rolling-prefix id is a hash over the whole prefix ending at it, so two positions in one request's
+  path have different prefixes and **cannot** share an id. A repeat inside one path is therefore a
+  logical contradiction of the manifest, not an unlikely collision, and it is the signature of
+  position-independent content hashing. It matters because *every* path measurement — depth, width,
+  sharing, occupancy, the whole trunk — reads a position off the id: on such a trace none of them
+  mean anything, and the fit will still produce plausible numbers.
+  Measured over the corpus, **two of 24 traces fail**: `qwen_toc` on 7 055 of 43 058 rows (106 026
+  repeated references) and `qwen_tob` on 6 512 of 172 800 (58 750), while `qwen_code` and
+  `qwen_reasoning` from the same family are clean — so this is per-trace and not a corpus convention.
+  Both were being fitted silently, and `qwen_toc` was one of the nine traces the FR-055f matrix
+  reported divergences for.
+  The check is judged on the **same 1% threshold** as the encoding invariant and for the same reason:
+  a handful of rows is damage to a valid trace, a large share is a trace whose ids are not what it
+  says they are. It MUST be **per path**, never pooled over a session, since under the delta encoding
+  turn n+1 re-reads every block of turn n and FR-014a requires exactly that — a pooled check would
+  condemn every multi-turn trace in the corpus.
+  This is a **necessary and not sufficient** condition: an id repeated across two requests at
+  different depths is also a contradiction, but detecting it needs a map over every distinct key and
+  costs gigabytes on the larger traces. `research/trie_profile.py` performs the complete check
+  offline; `fit` performs the part that is free, which is the part the corpus's actual corruption
+  trips.
 - **FR-054c**: **`growth_per_turn` is drawn i.i.d. per turn, and that is a known limitation of this
   model** (FR-054a), not a defect in any trace. It is the dominant reason a fit of a real agentic
   trace still runs long, and it is recorded here because every marginal distribution is *correct*
