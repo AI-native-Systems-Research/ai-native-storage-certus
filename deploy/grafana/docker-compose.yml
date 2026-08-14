@@ -24,6 +24,11 @@ services:
     restart: unless-stopped
     ports:
       - "9090:9090"
+    # Lets the vllm scrape job reach the host's published :8000 (the vLLM bench
+    # container publishes to the host, on a separate podman network). On Linux
+    # Docker Engine host.docker.internal does NOT resolve without this mapping.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
