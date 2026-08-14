@@ -34,8 +34,8 @@ from .handler import worker_class
 from .manager import GrpcCertusOffloadingManager
 from .mediums import CertusLoadStoreSpec
 
-# Process-level singletons: one channel/stub and one background executor per
-# worker process, shared across manager + handlers.
+# Process-level singletons: one channel/stub per worker process, shared across
+# manager + handlers.
 _CHANNEL_SINGLETON = None
 _STUB_SINGLETON = None
 
