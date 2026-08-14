@@ -145,14 +145,14 @@ def phase_populate(stub, keys, ipc_handle, block_size, pipeline_depth=4):
     """Populate keys with pipelined Reserve+CopyToStore+Commit."""
     latencies = []
     for key in keys:
-        reserve_entry = dispatcher_pb2.ReserveEntry(key=key, size=block_size, session_id=0)
+        reserve_entry = dispatcher_pb2.ReserveEntry(key=key, size=block_size)
         try:
             t0 = time.perf_counter()
             resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=[reserve_entry]))
             if not resp.results[0].success:
                 continue
             entry = dispatcher_pb2.CopyToStoreEntry(
-                key=key, ipc_handles=[_make_ipc_handle(ipc_handle, block_size)]
+                key=key, ipc_handle=_make_ipc_handle(ipc_handle, block_size)
             )
             resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=[entry]))
             if resp.results[0].success:
@@ -170,7 +170,7 @@ def phase_hot_lookup(stub, keys, ipc_handle, block_size, iterations=10, pipeline
     latencies = []
     entries = [
         dispatcher_pb2.LookupEntry(
-            key=k, ipc_handles=[_make_ipc_handle(ipc_handle, block_size)]
+            key=k, ipc_handle=_make_ipc_handle(ipc_handle, block_size)
         )
         for k in keys
     ]
@@ -224,12 +224,12 @@ def phase_bidirectional(stub, store_keys, load_keys, ipc_store, ipc_load,
             idx += 1
             try:
                 t0 = time.perf_counter()
-                reserve_entry = dispatcher_pb2.ReserveEntry(key=key, size=block_size, session_id=0)
+                reserve_entry = dispatcher_pb2.ReserveEntry(key=key, size=block_size)
                 resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=[reserve_entry]))
                 if not resp.results[0].success:
                     continue
                 entry = dispatcher_pb2.CopyToStoreEntry(
-                    key=key, ipc_handles=[_make_ipc_handle(ipc_store, block_size)]
+                    key=key, ipc_handle=_make_ipc_handle(ipc_store, block_size)
                 )
                 resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=[entry]))
                 if resp.results[0].success:
@@ -246,7 +246,7 @@ def phase_bidirectional(stub, store_keys, load_keys, ipc_store, ipc_load,
             idx += 1
             entries = [
                 dispatcher_pb2.LookupEntry(
-                    key=key, ipc_handles=[_make_ipc_handle(ipc_load, block_size)]
+                    key=key, ipc_handle=_make_ipc_handle(ipc_load, block_size)
                 )
             ]
             try:
@@ -295,7 +295,7 @@ def phase_per_block_latency(stub, keys, ipc_handle, block_size, n_samples=100):
         key = keys[i % len(keys)]
         entries = [
             dispatcher_pb2.LookupEntry(
-                key=key, ipc_handles=[_make_ipc_handle(ipc_handle, block_size)]
+                key=key, ipc_handle=_make_ipc_handle(ipc_handle, block_size)
             )
         ]
         try:
