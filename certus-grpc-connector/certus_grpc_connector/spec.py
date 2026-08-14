@@ -167,8 +167,15 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
             f"per-region strides={[r.stride_bytes for r in kv_regions]}",
             flush=True,
         )
-        executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="certus-grpc")
-        self._worker = worker_class()(stub, kv_regions, block_bytes, executor)
+        store_executor = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="certus-grpc-store"
+        )
+        load_executor = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="certus-grpc-load"
+        )
+        self._worker = worker_class()(
+            stub, kv_regions, block_bytes, store_executor, load_executor
+        )
         return self._worker
 
     def get_worker(self, kv_caches):

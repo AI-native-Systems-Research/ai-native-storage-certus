@@ -14,12 +14,13 @@ implementing BOTH worker interfaces the plugin API has had:
   direction is in the method name, so there is no medium-pair routing and
   ``TransferResult`` no longer carries a ``transfer_type``).
 
-Both interfaces share one background thread pool and the same store/load RPC
-bodies. Stores and loads maintain separate pending-job deques so a slow store
-cannot block reporting of completed loads (head-of-line avoidance). The base
-class is resolved lazily via ``compat.worker_base_class()`` (a factory builds
-the subclass on first use) so the base that is absent on the other era is never
-imported.
+Both interfaces share the same store/load RPC bodies but use separate thread
+pools per direction (store and load) so a burst of stores cannot starve load
+dispatch. Each direction also maintains its own pending-job deque so completed
+loads are reported independently of in-flight stores (head-of-line avoidance).
+The base class is resolved lazily via ``compat.worker_base_class()`` (a factory
+builds the subclass on first use) so the base that is absent on the other era
+is never imported.
 
 Each submit enqueues one gRPC call onto the pool and returns immediately;
 ``get_finished`` reaps completed futures from both deques independently in
@@ -132,12 +133,14 @@ def _build_worker_class():
             stub,
             kv_regions: list[KvCacheIpc],
             block_size_bytes: int,
-            executor: ThreadPoolExecutor,
+            store_executor: ThreadPoolExecutor,
+            load_executor: ThreadPoolExecutor,
         ):
             self._stub = stub
             self._kv_regions = kv_regions
             self._block_size_bytes = int(block_size_bytes)
-            self._executor = executor
+            self._store_executor = store_executor
+            self._load_executor = load_executor
             self._pending_stores: deque[_PendingJob] = deque()
             self._pending_loads: deque[_PendingJob] = deque()
 
@@ -151,8 +154,9 @@ def _build_worker_class():
             fn,
             transfer_type: tuple[str, str],
             pending: deque[_PendingJob],
+            executor: ThreadPoolExecutor,
         ) -> bool:
-            future = self._executor.submit(fn, gpu_block_ids, keys)
+            future = executor.submit(fn, gpu_block_ids, keys)
             pending.append(
                 _PendingJob(
                     job_id=job_id,
@@ -212,7 +216,7 @@ def _build_worker_class():
             block_ids = gpu_block_ids(src_spec)
             return self._submit(
                 job_id, block_ids, dst_spec.keys, self._do_store, _STORE_TYPE,
-                self._pending_stores,
+                self._pending_stores, self._store_executor,
             )
 
         def submit_load(self, job_id: int, src_spec, dst_spec) -> bool:
@@ -220,7 +224,7 @@ def _build_worker_class():
             block_ids = gpu_block_ids(dst_spec)
             return self._submit(
                 job_id, block_ids, src_spec.keys, self._do_load, _LOAD_TYPE,
-                self._pending_loads,
+                self._pending_loads, self._load_executor,
             )
 
         # ── ≤0.24 medium-pair interface ──
