@@ -1073,17 +1073,12 @@ impl IGpuServices for GpuServicesComponent {
                 return Err("Not initialized: call initialize() first".to_string());
             }
 
-            // cuMemcpyBatchAsync (CUDA 12.8+) is implemented but currently
-            // returns CUDA_ERROR_INVALID_VALUE with IPC-imported device pointers.
-            // Investigate: may need CUstream from cuStreamCreate vs cudaStream_t,
-            // or the pointers need to be in a valid CUdeviceptr address range.
-            // The fallback loop still benefits from stream split + nonblocking.
-            // Uncomment to enable once the driver compatibility is resolved:
-            // if !stream.0.is_null() {
-            //     if let Some(result) = self.try_batch_async(ops, stream) {
-            //         return result;
-            //     }
-            // }
+            // cuMemcpyBatchAsync (CUDA 12.8+): one driver call for N copies.
+            if !stream.0.is_null() {
+                if let Some(result) = self.try_batch_async(ops, stream) {
+                    return result;
+                }
+            }
 
             // Fallback: individual cudaMemcpyAsync per op.
             for (i, op) in ops.iter().enumerate() {
@@ -1153,8 +1148,8 @@ impl GpuServicesComponent {
             flags: u32,
         }
 
-        const CU_MEMCPY_SRC_ACCESS_ORDER_STREAM: i32 = 0;
-        const CU_MEMCPY_SRC_ACCESS_ORDER_ANY: i32 = 2;
+        const CU_MEMCPY_SRC_ACCESS_ORDER_STREAM: i32 = 1;
+        const CU_MEMCPY_SRC_ACCESS_ORDER_ANY: i32 = 3;
 
         static BATCH_FN: OnceLock<Option<BatchFn>> = OnceLock::new();
         let batch_fn = BATCH_FN.get_or_init(|| {
