@@ -46,6 +46,18 @@ SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 
+# PROM_PORT — if set, publish the container's Prometheus exporter on that host
+# port and tell the workload to start it (needs LOG_STATS=1 so vLLM actually
+# registers metrics). Unset by default: no port published, behaviour unchanged.
+PROM_PORT="${PROM_PORT:-}"
+# LOG_STATS — forwarded to the workload (was previously NOT passed through, so
+# `LOG_STATS=1 ./run-bench.sh` had no effect inside the container).
+LOG_STATS="${LOG_STATS:-}"
+# WORKLOAD_SRC — optional host path to run_multiturn_grpc_certus.py, bind-mounted
+# over the copy baked into the image. Lets a change to the workload (e.g. the
+# Prometheus exporter block) take effect WITHOUT rebuilding the image.
+WORKLOAD_SRC="${WORKLOAD_SRC:-}"
+
 # This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
 # needs explicit store paths. Override or unset for a default install.
 PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
@@ -102,6 +114,31 @@ else
     echo "warning: HF cache dir ${HF_CACHE} missing — model will download fresh." >&2
 fi
 
+# ── Prometheus exporter passthrough (only if PROM_PORT set) ──
+prom_flags=()
+if [[ -n "${PROM_PORT}" ]]; then
+    prom_flags+=(-p "${PROM_PORT}:${PROM_PORT}" -e "PROM_PORT=${PROM_PORT}")
+    echo "[run-bench] prometheus exporter -> http://<host>:${PROM_PORT}/metrics" >&2
+fi
+
+# ── LOG_STATS passthrough (only if set) ──
+logstats_env=()
+[[ -n "${LOG_STATS}" ]] && logstats_env+=(-e "LOG_STATS=${LOG_STATS}")
+
+# ── Workload override mount (only if WORKLOAD_SRC set) ──
+# The image's ENV WORKLOAD points at this in-container path; mounting over it
+# swaps in a host copy without a rebuild. :z relabels for rootless SELinux, ro
+# keeps it read-only.
+workload_mount=()
+if [[ -n "${WORKLOAD_SRC}" ]]; then
+    if [[ -f "${WORKLOAD_SRC}" ]]; then
+        workload_mount+=(-v "${WORKLOAD_SRC}:/workspace/certus-grpc-connector/run_multiturn_grpc_certus.py:z,ro")
+        echo "[run-bench] workload override: ${WORKLOAD_SRC}" >&2
+    else
+        echo "warning: WORKLOAD_SRC=${WORKLOAD_SRC} not found — using image's baked workload." >&2
+    fi
+fi
+
 echo "[run-bench] image=${IMAGE} gpu=${GPU} server=${CERTUS_SERVER}"
 echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL} tensor_parallel_size=${TENSOR_PARALLEL_SIZE}"
 
@@ -114,6 +151,9 @@ exec command podman "${store_flags[@]}" run --rm \
     --pull=never \
     --device "nvidia.com/gpu=${GPU}" \
     --ipc=host \
+    "${prom_flags[@]}" \
+    "${logstats_env[@]}" \
+    "${workload_mount[@]}" \
     "${cache_mount[@]}" \
     "${hf_env[@]}" \
     -e "CERTUS_SERVER=${CERTUS_SERVER}" \
