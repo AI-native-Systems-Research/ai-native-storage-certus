@@ -16,6 +16,9 @@
 //! differs from the document describing it.
 
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::rng::Stream;
@@ -311,14 +314,98 @@ fn standard_normal(st: &mut Stream) -> f64 {
     (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
 }
 
-/// Zipf by inverse transform over a truncated support.
+/// Support size above which the discrete table is not built and the continuous
+/// approximation is used instead.
+///
+/// An unbounded `Zipf` samples against `u32::MAX`, so some bound is required. Every
+/// support a document can mean — `roots.count`, or a trunk node's child count — is
+/// orders of magnitude below this, and the fallback is documented on [`zipf`].
+const ZIPF_EXACT_MAX_SUPPORT: u64 = 1 << 22;
+
+/// Memoised discrete-Zipf cumulative tables, keyed by `(s.to_bits(), n)`.
+///
+/// `s` is keyed by its bits because an exponent is an exact document value here, not a
+/// computed one, so bitwise identity is the right notion of "the same distribution".
+type ZipfTables = HashMap<(u64, u64), Rc<Vec<f64>>>;
+
+/// The discrete Zipf cumulative distribution over ranks `1..=n`, memoised per
+/// `(s, n)`.
+///
+/// Inversion needs the generalised harmonic number `H_n(s) = Σ k^-s`, which has no
+/// closed form, so the table is built once per distinct `(s, n)` and shared. A memo
+/// rather than a field on the distribution because `Corpus::pick_child` mints a fresh
+/// `Zipf` per node — its support is *that node's* child count — so there is nowhere to
+/// hang a prepared form. The cache cannot affect a drawn value, only how fast it
+/// arrives, so determinism is untouched.
+fn zipf_cdf(s: f64, n: u64) -> Rc<Vec<f64>> {
+    thread_local! {
+        static CACHE: RefCell<ZipfTables> = RefCell::new(ZipfTables::new());
+    }
+    CACHE.with(|c| {
+        let key = (s.to_bits(), n);
+        if let Some(t) = c.borrow().get(&key) {
+            return Rc::clone(t);
+        }
+        let mut cdf = Vec::with_capacity(n as usize);
+        let mut acc = 0.0f64;
+        for k in 1..=n {
+            acc += (k as f64).powf(-s);
+            cdf.push(acc);
+        }
+        // Normalise in place, and pin the last entry to exactly 1.0 so a `u` just
+        // below 1 cannot fall off the end through rounding.
+        let total = acc;
+        for v in cdf.iter_mut() {
+            *v /= total;
+        }
+        if let Some(last) = cdf.last_mut() {
+            *last = 1.0;
+        }
+        let t = Rc::new(cdf);
+        c.borrow_mut().insert(key, Rc::clone(&t));
+        t
+    })
+}
+
+/// Zipf by inverse transform over a truncated support, as the **discrete** pmf
+/// `p_k = k^-s / H_n(s)`.
+///
+/// # Why this is not the continuous approximation it used to be
+///
+/// The previous implementation inverted a continuous approximation and floored, so
+/// rank `k` received the density's mass on `[k, k+1)`. That has two consequences that
+/// are not approximation error but structural defects:
+///
+/// * **Rank `n` had probability exactly zero.** `h(1) = 0` and [`Stream::next_f64`] is
+///   in `[0, 1)`, so the inverted value never reached `n` and the top-numbered rank was
+///   unreachable at every support size.
+/// * **At `n = 2` the draw was deterministic** for *every* `s > 0`, since
+///   `p_1 = h(2)/h(2) = 1`. The 2-way split is the commonest branch point in real
+///   traces, so `branch_skew` values of 0.5, 0.9 and 1.5 all produced byte-identical
+///   streams and a trunk collapsed to one path per root.
+///
+/// Both are gone: every rank in `1..=n` has positive probability, and `p_1` at `n = 2`
+/// is `1/(1 + 2^-s)`, which is below 1 for every finite `s`.
+///
+/// `s <= 0` is uniform over the support, which is what the schema documents for 0.
+/// Above [`ZIPF_EXACT_MAX_SUPPORT`] the old continuous inverse is used, because an
+/// unbounded `Zipf` would otherwise ask for a `u32::MAX`-entry table; no support a
+/// document can express comes near that bound.
 fn zipf(st: &mut Stream, s: f64, n: u64) -> f64 {
     let u = st.next_f64();
-    if s <= 0.0 {
+    if s <= 0.0 || n <= 1 {
         return (u * n as f64).floor() + 1.0;
     }
-    // Continuous approximation to the discrete inverse CDF; adequate for rank
-    // selection and monotone in u, which is what callers rely on.
+    if n > ZIPF_EXACT_MAX_SUPPORT {
+        return zipf_continuous(u, s, n);
+    }
+    let cdf = zipf_cdf(s, n);
+    // The first rank whose cumulative exceeds `u`; ranks are 1-based.
+    (cdf.partition_point(|&c| c <= u) as f64 + 1.0).min(n as f64)
+}
+
+/// The pre-2026-08 continuous approximation, kept for supports too large to tabulate.
+fn zipf_continuous(u: f64, s: f64, n: u64) -> f64 {
     let n = n as f64;
     let h = |x: f64| -> f64 {
         if (s - 1.0).abs() < 1e-9 {
@@ -435,6 +522,63 @@ mod tests {
             sigma: 0.0,
         });
         assert!((d.mean().unwrap() - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_discrete_zipf_reaches_every_rank_and_the_continuous_one_never_reached_the_last() {
+        // The defect this law replaced, pinned against the fallback that still
+        // implements it — so the improvement is asserted rather than asserted-about,
+        // and nobody has to revert the sampler to see what changed.
+        //
+        // `zipf_continuous` is `zipf`'s own large-support fallback, so these are the
+        // two laws side by side at the same `(s, n)`.
+        // Rank `n`'s mass under the old law is `min(h(n), h(n+1)) - h(n) = 0`, so it is
+        // measure-zero rather than literally unreachable — `x` attains `n` only as
+        // `u -> 1`, which no draw produces. Asserted by sampling, not by probing the
+        // boundary: a `u` within an epsilon of 1 does round up to `n` and would make
+        // this test claim something false about the law.
+        for n in [3u64, 8, 64] {
+            let mut st = Stream::new(9, n);
+            let top = (0..20_000)
+                .map(|_| zipf_continuous(st.next_f64(), 0.9, n))
+                .fold(0.0f64, f64::max);
+            assert!(
+                top < n as f64,
+                "the continuous inverse must be shown never drawing rank {n}, got {top}"
+            );
+        }
+        // At two children the old law was not merely biased, it was deterministic:
+        // h(2)/h(2) = 1 puts every draw on rank 1 for any s > 0. That is why
+        // branch_skew 0.5, 0.9 and 1.5 produced byte-identical streams.
+        for s in [0.5, 0.9, 1.5] {
+            let mut st = Stream::new(3, 3);
+            let old: Vec<f64> = (0..200)
+                .map(|_| zipf_continuous(st.next_f64(), s, 2))
+                .collect();
+            assert!(
+                old.iter().all(|v| *v == 1.0),
+                "the continuous inverse at n=2, s={s} must be shown deterministic"
+            );
+        }
+        // The discrete law: p_1 = 1/(1 + 2^-s), and both ranks occur.
+        for s in [0.5, 0.9, 1.5] {
+            let d = Dist::Shaped(Shape::Zipf { s, n: Some(2) });
+            let mut st = Stream::new(3, 3);
+            let ones = (0..20_000).filter(|_| d.sample(&mut st) == 1.0).count();
+            let want = 1.0 / (1.0 + 2f64.powf(-s));
+            let got = ones as f64 / 20_000.0;
+            assert!(
+                (got - want).abs() < 0.02,
+                "n=2 s={s}: rank 1 realised {got:.4} against the discrete pmf's {want:.4}"
+            );
+        }
+        // And the top rank of a larger support is now reachable.
+        let d = Dist::Shaped(Shape::Zipf { s: 0.9, n: Some(8) });
+        let mut st = Stream::new(4, 4);
+        assert!(
+            (0..20_000).any(|_| d.sample(&mut st) == 8.0),
+            "rank 8 of 8 must be reachable"
+        );
     }
 
     #[test]

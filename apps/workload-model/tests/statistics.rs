@@ -22,13 +22,8 @@ use workload_model::stats::{Ref, Report, Statistics};
 // The analytic side: a closed form for the independent-reference model.
 // ---------------------------------------------------------------------------
 
-/// The rank pmf the generator's Zipf sampler realises.
-///
-/// `dist::zipf` inverts a *continuous* approximation to the discrete Zipf CDF and
-/// floors the result, so rank `k` gets the mass the true density puts on
-/// `[k, k+1)`: `p_k = (H(k+1) - H(k)) / H(n)` with `H` the antiderivative of
-/// `x^-s`. That is exactly integrable, so the realised pmf has a closed form even
-/// though it is not the discrete Zipf pmf.
+/// The rank pmf the generator's Zipf sampler realises: the **discrete** Zipf,
+/// `p_k = k^-s / H_n(s)` with `H_n(s) = Σ_{k=1}^{n} k^-s`.
 ///
 /// Derived from the sampler's *documented* transform rather than measured from its
 /// output, so this is a statement about the law and not a restatement of the
@@ -36,22 +31,16 @@ use workload_model::stats::{Ref, Report, Statistics};
 /// sampler against it separately, which is what keeps the reuse-distance
 /// comparison below from being circular: if the popularity law were wrong, that
 /// test fails and says so, rather than this one failing for an unclear reason.
+///
+/// # History
+///
+/// Until 2026-08-14 `dist::zipf` inverted a *continuous* approximation and floored,
+/// giving rank `k` the density's mass on `[k, k+1)` — which put **zero** mass on rank
+/// `n` and made the `n = 2` draw deterministic for every `s > 0`. This function
+/// mirrored that law, correctly, and so is the thing that had to change with it.
 fn zipf_pmf(s: f64, n: u64) -> Vec<f64> {
-    let h = |x: f64| {
-        if (s - 1.0).abs() < 1e-9 {
-            x.ln()
-        } else {
-            (x.powf(1.0 - s) - 1.0) / (1.0 - s)
-        }
-    };
-    let hn = h(n as f64);
-    (1..=n)
-        .map(|k| {
-            // The top rank is reachable only at u == 1, which never occurs, so
-            // its mass is zero and the rest sum to one.
-            (h((k + 1) as f64).min(hn) - h(k as f64)) / hn
-        })
-        .collect()
+    let hn: f64 = (1..=n).map(|k| (k as f64).powf(-s)).sum();
+    (1..=n).map(|k| (k as f64).powf(-s) / hn).collect()
 }
 
 /// `P(reuse distance <= d)` under the independent-reference model, exactly.
@@ -152,12 +141,13 @@ fn irm_reuse_distance_cdf(p: &[f64]) -> Vec<f64> {
 // Fixtures.
 // ---------------------------------------------------------------------------
 
-/// Roots in the pure-Zipf fixture. The top rank carries no mass (see
-/// [`zipf_pmf`]), so the usable support is one less.
+/// Roots in the pure-Zipf fixture. Every rank carries mass, so all of them are
+/// usable — until 2026-08-14 the top rank's probability was zero and the usable
+/// support was one less.
 ///
 /// Small on purpose: [`irm_reuse_distance_cdf`] is exponential in the support, and
-/// twelve usable roots give twelve CDF points every one of which is an exact
-/// bucket bound, so the comparison carries no bucketing error at all.
+/// thirteen roots give thirteen CDF points every one of which is an exact bucket
+/// bound, so the comparison carries no bucketing error at all.
 const ZIPF_ROOTS: u64 = 13;
 /// The Zipf exponent under test.
 const ZIPF_S: f64 = 0.9;
@@ -296,7 +286,8 @@ fn the_realised_root_popularity_matches_the_analytic_pmf() {
         let got = *got as f64 / total as f64;
         // Absolute tolerance: the sampling error on a 400k-draw multinomial is
         // under 0.001 at every rank, so 0.005 is loose by a wide margin while
-        // still catching the ~20% error a discrete-Zipf pmf would show at rank 1.
+        // still catching the ~20% error the old continuous approximation showed at
+        // rank 1 — which is how the two laws are told apart here.
         assert!(
             (got - want).abs() < 0.005,
             "rank {} realised {got:.5} vs analytic {want:.5}",
@@ -323,8 +314,10 @@ fn the_reuse_distance_cdf_matches_the_analytic_zipf_distribution() {
     // generator's off-by-one path length.
     const TOLERANCE: f64 = 0.02;
 
-    // Only the ranks that carry mass take part: the top rank's is zero, and a
-    // zero-probability item is not one of the "others" any distance can count.
+    // Only the ranks that carry mass take part, since a zero-probability item is not
+    // one of the "others" any distance can count. Under the discrete pmf that is all
+    // of them; the filter is kept because it is the correct precondition of
+    // [`irm_reuse_distance_cdf`], not because any rank is expected to fail it.
     let pmf: Vec<f64> = zipf_pmf(ZIPF_S, ZIPF_ROOTS)
         .into_iter()
         .filter(|p| *p > 0.0)

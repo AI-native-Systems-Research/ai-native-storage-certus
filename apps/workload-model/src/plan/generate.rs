@@ -845,12 +845,28 @@ run:
     }
 
     #[test]
-    fn the_shared_prefix_is_exactly_shared_depth_blocks_long() {
+    fn the_shared_prefix_is_at_most_shared_depth_and_only_a_branch_point_shortens_it() {
         // The other half of FR-014a's arithmetic, and the defect the length check
         // above cannot see: a trunk one level too deep would still give every path
-        // the right total. Two sessions on the same root must agree on exactly
-        // `shared_depth` leading keys and disagree from there on.
-        let ev = drain(&mut Generator::new(&doc("requests: 400")).unwrap());
+        // the right total.
+        //
+        // This asserted `common == shared_depth` for *every* pair on a root until
+        // 2026-08-14, and it passed only because `branching` was inert. `child_count`
+        // at a fitted fanout is 1 or 2, and the superseded `dist::zipf` returned
+        // child 0 with probability 1 at two children, so every session on a root
+        // walked one identical chain and no `branching` value could widen it. With a
+        // real discrete Zipf the trunk branches where the profile says it does, which
+        // is the whole point of the parameter — so the honest properties are:
+        //
+        // * the realised common prefix is **at most** `shared_depth` (FR-012a: the
+        //   drawn value bounds the realised one), and at least the root;
+        // * it is **exactly** `shared_depth` unless the pair passed a node with more
+        //   than one child, and that node is nameable.
+        //
+        // The second clause is what keeps this from being a vacuous inequality: a
+        // prefix may only be cut short by a genuine branch point.
+        let mut g = Generator::new(&doc("requests: 400")).unwrap();
+        let ev = drain(&mut g);
         let shared = 6usize;
         let mut paths: std::collections::BTreeMap<u32, Vec<CacheKey>> =
             std::collections::BTreeMap::new();
@@ -868,6 +884,7 @@ run:
             }
         }
         let mut compared = 0;
+        let mut diverged_early = 0;
         for group in by_root.values() {
             for pair in group.windows(2) {
                 let common = pair[0]
@@ -875,14 +892,35 @@ run:
                     .zip(pair[1].iter())
                     .take_while(|(a, b)| a == b)
                     .count();
-                assert_eq!(
-                    common, shared,
-                    "two sessions on one root shared {common} blocks, not {shared}"
+                assert!(
+                    (1..=shared).contains(&common),
+                    "two sessions on one root shared {common} blocks, outside 1..={shared}"
                 );
+                if common < shared {
+                    diverged_early += 1;
+                    // The last key they agreed on must be a real branch point;
+                    // `common` is a length, so it is also the depth of the step that
+                    // parted them.
+                    let last_agreed = pair[0][common - 1];
+                    let n = g.corpus.child_count(last_agreed, common as u32);
+                    assert!(
+                        n > 1,
+                        "the pair parted at depth {common} under a node with {n} child(ren): \
+                         a shared prefix may only be cut short by a branch point"
+                    );
+                }
                 compared += 1;
             }
         }
         assert!(compared > 5, "only {compared} pairs compared");
+        // Both regimes must actually occur in the fixture, or the assertions above
+        // are each half-untested. At `branching: 1.02` about 2% of trunk nodes have
+        // two children, so a minority of pairs part early and most do not.
+        assert!(
+            diverged_early > 0 && diverged_early < compared,
+            "{diverged_early} of {compared} pairs parted early: the fixture must exercise \
+             both the full-prefix and the branch-point case"
+        );
     }
 
     #[test]

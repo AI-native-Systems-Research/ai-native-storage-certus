@@ -1977,6 +1977,23 @@ report segments statistics into before/after windows around the event.
   measured ratio collapses toward **1 regardless of the true value**. The fit report MUST state
   the realised occupancy at which each width ratio was measured so a value near 1 is not mistaken
   for a genuinely linear trunk.
+- **FR-055d**: The `zipf` shape MUST be the **discrete** pmf `p_k = k^-s / H_n(s)` over ranks
+  `1..=n`, so that **every rank in the support has positive probability at every support size and
+  every exponent**. This is a requirement about the trunk, not about a distribution's tidiness.
+  `roots.popularity` and `branch_skew` are both Zipf-over-rank, a fitted `branching` fanout sits near
+  1.0 so a trunk node has one or two children, and a 2-way split is the commonest branch point
+  measured in real traces (~65% of descents in `qwen_code`, ~67% in the `tau2` traces). A sampler that
+  puts probability 1 on rank 1 at `n = 2` therefore makes every session on a root walk one identical
+  chain: `branching` becomes inert, the realised trunk width is 1 per root however wide the profile
+  says, and the model generates more sharing than the trace it was fitted to.
+  A continuous approximation to the discrete CDF does exactly that. Inverting `H(x)` and flooring
+  gives rank `k` the density's mass on `[k, k+1)`, which puts **zero** mass on rank `n` at every
+  support size and collapses to `p_1 = h(2)/h(2) = 1` at `n = 2` for every `s > 0` — measured
+  2026-08-14, `branch_skew` 0.5, 0.9 and 1.5 produced byte-identical streams and a width of 3 against
+  384 at `branch_skew: 0`. So the requirement is on the realised **histogram**: a test that asserts
+  only that a drawn child index is in range cannot see this, and one that did is why it survived.
+  A support too large to tabulate exactly MAY fall back to the continuous form, since a support of
+  that size cannot arise from `roots.count` or a child count.
 - **FR-056**: `fit` MUST validate the fitted model by comparing four statistics between the
   real trace and synthetic output: reuse-distance CDF (primary), prefix-sharing depth
   histogram, request-length distribution, and unique-keys-over-time curve.

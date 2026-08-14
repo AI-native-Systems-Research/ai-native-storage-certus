@@ -464,4 +464,48 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn pick_child_realises_a_skewed_but_non_degenerate_histogram() {
+        // `pick_child_stays_in_range` above asserts only the *range*, which is how a
+        // law that returned child 0 on **every** 2-way split survived unnoticed until
+        // 2026-08-14: `branch_skew` 0.5, 0.9 and 1.5 all produced byte-identical
+        // streams, and a 2-way split is the commonest branch point in real traces
+        // (~65% of descents). A range assertion cannot see that; a histogram can.
+        let c = corpus(Branching::Uniform(1.25));
+        let mut st = Stream::new(11, 11);
+        const DRAWS: u64 = 20_000;
+
+        // Discrete Zipf at s = 0.9 over two children: p_1 = 1/(1 + 2^-0.9) = 0.6511.
+        let mut hist = [0u64; 2];
+        for _ in 0..DRAWS {
+            hist[c.pick_child(&mut st, 2) as usize] += 1;
+        }
+        let p0 = hist[0] as f64 / DRAWS as f64;
+        assert!(
+            (p0 - 0.6511).abs() < 0.02,
+            "a 2-way split at branch_skew 0.9 must take child 0 about 65% of the time, \
+             not 100% and not 50%; got {p0:.4}"
+        );
+
+        // And every child must be reachable. The superseded continuous inverse gave
+        // the top *rank* probability exactly zero, so the last child was unreachable
+        // at every support size, not just at two.
+        for n in 2..12u32 {
+            let mut seen = vec![false; n as usize];
+            for _ in 0..DRAWS {
+                seen[c.pick_child(&mut st, n) as usize] = true;
+            }
+            let missing: Vec<usize> = seen
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| !**s)
+                .map(|(i, _)| i)
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "every one of {n} children must be reachable; never picked {missing:?}"
+            );
+        }
+    }
 }

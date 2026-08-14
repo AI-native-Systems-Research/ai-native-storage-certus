@@ -110,7 +110,7 @@ Every distribution-valued field takes the same tagged union. A bare scalar is su
 | `lognormal` | `median`, `sigma` | the default shape for sizes, lengths, and think times |
 | `exponential` | `mean` | |
 | `geometric` | `mean` | discrete; the default for turn counts |
-| `zipf` | `s`, `n` | `s` is the exponent; `n` the support size |
+| `zipf` | `s`, `n` | `s` is the exponent; `n` the support size. The **discrete** pmf `p_k = k^-s / H_n(s)`, so every rank in `1..=n` has positive probability |
 | `pareto` | `scale`, `alpha` | |
 | `empirical` | `points: [[value, cum_prob], ...]` | what `fit` emits when no parametric shape fits well; linearly interpolated |
 
@@ -202,6 +202,13 @@ corpus:
     # into tool variants is often far more skewed than a fanout into user content.
     # A segment may likewise override `churn.half_life` as `churn_half_life:`, which is
     # how you say "prompts are stable for weeks, retrieved documents turn over daily".
+    #
+    # NOTE the interaction with `branching` (FR-055d): a fitted fanout sits near 1.0, so
+    # a trunk node has one or two children, and a 2-way split is the commonest branch
+    # point in real traces. Any skew must therefore leave BOTH children reachable —
+    # until 2026-08-14 the sampler put probability 1 on the first at two children, which
+    # made every non-zero `branch_skew` collapse the trunk to one path per root and made
+    # `branching` inert in every document that did not say `branch_skew: 0`.
     branch_skew: 0.9
 ```
 
