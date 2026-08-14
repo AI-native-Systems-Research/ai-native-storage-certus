@@ -1977,7 +1977,7 @@ report segments statistics into before/after windows around the event.
   measured ratio collapses toward **1 regardless of the true value**. The fit report MUST state
   the realised occupancy at which each width ratio was measured so a value near 1 is not mistaken
   for a genuinely linear trunk.
-- **FR-055d**: The `zipf` shape MUST be the **discrete** pmf `p_k = k^-s / H_n(s)` over ranks
+- **FR-055g**: The `zipf` shape MUST be the **discrete** pmf `p_k = k^-s / H_n(s)` over ranks
   `1..=n`, so that **every rank in the support has positive probability at every support size and
   every exponent**. This is a requirement about the trunk, not about a distribution's tidiness.
   `roots.popularity` and `branch_skew` are both Zipf-over-rank, a fitted `branching` fanout sits near

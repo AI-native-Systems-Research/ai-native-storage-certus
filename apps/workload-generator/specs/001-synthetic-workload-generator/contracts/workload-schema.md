@@ -203,7 +203,7 @@ corpus:
     # A segment may likewise override `churn.half_life` as `churn_half_life:`, which is
     # how you say "prompts are stable for weeks, retrieved documents turn over daily".
     #
-    # NOTE the interaction with `branching` (FR-055d): a fitted fanout sits near 1.0, so
+    # NOTE the interaction with `branching` (FR-055g): a fitted fanout sits near 1.0, so
     # a trunk node has one or two children, and a 2-way split is the commonest branch
     # point in real traces. Any skew must therefore leave BOTH children reachable —
     # until 2026-08-14 the sampler put probability 1 on the first at two children, which
