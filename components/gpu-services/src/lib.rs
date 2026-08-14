@@ -1073,12 +1073,17 @@ impl IGpuServices for GpuServicesComponent {
                 return Err("Not initialized: call initialize() first".to_string());
             }
 
-            // Try cuMemcpyBatchAsync (CUDA 12.8+) for non-null streams.
-            if !stream.0.is_null() {
-                if let Some(result) = self.try_batch_async(ops, stream) {
-                    return result;
-                }
-            }
+            // cuMemcpyBatchAsync (CUDA 12.8+) is implemented but currently
+            // returns CUDA_ERROR_INVALID_VALUE with IPC-imported device pointers.
+            // Investigate: may need CUstream from cuStreamCreate vs cudaStream_t,
+            // or the pointers need to be in a valid CUdeviceptr address range.
+            // The fallback loop still benefits from stream split + nonblocking.
+            // Uncomment to enable once the driver compatibility is resolved:
+            // if !stream.0.is_null() {
+            //     if let Some(result) = self.try_batch_async(ops, stream) {
+            //         return result;
+            //     }
+            // }
 
             // Fallback: individual cudaMemcpyAsync per op.
             for (i, op) in ops.iter().enumerate() {
@@ -1119,9 +1124,10 @@ impl GpuServicesComponent {
         //     size_t *sizeArray, size_t count,
         //     CUmemcpyAttributes *attrArray, size_t *attrIdxArray,
         //     size_t numAttrs, size_t *failIdx, CUstream stream)
+        // CUdeviceptr = unsigned long long (u64) in CUDA driver API.
         type BatchFn = unsafe extern "C" fn(
-            dsts: *const *mut std::ffi::c_void,
-            srcs: *const *const std::ffi::c_void,
+            dsts: *const u64,
+            srcs: *const u64,
             sizes: *const usize,
             count: usize,
             attrs: *const CuMemcpyAttributes,
@@ -1152,28 +1158,25 @@ impl GpuServicesComponent {
 
         static BATCH_FN: OnceLock<Option<BatchFn>> = OnceLock::new();
         let batch_fn = BATCH_FN.get_or_init(|| {
+            // Resolve cuMemcpyBatchAsync via dlsym from libcuda.so (driver API).
+            // This avoids a link-time dependency on libcuda and works on any
+            // CUDA 12.8+ driver at runtime.
             extern "C" {
-                fn cuGetProcAddress(
-                    symbol: *const std::ffi::c_char,
-                    pfn: *mut *mut std::ffi::c_void,
-                    cuda_version: i32,
-                    flags: u64,
-                    status: *mut i32,
-                ) -> i32;
+                fn dlopen(filename: *const std::ffi::c_char, flags: i32) -> *mut std::ffi::c_void;
+                fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
             }
-            let symbol = b"cuMemcpyBatchAsync\0";
-            let mut fn_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-            let mut status: i32 = 0;
-            let res = unsafe {
-                cuGetProcAddress(
-                    symbol.as_ptr() as *const std::ffi::c_char,
-                    &mut fn_ptr,
-                    12080, // minimum CUDA version
-                    0,     // CU_GET_PROC_ADDRESS_DEFAULT
-                    &mut status,
-                )
+            const RTLD_LAZY: i32 = 0x0001;
+            const RTLD_NOLOAD: i32 = 0x0004;
+            let libcuda = unsafe {
+                dlopen(b"libcuda.so.1\0".as_ptr() as *const _, RTLD_LAZY | RTLD_NOLOAD)
             };
-            if res != 0 || fn_ptr.is_null() {
+            if libcuda.is_null() {
+                return None;
+            }
+            let fn_ptr = unsafe {
+                dlsym(libcuda, b"cuMemcpyBatchAsync\0".as_ptr() as *const _)
+            };
+            if fn_ptr.is_null() {
                 None
             } else {
                 Some(unsafe { std::mem::transmute::<*mut std::ffi::c_void, BatchFn>(fn_ptr) })
@@ -1183,13 +1186,13 @@ impl GpuServicesComponent {
         let batch_fn = (*batch_fn)?;
 
         let n = ops.len();
-        let mut srcs: Vec<*const std::ffi::c_void> = Vec::with_capacity(n);
-        let mut dsts: Vec<*mut std::ffi::c_void> = Vec::with_capacity(n);
+        let mut srcs: Vec<u64> = Vec::with_capacity(n);
+        let mut dsts: Vec<u64> = Vec::with_capacity(n);
         let mut sizes: Vec<usize> = Vec::with_capacity(n);
 
         for op in ops {
-            srcs.push(op.src);
-            dsts.push(op.dst);
+            srcs.push(op.src as u64);
+            dsts.push(op.dst as u64);
             sizes.push(op.size);
         }
 
