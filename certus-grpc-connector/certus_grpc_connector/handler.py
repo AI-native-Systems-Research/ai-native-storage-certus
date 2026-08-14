@@ -14,15 +14,18 @@ implementing BOTH worker interfaces the plugin API has had:
   direction is in the method name, so there is no medium-pair routing and
   ``TransferResult`` no longer carries a ``transfer_type``).
 
-Both interfaces share one background thread pool, one pending-job deque, and the
-same store/load RPC bodies. The base class is resolved lazily via
-``compat.worker_base_class()`` (a factory builds the subclass on first use) so the
-base that is absent on the other era is never imported.
+Both interfaces share one background thread pool and the same store/load RPC
+bodies. Stores and loads maintain separate pending-job deques so a slow store
+cannot block reporting of completed loads (head-of-line avoidance). The base
+class is resolved lazily via ``compat.worker_base_class()`` (a factory builds
+the subclass on first use) so the base that is absent on the other era is never
+imported.
 
 Each submit enqueues one gRPC call onto the pool and returns immediately;
-``get_finished`` reaps completed futures in FIFO order. Per block we build a proto
-``IpcHandle`` sharing the KV-cache allocation's IPC handle with ``offset`` set to
-the block's byte offset, so the server DMAs at ``open(handle) + offset``.
+``get_finished`` reaps completed futures from both deques independently in
+per-direction FIFO order. Per block we build a proto ``IpcHandle`` sharing the
+KV-cache allocation's IPC handle with ``offset`` set to the block's byte
+offset, so the server DMAs at ``open(handle) + offset``.
 """
 
 from __future__ import annotations
@@ -85,8 +88,6 @@ class _PendingJob:
     future: Future
     start_time: float
     num_blocks: int
-    # Direction of this job; carried per-job because one deque now holds both
-    # store and load jobs (≤0.24 used two separate handler instances).
     transfer_type: tuple[str, str]
 
 
@@ -137,7 +138,8 @@ def _build_worker_class():
             self._kv_regions = kv_regions
             self._block_size_bytes = int(block_size_bytes)
             self._executor = executor
-            self._pending: deque[_PendingJob] = deque()
+            self._pending_stores: deque[_PendingJob] = deque()
+            self._pending_loads: deque[_PendingJob] = deque()
 
         # ── shared async plumbing ──
 
@@ -148,9 +150,10 @@ def _build_worker_class():
             keys: list[int],
             fn,
             transfer_type: tuple[str, str],
+            pending: deque[_PendingJob],
         ) -> bool:
             future = self._executor.submit(fn, gpu_block_ids, keys)
-            self._pending.append(
+            pending.append(
                 _PendingJob(
                     job_id=job_id,
                     future=future,
@@ -161,13 +164,11 @@ def _build_worker_class():
             )
             return True
 
-        def get_finished(self) -> "list":
+        @staticmethod
+        def _reap(pending: deque[_PendingJob], now: float, block_size: int) -> "list":
             results = []
-            now = time.monotonic()
-            # Reap completed jobs in submission order (FIFO), stopping at the
-            # first still-running job so ordering guarantees are preserved.
-            while self._pending and self._pending[0].future.done():
-                job = self._pending.popleft()
+            while pending and pending[0].future.done():
+                job = pending.popleft()
                 try:
                     success = bool(job.future.result())
                 except Exception as e:  # noqa: BLE001 - report as a failed transfer
@@ -180,15 +181,24 @@ def _build_worker_class():
                     make_transfer_result(
                         job_id=job.job_id,
                         success=success,
-                        transfer_size=job.num_blocks * self._block_size_bytes,
+                        transfer_size=job.num_blocks * block_size,
                         transfer_time=now - job.start_time,
                         transfer_type=job.transfer_type,
                     )
                 )
             return results
 
+        def get_finished(self) -> "list":
+            now = time.monotonic()
+            stores = self._reap(self._pending_stores, now, self._block_size_bytes)
+            loads = self._reap(self._pending_loads, now, self._block_size_bytes)
+            return stores + loads
+
         def wait(self, job_ids: set) -> None:
-            for job in list(self._pending):
+            for job in list(self._pending_stores):
+                if job.job_id in job_ids:
+                    job.future.result()
+            for job in list(self._pending_loads):
                 if job.job_id in job_ids:
                     job.future.result()
 
@@ -201,14 +211,16 @@ def _build_worker_class():
             """Async GPU -> Certus (0.26). src=GPU spec, dst=Certus spec."""
             block_ids = gpu_block_ids(src_spec)
             return self._submit(
-                job_id, block_ids, dst_spec.keys, self._do_store, _STORE_TYPE
+                job_id, block_ids, dst_spec.keys, self._do_store, _STORE_TYPE,
+                self._pending_stores,
             )
 
         def submit_load(self, job_id: int, src_spec, dst_spec) -> bool:
             """Async Certus -> GPU (0.26). src=Certus spec, dst=GPU spec."""
             block_ids = gpu_block_ids(dst_spec)
             return self._submit(
-                job_id, block_ids, src_spec.keys, self._do_load, _LOAD_TYPE
+                job_id, block_ids, src_spec.keys, self._do_load, _LOAD_TYPE,
+                self._pending_loads,
             )
 
         # ── ≤0.24 medium-pair interface ──
