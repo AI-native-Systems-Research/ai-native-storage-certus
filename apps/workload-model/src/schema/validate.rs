@@ -14,6 +14,7 @@
 
 use super::{ArrivalModel, Branching, Document, Growth, Placement};
 use crate::corpus::{occupancy, Corpus, TARGET_OCCUPANCY};
+use crate::dist::Shape;
 use crate::session::{check_warmup, Population};
 use crate::units::{parse_duration_ns, parse_rate_per_s};
 
@@ -187,12 +188,125 @@ pub fn validate(d: &Document) -> Report {
         );
     }
 
+    // Rule 9's second half: an `empirical` distribution must be a usable CDF. Documented
+    // for `shared_depth` — "points not in ascending value order or with a final cumulative
+    // probability != 1.0" — and implemented nowhere until 2026-08-14; a grep for
+    // `Empirical` in this file found nothing, and `dist.rs` does no deserialize-time
+    // checking either, so no code path had ever looked at a point value.
+    //
+    // Values must be NON-DECREASING rather than strictly ascending, because the step
+    // encoding `fit` emits repeats each value deliberately: `(v, c_before), (v, c_after)`
+    // is how a discrete distribution is expressed through an interpolating reader. A check
+    // demanding strict ascent would reject every fitted document.
+    for (label, dist) in [
+        ("corpus.trees.shared_depth", &d.corpus.trees.shared_depth),
+        (
+            "corpus.trees.roots.popularity",
+            &d.corpus.trees.roots.popularity,
+        ),
+    ] {
+        if let Shape::Empirical { points } = dist.shape() {
+            if points.is_empty() {
+                r.reject(
+                    "9",
+                    format!("{label} is an empirical distribution with no points"),
+                );
+                continue;
+            }
+            let mut prev = (f64::MIN, f64::MIN);
+            for (v, c) in &points {
+                if *v < prev.0 {
+                    r.reject(
+                        "9",
+                        format!(
+                            "{label}'s empirical points must be in non-decreasing value order; \
+                             {v} follows {}",
+                            prev.0
+                        ),
+                    );
+                    break;
+                }
+                if *c < prev.1 {
+                    r.reject(
+                        "9",
+                        format!(
+                            "{label}'s cumulative probability must not decrease; {c} follows {}",
+                            prev.1
+                        ),
+                    );
+                    break;
+                }
+                prev = (*v, *c);
+            }
+            if (prev.1 - 1.0).abs() > 1e-6 {
+                r.reject(
+                    "9",
+                    format!(
+                        "{label}'s final cumulative probability is {}, not 1.0: the mass above it \
+                         is unreachable and every draw in that range silently returns the top \
+                         point instead",
+                        prev.1
+                    ),
+                );
+            }
+        }
+    }
+
     // Rule 8: roots and branching domains.
     if d.corpus.trees.roots.count < 1 {
         r.reject("8", "roots.count must be at least 1");
     }
     if d.corpus.trees.branch_skew < 0.0 {
         r.reject("8", "branch_skew must be >= 0");
+    }
+    // `roots.popularity`'s support IS `roots.count`, which the contract states twice and
+    // nothing checked. Both halves went wrong at once in a fitted document, silently:
+    //
+    // * an `n` written for a Zipf was accepted and then overwritten by the generator, so
+    //   the author's value had no effect and no error;
+    // * an `empirical` support narrower than `roots.count` left every rank above it
+    //   unreachable — 450 of 603 roots on one real trace — and because
+    //   `sample_u64_clamped` only counts draws pulled *into* range, unused headroom
+    //   above the support records **zero** clamps. The model had 5 populated roots and
+    //   said 603.
+    //
+    // So the check is on the support, and a document that cannot populate the root layer
+    // it declares is rejected rather than quietly generating a narrower one.
+    match d.corpus.trees.roots.popularity.shape() {
+        Shape::Zipf { n: Some(n), .. } => r.reject(
+            "8",
+            format!(
+                "roots.popularity states n = {n}, but the support of a root-popularity \
+                 distribution is `roots.count` ({}) and is not the author's to choose. Remove \
+                 `n`: the generator supplies it, and a value here would be silently overwritten",
+                d.corpus.trees.roots.count
+            ),
+        ),
+        Shape::Empirical { points } => {
+            let top = points.iter().map(|(v, _)| *v).fold(0.0f64, f64::max);
+            let bottom = points.iter().map(|(v, _)| *v).fold(f64::MAX, f64::min);
+            if (top - f64::from(d.corpus.trees.roots.count)).abs() > 0.5 {
+                r.reject(
+                    "8",
+                    format!(
+                        "roots.popularity's support reaches rank {top}, but roots.count is {}: \
+                         the ranks between are unreachable, so {} of the declared roots would \
+                         never be populated and the realised root layer would be narrower than \
+                         the document says — silently, since drawing inside a narrow support \
+                         records no clamp",
+                        d.corpus.trees.roots.count,
+                        (f64::from(d.corpus.trees.roots.count) - top).max(0.0)
+                    ),
+                );
+            }
+            if bottom < 1.0 {
+                r.reject(
+                    "8",
+                    format!("roots.popularity draws rank {bottom}; ranks are 1-based"),
+                );
+            }
+        }
+        _ => {}
     }
     match &d.corpus.trees.branching {
         Branching::Uniform(f) if *f < 1.0 => r.reject(
@@ -630,6 +744,98 @@ run:
     #[test]
     fn a_clean_document_passes() {
         assert!(!validate(&doc("")).is_rejected());
+    }
+
+    #[test]
+    fn a_popularity_support_narrower_than_roots_count_is_rejected() {
+        // The defect this rule exists for, in the exact shape a fit emitted for months:
+        // roots.count 603 with an empirical support reaching rank 153, which left 450
+        // roots unreachable and recorded ZERO clamps, because `sample_u64_clamped` only
+        // counts draws pulled *into* range. The realised root layer was 5.
+        let mut d = doc("");
+        d.corpus.trees.roots.count = 603;
+        d.corpus.trees.roots.popularity = crate::dist::Dist::Shaped(Shape::Empirical {
+            points: vec![(1.0, 0.0), (1.0, 0.61), (153.0, 0.61), (153.0, 1.0)],
+        });
+        let r = validate(&d);
+        let msg: String = r
+            .rejections()
+            .filter(|f| f.rule == "8")
+            .map(|f| f.message.clone())
+            .collect();
+        assert!(msg.contains("support reaches rank 153"), "{msg}");
+        assert!(msg.contains("roots.count is 603"), "{msg}");
+        assert!(msg.contains("records no clamp"), "{msg}");
+
+        // And the same document with a support spanning the count is accepted, so this
+        // is a check on the support rather than on empirical popularity as such.
+        d.corpus.trees.roots.popularity = crate::dist::Dist::Shaped(Shape::Empirical {
+            points: vec![(1.0, 0.0), (1.0, 0.61), (603.0, 0.61), (603.0, 1.0)],
+        });
+        assert!(
+            !validate(&d).rejections().any(|f| f.rule == "8"),
+            "a support spanning roots.count must pass"
+        );
+    }
+
+    #[test]
+    fn an_empirical_cdf_that_does_not_reach_one_is_rejected() {
+        // Rule 9, documented since the first draft and unimplemented until 2026-08-14.
+        // A CDF stopping at 0.8 makes every draw above it return the top point, so a
+        // fifth of the mass silently collapses onto one value.
+        let mut d = doc("");
+        d.corpus.trees.shared_depth = crate::dist::Dist::Shaped(Shape::Empirical {
+            points: vec![(1.0, 0.0), (1.0, 0.4), (9.0, 0.4), (9.0, 0.8)],
+        });
+        let msg: String = validate(&d)
+            .rejections()
+            .filter(|f| f.rule == "9")
+            .map(|f| f.message.clone())
+            .collect();
+        assert!(msg.contains("final cumulative probability is 0.8"), "{msg}");
+
+        // Descending values are rejected too, and the STEP encoding `fit` emits — which
+        // repeats each value on purpose — must not be: that is the whole reason the check
+        // is non-decreasing rather than strictly ascending.
+        let mut back = doc("");
+        back.corpus.trees.shared_depth = crate::dist::Dist::Shaped(Shape::Empirical {
+            points: vec![(9.0, 0.0), (9.0, 0.5), (1.0, 0.5), (1.0, 1.0)],
+        });
+        assert!(validate(&back).rejections().any(|f| f.rule == "9"));
+        let mut steps = doc("");
+        steps.corpus.trees.shared_depth = crate::dist::Dist::Shaped(Shape::Empirical {
+            points: vec![(1.0, 0.0), (1.0, 0.4), (9.0, 0.4), (9.0, 1.0)],
+        });
+        assert!(
+            !validate(&steps).rejections().any(|f| f.rule == "9"),
+            "the step encoding repeats each value and must pass"
+        );
+    }
+
+    #[test]
+    fn an_n_supplied_to_roots_popularity_is_rejected() {
+        // Documented in the contract — "supplying `n` here is a schema error", because
+        // the support is `roots.count` — and unimplemented until 2026-08-14. Measured
+        // before the fix: a document with `n: 10` produced zero rejections and the
+        // generator silently overwrote it, realising 602 roots.
+        let d = doc("");
+        let mut d = d;
+        d.corpus.trees.roots.popularity = crate::dist::Dist::Shaped(Shape::Zipf {
+            s: 0.9,
+            n: Some(10),
+        });
+        let r = validate(&d);
+        let msg: String = r
+            .rejections()
+            .filter(|f| f.rule == "8")
+            .map(|f| f.message.clone())
+            .collect();
+        assert!(msg.contains("not the author's to choose"), "{msg}");
+        // A Zipf without `n` is the normal case and must still pass.
+        let mut ok = doc("");
+        ok.corpus.trees.roots.popularity =
+            crate::dist::Dist::Shaped(Shape::Zipf { s: 0.9, n: None });
+        assert!(!validate(&ok).rejections().any(|f| f.rule == "8"));
     }
 
     #[test]

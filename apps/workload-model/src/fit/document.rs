@@ -33,8 +33,19 @@ use crate::stats::FastMap;
 use super::branching::FittedBranching;
 use super::sessions::FittedSessions;
 
-/// Percentile points a fitted `roots.popularity` is emitted at.
-const RANK_POINTS: [f64; 8] = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.99, 1.00];
+/// Ranks a fitted `roots.popularity` is emitted at before ranks are grouped.
+///
+/// One step per rank up to this many, so **every** rank in the support is reachable.
+/// It replaced eight percentile points (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.99, 1.00)
+/// on 2026-08-14, which was a readability budget standing in for an accuracy one and cost
+/// far more than readability: a step CDF's steps have zero width, so `dist::empirical`
+/// could only ever return one of the point *values themselves*. For a real trace's
+/// histogram those were ranks {1, 6, 38, 132, 153} — a fitted model with **five**
+/// populated roots however many `roots.count` claimed. Measured with the real generator
+/// over 1.2M sessions.
+///
+/// The corpus's largest shared-root count is 249, so grouping never engages on it.
+const RANK_MAX_STEPS: usize = 4096;
 
 /// Sessions per root, which is what `roots.popularity` is a distribution over.
 ///
@@ -63,7 +74,7 @@ impl RootPopularity {
         self.root_of_session.entry(session).or_insert(root);
     }
 
-    /// Distinct roots observed.
+    /// Distinct roots observed, shared or not.
     pub fn roots(&self) -> u64 {
         self.root_of_session
             .values()
@@ -71,8 +82,8 @@ impl RootPopularity {
             .len() as u64
     }
 
-    /// The fitted distribution over rank, or `None` with nothing to fit.
-    pub fn finish(&self) -> Option<Dist> {
+    /// The fitted root layer, or `None` with nothing to fit.
+    pub fn finish(&self) -> Option<FittedRoots> {
         let mut per_root: FastMap<CacheKey, u64> = FastMap::default();
         for root in self.root_of_session.values() {
             *per_root.entry(*root).or_insert(0) += 1;
@@ -80,29 +91,49 @@ impl RootPopularity {
         if per_root.is_empty() {
             return None;
         }
+        let observed = per_root.len() as u32;
         let mut counts: Vec<u64> = per_root.into_values().collect();
         // Descending, so rank 1 is the most popular root — the order the schema's
         // Zipf-over-rank parameter assumes.
         counts.sort_unstable_by(|a, b| b.cmp(a));
+
+        // **Shared roots only**, decided 2026-08-14. `roots.count` is the shared width at
+        // depth 0 — keys two or more sessions reached — so the popularity distribution
+        // over it must be measured on the same population, or the two disagree and the
+        // support cannot span the count. Measured on `qwen_code`, they disagreed three
+        // ways at once before this: `roots.count` 603 (a *folded* boundary depth), the
+        // popularity support 153 (all first-request roots, singletons included), and the
+        // realised root layer 5 (the step-encoding cap above).
+        //
+        // A session on a singleton root shares no prefix with anything, which is a case
+        // the model already cannot express — `shared_depth`'s support starts at 1 — so it
+        // is counted and reported rather than silently folded into the shared population.
+        let singleton_sessions: u64 = counts.iter().filter(|c| **c < 2).sum();
+        counts.retain(|c| *c >= 2);
+        if counts.is_empty() {
+            return None;
+        }
+        let count = counts.len() as u32;
         let total: u64 = counts.iter().sum();
 
+        // One step per rank, so every rank in the support is reachable. Grouped only
+        // above `RANK_MAX_STEPS`, where the alternative is a document listing a step per
+        // root for a corpus with thousands of them; the corpus's largest is 249.
+        let group = counts.len().div_ceil(RANK_MAX_STEPS);
         let mut steps: Vec<(f64, f64)> = Vec::new();
         let mut acc = 0u64;
-        let mut next = 0usize;
         for (i, c) in counts.iter().enumerate() {
             acc += c;
-            let cumulative = acc as f64 / total as f64;
-            let mut wanted = false;
-            while next < RANK_POINTS.len() && cumulative >= RANK_POINTS[next] {
-                next += 1;
-                wanted = true;
-            }
-            if wanted {
+            if (i + 1) % group == 0 || i + 1 == counts.len() {
                 // Rank is 1-based, matching `sample_u64_clamped(st, 1, roots)`.
-                steps.push(((i + 1) as f64, cumulative));
+                steps.push(((i + 1) as f64, acc as f64 / total as f64));
             }
         }
         if let Some(last) = steps.last_mut() {
+            // The support must reach `roots.count` exactly, which schema rule 8 checks:
+            // a distribution stopping short leaves the roots above it unreachable, and
+            // the generator records no clamp for headroom it never uses.
+            last.0 = f64::from(count);
             last.1 = 1.0;
         }
         // Step points, for the same reason `fit::sessions` uses them: rank is
@@ -117,8 +148,33 @@ impl RootPopularity {
             points.push((v, c));
             prev = c;
         }
-        Some(Dist::Shaped(Shape::Empirical { points }))
+        Some(FittedRoots {
+            popularity: Dist::Shaped(Shape::Empirical { points }),
+            count,
+            observed,
+            sessions: self.root_of_session.len() as u64,
+            singleton_sessions,
+        })
     }
+}
+
+/// The fitted root layer: a rank distribution and the population it is over.
+///
+/// The two travel together because they were measured apart and disagreed — see
+/// [`RootPopularity::finish`]. `count` is both `roots.count` and the support of
+/// `popularity`, by construction rather than by coincidence.
+#[derive(Debug, Clone)]
+pub struct FittedRoots {
+    /// Distribution over root rank, with support `1..=count`.
+    pub popularity: Dist,
+    /// Shared roots: those two or more sessions bound to. `roots.count`.
+    pub count: u32,
+    /// Distinct first-request roots observed, singletons included.
+    pub observed: u32,
+    /// Sessions that bound to any root at all.
+    pub sessions: u64,
+    /// Sessions whose root no other session bound to.
+    pub singleton_sessions: u64,
 }
 
 /// What the caller must supply because no trace carries it.
@@ -220,13 +276,48 @@ pub fn assemble(
         .shared_depth
         .clone()
         .ok_or(FitError::Unmeasured("shared_depth"))?;
-    let popularity = roots
+    let fitted_roots = roots
         .finish()
         .ok_or(FitError::Unmeasured("roots.popularity"))?;
 
     let mut unset = Vec::new();
     let mut caveats = branching.caveats();
     caveats.extend(sessions.caveats());
+
+    // Sessions on a root nobody else used. They are excluded from `roots.popularity`
+    // because `roots.count` is the *shared* root layer, and the model has no way to say
+    // "this session shares nothing" — the same restriction `shared_depth`'s support
+    // already imposes. Reported rather than folded in silently.
+    if fitted_roots.singleton_sessions > 0 {
+        caveats.push(format!(
+            "MODEL LIMITATION (FR-054a): {} of {} sessions bound to a root no other session \
+             used, and `roots.count` is the SHARED root layer ({} of {} distinct first-request \
+             roots), so those sessions are not represented in `roots.popularity`. A generated \
+             model puts every session on a shared root, giving them sharing the trace gave them \
+             none of. A session alone on its root is ordinary workload — a one-off prompt — so \
+             the gap is in the model's root layer, not in the trace",
+            fitted_roots.singleton_sessions,
+            fitted_roots.sessions,
+            fitted_roots.count,
+            fitted_roots.observed
+        ));
+    }
+    // The shared root layer, measured a second way. The trunk report counts a depth-0 key
+    // as shared when two sessions reached it at *any* invocation; a session's root is its
+    // *first* request's. Real traces contain a few sessions whose invocations start at
+    // different roots, so the two can differ by a handful — reported, because a reader
+    // comparing `roots.count` against a width table needs to know which rule produced it.
+    if branching.roots != u64::from(fitted_roots.count) {
+        caveats.push(format!(
+            "`roots.count` is {} — shared roots by session binding — while the trunk width at \
+             depth 0 counts {} shared keys. The two rules differ: a session binds to its FIRST \
+             request's root (FR-019a) whereas the width counts a key shared if two sessions \
+             reached it at any invocation, and a few sessions in a real trace start at more than \
+             one root. `roots.count` follows the binding, because that is the population \
+             `roots.popularity` is a distribution over",
+            fitted_roots.count, branching.roots
+        ));
+    }
 
     // think_time: measured where timestamps allow, and a hard stop otherwise, since
     // the schema requires it and a guess would set the plan's whole time axis.
@@ -299,9 +390,17 @@ pub fn assemble(
         corpus: Corpus {
             block_bytes: supplied.block_bytes.clone(),
             trees: Trees {
+                // `roots.count` and `roots.popularity` come from the SAME accumulator,
+                // so the support spans the count by construction (schema rule 8 checks
+                // it). `branching.roots` — the shared width at depth 0 from the trunk
+                // report — is the same quantity measured a second way, and the two are
+                // compared in a caveat rather than silently preferred: the trunk counts a
+                // depth-0 key shared if two sessions reached it at *any* invocation,
+                // while a session's root is its *first* request's, and a handful of
+                // sessions in a real trace start at two different roots.
                 roots: Roots {
-                    count: branching.roots.max(1) as u32,
-                    popularity,
+                    count: fitted_roots.count.max(1),
+                    popularity: fitted_roots.popularity.clone(),
                 },
                 shared_depth,
                 branching: if branching.segments.is_empty() {
@@ -462,7 +561,20 @@ mod tests {
         let back = Document::from_yaml(&yaml).expect("a fitted document must parse");
         assert_eq!(back.version, 1);
         assert_eq!(back.requests, Some(80));
-        assert_eq!(back.corpus.trees.roots.count, 12);
+        // `roots.count` is the SHARED root layer from the popularity accumulator — four
+        // roots here — not the trunk report's depth-0 width (12 in `fitted_branching()`).
+        // It asserted 12 until 2026-08-14, when the two came from different measurements
+        // and could not be made to agree; taking both from one accumulator is what lets
+        // rule 8 check that the popularity's support spans the count.
+        assert_eq!(back.corpus.trees.roots.count, 4);
+        match back.corpus.trees.roots.popularity.shape() {
+            Shape::Empirical { points } => assert_eq!(
+                points.iter().map(|(v, _)| *v).fold(0.0f64, f64::max),
+                4.0,
+                "the emitted support must span the emitted count"
+            ),
+            other => panic!("expected an empirical popularity, got {other:?}"),
+        }
     }
 
     #[test]
@@ -557,9 +669,62 @@ mod tests {
         // assumes. With 60 of 100 sessions on one root, the median draw is rank 1.
         let r = roots_with(&[60, 20, 10, 10]);
         assert_eq!(r.roots(), 4);
-        let d = r.finish().expect("fitted");
-        assert_eq!(d.quantile(0.5), Some(1.0));
-        assert_eq!(d.quantile(1.0), Some(4.0));
+        let f = r.finish().expect("fitted");
+        assert_eq!(f.popularity.quantile(0.5), Some(1.0));
+        assert_eq!(f.popularity.quantile(1.0), Some(4.0));
+        assert_eq!(f.count, 4, "all four roots are shared");
+        assert_eq!(f.singleton_sessions, 0);
+    }
+
+    #[test]
+    fn every_rank_in_the_support_is_reachable_and_the_support_spans_roots_count() {
+        // The defect this shape replaced, and the reason rule 8 now checks the support.
+        // Eight percentile points with zero-width steps meant `dist::empirical` could
+        // only return one of the point *values*, so a 153-root histogram populated five
+        // roots. Asserted by drawing: every rank must actually come out.
+        let r = roots_with(&[40, 30, 20, 12, 9, 7, 6, 5, 4, 3, 2, 2]);
+        let f = r.finish().expect("fitted");
+        assert_eq!(f.count, 12);
+        // The last point must land exactly on roots.count, or rule 8 rejects the
+        // document the fit just produced.
+        match f.popularity.shape() {
+            Shape::Empirical { points } => {
+                let top = points.iter().map(|(v, _)| *v).fold(0.0f64, f64::max);
+                assert_eq!(top, 12.0, "the support must reach roots.count");
+            }
+            other => panic!("expected an empirical popularity, got {other:?}"),
+        }
+        let mut seen = [false; 12];
+        let mut st = crate::rng::Stream::new(5, 5);
+        for _ in 0..20_000 {
+            let rank =
+                f.popularity
+                    .sample_u64_clamped(&mut st, 1, 12, &crate::dist::Clamps::default());
+            seen[(rank - 1) as usize] = true;
+        }
+        let missing: Vec<usize> = seen
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !**s)
+            .map(|(i, _)| i + 1)
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "ranks {missing:?} are declared but unreachable"
+        );
+    }
+
+    #[test]
+    fn a_root_only_one_session_used_is_excluded_and_counted() {
+        // `roots.count` is the SHARED root layer, so a singleton root is not one of its
+        // ranks — and the sessions on it are reported, because the model will place them
+        // on a shared root and give them sharing the trace gave them none of.
+        let r = roots_with(&[50, 20, 1, 1, 1]);
+        let f = r.finish().expect("fitted");
+        assert_eq!(f.count, 2, "only two roots had two or more sessions");
+        assert_eq!(f.observed, 5, "five distinct roots were seen");
+        assert_eq!(f.singleton_sessions, 3);
+        assert_eq!(f.sessions, 73);
     }
 
     #[test]

@@ -2022,6 +2022,32 @@ report segments statistics into before/after windows around the event.
   measured ratio collapses toward **1 regardless of the true value**. The fit report MUST state
   the realised occupancy at which each width ratio was measured so a value near 1 is not mistaken
   for a genuinely linear trunk.
+- **FR-055i**: `roots.count` and `roots.popularity` MUST be measured over **one population** — the
+  **shared** root layer, keys two or more sessions bound to — and the popularity's support MUST span
+  `1..=roots.count`, which schema rule 8 MUST check.
+  The contract has always said the support *is* `roots.count`, and nothing checked it. Three numbers
+  disagreed at once in the document a fit emitted for `qwen_code`: `roots.count` **603** (the width at
+  a folded boundary depth), the popularity support **153** (all distinct first-request roots), and the
+  realised root layer **5**. All three failures were silent, and the third is the one that matters:
+  `plan::generate::with_support` rewrites the support only for `Shape::Zipf`, and
+  `sample_u64_clamped` counts only draws pulled *into* range, so unused headroom above an empirical
+  support records **zero** clamps. Measured with the real generator over 1.2M sessions per case.
+  A second, independent cap made it worse: the popularity was emitted at **eight percentile points**
+  as a *step* CDF, and a step has zero width, so `dist::empirical` could only ever return one of the
+  point values themselves — ranks {1, 6, 38, 132, 153}. So the emitted distribution MUST place a step
+  at **every** rank in the support up to a stated cap, and the report MUST say when ranks were grouped
+  beyond it. A readability budget standing in for an accuracy one is the same mistake FR-056a records
+  for `empirical` generally.
+  Sessions bound to a **singleton** root — one no other session used — are excluded from the shared
+  population and MUST be counted and reported: the model puts every session on a shared root, so those
+  sessions receive sharing the trace gave them none of. This is the root-layer form of the restriction
+  `shared_depth`'s support already imposes. Measured: 1 of 957 sessions on `tau2_airline`, 44 of 26 406
+  on `qwen_code`.
+  The trunk's shared width at depth 0 is the **same quantity measured a second way** — a key counts as
+  shared there if two sessions reached it at *any* invocation, while a session's root is its *first*
+  request's (FR-019a) — and where the two differ the fit MUST report both rather than silently prefer
+  one. Measured: 110 against 109 on `qwen_code`, the difference being sessions whose invocations start
+  at more than one root.
 - **FR-055h**: A segment's fanout MUST be estimated **from the segment's endpoints**, as the
   geometric mean of the *unclipped* per-depth width ratios, with rule 8's `fanout >= 1` imposed **once
   per segment**. It MUST NOT be a product of per-depth ratios each clipped at 1, and the fitted region

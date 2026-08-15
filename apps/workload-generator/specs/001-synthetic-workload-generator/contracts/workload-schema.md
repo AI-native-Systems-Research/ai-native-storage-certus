@@ -992,11 +992,19 @@ The generator rejects, rather than silently accepting:
 8. `roots.count < 1`, `branch_skew < 0`, any `branching` segment with `fanout < 1` (a trunk node
    with no children
    would let a session run off the end of the trunk), or an `n` supplied to
-   `roots.popularity` (its support is `roots.count`).
+   `roots.popularity` (its support is `roots.count`). Also rejected: a **bounded-support**
+   `roots.popularity` whose support does not span `1..=roots.count` — an `empirical` whose top rank
+   falls short leaves every rank above it unreachable, so the realised root layer is narrower than
+   the document declares, and it is silent because a draw inside a narrow support records no clamp.
 9. A corpus that mints no keys below the trunk — `sessions.private_depth` const 0 with
    `roots.count` and `shared_depth` also fixed makes the key space finite, so no eviction is
-   ever exercised and the run is meaningless. Also rejected: `empirical` `shared_depth`
-   points not in ascending value order or with a final cumulative probability ≠ 1.0.
+   ever exercised and the run is meaningless. Also rejected: `empirical` `shared_depth` or
+   `roots.popularity` points not in **non-decreasing** value order, with a decreasing cumulative
+   probability, or with a final cumulative probability ≠ 1.0. Non-decreasing rather than strictly
+   ascending because the step encoding `fit` emits repeats each value on purpose — `(v, c_before),
+   (v, c_after)` is how a discrete distribution passes through an interpolating reader — so a check
+   demanding strict ascent would reject every fitted document. A CDF that stops below 1.0 makes every
+   draw above it return the top point, silently collapsing that mass onto one value.
 10. `replication.nodes_per_key` exceeding `len(topology.nodes)`.
 11. `topology.membership_events` referencing a node not in `topology.nodes`, or an `at` beyond
     `duration`.
