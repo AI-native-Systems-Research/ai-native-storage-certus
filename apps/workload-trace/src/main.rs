@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use workload_model::corpus::Profile;
 use workload_model::fit::branching;
 use workload_model::fit::document::{assemble, RootPopularity, Supplied};
 use workload_model::fit::sessions::{scale_values, SessionShapes};
@@ -1140,23 +1141,14 @@ fn print_trunk_profile(trace: &Report, fitted: &workload_model::fit::branching::
     );
     for d in want {
         let row = &depths[d];
-        // The model's width at this depth: roots times the product of every fanout
-        // that applies at or below it. This is the quantity rule 16 divides into the
-        // session population, so it is the one worth showing.
-        let mut model = fitted.roots as f64;
-        for (i, s) in fitted.segments.iter().enumerate() {
-            if (s.from_depth as usize) > d {
-                break;
-            }
-            let end = fitted
-                .segments
-                .get(i + 1)
-                .map(|n| n.from_depth as usize)
-                .unwrap_or(usize::MAX)
-                .min(d + 1);
-            let levels = end.saturating_sub(s.from_depth as usize);
-            model *= s.fanout.powi(levels as i32);
-        }
+        // The model's width at this depth, through the generator's OWN arithmetic —
+        // the quantity rule 16 divides into the session population. `Profile::paths`
+        // rather than a second implementation of it: `paths` multiplies
+        // `fanout_at(1..=d)`, so `fanout_at(0)` is never read and the first segment
+        // describes the step *into* depth 1. The hand-rolled version this replaces
+        // counted a level at depth 0 and overstated every row by the first segment's
+        // fanout — on a fixture whose true width at depth 0 is 4 it printed 12.
+        let model = Profile::from_segments(&fitted.segments).paths(d as u32, fitted.roots as u32);
         let mut note = Vec::new();
         if d == fitted.fitted_to_depth as usize {
             note.push("last fitted depth");

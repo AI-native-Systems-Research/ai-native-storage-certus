@@ -523,25 +523,12 @@ mod tests {
     /// `n` sessions all walking one shared path of `depth` blocks.
     /// The model's implied width at `depth`: roots times every fanout at or below it.
     ///
-    /// The same arithmetic `--explain` prints and rule 16 divides the session population
-    /// into, kept here so the invariant tests measure the emitted profile rather than the
-    /// internals that produced it.
+    /// Deliberately `Profile::paths` rather than a second implementation: `paths`
+    /// multiplies `fanout_at(1..=depth)`, so `fanout_at(0)` is never read and the first
+    /// segment's fanout describes the step *into* depth 1. A hand-rolled version here
+    /// counted a level at depth 0 and reported 12 where the profile means 4.
     fn model_width(f: &FittedBranching, depth: usize) -> f64 {
-        let mut w = f.roots as f64;
-        for (i, s) in f.segments.iter().enumerate() {
-            if (s.from_depth as usize) > depth {
-                break;
-            }
-            let end = f
-                .segments
-                .get(i + 1)
-                .map(|n| n.from_depth as usize)
-                .unwrap_or(usize::MAX)
-                .min(depth + 1);
-            let levels = end.saturating_sub(s.from_depth as usize);
-            w *= s.fanout.powi(levels as i32);
-        }
-        w
+        crate::corpus::Profile::from_segments(&f.segments).paths(depth as u32, f.roots as u32)
     }
 
     fn shared_trunk(n: u32, depth: usize) -> Vec<(u32, Vec<u64>)> {
