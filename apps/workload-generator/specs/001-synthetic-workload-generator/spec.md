@@ -1981,16 +1981,35 @@ report segments statistics into before/after windows around the event.
   that manufactures misses. `fit` MAY report a lower bound ("no trunk rotation observed within the
   trace's N-hour span, so `half_life` ≫ N"). Setting churn MUST remain a deliberate act by whoever
   knows the deployment's content cadence.
-- **FR-055c**: `fit` MUST choose the **root boundary** at the depth below the last *near-root*
-  fanout event, report `roots.count` as the width at that depth, and treat the levels above it as a
-  global preamble prepended to every session. The boundary depth MUST appear in the fit report,
-  because it changes what `roots.count` means. Taking depth 0 literally would report
-  `roots.count: 1` for a trace whose every request shares one preamble, and then have to express the
-  fanout immediately below — observed at up to four orders of magnitude in a single level — as trunk
-  branching, which fails the FR-009f occupancy floor at any useful depth. This rule applies only to
-  near-root fanout: a fanout deep in the trunk, which has been observed beyond depth 100, is a
-  genuine `branching` segment and MUST NOT be absorbed into `roots.count`, because no choice of root
-  boundary can reach it.
+- **FR-055c**: ~~`fit` MUST choose the **root boundary** at the depth below the last *near-root*
+  fanout event~~ — **WITHDRAWN 2026-08-14. `roots.count` is the shared width at depth 0, and no
+  boundary is chosen.** The rule required a fold that re-based the emitted profile onto a deeper
+  depth whenever the model's implied path count left occupancy below the FR-009f target, treating the
+  levels above as a global preamble. Three measurements retired it:
+  1. **The fold could not move the quantity its own loop tested.** A segment's `fanout^span` is
+     exactly `w(to)/w(from-1)` — it telescopes — so dropping the shallowest segment and re-basing
+     `roots.count` onto the width at its end leaves the implied path count *identical*. On the one
+     corpus trace where the fold fired it therefore ran until it exhausted its segments rather than
+     until occupancy was met. Under the superseded per-depth clip the identity was broken only by
+     clipping, i.e. the fold's whole effect on its own metric came from the estimator's bias.
+  2. **It moved a different quantity by 4.6x.** With the loop's path count fixed at 719 on
+     `qwen_code`, the emitted profile's width at the last fitted depth moved 3941 → 857. So it did
+     change what rule 16 judges — just not what it measured.
+  3. **Forcing it changed nothing observable on two traces and helped when removed on the third.**
+     `tau2_airline` (roots 26 → 40) and `browsecompplus` (24 → 42) generated **bit-identical**
+     output on all four FR-056 statistics, because `roots.count` does not reach the generator once
+     `roots.popularity` is empirical. On `qwen_code`, three seeds, removing the fold improved
+     `reuse_distance_objects` from 3.12x to 1.40x tolerance.
+  What governs instead is **FR-055a's existing requirement to fail rather than substitute**: a
+  measured trunk that cannot meet the FR-009f floor is a model limitation to be reported, and
+  re-basing the profile was exactly the silent substitution that requirement forbids. Rule 16 now
+  judges the trunk the trace actually has.
+  The original motivation was sound and is **not** answered by withdrawing the rule: a trace whose
+  every request shares one preamble does report `roots.count: 1` with an enormous fanout immediately
+  below, and that combination fails the occupancy floor. It now fails **visibly**, naming rule 8's
+  `fanout >= 1` as the binding restriction, rather than being folded out of sight. Admitting such a
+  trace needs a schema that can express a *narrowing* trunk, which is a change to FR-009f's floor and
+  not something `fit` can decide.
 - **FR-055a**: `fit` MUST emit the **measured** `branching` profile rather than `auto`, because trunk
   structure is a physical property of the trace. It MUST also record the value `auto` would have
   chosen, and MUST **fail** per FR-057 — never silently substitute — when the measured combination
@@ -2003,6 +2022,37 @@ report segments statistics into before/after windows around the event.
   measured ratio collapses toward **1 regardless of the true value**. The fit report MUST state
   the realised occupancy at which each width ratio was measured so a value near 1 is not mistaken
   for a genuinely linear trunk.
+- **FR-055h**: A segment's fanout MUST be estimated **from the segment's endpoints**, as the
+  geometric mean of the *unclipped* per-depth width ratios, with rule 8's `fanout >= 1` imposed **once
+  per segment**. It MUST NOT be a product of per-depth ratios each clipped at 1, and the fitted region
+  MUST NOT be bounded by a retention floor.
+  The clipped product **rectifies noise**. A flat trunk measured with noise has ratios scattered
+  either side of 1; clipping each to `max(1, r)` before multiplying converts that scatter into growth.
+  Measured over the nine fittable corpus traces the deep trunk's *unclipped* geometric-mean ratio is
+  **0.995–1.001** — a plateau with a log-slope of −0.001 to −0.006 per depth — and extending the
+  clipped estimator to the last shared depth would have multiplied model width by 4x
+  (`browsecompplus`), 576x (`tau2_telecom`), 5.4e4 (`wildchat`) and **5e23** (`qwen_toc`).
+  A cumulative-retention floor of 0.99 was what contained that, and it contained it by **amputating
+  the trace**: it stopped the fit at depth 0–74 while shared structure ran 939–6094 deep, discarding
+  **83–99% of the shared trunk on every trace**, with `wildchat` fitted to depth 0 because 1.8% of its
+  requests are one block long. Its own justification also failed to survive the 2026-08-12 switch to
+  shared keys: "12 of 16 traces clean at 0.99" recomputed under the new `w(d)` gives **2 of 9**, and 7
+  of 9 traces already admit decreasing ratios *inside* the fitted prefix. It was guarding an
+  estimator, not the data. Two alternatives were measured and rejected — conditioning width on
+  survivors removes only 10–30% of decreasing ratios and **zero** on five of nine traces, and a
+  per-segment retention rule never terminates, because retention loss is always recoverable by cutting
+  a segment.
+  Because the log mean telescopes, `fanout^span` is exactly `max(1, w(to)/w(from-1))`, which yields the
+  guarantee that replaces the floor and MUST be asserted: **the fitted profile is a non-decreasing
+  envelope of the observed shared width and never exceeds its running maximum.** Retention MUST still
+  be measured and reported at the deepest fitted depth, because a width read over a thinned population
+  is thin evidence — but thin evidence is a caveat, not a reason to describe none of the trace.
+  The envelope's error has a **known direction and it is not free**: wherever the trace's trunk
+  narrows, the model's stops widening instead, so from the first narrowing segment onward the model is
+  wider than the trace. `fit` MUST report the count, the depth span and the steepest rate of the
+  narrowing segments, aggregated rather than one caveat per segment. On `tau2_airline` 8 of 17 segments
+  narrow, on `qwen_code` 55 of 110 — so this is the common case, not an edge one, and it is the same
+  restriction FR-055c now names: the schema cannot express a narrowing trunk.
 - **FR-055g**: The `zipf` shape MUST be the **discrete** pmf `p_k = k^-s / H_n(s)` over ranks
   `1..=n`, so that **every rank in the support has positive probability at every support size and
   every exponent**. This is a requirement about the trunk, not about a distribution's tidiness.

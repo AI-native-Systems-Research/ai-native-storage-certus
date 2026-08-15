@@ -430,17 +430,8 @@ fn cmd_fit(
     let sharing_report = sharing.finish();
     let fitted_sessions = shapes.finish(&sharing_report);
 
-    // The occupancy numerator the root fold needs: sessions reaching the depth the
-    // fit treats as the sharing depth.
-    let sessions_at_sharing = trace_report
-        .sharing
-        .realised_depth
-        .p99
-        .and_then(|d| trace_report.trunk.depths.get(d as usize))
-        .and_then(|d| d.occupancy.map(|o| o * d.width_run as f64))
-        .unwrap_or(trace.sessions() as f64);
-    let fitted_branching = branching::fit(&trace_report.trunk, sessions_at_sharing)
-        .ok_or("the trace has no width profile to fit")?;
+    let fitted_branching =
+        branching::fit(&trace_report.trunk).ok_or("the trace has no width profile to fit")?;
 
     // A rate from the trace's own span where it has one; the caller's otherwise.
     let measured_rate = if trace.chronological {
@@ -500,14 +491,13 @@ fn cmd_fit(
         }
     );
     println!(
-        "  trunk     roots.count {} at boundary depth {} (retention {:.3}), {} segments, \
-         fitted to depth {} of {}",
+        "  trunk     roots.count {} (shared keys at depth 0), {} segments, fitted to depth {} \
+         of {} (retention {:.3} there)",
         fitted_branching.roots,
-        fitted_branching.root_boundary_depth,
-        fitted_branching.retention_at_boundary,
         fitted_branching.segments.len(),
         fitted_branching.fitted_to_depth,
-        fitted_branching.observed_to_depth
+        fitted_branching.observed_to_depth,
+        fitted_branching.retention_at_fitted_to
     );
 
     // FR-055e: which fitted values came from a reconstructed field. Printed before
@@ -1129,7 +1119,7 @@ fn print_trunk_profile(trace: &Report, fitted: &workload_model::fit::branching::
     // The depths worth showing: the fitted region's ends, each segment boundary, the
     // depth rule 16 judges, and the deepest observed. Printing every depth would be
     // thousands of rows for an agentic trace and would bury exactly this comparison.
-    let mut want: Vec<usize> = vec![0, fitted.root_boundary_depth as usize];
+    let mut want: Vec<usize> = vec![0];
     want.extend(fitted.segments.iter().map(|s| s.from_depth as usize));
     want.push(fitted.fitted_to_depth as usize);
     want.push(p99);
@@ -1168,9 +1158,6 @@ fn print_trunk_profile(trace: &Report, fitted: &workload_model::fit::branching::
             model *= s.fanout.powi(levels as i32);
         }
         let mut note = Vec::new();
-        if d == fitted.root_boundary_depth as usize {
-            note.push("root boundary");
-        }
         if d == fitted.fitted_to_depth as usize {
             note.push("last fitted depth");
         }

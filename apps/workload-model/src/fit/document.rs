@@ -408,15 +408,15 @@ mod tests {
 
     fn fitted_branching() -> FittedBranching {
         FittedBranching {
-            root_boundary_depth: 0,
             roots: 12,
-            retention_at_boundary: 1.0,
+            retention_at_fitted_to: 1.0,
             segments: vec![crate::schema::Segment {
                 from_depth: 0,
                 fanout: 1.05,
                 skew: None,
                 churn_half_life: None,
             }],
+            raw_fanouts: vec![1.05],
             segment_occupancy: vec![8.0],
             fitted_to_depth: 40,
             observed_to_depth: 40,
