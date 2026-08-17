@@ -42,6 +42,81 @@ extern "C" fn handle_signal(_sig: libc::c_int) {
     SHUTDOWN.store(true, Ordering::SeqCst);
 }
 
+/// How often the telemetry thread logs cumulative SSD I/O stats (rw-telemetry
+/// builds only).
+#[cfg(feature = "rw-telemetry")]
+const TELEMETRY_INTERVAL_SECS: u64 = 10;
+
+/// Render a byte count as a compact human-readable size (`4KiB`, `128KiB`,
+/// `2MiB`, ...). Used to label transfer-size histogram buckets.
+#[cfg(feature = "rw-telemetry")]
+fn human_size(bytes: u64) -> String {
+    const UNITS: [(&str, u64); 4] = [
+        ("GiB", 1 << 30),
+        ("MiB", 1 << 20),
+        ("KiB", 1 << 10),
+        ("B", 1),
+    ];
+    for (name, scale) in UNITS {
+        if bytes >= scale {
+            return format!("{}{}", bytes / scale, name);
+        }
+    }
+    "0B".to_string()
+}
+
+/// Render one direction's transfer-size histogram as `lo-hi:count` bins over the
+/// non-empty buckets (e.g. `[4KiB,8KiB):12 [128KiB,256KiB):340 >=8MiB:1024`).
+/// The final bucket is open-ended (sizes are clamped into it).
+#[cfg(feature = "rw-telemetry")]
+fn format_size_hist(buckets: &[u64; interfaces::IO_SIZE_BUCKETS]) -> String {
+    use interfaces::{ReadWriteStats, IO_SIZE_BUCKETS};
+    let mut parts = Vec::new();
+    for (idx, &count) in buckets.iter().enumerate() {
+        if count == 0 {
+            continue;
+        }
+        let lo = ReadWriteStats::bucket_lower_bound(idx);
+        let label = if idx == IO_SIZE_BUCKETS - 1 {
+            format!(">={}", human_size(lo))
+        } else {
+            format!("[{},{})", human_size(lo), human_size(1u64 << idx))
+        };
+        parts.push(format!("{label}:{count}"));
+    }
+    if parts.is_empty() {
+        "(none)".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
+/// Format a cumulative SSD read/write telemetry snapshot for the server log:
+/// op counts, GiB moved, mean transfer size (bytes/op = the effective on-device
+/// I/O block size), mean per-op latency, and the full per-direction transfer-size
+/// distribution. Only compiled with `rw-telemetry`; without that feature
+/// `read_write_stats()` returns all-zero counters.
+#[cfg(feature = "rw-telemetry")]
+fn format_io_stats(s: &interfaces::ReadWriteStats) -> String {
+    let gib = |b: u64| b as f64 / (1u64 << 30) as f64;
+    let per = |num: u64, den: u64| if den > 0 { num / den } else { 0 };
+    format!(
+        "reads[{ro} ops, {rg:.3} GiB, {rbs} B/op, {rl} us/op]  \
+         writes[{wo} ops, {wg:.3} GiB, {wbs} B/op, {wl} us/op]\n    \
+         read-sizes:  {rh}\n    write-sizes: {wh}",
+        ro = s.read_ops,
+        rg = gib(s.read_bytes),
+        rbs = per(s.read_bytes, s.read_ops),
+        rl = per(s.read_latency_ns_sum / 1000, s.read_ops),
+        wo = s.write_ops,
+        wg = gib(s.write_bytes),
+        wbs = per(s.write_bytes, s.write_ops),
+        wl = per(s.write_latency_ns_sum / 1000, s.write_ops),
+        rh = format_size_hist(&s.read_size_buckets),
+        wh = format_size_hist(&s.write_size_buckets),
+    )
+}
+
 /// Certus shared-memory-queue server exposing the IDispatcher control plane.
 #[derive(Parser)]
 #[command(
@@ -497,6 +572,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("spawn reaper")
     };
 
+    // Telemetry logger (rw-telemetry builds only): periodically log cumulative
+    // SSD read/write stats + derived mean I/O block size, so a run's disk
+    // behaviour is visible in the server log — the shmq transport has no
+    // GetIoStats readout path like the gRPC server does.
+    #[cfg(feature = "rw-telemetry")]
+    let telemetry = {
+        let dispatcher = Arc::clone(&dispatcher);
+        let logger = Arc::clone(&logger);
+        thread::Builder::new()
+            .name("shmq-telemetry".into())
+            .spawn(move || {
+                let tick = Duration::from_millis(500);
+                let mut elapsed = Duration::ZERO;
+                while !SHUTDOWN.load(Ordering::Relaxed) {
+                    thread::sleep(tick);
+                    elapsed += tick;
+                    if elapsed >= Duration::from_secs(TELEMETRY_INTERVAL_SECS) {
+                        elapsed = Duration::ZERO;
+                        logger.info(&format!(
+                            "certus-shmq-server: io-stats {}",
+                            format_io_stats(&dispatcher.read_write_stats())
+                        ));
+                    }
+                }
+            })
+            .expect("spawn telemetry")
+    };
+
     // Poller thread: busy-scan every channel, hand ready requests to workers.
     let poller = {
         let server = Arc::clone(&server);
@@ -548,6 +651,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = w.join();
     }
     let _ = reaper.join();
+
+    // Read the final cumulative stats BEFORE shutdown tears down the block
+    // devices (which is when the telemetry counters go away).
+    #[cfg(feature = "rw-telemetry")]
+    {
+        let _ = telemetry.join();
+        logger.info(&format!(
+            "certus-shmq-server: FINAL io-stats {}",
+            format_io_stats(&dispatcher.read_write_stats())
+        ));
+    }
 
     let _ = dispatcher.shutdown();
     logger.info("certus-shmq-server: shutdown complete");

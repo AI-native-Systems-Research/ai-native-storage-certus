@@ -3259,13 +3259,8 @@ impl IDispatcher for DispatcherComponent {
         // built with the telemetry feature); sum for the dispatcher-wide total.
         let mut agg = interfaces::ReadWriteStats::default();
         for drive in self.data_drives.read().iter() {
-            let s = drive.block_dev_iface.read_write_stats();
-            agg.read_ops += s.read_ops;
-            agg.read_bytes += s.read_bytes;
-            agg.read_latency_ns_sum += s.read_latency_ns_sum;
-            agg.write_ops += s.write_ops;
-            agg.write_bytes += s.write_bytes;
-            agg.write_latency_ns_sum += s.write_latency_ns_sum;
+            // merge_from sums every counter and both size histograms.
+            agg.merge_from(&drive.block_dev_iface.read_write_stats());
         }
         agg
     }
