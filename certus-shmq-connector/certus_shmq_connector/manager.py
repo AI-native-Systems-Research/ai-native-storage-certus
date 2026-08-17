@@ -73,10 +73,7 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     def __init__(self, ring, block_size_bytes: int):
         self._ring = ring
         self._block_size_bytes = int(block_size_bytes)
-        # Cumulative count of blocks we could not offload because the server's
-        # memory tier was saturated (Reserve failed). Logged in throttled
-        # summaries rather than per-request, so a persistently-full tier does
-        # not produce a warning storm.
+        self._presence: set[int] = set()
         self._store_dropped_blocks = 0
         self._store_drop_log_next = 1000
 
@@ -106,14 +103,10 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     # ── lookup / touch ──
 
     def lookup(self, key: OffloadKey, req_context=None):
-        # Returns ``bool`` on ≤0.24 and a ``LookupResult`` enum (HIT/MISS) on
-        # 0.26+, which rewrote ``lookup``'s return type. The shim absorbs the
-        # difference so this body stays a single Check call.
         from .compat import lookup_result
 
         int_key = _key_to_u64(key)
-        exists = self._ring.check([int_key])
-        return lookup_result(bool(exists and exists[0]))
+        return lookup_result(int_key in self._presence)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         int_keys = _keys_to_u64s(keys)
@@ -129,12 +122,9 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         int_keys = _keys_to_u64s(keys_list)
         session_id = _session_id_to_u64(req_context)
 
-        # Filter out keys already cached (consecutive dedup is vLLM's concern;
-        # here we just avoid re-storing existing entries).
-        exists_flags = self._ring.check(int_keys)
-        exists = {k: e for k, e in zip(int_keys, exists_flags)}
         to_store_pairs = [
-            (orig, k) for orig, k in zip(keys_list, int_keys) if not exists.get(k, False)
+            (orig, k) for orig, k in zip(keys_list, int_keys)
+            if k not in self._presence
         ]
 
         if not to_store_pairs:
@@ -221,6 +211,7 @@ class ShmqCertusOffloadingManager(OffloadingManager):
             return
         if success:
             self._ring.commit_store(int_keys)
+            self._presence.update(int_keys)
         else:
             self._ring.abort_store(int_keys)
 
@@ -266,12 +257,12 @@ class ShmqCertusOffloadingManager(OffloadingManager):
                 file=sys.stderr,
                 flush=True,
             )
-        # Only REMOVED means the key is no longer accessible. DEMOTED entries
-        # stay on SSD and remain loadable, so they are not eviction events for
-        # vLLM's accounting.
-        removed = [
-            key.to_bytes(8, "big") for key, reason in events if reason == REASON_REMOVED
-        ]
+            self._presence.clear()
+        removed = []
+        for key, reason in events:
+            if reason == REASON_REMOVED:
+                self._presence.discard(key)
+                removed.append(key.to_bytes(8, "big"))
         if removed:
             yield OffloadingEvent(
                 keys=removed,
