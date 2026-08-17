@@ -283,6 +283,7 @@ if __name__ == "__main__":
         if not active_prompts:
             break
 
+        t_round = time.perf_counter()
         outputs = llm.generate(active_prompts, active_sps)
         for j, out in enumerate(outputs):
             i = active_idx[j]
@@ -290,6 +291,7 @@ if __name__ == "__main__":
             contexts[i] = contexts[i] + gen
             next_turn[i] += 1
             total_generations += 1
+        round_s = time.perf_counter() - t_round
         rounds_done += 1
 
         # Per-round SSD I/O deltas from the server counters.
@@ -298,7 +300,7 @@ if __name__ == "__main__":
         io_prev = io_now
         d_rops, d_rb, d_rlat, d_wops, d_wb, d_wlat = d
         print(
-            f"[run] round {rounds_done}: {len(active_prompts)} prompts, "
+            f"[run] round {rounds_done}: {len(active_prompts)} prompts in {round_s:.1f}s, "
             f"{total_generations} total generations  "
             f"ssd_read={gib(d_rb)} ssd_write={gib(d_wb)} "
             f"r_ops={d_rops} w_ops={d_wops} "

@@ -79,6 +79,47 @@ if __name__ == "__main__":
     DISK_READ_THREADS = int(os.environ.get("DISK_READ_THREADS", 16))
     DISK_WRITE_THREADS = int(os.environ.get("DISK_WRITE_THREADS", 16))
 
+    # Secondary offload tier. "" (default) = CPU-only (CPUOffloadingSpec, host RAM).
+    # "fs" = vLLM's native TieringOffloadingManager with the CPU tier as PRIMARY and
+    # a filesystem tier as SECONDARY (spills overflow blocks to FS_ROOT_DIR). CPU_BYTES
+    # then sizes only the primary tier; blocks the primary evicts fall through to disk.
+    SECONDARY_TIER = os.environ.get("SECONDARY_TIER", "").strip().lower()
+    FS_ROOT_DIR = os.environ.get("FS_ROOT_DIR", "/mnt/fs-tier/kv-tier")
+    FS_READ_THREADS = int(os.environ.get("FS_READ_THREADS", 16))
+    FS_WRITE_THREADS = int(os.environ.get("FS_WRITE_THREADS", 16))
+
+    # ── Per-round physical disk I/O accounting ────────────────────────────
+    # /sys/block/<dev>/stat exposes cumulative sectors read (field 3) and
+    # written (field 7) in 512-byte units. Snapshotting around each generate()
+    # gives bytes moved to/from the device per round. For Tiered-CPU-FS the
+    # fs secondary tier lives on DISK_DEV (the RAID0 md), so this captures the
+    # real SSD read/write of the spill tier; for CPU-only offload it stays ~0.
+    # Reading the md device aggregates all RAID0 member I/O in one place.
+    DISK_DEV = os.environ.get("DISK_DEV", "").strip()
+    DISK_STAT = f"/sys/block/{DISK_DEV}/stat" if DISK_DEV else ""
+    SECTOR = 512
+
+    def disk_rw_bytes():
+        """Return (bytes_read, bytes_written) cumulative for DISK_DEV, or (None, None)."""
+        if not DISK_STAT:
+            return None, None
+        try:
+            with open(DISK_STAT) as _f:
+                fields = _f.read().split()
+            return int(fields[2]) * SECTOR, int(fields[6]) * SECTOR
+        except (OSError, IndexError, ValueError):
+            return None, None
+
+    def gib(n):
+        return "n/a" if n is None else f"{n / (1024 ** 3):.2f} GiB"
+
+    if DISK_DEV and disk_rw_bytes()[1] is None:
+        print(f"[run] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled",
+              file=sys.stderr, flush=True)
+    elif not DISK_DEV:
+        print("[run] DISK_DEV unset — per-round disk I/O accounting disabled",
+              file=sys.stderr, flush=True)
+
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
     print(f"[run] model={MODEL}", file=sys.stderr)
     print(f"[run] num_convs={NUM_CONVS} max_model_len={MAX_MODEL_LEN} "
@@ -151,6 +192,33 @@ if __name__ == "__main__":
                 "eviction_policy": "lru",
             },
         }
+    elif SECONDARY_TIER == "fs":
+        # Tiered: CPU primary + filesystem secondary. TieringOffloadingSpec is a
+        # CPUOffloadingSpec subclass registered by name in vLLM's
+        # OffloadingSpecFactory (vLLM >= 0.26); "fs" resolves to FileSystemTierManager
+        # via the SecondaryTierFactory. CPU_BYTES sizes the primary tier; primary
+        # evictions spill to FS_ROOT_DIR. root_dir must exist and be writable.
+        os.makedirs(FS_ROOT_DIR, exist_ok=True)
+        KV_CONFIG = {
+            "kv_connector": "OffloadingConnector",
+            "kv_role": "kv_both",
+            "kv_connector_extra_config": {
+                "cpu_bytes_to_use": CPU_BYTES,
+                "spec_name": "TieringOffloadingSpec",
+                "eviction_policy": "lru",
+                "secondary_tiers": [
+                    {
+                        "type": "fs",
+                        "root_dir": FS_ROOT_DIR,
+                        "n_read_threads": FS_READ_THREADS,
+                        "n_write_threads": FS_WRITE_THREADS,
+                    },
+                ],
+            },
+        }
+        print(f"[run] secondary_tier=fs root_dir={FS_ROOT_DIR} "
+              f"read_threads={FS_READ_THREADS} write_threads={FS_WRITE_THREADS}",
+              file=sys.stderr)
     else:
         # CPUOffloadingSpec is registered by name in vLLM's OffloadingSpecFactory,
         # so no spec_module_path is needed.
@@ -164,6 +232,7 @@ if __name__ == "__main__":
             },
         }
     print(f"[run] kv_connector={KV_CONFIG['kv_connector']} "
+          f"spec={KV_CONFIG['kv_connector_extra_config'].get('spec_name')} "
           f"(TRACE_OFFLOAD={os.environ.get('TRACE_OFFLOAD', '0')})", file=sys.stderr)
 
     # Clear stale trace files
@@ -260,18 +329,23 @@ if __name__ == "__main__":
             break
 
         rounds_done += 1
+        rd0, wr0 = disk_rw_bytes()
         round_start = time.perf_counter()
         outs = llm.generate(active_prompts, sp)
+        round_elapsed = time.perf_counter() - round_start
+        rd1, wr1 = disk_rw_bytes()
+        d_rd = None if rd0 is None or rd1 is None else rd1 - rd0
+        d_wr = None if wr0 is None or wr1 is None else wr1 - wr0
         # Append vLLM's own response for next round's prefix
         for i, out in zip(active_idx, outs):
             response = out.outputs[0].text if out.outputs else ""
             contexts[i] = contexts[i] + response
             next_turn[i] += 1
         total_generations += len(active_prompts)
-        round_elapsed = time.perf_counter() - round_start
         n_alive = sum(alive)
         print(f"[run] round {rounds_done}: {len(active_prompts)} prompts in "
-              f"{round_elapsed:.1f}s  ({n_alive} convs still alive)",
+              f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
+              f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
               file=sys.stderr, flush=True)
 
     elapsed = time.perf_counter() - t_start

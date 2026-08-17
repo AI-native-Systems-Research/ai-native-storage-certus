@@ -173,8 +173,7 @@ def test_render_matrix_lists_every_version_and_feature():
 def test_gpu_block_ids_coerces_to_plain_int_list():
     from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
 
-    # group_sizes/block_indices are required by real vLLM (one group of 3 here).
-    spec = GPULoadStoreSpec(block_ids=[3, 7, 11], group_sizes=[3], block_indices=[0])
+    spec = GPULoadStoreSpec(block_ids=[3, 7, 11])
     out = compat.gpu_block_ids(spec)
     assert out == [3, 7, 11]
     assert all(type(b) is int for b in out)  # not np.int64
