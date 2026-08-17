@@ -72,10 +72,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     def __init__(self, stub, block_size_bytes: int):
         self._stub = stub
         self._block_size_bytes = int(block_size_bytes)
-        # Cumulative count of blocks we could not offload because the server's
-        # memory tier was saturated (Reserve failed). Logged in throttled
-        # summaries rather than per-request, so a persistently-full tier does
-        # not produce a warning storm.
+        self._presence: set[int] = set()
         self._store_dropped_blocks = 0
         self._store_drop_log_next = 1000
 
@@ -105,15 +102,10 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     # ── lookup / touch ──
 
     def lookup(self, key: OffloadKey, req_context=None):
-        # Returns ``bool`` on ≤0.24 and a ``LookupResult`` enum (HIT/MISS) on
-        # 0.26+, which rewrote ``lookup``'s return type. The shim absorbs the
-        # difference so this body stays a single Check RPC.
         from .compat import lookup_result
 
         int_key = _key_to_u64(key)
-        resp = self._stub.Check(pb.BatchCheckRequest(keys=[int_key]))
-        exists = bool(resp.results and resp.results[0].exists)
-        return lookup_result(exists)
+        return lookup_result(int_key in self._presence)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         int_keys = _keys_to_u64s(keys)
@@ -129,12 +121,11 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         int_keys = _keys_to_u64s(keys_list)
         session_id = _session_id_to_u64(req_context)
 
-        # Filter out keys already cached (consecutive dedup is vLLM's concern;
-        # here we just avoid re-storing existing entries).
-        check = self._stub.Check(pb.BatchCheckRequest(keys=int_keys))
-        exists = {r.key: r.exists for r in check.results}
+        # Filter out keys already cached using the local presence cache.
+        # No RPC needed — we track what we stored and what was evicted.
         to_store_pairs = [
-            (orig, k) for orig, k in zip(keys_list, int_keys) if not exists.get(k, False)
+            (orig, k) for orig, k in zip(keys_list, int_keys)
+            if k not in self._presence
         ]
 
         if not to_store_pairs:
@@ -228,6 +219,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             return
         if success:
             self._stub.CommitStore(pb.BatchCommitStoreRequest(keys=int_keys))
+            self._presence.update(int_keys)
         else:
             self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=int_keys))
 
@@ -274,14 +266,14 @@ class GrpcCertusOffloadingManager(OffloadingManager):
                 file=sys.stderr,
                 flush=True,
             )
-        # Only REMOVED means the key is no longer accessible. DEMOTED entries
-        # stay on SSD and remain loadable, so they are not eviction events for
-        # vLLM's accounting.
-        removed = [
-            e.key.to_bytes(8, "big")
-            for e in resp.events
-            if e.reason == pb.EVICTION_REASON_REMOVED
-        ]
+            # Lost events mean our presence cache may be stale. Clear all
+            # positive entries so lookup() falls back to RPC for unknowns.
+            self._presence.clear()
+        removed = []
+        for e in resp.events:
+            if e.reason == pb.EVICTION_REASON_REMOVED:
+                self._presence.discard(e.key)
+                removed.append(e.key.to_bytes(8, "big"))
         if removed:
             yield OffloadingEvent(
                 keys=removed,
