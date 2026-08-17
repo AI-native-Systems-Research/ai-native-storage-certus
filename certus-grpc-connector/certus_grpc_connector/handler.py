@@ -251,78 +251,45 @@ def _build_worker_class():
 
         def _do_store(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
             entries = [
-                pb.CopyToStoreEntry(
+                pb.StoreBatchEntry(
                     key=key,
+                    size=self._block_size_bytes,
+                    session_id=0,
                     ipc_handles=_ipc_handles(self._kv_regions, block_id),
                 )
                 for block_id, key in zip(gpu_block_ids, keys)
             ]
             try:
-                resp = self._stub.CopyToStore(
-                    pb.BatchCopyToStoreRequest(entries=entries)
+                resp = self._stub.StoreBatch(
+                    pb.StoreBatchRequest(entries=entries)
                 )
-            except Exception as e:  # noqa: BLE001 - store failure must not crash vLLM
-                # A whole-batch RPC failure: roll back all reservations and report
-                # success (see the invariant note below). Blocks stay uncached.
+            except Exception as e:  # noqa: BLE001
                 print(
-                    f"[certus-grpc] CopyToStore RPC error: {e} — aborting {len(keys)} keys",
+                    f"[certus-grpc] StoreBatch RPC error: {e}",
                     flush=True,
                 )
-                try:
-                    self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=keys))
-                except Exception:  # noqa: BLE001
-                    pass
                 return True
 
-            # CRITICAL: the store path must NEVER report success=False. vLLM's
-            # offloading worker asserts transfer_result.success and a False
-            # return kills the engine. A failed CopyToStore only means "this block
-            # won't be cached" — the KV data is still valid in GPU memory, so it
-            # is safe to drop. But because store is split-phase (Reserve ->
-            # CopyToStore -> CommitStore), we must roll back any key whose copy
-            # failed, so the subsequent CommitStore can't publish an unpopulated
-            # slot as a valid entry. Abort the failed keys; report success.
             failed_results = [r for r in resp.results if not r.success]
-            failed = [r.key for r in failed_results]
-            if failed:
-                # DIAGNOSTIC: the server already returns the real reason per key in
-                # error_message (e.g. "GPU async DMA copy failed: cudaMemcpyAsync
-                # D2H failed: ..." or "size (N) exceeds destination buffer length
-                # (M)"). We normally discard it; surface the first few distinct
-                # messages so a store-path regression isn't silent. Rate-limited so
-                # a 48k-failure run doesn't spew.
+            if failed_results:
                 _log_copy_failure(failed_results, len(keys))
-                print(
-                    f"[certus-grpc] CopyToStore failed for {len(failed)}/{len(keys)} "
-                    f"blocks — aborting those reservations, leaving them uncached",
-                    flush=True,
-                )
-                try:
-                    self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=failed))
-                except Exception as e:  # noqa: BLE001 - best-effort rollback
-                    print(f"[certus-grpc] AbortStore rollback failed: {e}", flush=True)
             return True
 
         def _do_load(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
             entries = [
-                pb.LookupEntry(
+                pb.LoadBatchEntry(
                     key=key,
                     ipc_handles=_ipc_handles(self._kv_regions, block_id),
                 )
                 for block_id, key in zip(gpu_block_ids, keys)
             ]
-            resp = self._stub.Lookup(pb.BatchLookupRequest(entries=entries))
-            # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
-            # able to — prepare_load pinned these keys. If the server reports any
-            # per-key failure, dump exactly which key + error so we can see WHY a
-            # Lookup missed a key that lookup()/Check said was present.
+            resp = self._stub.LoadBatch(pb.LoadBatchRequest(entries=entries))
             if not all_success(resp.results):
                 for r in resp.results:
                     if not r.success:
                         print(
                             f"[certus-grpc] LOAD FAILURE key={r.key} "
-                            f"error_code={r.error_code} msg={r.error_message!r} "
-                            f"(this key was Check-hit and Pinned in prepare_load)",
+                            f"error_code={r.error_code} msg={r.error_message!r}",
                             flush=True,
                         )
                 return False
