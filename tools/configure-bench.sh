@@ -639,6 +639,30 @@ set_kernel_params() {
 
     header "Kernel Boot Parameters ($mode, MEM_METHOD=$MEM_METHOD)"
 
+    # Consistency guard: the mem= RAM cap must be large enough to hold the
+    # hugepage pool we're about to reserve plus the vLLM RAM floor. `hugepages`
+    # and MEM_LIMIT come from independent inputs — an explicit CERTUS_HUGEPAGES
+    # (profile_all.sh --total-mem passes it through, without a matching
+    # TOTAL_USABLE_GIB) vs the TOTAL_USABLE_GIB default that drives MEM_LIMIT —
+    # with nothing cross-checking them. A mismatched pair such as
+    # `hugepages=48 mem=32G` is otherwise emittable: at boot the kernel can
+    # reserve only part of the pool (27 of 48 on a 32G cap) and comes up
+    # RAM-starved. Require mem >= hugepages + vLLM floor, raising the cap (and
+    # TOTAL_USABLE_GIB, so the reported tier size stays consistent) to fit rather
+    # than writing an internally inconsistent boot line.
+    if [[ "$MEM_METHOD" == "kernel" && "$MEM_LIMIT" =~ ^([0-9]+)[Gg]$ ]]; then
+        local mem_gib="${BASH_REMATCH[1]}"
+        local need_gib=$(( hugepages + VLLM_MIN_RAM_GIB ))
+        if (( mem_gib < need_gib )); then
+            echo -e "  ${YELLOW}mem=${MEM_LIMIT} is too small for hugepages=${hugepages}${NC}"
+            echo "  (a ${hugepages}x1G-page pool + ${VLLM_MIN_RAM_GIB}G vLLM floor needs mem>=${need_gib}G;"
+            echo "   at mem=${MEM_LIMIT} the kernel could reserve only part of the pool)."
+            echo "  Raising to mem=${need_gib}G to keep the boot params consistent."
+            MEM_LIMIT="${need_gib}G"
+            TOTAL_USABLE_GIB="$need_gib"
+        fi
+    fi
+
     # Remove old conflicting params
     local remove_args="hugepages hugepagesz default_hugepagesz mem memmap"
     echo "  Removing old params: $remove_args"
