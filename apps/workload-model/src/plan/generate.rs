@@ -696,6 +696,9 @@ impl Generator {
         // prefix, so a path that has left the trunk cannot rejoin it at a deeper level.
         let mut cohort = live.root_cohort;
         let mut alone = false;
+        // Where this root's first split is, drawn from the root's own stream — which is what
+        // lets two roots have preambles of different lengths.
+        let mut split = crate::corpus::SplitState::at_root(&self.corpus, cur);
         for d in 0..depth {
             if d > 0 {
                 // The boundary is the EARLIER of cohort exhaustion and the drawn cap.
@@ -715,17 +718,18 @@ impl Generator {
                 // segment spelling carries total out-degree. Until then the cap binds first
                 // on any fitted document and this is a superset of the old behaviour.
                 cur = if !alone && d < live.shared_depth {
-                    let n = self.corpus.child_count(cur, d);
-                    let (idx, p) = self.corpus.pick_child_p(&mut walk, n);
-                    // Only a real branch divides a cohort; a single-child step leaves it
-                    // whole, which is what makes a long unary run a shared segment.
-                    if n > 1 {
-                        cohort *= p;
-                    }
+                    // One entry point for both trunk spellings. Under a node-level process
+                    // it returns probability 1.0 inside a run and divides the cohort only at
+                    // a real split, which is what makes a long run a shared segment rather
+                    // than a slow fanout.
+                    let (next, p) = self
+                        .corpus
+                        .trunk_step_stateful(cur, d, &mut split, &mut walk, gen);
+                    cohort *= p;
                     if cohort < COHORT_FLOOR {
                         alone = true;
                     }
-                    self.corpus.trunk_child_at(cur, idx, gen)
+                    next
                 } else {
                     private_child(cur, live.s.id, d)
                 };

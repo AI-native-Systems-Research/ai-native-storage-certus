@@ -152,11 +152,118 @@ pub fn auto_fanout(sessions_per_window: f64, roots: u32, trunk_steps: u32) -> f6
     headroom.powf(1.0 / f64::from(trunk_steps)).max(1.0)
 }
 
+/// A [`crate::schema::SegmentProcess`] with its bands ordered for lookup.
+#[derive(Debug, Clone)]
+pub struct ResolvedSegments {
+    /// `(from_depth, length, out_degree)`, ascending by depth.
+    bands: Vec<(u32, Dist, Dist)>,
+}
+
+impl ResolvedSegments {
+    /// The band covering `depth`.
+    fn at(&self, depth: u32) -> &(u32, Dist, Dist) {
+        let mut chosen = &self.bands[0];
+        for b in &self.bands {
+            if depth >= b.0 {
+                chosen = b;
+            } else {
+                break;
+            }
+        }
+        chosen
+    }
+
+    /// Blocks the unary run below the split at `node` continues, at least 1.
+    ///
+    /// Keyed on the **node**, not on the visit, for the same reason `child_count` is: it is
+    /// what keeps a long run reproducible and independent of arrival order, and it is why a
+    /// walker needs no stored trie.
+    pub fn run_length(&self, seed: u64, node: CacheKey, depth: u32) -> u32 {
+        let (_, len, _) = self.at(depth);
+        let mut st = Stream::new(seed ^ node.0, u64::from(depth) ^ TAG_SEGMENT);
+        len.sample_u64(&mut st).max(1).min(u64::from(u32::MAX)) as u32
+    }
+
+    /// Children at the split at `node` — the total, singletons included.
+    pub fn out_degree(&self, seed: u64, node: CacheKey, depth: u32) -> u32 {
+        let (_, _, deg) = self.at(depth);
+        let mut st = Stream::new(
+            seed ^ node.0,
+            (u64::from(depth) ^ TAG_SEGMENT).wrapping_add(1),
+        );
+        deg.sample_u64(&mut st).max(1).min(u64::from(u32::MAX)) as u32
+    }
+
+    /// The band-mean fanout per depth, as a [`Profile`].
+    ///
+    /// A node-level process still has a mean fanout at each depth — `out_degree` children
+    /// once every `length` blocks — and occupancy, rule 16 and the reports are all written
+    /// against one. `E[deg]^(1/E[len])` per band is that mean in the geometric sense the
+    /// profile multiplies in.
+    pub fn mean_profile(&self) -> Profile {
+        let segs: Vec<Segment> = self
+            .bands
+            .iter()
+            .map(|(from, len, deg)| {
+                let l = len.mean().unwrap_or(1.0).max(1.0);
+                let d = deg.mean().unwrap_or(1.0).max(1.0);
+                Segment {
+                    from_depth: *from,
+                    fanout: d.powf(1.0 / l),
+                    skew: None,
+                    churn_half_life: None,
+                }
+            })
+            .collect();
+        Profile::from_segments(&segs)
+    }
+}
+
+/// Where the trunk's next split is, carried down one walk.
+///
+/// The walk already re-derives a session's path from the root every turn, so this rides
+/// along with it and nothing is stored per node — the memory bound stays the live session
+/// population (FR-010). It is the only state a node-level process needs: "the last split was
+/// here and its run is this long" is enough to know whether the current depth is a split.
+#[derive(Debug, Clone, Copy)]
+pub struct SplitState {
+    /// Depth at which the next split happens.
+    next_split_depth: u32,
+}
+
+/// Domain separator for a node's own run-length and out-degree draws.
+const TAG_SEGMENT: u64 = 0x5E67_3E27;
+
+impl SplitState {
+    /// The state a walk starts in at `root`.
+    ///
+    /// The root is itself a split node, so its run length comes from *its* stream — which is
+    /// exactly what gives each root its own preamble length. Under a per-depth profile every
+    /// depth is a potential split, which is the degenerate case of the same state.
+    pub fn at_root(corpus: &Corpus, root: CacheKey) -> SplitState {
+        match &corpus.segments {
+            None => SplitState {
+                next_split_depth: 0,
+            },
+            Some(s) => SplitState {
+                next_split_depth: s.run_length(corpus.seed, root, 0),
+            },
+        }
+    }
+}
+
 /// The realised shared structure.
 #[derive(Debug, Clone)]
 pub struct Corpus {
     /// Number of trees.
     pub roots: u32,
+    /// A node-level trunk process, when the document states one.
+    ///
+    /// `Some` means `branching: {by_depth: [...]}` — the shape is asked of the node rather
+    /// than read off the depth. [`Corpus::profile`] is still resolved alongside as the
+    /// band-mean fanout, because occupancy, validation rule 16 and reporting are all written
+    /// against a per-depth fanout and a node-level process still has a mean at each depth.
+    pub segments: Option<ResolvedSegments>,
     /// The resolved fanout profile.
     pub profile: Profile,
     /// Zipf exponent over child rank when a session picks among children.
@@ -176,6 +283,20 @@ impl Corpus {
         sessions_per_window: f64,
         trunk_steps: u32,
     ) -> Corpus {
+        let segments = match &trees.branching {
+            Branching::Segments(p) if !p.by_depth.is_empty() => Some(ResolvedSegments {
+                bands: {
+                    let mut b: Vec<(u32, Dist, Dist)> = p
+                        .by_depth
+                        .iter()
+                        .map(|s| (s.from_depth, s.length.clone(), s.out_degree.clone()))
+                        .collect();
+                    b.sort_by_key(|x| x.0);
+                    b
+                },
+            }),
+            _ => None,
+        };
         let profile = match &trees.branching {
             Branching::Auto(_) => Profile::uniform(auto_fanout(
                 sessions_per_window,
@@ -184,9 +305,18 @@ impl Corpus {
             )),
             Branching::Uniform(f) => Profile::uniform(*f),
             Branching::Profile(segs) => Profile::from_segments(segs),
+            // The band means, so occupancy and rule 16 still have a per-depth fanout to
+            // judge. An empty band list resolves to a flat trunk rather than panicking;
+            // validation rejects it, and a caller that skipped validation gets the
+            // documented default rather than a crash.
+            Branching::Segments(_) => segments
+                .as_ref()
+                .map(|s| s.mean_profile())
+                .unwrap_or_else(|| Profile::uniform(1.0)),
         };
         Corpus {
             roots: trees.roots.count,
+            segments,
             profile,
             branch_skew: trees.branch_skew,
             block_bytes,
@@ -258,6 +388,47 @@ impl Corpus {
         let rank = d.sample_u64(st).max(1).min(n);
         let idx = (rank - 1) as u32;
         (idx, crate::dist::zipf_pmf_at(self.branch_skew, n, rank))
+    }
+
+    /// One step down the trunk, carrying the walk's split state.
+    ///
+    /// Returns the child key and the probability of having taken it, which is what the caller
+    /// multiplies into its expected cohort. This is the single entry point both trunk
+    /// spellings answer:
+    ///
+    /// * per-depth profile — every depth is a potential split, so the node's child count is
+    ///   read off the profile and a choice is made among them;
+    /// * node-level segments — a split happens only where the run drawn at the last split
+    ///   ends. Between splits the node has exactly one child, so the cohort is *not* divided,
+    ///   which is what makes a long run a shared segment rather than a slow fanout.
+    pub fn trunk_step_stateful(
+        &self,
+        cur: CacheKey,
+        depth: u32,
+        state: &mut SplitState,
+        st: &mut Stream,
+        gen: Generation,
+    ) -> (CacheKey, f64) {
+        match &self.segments {
+            None => {
+                let n = self.child_count(cur, depth);
+                let (idx, p) = self.pick_child_p(st, n);
+                (trunk_child(cur, idx, gen), p)
+            }
+            Some(s) => {
+                if depth < state.next_split_depth {
+                    // Inside a run: one child, cohort intact.
+                    (trunk_child(cur, 0, gen), 1.0)
+                } else {
+                    let n = s.out_degree(self.seed, cur, depth);
+                    let (idx, p) = self.pick_child_p(st, n);
+                    let child = trunk_child(cur, idx, gen);
+                    state.next_split_depth =
+                        depth.saturating_add(s.run_length(self.seed, child, depth));
+                    (child, p)
+                }
+            }
+        }
     }
 
     /// The trunk child at `index` of `cur` — the key half of a trunk step.
@@ -494,6 +665,93 @@ mod tests {
                 assert!(c.pick_child(&mut st, n) < n);
             }
         }
+    }
+
+    /// A node-level process with the given run length and out-degree, one band.
+    fn seg_corpus(length: f64, out_degree: f64) -> Corpus {
+        use crate::schema::{SegmentBand, SegmentProcess};
+        corpus(Branching::Segments(SegmentProcess {
+            by_depth: vec![SegmentBand {
+                from_depth: 0,
+                length: Dist::Scalar(length),
+                out_degree: Dist::Scalar(out_degree),
+            }],
+        }))
+    }
+
+    #[test]
+    fn a_node_level_process_gives_each_root_its_own_preamble() {
+        // The property the whole spelling exists for, and the one a per-depth profile
+        // cannot express: measured preamble lengths are per-ROOT and multi-modal —
+        // `appworld` splits at 23, 3194 and 5556 blocks, `browsecompplus` at 1, 141, 939 —
+        // so a profile keyed on depth must fan out at depth 141 for every root or for none.
+        //
+        // With a run length drawn from the node's own stream, two roots get different first
+        // splits. A geometric length gives a spread; the assertion is that the splits are
+        // NOT at the same depth for every root, which is precisely what the old spelling
+        // guaranteed.
+        let c = corpus(Branching::Segments(crate::schema::SegmentProcess {
+            by_depth: vec![crate::schema::SegmentBand {
+                from_depth: 0,
+                length: Dist::Shaped(crate::dist::Shape::Geometric { mean: 20.0 }),
+                out_degree: Dist::Scalar(3.0),
+            }],
+        }));
+        let firsts: Vec<u32> = (0..12u32)
+            .map(|i| SplitState::at_root(&c, c.root_key(i, Generation::STABLE)).next_split_depth)
+            .collect();
+        let distinct: std::collections::BTreeSet<u32> = firsts.iter().copied().collect();
+        assert!(
+            distinct.len() > 3,
+            "twelve roots produced only {} distinct preamble lengths: {firsts:?}",
+            distinct.len()
+        );
+        assert!(
+            firsts.iter().all(|l| *l >= 1),
+            "a preamble is at least one block: {firsts:?}"
+        );
+    }
+
+    #[test]
+    fn inside_a_run_the_cohort_is_not_divided_and_at_a_split_it_is() {
+        // What makes a long run a shared SEGMENT rather than a slow fanout: between splits
+        // the node has exactly one child, so the probability of the step is 1 and a walker's
+        // expected cohort is unchanged. Only a split divides it.
+        let c = seg_corpus(5.0, 4.0);
+        let root = c.root_key(0, Generation::STABLE);
+        let mut state = SplitState::at_root(&c, root);
+        assert_eq!(state.next_split_depth, 5, "a const run length of 5");
+        let mut st = Stream::new(1, 1);
+        let mut cur = root;
+        let mut ps = Vec::new();
+        for d in 1..=6u32 {
+            let (next, p) = c.trunk_step_stateful(cur, d, &mut state, &mut st, Generation::STABLE);
+            ps.push(p);
+            cur = next;
+        }
+        // Depths 1..4 are inside the run; depth 5 is the split.
+        assert_eq!(&ps[..4], &[1.0, 1.0, 1.0, 1.0], "a run must not divide");
+        assert!(
+            ps[4] < 1.0,
+            "the split at depth 5 must divide the cohort, p was {}",
+            ps[4]
+        );
+    }
+
+    #[test]
+    fn a_segment_process_still_offers_a_per_depth_mean_for_occupancy() {
+        // Occupancy, rule 16 and the reports are all written against a per-depth fanout, and
+        // a node-level process still has one: `out_degree` children once every `length`
+        // blocks is a geometric mean of `deg^(1/len)` per step. Without this, adopting the
+        // new spelling would silently disable the occupancy floor.
+        let c = seg_corpus(4.0, 16.0);
+        // 16 children every 4 blocks is 16^(1/4) = 2.0 per step.
+        assert!(
+            (c.profile.fanout_at(1) - 2.0).abs() < 1e-9,
+            "band-mean fanout was {}",
+            c.profile.fanout_at(1)
+        );
+        assert!(c.segments.is_some(), "the node-level process is retained");
     }
 
     #[test]

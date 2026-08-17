@@ -186,6 +186,68 @@ pub enum Branching {
     Uniform(f64),
     /// Piecewise: each entry holds from its depth until the next.
     Profile(Vec<Segment>),
+    /// A node-level branching process: **where** splits are, not just how wide.
+    Segments(SegmentProcess),
+}
+
+/// The trunk as a process over nodes rather than a fanout per depth.
+///
+/// # Why this spelling exists
+///
+/// The other three spellings are functions of **depth**: they say what the fanout is at
+/// depth `d`, so every node at that depth fans out the same way. Real traces are not like
+/// that. Measured preamble lengths are per-root and multi-modal — `appworld` has cohorts
+/// splitting at 23, 3194 and 5556 blocks, `browsecompplus` at 1, 141 and 939 — so a
+/// depth-indexed profile must fan out at depth 141 for *every* root or for none, and cannot
+/// express the shape any of the corpus's six regimes actually has.
+///
+/// Here a node draws **how far the unary run continues** and **how many children end it**,
+/// from its own stream. Per-root variation then comes for free, because each root draws its
+/// own run length. Three further properties matter:
+///
+/// * **It subsumes the older spellings.** `length` const 1 with `out_degree` const `f` is
+///   exactly `Branching::Uniform(f)`.
+/// * **Nothing is extrapolated.** A depth-indexed profile has to say something about depths
+///   past the deepest it was fitted from, and that extrapolation is where a clipped-ratio
+///   product blew model width up by 5e23 on one real trace, which is why a retention floor
+///   had to exist at all. A node-level process generates unbounded depth from the same
+///   distributions with nothing extended.
+/// * **`out_degree` is the TOTAL, singletons included.** That is what makes a session go
+///   private: a split with 4739 children of which 483 are shared lets a session land on a
+///   child nobody else took and be alone from there on. A profile fitted to *shared* width
+///   cannot say it, and a generator without it produced a corpus in which nothing was
+///   private, against traces where 95% of nodes are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SegmentProcess {
+    /// Bands by depth, ascending, the first starting at 0.
+    ///
+    /// Banded because the conditioning is real and per-trace: measured, the relationship
+    /// between a segment's length and its depth differs between traces **in sign** (rho
+    /// -0.60 on `ragbench`, -0.52 on `tau2_airline`, -0.01 on `qwen_code`, +0.45 on
+    /// `exgentic_swebench`), and `qwen_code`'s per-band medians run 28, 9, 18, 23, 37, 13 —
+    /// non-monotonic, and invisible to any single coefficient. A banded empirical table is
+    /// the honest form; a fitted trend would be a shape no trace supports.
+    pub by_depth: Vec<SegmentBand>,
+}
+
+/// One depth band of a [`SegmentProcess`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SegmentBand {
+    /// This band holds from here until the next.
+    pub from_depth: u32,
+    /// Blocks a unary run continues before the next split. Drawn per split node.
+    pub length: Dist,
+    /// Children at the split that ends the run — **total**, singletons included.
+    pub out_degree: Dist,
+    // NO `n_eff_frac` HERE, deliberately. The child-choice law is `branch_skew`, which now
+    // works: `n_eff` is a different parameterisation of the same quantity, and accepting both
+    // would either double-count or — worse — be silently ignored. A field that looks fitted
+    // and does nothing is the exact defect this rework exists to remove, and there were three
+    // of them. Fitting `n_eff` per band and solving `branch_skew` from it is real work worth
+    // doing (it is the only functional occupancy, rule 16 and `branching: auto` depend on),
+    // and it is not done yet.
 }
 
 impl Default for Branching {
