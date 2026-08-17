@@ -272,6 +272,19 @@ pub fn assemble(
         .private_depth
         .clone()
         .ok_or(FitError::Unmeasured("private_depth"))?;
+    // Still the measured distribution, and it is now used for **one** thing rather than two.
+    //
+    // `shared_depth` is doubly loaded, which is the sharpest evidence that it is a stand-in
+    // rather than a property: `session::depth_at_turn` computes turn-1 depth as
+    // `shared_depth + private_depth`, so the field is simultaneously a term in PATH LENGTH
+    // and the TRUNK BOUNDARY. Since 2026-08-15 the trunk boundary is derived — a session
+    // leaves the trunk when its expected cohort falls below two — and this value survives
+    // only as the length term, where it is a measured quantity.
+    //
+    // Both roles disappear together when `{shared_depth, private_depth}` become one measured
+    // turn-1 path length, which is what the trace hands over directly. Staged separately: it
+    // is a 265-site change and the mechanism replacing the boundary role should be measured
+    // before the refactor rides on it.
     let shared_depth = sessions
         .shared_depth
         .clone()

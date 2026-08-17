@@ -404,6 +404,43 @@ fn zipf(st: &mut Stream, s: f64, n: u64) -> f64 {
     (cdf.partition_point(|&c| c <= u) as f64 + 1.0).min(n as f64)
 }
 
+/// The discrete Zipf probability of one rank, `p_k = k^-s / H_n(s)`.
+///
+/// Exposed because a caller that draws a rank often needs to know **how likely that rank
+/// was**: `Corpus::pick_child_p` carries the product of the probabilities a session took
+/// down the trunk as an expected cohort size, which is what tells it when its cohort has
+/// been subdivided away. Reads the same memoised table the draw does, so the two cannot
+/// disagree about the law.
+///
+/// `s <= 0` is uniform, matching the draw. Above the support size at which the exact table
+/// is abandoned the continuous density is used instead, again consistent with the draw.
+pub fn zipf_pmf_at(s: f64, n: u64, rank: u64) -> f64 {
+    if n == 0 || rank == 0 || rank > n {
+        return 0.0;
+    }
+    if s <= 0.0 || n == 1 {
+        return 1.0 / n as f64;
+    }
+    if n > ZIPF_EXACT_MAX_SUPPORT {
+        let h = |x: f64| -> f64 {
+            if (s - 1.0).abs() < 1e-9 {
+                x.ln()
+            } else {
+                (x.powf(1.0 - s) - 1.0) / (1.0 - s)
+            }
+        };
+        let hn = h(n as f64);
+        if hn <= 0.0 {
+            return 1.0 / n as f64;
+        }
+        return ((h((rank + 1) as f64).min(hn) - h(rank as f64)) / hn).max(0.0);
+    }
+    let cdf = zipf_cdf(s, n);
+    let i = (rank - 1) as usize;
+    let lo = if i == 0 { 0.0 } else { cdf[i - 1] };
+    (cdf[i] - lo).max(0.0)
+}
+
 /// The pre-2026-08 continuous approximation, kept for supports too large to tabulate.
 fn zipf_continuous(u: f64, s: f64, n: u64) -> f64 {
     let n = n as f64;

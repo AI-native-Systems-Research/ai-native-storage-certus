@@ -53,6 +53,20 @@ use crate::units::{parse_duration_ns, parse_rate_per_s, UnitError};
 /// can be tuned against a measurement.
 pub const DEFAULT_HORIZON_EVENTS: usize = 64 * 1024;
 
+/// Expected cohort size below which a session is treated as alone on the trunk.
+///
+/// "Shared" means two or more sessions, and that is exactly the threshold the trace-side
+/// measurement uses: a key counts toward shared width when two sessions reached it. So a
+/// branch whose expected cohort has fallen below 2 is one where this session would be the
+/// only occupant, and the blocks below it are private in fact whatever the trunk says.
+///
+/// This is the mechanism that replaced a drawn `shared_depth` as the binding constraint.
+/// It is an *expectation*, not a census — the generator stores nothing per node — so a
+/// session can be wrong about being alone in either direction. What matters is that the
+/// error is correlated with the branches it took rather than being an independent coin
+/// flip per node, which is what an earlier design got wrong.
+const COHORT_FLOOR: f64 = 2.0;
+
 /// Domain separators for the generator's own draws, so that two unrelated
 /// quantities about one session never consume each other's values.
 const TAG_SESSION: u64 = 0x5E55_1014;
@@ -167,8 +181,20 @@ impl std::error::Error for GenError {}
 #[derive(Debug, Clone)]
 struct Live {
     s: Session,
-    /// How much of this session's path is shared trunk; drawn once at birth.
+    /// A **ceiling** on how much of this session's path is shared trunk, drawn at birth.
+    ///
+    /// FR-012a always called the drawn value an upper bound on the realised one; since
+    /// 2026-08-15 the binding constraint is the session's own cohort running out (see
+    /// [`Live::root_cohort`]), and this only caps it. `fit` no longer emits it, so a
+    /// fitted model predicts its sharing depth instead of being told it.
     shared_depth: u32,
+    /// Expected sessions sharing this session's root — the head of the cohort product.
+    ///
+    /// `sessions per window x p(this root's rank)`. The walk multiplies it by
+    /// `p(child taken)` at every branch, and where it falls below
+    /// [`COHORT_FLOOR`] the session is statistically alone and continues privately.
+    /// Nothing is stored per node: the estimate is carried down the walk.
+    root_cohort: f64,
     /// Path depth of the turn about to be issued.
     depth: u32,
     /// Turn 1's depth, so the ceiling can never sit below it.
@@ -250,6 +276,8 @@ pub struct Generator {
     document: Document,
     /// `roots.popularity` with its support fixed to `roots.count`, resolved once.
     root_popularity: Dist,
+    /// Expected live sessions per occupancy window, the cohort estimate's numerator.
+    sessions_per_window: f64,
     shared_depth: Dist,
     seed: u64,
     nodes: u16,
@@ -356,6 +384,10 @@ impl Generator {
                 d.corpus.trees.roots.count,
             ),
             shared_depth: d.corpus.trees.shared_depth.clone(),
+            // Carried so a session's cohort estimate starts from the population it is
+            // actually competing for sharing with, over the window every occupancy
+            // quantity in this model is defined over (FR-009h).
+            sessions_per_window,
             seed: d.seed,
             nodes,
             placement,
@@ -571,6 +603,12 @@ impl Generator {
             params.max_depth,
             &mut growth,
         );
+        // The head of the cohort product: how many sessions this root is expected to
+        // hold. `p(rank)` comes from the same distribution the rank was drawn from, so a
+        // skewed root layer gives a popular root a large cohort and a rare one a small
+        // cohort — which is why a session on an unpopular root shares less, as in the
+        // trace, without anything having to be told to it.
+        let root_cohort = self.sessions_per_window * self.root_rank_p(root_index, roots);
         Live {
             turn_one_depth: depth,
             s: Session {
@@ -582,8 +620,40 @@ impl Generator {
                 next_t_ns: at_ns,
             },
             shared_depth,
+            root_cohort,
             depth,
             growth,
+        }
+    }
+
+    /// The probability that a session binds to the root at `index`.
+    ///
+    /// Read off `roots.popularity` rather than assumed uniform: the whole point of the
+    /// cohort estimate is that an unpopular root holds few sessions. For an `empirical`
+    /// rank distribution — what `fit` emits — the mass on a rank is the CDF step across
+    /// it; for `zipf` it is the discrete pmf; anything else falls back to uniform, which
+    /// is the honest answer when the shape carries no closed form here.
+    fn root_rank_p(&self, index: u32, roots: u32) -> f64 {
+        let rank = u64::from(index) + 1;
+        match self.root_popularity.shape() {
+            Shape::Zipf { s, n } => {
+                crate::dist::zipf_pmf_at(s, n.unwrap_or(u64::from(roots)), rank)
+            }
+            Shape::Empirical { points } => {
+                let v = rank as f64;
+                let mut below = 0.0f64;
+                let mut at = 0.0f64;
+                for (pv, pc) in &points {
+                    if *pv < v {
+                        below = below.max(*pc);
+                    }
+                    if *pv <= v {
+                        at = at.max(*pc);
+                    }
+                }
+                (at - below).max(0.0)
+            }
+            _ => 1.0 / f64::from(roots.max(1)),
         }
     }
 
@@ -621,10 +691,41 @@ impl Generator {
         // whatever `shared_depth` says, since every session bound to a root
         // traverses it — so a trunk of length 0 is not expressible, and
         // `shared_depth` of 0 and 1 both mean "the root and nothing below it".
+        // The expected cohort, carried down rather than stored per node. Once a session is
+        // alone it stays alone: a rolling-prefix key rehashes everything below a changed
+        // prefix, so a path that has left the trunk cannot rejoin it at a deeper level.
+        let mut cohort = live.root_cohort;
+        let mut alone = false;
         for d in 0..depth {
             if d > 0 {
-                cur = if d < live.shared_depth {
-                    self.corpus.trunk_step(cur, d, &mut walk, gen)
+                // The boundary is the EARLIER of cohort exhaustion and the drawn cap.
+                //
+                // Cohort exhaustion is the mechanism the trace's structure actually uses, and
+                // it is live here — but on its own it cannot yet replace the cap, which is a
+                // measured result rather than a caution. A fitted `branching` profile fits
+                // the width of the SHARED subtrie (keys two or more sessions reached), and
+                // that width is nearly flat, so the cohort almost never divides and nothing
+                // ever becomes private: removing the cap made every block shared and minted
+                // no private keys at all, against a trace where 95% of nodes are private.
+                //
+                // What creates privacy in the trace is *total* out-degree — a split with 4739
+                // children of which only 483 are shared, so a session can land on a singleton
+                // child and be alone from there. The per-depth shared-width profile cannot
+                // express that, so cohort tracking can only become the sole boundary once the
+                // segment spelling carries total out-degree. Until then the cap binds first
+                // on any fitted document and this is a superset of the old behaviour.
+                cur = if !alone && d < live.shared_depth {
+                    let n = self.corpus.child_count(cur, d);
+                    let (idx, p) = self.corpus.pick_child_p(&mut walk, n);
+                    // Only a real branch divides a cohort; a single-child step leaves it
+                    // whole, which is what makes a long unary run a shared segment.
+                    if n > 1 {
+                        cohort *= p;
+                    }
+                    if cohort < COHORT_FLOOR {
+                        alone = true;
+                    }
+                    self.corpus.trunk_child_at(cur, idx, gen)
                 } else {
                     private_child(cur, live.s.id, d)
                 };

@@ -579,9 +579,14 @@ fn warmup_window(d: &Document, r: &mut Report) {
 /// the realised sharing is far below the drawn depth — which then reads as a
 /// property of the workload rather than of the arithmetic.
 ///
-/// Below **1.0** rejects: on average not one other session has been down the
-/// path, so the sharing the document describes does not exist. Below
-/// [`TARGET_OCCUPANCY`] warns: still measurable, just thin.
+/// **Both bands warn since 2026-08-15; neither rejects.** Below 1.0 means most sessions at
+/// that depth are alone on their branch, and the generator now realises that faithfully by
+/// letting a session leave the trunk when its expected cohort falls below two — so the
+/// document is not claiming sharing it cannot deliver, it is delivering less. Below
+/// [`TARGET_OCCUPANCY`] is thinner still. The prose above describes the world before
+/// sharing was derived rather than drawn, and is kept because the arithmetic is unchanged:
+/// what changed is that a thin trunk is now a fact about the workload rather than a defect
+/// in the document.
 ///
 /// When an input the arithmetic needs is missing, this **says so** rather than
 /// passing quietly. A silently skipped check reads exactly like a check that
@@ -680,13 +685,29 @@ pub fn occupancy_floor(d: &Document, r: &mut Report) {
         ));
     }
     if occ < 1.0 {
-        r.reject(
+        // WARNS since 2026-08-15, where it used to reject.
+        //
+        // The rejection's premise was that a document could *ask* for sharing its trunk
+        // cannot supply: `shared_depth` was what a session attempted, so a trunk wider
+        // than the population could occupy left sessions on virgin trunk while the
+        // document still claimed the sharing. That premise is gone. A session now leaves
+        // the trunk when its own expected cohort falls below two
+        // (`plan::generate::COHORT_FLOOR`), so a wide trunk does not produce unrealisable
+        // sharing — it produces *less* sharing, correctly and visibly, and the realised
+        // figure is what FR-056 compares.
+        //
+        // Keeping the rejection would refuse honest models: it rejected five corpus
+        // traces at occupancy 0.23-0.25 once the deep trunk was fitted rather than
+        // amputated, for a trunk those traces demonstrably have.
+        r.warn(
             "16",
             format!(
                 "trunk occupancy at p99(shared_depth) = {p99} is {occ:.2}{churn_note}: fewer than \
-                 one session per distinct trunk path, so sessions land on virgin trunk and the \
-                 sharing this document describes is not realised. Widen the population, narrow \
-                 the trunk ({} roots at fanout {:.3}), or reduce shared_depth",
+                 one session per distinct trunk path at that depth, so most sessions there are \
+                 alone on their branch and will go private rather than share. That is realised \
+                 faithfully rather than misreported — a session leaves the trunk when its \
+                 expected cohort falls below two — but if you meant this run to exercise \
+                 sharing, widen the population or narrow the trunk ({} roots at fanout {:.3})",
                 roots,
                 corpus.profile.fanout_at(1)
             ),
@@ -954,15 +975,23 @@ run:
         // session population, and that is arithmetic rather than a threshold on
         // the number itself. The same 2.0 that is fatal at depth 40 is harmless
         // at depth 4, which no rule reading the fanout alone could express.
+        // Both bands WARN since 2026-08-15 rather than rejecting, so the assertion is
+        // on the finding and its band, not on rejection. The property being pinned is
+        // unchanged: the same fanout is judged differently at different depths.
         let deep = validate(&occ_doc(12, "2.0", 40, 240_000));
-        assert!(
-            deep.rejections().any(|f| f.rule == "16"),
-            "{:?}",
-            deep.findings
-        );
+        let f = deep
+            .findings
+            .iter()
+            .find(|f| f.rule == "16")
+            .expect("rule 16 must speak at depth 40");
+        assert_eq!(f.severity, Severity::Warn);
+        assert!(f.message.contains("alone on their branch"), "{}", f.message);
         let shallow = validate(&occ_doc(12, "2.0", 4, 240_000));
         assert!(
-            !shallow.rejections().any(|f| f.rule == "16"),
+            !shallow
+                .findings
+                .iter()
+                .any(|f| f.rule == "16" && f.message.contains("alone on their branch")),
             "{:?}",
             shallow.findings
         );
@@ -1018,16 +1047,40 @@ run:
     }
 
     #[test]
-    fn an_unoccupiable_trunk_is_rejected_rather_than_measured() {
-        // Rule 16, the reject half. Fanout 2.0 over 40 depths is 2^40 paths from
-        // each of 12 roots against ~40k sessions per window: every session walks
-        // virgin trunk, so the shared_depth it drew is fiction.
+    fn an_unoccupiable_trunk_is_reported_and_no_longer_refused() {
+        // Fanout 2.0 over 40 depths is 2^40 paths from each of 12 roots against ~40k
+        // sessions per window, so almost every session is alone on its branch there.
+        //
+        // That used to REJECT, on the premise that a document could ask for sharing its
+        // trunk cannot supply — `shared_depth` was what a session attempted, and the
+        // attempt could be fiction. Since sharing became derived (2026-08-15) the premise
+        // is gone: a session leaves the trunk when its expected cohort falls below two, so
+        // a wide trunk yields *less* sharing rather than misreported sharing, and the
+        // realised figure is what FR-056 compares. Keeping the rejection refused five
+        // corpus traces for a trunk they demonstrably have.
         let d = occ_doc(12, "2.0", 40, 240_000);
         let r = validate(&d);
-        assert!(r.is_rejected());
-        let f = r.rejections().find(|f| f.rule == "16").expect("rule 16");
-        assert!(f.message.contains("virgin trunk"), "{}", f.message);
-        assert!(f.message.contains("p99(shared_depth) = 40"));
+        assert!(
+            !r.rejections().any(|f| f.rule == "16"),
+            "rule 16 must not reject: {:?}",
+            r.findings
+        );
+        let f = r
+            .findings
+            .iter()
+            .find(|f| f.rule == "16")
+            .expect("but it must still speak");
+        assert_eq!(f.severity, Severity::Warn);
+        assert!(
+            f.message.contains("p99(shared_depth) = 40"),
+            "{}",
+            f.message
+        );
+        assert!(
+            f.message.contains("expected cohort falls below two"),
+            "the warning must say what the generator will actually do: {}",
+            f.message
+        );
     }
 
     #[test]
@@ -1105,7 +1158,11 @@ run:
         let mut d = occ_doc(12, "2.0", 40, 240_000);
         d.run.wss_window = None;
         let r = validate(&d);
-        let f = r.rejections().find(|f| f.rule == "16").expect("rule 16");
+        let f = r
+            .findings
+            .iter()
+            .find(|f| f.rule == "16")
+            .expect("rule 16 still runs; it warns rather than rejects");
         assert!(
             f.message.contains("default window of 240000"),
             "{}",

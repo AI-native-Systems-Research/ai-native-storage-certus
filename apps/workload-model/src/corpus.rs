@@ -224,18 +224,49 @@ impl Corpus {
     /// choice the session makes; the node's own stream decides only how many
     /// children exist.
     pub fn pick_child(&self, st: &mut Stream, children: u32) -> u32 {
+        self.pick_child_p(st, children).0
+    }
+
+    /// The chosen child **and the probability of choosing it**.
+    ///
+    /// The probability is what lets a walker carry an *expected cohort size* down the
+    /// trunk — `sessions on this root x PROD p(child taken)` — and so know, without any
+    /// per-node census, roughly how many other sessions are still beside it. That is the
+    /// quantity the trace's structure is actually made of: measured over six traces, a
+    /// cohort's fan-in falls by **subdivision** until a branch holds one session, at which
+    /// point that session is in its private tail. Leakage at a split — sessions retiring
+    /// *on* the shared trunk — has a median of exactly 0.000 in every depth band, because
+    /// sessions retire in their private tails instead, those being 95%+ of all nodes.
+    ///
+    /// So a session leaves the shared region when its own cohort is exhausted, which
+    /// depends on how popular the branches it took were. That correlation is the whole
+    /// point: an earlier design shed sessions off the trunk with a per-node coin flip,
+    /// uncorrelated with the session, and it made `sharing_depth` three times worse.
+    pub fn pick_child_p(&self, st: &mut Stream, children: u32) -> (u32, f64) {
         if children <= 1 {
-            return 0;
+            return (0, 1.0);
         }
+        let n = u64::from(children);
         if self.branch_skew <= 0.0 {
-            return st.next_below(u64::from(children)) as u32;
+            return (st.next_below(n) as u32, 1.0 / children as f64);
         }
         let d = Dist::Shaped(crate::dist::Shape::Zipf {
             s: self.branch_skew,
-            n: Some(u64::from(children)),
+            n: Some(n),
         });
         // Zipf yields a 1-based rank; children are 0-based.
-        (d.sample_u64(st).max(1) - 1).min(u64::from(children - 1)) as u32
+        let rank = d.sample_u64(st).max(1).min(n);
+        let idx = (rank - 1) as u32;
+        (idx, crate::dist::zipf_pmf_at(self.branch_skew, n, rank))
+    }
+
+    /// The trunk child at `index` of `cur` — the key half of a trunk step.
+    ///
+    /// Split out from [`Corpus::trunk_step`] so a caller that needs the *probability* of
+    /// the step (to carry an expected cohort) can draw the child itself with
+    /// [`Corpus::pick_child_p`] and still mint the key through one implementation.
+    pub fn trunk_child_at(&self, cur: CacheKey, index: u32, gen: Generation) -> CacheKey {
+        trunk_child(cur, index, gen)
     }
 
     /// The key at `root_index`.
