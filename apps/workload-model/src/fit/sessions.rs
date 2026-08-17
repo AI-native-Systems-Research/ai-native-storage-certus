@@ -990,7 +990,7 @@ fn empirical_from(h: &Hist) -> Option<Dist> {
 /// A bucket's own value is likewise its midpoint rather than its lower bound, which
 /// is the same argument one level down. Below `LINEAR` a bucket is a single integer
 /// and the midpoint *is* that integer, so the exact case stays exact.
-fn empirical_from_buckets(buckets: &[(u64, u64, u64)]) -> Option<Dist> {
+pub(crate) fn empirical_from_buckets(buckets: &[(u64, u64, u64)]) -> Option<Dist> {
     let total: u64 = buckets.iter().map(|(_, _, c)| *c).sum();
     if total == 0 {
         return None;

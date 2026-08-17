@@ -292,6 +292,87 @@ impl SegmentRow {
     }
 }
 
+/// Depth bands a fitted [`crate::schema::SegmentProcess`] is banded by.
+///
+/// Geometric, because the structure plainly varies with depth — out-degree 4739 at depth 0
+/// against 2 at depth 210 on `qwen_code` — and a linear banding would put every interesting
+/// thing in one bucket. The same bands `research/segment_census.py` reports, so a fitted
+/// document can be read against that table directly.
+const BANDS: [u32; 6] = [0, 1, 8, 32, 128, 512];
+
+/// Fit a node-level trunk process from the census.
+///
+/// Per band, the distribution of a split's **run length** and of its **total out-degree**,
+/// both as empirical step distributions through the same builder `fit::sessions` uses — so
+/// the step encoding gets the same care that a readability budget standing in for an
+/// accuracy one previously cost us twice.
+///
+/// # Weighted by fan-in, deliberately
+///
+/// A walker draws a run length *at a split it has arrived at*, and a split holding 5000
+/// sessions is arrived at by 5000 sessions while one holding 2 is arrived at by 2. So the
+/// distribution a session experiences is the fan-in-weighted one, not the per-segment one.
+/// This matters here more than it usually would: measured, the shared region is numerically
+/// dominated by tiny short-lived cohorts (fan-in median 2-3 in the deep bands) while the
+/// reference mass sits in a handful of big segments, so the unweighted and weighted
+/// distributions are very different objects. Weight the fit the way the statistic is
+/// weighted, or `unique_keys` and reuse distance pull in opposite directions.
+pub fn fit_process(rows: &[SegmentRow]) -> Option<crate::schema::SegmentProcess> {
+    use crate::schema::{SegmentBand, SegmentProcess};
+
+    let mut bands: Vec<SegmentBand> = Vec::new();
+    for (i, lo) in BANDS.iter().enumerate() {
+        let hi = BANDS.get(i + 1).copied().unwrap_or(u32::MAX);
+        let in_band = || {
+            rows.iter()
+                .filter(move |r| r.start_depth >= *lo && (hi == u32::MAX || r.start_depth < hi))
+        };
+        let length =
+            weighted_empirical(in_band().map(|r| (u64::from(r.length), u64::from(r.fan_in))));
+        // Out-degree is only defined where a split ended the segment; a leaf has none, and
+        // an attrition boundary is a cohort shrinking rather than dividing.
+        let out_degree = weighted_empirical(
+            in_band()
+                .filter(|r| r.ends == SegmentEnd::Fanout)
+                .map(|r| (u64::from(r.out_degree), u64::from(r.fan_in))),
+        );
+        if let (Some(length), Some(out_degree)) = (length, out_degree) {
+            bands.push(SegmentBand {
+                from_depth: *lo,
+                length,
+                out_degree,
+            });
+        }
+    }
+    if bands.is_empty() {
+        return None;
+    }
+    // Schema rule 8 requires the first band at depth 0. If the shallowest band with any
+    // measured split is deeper, its distributions are the best evidence there is for the
+    // depths above it — stating them from 0 is honest, whereas omitting the band would leave
+    // the document unable to describe its own root layer.
+    bands[0].from_depth = 0;
+    Some(SegmentProcess { by_depth: bands })
+}
+
+/// An empirical step distribution over `(value, weight)` pairs.
+fn weighted_empirical(obs: impl Iterator<Item = (u64, u64)>) -> Option<crate::dist::Dist> {
+    let mut pairs: Vec<(u64, u64)> = obs.collect();
+    if pairs.is_empty() {
+        return None;
+    }
+    pairs.sort_unstable();
+    // Merge equal values, since the builder expects one bucket per distinct value.
+    let mut buckets: Vec<(u64, u64, u64)> = Vec::new();
+    for (v, w) in pairs {
+        match buckets.last_mut() {
+            Some((lo, _, c)) if *lo == v => *c += w.max(1),
+            _ => buckets.push((v, v, w.max(1))),
+        }
+    }
+    super::sessions::empirical_from_buckets(&buckets)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,6 +457,59 @@ mod tests {
             (seg.leak() - 1.0 / 3.0).abs() < 1e-9,
             "leak was {}",
             seg.leak()
+        );
+    }
+
+    #[test]
+    fn a_fitted_process_states_the_measured_run_length_and_total_out_degree() {
+        // Four sessions share three blocks then split two ways, so the root band should
+        // state a run of 3 and an out-degree of 2 — and the out-degree must be the TOTAL,
+        // which is what a shared-width profile cannot say.
+        let reqs = vec![
+            (1, vec![1, 2, 3, 10, 11]),
+            (2, vec![1, 2, 3, 10, 12]),
+            (3, vec![1, 2, 3, 20, 21]),
+            (4, vec![1, 2, 3, 20, 22]),
+        ];
+        let rows = census_of(&reqs).finish(2);
+        let p = fit_process(&rows).expect("a process");
+        assert_eq!(
+            p.by_depth[0].from_depth, 0,
+            "rule 8 wants the first band at 0"
+        );
+        let l = p.by_depth[0].length.quantile(0.5).expect("a median length");
+        assert!((l - 3.0).abs() < 0.5, "median run length came out {l}");
+        let d = p.by_depth[0]
+            .out_degree
+            .quantile(0.5)
+            .expect("a median degree");
+        assert!((d - 2.0).abs() < 0.5, "median out-degree came out {d}");
+    }
+
+    #[test]
+    fn the_fit_is_weighted_by_fan_in_because_that_is_what_a_session_experiences() {
+        // A walker draws a run length at a split it has ARRIVED at, so a split holding many
+        // sessions is arrived at by many. Here one segment of length 2 carries 10 sessions
+        // and twenty segments of length 50 carry 2 each: unweighted the median length is 50,
+        // fan-in weighted it is 2, and the sessions overwhelmingly experience 2.
+        //
+        // This is not a nicety — measured, the shared region is numerically tiny cohorts
+        // while the reference mass is a few big segments, so the two weightings are
+        // different objects.
+        let mut reqs: Vec<(u32, Vec<u64>)> = Vec::new();
+        for s in 0..10u32 {
+            // Ten sessions share a 2-block root run, then each pair goes its own way.
+            reqs.push((s, vec![1, 2, 100 + u64::from(s) / 2]));
+        }
+        let rows = census_of(&reqs).finish(2);
+        let root = rows.iter().find(|r| r.start_depth == 0).expect("root");
+        assert_eq!(root.length, 2);
+        assert_eq!(root.fan_in, 10);
+        let p = fit_process(&rows).expect("a process");
+        let l = p.by_depth[0].length.quantile(0.5).expect("median");
+        assert!(
+            (l - 2.0).abs() < 0.6,
+            "the 10-session run must dominate the median, got {l}"
         );
     }
 

@@ -106,6 +106,21 @@ enum Cmd {
         /// parameter than a uniform shift would.
         #[arg(long)]
         explain: bool,
+        /// Emit the node-level `branching: {by_depth: [...]}` spelling.
+        ///
+        /// OFF by default because it is not yet an improvement, and the reason is
+        /// specific: the spelling states a split's **total** out-degree, but the law
+        /// choosing among those children is still the document-wide `branch_skew`. On
+        /// `qwen_code` the census measures a 4739-way root split with 0.496 of sessions on
+        /// its top child, while `branch_skew: 0.9` puts 0.054 there — so sessions scatter
+        /// about nine times more than the trace and sharing collapses (`sharing_depth`
+        /// 0.060 -> 0.364). Out-degree and the child law are a pair; fitting one without
+        /// the other is worse than fitting neither.
+        ///
+        /// The flag exists so the two can be A/B'd on one trace as the child law is
+        /// fitted, rather than the capability sitting unexercised until it is finished.
+        #[arg(long)]
+        branching_segments: bool,
     },
     /// Compare two reference streams statistic by statistic.
     ///
@@ -192,6 +207,7 @@ fn main() -> ExitCode {
             allow_partial,
             tolerances,
             explain,
+            branching_segments,
         } => cmd_fit(
             &trace,
             out.as_deref(),
@@ -203,6 +219,7 @@ fn main() -> ExitCode {
             allow_partial,
             &tolerances,
             explain,
+            branching_segments,
         ),
         Cmd::Validate {
             plan,
@@ -361,6 +378,7 @@ fn cmd_fit(
     allow_partial: bool,
     tolerance_args: &[String],
     explain: bool,
+    branching_segments: bool,
 ) -> Result<bool, String> {
     let tol = parse_tolerances(tolerance_args)?;
     let trace =
@@ -455,8 +473,23 @@ fn cmd_fit(
         wss_window_requests: wss_window,
         seed,
     };
+    // The segment census, and the node-level trunk process fitted from it. Built once:
+    // it is the only description that can state per-root preamble lengths and the TOTAL
+    // out-degree a session needs in order to land on a child nobody else took.
+    let fitted_segments = if !branching_segments {
+        None
+    } else {
+        let mut order: Vec<usize> = (0..trace.invocations.len()).collect();
+        order.sort_by_key(|i| (trace.invocations[*i].session.0, trace.invocations[*i].turn));
+        let mut census = workload_model::fit::segments::Census::new();
+        for i in order {
+            census.observe(trace.invocations[i].session, &trace.invocations[i].blocks);
+        }
+        workload_model::fit::segments::fit_process(&census.finish(2))
+    };
     let fitted = assemble(
         &fitted_branching,
+        fitted_segments.as_ref(),
         &fitted_sessions,
         &roots,
         &supplied,
@@ -639,6 +672,7 @@ fn cmd_fit(
             adjusted.private_depth = shapes.private_depth_at(scale);
             match assemble(
                 &fitted_branching,
+                fitted_segments.as_ref(),
                 &adjusted,
                 &roots,
                 &supplied,

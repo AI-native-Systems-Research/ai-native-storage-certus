@@ -258,6 +258,7 @@ impl std::error::Error for FitError {}
 /// (FR-055d).
 pub fn assemble(
     branching: &FittedBranching,
+    segments: Option<&crate::schema::SegmentProcess>,
     sessions: &FittedSessions,
     roots: &RootPopularity,
     supplied: &Supplied,
@@ -416,13 +417,20 @@ pub fn assemble(
                     popularity: fitted_roots.popularity.clone(),
                 },
                 shared_depth,
-                branching: if branching.segments.is_empty() {
-                    // No fitted segment means the uncensored prefix held no width
-                    // change: a flat trunk, which is a measurement rather than an
-                    // absence.
-                    Branching::Uniform(1.0)
-                } else {
-                    Branching::Profile(branching.segments.clone())
+                // A node-level process where the census produced one, because it is the
+                // only spelling that can state per-root preamble lengths and total
+                // out-degree — the two things the corpus's structure is made of and a
+                // per-depth profile cannot express. The width profile remains the
+                // fallback, and remains what `--explain`'s width table is judged against.
+                branching: match segments {
+                    Some(p) => Branching::Segments(p.clone()),
+                    None if branching.segments.is_empty() => {
+                        // No fitted segment means the uncensored prefix held no width
+                        // change: a flat trunk, which is a measurement rather than an
+                        // absence.
+                        Branching::Uniform(1.0)
+                    }
+                    None => Branching::Profile(branching.segments.clone()),
                 },
                 branch_skew: crate::schema::default_branch_skew(),
                 churn: None,
@@ -563,6 +571,7 @@ mod tests {
         // The whole point: what `fit` writes must be what `plan` reads.
         let f = assemble(
             &fitted_branching(),
+            None,
             &fitted_sessions(),
             &roots_with(&[40, 20, 10, 5]),
             &supplied(),
@@ -596,6 +605,7 @@ mod tests {
         // cannot realise, so the document it emits has to survive the schema.
         let f = assemble(
             &fitted_branching(),
+            None,
             &fitted_sessions(),
             &roots_with(&[40, 20, 10, 5]),
             &supplied(),
@@ -620,6 +630,7 @@ mod tests {
     fn the_unfittable_parameters_are_named_rather_than_filled_in() {
         let f = assemble(
             &fitted_branching(),
+            None,
             &fitted_sessions(),
             &roots_with(&[10, 5]),
             &supplied(),
@@ -641,6 +652,7 @@ mod tests {
         s.rate_per_s = None;
         let e = assemble(
             &fitted_branching(),
+            None,
             &fitted_sessions(),
             &roots_with(&[10]),
             &s,
@@ -663,6 +675,7 @@ mod tests {
         // FR-055d: an order-dependent measurement must not read as a measured one.
         let f = assemble(
             &fitted_branching(),
+            None,
             &fitted_sessions(),
             &roots_with(&[10]),
             &supplied(),
@@ -756,6 +769,7 @@ mod tests {
         let empty = SessionShapes::new().finish(&sharing_with(&[]));
         let e = assemble(
             &fitted_branching(),
+            None,
             &empty,
             &roots_with(&[10]),
             &supplied(),
