@@ -12,4 +12,5 @@
 
 pub mod branching;
 pub mod document;
+pub mod segments;
 pub mod sessions;

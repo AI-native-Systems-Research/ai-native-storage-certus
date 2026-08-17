@@ -585,6 +585,7 @@ fn cmd_fit(
     // the trace genuinely describes something the model cannot express.
     if explain {
         print_trunk_profile(&trace_report, &fitted_branching);
+        print_segment_census(&trace.invocations);
     }
 
     if !rejections.is_empty() {
@@ -1110,6 +1111,123 @@ fn print_path_budget(
 /// which is the trunk as the fit defines it; `width` counts every distinct key there,
 /// trunk plus every private descent. Where the two diverge, the trunk has ended and
 /// what remains is private.
+/// The segment census, banded by depth — the fitting input for the cohort mechanism.
+///
+/// Printed under `--explain` because it is what says whether the trunk the fit describes is
+/// the trunk the trace has. The per-depth width table above cannot: it is the trie's
+/// marginals, and "one preamble shared by 5922 sessions" and "5922 sessions over 603
+/// unrelated roots" produce identical rows in it.
+///
+/// The bands are the same geometric ones `research/segment_census.py` uses, and the columns
+/// are the same quantities, deliberately: the two implementations are meant to be diffed on
+/// a real trace. Out-degree is the **total**, singletons included, because that is where
+/// privacy comes from and where a shared-width profile is blind.
+fn print_segment_census(invocations: &[read::NormalisedInvocation]) {
+    use workload_model::fit::segments::{Census, SegmentEnd};
+
+    // Grouped by session, which `Census::observe` requires for an exact fan-in.
+    let mut order: Vec<usize> = (0..invocations.len()).collect();
+    order.sort_by_key(|i| (invocations[*i].session.0, invocations[*i].turn));
+    let mut census = Census::new();
+    for i in order {
+        census.observe(invocations[i].session, &invocations[i].blocks);
+    }
+    let rows = census.finish(2);
+    if rows.is_empty() {
+        println!("\n  segment census — no shared segment to report");
+        return;
+    }
+    const BANDS: [(u32, u32); 6] = [
+        (0, 0),
+        (1, 7),
+        (8, 31),
+        (32, 127),
+        (128, 511),
+        (512, u32::MAX),
+    ];
+    println!("\n  segment census — the trunk as runs of blocks one cohort walks together");
+    println!(
+        "  a segment is a maximal chain of constant fan-in; out-degree is the TOTAL at the split\n  \
+         that ends it, singletons included, because that is what makes a session go private."
+    );
+    println!(
+        "    {:>10}  {:>6}  {:>8}  {:>8}  {:>8}  {:>8}  {:>7}  {:>7}  {:>8}",
+        "depths",
+        "segs",
+        "len_med",
+        "len_max",
+        "fanin_med",
+        "fanin_max",
+        "deg_med",
+        "shared",
+        "leak_wt"
+    );
+    for (lo, hi) in BANDS {
+        let mut v: Vec<&_> = rows
+            .iter()
+            .filter(|r| r.start_depth >= lo && r.start_depth <= hi)
+            .collect();
+        if v.is_empty() {
+            continue;
+        }
+        v.sort_by_key(|r| r.length);
+        let len_med = v[v.len() / 2].length;
+        let len_max = v.iter().map(|r| r.length).max().unwrap_or(0);
+        let mut f: Vec<u32> = v.iter().map(|r| r.fan_in).collect();
+        f.sort_unstable();
+        let fan_med = f[f.len() / 2];
+        let fan_max = *f.last().unwrap_or(&0);
+        let splits: Vec<&&_> = v.iter().filter(|r| r.ends == SegmentEnd::Fanout).collect();
+        let mut deg: Vec<u32> = splits.iter().map(|r| r.out_degree).collect();
+        deg.sort_unstable();
+        let deg_med = if deg.is_empty() {
+            0
+        } else {
+            deg[deg.len() / 2]
+        };
+        let shared_med = {
+            let mut s: Vec<u32> = splits.iter().map(|r| r.shared_children).collect();
+            s.sort_unstable();
+            if s.is_empty() {
+                0
+            } else {
+                s[s.len() / 2]
+            }
+        };
+        // Session-weighted, because a split holding 5000 sessions matters more than one
+        // holding 2 — and because the median is exactly 0.000 on every trace measured, which
+        // is the finding that established sharing ends by subdivision rather than retirement.
+        let lw: f64 = splits.iter().map(|r| r.leak() * f64::from(r.fan_in)).sum();
+        let ld: f64 = splits.iter().map(|r| f64::from(r.fan_in)).sum();
+        let span = if hi == u32::MAX {
+            format!("{lo}+")
+        } else if lo == hi {
+            format!("{lo}")
+        } else {
+            format!("{lo}-{hi}")
+        };
+        println!(
+            "    {:>10}  {:>6}  {:>8}  {:>8}  {:>8}  {:>8}  {:>7}  {:>7}  {:>8.3}",
+            span,
+            v.len(),
+            len_med,
+            len_max,
+            fan_med,
+            fan_max,
+            deg_med,
+            shared_med,
+            if ld > 0.0 { lw / ld } else { 0.0 }
+        );
+    }
+    if census.violations() > 0 {
+        println!(
+            "    {} keys contradict rolling-prefix identity, so these rows describe something \
+             that is not a trie",
+            census.violations()
+        );
+    }
+}
+
 fn print_trunk_profile(trace: &Report, fitted: &workload_model::fit::branching::FittedBranching) {
     let depths = &trace.trunk.depths;
     if depths.is_empty() {
