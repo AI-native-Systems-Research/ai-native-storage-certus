@@ -79,6 +79,20 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # not produce a warning storm.
         self._store_dropped_blocks = 0
         self._store_drop_log_next = 1000
+        # Per-pass lookup cache. The scheduler calls ``touch(full_key_list)`` for
+        # every KV group and THEN runs its maximal-prefix lookup loop over a
+        # slice of those same keys — one ``lookup()`` per key, breaking at the
+        # first miss (offloading/scheduler.py::_maximal_prefix_lookup). We fire a
+        # single batched ``Check`` inside ``touch`` (which already ships the whole
+        # key list) and answer each per-key ``lookup`` from this map, collapsing
+        # up to K per-key ``Check`` round-trips into one. Scope is a single
+        # scheduling pass: a ``touch`` that follows a ``lookup`` starts a new pass
+        # and clears the map (so a positive bit can never be reused across steps,
+        # after the key may have been evicted). A cache miss falls back to the
+        # authoritative single-key ``Check`` — an unseen key is never answered
+        # wrong, only un-batched.
+        self._lookup_cache: dict[int, bool] = {}
+        self._last_op_was_lookup = False
 
     def set_block_size_bytes(self, block_size_bytes: int) -> None:
         """Update the per-block Reserve size once the true KV-cache tensor
@@ -111,14 +125,37 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # difference so this body stays a single Check call.
         from .compat import lookup_result
 
+        self._last_op_was_lookup = True
         int_key = _key_to_u64(key)
-        exists = self._ring.check([int_key])
-        return lookup_result(bool(exists and exists[0]))
+        # Fast path: answer from the bitmap the preceding touch() batched. A
+        # miss (key not in this pass's batch, e.g. the scheduler looking up a
+        # key it never touched) falls back to the authoritative single-key
+        # Check — correctness is never traded for the batch, only latency.
+        cached = self._lookup_cache.get(int_key)
+        if cached is None:
+            exists = self._ring.check([int_key])
+            cached = bool(exists and exists[0])
+        return lookup_result(cached)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
+        # A touch that follows a lookup opens a new scheduling pass — retire the
+        # previous pass's bitmap so a stale positive can never outlive the step
+        # in which its Check was authoritative (the key may since be evicted).
+        if self._last_op_was_lookup:
+            self._lookup_cache.clear()
+            self._last_op_was_lookup = False
         int_keys = _keys_to_u64s(keys)
-        if int_keys:
-            self._ring.touch(int_keys, promote=False)
+        if not int_keys:
+            return
+        self._ring.touch(int_keys, promote=False)
+        # Batch the existence probe for the whole key list here, where we
+        # already hold it, so the scheduler's subsequent per-key lookup loop
+        # (offloading/scheduler.py::_maximal_prefix_lookup) is served from this
+        # map instead of firing one Check RPC per key.
+        flags = self._ring.check(int_keys)
+        self._lookup_cache.update(
+            (k, bool(f)) for k, f in zip(int_keys, flags)
+        )
 
     # ── store ──
 

@@ -136,6 +136,60 @@ def test_touch_maps_to_touch_no_promote():
     assert promote is False
 
 
+def test_touch_batches_check_for_following_per_key_lookups():
+    # Option 1: touch() ships the whole key list, so it fires ONE batched check
+    # and the scheduler's subsequent per-key lookup loop is served from the
+    # memoized bitmap — no per-key check RPC.
+    ring = FakeRing()
+    ring.exists[1] = True
+    ring.exists[2] = True
+    # key 3 absent
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    keys = [(1).to_bytes(8, "big"), (2).to_bytes(8, "big"), (3).to_bytes(8, "big")]
+
+    mgr.touch(keys)
+    # Exactly one batched check over the full list.
+    checks = _calls_of(ring, "check")
+    assert checks == [[1, 2, 3]]
+
+    # Per-key lookups answer from the cache, issuing NO further check.
+    assert mgr.lookup(keys[0]) is True
+    assert mgr.lookup(keys[1]) is True
+    assert mgr.lookup(keys[2]) is False
+    assert _calls_of(ring, "check") == [[1, 2, 3]]  # still just the one
+
+
+def test_lookup_miss_falls_back_to_single_check():
+    # A lookup for a key the current pass never touched must consult the
+    # authoritative single-key check rather than answering absent from a stale
+    # or empty bitmap.
+    ring = FakeRing()
+    ring.exists[42] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    mgr.touch([(1).to_bytes(8, "big")])  # bitmap covers key 1 only
+    assert mgr.lookup((42).to_bytes(8, "big")) is True
+    # The fallback single-key check happened for the uncached key.
+    assert [1] in _calls_of(ring, "check")
+    assert [42] in _calls_of(ring, "check")
+
+
+def test_touch_after_lookup_starts_new_pass_and_clears_bitmap():
+    # A touch that follows a lookup opens a new scheduling pass: the prior pass's
+    # positive bit must not survive (the key may since have been evicted), so the
+    # next lookup re-derives from the fresh batched check.
+    ring = FakeRing()
+    ring.exists[5] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+
+    mgr.touch([(5).to_bytes(8, "big")])
+    assert mgr.lookup((5).to_bytes(8, "big")) is True
+
+    # Key 5 evicted between passes; new pass's batched check reflects it.
+    ring.exists[5] = False
+    mgr.touch([(5).to_bytes(8, "big")])
+    assert mgr.lookup((5).to_bytes(8, "big")) is False
+
+
 # ── manager: prepare_store ──
 
 
