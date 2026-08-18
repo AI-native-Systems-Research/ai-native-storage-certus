@@ -183,6 +183,18 @@ if __name__ == "__main__":
         gpu_memory_utilization=GPU_MEM_UTIL,
         dtype="float16",
         enable_prefix_caching=True,
+        # ENFORCE_EAGER=0 (default) keeps CUDA graphs on (vLLM default) for a fair
+        # comparison; =1 forces eager.
+        enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
+        # async_scheduling MUST be off for the OffloadingConnector: it serializes
+        # KV transfers per request, and the async batch-queue scheduler path
+        # (step_with_batch_queue) trips a KeyError in the native tiering manager's
+        # prepare_store (self._req_state[req_id]) — EngineDeadError at round 1.
+        # This is ORTHOGONAL to cudagraph: disabling it keeps the fair cudagraph
+        # config while taking the synchronous, connector-correct scheduling path
+        # (mirrors run_multiturn_shmq_certus.py's needs_disable_async_scheduling).
+        # Override with ASYNC_SCHED=1 to reproduce the crash.
+        async_scheduling=(os.environ.get("ASYNC_SCHED", "0") != "0"),
         kv_transfer_config=KV_CONFIG,
         # LOG_STATS=1 keeps vLLM's stats logging on so its PrometheusStatLogger
         # registers metrics (incl. the tiering/kv_offload counters). Default off

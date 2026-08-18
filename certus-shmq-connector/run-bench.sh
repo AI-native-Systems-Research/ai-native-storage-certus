@@ -58,6 +58,11 @@ LOG_STATS="${LOG_STATS:-}"
 # over the copy baked into the image. Lets a change to the workload take effect
 # WITHOUT rebuilding the image.
 WORKLOAD_SRC="${WORKLOAD_SRC:-}"
+# CONNECTOR_SRC — optional host path to the certus_shmq_connector package dir,
+# bind-mounted over the copy installed in the image (runs local edits without a
+# rebuild). Unset by default (uses the image's baked connector); declared here so
+# the `-n` test at the mount block below is safe under `set -u`.
+CONNECTOR_SRC="${CONNECTOR_SRC:-}"
 
 # This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
 # needs explicit store paths. Override or unset for a default install.
@@ -154,6 +159,21 @@ if [[ -n "${WORKLOAD_SRC}" ]]; then
     fi
 fi
 
+# ── Connector package override mount (only if CONNECTOR_SRC set) ──
+# The image installs the connector as `pip install -e /workspace/certus-shmq-connector`,
+# so the importable package resolves to .../certus_shmq_connector. Mounting a host
+# copy of that dir over it runs local edits (e.g. manager.py changes) without an
+# image rebuild — same :z,ro rationale as the workload mount above.
+connector_mount=()
+if [[ -n "${CONNECTOR_SRC}" ]]; then
+    if [[ -d "${CONNECTOR_SRC}" ]]; then
+        connector_mount+=(-v "${CONNECTOR_SRC}:/workspace/certus-shmq-connector/certus_shmq_connector:z,ro")
+        echo "[run-bench] connector override: ${CONNECTOR_SRC}" >&2
+    else
+        echo "warning: CONNECTOR_SRC=${CONNECTOR_SRC} not found — using image's baked connector." >&2
+    fi
+fi
+
 echo "[run-bench] image=${IMAGE} gpu=${GPU} shm_path=${SHM_PATH}"
 echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL} tensor_parallel_size=${TENSOR_PARALLEL_SIZE}"
 
@@ -169,6 +189,7 @@ exec command podman "${store_flags[@]}" run --rm \
     "${prom_flags[@]}" \
     "${logstats_env[@]}" \
     "${workload_mount[@]}" \
+    "${connector_mount[@]}" \
     "${cache_mount[@]}" \
     "${hf_env[@]}" \
     -e "SHM_PATH=${SHM_PATH}" \
@@ -177,4 +198,6 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "MODEL=${MODEL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
+    -e "ENFORCE_EAGER=${ENFORCE_EAGER:-0}" \
+    -e "DTYPE=${DTYPE:-float16}" \
     "${IMAGE}"
