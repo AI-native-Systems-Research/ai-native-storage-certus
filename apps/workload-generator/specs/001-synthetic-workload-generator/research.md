@@ -642,28 +642,76 @@ corpus rather than only the traces the model happens to fit.
 2. **Reuse distance is the opposite case and is the real defect.** Its floor is 0.002-0.012 against a
    0.02 tolerance, so the tolerance is comfortably reachable, and measured failures of 0.024-0.106
    sit at 3-30x the floor.
-3. **The sibling bound shows three of the four statistics barely discriminate at all.** Comparing two
-   *different* workloads of one family (`tau2_airline` against `tau2_retail`) bounds the same
-   question from above, and the ratio **sibling ÷ own floor** is the statistic's dynamic range:
+3. **The sibling bound is a property of the PAIR, not of the statistic — and reading it from one pair
+   is an error this project has already made once.** Comparing two *different* workloads bounds the
+   same question from above, and **sibling ÷ own floor** is the dynamic range. Measured over three
+   pairs:
 
-   | statistic | own floor | sibling bound | dynamic range | our model |
+   | pair | reuse | share | req_len | uniq |
    | --- | --- | --- | --- | --- |
-   | `sharing_depth` | 0.0337 | 0.1637 | **4.9x** usable | 0.1017 |
-   | `reuse_distance_objects` | 0.0071 | 0.0118 | 1.7x weak | 0.0262 |
-   | `unique_keys` | 0.3512 | 0.5819 | 1.7x weak | 0.3347 |
-   | `request_length` | 0.0425 | 0.0342 | **0.80x — inverted** | 0.0258 |
+   | `tau2_airline` / `tau2_retail` | 1.67x | 4.86x | **0.80x** | 1.66x |
+   | `swebench` / `browsecompplus` | 33.0x | 12.3x | 10.3x | 12.6x |
+   | `qwen_code` / `qwen_reasoning` | 30.3x | 33.6x | 28.4x | 9.9x |
 
-   **`request_length` cannot tell these two workloads apart**: they are closer on it than two halves
-   of one trace are. And `reuse_distance_objects`, though a real failure, has a usable band only
-   0.007-0.012 wide, so a 0.02 tolerance sits *above* the whole discriminating range and would pass a
-   model that is further from airline than `tau2_retail` is — which is exactly where our model sits
-   (0.026). The tolerance is not merely miscalibrated; it is on the wrong side of the range.
+   **The first row was measured first and generalised too soon.** On the strength of it this section
+   said "three of the four statistics barely discriminate" and FR-057c said a statistic with range
+   below 1 must not be gated on at all, naming `request_length`. Two more pairs refute that: every
+   statistic has ample range on both, `request_length` included at 10-28x. **The low numbers are a
+   property of how tight the `tau2` pair is** — two task domains of one benchmark harness with one
+   agent scaffold, which `corpus_matrix.py`'s own docstring already calls "near-siblings, not three
+   independent workloads". On that pair airline and retail genuinely do have near-identical
+   request-length distributions, closer than two halves of airline are; that is a fact about those
+   workloads, not a defect in the measure. **No statistic is retired on this evidence, and FR-057c was
+   corrected.** This is the same error as FR-054g — a claim stated wider than its evidence from the
+   tau2 family — which is precisely what the whole-corpus check exists to prevent, so it is recorded
+   rather than quietly fixed.
+   What the tight pair does establish is a **conservative** bound: a gate required to tell a trace
+   from its nearest neighbour in the corpus cannot lean on `request_length` to do it. And
+   `reuse_distance_objects` on that pair has a usable band only 0.007-0.012 wide, so its 0.02
+   tolerance sits above the whole band there.
 
 **The rule this establishes, and it is the reusable part:** a statistic worth gating on needs **both**
-a low floor and a high sibling bound. Neither alone is sufficient, and relevance argued from what a
-quantity *means* is not evidence — `request_length` sounds like a direct measure of workload shape and
-measures nothing that separates these workloads. Selecting the cache-relevant statistics of the next
-gate revision by this criterion is the point of measuring it.
+a low floor and a high sibling bound, the bound measured over **several pairs** and reported with the
+pair named. The **floor** result is the robust half and is unaffected by the correction above — it is
+measured within one trace and needs no second workload.
+
+### Fan-in per block — the FR-057c criterion applied to a candidate (FR-056b)
+
+The point of measuring a floor and a sibling bound is to choose what to gate on. **Fan-in per block**
+— distinct sessions referencing a key — is the first candidate, because it is what a lifetime-hinted
+cache consumes and because nothing in the model fits it. Applying the criterion rather than the
+argument:
+
+| pair | fan-in floor | sibling bound | dynamic range |
+| --- | --- | --- | --- |
+| `tau2_airline` / `tau2_retail` | 0.00854 | 0.02258 | **2.65x** |
+| `swebench` / `browsecompplus` | 0.00113 | 0.00355 | 3.13x |
+| `qwen_code` / `qwen_reasoning` | 0.00164 | 0.04634 | 28.28x |
+
+Three pairs, not one — the correction recorded above. Ranked by **worst-case** range across pairs,
+which is the right summary for a gate that has to work on every pair rather than on a favourable one:
+
+| statistic | worst-case range | floor range |
+| --- | --- | --- |
+| `sharing_depth` | 4.86x | 0.005-0.038 |
+| **fan-in per block** | **2.65x** | **0.0011-0.0085** |
+| `reuse_distance_objects` | 1.67x | 0.002-0.012 |
+| `unique_keys` | 1.66x | 0.023-0.351 |
+| `request_length` | 0.80x | 0.009-0.043 |
+
+So fan-in is **second of five**, and its floor is an order of magnitude below `sharing_depth`'s, which
+means it can carry a much tighter tolerance than any incumbent. It qualifies.
+
+**Exactness has a precondition, and it is checked rather than trusted.** Counting distinct sessions
+per key without a set per key means keeping `(count, last_session)`, which is exact only if each
+session's references arrive contiguously — `A, B, A` otherwise counts three. That is the same
+constraint `fit::segments::Census` carries, and the same remedy: `fit` groups by session while a
+streaming accumulator sees an interleaved stream. `FanIn` therefore counts and reports
+non-contiguous session reappearances, because the failure biases fan-in **upward** — a workload looks
+more shareable than it is, which is the direction that flatters the model rather than exposing it.
+
+**Not gated on yet.** Gating needs the same measurement on the generated plan, and plan events are
+not session-contiguous either, so that is a separate piece of work rather than a flag flip.
 
 ### Fit tolerances and divergence measures — the derivation behind FR-057a and FR-057b
 

@@ -36,6 +36,7 @@ use crate::keys::{CacheKey, SessionId};
 use crate::plan::{flags, PlanEvent};
 
 pub mod divergence;
+pub mod fanin;
 pub mod floor;
 pub mod hist;
 pub mod length;

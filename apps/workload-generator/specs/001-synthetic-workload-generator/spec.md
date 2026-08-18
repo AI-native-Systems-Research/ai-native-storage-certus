@@ -2163,13 +2163,22 @@ report segments statistics into before/after windows around the event.
   0.335), and its floor exceeds its tolerance on 3 of 9 traces. Conversely `reuse_distance_objects`
   has a floor of **0.002-0.012**, so its 0.02 tolerance is comfortably reachable and every reuse
   failure measured is real, at 3-30x its floor.
-  **A statistic MUST also be judged on its DYNAMIC RANGE — the sibling bound divided by its own
-  floor — and a statistic whose range is below ~1 MUST NOT be gated on at all**, because two
-  different workloads are then closer together than two samples of one. Measured on `tau2_airline`
-  against `tau2_retail`: `sharing_depth` **4.9x** (usable), `reuse_distance_objects` **1.7x**,
-  `unique_keys` **1.7x**, and `request_length` **0.80x — inverted**. So the statistic this project
-  spent the most effort on cannot distinguish two workloads of one family. Relevance MUST be
-  established by this measurement rather than by argument about what the quantity means.
+  **A statistic SHOULD also be judged on its DYNAMIC RANGE — a sibling bound divided by its own
+  floor — and a range below ~1 means two different workloads are closer together than two samples of
+  one, so the statistic cannot certify fidelity to *that* trace as against its neighbour.** The
+  dynamic range is a property of the **(statistic, pair)** and MUST be measured over several pairs
+  before any statistic is retired: measured over three, `tau2_airline`/`tau2_retail` gives
+  `sharing_depth` 4.9x, reuse 1.7x, `unique_keys` 1.7x and `request_length` **0.80x**, while
+  `swebench`/`browsecompplus` gives 12.3x / 33.0x / 12.6x / 10.3x and
+  `qwen_code`/`qwen_reasoning` gives 33.6x / 30.3x / 9.9x / 28.4x. So the low ranges are a property
+  of how **tight the tau2 pair is** — two task domains of one benchmark harness with one agent
+  scaffold — and not of the statistics: on that pair `tau2_airline` and `tau2_retail` genuinely have
+  near-identical request-length distributions, closer than two halves of airline are. No statistic is
+  retired on this evidence. What the tight pair does establish is a **conservative** bound: a gate
+  that must distinguish a trace from its nearest neighbour in the corpus cannot rely on
+  `request_length` to do it. Relevance MUST be established by measurement rather than by argument
+  about what a quantity means — and a range MUST NOT be quoted from a single pair, which is the
+  error FR-054g already records.
   Two further consequences worth stating because each is easy to get wrong: a half-vs-half
   comparison is **half-size on both sides**, so a two-sample KS floor is inflated by about
   `sqrt(2)` and the projection to full size applies to the **KS** statistics only — not to an area
@@ -2180,6 +2189,25 @@ report segments statistics into before/after windows around the event.
 - **FR-056**: `fit` MUST validate the fitted model by comparing four statistics between the
   real trace and synthetic output: reuse-distance CDF (primary), prefix-sharing depth
   histogram, request-length distribution, and unique-keys-over-time curve.
+- **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
+  measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
+  sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first
+  candidate because it is the quantity a lifetime-hinted cache actually consumes: given a hint per
+  block, how many other sessions will touch it is the most valuable eviction input, and a block
+  twenty sessions share is worth holding at a reuse distance that would evict a private one. Nothing
+  in the model fits it.
+  Measured 2026-08-18, it clears the criterion: floors of **0.0011-0.0085** (an order of magnitude
+  below `sharing_depth`'s, so it can carry a tight tolerance) and dynamic ranges of **2.65x / 3.13x /
+  28.3x** over three pairs. Ranked by **worst-case** range — the right summary for a gate that must
+  work on every pair — it is second of five, behind `sharing_depth` (4.86x) and ahead of reuse
+  distance (1.67x), `unique_keys` (1.66x) and `request_length` (0.80x).
+  Counting *distinct sessions* per key exactly requires each session's references to arrive
+  **contiguously**, and an implementation MUST **check** that rather than trust it: violating it
+  overcounts, which biases fan-in **upward** and makes a workload look more shareable than it is —
+  the direction that flatters the model. It is the same constraint the segment census carries, for
+  the same reason, and `fit` can satisfy it by grouping while a streaming accumulator cannot.
+  Fan-in is **not** gated on yet: gating requires the same measurement on the *generated* plan, whose
+  events are not session-contiguous either.
 - **FR-056a**: An `empirical` distribution that `fit` emits MUST be resolved finely enough that its
   own step structure cannot fail FR-056's comparison, and each step's value MUST be the **mass-weighted
   mean of the samples it absorbs** rather than either end of its interval. Both halves are forced by

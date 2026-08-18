@@ -121,6 +121,19 @@ enum Cmd {
         /// fitted, rather than the capability sitting unexercised until it is finished.
         #[arg(long)]
         branching_segments: bool,
+        /// Skip the achievable-floor measurement and use the global default tolerances.
+        ///
+        /// The floor costs a pass over the trace for each half — about twice the
+        /// statistics phase, which on the corpus's largest traces is minutes rather
+        /// than seconds. This is the escape hatch for a quick fit.
+        ///
+        /// It makes the verdict **uncalibrated**, which is the thing FR-057c exists to
+        /// fix: the default tolerances describe the generator's repeatability, not what
+        /// a correct model of this workload would score, and measured they are 1.5x too
+        /// tight on one real trace's `request_length` and 2-10x too loose on its reuse
+        /// distance. So the report says so rather than printing a bare `within`.
+        #[arg(long)]
+        no_floor: bool,
     },
     /// Compare two reference streams statistic by statistic.
     ///
@@ -162,6 +175,11 @@ enum Cmd {
         explain: bool,
     },
     /// Measure the **achievable floor**: two samples of one real trace, compared.
+    ///
+    /// Not to be confused with `stats::floor`, which is the **compulsory-miss** floor of
+    /// FR-044/FR-060 — the miss rate an unbounded cache would still report. This is the
+    /// *divergence* floor: how far apart two samples of one workload are, and therefore the
+    /// score below which no model can be distinguished from a correct one.
     ///
     /// The FR-056 tolerances were calibrated from the generator against *itself* across
     /// seeds, where any bias the model shares with itself cancels exactly. So they say
@@ -244,6 +262,7 @@ fn main() -> ExitCode {
             tolerances,
             explain,
             branching_segments,
+            no_floor,
         } => cmd_fit(
             &trace,
             out.as_deref(),
@@ -256,6 +275,7 @@ fn main() -> ExitCode {
             &tolerances,
             explain,
             branching_segments,
+            no_floor,
         ),
         Cmd::Validate {
             plan,
@@ -315,7 +335,16 @@ fn main() -> ExitCode {
 
 /// Parse `--tolerance name=value` overrides onto the derived defaults.
 fn parse_tolerances(args: &[String]) -> Result<Tolerances, String> {
-    let mut t = Tolerances::default();
+    parse_tolerances_onto(Tolerances::default(), args)
+}
+
+/// As [`parse_tolerances`], but over a stated base rather than the seed-to-seed defaults.
+///
+/// Exists so that an explicit `--tolerance` still wins over a **floor-derived** base (FR-057c):
+/// the derivation must not be able to silently override what a caller asked for, and a caller
+/// must not have to know whether a derivation ran in order to override it.
+fn parse_tolerances_onto(base: Tolerances, args: &[String]) -> Result<Tolerances, String> {
+    let mut t = base;
     for a in args {
         let (name, value) = a
             .split_once('=')
@@ -432,8 +461,8 @@ fn cmd_fit(
     tolerance_args: &[String],
     explain: bool,
     branching_segments: bool,
+    no_floor: bool,
 ) -> Result<bool, String> {
-    let tol = parse_tolerances(tolerance_args)?;
     let trace =
         read::read_trace(trace_path, allow_partial, block_size).map_err(|e| e.to_string())?;
     if !trace.capabilities.trunk_fittable() {
@@ -447,6 +476,41 @@ fn cmd_fit(
                 .into(),
         );
     }
+
+    // The trace's own ACHIEVABLE FLOOR, and the tolerances derived from it (FR-057c).
+    //
+    // Measured before anything is fitted, because it is a property of the trace rather than of
+    // any model: two independent samples of this workload, compared with the same accumulators
+    // the fit will be judged by. The seed-to-seed defaults describe the generator's
+    // repeatability and cannot say what a correct model of THIS workload would score — measured,
+    // they are 1.5x too tight on `tau2_airline`'s `request_length` and 2-10x too loose on reuse
+    // distance, so one constant was wrong in both directions at once.
+    //
+    // The session split, not the time split: it preserves the run's duration and therefore its
+    // stationarity, where a time split charges real drift to the floor and would excuse a model
+    // for failing to reproduce structure the trace genuinely has.
+    //
+    // `--no-floor` skips it, at the cost of an uncalibrated verdict; the report says which.
+    let floor = if no_floor {
+        None
+    } else {
+        let (mut a, mut b) = (Statistics::new(wss_window), Statistics::new(wss_window));
+        for r in trace.refs_of(|_, inv| floor_side(inv.session.0) == 0) {
+            a.push(&r);
+        }
+        for r in trace.refs_of(|_, inv| floor_side(inv.session.0) == 1) {
+            b.push(&r);
+        }
+        Some(compare(&a.finish(), &b.finish(), &Tolerances::default()))
+    };
+    // Explicit overrides are applied ON TOP of the derivation, so a caller who names a tolerance
+    // still gets it and does not have to know whether a floor was measured.
+    let tol = parse_tolerances_onto(
+        floor
+            .as_ref()
+            .map_or_else(Tolerances::default, Tolerances::from_floor),
+        tolerance_args,
+    )?;
 
     // One pass drives every measurement, so the sharing prefix a `private_depth`
     // subtracts is the same one a validator recomputes.
@@ -846,15 +910,24 @@ fn cmd_fit(
         "the synthetic plan's sizes are the supplied block_bytes and the trace's are tokens \
          per block, so this compares units rather than workloads",
     );
+    // The floor is printed beside the divergence because the tolerance is now derived from it
+    // (FR-057c) and a verdict is unreadable without it: 0.026 against a 0.02 default looks like a
+    // failure and against a 0.030 floor is indistinguishable from a perfect model.
     println!(
-        "\n  {:<24} {:>10} {:>10} {:>9}  verdict",
-        "statistic", "divergence", "tolerance", "samples"
+        "\n  {:<24} {:>10} {:>10} {:>10} {:>9}  verdict",
+        "statistic", "divergence", "floor", "tolerance", "samples"
     );
     for x in &d.divergences {
+        let f = floor.as_ref().and_then(|fl| {
+            fl.divergences
+                .iter()
+                .find(|y| y.statistic == x.statistic && y.incomparable.is_none())
+        });
         println!(
-            "  {:<24} {:>10.5} {:>10.5} {:>9}  {}",
+            "  {:<24} {:>10.5} {:>10} {:>10.5} {:>9}  {}",
             x.statistic.name(),
             x.value,
+            f.map_or("--".into(), |y| format!("{:.5}", y.value)),
             x.tolerance,
             x.samples,
             match &x.incomparable {
@@ -863,6 +936,25 @@ fn cmd_fit(
                 None => "EXCEEDED",
             }
         );
+    }
+    match floor.as_ref() {
+        Some(_) => println!(
+            "  floor = two samples of THIS trace compared with each other (session split, \
+             half-size),\n  so a divergence at or below it is unreachable by any model. tolerance \
+             is {}x the\n  floor projected to full size, never tighter than the seed-to-seed \
+             default (FR-057c).",
+            workload_model::stats::divergence::FLOOR_TOLERANCE_FACTOR
+        ),
+        // Stated as loudly as a caveat, because an uncalibrated `within` is the misreading this
+        // whole measurement exists to prevent: the defaults describe the GENERATOR's
+        // repeatability, and measured against real traces they are wrong in BOTH directions.
+        None => println!(
+            "  UNCALIBRATED (--no-floor): these are the seed-to-seed defaults, which describe the \
+             generator's\n  own repeatability rather than what a correct model of THIS workload \
+             would score. Measured on\n  real traces they run 1.5x too tight on request_length \
+             and 2-10x too loose on reuse distance,\n  so neither a `within` nor an `EXCEEDED` \
+             here is evidence about the model (FR-057c)."
+        ),
     }
 
     if explain {
@@ -1005,6 +1097,115 @@ fn mix64(x: u64) -> u64 {
     z ^ (z >> 31)
 }
 
+/// Fan-in per block: its achievable floor, and its sibling bound where one is asked for.
+///
+/// Measured, not gated (FR-057c): a statistic earns a place in the gate by having a low floor and a
+/// high sibling bound, and `request_length` is the standing proof that sounding relevant is not
+/// evidence. Fan-in is first on the list of quantities a hinted KV cache actually reacts to and
+/// nothing in the model fits it, so it is the first candidate — but it goes in only if it separates
+/// workloads by more than it separates a workload from itself.
+///
+/// Fed in **session-sorted** order, which `Trace::refs_of` cannot supply: it preserves the trace's
+/// own order, and `FanIn` needs each session's references contiguous to count distinct sessions
+/// exactly. Fan-in wants only `(key, session)`, so iterating invocations directly here is a
+/// projection of the reference stream rather than a second definition of it — and `FanIn` reports
+/// any contiguity violation instead of trusting this.
+fn print_fanin_floor(
+    trace: &read::Trace,
+    against: Option<&Path>,
+    block_size: Option<u32>,
+    allow_partial: bool,
+) -> Result<(), String> {
+    use workload_model::stats::fanin::{FanIn, FanInReport};
+
+    // One side's fan-in, over the invocations a predicate keeps, in session order.
+    let measure = |t: &read::Trace, keep: &dyn Fn(usize, &read::NormalisedInvocation) -> bool| {
+        let mut order: Vec<usize> = (0..t.invocations.len())
+            .filter(|i| keep(*i, &t.invocations[*i]))
+            .collect();
+        order.sort_by_key(|i| (t.invocations[*i].session.0, t.invocations[*i].turn));
+        let mut f = FanIn::new();
+        for i in order {
+            let inv = &t.invocations[i];
+            for k in &inv.blocks {
+                f.observe(*k, inv.session);
+            }
+        }
+        f.finish()
+    };
+
+    let row = |name: &str, r: &FanInReport| {
+        println!(
+            "    {:<26} {:>10} {:>9.3} {:>9.4} {:>10}",
+            name,
+            r.keys,
+            r.mean().unwrap_or(f64::NAN),
+            r.shared_fraction(),
+            r.per_key.max().unwrap_or(0),
+        );
+    };
+    // KS between two fan-in distributions over keys, using the same bucket-based comparison the
+    // gated statistics use, so a number here is on the same scale as the ones above.
+    let ks = |a: &FanInReport, b: &FanInReport| {
+        workload_model::stats::divergence::ks_from_buckets(
+            &a.per_key.buckets(),
+            a.per_key.count(),
+            &b.per_key.buckets(),
+            b.per_key.count(),
+        )
+    };
+
+    println!(
+        "\n  fan-in per block — distinct sessions touching each key. MEASURED, NOT GATED:\n           a candidate joins the gate on a low floor and a high sibling bound, never on relevance."
+    );
+    println!(
+        "    {:<26} {:>10} {:>9} {:>9} {:>10}",
+        "sample", "keys", "mean", "shared", "max"
+    );
+    let a = measure(trace, &|_, inv| floor_side(inv.session.0) == 0);
+    let b = measure(trace, &|_, inv| floor_side(inv.session.0) == 1);
+    row("this trace, half A", &a);
+    row("this trace, half B", &b);
+    let floor = ks(&a, &b);
+    if a.out_of_order_sessions + b.out_of_order_sessions > 0 {
+        println!(
+            "    WARNING {} non-contiguous session appearances, so these are upper bounds",
+            a.out_of_order_sessions + b.out_of_order_sessions
+        );
+    }
+    match against {
+        None => println!("    floor (KS between halves, fan-in over keys) {floor:.5}"),
+        Some(other) => {
+            let sibling =
+                read::read_trace(other, allow_partial, block_size).map_err(|e| e.to_string())?;
+            let s = measure(&sibling, &|_, _| true);
+            let whole = measure(trace, &|_, _| true);
+            row("sibling, whole", &s);
+            let bound = ks(&whole, &s);
+            println!(
+                "    floor {floor:.5}   sibling {bound:.5}   range {:.2}x",
+                {
+                    if floor > 0.0 {
+                        bound / floor
+                    } else {
+                        f64::INFINITY
+                    }
+                }
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Which side of a **session split** a session falls on: `0` or `1`.
+///
+/// The one definition both `floor` and `fit` use. Two copies could drift, and then the floor a fit
+/// derives its tolerances from would not be the floor `floor` reports for the same trace — a
+/// disagreement that would look like a bug in whichever was read second.
+fn floor_side(session: u32) -> u64 {
+    mix64(u64::from(session)) & 1
+}
+
 /// Measure the achievable floor: what a *perfect* model would score against a real trace.
 ///
 /// # Why this is the first thing to measure
@@ -1069,10 +1270,10 @@ fn cmd_floor(
         // statistic is worth gating on at all, and measured on `tau2_airline` against
         // `tau2_retail` three of the four gated statistics turn out to have almost none.
         let (mut c, mut d) = (Statistics::new(window), Statistics::new(window));
-        for r in trace.refs_of(|_, inv| mix64(u64::from(inv.session.0)) & 1 == 0) {
+        for r in trace.refs_of(|_, inv| floor_side(inv.session.0) == 0) {
             c.push(&r);
         }
-        for r in trace.refs_of(|_, inv| mix64(u64::from(inv.session.0)) & 1 == 1) {
+        for r in trace.refs_of(|_, inv| floor_side(inv.session.0) == 1) {
             d.push(&r);
         }
         arms.push((
@@ -1086,10 +1287,10 @@ fn cmd_floor(
             let (mut a, mut b) = (Statistics::new(window), Statistics::new(window));
             match split {
                 Split::Session => {
-                    for r in trace.refs_of(|_, inv| mix64(u64::from(inv.session.0)) & 1 == 0) {
+                    for r in trace.refs_of(|_, inv| floor_side(inv.session.0) == 0) {
                         a.push(&r);
                     }
-                    for r in trace.refs_of(|_, inv| mix64(u64::from(inv.session.0)) & 1 == 1) {
+                    for r in trace.refs_of(|_, inv| floor_side(inv.session.0) == 1) {
                         b.push(&r);
                     }
                 }
@@ -1220,6 +1421,11 @@ fn cmd_floor(
          log-ratio measures, which do not scale that way — one correction applied to all four\n  \
          would manufacture three wrong numbers."
     );
+
+    // Fan-in per block, measured the same two ways, because FR-057c requires a candidate
+    // statistic's floor and sibling bound BEFORE it is gated on. Reported separately from the
+    // table above because it has no tolerance yet — that is the decision this measurement informs.
+    print_fanin_floor(&trace, against, block_size, allow_partial)?;
 
     // With `--against` there are two arms — the sibling bound and this trace's own floor — and
     // their ratio is the statistic's DYNAMIC RANGE: how far apart two different workloads sit,

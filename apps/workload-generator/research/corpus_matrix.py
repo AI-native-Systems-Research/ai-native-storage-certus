@@ -107,10 +107,24 @@ def measure(binary: str, trace: pathlib.Path, block_bytes: int, window: int, see
         # it is a mean, so it moves for reasons every distributional check is blind to.
         row["refs_ratio"] = int(syn.group(2)) / int(m.group(2))
     for stat in TOLERANCES:
-        s = re.search(rf"^  {stat}\s+([\d.]+)\s+([\d.]+)\s+\d+\s+(\w+)", out, re.M)
-        if s:
-            row[stat] = float(s.group(1))
-            row[stat + "_verdict"] = s.group(3)
+        # Parsed by position from BOTH ends rather than by a fixed column count, because the
+        # report has gained a column before now (the FR-057c floor) and a fixed-width regex
+        # silently matched nothing — every statistic came back absent and the table read as
+        # "0 of 4 inside tolerance", which is indistinguishable from a real regression. Layout:
+        # `name divergence [floor] tolerance samples verdict`, so the divergence is the first
+        # field after the name and the verdict, samples and tolerance are the last three.
+        m2 = re.search(rf"^  {stat}\s+(\S.*)$", out, re.M)
+        if not m2:
+            continue
+        f = m2.group(1).split()
+        if len(f) < 4:
+            continue
+        try:
+            row[stat] = float(f[0])
+            row[stat + "_tolerance"] = float(f[-3])
+        except ValueError:
+            continue
+        row[stat + "_verdict"] = f[-1]
     # One line of why, for a trace that did not fit. The classification says which kind of
     # problem it is; this says which instance.
     why = re.search(r"(MODEL LIMITATION[^\n]{0,150}|CALLER INPUT: [^\n]{0,150}|CORRUPT TRACE[^\n]{0,150})", out)

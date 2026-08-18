@@ -247,6 +247,70 @@ pub const DEFAULT_REQUEST_LENGTH: f64 = 0.02;
 /// Relative-error tolerance for the unique-keys curve. Floor 0.085, so ~2x.
 pub const DEFAULT_UNIQUE_KEYS: f64 = 0.15;
 
+/// How many times a trace's own achievable floor a divergence may be and still pass.
+///
+/// A **choice**, named as one, and the same factor the seed-to-seed defaults above already use
+/// (each is 2-3x its measured floor). The floor is what two independent samples of one workload
+/// score against each other, so `1.0` would fail a perfect model half the time and a large factor
+/// would pass a model that is not close at all. 2.0 says: no further from the trace than twice
+/// the distance another sample of that trace would be.
+pub const FLOOR_TOLERANCE_FACTOR: f64 = 2.0;
+
+impl Tolerances {
+    /// Tolerances derived from a **measured achievable floor** for the trace being fitted.
+    ///
+    /// # Why this exists (FR-057c)
+    ///
+    /// The [`Default`] tolerances were calibrated from the generator against *itself* across
+    /// seeds. That measures repeatability: a bias the model shares with itself cancels exactly, so
+    /// those numbers cannot say what a correct model of a *real* workload would score. Measured on
+    /// nine real traces, the two disagree materially and **per trace** — `request_length` on
+    /// `tau2_airline` has a floor of 0.030 against a 0.020 default, so a residual chased across
+    /// several sessions was smaller than the noise, while `reuse_distance_objects` has a floor of
+    /// 0.002-0.012 and its 0.020 default is loose by 2-10x. One global constant cannot be right for
+    /// both, because the floor is a property of the workload and not of the model.
+    ///
+    /// So a tolerance becomes `FLOOR_TOLERANCE_FACTOR` times that trace's own floor, and never
+    /// **tighter** than the seed-to-seed default: the default is a floor under the *generator's*
+    /// own reproducibility, and a trace whose sampling noise is smaller than the generator's does
+    /// not make the generator more repeatable than it is. Taking the max of the two is therefore
+    /// not conservatism, it is the binding of two independent lower bounds.
+    ///
+    /// # The projection, and why it is applied to only two of the five
+    ///
+    /// A floor from a half-vs-half split is measured on **half-size** samples on both sides, while
+    /// a fit compares full against full. A two-sample KS distance scales as `sqrt(2/n)`, so halving
+    /// both sides inflates it by `sqrt(2)` and the floor is divided by that to project it. An
+    /// **area** between CDFs and a **max log-ratio** of counts do not scale that way, so they are
+    /// taken as measured — which is the conservative direction, and honest, whereas applying one
+    /// correction to all five to keep the code uniform would manufacture three wrong numbers.
+    pub fn from_floor(floor: &Report) -> Tolerances {
+        let default = Tolerances::default();
+        let mut out = default;
+        for d in &floor.divergences {
+            // A floor measured on a statistic that could not be compared says nothing, so the
+            // seed-to-seed default stands rather than being replaced by a zero.
+            if d.incomparable.is_some() {
+                continue;
+            }
+            let projected = match d.measure {
+                Measure::KolmogorovSmirnov => d.value / std::f64::consts::SQRT_2,
+                Measure::AreaBetweenCdfs | Measure::MaxLogRatio => d.value,
+            };
+            let derived = FLOOR_TOLERANCE_FACTOR * projected;
+            let slot = match d.statistic {
+                Statistic::ReuseDistanceObjects => &mut out.reuse_distance_objects,
+                Statistic::ReuseDistanceBytes => &mut out.reuse_distance_bytes,
+                Statistic::SharingDepth => &mut out.sharing_depth,
+                Statistic::RequestLength => &mut out.request_length,
+                Statistic::UniqueKeys => &mut out.unique_keys,
+            };
+            *slot = slot.max(derived);
+        }
+        out
+    }
+}
+
 /// KS distance between two bucket lists sharing one bucket scheme.
 ///
 /// Evaluated at every bucket's **upper** bound, where each CDF is exact: a bucket
@@ -697,6 +761,86 @@ mod tests {
     use super::*;
     use crate::keys::{CacheKey, SessionId};
     use crate::stats::{Ref, Statistics};
+
+    /// A synthetic floor report, so the derivation is tested on stated numbers.
+    fn floor_of(values: &[(Statistic, f64)]) -> Report {
+        Report {
+            divergences: values
+                .iter()
+                .map(|(s, v)| Divergence {
+                    statistic: *s,
+                    measure: s.measure(),
+                    value: *v,
+                    tolerance: 0.0,
+                    sup: None,
+                    samples: 1_000_000,
+                    within: true,
+                    incomparable: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_floor_derived_tolerance_never_tightens_the_seed_to_seed_default() {
+        // Two independent lower bounds, and the tolerance is bound by both: the floor says how
+        // close two samples of the REAL trace are, the default says how repeatable the GENERATOR
+        // is. A trace with very little sampling noise does not make the generator more repeatable,
+        // so a tiny floor must not be allowed to tighten the gate below the default.
+        let t = Tolerances::from_floor(&floor_of(&[
+            (Statistic::ReuseDistanceObjects, 0.0001),
+            (Statistic::SharingDepth, 0.0001),
+            (Statistic::RequestLength, 0.0001),
+            (Statistic::UniqueKeys, 0.0001),
+        ]));
+        let d = Tolerances::default();
+        assert_eq!(t.reuse_distance_objects, d.reuse_distance_objects);
+        assert_eq!(t.sharing_depth, d.sharing_depth);
+        assert_eq!(t.request_length, d.request_length);
+        assert_eq!(t.unique_keys, d.unique_keys);
+    }
+
+    #[test]
+    fn a_floor_above_the_default_raises_the_tolerance_to_twice_the_projected_floor() {
+        // `tau2_airline`'s measured case, which is the whole reason FR-057c exists: a
+        // `request_length` floor of 0.0425 half-vs-half against a 0.02 default, where the fitted
+        // model scores 0.0258 and was reported as a failure for several sessions.
+        let t = Tolerances::from_floor(&floor_of(&[
+            (Statistic::RequestLength, 0.0425),
+            (Statistic::UniqueKeys, 0.3512),
+        ]));
+        // KS is projected to full size by sqrt(2) first, then doubled.
+        let want = 2.0 * (0.0425 / std::f64::consts::SQRT_2);
+        assert!(
+            (t.request_length - want).abs() < 1e-9,
+            "want {want}, got {}",
+            t.request_length
+        );
+        assert!(
+            0.0258 < t.request_length,
+            "the fitted model's 0.0258 must now pass, since it is below the floor itself"
+        );
+        // A log-ratio measure is NOT projected — it does not scale as sqrt(2/n) — so it is
+        // doubled as measured. Asserting the two are treated differently is the point.
+        assert!(
+            (t.unique_keys - 2.0 * 0.3512).abs() < 1e-9,
+            "{}",
+            t.unique_keys
+        );
+    }
+
+    #[test]
+    fn an_incomparable_floor_leaves_its_default_alone() {
+        // A statistic the floor could not compare says nothing about the workload's noise, and
+        // must not be read as a floor of zero — which would silently keep the default anyway here,
+        // but would become a tightening the moment the factor or the max changed.
+        let mut f = floor_of(&[(Statistic::RequestLength, 0.9)]);
+        f.divergences[0].incomparable = Some("no samples".into());
+        assert_eq!(
+            Tolerances::from_floor(&f).request_length,
+            Tolerances::default().request_length
+        );
+    }
 
     fn report(requests: &[(u32, Vec<u64>)], window: u64) -> crate::stats::Report {
         let mut s = Statistics::new(window);
