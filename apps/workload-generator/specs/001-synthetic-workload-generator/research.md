@@ -392,6 +392,88 @@ since the gap between a flat run and a real event is tens of standard errors, bu
 And the retention knee at 0.99 is read off sixteen traces from a convenience sample — the *form* of
 the criterion follows from the model, the *value* does not.
 
+### The child-choice law — the derivation behind FR-055j
+
+`branch_skew` was the last structural parameter with no fitting procedure, and the reason it resisted
+one is that the obvious target — the popularity curve over child rank — is not a property the corpus
+holds in common. This section derives what to fit instead, from what the mechanism can observe.
+
+**What the trunk mechanism reads from the child law is one scalar.** The walk carries an expected
+cohort down the trunk as `cohort *= p(child taken)`, and the child taken is itself drawn from `p`, so
+the expected factor at a split is `Σ_i p_i · p_i = Σ p²`. Nothing else about the law enters: the
+cohort's decay, and therefore where sharing ends, is a product of collision probabilities. Its
+reciprocal `n_eff = 1/Σ p²` is the inverse participation ratio that trunk occupancy, validation rule
+16 and `branching: auto` were already written in terms of, so fitting this scalar keeps those four
+consumers consistent by construction rather than by agreement.
+
+Measured from a split's child fan-ins the estimator is `Σ c²/(Σ c)²`, over **all** children — a
+singleton child is how a session becomes private, so excluding singletons would fit a law the
+generator does not apply. The denominator is the summed child fan-in rather than the segment's own
+fan-in, so a session that retired *at* the split is excluded from a choice it never exercised;
+measured leakage at a split has a median of exactly 0.000 in every band of six traces, so the two
+denominators barely differ in practice, but only one of them is the conditional the law describes.
+
+**Under FR-055g's discrete Zipf the collision probability has a closed form**, `Σ_k (k^-s/H_n(s))² =
+H_n(2s)/H_n(s)²`. It is strictly increasing in `s` at fixed `n` and decreasing in `n` at fixed `s`, so
+inverting it at a measured target is a bisection with no local minima and no starting guess. Cost is
+one pass over ranks `1..=max` accumulating both harmonic sums, so a band's fit costs its **widest**
+split rather than the sum over its splits — which matters because the widest fanout in the corpus is
+`wildchat`'s 204030-way one and a per-split sum would be quadratic in it.
+
+**Why not the rank curve.** Fitting the shape directly was tried and does not transfer. A Zipf fails
+the corpus's two widest fanouts in *opposite* directions — `qwen_code`'s root head is 25% too light
+under any exponent that fits its tail, and its log-log slope is non-monotone, so it is not a power law
+and Mandelbrot's offset cannot rescue it, while `ragbench`'s depth-1 head is 2.4x too heavy and *is*
+fitted by a Mandelbrot `q = 4.7`. Below depth 1 `ragbench` is **exactly uniform** (2498 branch points,
+literally equal child counts, median TV against uniform 0.000), so any nonzero exponent makes 3889 of
+its 3890 branch points worse. Adjacent binary splits in one trace demand opposite extremes
+(`tau2_retail`: `s = 0.043` at depth 69, `s = 5.658` at depth 71), and the exponent correlates with
+neither depth (rho +0.13, p 0.15) nor out-degree (rho −0.03, p 0.74) — **no schema-available
+conditioner identifies it.**
+The collision probability sidesteps all of this because it does not ask the tail's shape. It also
+recovers the head as a *consequence*: on `qwen_code`'s 4739-way root split, measured head 0.496, the
+exponent matching the collision probability puts **0.464** there — against **0.072** under the
+document-level 0.9 default. The tail those rank fits argue over is exactly the part cohort decay does
+not read.
+
+**One exponent per depth band, and the bands are the census's.** Within a band the collision
+probability varies and one exponent matches only its fan-in-weighted mean — which is the quantity
+`cohort *= p` accumulates, so it is the right mean to match. Splits are weighted by fan-in for the
+same reason the run length and out-degree are: a walker meets a split in proportion to the sessions
+arriving at it, and the shared region is numerically dominated by tiny cohorts while the reference
+mass sits in a handful of large segments. Whether the law is better conditioned on **out-degree** than
+on depth is left measurable rather than assumed — `fit --explain` prints the within-band p10/p50/p90
+spread of the collision probability beside the fitted exponent, and a wide spread is the signal to
+re-condition.
+
+**Two boundaries are stated rather than fitted past.** A split no more concentrated than uniform
+descent is emitted as uniform with a note, because no Zipf is flatter than uniform and the case is
+real: `ragbench`'s deep splits sit at 0.95x uniform, i.e. **sub-multinomial** — more even than random
+assignment. A split more concentrated than the widest exponent the fit will state is clamped and
+reported, because beyond roughly `s = 8` a two-way split already sends 99.6% of a cohort one way and
+the exponent stops being identifiable. A segment ending in a **leaf or in attrition** states no law:
+that cohort shrank rather than divided, so there was no choice, and an absent law correctly defers to
+the document-level `branch_skew`.
+
+**What this fixes, and what it does not — measured 2026-08-17, seed 4242.** It closes a *pair*
+defect. The node-level spelling fitted `out_degree` from the census while the law choosing among those
+children stayed at the document default, so on `qwen_code` the model built all 4739 root children and
+put 0.072 on a head the trace gives 0.496; sessions scattered ~9x more than the trace and sharing
+collapsed. Fitting the law recovers most of that: `qwen_code` `sharing_depth` **0.364 → 0.107** and
+`unique_keys` **0.697 → 0.479**. On `tau2_airline` it is a **no-op** (0.371 → 0.376, 0.557 → 0.556),
+and the reason is visible in the fit itself — airline's fitted exponents are 0.98–1.56, near the 0.9
+default they replace, so the child law was never airline's problem.
+
+Both remain worse than the per-depth profile's 0.060/0.182 and 0.102/0.335, so `--branching-segments`
+stays off by default. The residual is that the synthetic mints **1.6–1.7x too many distinct keys**
+(`qwen_code` 8.40M against 5.20M; airline 445k against 255k) while per-split collision now matches its
+target to **0.4%** in every band — so the cohort divides too often rather than too widely. The
+candidate mechanism is the run-length distribution, not the child law: airline's median segment length
+is **1** in all three bands below depth 32, so a walker there draws a split at nearly every block,
+while the trace's deep chains carry fan-in 3–4 out to depth 1200 across only 35 segments beyond depth
+512. Fitting one member of a pair is worse than fitting neither, and `(length, out_degree, skew)` may
+be a **triple**.
+
 ### Fit tolerances and divergence measures — the derivation behind FR-057a and FR-057b
 
 FR-056 names four statistics to compare between a trace and the synthetic output fitted from it, and
@@ -709,8 +791,13 @@ Assigned to this file by `spec.md` and **not yet done**:
   2026-08-11** by § Fit tolerances and divergence measures. Three measures for four statistics, each
   default set 1.7–3.0× above a measured seed-to-seed floor at a stated plan size. The safety factor
   and the use of synthetic shapes rather than traces remain limitations, named there.
-- **The `branch_skew` parameterisation**, and the fitting procedures for `shared_depth` and
-  `roots.popularity`.
+- ~~**The `branch_skew` parameterisation**~~ — **discharged 2026-08-17** by § The child-choice law.
+  The law is fitted to the one functional the cohort mechanism reads, the collision probability
+  `Σ p²`, by bisecting its closed form `H_n(2s)/H_n(s)²`; the rank curve is *not* fitted, and the
+  measurement showing no rank law transfers across the corpus is recorded there. Two choices remain
+  named rather than derived: the depth banding is the census's rather than a fit to out-degree, and the
+  `s = 8` ceiling is where the exponent stops being identifiable rather than a bound on the data.
+  The fitting procedures for `shared_depth` and `roots.popularity` remain open.
 - ~~**Reuse-distance estimation method** and the **significance-testing approach** behind
   `repeat: 8`~~ — **discharged 2026-08-11** by § Reuse-distance estimation, and the basis for
   `repeat: 8`. Exact costs ~40 bytes per reference, capping at ~4 × 10⁸ on a 16 GB budget, which one

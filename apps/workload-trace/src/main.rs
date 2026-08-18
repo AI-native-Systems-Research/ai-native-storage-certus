@@ -487,9 +487,10 @@ fn cmd_fit(
         }
         workload_model::fit::segments::fit_process(&census.finish(2))
     };
+    let fitted_process = fitted_segments.as_ref().map(|f| &f.process);
     let fitted = assemble(
         &fitted_branching,
-        fitted_segments.as_ref(),
+        fitted_process,
         &fitted_sessions,
         &roots,
         &supplied,
@@ -618,7 +619,10 @@ fn cmd_fit(
     // the trace genuinely describes something the model cannot express.
     if explain {
         print_trunk_profile(&trace_report, &fitted_branching);
-        print_segment_census(&trace.invocations);
+        print_segment_census(
+            &trace.invocations,
+            fitted_segments.as_ref().map(|f| f.skews.as_slice()),
+        );
     }
 
     if !rejections.is_empty() {
@@ -672,7 +676,7 @@ fn cmd_fit(
             adjusted.private_depth = shapes.private_depth_at(scale);
             match assemble(
                 &fitted_branching,
-                fitted_segments.as_ref(),
+                fitted_process,
                 &adjusted,
                 &roots,
                 &supplied,
@@ -1156,7 +1160,10 @@ fn print_path_budget(
 /// are the same quantities, deliberately: the two implementations are meant to be diffed on
 /// a real trace. Out-degree is the **total**, singletons included, because that is where
 /// privacy comes from and where a shared-width profile is blind.
-fn print_segment_census(invocations: &[read::NormalisedInvocation]) {
+fn print_segment_census(
+    invocations: &[read::NormalisedInvocation],
+    skews: Option<&[workload_model::fit::segments::BandSkew]>,
+) {
     use workload_model::fit::segments::{Census, SegmentEnd};
 
     // Grouped by session, which `Census::observe` requires for an exact fan-in.
@@ -1171,14 +1178,21 @@ fn print_segment_census(invocations: &[read::NormalisedInvocation]) {
         println!("\n  segment census — no shared segment to report");
         return;
     }
-    const BANDS: [(u32, u32); 6] = [
-        (0, 0),
-        (1, 7),
-        (8, 31),
-        (32, 127),
-        (128, 511),
-        (512, u32::MAX),
-    ];
+    // Derived from the fit's own band list rather than restated, so this table and the
+    // fitted document cannot come to disagree about which depths a row covers.
+    let bands = workload_model::fit::segments::BANDS;
+    let spans: Vec<(u32, u32)> = bands
+        .iter()
+        .enumerate()
+        .map(|(i, lo)| {
+            (
+                *lo,
+                bands
+                    .get(i + 1)
+                    .map_or(u32::MAX, |next| next.saturating_sub(1)),
+            )
+        })
+        .collect();
     println!("\n  segment census — the trunk as runs of blocks one cohort walks together");
     println!(
         "  a segment is a maximal chain of constant fan-in; out-degree is the TOTAL at the split\n  \
@@ -1196,7 +1210,7 @@ fn print_segment_census(invocations: &[read::NormalisedInvocation]) {
         "shared",
         "leak_wt"
     );
-    for (lo, hi) in BANDS {
+    for (lo, hi) in spans.iter().copied() {
         let mut v: Vec<&_> = rows
             .iter()
             .filter(|r| r.start_depth >= lo && r.start_depth <= hi)
@@ -1258,6 +1272,92 @@ fn print_segment_census(invocations: &[read::NormalisedInvocation]) {
             "    {} keys contradict rolling-prefix identity, so these rows describe something \
              that is not a trie",
             census.violations()
+        );
+    }
+    print_child_law(&rows, &spans, skews);
+}
+
+/// The child-choice law per band: what the trace does, and what the fit stated.
+///
+/// `coll` is the **collision probability** at a split — the chance two sessions arriving there
+/// descend into the same child, and so the factor by which a session's cohort shrinks in
+/// expectation as it takes the step. It is printed because it is exactly what the generator
+/// multiplies (`cohort *= p(child taken)`, the child drawn from `p`), which makes it the one
+/// functional of the child law the cohort mechanism can observe, and the thing `skew` is
+/// fitted to. `1/coll` is the effective branching that occupancy and rule 16 depend on.
+///
+/// The p10/p90 columns are the question this banding leaves open: one exponent per depth band
+/// matches the band's weighted mean and cannot match every split in it. A wide spread here
+/// says the law is better conditioned on out-degree than on depth — which is measurable from
+/// this table rather than assumable.
+fn print_child_law(
+    rows: &[workload_model::fit::segments::SegmentRow],
+    spans: &[(u32, u32)],
+    skews: Option<&[workload_model::fit::segments::BandSkew]>,
+) {
+    let any = rows.iter().any(|r| r.collision().is_some());
+    if !any {
+        return;
+    }
+    println!(
+        "\n  child law — how a cohort divides at a split. coll = SUM p^2 over children, \
+         fan-in weighted;\n  1/coll is the effective branching. skew is the fitted Zipf \
+         exponent reproducing coll_wt."
+    );
+    println!(
+        "    {:>10}  {:>7}  {:>8}  {:>8}  {:>8}  {:>8}  {:>6}  {:>8}",
+        "depths", "splits", "coll_wt", "coll_p10", "coll_p50", "coll_p90", "skew", "achieved"
+    );
+    for (lo, hi) in spans.iter().copied() {
+        let v: Vec<&workload_model::fit::segments::SegmentRow> = rows
+            .iter()
+            .filter(|r| r.start_depth >= lo && r.start_depth <= hi)
+            .filter(|r| r.collision().is_some())
+            .collect();
+        if v.is_empty() {
+            continue;
+        }
+        // Fan-in weighted, for the same reason the fit is: a walker meets a split in
+        // proportion to the sessions arriving at it, and the shared region is numerically
+        // dominated by tiny cohorts while the reference mass sits in a few large segments.
+        let num: f64 = v
+            .iter()
+            .map(|r| r.collision().unwrap_or(0.0) * f64::from(r.fan_in).max(1.0))
+            .sum();
+        let den: f64 = v.iter().map(|r| f64::from(r.fan_in).max(1.0)).sum();
+        let mut c: Vec<f64> = v.iter().filter_map(|r| r.collision()).collect();
+        c.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let q = |f: f64| c[((c.len() - 1) as f64 * f).round() as usize];
+        let span = if hi == u32::MAX {
+            format!("{lo}+")
+        } else if lo == hi {
+            format!("{lo}")
+        } else {
+            format!("{lo}-{hi}")
+        };
+        let fitted = skews.and_then(|s| s.iter().find(|b| b.from_depth == lo));
+        println!(
+            "    {:>10}  {:>7}  {:>8.4}  {:>8.4}  {:>8.4}  {:>8.4}  {:>6}  {:>8}",
+            span,
+            v.len(),
+            if den > 0.0 { num / den } else { 0.0 },
+            q(0.10),
+            q(0.50),
+            q(0.90),
+            fitted.map_or("-".to_string(), |b| format!("{:.3}", b.skew)),
+            fitted.map_or("-".to_string(), |b| format!("{:.4}", b.achieved)),
+        );
+    }
+    for b in skews.unwrap_or(&[]) {
+        if let Some(note) = b.clamped {
+            println!("    depth {}+: {note}", b.from_depth);
+        }
+    }
+    if skews.is_none() {
+        println!(
+            "    skew unfitted: pass --branching-segments. Without the node-level spelling the \
+             document\n    states one law for every depth, and coll is what it would have to \
+             reproduce."
         );
     }
 }

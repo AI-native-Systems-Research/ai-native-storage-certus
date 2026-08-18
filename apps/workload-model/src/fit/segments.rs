@@ -184,6 +184,7 @@ impl Census {
                 child_fan_in_sum: 0,
                 shared_fan_in_sum: 0,
                 child_fan_in_sq: 0.0,
+                child_fan_in_sq_all: 0.0,
                 top_child_fan_in: 0,
             };
             if ends == SegmentEnd::Fanout {
@@ -191,6 +192,7 @@ impl Census {
                 while c != NO_PARENT {
                     let f = self.sessions[c as usize];
                     row.child_fan_in_sum += u64::from(f);
+                    row.child_fan_in_sq_all += f64::from(f) * f64::from(f);
                     if f >= min_sessions {
                         row.shared_children += 1;
                         row.shared_fan_in_sum += u64::from(f);
@@ -247,6 +249,15 @@ pub struct SegmentRow {
     pub shared_fan_in_sum: u64,
     /// Summed squared fan-in over shared children, for `n_eff`.
     pub child_fan_in_sq: f64,
+    /// Summed squared fan-in over **all** children, for [`SegmentRow::collision`].
+    ///
+    /// Separate from `child_fan_in_sq` rather than replacing it because the two answer
+    /// different questions and both are wanted: `n_eff` over shared children describes how
+    /// wide the *shared* subtrie is below the split, and is the figure cross-validated
+    /// against `research/segment_census.py`, while the child law the generator applies
+    /// chooses among the **total** out-degree — singleton children included, since landing on
+    /// one is how a session becomes private.
+    pub child_fan_in_sq_all: f64,
     /// The most-taken child's fan-in.
     pub top_child_fan_in: u32,
 }
@@ -266,6 +277,30 @@ impl SegmentRow {
         }
         let sum = self.shared_fan_in_sum as f64;
         Some(sum * sum / self.child_fan_in_sq)
+    }
+
+    /// The **collision probability** at this split: `Σ c² / (Σ c)²` over all children.
+    ///
+    /// The probability that two sessions arriving here descend into the same child, and so —
+    /// read the other way — the factor by which a session's own cohort shrinks in
+    /// expectation as it takes the step. That is literally the generator's arithmetic:
+    /// `plan::generate` carries `cohort *= p(child taken)` and draws the child from `p`, so
+    /// the expected factor is `Σ p²`. Fitting a child law to this scalar therefore fits the
+    /// only thing about the law the cohort mechanism can observe.
+    ///
+    /// Over **all** children, matching the generator, which chooses among the total
+    /// out-degree. The denominator is the summed child fan-in rather than the segment's own
+    /// `fan_in`, so a session that retired *at* the split is excluded from the law it never
+    /// exercised; measured leakage is a median of exactly 0.000 anyway.
+    ///
+    /// `None` where there is no choice to describe: a segment that ended in a leaf or in
+    /// attrition, or a split with a single child.
+    pub fn collision(&self) -> Option<f64> {
+        if self.ends != SegmentEnd::Fanout || self.out_degree < 2 || self.child_fan_in_sum == 0 {
+            return None;
+        }
+        let sum = self.child_fan_in_sum as f64;
+        Some(self.child_fan_in_sq_all / (sum * sum))
     }
 
     /// `n_eff` as a fraction of the shared children it is taken over.
@@ -298,7 +333,11 @@ impl SegmentRow {
 /// against 2 at depth 210 on `qwen_code` — and a linear banding would put every interesting
 /// thing in one bucket. The same bands `research/segment_census.py` reports, so a fitted
 /// document can be read against that table directly.
-const BANDS: [u32; 6] = [0, 1, 8, 32, 128, 512];
+///
+/// Public so that the census `fit --explain` prints is banded by these rather than by a
+/// second copy of the same list: the two tables are read against each other row by row, and a
+/// copy that drifted would misattribute every fitted law by one band.
+pub const BANDS: [u32; 6] = [0, 1, 8, 32, 128, 512];
 
 /// Fit a node-level trunk process from the census.
 ///
@@ -317,10 +356,11 @@ const BANDS: [u32; 6] = [0, 1, 8, 32, 128, 512];
 /// reference mass sits in a handful of big segments, so the unweighted and weighted
 /// distributions are very different objects. Weight the fit the way the statistic is
 /// weighted, or `unique_keys` and reuse distance pull in opposite directions.
-pub fn fit_process(rows: &[SegmentRow]) -> Option<crate::schema::SegmentProcess> {
+pub fn fit_process(rows: &[SegmentRow]) -> Option<ProcessFit> {
     use crate::schema::{SegmentBand, SegmentProcess};
 
     let mut bands: Vec<SegmentBand> = Vec::new();
+    let mut skews: Vec<BandSkew> = Vec::new();
     for (i, lo) in BANDS.iter().enumerate() {
         let hi = BANDS.get(i + 1).copied().unwrap_or(u32::MAX);
         let in_band = || {
@@ -337,12 +377,17 @@ pub fn fit_process(rows: &[SegmentRow]) -> Option<crate::schema::SegmentProcess>
                 .map(|r| (u64::from(r.out_degree), u64::from(r.fan_in))),
         );
         if let (Some(length), Some(out_degree)) = (length, out_degree) {
+            let skew = fit_skew(in_band(), &out_degree);
             bands.push(SegmentBand {
                 from_depth: *lo,
                 length,
                 out_degree,
-                skew: None,
+                skew: skew.as_ref().map(|s| s.skew),
             });
+            if let Some(mut s) = skew {
+                s.from_depth = *lo;
+                skews.push(s);
+            }
         }
     }
     if bands.is_empty() {
@@ -353,7 +398,199 @@ pub fn fit_process(rows: &[SegmentRow]) -> Option<crate::schema::SegmentProcess>
     // depths above it — stating them from 0 is honest, whereas omitting the band would leave
     // the document unable to describe its own root layer.
     bands[0].from_depth = 0;
-    Some(SegmentProcess { by_depth: bands })
+    if let Some(first) = skews.first_mut() {
+        first.from_depth = 0;
+    }
+    Some(ProcessFit {
+        process: SegmentProcess { by_depth: bands },
+        skews,
+    })
+}
+
+/// A fitted trunk process together with what its child-law fit achieved.
+///
+/// The diagnostics travel beside the document rather than inside it because they are
+/// evidence about the fit, not parameters of the workload: `fit --explain` prints them and
+/// nothing generates from them.
+#[derive(Debug, Clone)]
+pub struct ProcessFit {
+    /// The document's `branching` section.
+    pub process: crate::schema::SegmentProcess,
+    /// One entry per band whose child law could be fitted, ascending by depth.
+    pub skews: Vec<BandSkew>,
+}
+
+/// The widest child law the fit will state.
+///
+/// At `s = 8` a two-way split already sends 99.6% of a cohort down one child, so the band
+/// above this is a law nothing distinguishes; a bound also keeps the bisection finite when a
+/// band's measured collision probability is unreachable under any Zipf.
+const SKEW_MAX: f64 = 8.0;
+
+/// Bisection steps. `SKEW_MAX / 2^40` is far below any exponent's meaning.
+const SKEW_STEPS: usize = 40;
+
+/// Out-degrees drawn from the emitted distribution when checking what the fit achieves.
+const SKEW_CHECK_DRAWS: usize = 2048;
+
+/// Seed for that check. Fixed, so a fit is reproducible: this is a diagnostic about the
+/// emitted distribution, not a draw the workload depends on.
+const TAG_SKEW_CHECK: u64 = 0x5CE7_C4EC;
+
+/// What fitting one band's child law found.
+#[derive(Debug, Clone)]
+pub struct BandSkew {
+    /// The band this describes.
+    pub from_depth: u32,
+    /// The fitted Zipf exponent over child rank.
+    pub skew: f64,
+    /// The band's measured collision probability, fan-in weighted.
+    pub target: f64,
+    /// What the fitted law realises over out-degrees drawn from the emitted distribution.
+    ///
+    /// The bisection converges on `target` over the *measured* out-degrees to well below any
+    /// meaningful precision, so a gap here is the emitted empirical's step coarsening rather
+    /// than a failure of the solve — which is why it is worth printing separately.
+    pub achieved: f64,
+    /// Set when the target was outside what any exponent in `[0, SKEW_MAX]` can reach.
+    pub clamped: Option<&'static str>,
+    /// Splits the target was measured over.
+    pub splits: usize,
+}
+
+/// Fit one band's child-choice law from its splits.
+///
+/// The target is the **fan-in-weighted mean collision probability** over the band's splits
+/// (see [`SegmentRow::collision`]), weighted by fan-in for the same reason the run length and
+/// out-degree are: a walker experiences a split in proportion to the sessions arriving at it,
+/// and measured, the shared region is numerically dominated by tiny cohorts while the
+/// reference mass sits in a handful of large segments.
+///
+/// A single exponent per band, not per split. Within a band the collision probability varies
+/// and one `s` cannot match every split; what it matches is the mean, which is exactly the
+/// quantity `cohort *= p` accumulates. Conditioning on out-degree instead of depth is the
+/// obvious alternative and `fit --explain` prints the within-band spread so the question can
+/// be settled on the corpus rather than assumed.
+fn fit_skew<'a>(
+    rows: impl Iterator<Item = &'a SegmentRow>,
+    out_degree: &crate::dist::Dist,
+) -> Option<BandSkew> {
+    // Weighted by fan-in, deduplicated by out-degree so that the harmonic pass below is over
+    // the widest split rather than over every split.
+    let mut by_degree: FastMap<u64, f64> = FastMap::default();
+    let mut splits = 0usize;
+    let mut num = 0.0f64;
+    let mut den = 0.0f64;
+    for r in rows {
+        let Some(c) = r.collision() else { continue };
+        let w = f64::from(r.fan_in).max(1.0);
+        *by_degree.entry(u64::from(r.out_degree)).or_insert(0.0) += w;
+        num += w * c;
+        den += w;
+        splits += 1;
+    }
+    if den <= 0.0 || splits == 0 {
+        return None;
+    }
+    let target = num / den;
+    let mut pairs: Vec<(u64, f64)> = by_degree.into_iter().collect();
+    pairs.sort_unstable_by_key(|(n, _)| *n);
+
+    // Monotone increasing in `s`, so the endpoints decide whether a solution exists at all.
+    let at = |s: f64| weighted_collision(s, &pairs);
+    let (flat, steep) = (at(0.0)?, at(SKEW_MAX)?);
+    let mut clamped = None;
+    let skew = if target <= flat {
+        // More even than uniform descent — real, and measured: `ragbench`'s deep splits sit
+        // at 0.95x uniform, i.e. sub-multinomial. No Zipf is flatter than uniform, so the
+        // honest statement is uniform and a note that the trace is flatter still.
+        clamped = Some("target is at or below uniform descent; stated as uniform");
+        0.0
+    } else if target >= steep {
+        clamped = Some("target is more concentrated than the widest law fit will state");
+        SKEW_MAX
+    } else {
+        let mut lo = 0.0f64;
+        let mut hi = SKEW_MAX;
+        for _ in 0..SKEW_STEPS {
+            let mid = 0.5 * (lo + hi);
+            match at(mid) {
+                Some(c) if c < target => lo = mid,
+                Some(_) => hi = mid,
+                None => return None,
+            }
+        }
+        0.5 * (lo + hi)
+    };
+
+    // What the law will actually realise, over out-degrees drawn from the distribution the
+    // document states rather than over the ones measured — so the ≤64-step coarsening of the
+    // emitted empirical is visible rather than assumed away.
+    let mut st = crate::rng::Stream::new(TAG_SKEW_CHECK, 0);
+    let mut drawn: FastMap<u64, f64> = FastMap::default();
+    for _ in 0..SKEW_CHECK_DRAWS {
+        let n = out_degree.sample_u64(&mut st).max(1);
+        *drawn.entry(n).or_insert(0.0) += 1.0;
+    }
+    let mut drawn: Vec<(u64, f64)> = drawn.into_iter().collect();
+    drawn.sort_unstable_by_key(|(n, _)| *n);
+    let achieved = weighted_collision(skew, &drawn).unwrap_or(f64::NAN);
+
+    Some(BandSkew {
+        from_depth: 0,
+        skew,
+        target,
+        achieved,
+        clamped,
+        splits,
+    })
+}
+
+/// The weighted mean collision probability at `s` over `(out_degree, weight)` pairs.
+///
+/// `pairs` must be ascending by out-degree. One pass over ranks `1..=max`, accumulating both
+/// harmonic sums and reading each pair's value off the running totals, so the cost is the
+/// **widest** split rather than the sum over splits — which matters because the widest
+/// measured fanout in the corpus is 204030 and a per-pair sum would be quadratic in it.
+///
+/// `None` if any out-degree is above the support at which the sampler abandons the exact
+/// discrete law, matching [`crate::dist::zipf_collision`]: fitting an exponent against a law
+/// the draw is not using would be worse than declining.
+fn weighted_collision(s: f64, pairs: &[(u64, f64)]) -> Option<f64> {
+    let max = pairs.last()?.0;
+    let mut num = 0.0f64;
+    let mut den = 0.0f64;
+    if s <= 0.0 {
+        for (n, w) in pairs {
+            let c = crate::dist::zipf_collision(0.0, *n)?;
+            num += w * c;
+            den += w;
+        }
+        return if den > 0.0 { Some(num / den) } else { None };
+    }
+    if max > crate::dist::ZIPF_EXACT_MAX_SUPPORT {
+        return None;
+    }
+    let mut h_s = 0.0f64;
+    let mut h_2s = 0.0f64;
+    let mut next = 0usize;
+    for k in 1..=max {
+        let t = (k as f64).powf(-s);
+        h_s += t;
+        h_2s += t * t;
+        while next < pairs.len() && pairs[next].0 == k {
+            if h_s > 0.0 {
+                num += pairs[next].1 * h_2s / (h_s * h_s);
+                den += pairs[next].1;
+            }
+            next += 1;
+        }
+    }
+    if den > 0.0 {
+        Some(num / den)
+    } else {
+        None
+    }
 }
 
 /// An empirical step distribution over `(value, weight)` pairs.
@@ -461,6 +698,124 @@ mod tests {
         );
     }
 
+    /// One split with the given child fan-ins, as a row at depth 0.
+    ///
+    /// Built directly rather than through a census so a test can state a child law exactly:
+    /// realising a planted exponent through sessions would need thousands of them and would
+    /// test the sampler rather than the inversion.
+    fn split_row(fan_ins: &[u32]) -> SegmentRow {
+        let sum: u64 = fan_ins.iter().map(|f| u64::from(*f)).sum();
+        SegmentRow {
+            start_depth: 0,
+            length: 1,
+            fan_in: sum as u32,
+            ends: SegmentEnd::Fanout,
+            out_degree: fan_ins.len() as u32,
+            shared_children: fan_ins.iter().filter(|f| **f >= 2).count() as u32,
+            child_fan_in_sum: sum,
+            shared_fan_in_sum: fan_ins
+                .iter()
+                .filter(|f| **f >= 2)
+                .map(|f| u64::from(*f))
+                .sum(),
+            child_fan_in_sq: 0.0,
+            child_fan_in_sq_all: fan_ins.iter().map(|f| f64::from(*f) * f64::from(*f)).sum(),
+            top_child_fan_in: fan_ins.iter().copied().max().unwrap_or(0),
+        }
+    }
+
+    #[test]
+    fn the_fitted_child_law_reproduces_the_collision_probability_it_was_fitted_to() {
+        // The inversion, on a planted law: child fan-ins proportional to k^-1.5 over eight
+        // children, so the split's collision probability is the one a Zipf at s = 1.5
+        // realises and the fit must recover that exponent.
+        //
+        // This is the parameter whose absence made `--branching-segments` unusable:
+        // `out_degree` and the child law are a pair, and a measured out-degree with the
+        // document-level default put 0.072 on a head the trace gives 0.496.
+        let n = 8u64;
+        let total = 100_000.0f64;
+        let h: f64 = (1..=n).map(|k| (k as f64).powf(-1.5)).sum();
+        let fan_ins: Vec<u32> = (1..=n)
+            .map(|k| ((k as f64).powf(-1.5) / h * total).round() as u32)
+            .collect();
+        let row = split_row(&fan_ins);
+        let want = crate::dist::zipf_collision(1.5, n).unwrap();
+        assert!(
+            (row.collision().unwrap() - want).abs() < 1e-4,
+            "the fixture's own collision is {} against zipf(1.5)'s {want}",
+            row.collision().unwrap()
+        );
+        let fit = fit_process(&[row]).expect("a process");
+        let band = &fit.skews[0];
+        assert!(
+            (band.skew - 1.5).abs() < 0.01,
+            "planted s = 1.5, fitted {}",
+            band.skew
+        );
+        assert!(
+            (band.achieved - band.target).abs() < 1e-6,
+            "a const out-degree cannot be coarsened, so achieved {} must equal target {}",
+            band.achieved,
+            band.target
+        );
+        assert!(band.clamped.is_none());
+        assert_eq!(
+            fit.process.by_depth[0].skew,
+            Some(band.skew),
+            "the fitted law must reach the document, not only the report"
+        );
+    }
+
+    #[test]
+    fn a_split_no_more_concentrated_than_uniform_is_stated_as_uniform_and_says_so() {
+        // Measured, `ragbench`'s 2498 deep splits are EXACTLY uniform — literally equal child
+        // counts — and some traces are flatter still (0.95x uniform, sub-multinomial). No Zipf
+        // is flatter than uniform, so the honest emission is uniform plus a note; silently
+        // fitting the nearest exponent would state a concentration the trace contradicts.
+        let fit = fit_process(&[split_row(&[25, 25, 25, 25])]).expect("a process");
+        let band = &fit.skews[0];
+        assert_eq!(band.skew, 0.0, "uniform descent is skew 0");
+        assert!(
+            band.clamped.is_some_and(|c| c.contains("uniform")),
+            "the clamp must be reported: {:?}",
+            band.clamped
+        );
+        assert!((band.target - 0.25).abs() < 1e-12, "four equal children");
+    }
+
+    #[test]
+    fn a_split_more_concentrated_than_any_stated_law_clamps_and_says_so() {
+        // A cohort of 1001 where 1000 take one child: collision 0.998, above what s = 8
+        // reaches at a 2-way split (0.992). Clamping is the right answer — beyond this the
+        // exponent is unidentifiable, every value sending essentially the whole cohort one way
+        // — but it must be visible, because a clamped band is a band whose realised sharing
+        // will be slightly shallower than the trace's.
+        let fit = fit_process(&[split_row(&[1000, 1])]).expect("a process");
+        let band = &fit.skews[0];
+        assert_eq!(band.skew, SKEW_MAX);
+        assert!(
+            band.clamped.is_some_and(|c| c.contains("concentrated")),
+            "{:?}",
+            band.clamped
+        );
+    }
+
+    #[test]
+    fn a_band_with_no_split_states_no_law_rather_than_a_default() {
+        // A segment ending in a leaf or in attrition is a cohort that shrank rather than
+        // divided, so there is no choice to describe. An absent `skew` defers to the
+        // document-level `branch_skew`, which is what the schema has always meant; inventing
+        // 0.9 here would look fitted and be arbitrary.
+        let mut leaf = split_row(&[4, 4]);
+        leaf.ends = SegmentEnd::Leaf;
+        leaf.out_degree = 0;
+        assert!(leaf.collision().is_none());
+        // `fit_process` needs an out-degree to state a band at all, so a corpus of only leaves
+        // yields no band; the check that matters is that no law is invented for one.
+        assert!(fit_process(&[leaf]).is_none());
+    }
+
     #[test]
     fn a_fitted_process_states_the_measured_run_length_and_total_out_degree() {
         // Four sessions share three blocks then split two ways, so the root band should
@@ -473,7 +828,7 @@ mod tests {
             (4, vec![1, 2, 3, 20, 22]),
         ];
         let rows = census_of(&reqs).finish(2);
-        let p = fit_process(&rows).expect("a process");
+        let p = fit_process(&rows).expect("a process").process;
         assert_eq!(
             p.by_depth[0].from_depth, 0,
             "rule 8 wants the first band at 0"
@@ -506,7 +861,7 @@ mod tests {
         let root = rows.iter().find(|r| r.start_depth == 0).expect("root");
         assert_eq!(root.length, 2);
         assert_eq!(root.fan_in, 10);
-        let p = fit_process(&rows).expect("a process");
+        let p = fit_process(&rows).expect("a process").process;
         let l = p.by_depth[0].length.quantile(0.5).expect("median");
         assert!(
             (l - 2.0).abs() < 0.6,

@@ -2096,6 +2096,43 @@ report segments statistics into before/after windows around the event.
   only that a drawn child index is in range cannot see this, and one that did is why it survived.
   A support too large to tabulate exactly MAY fall back to the continuous form, since a support of
   that size cannot arise from `roots.count` or a child count.
+- **FR-055j**: `fit` MUST fit a segment's child-choice law to the **collision probability** at its
+  splits — `Σ_k p_k²`, the probability that two sessions arriving at a split descend into the same
+  child, measured as `Σ c²/(Σ c)²` over the split's child fan-ins — and MUST NOT fit the law's rank
+  curve. The collision probability is the only functional of the child law the trunk mechanism reads:
+  the walk carries an expected cohort as `cohort *= p(child taken)` with the child itself drawn from
+  `p`, so the expected factor at a split is `Σ p²`, and its reciprocal is the effective branching
+  `n_eff = 1/Σ p²` that trunk occupancy, rule 16 and `branching: auto` are already functions of.
+  Under FR-055g's discrete Zipf it is `H_n(2s)/H_n(s)²`, strictly increasing in `s` and decreasing in
+  `n`, so inverting it for an exponent is a bisection with no local minima.
+  Measure over **all** children, singletons included, because landing on a singleton child is how a
+  session becomes private, and weight splits by **fan-in**, for the reason the node-level run length
+  and out-degree are: a walker meets a split in proportion to the sessions arriving at it, and the
+  shared region is numerically dominated by tiny cohorts while the reference mass sits in a handful of
+  large segments.
+  **The rank curve MUST NOT be fitted instead, because no rank law transfers.** Measured across the
+  corpus, a Zipf fails the two widest fanouts in **opposite** directions (`qwen_code`'s root head 25%
+  too light; `ragbench`'s 2.4x too heavy) while `ragbench`'s 2498 deep splits are *exactly* uniform, so
+  any nonzero exponent makes 3889 of its 3890 branch points worse. Matching the collision probability
+  recovers the head as a *consequence* rather than as a target: on `qwen_code`'s 4739-way root split,
+  whose measured head is 0.496, the exponent reproducing the collision probability puts **0.464**
+  there against the **0.072** of the document-level default.
+  Where the measurement lies outside what an exponent can state, `fit` MUST state the boundary and
+  **report that it did** rather than silently fitting the nearest reachable value. A split no more
+  concentrated than uniform descent is stated as uniform — that case is real and measured, `ragbench`'s
+  deep splits sitting at 0.95x uniform, i.e. **sub-multinomial**, and no Zipf is flatter than uniform.
+  A segment ending in a **leaf or in attrition** states no law at all, because a cohort that shrank
+  rather than divided exercised no choice; an absent law defers to the document-level `branch_skew`,
+  and inventing a default there would look fitted while being arbitrary.
+  **This does not on its own make the node-level spelling adoptable, and the measurement says so.**
+  Measured 2026-08-17 at seed 4242, it takes `qwen_code` from `sharing_depth` 0.364 and `unique_keys`
+  0.697 to **0.107 / 0.479**, and is a **no-op on `tau2_airline`** (0.371 → 0.376, `unique_keys` 0.557
+  → 0.556) whose fitted exponents 0.98–1.56 sit near the 0.9 default they replace. Both stay worse
+  than the per-depth profile's 0.060/0.182 and 0.102/0.335, so `--branching-segments` remains off by
+  default. What the requirement removes is a **pair** defect — an `out_degree` fitted while the law
+  choosing among those children was not — and fitting one of the pair without the other is worse than
+  fitting neither. The residual is that the synthetic mints **1.6–1.7x too many distinct keys**: the
+  cohort still divides faster than the trace's, while per-split collision now matches to 0.4%.
 - **FR-056**: `fit` MUST validate the fitted model by comparing four statistics between the
   real trace and synthetic output: reuse-distance CDF (primary), prefix-sharing depth
   histogram, request-length distribution, and unique-keys-over-time curve.

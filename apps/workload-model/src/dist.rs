@@ -319,8 +319,13 @@ fn standard_normal(st: &mut Stream) -> f64 {
 ///
 /// An unbounded `Zipf` samples against `u32::MAX`, so some bound is required. Every
 /// support a document can mean — `roots.count`, or a trunk node's child count — is
-/// orders of magnitude below this, and the fallback is documented on [`zipf`].
-const ZIPF_EXACT_MAX_SUPPORT: u64 = 1 << 22;
+/// orders of magnitude below this, and the fallback is documented on [`Shape::Zipf`]'s
+/// sampler.
+///
+/// Public because it is the support at which the **law itself changes**, not an internal
+/// tuning constant: a caller fitting an exponent has to know where the exact discrete pmf
+/// stops describing what the sampler draws.
+pub const ZIPF_EXACT_MAX_SUPPORT: u64 = 1 << 22;
 
 /// Memoised discrete-Zipf cumulative tables, keyed by `(s.to_bits(), n)`.
 ///
@@ -439,6 +444,66 @@ pub fn zipf_pmf_at(s: f64, n: u64, rank: u64) -> f64 {
     let i = (rank - 1) as usize;
     let lo = if i == 0 { 0.0 } else { cdf[i - 1] };
     (cdf[i] - lo).max(0.0)
+}
+
+/// The **collision probability** of the discrete Zipf law, `Σ_k p_k² = H_n(2s) / H_n(s)²`.
+///
+/// # What it is for
+///
+/// This is the child law's whole effect on how fast a cohort subdivides, and therefore the
+/// one number worth fitting a child law to. `plan::generate` carries an expected cohort down
+/// the trunk as `cohort *= p(child taken)`, and the child taken is itself drawn from `p`, so
+/// the expected factor at a split is `Σ_i p_i · p_i` — exactly this. Its reciprocal is the
+/// effective branching `n_eff = 1/Σp²`, the inverse participation ratio that
+/// `corpus::occupancy`, validation rule 16 and `branching: auto` are all functions of.
+///
+/// Two properties make it fittable, both worth stating because they are what let a scalar
+/// stand in for a rank curve:
+///
+/// * it is **strictly decreasing in `n` and increasing in `s`**, so inverting it for `s` at a
+///   measured target is a bisection with no local minima; and
+/// * matching it recovers the *head* share as a consequence rather than by fitting it. On
+///   `qwen_code`'s 4739-way root split the measured head is 0.496; the `s` that reproduces
+///   that split's collision probability puts 0.464 there, against the 0.072 of the
+///   document-level default. Fitting the full rank curve was tried and does not transfer —
+///   the corpus's two largest fanouts fail a Zipf in *opposite* directions — but the tail
+///   those fits argue over does not affect cohort decay.
+///
+/// # Returns
+///
+/// `None` when `n` exceeds the support at which [`zipf_pmf_at`] switches to the continuous
+/// density, because the sum below is the *discrete* law's and would then describe a law the
+/// draw is not using. A caller fitting an exponent should decline to fit rather than fit
+/// against the wrong law; no out-degree measured in the corpus comes near the bound (the
+/// widest is `wildchat`'s 204030-way fanout, against a bound of 4194304).
+pub fn zipf_collision(s: f64, n: u64) -> Option<f64> {
+    if n == 0 {
+        return None;
+    }
+    if n == 1 {
+        return Some(1.0);
+    }
+    if n > ZIPF_EXACT_MAX_SUPPORT {
+        return None;
+    }
+    if s <= 0.0 {
+        // Uniform descent: every child equally likely, so the collision probability is 1/n
+        // and the effective branching is the full width.
+        return Some(1.0 / n as f64);
+    }
+    // One pass, one `powf` per rank: `H_n(2s)` is `Σ (k^-s)²`, so the same term serves both
+    // sums and the top of the loop never recomputes a power.
+    let mut h_s = 0.0f64;
+    let mut h_2s = 0.0f64;
+    for k in 1..=n {
+        let t = (k as f64).powf(-s);
+        h_s += t;
+        h_2s += t * t;
+    }
+    if h_s <= 0.0 {
+        return None;
+    }
+    Some(h_2s / (h_s * h_s))
 }
 
 /// The pre-2026-08 continuous approximation, kept for supports too large to tabulate.
@@ -616,6 +681,41 @@ mod tests {
             (0..20_000).any(|_| d.sample(&mut st) == 8.0),
             "rank 8 of 8 must be reachable"
         );
+    }
+
+    #[test]
+    fn the_collision_probability_agrees_with_the_pmf_it_is_a_functional_of() {
+        // Two implementations of one law, so they are pinned to each other rather than each
+        // to a hand-computed constant: `zipf_collision` uses the closed form
+        // `H_n(2s)/H_n(s)²` while `zipf_pmf_at` reads the memoised cumulative table, and a
+        // fitted exponent is only meaningful if the quantity fitted is the quantity the walk
+        // then realises.
+        for s in [0.0, 0.4, 0.9, 1.65, 3.0] {
+            for n in [2u64, 3, 7, 40, 4739] {
+                let want: f64 = (1..=n).map(|k| zipf_pmf_at(s, n, k).powi(2)).sum();
+                let got = zipf_collision(s, n).expect("inside the exact support");
+                assert!(
+                    (got - want).abs() < 1e-9,
+                    "s={s} n={n}: closed form {got:.12} against Σ pmf² {want:.12}"
+                );
+            }
+        }
+        // Uniform descent is 1/n exactly, which is the boundary case the fit's lower clamp
+        // lands on — `ragbench`'s 2498 deep splits are measured exactly uniform.
+        assert!((zipf_collision(0.0, 16).unwrap() - 1.0 / 16.0).abs() < 1e-12);
+        // Monotone in `s` at fixed `n`, which is what makes inverting it a bisection.
+        let mut prev = zipf_collision(0.0, 64).unwrap();
+        for s in [0.2, 0.5, 0.9, 1.4, 2.0, 4.0] {
+            let c = zipf_collision(s, 64).unwrap();
+            assert!(
+                c > prev,
+                "collision must rise with skew: {c} <= {prev} at s={s}"
+            );
+            prev = c;
+        }
+        // Above the exact support the draw changes law, so this declines rather than
+        // describing a law the sampler is not using.
+        assert_eq!(zipf_collision(0.9, (1 << 22) + 1), None);
     }
 
     #[test]

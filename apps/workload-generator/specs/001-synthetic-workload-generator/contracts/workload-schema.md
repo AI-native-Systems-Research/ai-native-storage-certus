@@ -471,7 +471,7 @@ nonparametric branching process with no closed-form fit:
 | `roots.popularity` | histogram of sessions per root |
 | `shared_depth` | longest common prefix *within one `wss_window`* of each session's **turn-1 request only** — the space the parameter is drawn in, not the space it is validated in; see below |
 | `branching` | the **width-by-depth profile** `w(d) = distinct keys at depth d that **two or more sessions** reached`, segmented per `research.md` § The branching segmentation rule; each segment's fanout is the geometric mean of the ratios inside it |
-| `branch_skew` | Zipf exponent fitted to the visit-count distribution over the keys at one depth, per segment |
+| `branch_skew` | the exponent whose **collision probability** `H_n(2s)/H_n(s)²` matches the fan-in-weighted mean of `Σ c²/(Σ c)²` measured over each split's children, per segment — **not** a fit to the rank curve, which does not transfer across the corpus; see FR-055j |
 | `private_depth` | path depth of the **lowest-numbered turn** − that request's longest common prefix |
 | `growth_per_turn` | path-depth increment between consecutive turns of one session, **in turn-index order**, accumulated **per session-length band** — see below |
 | `churn.half_life` | **not fittable from a trace of ordinary length** — see below |
