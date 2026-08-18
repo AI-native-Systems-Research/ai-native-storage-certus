@@ -756,10 +756,15 @@ fn cmd_fit(
     // the trace genuinely describes something the model cannot express.
     if explain {
         print_trunk_profile(&trace_report, &fitted_branching);
-        print_segment_census(
+        let trace_rows = print_segment_census(
             &trace.invocations,
             fitted_segments.as_ref().map(|f| f.skews.as_slice()),
         );
+        // Structure, not marginals: the four gated statistics cannot see the trunk's shape, and
+        // a collapsed trunk passes all of them. Compared through the same census both sides.
+        if let Err(e) = print_structure_diff(&trace_rows, &doc) {
+            println!("\n  trunk structure — unavailable: {e}");
+        }
         // After the census, so the fitted bands are read against the measurement they came
         // from: the two tables carry the same quantities per the same bands, and the whole
         // point is to diff them.
@@ -1802,6 +1807,161 @@ fn print_path_budget(
     }
 }
 
+/// A per-band structural summary of one census, for comparing two of them.
+///
+/// Deliberately the quantities `print_segment_census` already prints, so a reader can hold the
+/// two tables against each other, and deliberately **structural** rather than marginal: FR-056's
+/// four statistics are distributions over requests and references, and a trunk can collapse to a
+/// handful of chains without any of them firing. That is not hypothetical — it is what this branch
+/// spent several sessions failing to see.
+#[derive(Debug, Clone, Copy, Default)]
+struct BandShape {
+    segments: u64,
+    len_med: u64,
+    fan_in_med: u64,
+    deg_med: u64,
+    max_fan_in: u32,
+}
+
+/// Summarise a census's rows into the same bands the fit uses.
+fn band_shapes(rows: &[workload_model::fit::segments::SegmentRow]) -> Vec<(u32, BandShape)> {
+    let bands = workload_model::fit::segments::BANDS;
+    let med = |mut v: Vec<u64>| -> u64 {
+        if v.is_empty() {
+            return 0;
+        }
+        v.sort_unstable();
+        v[v.len() / 2]
+    };
+    bands
+        .iter()
+        .enumerate()
+        .map(|(i, lo)| {
+            let hi = bands.get(i + 1).copied().unwrap_or(u32::MAX);
+            let in_band: Vec<&_> = rows
+                .iter()
+                .filter(|r| r.start_depth >= *lo && (hi == u32::MAX || r.start_depth < hi))
+                .collect();
+            (
+                *lo,
+                BandShape {
+                    segments: in_band.len() as u64,
+                    len_med: med(in_band.iter().map(|r| u64::from(r.length)).collect()),
+                    fan_in_med: med(in_band.iter().map(|r| u64::from(r.fan_in)).collect()),
+                    deg_med: med(in_band.iter().map(|r| u64::from(r.out_degree)).collect()),
+                    max_fan_in: in_band.iter().map(|r| r.fan_in).max().unwrap_or(0),
+                },
+            )
+        })
+        .collect()
+}
+
+/// Compare the **structure** of the generated trunk against the source trace's.
+///
+/// The gap this closes: every gated statistic is a marginal over requests or references, and the
+/// trunk's *shape* is not recoverable from any of them. A model whose trunk has collapsed to five
+/// chains can sit inside all four tolerances, and a model that reproduces three marginals while
+/// inverting the segment structure is not a model of the workload. So the generated plan is put
+/// through the same `Census` the trace is, and the two censuses are diffed band for band.
+///
+/// Plan events arrive interleaved by session, and `Census::observe` needs one session's paths
+/// contiguous for an exact fan-in — so requests are collected, grouped and then fed, exactly as the
+/// trace side does. Reconstructed by `request_id` with `depth` as the ordinal, which is the plan
+/// format's own invariant rather than a second convention.
+fn print_structure_diff(
+    trace_rows: &[workload_model::fit::segments::SegmentRow],
+    doc: &workload_model::schema::Document,
+) -> Result<(), String> {
+    use workload_model::fit::segments::Census;
+
+    // Regenerated here rather than buffered during the search: holding every event of a 20M-event
+    // plan costs hundreds of megabytes, and this runs only under `--explain`.
+    let mut g = Generator::new(doc).map_err(|e| e.to_string())?;
+    let mut plan: Vec<PlanEvent> = Vec::new();
+    let mut chunk: Vec<PlanEvent> = Vec::new();
+    while !g.is_done() {
+        chunk.clear();
+        if g.fill(&mut chunk) == 0 {
+            break;
+        }
+        plan.extend_from_slice(&chunk);
+    }
+    let plan = &plan;
+
+    // request_id -> (session, turn, blocks by depth). Ascending request_id groups one request.
+    let mut reqs: Vec<(u32, u32, u16, Vec<workload_model::keys::CacheKey>)> = Vec::new();
+    for e in plan {
+        match reqs.last_mut() {
+            Some((rid, ..)) if *rid == e.request_id => {}
+            _ => reqs.push((e.request_id, e.session_id.0, e.turn, Vec::new())),
+        }
+        let last = reqs.last_mut().expect("just pushed");
+        if e.depth as usize >= last.3.len() {
+            last.3
+                .resize(e.depth as usize + 1, workload_model::keys::CacheKey(0));
+        }
+        last.3[e.depth as usize] = e.key;
+    }
+    reqs.sort_by_key(|(_, s, t, _)| (*s, *t));
+    let mut census = Census::new();
+    for (_, s, _, blocks) in &reqs {
+        census.observe(workload_model::keys::SessionId(*s), blocks);
+    }
+    let plan_rows = census.finish(2);
+
+    println!(
+        "\n  trunk structure — the GENERATED trunk against the source's, same census both sides\n           Four marginal tests cannot see the trunk's shape: a collapsed trunk passes all of them.\n           T = trace, S = synthetic; fanin~ is the median cohort, fanmax the biggest spine.\n  \
+         Read the ratios, not the absolutes — the two sides differ in size."
+    );
+    println!(
+        "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}",
+        "depths",
+        "segs T",
+        "segs S",
+        "len T",
+        "len S",
+        "deg T",
+        "deg S",
+        "fanin~T",
+        "fanin~S",
+        "fanmax T",
+        "fanmax S"
+    );
+    let (t, p) = (band_shapes(trace_rows), band_shapes(&plan_rows));
+    for ((lo, ts), (_, ps)) in t.iter().zip(p.iter()) {
+        if ts.segments == 0 && ps.segments == 0 {
+            continue;
+        }
+        println!(
+            "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}",
+            format!("{lo}+"),
+            ts.segments,
+            ps.segments,
+            ts.len_med,
+            ps.len_med,
+            ts.deg_med,
+            ps.deg_med,
+            ts.fan_in_med,
+            ps.fan_in_med,
+            ts.max_fan_in,
+            ps.max_fan_in
+        );
+    }
+    let (tt, pt): (u64, u64) = (
+        t.iter().map(|(_, s)| s.segments).sum(),
+        p.iter().map(|(_, s)| s.segments).sum(),
+    );
+    println!(
+        "    total shared segments: trace {tt}, synthetic {pt}{}",
+        if tt > 0 && pt * 20 < tt {
+            "  <- the generated trunk has COLLAPSED relative to the trace's"
+        } else {
+            ""
+        }
+    );
+    Ok(())
+}
+
 /// The observed width-by-depth profile beside what was fitted from it.
 ///
 /// The instrument for a schema rejection about the trunk, which is otherwise a number
@@ -1830,7 +1990,7 @@ fn print_path_budget(
 fn print_segment_census(
     invocations: &[read::NormalisedInvocation],
     skews: Option<&[workload_model::fit::segments::BandSkew]>,
-) {
+) -> Vec<workload_model::fit::segments::SegmentRow> {
     use workload_model::fit::segments::{Census, SegmentEnd};
 
     // Grouped by session, which `Census::observe` requires for an exact fan-in.
@@ -1843,7 +2003,7 @@ fn print_segment_census(
     let rows = census.finish(2);
     if rows.is_empty() {
         println!("\n  segment census — no shared segment to report");
-        return;
+        return rows;
     }
     // Derived from the fit's own band list rather than restated, so this table and the
     // fitted document cannot come to disagree about which depths a row covers.
@@ -1942,6 +2102,7 @@ fn print_segment_census(
         );
     }
     print_child_law(&rows, &spans, skews);
+    rows
 }
 
 /// The child-choice law per band: what the trace does, and what the fit stated.

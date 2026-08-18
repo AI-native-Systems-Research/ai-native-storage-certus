@@ -675,6 +675,54 @@ an improvement. The next step is calibrating the division rate so that realised 
 `sharing_depth` as the readout — not another marginal fix, since the mechanism is now doing the work
 and only its rate is wrong. Reproduce with `CERTUS_EXP_COHORT_BOUNDARY=1` and `--branching-segments`.
 
+### The structural gate — profiling the GENERATED trunk, and what it immediately found
+
+Every FR-056 statistic is a marginal over requests or references, and none of them can see the
+trunk's *shape*: a trunk collapsed to a handful of chains passes all four. That is not hypothetical —
+it is what several sessions of this work failed to see. So the generated plan is now put through the
+**same segment census** the trace is, and the two are diffed band for band under `fit --explain`.
+Plan events arrive interleaved and the census needs one session's paths contiguous, so requests are
+reconstructed by `request_id` with `depth` as the ordinal and grouped before feeding — the plan
+format's own invariant rather than a second convention.
+
+Median segment length per band on `tau2_airline`, trace against three arms:
+
+| band | trace | per-depth profile | node-level segments | segments + cohort exhaustion |
+| --- | --- | --- | --- | --- |
+| 0+ | **124** | 1 | 1 | 7 |
+| 1+ | 14 | 13 | 6 | 6 |
+| 8+ | 11 | 12 | 11 | 1 |
+| 32+ | **1** | 22 | 5 | **1** |
+| 128+ | **1** | 40 | 2 | **1** |
+| 512+ | 1 | 376 | 64 | 44 |
+| total shared segments | **158** | 438 | 389 | 413 |
+
+**Three findings, none of them visible in any gated statistic.**
+
+1. **The per-depth profile's length profile is INVERTED.** The trace has one long root preamble and
+   then frequent, short segments; the profile produces short segments near the root and runs of 22 to
+   376 blocks deep — long where the trace is short and short where it is long. That is the legacy of
+   fitting width by depth: fanout above 1 near the root chops it, and a flat deep region never splits.
+2. **Cohort exhaustion structurally FIXES the deep region**, reproducing the trace's median length of
+   **1** exactly at depths 32+ and 128+ where the profile is 22-40x too long. This is a win for the
+   mechanism that its *marginals* actively hide — the arm that looks worse on `sharing_depth` is the
+   one that gets the deep structure right. It is the clearest evidence so far that the marginals were
+   the wrong thing to steer by.
+3. **No arm builds the trace's 124-block root preamble**, and the reason is a discrepancy worth
+   chasing rather than a missing parameter: the fitted band-0 **length distribution already has a
+   median of 124** (see § Fan-in / the fitted trunk process table), and `SplitState::at_root` draws
+   the root's run length from it, yet the realised median is 1 to 7. A fitted parameter and its
+   realisation disagree by more than an order of magnitude.
+   The likely mechanism, and the next thing to test: a segment breaks on **attrition** as well as on
+   fanout, so any session leaving mid-run chops the preamble into 1-block segments. In the trace no
+   session leaves during a preamble — a cohort walks all 124 blocks **together** and then splits at
+   once, i.e. departures are *synchronised to splits*. The drawn `shared_depth` cap makes departures
+   land at a per-session depth instead, spreading them across the run. That is the same
+   correlated-versus-independent error as the rest of step 3, seen from a third direction.
+
+All three arms also carry **~2.5x too many shared segments** (389-438 against 158), so the generated
+trunk is over-fragmented in every spelling.
+
 ### The achievable floor — the derivation behind FR-057c, and what it says about the gate
 
 The tolerances of FR-057b were calibrated from the generator against itself across seeds. That is a
