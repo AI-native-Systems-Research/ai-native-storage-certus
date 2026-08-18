@@ -623,6 +623,12 @@ fn cmd_fit(
             &trace.invocations,
             fitted_segments.as_ref().map(|f| f.skews.as_slice()),
         );
+        // After the census, so the fitted bands are read against the measurement they came
+        // from: the two tables carry the same quantities per the same bands, and the whole
+        // point is to diff them.
+        if let Some(f) = fitted_segments.as_ref() {
+            print_fitted_process(f);
+        }
     }
 
     if !rejections.is_empty() {
@@ -1360,6 +1366,103 @@ fn print_child_law(
              reproduce."
         );
     }
+}
+
+/// The node-level trunk process as fitted: the parameters the document will state.
+///
+/// Printed because nothing else could read them. The census above is the *measurement* and the
+/// child-law table is one of the three fitted halves; the run length and out-degree reached only
+/// the emitted YAML, which FR-057 refuses to write whenever the fit does not resemble its source
+/// — i.e. exactly when someone is trying to find out why. Every column here is a function of the
+/// fitted document alone, so this table says what the model will do, not what the trace did.
+///
+/// Read it against the census's `len_med` / `deg_med` columns, band for band. Expect them to
+/// differ: the fit weights both by **fan-in** while the census medians are per segment, and on
+/// `tau2_airline` at depths 128-511 that moves the out-degree from a census median of 3 to a
+/// fitted 19. That gap is the fan-in weighting doing its job, and it is visible only here.
+///
+/// The derived columns are the reason the table exists. `splits/blk` is the rate the run length
+/// sets — off the **mean**, not the median, since the number of splits over a depth is a renewal
+/// rate and these distributions are heavily skewed. `decay/band` is the expected cohort factor
+/// across the band's **own span**, `coll ^ (span / mean len)`, and `cum` is the running product
+/// down the trunk. Sharing ends where a cohort reaches one session, so `cum` against the session
+/// count per root is what decides where — not either fitted half alone.
+fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
+    let implied = fit.implied();
+    println!(
+        "\n  fitted trunk process — the node-level law the document states, per band\n  \
+         a walker draws a run length from `len`, walks it, then splits `deg` ways and picks a \
+         child\n  under `skew`. splits/blk is off the MEAN length; decay/band = \
+         coll^(span/mean len);\n  cum is the product down the trunk. Compare len/deg against the \
+         census above: the fit\n  weights both by fan-in, so they are meant to differ from its \
+         per-segment medians."
+    );
+    println!(
+        "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>10}  {:>9}  {:>9}",
+        "depths",
+        "len_p10",
+        "len_p50",
+        "len_p90",
+        "len_mean",
+        "deg_p50",
+        "deg_mean",
+        "skew",
+        "splits/blk",
+        "decay/band",
+        "cum"
+    );
+    let bands = &fit.process.by_depth;
+    for (i, b) in bands.iter().enumerate() {
+        let span = match bands.get(i + 1) {
+            Some(next) => format!("{}-{}", b.from_depth, next.from_depth.saturating_sub(1)),
+            None => format!("{}+", b.from_depth),
+        };
+        // `-` rather than a substituted value wherever the distribution declines to answer: a
+        // `zipf` has no closed-form mean, and printing a stand-in here would be a fitted-looking
+        // number nothing states.
+        let q = |d: &workload_model::dist::Dist, p: f64| {
+            d.quantile(p).map_or("-".to_string(), |v| format!("{v:.1}"))
+        };
+        let m = |d: &workload_model::dist::Dist| {
+            d.mean().map_or("-".to_string(), |v| format!("{v:.1}"))
+        };
+        let this = implied.iter().find(|x| x.from_depth == b.from_depth);
+        // A cohort of a few thousand sessions is long gone by 1e-6, so below that the figure has
+        // stopped describing anything realisable and an exponent would only imply precision.
+        let factor = |v: Option<f64>| match v {
+            None => "-".to_string(),
+            Some(d) if d < 1e-6 => "<1e-6".to_string(),
+            Some(d) => format!("{d:.5}"),
+        };
+        println!(
+            "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>10}  {:>9}  {:>9}",
+            span,
+            q(&b.length, 0.10),
+            q(&b.length, 0.50),
+            q(&b.length, 0.90),
+            m(&b.length),
+            q(&b.out_degree, 0.50),
+            m(&b.out_degree),
+            b.skew.map_or("-".to_string(), |s| format!("{s:.3}")),
+            this.map_or("-".to_string(), |x| format!("{:.4}", x.splits_per_block)),
+            factor(this.and_then(|x| x.decay_in_band)),
+            factor(this.and_then(|x| x.cumulative)),
+        );
+    }
+    if bands.len() != implied.len() {
+        println!(
+            "    {} of {} bands state no child law, so no decay is derived for them; those \
+             defer\n    to the document-level `branch_skew`, which is not this fit's statement, \
+             and every\n    `cum` below such a band is withheld rather than multiplied across the \
+             gap.",
+            bands.len() - implied.len(),
+            bands.len()
+        );
+    }
+    println!(
+        "    the last band is unbounded — the profile applies it to every depth below its \
+         start —\n    so it has no span to integrate over and its decay/band and cum read `-`."
+    );
 }
 
 fn print_trunk_profile(trace: &Report, fitted: &workload_model::fit::branching::FittedBranching) {

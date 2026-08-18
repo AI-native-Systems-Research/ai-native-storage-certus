@@ -467,12 +467,55 @@ default they replace, so the child law was never airline's problem.
 Both remain worse than the per-depth profile's 0.060/0.182 and 0.102/0.335, so `--branching-segments`
 stays off by default. The residual is that the synthetic mints **1.6–1.7x too many distinct keys**
 (`qwen_code` 8.40M against 5.20M; airline 445k against 255k) while per-split collision now matches its
-target to **0.4%** in every band — so the cohort divides too often rather than too widely. The
-candidate mechanism is the run-length distribution, not the child law: airline's median segment length
-is **1** in all three bands below depth 32, so a walker there draws a split at nearly every block,
-while the trace's deep chains carry fan-in 3–4 out to depth 1200 across only 35 segments beyond depth
-512. Fitting one member of a pair is worse than fitting neither, and `(length, out_degree, skew)` may
-be a **triple**.
+target to **0.4%** in every band — so the cohort divides too often rather than too widely.
+
+#### What the fitted bands say once they are printed — and one wrong diagnosis corrected
+
+The fitted `length` and `out_degree` reached only the emitted YAML, which FR-057 refuses to write
+whenever the fit does not resemble its source, i.e. exactly when someone is diagnosing it. They are now
+printed under `fit --explain` beside the derived split rate and the cohort decay, and the first thing
+that fell out was a **correction**.
+
+**A split rate read off a median is wrong by orders of magnitude, and this note previously made that
+error.** The candidate mechanism recorded here was "airline's median segment length is 1 below depth
+32, so a walker splits at nearly every block". The number of splits over a depth is a **renewal rate**,
+set by the **mean**, and these length distributions are heavily skewed: airline's fitted means are
+246 / 354 / 9 / 26 / 71 / 131 blocks, so `splits/blk` is **0.003–0.111**, not ~1. The censuses's `len_med`
+of 1 sits under a p90 of 161 in the same band. Nothing about the corpus changed; the reading was wrong.
+
+What the composition does show is sharper, and it **separates the two traces**. Cumulative expected
+cohort factor from depth 0, `Π coll^(span/mean len)` per band:
+
+| band | airline decay/band | airline cum | qwen_code decay/band | qwen_code cum |
+| --- | --- | --- | --- | --- |
+| 0 | 0.99550 | 0.99550 | 0.93401 | 0.93401 |
+| 1–7 | 0.98111 | 0.97669 | 0.63782 | 0.59573 |
+| 8–31 | 0.18594 | 0.18160 | 0.85987 | 0.51225 |
+| 32–127 | 0.05257 | 0.00955 | 0.61441 | 0.31473 |
+| 128–511 | 0.00003 | **<1e-6** | 0.24144 | **0.07599** |
+
+**`qwen_code` composes faithfully; airline annihilates its cohort.** qwen_code's dominant root carries
+16045 sessions, so a cumulative 0.076 leaves ~1219 still together at depth 511 — against a measured
+maximum fan-in of **1127** in that band. Airline's widest root holds 154, so <1e-6 leaves nothing
+sharing beyond roughly depth 100–130, while the trace still has fan-in 3–4 out to depth 1200. Realised
+sharing p50 is 124 against the trace's 288. This is the same trace on which the child-law fit was a
+no-op, and it is why airline stays at 0.376.
+
+**The likely cause is a small-sample fan-in weighting, and it is checkable.** Airline's bands are fitted
+from **13–36 splits** each, against qwen_code's 104–4067, and airline's fan-in-weighted `deg_mean` comes
+out **18.5 / 11.2 / 2.4 / 14.1 / 18.9 / 6.6** where its per-segment census median is **4 / 2 / 2 / 3 / 3
+/ 4**. At depths 128–511 the fit therefore states an effective branching of `1/0.1405 ≈ 7.1` where the
+typical split is 2–3 ways: a couple of wide, high-fan-in segments are setting the whole band's law.
+Fan-in weighting is right in principle — a walker meets a split in proportion to arrivals — but on 36
+observations it is an average over a heavy tail, and cohort decay is a *product*, so a band's mean is
+the wrong summary of it. The next thing to test is a weighting robust to that (or a per-band sample
+floor below which the band declines to state a law), **not** the run-length distribution.
+
+Note also that this is the third independent appearance of one mechanism: **survival correlates with
+depth**, so applying a population-average decay to every walker sheds the wrong sessions. It was first
+measured in the refuted `fanout < 1` experiment, then again when survivor-conditioning recovered almost
+nothing, and now here. `(length, out_degree, skew)` may be a **triple** — but the evidence now points at
+how the band's law is *summarised*, not at which of the three is missing.
 
 ### Fit tolerances and divergence measures — the derivation behind FR-057a and FR-057b
 

@@ -420,6 +420,111 @@ pub struct ProcessFit {
     pub skews: Vec<BandSkew>,
 }
 
+impl ProcessFit {
+    /// What each fitted band implies about how fast a cohort decays with depth.
+    ///
+    /// The band's two fitted halves decide sharing only jointly, and neither alone is
+    /// readable: a run length says how *often* a walker splits and the child law says how much
+    /// of its cohort it keeps at each split, so the quantity that decides where sharing ends is
+    /// `collision ^ (1/mean length)` per block. Reported because the emitted document states
+    /// the two separately and FR-057 may refuse to write it at all, which leaves the fit's own
+    /// consequence unreadable at exactly the moment it is being diagnosed.
+    ///
+    /// One entry per band that has both halves, ascending by depth. A band whose child law was
+    /// not fitted is omitted rather than defaulted, since the document-level `branch_skew` that
+    /// such a band falls back to is not this fit's statement.
+    ///
+    /// Each band's decay is taken over **its own span**, never over a fixed depth: a band 24
+    /// blocks wide and one 384 blocks wide contribute different amounts of subdivision at the
+    /// same per-split rate, so a common yardstick would overstate the narrow bands by more than
+    /// an order of magnitude. `cumulative` is the running product down the trunk, and is
+    /// **`None` from the first band that stated no law onwards** rather than multiplying across
+    /// the hole, because a product missing a factor reads as a smaller number, not as a gap.
+    pub fn implied(&self) -> Vec<BandImplied> {
+        let bands = &self.process.by_depth;
+        let mut out: Vec<BandImplied> = Vec::new();
+        let mut cumulative = Some(1.0f64);
+        for (i, b) in bands.iter().enumerate() {
+            // The last band is unbounded: the profile applies it to every depth below its start,
+            // so there is no span to integrate over and no honest end to the product.
+            let span_blocks = bands
+                .get(i + 1)
+                .map(|next| next.from_depth.saturating_sub(b.from_depth));
+            let law = self.skews.iter().find(|s| s.from_depth == b.from_depth);
+            let mean_length = b.length.mean().filter(|m| *m > 0.0);
+            let (Some(law), Some(mean_length)) = (law, mean_length) else {
+                // Any gap voids every later cumulative figure, not just this row's.
+                cumulative = None;
+                continue;
+            };
+            // The realised collision rather than the target: `achieved` is measured over
+            // out-degrees drawn from the distribution the document states, so it carries the
+            // emitted empirical's coarsening, which is the whole reason both are kept.
+            let splits_per_block = 1.0 / mean_length;
+            let row = BandImplied {
+                from_depth: b.from_depth,
+                span_blocks,
+                mean_length,
+                collision: law.achieved,
+                splits_per_block,
+                decay_in_band: None,
+                cumulative: None,
+            };
+            let decay_in_band = span_blocks.map(|s| row.decay_over(f64::from(s)));
+            cumulative = match (cumulative, decay_in_band) {
+                (Some(c), Some(d)) => Some(c * d),
+                // An unbounded final band has no end to accumulate to, so the product stops at
+                // the band above it rather than being extended by a guess.
+                _ => None,
+            };
+            out.push(BandImplied {
+                decay_in_band,
+                cumulative,
+                ..row
+            });
+        }
+        out
+    }
+}
+
+/// What one fitted band implies about cohort decay, derived from both of its halves.
+#[derive(Debug, Clone, Copy)]
+pub struct BandImplied {
+    /// The band this describes.
+    pub from_depth: u32,
+    /// Blocks this band covers. `None` for the last band, which is unbounded.
+    pub span_blocks: Option<u32>,
+    /// Mean run length, the renewal rate's reciprocal.
+    ///
+    /// The **mean**, because the number of splits over a depth is set by the renewal rate and a
+    /// run-length distribution measured on this corpus is heavily skewed: `tau2_airline`'s band
+    /// at depths 128-511 has a median of 119 and a mean of 71, and its census median is 1
+    /// against a p90 of 161. Reading a split rate off a median overstates it by orders of
+    /// magnitude, which was measured and recorded as a wrong diagnosis on 2026-08-17.
+    pub mean_length: f64,
+    /// The collision probability the band's child law realises at one split.
+    pub collision: f64,
+    /// Splits a walker meets per block of trunk, `1/mean_length`.
+    pub splits_per_block: f64,
+    /// Expected cohort factor across this band's own span. `None` for an unbounded last band.
+    pub decay_in_band: Option<f64>,
+    /// Expected cohort factor from depth 0 through the end of this band.
+    ///
+    /// `None` once any band above stated no law, and for an unbounded final band.
+    pub cumulative: Option<f64>,
+}
+
+impl BandImplied {
+    /// The expected factor a cohort shrinks by over `blocks` blocks of trunk in this band.
+    ///
+    /// `collision ^ (blocks / mean_length)`: one factor of the collision probability per split,
+    /// and `blocks / mean_length` splits. An expectation over a product of independent draws,
+    /// so it describes the mean cohort rather than any one walker's.
+    pub fn decay_over(&self, blocks: f64) -> f64 {
+        self.collision.powf(blocks * self.splits_per_block)
+    }
+}
+
 /// The widest child law the fit will state.
 ///
 /// At `s = 8` a two-way split already sends 99.6% of a cohort down one child, so the band
@@ -798,6 +903,49 @@ mod tests {
             band.clamped.is_some_and(|c| c.contains("concentrated")),
             "{:?}",
             band.clamped
+        );
+    }
+
+    #[test]
+    fn the_implied_decay_is_the_two_fitted_halves_multiplied_out() {
+        // The point of reporting this: a run length and a child law are individually readable
+        // and jointly decisive, and the joint quantity is what the residual is about — measured
+        // 2026-08-17, the segments spelling mints 1.6-1.7x too many keys while per-split
+        // collision matches its target to 0.4%, i.e. the cohort divides too OFTEN rather than
+        // too widely, which only this product can show.
+        let row = split_row(&[50, 50]);
+        let fit = fit_process(&[row]).expect("a process");
+        let implied = fit.implied();
+        assert_eq!(implied.len(), 1, "one band was fitted, so one row");
+        let b = implied[0];
+        // A single band is the unbounded last one, so there is no span to integrate over and
+        // both derived figures decline rather than extrapolating to a guessed depth.
+        assert_eq!(b.span_blocks, None);
+        assert_eq!(b.decay_in_band, None);
+        assert_eq!(b.cumulative, None);
+        // Two equal children is uniform descent, so the law is stated as uniform and the
+        // collision is 1/2 exactly — the boundary case, which keeps this test's arithmetic
+        // checkable by hand rather than against the bisection's output.
+        assert!((b.collision - 0.5).abs() < 1e-12, "{}", b.collision);
+        // `split_row` is one block long, so the walker splits once per block and 100 blocks of
+        // trunk cost 100 halvings.
+        assert!((b.mean_length - 1.0).abs() < 0.01, "{}", b.mean_length);
+        assert!((b.splits_per_block - 1.0 / b.mean_length).abs() < 1e-12);
+        let want = 0.5f64.powf(100.0 * b.splits_per_block);
+        assert!((b.decay_over(100.0) - want).abs() < 1e-12);
+        // Doubling the run length halves the split count, so the decay over a fixed depth is
+        // the square root — the relationship that makes run length, not just the child law, a
+        // first-class suspect for the residual.
+        let slower = BandImplied {
+            mean_length: 2.0 * b.mean_length,
+            splits_per_block: 1.0 / (2.0 * b.mean_length),
+            ..b
+        };
+        assert!(
+            (slower.decay_over(100.0) - b.decay_over(100.0).sqrt()).abs() < 1e-12,
+            "{} against {}",
+            slower.decay_over(100.0),
+            b.decay_over(100.0).sqrt()
         );
     }
 

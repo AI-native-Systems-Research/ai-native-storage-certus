@@ -2133,6 +2133,14 @@ report segments statistics into before/after windows around the event.
   choosing among those children was not — and fitting one of the pair without the other is worse than
   fitting neither. The residual is that the synthetic mints **1.6–1.7x too many distinct keys**: the
   cohort still divides faster than the trace's, while per-split collision now matches to 0.4%.
+  `fit --explain` MUST report **both fitted halves per band** — the run length and out-degree, not only
+  the child law — together with the **cohort decay they jointly imply** over each band's own span and
+  cumulatively down the trunk. Neither half is interpretable alone, and the composition is what decides
+  where sharing ends, so the joint figure is the only one that can be judged. The reporting requirement
+  is not cosmetic: these parameters otherwise reach only the emitted document, which FR-057 refuses to
+  write precisely when the fit is being diagnosed, and the first thing printing them established was
+  that a **split rate read off a median run length overstates it by orders of magnitude** — the means
+  are 9–354 blocks where the medians are 1, so the derived rate MUST be taken from the mean.
 - **FR-056**: `fit` MUST validate the fitted model by comparing four statistics between the
   real trace and synthetic output: reuse-distance CDF (primary), prefix-sharing depth
   histogram, request-length distribution, and unique-keys-over-time curve.
