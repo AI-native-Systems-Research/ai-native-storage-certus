@@ -1308,11 +1308,21 @@ fn print_child_law(
     println!(
         "\n  child law — how a cohort divides at a split. coll = SUM p^2 over children, \
          fan-in weighted;\n  1/coll is the effective branching. skew is the fitted Zipf \
-         exponent reproducing coll_wt."
+         exponent reproducing coll_wt.\n  ess is Kish's effective sample size of those weights, \
+         (SUM w)^2/SUM w^2 — how many splits coll_wt\n  effectively averages. Far below splits \
+         means one wide segment is setting the band's law."
     );
     println!(
-        "    {:>10}  {:>7}  {:>8}  {:>8}  {:>8}  {:>8}  {:>6}  {:>8}",
-        "depths", "splits", "coll_wt", "coll_p10", "coll_p50", "coll_p90", "skew", "achieved"
+        "    {:>10}  {:>7}  {:>6}  {:>8}  {:>8}  {:>8}  {:>8}  {:>6}  {:>8}",
+        "depths",
+        "splits",
+        "ess",
+        "coll_wt",
+        "coll_p10",
+        "coll_p50",
+        "coll_p90",
+        "skew",
+        "achieved"
     );
     for (lo, hi) in spans.iter().copied() {
         let v: Vec<&workload_model::fit::segments::SegmentRow> = rows
@@ -1342,10 +1352,20 @@ fn print_child_law(
             format!("{lo}-{hi}")
         };
         let fitted = skews.and_then(|s| s.iter().find(|b| b.from_depth == lo));
+        // Kish's effective sample size of the fan-in weights, recomputed here from the same rows
+        // the table above is built from rather than read off the fit, so that the number shown
+        // beside the measurement belongs to the measurement even when no law was fitted.
+        let wsum: f64 = v.iter().map(|r| f64::from(r.fan_in).max(1.0)).sum();
+        let wsq: f64 = v.iter().map(|r| f64::from(r.fan_in).max(1.0).powi(2)).sum();
         println!(
-            "    {:>10}  {:>7}  {:>8.4}  {:>8.4}  {:>8.4}  {:>8.4}  {:>6}  {:>8}",
+            "    {:>10}  {:>7}  {:>6}  {:>8.4}  {:>8.4}  {:>8.4}  {:>8.4}  {:>6}  {:>8}",
             span,
             v.len(),
+            if wsq > 0.0 {
+                format!("{:.1}", wsum * wsum / wsq)
+            } else {
+                "-".to_string()
+            },
             if den > 0.0 { num / den } else { 0.0 },
             q(0.10),
             q(0.50),

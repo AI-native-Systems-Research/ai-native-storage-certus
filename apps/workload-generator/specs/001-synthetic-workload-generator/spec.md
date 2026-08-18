@@ -2141,6 +2141,13 @@ report segments statistics into before/after windows around the event.
   write precisely when the fit is being diagnosed, and the first thing printing them established was
   that a **split rate read off a median run length overstates it by orders of magnitude** — the means
   are 9–354 blocks where the medians are 1, so the derived rate MUST be taken from the mean.
+  The report MUST also state each band's **effective sample size** of the fan-in weights, `(Σw)²/Σw²`,
+  because the split count does not say how well-observed a *weighted* mean is — fan-in spans four orders
+  of magnitude within one band. `fit` MUST NOT, however, gate a band on it: measured 2026-08-18, the
+  quantity does not identify the failing bands (`tau2_airline`'s cohort-annihilating band scores 12.5
+  while `qwen_code`'s faithfully-composing root band scores 2.4), and a floor makes airline monotonically
+  worse while its apparent gain on `qwen_code` is a lottery over which band's law is rebased onto depth 0
+  — shown by a one-pooled-band control that fails to reproduce it. See research.md.
 - **FR-056**: `fit` MUST validate the fitted model by comparing four statistics between the
   real trace and synthetic output: reuse-distance CDF (primary), prefix-sharing depth
   histogram, request-length distribution, and unique-keys-over-time curve.

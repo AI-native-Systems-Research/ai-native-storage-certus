@@ -378,6 +378,10 @@ pub fn fit_process(rows: &[SegmentRow]) -> Option<ProcessFit> {
         );
         if let (Some(length), Some(out_degree)) = (length, out_degree) {
             let skew = fit_skew(in_band(), &out_degree);
+            // No effective-sample-size floor here, deliberately: one was built and measured on
+            // 2026-08-18 and it is not a criterion. `BandSkew::ess` is reported instead, because
+            // the measurement refuted the hypothesis that motivated the floor — see research.md
+            // § The child-choice law.
             bands.push(SegmentBand {
                 from_depth: *lo,
                 length,
@@ -561,6 +565,14 @@ pub struct BandSkew {
     pub clamped: Option<&'static str>,
     /// Splits the target was measured over.
     pub splits: usize,
+    /// Kish's effective sample size of the fan-in weights, `(Σw)²/Σw²`.
+    ///
+    /// How many splits the band's weighted mean *effectively* averages, which is not `splits`:
+    /// fan-in spans four orders of magnitude within one band, so a band with dozens of splits can
+    /// be a two-observation estimate. Reported because cohort decay is a **product** of these
+    /// means down the trunk, so a band whose mean is set by one wide segment does not merely add
+    /// noise — it biases every depth below it.
+    pub ess: f64,
 }
 
 /// Fit one band's child-choice law from its splits.
@@ -586,18 +598,27 @@ fn fit_skew<'a>(
     let mut splits = 0usize;
     let mut num = 0.0f64;
     let mut den = 0.0f64;
+    let mut weight_sq = 0.0f64;
     for r in rows {
         let Some(c) = r.collision() else { continue };
         let w = f64::from(r.fan_in).max(1.0);
         *by_degree.entry(u64::from(r.out_degree)).or_insert(0.0) += w;
         num += w * c;
         den += w;
+        weight_sq += w * w;
         splits += 1;
     }
     if den <= 0.0 || splits == 0 {
         return None;
     }
     let target = num / den;
+    // Kish's effective sample size, `(Σw)²/Σw²`. The raw split count is the wrong measure of
+    // how well-observed a band is when the estimate is a *weighted* mean: a band of 36 splits
+    // whose fan-in sits almost entirely on two of them is a two-observation estimate, and
+    // `target` is then one segment's collision probability wearing the band's name. This is the
+    // same inverse-participation functional as `n_eff` and `collision` itself, one level up —
+    // there over children, here over the splits the band averages.
+    let ess = den * den / weight_sq;
     let mut pairs: Vec<(u64, f64)> = by_degree.into_iter().collect();
     pairs.sort_unstable_by_key(|(n, _)| *n);
 
@@ -648,6 +669,7 @@ fn fit_skew<'a>(
         achieved,
         clamped,
         splits,
+        ess,
     })
 }
 
@@ -903,6 +925,39 @@ mod tests {
             band.clamped.is_some_and(|c| c.contains("concentrated")),
             "{:?}",
             band.clamped
+        );
+    }
+
+    #[test]
+    fn the_effective_sample_size_counts_weights_not_splits() {
+        // `ess` exists because the raw split count says nothing about how well-observed a
+        // *weighted* mean is, and it is what refuted the per-band sample floor on 2026-08-18:
+        // measured, `tau2_airline`'s cohort-annihilating band has ess 12.5 while `qwen_code`'s
+        // faithfully-composing root band has 2.4, so the quantity does not separate the two
+        // traces and a floor on it is not a criterion.
+        //
+        // Equal weights give ess == splits; one dominant weight drives it to ~1 however many
+        // splits there are. Both directions are asserted, since a measure that only ever went
+        // down with concentration could be any monotone function of it.
+        let equal: Vec<SegmentRow> = (0..4).map(|_| split_row(&[5, 5])).collect();
+        let fit = fit_process(&equal).expect("a process");
+        let band = &fit.skews[0];
+        assert_eq!(band.splits, 4);
+        assert!(
+            (band.ess - 4.0).abs() < 1e-9,
+            "four equally-weighted splits are four observations, got {}",
+            band.ess
+        );
+        // Same four splits, but one carries 1000x the fan-in of the others.
+        let mut skewed = vec![split_row(&[5000, 5000])];
+        skewed.extend((0..3).map(|_| split_row(&[5, 5])));
+        let fit = fit_process(&skewed).expect("a process");
+        let band = &fit.skews[0];
+        assert_eq!(band.splits, 4, "still four splits");
+        assert!(
+            band.ess < 1.01,
+            "one split carrying the fan-in is ~one observation, got {}",
+            band.ess
         );
     }
 

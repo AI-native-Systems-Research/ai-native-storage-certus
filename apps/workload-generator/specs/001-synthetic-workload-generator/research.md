@@ -501,21 +501,73 @@ sharing beyond roughly depth 100–130, while the trace still has fan-in 3–4 o
 sharing p50 is 124 against the trace's 288. This is the same trace on which the child-law fit was a
 no-op, and it is why airline stays at 0.376.
 
-**The likely cause is a small-sample fan-in weighting, and it is checkable.** Airline's bands are fitted
-from **13–36 splits** each, against qwen_code's 104–4067, and airline's fan-in-weighted `deg_mean` comes
-out **18.5 / 11.2 / 2.4 / 14.1 / 18.9 / 6.6** where its per-segment census median is **4 / 2 / 2 / 3 / 3
-/ 4**. At depths 128–511 the fit therefore states an effective branching of `1/0.1405 ≈ 7.1` where the
-typical split is 2–3 ways: a couple of wide, high-fan-in segments are setting the whole band's law.
-Fan-in weighting is right in principle — a walker meets a split in proportion to arrivals — but on 36
-observations it is an average over a heavy tail, and cohort decay is a *product*, so a band's mean is
-the wrong summary of it. The next thing to test is a weighting robust to that (or a per-band sample
-floor below which the band declines to state a law), **not** the run-length distribution.
+**The candidate cause was a small-sample fan-in weighting.** Airline's bands are fitted from **13–36
+splits** each, against qwen_code's 104–4067, and airline's fan-in-weighted `deg_mean` comes out
+**18.5 / 11.2 / 2.4 / 14.1 / 18.9 / 6.6** where its per-segment census median is **4 / 2 / 2 / 3 / 3 /
+4**. At depths 128–511 the fit therefore states an effective branching of `1/0.1405 ≈ 7.1` where the
+typical split is 2–3 ways, which reads as a couple of wide, high-fan-in segments setting the band's law.
+
+#### The per-band sample floor is REFUTED — measured 2026-08-18, do not rebuild it
+
+The right measure of how well-observed a *weighted* mean is, is not the split count but **Kish's
+effective sample size** `(Σw)²/Σw²` — the same inverse-participation functional as `n_eff` and
+`collision`, one level up: there over children, here over the splits a band averages. It is now
+reported per band as `ess`, and it **refutes the hypothesis outright**:
+
+| band | airline splits / ess | qwen_code splits / ess |
+| --- | --- | --- |
+| 0 | 26 / 15.8 | 104 / **2.4** |
+| 1–7 | 13 / 4.9 | 2033 / 6.6 |
+| 8–31 | 20 / 15.1 | 1137 / 5.8 |
+| 32–127 | 28 / 7.3 | 619 / 4.5 |
+| 128–511 | 36 / **12.5** | 1334 / 36.3 |
+| 512+ | 35 / 23.0 | 4067 / 175.3 |
+
+Airline's cohort-annihilating band has `ess` **12.5**, one of its better-observed; qwen_code's root band,
+in the trace that composes *faithfully*, has **2.4** — the worst in either trace. The quantity does not
+separate the two traces, and it runs the wrong way in four of six bands. So airline's `coll_wt` of 0.139
+against a median of 0.333 is **not** a one-segment artefact: there genuinely are wide, high-fan-in splits
+in its deep region, and the weighted mean is a faithful summary of them.
+
+Built anyway and measured, because a prediction is not a measurement. Dropping every band below a floor
+and letting the band above carry forward:
+
+| arm | airline share / uniq / reuse | qwen_code share / uniq / reuse |
+| --- | --- | --- |
+| six bands (committed) | 0.376 / 0.556 / 0.031 | 0.107 / 0.479 / 0.106 |
+| ess floor 8 | 0.384 / 0.549 / 0.031 | **0.093 / 0.244 / 0.019** |
+| ess floor 13 | 0.431 / 0.551 / 0.031 | — |
+| ess floor 20 | 0.533 / 0.589 / 0.032 | 0.093 / 0.244 / 0.019 |
+| one pooled band | **0.323 / 0.498 / 0.030** | 0.104 / 0.469 / 0.088 |
+| per-depth profile (default) | 0.102 / 0.335 / 0.026 | 0.060 / 0.182 / 0.035 |
+
+Airline gets **monotonically worse** with the floor. qwen_code improves a lot — reuse 0.106 → **0.0188**,
+inside its 0.02 tolerance for the first time in this spelling — and floors 8 and 20 give *identical*
+output, which is the tell: both leave the same two bands, so the win is not "better-sampled laws" but
+the depth-128–511 band's unusually gentle law (`coll` 0.8132, `n_eff` 1.23) being rebased onto depth 0.
+**The one-pooled-band control settles it**: if the win were "one law applied globally" the pooled fit
+would reproduce it, and it does not (0.0878 / 0.4685 against 0.0188 / 0.2437). The floor is a lottery
+over which band's law becomes global, and its direction is arbitrary with respect to its own
+justification. Neither toggle is kept; `ess` is, because it is what did the refuting.
+
+**Two things worth keeping from the sweep.** First, **one pooled band beats six on both traces**
+(airline 0.376 → 0.323, qwen_code 0.107 → 0.104, `unique_keys` better on both), so the depth banding is
+mildly *counterproductive* — consistent with the earlier finding that the exponent correlates with
+neither depth (rho +0.13, p 0.15) nor out-degree. That is a real lead, but it is n=2 and adopting it
+means deleting the band structure, so it needs the corpus matrix (FR-055f) first.
+Second, and more diagnostic: **the configuration that does best is the least divisive one.** qwen_code's
+best arm is the one whose per-split collision is 0.81 — barely dividing at all — and it is *still* short
+of the per-depth profile. Every arm over-divides. That is the signature of applying a marginal per-split
+law independently at each step when the trace's splits along a path are **negatively correlated**: a
+session that passes a wide split lands in a narrow subtree, so the trace's product along a path far
+exceeds the product of marginals. Which is, once again, **survival correlates with depth** — the same
+mechanism as the refuted `fanout < 1` experiment and the survivor-conditioning result. The next thing to
+build is a law conditioned on that correlation, not a better summary of the marginal.
 
 Note also that this is the third independent appearance of one mechanism: **survival correlates with
 depth**, so applying a population-average decay to every walker sheds the wrong sessions. It was first
 measured in the refuted `fanout < 1` experiment, then again when survivor-conditioning recovered almost
-nothing, and now here. `(length, out_degree, skew)` may be a **triple** — but the evidence now points at
-how the band's law is *summarised*, not at which of the three is missing.
+nothing, and now here — and the sample-floor sweep below makes it a fourth, by yet another route.
 
 ### Fit tolerances and divergence measures — the derivation behind FR-057a and FR-057b
 
