@@ -67,6 +67,28 @@ pub const DEFAULT_HORIZON_EVENTS: usize = 64 * 1024;
 /// flip per node, which is what an earlier design got wrong.
 const COHORT_FLOOR: f64 = 2.0;
 
+/// Whether cohort exhaustion is the **sole** trunk boundary, ignoring the drawn cap.
+///
+/// EXPERIMENT (`CERTUS_EXP_COHORT_BOUNDARY=1`), off by default. Read once — a per-step
+/// `env::var` in the trunk walk would cost more than the walk itself.
+///
+/// # What this isolates, and why it is safe to try
+///
+/// `shared_depth` is doubly loaded: `session::depth_at_turn` makes turn-1 depth
+/// `shared_depth + private_depth`, so the field is a **path-length term** as well as the
+/// trunk boundary. An earlier attempt removed it as a boundary by emitting a deliberately
+/// non-binding *value*, which inflated every path 3.7x and took `request_length` to 0.99 —
+/// that is what found the double load.
+///
+/// This toggle does not touch the emitted document. It drops the cap **inside the walk**,
+/// where the loop bound is the already-drawn total `depth`, so the number of blocks in a
+/// request is bit-identical and only the trunk/private *boundary* moves. That isolates the
+/// mechanism from the path-length refactor the full fix needs.
+fn cohort_boundary_only() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CERTUS_EXP_COHORT_BOUNDARY").is_ok_and(|v| v == "1"))
+}
+
 /// Domain separators for the generator's own draws, so that two unrelated
 /// quantities about one session never consume each other's values.
 const TAG_SESSION: u64 = 0x5E55_1014;
@@ -717,7 +739,7 @@ impl Generator {
                 // express that, so cohort tracking can only become the sole boundary once the
                 // segment spelling carries total out-degree. Until then the cap binds first
                 // on any fitted document and this is a superset of the old behaviour.
-                cur = if !alone && d < live.shared_depth {
+                cur = if !alone && (cohort_boundary_only() || d < live.shared_depth) {
                     // One entry point for both trunk spellings. Under a node-level process
                     // it returns probability 1.0 inside a run and divides the cohort only at
                     // a real split, which is what makes a long run a shared segment rather

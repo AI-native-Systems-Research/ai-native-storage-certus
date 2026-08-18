@@ -370,6 +370,26 @@ fn parse_tolerances_onto(base: Tolerances, args: &[String]) -> Result<Tolerances
     Ok(t)
 }
 
+/// One iteration's candidate model, and what it scored.
+///
+/// A struct rather than a tuple because the selection rule needs the whole per-statistic vector,
+/// not just the worst ratio: a candidate is rejected if it improves the maximum by making another
+/// gated statistic worse. See the Pareto rule in `cmd_fit`.
+struct Candidate {
+    /// Worst divergence as a multiple of its own tolerance.
+    worst: f64,
+    /// The document this iteration assembled.
+    doc: workload_model::schema::Document,
+    /// What generating from it measured.
+    synthetic: Report,
+    /// The attempted-sharing scale that produced it.
+    scale: f64,
+    /// Which iteration.
+    iteration: usize,
+    /// Every comparable statistic's divergence, for the Pareto comparison.
+    values: Vec<(Statistic, f64)>,
+}
+
 /// Fit a model from a trace, validate it against that trace, and write it (T085, T087).
 ///
 /// The order matters and is FR-057's: measure, assemble, generate, compare, and only
@@ -783,7 +803,7 @@ fn cmd_fit(
     // quietly ruining request length.
     let target_sharing = trace_report.sharing.realised_depth.p50.unwrap_or(0) as f64;
     let mut scale = 1.0f64;
-    let mut best: Option<(f64, workload_model::schema::Document, Report, f64, usize)> = None;
+    let mut best: Option<Candidate> = None;
     let mut history: Vec<String> = Vec::new();
 
     for iteration in 0..MAX_FIT_ITERATIONS {
@@ -853,6 +873,15 @@ fn cmd_fit(
             .map(|x| x.value / x.tolerance)
             .fold(0.0f64, f64::max);
 
+        // Every comparable statistic's value, so a candidate can be rejected for buying one
+        // statistic with another. See the Pareto rule below.
+        let values: Vec<(Statistic, f64)> = d
+            .divergences
+            .iter()
+            .filter(|x| x.incomparable.is_none())
+            .map(|x| (x.statistic, x.value))
+            .collect();
+
         let realised = synthetic.sharing.realised_depth.p50.unwrap_or(0) as f64;
         history.push(format!(
             "iteration {iteration}: attempt scale {scale:.3}, realised sharing p50 \
@@ -860,9 +889,49 @@ fn cmd_fit(
              {worst:.2}x its tolerance"
         ));
 
-        let improved = best.as_ref().map(|(w, ..)| worst < *w).unwrap_or(true);
+        // A candidate must improve the worst relative excess AND make **no gated statistic
+        // worse** — a Pareto rule, not just a better maximum.
+        //
+        // Selecting on the maximum alone lets the loop buy one statistic with another, and
+        // that is not a hypothetical: when the tolerances became floor-derived (FR-057c),
+        // `request_length`'s tolerance on `tau2_airline` widened from 0.020 to 0.060, the
+        // loop's objective changed with it, and it began choosing a 4x-scaled attempt that
+        // improved the worst ratio while taking `request_length` from 0.026 to 0.411 and the
+        // reference count from 7.8M to 20.0M. Two traces regressed the same way on the
+        // default path. **The tolerances must not be able to change what the loop optimises
+        // for**, and every statistic here is gated, so a trade between them is never a win.
+        //
+        // Strict rather than epsilon-tolerant: the comparison is deterministic at a fixed
+        // seed, so a statistic that moves at all moved because the scale moved it. The loop's
+        // own premise — that raising the attempt closes a median shortfall — was already
+        // measured to be false, so the conservative rule also matches the evidence.
+        let regressed = best.as_ref().and_then(|prev| {
+            values.iter().find_map(|(st, v)| {
+                prev.values
+                    .iter()
+                    .find(|(p, _)| p == st)
+                    .filter(|(_, pv)| *v > *pv + 1e-12)
+                    .map(|(_, pv)| (*st, *pv, *v))
+            })
+        });
+        let improved = best.as_ref().map_or(true, |b| worst < b.worst) && regressed.is_none();
+        if let Some((st, was, now)) = regressed {
+            history.push(format!(
+                "iteration {iteration} rejected: it would improve the worst ratio but move \
+                 {} from {was:.5} to {now:.5}, and a trade between two gated statistics is \
+                 not an improvement",
+                st.name()
+            ));
+        }
         if improved {
-            best = Some((worst, candidate, synthetic, scale, iteration));
+            best = Some(Candidate {
+                worst,
+                doc: candidate,
+                synthetic,
+                scale,
+                iteration,
+                values,
+            });
         }
         if worst <= 1.0 {
             break;
@@ -880,8 +949,14 @@ fn cmd_fit(
         scale = (scale * step).clamp(1.0, 16.0);
     }
 
-    let (worst, doc, synthetic, best_scale, best_iteration) =
-        best.ok_or("no candidate model could be generated")?;
+    let Candidate {
+        worst,
+        doc,
+        synthetic,
+        scale: best_scale,
+        iteration: best_iteration,
+        ..
+    } = best.ok_or("no candidate model could be generated")?;
 
     println!("\n  iterations");
     for h in &history {
