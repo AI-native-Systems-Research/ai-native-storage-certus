@@ -590,6 +590,53 @@ depth**, so applying a population-average decay to every walker sheds the wrong 
 measured in the refuted `fanout < 1` experiment, then again when survivor-conditioning recovered almost
 nothing, and now here — and the sample-floor sweep below makes it a fourth, by yet another route.
 
+### Cohort exhaustion as the trunk boundary — step 3, measured and not yet adopted
+
+The named defect behind `sharing_depth` and reuse distance failing 8 of 8 is that the model draws
+**independently** what the trace has **correlated**: survival correlates with depth, measured four
+independent ways. The mechanism for it is already in the walk and was already right — `plan::generate`
+carries `cohort *= p(child taken)` where `p` is the probability of the child *actually drawn*, so a
+session that takes a popular child stays in a large cohort and survives deeper while one that takes a
+rare child is alone immediately. That is the correlation, and it is per-walker rather than a
+population average.
+
+What was missing is only that it was **non-binding**: the walk also tested `d < shared_depth`, and on
+any fitted document the cap bound first.
+
+**The isolation that made this testable.** `shared_depth` is doubly loaded — `depth_at_turn` makes
+turn-1 depth `shared_depth + private_depth`, so the field is a path-length term as well as the
+boundary — and an earlier attempt to remove the boundary by emitting a non-binding *value* inflated
+every path 3.7x. Dropping the cap **inside the walk** instead leaves the loop bound (the already-drawn
+total depth) untouched, so only the trunk/private boundary moves. Measured, the reference count and
+`request_length` come out **bit-identical** in both arms, which is what makes the comparison a
+measurement of the mechanism rather than of path length.
+
+| trace | arm | reuse | `sharing_depth` | `unique_keys` |
+| --- | --- | --- | --- | --- |
+| `tau2_airline` | drawn cap | 0.03101 | 0.37642 | 0.55603 |
+| `tau2_airline` | cohort exhaustion | **0.02845** | **0.30570** | **0.43385** |
+| `qwen_code` | drawn cap | 0.10615 | 0.10723 | 0.47856 |
+| `qwen_code` | cohort exhaustion | **0.02473** | 0.40445 | **0.11961** |
+
+**It is a large win on exactly the two statistics step 1 identified as real defects.** On `qwen_code`
+reuse distance improves **4.3x** to 0.0247 — against a floor of 0.0026 and a tolerance of 0.02, so it
+is now close to passing — and `unique_keys` improves **4x** to 0.1196, which is **inside** its 0.15
+tolerance. All three improve on `tau2_airline`.
+
+**And it makes `sharing_depth` a direct readout of the fitted division rate, which the cap was
+masking.** `qwen_code`'s sharing worsens to 0.404, and the reason is mechanical rather than mysterious:
+its dominant root holds 16 045 sessions, and with the cap gone a cohort that large takes many splits to
+fall below two, so sessions stay shared far deeper than the trace's realised p50 of 7. The fitted
+per-split division is too slow — `coll` 0.39-0.81 with mean run lengths of 13-92 blocks. So the
+over-division question that § The child-choice law left open is now **directly coupled to a gated
+statistic** instead of being hidden behind a drawn cap, which is the useful part of this result.
+
+**Not adopted.** It makes one gated statistic substantially worse on one trace, and by the same rule
+now enforced on the fit's own iteration loop, a trade between two gated statistics is not an
+improvement. The next step is calibrating the division rate so that realised sharing lands right, with
+`sharing_depth` as the readout — not another marginal fix, since the mechanism is now doing the work
+and only its rate is wrong. Reproduce with `CERTUS_EXP_COHORT_BOUNDARY=1` and `--branching-segments`.
+
 ### The achievable floor — the derivation behind FR-057c, and what it says about the gate
 
 The tolerances of FR-057b were calibrated from the generator against itself across seeds. That is a
