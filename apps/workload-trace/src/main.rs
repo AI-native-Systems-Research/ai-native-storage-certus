@@ -161,6 +161,42 @@ enum Cmd {
         #[arg(long)]
         explain: bool,
     },
+    /// Measure the **achievable floor**: two samples of one real trace, compared.
+    ///
+    /// The FR-056 tolerances were calibrated from the generator against *itself* across
+    /// seeds, where any bias the model shares with itself cancels exactly. So they say
+    /// how repeatable the generator is, and not what score a **perfect** model of a real
+    /// workload could achieve. Without that second number a divergence cannot be read:
+    /// 0.10 is a failure if two samples of the same trace score 0.01, and is at the noise
+    /// floor if they score 0.09.
+    ///
+    /// Splits the trace two ways, because each split has a confound and they point in
+    /// opposite directions — see `cmd_floor`. Also compares two whole traces with
+    /// `--against`, which bounds the same question from above: how far apart are two
+    /// *different* workloads from one family.
+    Floor {
+        /// The trace to split: a `.jsonl` file, or a directory holding a parquet trace.
+        #[arg(short = 't', long, value_name = "PATH")]
+        trace: PathBuf,
+        /// Compare against a whole second trace instead of splitting the first.
+        #[arg(long, value_name = "PATH")]
+        against: Option<PathBuf>,
+        /// Which blocking to read, in **tokens** per block. See `fit --block-size`.
+        #[arg(long, value_name = "TOKENS")]
+        block_size: Option<u32>,
+        /// The measurement window, in requests (FR-009h).
+        #[arg(long, default_value_t = 5_000, value_name = "N")]
+        wss_window: u64,
+        /// Accept a trace shorter than its manifest declares.
+        #[arg(long)]
+        allow_partial: bool,
+        /// Per-statistic tolerance overrides, as `name=value`.
+        #[arg(long = "tolerance", value_name = "NAME=VALUE")]
+        tolerances: Vec<String>,
+        /// Emit JSON instead of the human summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Convert a plan's `events.bin` into a parquet trace (FR-021h, mode 3).
     ///
     /// The columnar half of the interchange format. It lives in this binary rather
@@ -239,6 +275,23 @@ fn main() -> ExitCode {
             &tolerances,
             json,
             explain,
+        ),
+        Cmd::Floor {
+            trace,
+            against,
+            block_size,
+            wss_window,
+            allow_partial,
+            tolerances,
+            json,
+        } => cmd_floor(
+            &trace,
+            against.as_deref(),
+            block_size,
+            wss_window,
+            allow_partial,
+            &tolerances,
+            json,
         ),
         #[cfg(feature = "parquet")]
         Cmd::Convert {
@@ -892,6 +945,333 @@ fn trace_report(
         }
     );
     Ok((s.finish(), note))
+}
+
+/// How a trace is cut into two samples of itself.
+///
+/// Two modes and not one, because each carries a confound and the two point in **opposite**
+/// directions, so the pair brackets what a single split cannot establish alone.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Split {
+    /// By session, on a hash of the session id.
+    ///
+    /// Preserves the run's duration and therefore its stationarity, but **halves the
+    /// concurrent population** — and sharing is a population property (realised sharing is
+    /// the LCP against earlier requests of *other* sessions), so both halves genuinely share
+    /// less than the whole. Biases `sharing_depth` and reuse distance downward.
+    Session,
+    /// By time, at the median request timestamp.
+    ///
+    /// Preserves the concurrent population, so sharing and reuse distance are measured at
+    /// the density the whole trace has — but it is exposed to **nonstationarity**, which is
+    /// measured to be strong on this corpus (key-lifetime span over its stationary null is
+    /// 0.13 on `tau2_airline` and 0.098 on `tau2_retail`). Charges real drift to the floor.
+    Time,
+}
+
+impl Split {
+    fn name(self) -> &'static str {
+        match self {
+            Split::Session => "by session",
+            Split::Time => "by time",
+        }
+    }
+
+    fn confound(self) -> &'static str {
+        match self {
+            Split::Session => {
+                "halves the concurrent population, so both halves really do \
+                               share less than the whole — reads sharing and reuse LOW"
+            }
+            Split::Time => {
+                "preserves density but charges real nonstationarity to the floor \
+                            — reads every statistic that drifts HIGH"
+            }
+        }
+    }
+}
+
+/// Mix a session id so that a split is not aligned with arrival order.
+///
+/// Session ids are dense indices assigned on ingest, i.e. in arrival order, so their parity
+/// would split the trace into alternating arrivals — a defensible interleave, but one that
+/// makes the two halves correlated with anything periodic in the arrival process. SplitMix64's
+/// finalizer decorrelates it for three multiplications, and being a pure function of the id
+/// keeps the split reproducible without storing it.
+fn mix64(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Measure the achievable floor: what a *perfect* model would score against a real trace.
+///
+/// # Why this is the first thing to measure
+///
+/// The FR-056 tolerances came from the generator against itself across seeds. That measures
+/// the generator's repeatability, and any bias the model shares with itself cancels exactly —
+/// so the numbers say nothing about what score a correct model of a real workload could get.
+/// Six sessions of fitting have been judged against them anyway. If two samples of one trace
+/// score 0.09 on a statistic whose tolerance is 0.02, then **no model can pass it** and every
+/// hour spent chasing that residual was spent against an unreachable target.
+///
+/// # What is compared
+///
+/// Two samples of one trace, under both [`Split`] modes, or two whole traces with `--against`
+/// (which bounds the question from above: how far apart are two different workloads of one
+/// family — a divergence near that bound means a statistic cannot tell workloads apart).
+///
+/// Every statistic comes from the same accumulators `fit` uses, over the same
+/// [`read::Trace::refs_of`], so a half of a trace is measured by the rules a whole one is.
+///
+/// # Reading the numbers
+///
+/// A half-vs-half comparison is **half-size on both sides**, while `fit` compares full against
+/// full. A two-sample KS distance scales as `sqrt(2/n)`, so halving both sides inflates it by
+/// about `sqrt(2)`; the projection to full size is printed for the two KS statistics **only**.
+/// Reuse distance is gated on the *area* between CDFs and unique-keys on a *log-ratio* of
+/// counts, neither of which scales that way, so applying one correction to all four would
+/// manufacture three wrong numbers to keep a column tidy.
+fn cmd_floor(
+    path: &Path,
+    against: Option<&Path>,
+    block_size: Option<u32>,
+    window: u64,
+    allow_partial: bool,
+    tolerance_args: &[String],
+    json: bool,
+) -> Result<bool, String> {
+    let tol = parse_tolerances(tolerance_args)?;
+    let trace = read::read_trace(path, allow_partial, block_size).map_err(|e| e.to_string())?;
+
+    let mut arms: Vec<(String, String, Report, Report)> = Vec::new();
+    if let Some(other) = against {
+        let sibling =
+            read::read_trace(other, allow_partial, block_size).map_err(|e| e.to_string())?;
+        let (mut a, mut b) = (Statistics::new(window), Statistics::new(window));
+        for r in trace.refs() {
+            a.push(&r);
+        }
+        for r in sibling.refs() {
+            b.push(&r);
+        }
+        arms.push((
+            format!("whole vs whole ({})", other.display()),
+            "two DIFFERENT workloads, so this is an upper bound rather than a floor: a \
+             statistic scoring near it cannot tell these workloads apart"
+                .into(),
+            a.finish(),
+            b.finish(),
+        ));
+        // The primary trace's own floor as well, so the DYNAMIC RANGE can be printed rather
+        // than left as arithmetic for the reader. It is the number that decides whether a
+        // statistic is worth gating on at all, and measured on `tau2_airline` against
+        // `tau2_retail` three of the four gated statistics turn out to have almost none.
+        let (mut c, mut d) = (Statistics::new(window), Statistics::new(window));
+        for r in trace.refs_of(|_, inv| mix64(u64::from(inv.session.0)) & 1 == 0) {
+            c.push(&r);
+        }
+        for r in trace.refs_of(|_, inv| mix64(u64::from(inv.session.0)) & 1 == 1) {
+            d.push(&r);
+        }
+        arms.push((
+            "by session (for the range below)".into(),
+            Split::Session.confound().to_string(),
+            c.finish(),
+            d.finish(),
+        ));
+    } else {
+        for split in [Split::Session, Split::Time] {
+            let (mut a, mut b) = (Statistics::new(window), Statistics::new(window));
+            match split {
+                Split::Session => {
+                    for r in trace.refs_of(|_, inv| mix64(u64::from(inv.session.0)) & 1 == 0) {
+                        a.push(&r);
+                    }
+                    for r in trace.refs_of(|_, inv| mix64(u64::from(inv.session.0)) & 1 == 1) {
+                        b.push(&r);
+                    }
+                }
+                Split::Time => {
+                    // The median of whatever ordering the trace can actually supply. With
+                    // real timestamps that is wall-clock; without them the trace has no time
+                    // axis and the honest fallback is its own order, reported as such rather
+                    // than presented as a time split.
+                    let mut stamps: Vec<f64> = trace
+                        .invocations
+                        .iter()
+                        .filter_map(|i| i.request_start)
+                        .collect();
+                    let cut = if stamps.len() == trace.invocations.len() && !stamps.is_empty() {
+                        stamps
+                            .sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+                        Some(stamps[stamps.len() / 2])
+                    } else {
+                        None
+                    };
+                    let half = trace.invocations.len() / 2;
+                    for r in trace.refs_of(|i, inv| match (cut, inv.request_start) {
+                        (Some(c), Some(t)) => t < c,
+                        _ => i < half,
+                    }) {
+                        a.push(&r);
+                    }
+                    for r in trace.refs_of(|i, inv| match (cut, inv.request_start) {
+                        (Some(c), Some(t)) => t >= c,
+                        _ => i >= half,
+                    }) {
+                        b.push(&r);
+                    }
+                }
+            }
+            let note = if split == Split::Time
+                && trace.invocations.iter().any(|i| i.request_start.is_none())
+            {
+                format!(
+                    "{} — NO timestamps on every request, so this split is by the trace's own \
+                     order and is a time split only if that order is chronological",
+                    split.confound()
+                )
+            } else {
+                split.confound().to_string()
+            };
+            arms.push((split.name().to_string(), note, a.finish(), b.finish()));
+        }
+    }
+
+    let reports: Vec<(String, String, workload_model::stats::divergence::Report)> = arms
+        .iter()
+        .map(|(name, note, a, b)| {
+            (
+                name.clone(),
+                note.clone(),
+                // Deliberately NOT marking reuse_distance_bytes incomparable: both sides are
+                // traces, so both are in token units and the comparison is of workloads. This
+                // is the only context in which that statistic means anything, since no trace
+                // carries the model_config a plan's KV bytes would need.
+                compare(a, b, &tol),
+            )
+        })
+        .collect();
+
+    if json {
+        let out = serde_json::json!({
+            "trace": path.display().to_string(),
+            "against": against.map(|p| p.display().to_string()),
+            "window_requests": window,
+            "arms": reports.iter().map(|(name, note, d)| serde_json::json!({
+                "arm": name,
+                "confound": note,
+                "within_tolerance": d.within_tolerance(),
+                "divergences": d.divergences,
+            })).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+        );
+        return Ok(true);
+    }
+
+    println!("floor — two samples of one workload, which is what a perfect model would score");
+    println!("  trace   {}", path.display());
+    println!("  window  {window} requests, applied to both sides");
+    println!(
+        "\n  The FR-056 tolerances were calibrated generator-against-itself, where a shared bias\n  \
+         cancels. These numbers are the other half: a divergence at or below the floor is \
+         unreachable\n  by any model, so a tolerance tighter than the floor can never be met."
+    );
+    for (name, note, d) in &reports {
+        println!("\n  split {name} — {note}");
+        println!(
+            "    {:<24} {:>10} {:>10} {:>11}  reachable?",
+            "statistic", "floor", "tolerance", "full-size"
+        );
+        for x in &d.divergences {
+            let measure = match x.measure {
+                Measure::KolmogorovSmirnov => "ks",
+                Measure::AreaBetweenCdfs => "area",
+                Measure::MaxLogRatio => "log-ratio",
+            };
+            // Only the KS statistics get the sample-size projection; see the doc comment.
+            let projected = match x.measure {
+                Measure::KolmogorovSmirnov => {
+                    format!("{:>10.5}", x.value / std::f64::consts::SQRT_2)
+                }
+                _ => format!("{:>10}", "n/a"),
+            };
+            let verdict = if x.value > x.tolerance {
+                "NO — tolerance is below the floor"
+            } else {
+                "yes"
+            };
+            println!(
+                "    {:<24} {:>10.5} {:>10.5} {projected}  {verdict} ({measure})",
+                x.statistic.name(),
+                x.value,
+                x.tolerance,
+            );
+        }
+    }
+    println!(
+        "\n  full-size projects a HALF-size KS floor to the size `fit` compares at, dividing by\n  \
+         sqrt(2) because a two-sample KS distance scales as sqrt(2/n). It is `n/a` for area and\n  \
+         log-ratio measures, which do not scale that way — one correction applied to all four\n  \
+         would manufacture three wrong numbers."
+    );
+
+    // With `--against` there are two arms — the sibling bound and this trace's own floor — and
+    // their ratio is the statistic's DYNAMIC RANGE: how far apart two different workloads sit,
+    // measured in units of how far apart two samples of one workload sit. A statistic with a
+    // range near 1 cannot tell workloads apart at all, and gating on one is measuring noise.
+    if against.is_some() && reports.len() == 2 {
+        let (sibling, own) = (&reports[0].2, &reports[1].2);
+        println!("\n  dynamic range — sibling bound over own floor, per statistic");
+        println!(
+            "    {:<24} {:>10} {:>10} {:>9}  verdict",
+            "statistic", "own floor", "sibling", "range"
+        );
+        for x in &own.divergences {
+            let Some(s) = sibling
+                .divergences
+                .iter()
+                .find(|y| y.statistic == x.statistic)
+            else {
+                continue;
+            };
+            let range = if x.value > 0.0 {
+                s.value / x.value
+            } else {
+                f64::INFINITY
+            };
+            // 2x is the weakest range at which a statistic can distinguish a real difference
+            // from its own noise at all; below 1 the two workloads are closer than two samples
+            // of one, which is not a weak statistic but an actively misleading one.
+            let verdict = if range < 1.0 {
+                "USELESS — two workloads are closer than two samples of one"
+            } else if range < 2.0 {
+                "WEAK — barely separates workloads from noise"
+            } else {
+                "usable"
+            };
+            println!(
+                "    {:<24} {:>10.5} {:>10.5} {:>8.2}x  {verdict}",
+                x.statistic.name(),
+                x.value,
+                s.value,
+                range
+            );
+        }
+        println!(
+            "    A good statistic needs BOTH a low floor and a high sibling bound. This is the\n    \
+             criterion for choosing what to gate on — not how relevant the quantity sounds."
+        );
+    }
+    // Always true: this command measures, it does not judge. A floor above a tolerance is the
+    // finding, not a failure of the run, and exiting non-zero would make a sweep over the
+    // corpus look like a broken tool.
+    Ok(true)
 }
 
 /// Print the bucket-by-bucket working behind a comparison (`--explain`).

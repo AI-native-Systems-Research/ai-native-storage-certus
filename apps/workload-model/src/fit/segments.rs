@@ -361,6 +361,12 @@ pub fn fit_process(rows: &[SegmentRow]) -> Option<ProcessFit> {
 
     let mut bands: Vec<SegmentBand> = Vec::new();
     let mut skews: Vec<BandSkew> = Vec::new();
+    // Six depth bands, not one. Pooling every depth into a single band beat this on two traces
+    // and was therefore run across the corpus (FR-055f), where it did NOT generalise: better on
+    // `sharing_depth` and `request_length`, worse on `unique_keys` and on reuse distance
+    // (browsecompplus 0.038 -> 0.072, swebench 0.044 -> 0.073), with coverage unchanged at 8 of
+    // 24 and nothing inside tolerance in either arm. The experiment toggle is gone; see
+    // research.md § The child-choice law.
     for (i, lo) in BANDS.iter().enumerate() {
         let hi = BANDS.get(i + 1).copied().unwrap_or(u32::MAX);
         let in_band = || {

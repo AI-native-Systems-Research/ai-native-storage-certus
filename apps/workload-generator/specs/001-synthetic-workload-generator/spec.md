@@ -2148,6 +2148,35 @@ report segments statistics into before/after windows around the event.
   while `qwen_code`'s faithfully-composing root band scores 2.4), and a floor makes airline monotonically
   worse while its apparent gain on `qwen_code` is a lottery over which band's law is rebased onto depth 0
   — shown by a one-pooled-band control that fails to reproduce it. See research.md.
+- **FR-057c**: The tolerances of FR-056 MUST be justified against a measured **achievable floor** —
+  the divergence two independent samples of **one real trace** show — and a statistic whose floor
+  exceeds its tolerance MUST NOT be gated on, because no model can pass it. The floor is measured
+  by `certus-trace floor`, which splits a trace two ways (by session and by time) and can also
+  compare two whole traces to obtain the **sibling bound**.
+  FR-057b's defaults were calibrated from the generator against *itself* across seeds. That measures
+  repeatability, and any bias the model shares with itself cancels exactly, so it cannot say what a
+  **correct** model of a real workload would score. Measured 2026-08-18 on nine traces, the two
+  numbers disagree materially and **per trace**, which is why a single global tolerance is the wrong
+  shape: `request_length` on `tau2_airline` has a floor of **0.030** (projected to full size)
+  against a **0.020** tolerance, and the fitted model scores **0.026** — so a residual chased across
+  several sessions was **smaller than the floor**. `unique_keys` likewise (floor 0.351, model
+  0.335), and its floor exceeds its tolerance on 3 of 9 traces. Conversely `reuse_distance_objects`
+  has a floor of **0.002-0.012**, so its 0.02 tolerance is comfortably reachable and every reuse
+  failure measured is real, at 3-30x its floor.
+  **A statistic MUST also be judged on its DYNAMIC RANGE — the sibling bound divided by its own
+  floor — and a statistic whose range is below ~1 MUST NOT be gated on at all**, because two
+  different workloads are then closer together than two samples of one. Measured on `tau2_airline`
+  against `tau2_retail`: `sharing_depth` **4.9x** (usable), `reuse_distance_objects` **1.7x**,
+  `unique_keys` **1.7x**, and `request_length` **0.80x — inverted**. So the statistic this project
+  spent the most effort on cannot distinguish two workloads of one family. Relevance MUST be
+  established by this measurement rather than by argument about what the quantity means.
+  Two further consequences worth stating because each is easy to get wrong: a half-vs-half
+  comparison is **half-size on both sides**, so a two-sample KS floor is inflated by about
+  `sqrt(2)` and the projection to full size applies to the **KS** statistics only — not to an area
+  or a log-ratio measure, which do not scale that way; and the **time** split charges real
+  nonstationarity to the floor (airline `sharing_depth` 0.211 against 0.034 by session), so a model
+  of a stationary process cannot match it, which is a limit of the model that MUST be stated rather
+  than tuned against.
 - **FR-056**: `fit` MUST validate the fitted model by comparing four statistics between the
   real trace and synthetic output: reuse-distance CDF (primary), prefix-sharing depth
   histogram, request-length distribution, and unique-keys-over-time curve.

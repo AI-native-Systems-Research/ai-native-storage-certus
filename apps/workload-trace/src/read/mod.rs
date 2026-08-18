@@ -513,19 +513,40 @@ impl Trace {
     /// invented. Byte-weighted statistics over a trace are therefore in token units
     /// and the fit report says so.
     pub fn refs(&self) -> impl Iterator<Item = Ref> + '_ {
+        self.refs_of(|_, _| true)
+    }
+
+    /// The reference stream over a **subset** of invocations, in the trace's own order.
+    ///
+    /// Exists so that splitting a trace into two samples of itself — the FR-057c achievable
+    /// floor — cannot become a second definition of a reference. `refs` is this with a
+    /// constant predicate, so there is exactly one place where a block becomes a `Ref`, and
+    /// a half of a trace is measured by the same rules as the whole of one.
+    ///
+    /// The predicate sees the invocation's index in the trace's order as well as the
+    /// invocation, because the two splits worth measuring need different things: by session
+    /// (which sessions to keep) and by time (which prefix of the run).
+    pub fn refs_of<'a, F>(&'a self, keep: F) -> impl Iterator<Item = Ref> + 'a
+    where
+        F: Fn(usize, &NormalisedInvocation) -> bool + 'a,
+    {
         let block_size = self.capabilities.block_size;
-        self.invocations.iter().flat_map(move |inv| {
-            inv.blocks.iter().enumerate().map(move |(depth, key)| Ref {
-                key: *key,
-                size: block_size,
-                depth: depth as u32,
-                session: inv.session,
-                request_start: depth == 0,
-                // A trace has no warmup window: the concept belongs to a measured
-                // run. Treating some prefix as warmup would be inventing one.
-                warmup: false,
+        self.invocations
+            .iter()
+            .enumerate()
+            .filter(move |(i, inv)| keep(*i, inv))
+            .flat_map(move |(_, inv)| {
+                inv.blocks.iter().enumerate().map(move |(depth, key)| Ref {
+                    key: *key,
+                    size: block_size,
+                    depth: depth as u32,
+                    session: inv.session,
+                    request_start: depth == 0,
+                    // A trace has no warmup window: the concept belongs to a measured
+                    // run. Treating some prefix as warmup would be inventing one.
+                    warmup: false,
+                })
             })
-        })
     }
 
     /// Total block references.
@@ -1336,6 +1357,63 @@ mod tests {
             },
         ];
         assert!(!order(&mut flat, &caps));
+    }
+
+    #[test]
+    fn a_split_partitions_the_reference_stream_exactly() {
+        // The achievable floor compares two halves of one trace, so the halves must be a
+        // partition: every reference in exactly one side, in the trace's own order. A split
+        // that dropped or duplicated references would make the floor a measurement of the
+        // splitter — and it would read as a *tighter* floor, which is the dangerous direction,
+        // since a floor is used to decide that a tolerance is reachable.
+        let caps = Capabilities::from_manifest(&manifest(Encoding::Full, 4), 16).unwrap();
+        let invocations: Vec<NormalisedInvocation> = (0..8u32)
+            .map(|i| NormalisedInvocation {
+                session: SessionId(i),
+                turn: 0,
+                request_start: Some(f64::from(i)),
+                blocks: vec![CacheKey(u64::from(i)), CacheKey(u64::from(i) + 100)],
+            })
+            .collect();
+        let trace = Trace {
+            capabilities: caps,
+            manifest: manifest(Encoding::Full, 4),
+            invocations,
+            chronological: true,
+        };
+        let whole: Vec<u64> = trace.refs().map(|r| r.key.0).collect();
+        assert_eq!(whole.len(), 16);
+
+        // Any predicate and its negation partition the stream. Asserted over a predicate that
+        // actually interleaves, so a bug that kept order by accident is not what passes.
+        let a: Vec<u64> = trace.refs_of(|i, _| i % 3 == 0).map(|r| r.key.0).collect();
+        let b: Vec<u64> = trace.refs_of(|i, _| i % 3 != 0).map(|r| r.key.0).collect();
+        assert_eq!(
+            a.len() + b.len(),
+            whole.len(),
+            "no reference lost or doubled"
+        );
+        let mut union = a.clone();
+        union.extend(&b);
+        union.sort_unstable();
+        let mut want = whole.clone();
+        want.sort_unstable();
+        assert_eq!(union, want, "the two sides are exactly the whole");
+        // Each side keeps the trace's own order, which reuse distance depends on entirely. The
+        // check is that each side is a SUBSEQUENCE of the whole stream — not that its keys
+        // ascend, which they have no reason to do: one invocation contributes several blocks.
+        let is_subsequence = |part: &[u64]| {
+            let mut it = whole.iter();
+            part.iter().all(|k| it.any(|w| w == k))
+        };
+        assert!(is_subsequence(&a), "side A must keep the trace's order");
+        assert!(is_subsequence(&b), "side B must keep the trace's order");
+
+        // And a constant predicate is `refs` itself, which is what lets one definition serve
+        // both — asserted rather than assumed, since `refs` now delegates.
+        let all: Vec<u64> = trace.refs_of(|_, _| true).map(|r| r.key.0).collect();
+        assert_eq!(all, whole);
+        assert_eq!(trace.refs_of(|_, _| false).count(), 0);
     }
 
     #[test]

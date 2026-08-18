@@ -550,11 +550,32 @@ would reproduce it, and it does not (0.0878 / 0.4685 against 0.0188 / 0.2437). T
 over which band's law becomes global, and its direction is arbitrary with respect to its own
 justification. Neither toggle is kept; `ess` is, because it is what did the refuting.
 
-**Two things worth keeping from the sweep.** First, **one pooled band beats six on both traces**
-(airline 0.376 → 0.323, qwen_code 0.107 → 0.104, `unique_keys` better on both), so the depth banding is
-mildly *counterproductive* — consistent with the earlier finding that the exponent correlates with
-neither depth (rho +0.13, p 0.15) nor out-degree. That is a real lead, but it is n=2 and adopting it
-means deleting the band structure, so it needs the corpus matrix (FR-055f) first.
+**Two things worth keeping from the sweep.** First, on two traces **one pooled band beat six**
+(airline 0.376 → 0.323, qwen_code 0.107 → 0.104, `unique_keys` better on both), which looked like a
+real lead — the depth banding being mildly counterproductive is consistent with the exponent
+correlating with neither depth (rho +0.13, p 0.15) nor out-degree.
+**Run across the corpus it did NOT generalise, and the toggle was deleted.** Coverage is 8 of 24 in
+all three arms with no fit↔refuse change and nothing inside tolerance anywhere; means over the eight
+fitting traces:
+
+| arm | `sharing_depth` | `unique_keys` | `request_length` |
+| --- | --- | --- | --- |
+| per-depth profile (default) | **0.217** | **0.578** | **0.090** |
+| segments, six bands | 0.347 | 0.703 | 0.123 |
+| segments, one pooled band | 0.329 | 0.718 | 0.107 |
+
+One band is better on `sharing_depth` and `request_length` but worse on `unique_keys` and on reuse
+distance (`browsecompplus` 0.038 → 0.072, `swebench` 0.044 → 0.073) — mixed, so a two-trace result
+did not survive twenty-four. **This is what FR-055f exists to catch, and it caught it.** The default
+also beats both arms on every mean, confirming corpus-wide what two traces showed.
+
+**A CORRECTION, since this branch asserted the claim six times.** "No trunk work will ever move
+`request_length`" is false as stated. It is identical across all three arms on six of the eight
+traces, but `browsecompplus` moves 0.083 → 0.168 → 0.136 and `swebench` 0.024 → 0.201 → 0.107.
+FR-014a's path length has no trunk *term*, but FR-012a makes the drawn `shared_depth` an **upper
+bound** on the realised one, so where the trunk runs out of depth before `shared_depth` is reached the
+path really does shorten. The claim holds only while the trunk does not bind, and two traces where it
+binds are now known.
 Second, and more diagnostic: **the configuration that does best is the least divisive one.** qwen_code's
 best arm is the one whose per-split collision is 0.81 — barely dividing at all — and it is *still* short
 of the per-depth profile. Every arm over-divides. That is the signature of applying a marginal per-split
@@ -568,6 +589,81 @@ Note also that this is the third independent appearance of one mechanism: **surv
 depth**, so applying a population-average decay to every walker sheds the wrong sessions. It was first
 measured in the refuted `fanout < 1` experiment, then again when survivor-conditioning recovered almost
 nothing, and now here — and the sample-floor sweep below makes it a fourth, by yet another route.
+
+### The achievable floor — the derivation behind FR-057c, and what it says about the gate
+
+The tolerances of FR-057b were calibrated from the generator against itself across seeds. That is a
+measure of **repeatability**: a bias the model shares with itself cancels exactly, so the numbers
+cannot say what a *correct* model of a real workload would score. Six sessions of fitting were
+nonetheless judged against them. This section supplies the missing half.
+
+**Method.** `certus-trace floor` splits one real trace into two samples of itself and compares them
+with the same accumulators `fit` uses, over the same `Trace::refs_of` — so a half of a trace is
+measured by the rules a whole one is, and the halves are asserted to be an exact partition of the
+reference stream (a splitter that dropped references would report a *tighter* floor, which is the
+dangerous direction). Two splits, because each has a confound and they point opposite ways:
+
+- **by session**, on a mixed hash of the session id: preserves duration and stationarity, but
+  **halves the concurrent population**, and sharing is a population property, so both halves
+  genuinely share less than the whole. Reads sharing and reuse low.
+- **by time**, at the median request timestamp: preserves density, but charges real
+  **nonstationarity** to the floor — measured to be strong here (a key's first-to-last span over its
+  stationary null is 0.13 on `tau2_airline`).
+
+`request_length` is the one statistic with **no population term** — path length is per request — so
+its session-split floor is clean sampling noise plus session heterogeneity, and needs no caveat.
+A half-vs-half comparison is half-size on both sides, so a two-sample KS distance, which scales as
+`sqrt(2/n)`, is inflated by about `sqrt(2)`; the projection is applied to the KS statistics only,
+never to the area or log-ratio measures.
+
+**Measured, session split, nine traces** (projection to full size in brackets):
+
+| trace | reuse (tol 0.02) | share (tol 0.05) | req_len (tol 0.02) | uniq (tol 0.15) |
+| --- | --- | --- | --- | --- |
+| tau2_airline | 0.0071 | 0.0337 (0.0238) | **0.0425 (0.0301)** | **0.3512** |
+| tau2_retail | 0.0076 | 0.0368 (0.0260) | 0.0195 (0.0138) | 0.1120 |
+| tau2_telecom | 0.0023 | 0.0201 (0.0142) | 0.0150 (0.0106) | 0.0320 |
+| swebench | 0.0026 | 0.0239 (0.0169) | 0.0277 (0.0196) | **0.2001** |
+| browsecompplus | 0.0050 | 0.0378 (0.0268) | 0.0153 (0.0108) | 0.0370 |
+| qwen_code | 0.0026 | 0.0123 (0.0087) | 0.0089 (0.0063) | 0.0688 |
+| qwen_reasoning | 0.0124 | 0.0278 (0.0197) | 0.0127 (0.0090) | **0.2253** |
+| ragbench | 0.0021 | 0.0046 (0.0032) | 0.0086 (0.0061) | 0.0234 |
+
+Bold entries are floors **above** their own tolerance. Note that `ragbench` cannot be *fitted* at all
+(it supplies no `think_time`) yet its floor measures fine, so this calibration covers the whole
+corpus rather than only the traces the model happens to fit.
+
+**Three findings, in order of how much they change what to work on.**
+
+1. **Two of the residuals chased hardest were below their floors.** `request_length` on
+   `tau2_airline`: floor 0.030 projected, tolerance 0.020, fitted model **0.026**. `unique_keys` on
+   the same trace: floor 0.351, model 0.335. Neither was ever a failure. FR-054c/d/e/f/h were all
+   path-length work, and on this trace they were aimed inside the noise.
+2. **Reuse distance is the opposite case and is the real defect.** Its floor is 0.002-0.012 against a
+   0.02 tolerance, so the tolerance is comfortably reachable, and measured failures of 0.024-0.106
+   sit at 3-30x the floor.
+3. **The sibling bound shows three of the four statistics barely discriminate at all.** Comparing two
+   *different* workloads of one family (`tau2_airline` against `tau2_retail`) bounds the same
+   question from above, and the ratio **sibling ÷ own floor** is the statistic's dynamic range:
+
+   | statistic | own floor | sibling bound | dynamic range | our model |
+   | --- | --- | --- | --- | --- |
+   | `sharing_depth` | 0.0337 | 0.1637 | **4.9x** usable | 0.1017 |
+   | `reuse_distance_objects` | 0.0071 | 0.0118 | 1.7x weak | 0.0262 |
+   | `unique_keys` | 0.3512 | 0.5819 | 1.7x weak | 0.3347 |
+   | `request_length` | 0.0425 | 0.0342 | **0.80x — inverted** | 0.0258 |
+
+   **`request_length` cannot tell these two workloads apart**: they are closer on it than two halves
+   of one trace are. And `reuse_distance_objects`, though a real failure, has a usable band only
+   0.007-0.012 wide, so a 0.02 tolerance sits *above* the whole discriminating range and would pass a
+   model that is further from airline than `tau2_retail` is — which is exactly where our model sits
+   (0.026). The tolerance is not merely miscalibrated; it is on the wrong side of the range.
+
+**The rule this establishes, and it is the reusable part:** a statistic worth gating on needs **both**
+a low floor and a high sibling bound. Neither alone is sufficient, and relevance argued from what a
+quantity *means* is not evidence — `request_length` sounds like a direct measure of workload shape and
+measures nothing that separates these workloads. Selecting the cache-relevant statistics of the next
+gate revision by this criterion is the point of measuring it.
 
 ### Fit tolerances and divergence measures — the derivation behind FR-057a and FR-057b
 

@@ -89,9 +89,9 @@ def classify(out: str, rc: int) -> str:
 
 
 def measure(binary: str, trace: pathlib.Path, block_bytes: int, window: int, seed: int,
-            timeout: int) -> dict:
+            timeout: int, fit_args: list = ()) -> dict:
     cmd = [binary, "fit", "-t", str(trace), "--block-bytes", str(block_bytes),
-           "--wss-window", str(window), "--seed", str(seed)]
+           "--wss-window", str(window), "--seed", str(seed), *fit_args]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         out, rc = p.stdout + p.stderr, p.returncode
@@ -137,6 +137,11 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=4242)
     ap.add_argument("--timeout", type=int, default=900, help="per trace, seconds")
     ap.add_argument("--json", action="store_true")
+    # Pass-through so an arm of an experiment can be measured across the whole corpus without
+    # editing this script. FR-055f asks for the whole table per change, and a change reachable
+    # only behind a flag (`--branching-segments`) was otherwise unmeasurable here.
+    ap.add_argument("--fit-arg", action="append", default=[], metavar="ARG",
+                    help="extra argument passed to `certus-trace fit`; repeatable")
     a = ap.parse_args()
 
     traces = sorted(p for p in a.corpus.iterdir() if p.is_dir() or p.suffix == ".jsonl")
@@ -145,7 +150,8 @@ def main() -> int:
         return 2
     rows = []
     for t in traces:
-        rows.append(measure(a.bin, t, a.block_bytes, a.wss_window, a.seed, a.timeout))
+        rows.append(measure(a.bin, t, a.block_bytes, a.wss_window, a.seed, a.timeout,
+                            a.fit_arg))
         if not a.json:
             print(".", end="", flush=True, file=sys.stderr)
     if not a.json:
