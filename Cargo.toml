@@ -42,7 +42,9 @@ members = [
     "apps/baseline-generalized-fs",
     "apps/remote-lookup-bench",
     "apps/eviction-replay-benchmark",
-    "components/zyre"
+    "components/zyre",
+    "components/shm-queue",
+    "apps/certus-shmq-server"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -70,7 +72,8 @@ default-members = [
     "components/gpu-services",
     "components/eviction-policy-lru",
     "components/eviction-policy-session-lists",
-    "apps/eviction-replay-benchmark"
+    "apps/eviction-replay-benchmark",
+    "components/shm-queue"
 ]
 
 resolver = "2"
@@ -107,4 +110,5 @@ remote-lookup-rdma-initiator = { path = "components/remote-lookup-rdma-initiator
 remote-lookup-rdma-responder = { path = "components/remote-lookup-rdma-responder" }
 zyre = { path = "components/zyre" }
 certus-connector = { path = "certus-connector" }
+shm-queue = { path = "components/shm-queue" }
 libloading = "0.8"

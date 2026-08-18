@@ -53,6 +53,21 @@ struct PendingStoreEntry {
 
 type PendingStores = Arc<Mutex<HashMap<u64, PendingStoreEntry>>>;
 
+struct RegisteredRegion {
+    dev_ptr: *mut std::ffi::c_void,
+    size: u32,
+    stride: u64,
+}
+
+unsafe impl Send for RegisteredRegion {}
+unsafe impl Sync for RegisteredRegion {}
+
+struct RegisteredRegionSet {
+    regions: Vec<RegisteredRegion>,
+}
+
+type RegionSets = Arc<Mutex<Vec<RegisteredRegionSet>>>;
+
 /// Cumulative counters exposed to the metrics/telemetry layer.
 /// All fields are monotonic; take deltas across two reads to compute rates.
 #[derive(Clone)]
@@ -79,6 +94,7 @@ impl ServiceCounters {
 pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
+    region_sets: RegionSets,
     pending_stores: PendingStores,
     eviction_rx: crossbeam_channel::Receiver<EvictionEvent>,
     eviction_dropped: Arc<AtomicU64>,
@@ -95,6 +111,7 @@ impl DispatcherService {
         Self {
             dispatcher,
             ipc_cache: Arc::new(Mutex::new(HashMap::new())),
+            region_sets: Arc::new(Mutex::new(Vec::new())),
             pending_stores: Arc::new(Mutex::new(HashMap::new())),
             eviction_rx,
             eviction_dropped,
@@ -168,6 +185,31 @@ fn ipc_cache_close(cache: &IpcCache, handle_bytes: &[u8; 64]) {
             map.remove(handle_bytes);
         }
     }
+}
+
+fn resolve_registered_regions(
+    region_sets: &RegionSets,
+    region_set_id: u32,
+    block_id: u32,
+) -> Result<Vec<IpcHandle>, String> {
+    if region_set_id == 0 {
+        return Err("region_set_id must be > 0".into());
+    }
+    let sets = region_sets.lock().unwrap_or_else(|e| e.into_inner());
+    let idx = (region_set_id - 1) as usize;
+    let set = sets
+        .get(idx)
+        .ok_or_else(|| format!("unknown region_set_id {region_set_id}"))?;
+    Ok(set
+        .regions
+        .iter()
+        .map(|r| IpcHandle {
+            address: unsafe {
+                (r.dev_ptr as *mut u8).add(block_id as usize * r.stride as usize)
+            },
+            size: r.size,
+        })
+        .collect())
 }
 
 #[allow(clippy::result_large_err)]
@@ -903,5 +945,249 @@ impl Dispatcher for DispatcherService {
             write_bytes: s.write_bytes,
             write_latency_ns_sum: s.write_latency_ns_sum,
         }))
+    }
+
+    async fn store_batch(
+        &self,
+        request: Request<proto::StoreBatchRequest>,
+    ) -> Result<Response<proto::StoreBatchResponse>, Status> {
+        let req = request.into_inner();
+        let keys: Vec<u64> = req.entries.iter().map(|e| e.key).collect();
+        check_duplicate_keys(&keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let cache = Arc::clone(&self.ipc_cache);
+        let region_sets = Arc::clone(&self.region_sets);
+
+        let results = tokio::task::spawn_blocking(move || {
+            let mut local_ptrs: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
+
+            req.entries
+                .iter()
+                .map(|entry| {
+                    // Skip keys already committed (concurrent batch race or
+                    // client presence cache slightly stale after eviction).
+                    if dispatcher.check(entry.key).unwrap_or(false) {
+                        return success_result(entry.key);
+                    }
+
+                    // Step 1: Reserve
+                    let _slot = match dispatcher.reserve_memory(entry.key, entry.size, entry.session_id) {
+                        Ok(ptr) => ptr,
+                        Err(e) => return error_result(entry.key, &e),
+                    };
+
+                    // Step 2: Resolve IPC regions
+                    let regions: Vec<IpcHandle> = if entry.region_set_id > 0 {
+                        match resolve_registered_regions(
+                            &region_sets,
+                            entry.region_set_id,
+                            entry.block_id,
+                        ) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                let _ = dispatcher.release_memory(entry.key);
+                                return error_result(
+                                    entry.key,
+                                    &DispatcherError::InvalidParameter(e),
+                                );
+                            }
+                        }
+                    } else {
+                        let mut r = Vec::new();
+                        for handle in &entry.ipc_handles {
+                            let handle_key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+                                Ok(k) => k,
+                                Err(_) => {
+                                    let _ = dispatcher.release_memory(entry.key);
+                                    return error_result(
+                                        entry.key,
+                                        &DispatcherError::InvalidParameter(
+                                            "cuda_ipc_handle must be 64 bytes".into(),
+                                        ),
+                                    );
+                                }
+                            };
+                            let dev_ptr = match local_ptrs.get(&handle_key) {
+                                Some(&ptr) => ptr,
+                                None => match ipc_cache_open(&cache, &handle_key, handle.gpu_device_id) {
+                                    Ok(ptr) => {
+                                        local_ptrs.insert(handle_key, ptr);
+                                        ptr
+                                    }
+                                    Err(e) => {
+                                        let _ = dispatcher.release_memory(entry.key);
+                                        return error_result(
+                                            entry.key,
+                                            &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                                        );
+                                    }
+                                },
+                            };
+                            r.push(IpcHandle {
+                                address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
+                                size: handle.size,
+                            });
+                        }
+                        r
+                    };
+
+                    // Step 3: DMA GPU→DRAM
+                    if let Err(e) = dispatcher.copy_gpu_to_memory_async(
+                        entry.key,
+                        &regions,
+                        GpuStream(std::ptr::null_mut()),
+                    ) {
+                        let _ = dispatcher.release_memory(entry.key);
+                        return error_result(entry.key, &e);
+                    }
+
+                    // Step 4: Commit (register in dispatch-map + enqueue SSD write)
+                    match dispatcher.copy_gpu_to_memory_completed(entry.key, entry.size) {
+                        Ok(()) => success_result(entry.key),
+                        Err(e) => {
+                            let _ = dispatcher.release_memory(entry.key);
+                            error_result(entry.key, &e)
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(proto::StoreBatchResponse { results }))
+    }
+
+    async fn load_batch(
+        &self,
+        request: Request<proto::LoadBatchRequest>,
+    ) -> Result<Response<proto::LoadBatchResponse>, Status> {
+        let req = request.into_inner();
+        let keys: Vec<u64> = req.entries.iter().map(|e| e.key).collect();
+        check_duplicate_keys(&keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let cache = Arc::clone(&self.ipc_cache);
+        let region_sets = Arc::clone(&self.region_sets);
+
+        let results = tokio::task::spawn_blocking(move || {
+            let mut local_ptrs: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
+            let mut pinned_keys: Vec<u64> = Vec::new();
+            let mut batch_entries: Vec<(u64, Vec<IpcHandle>)> = Vec::with_capacity(req.entries.len());
+            let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
+
+            // Step 1: Pin all keys + resolve regions
+            for (i, entry) in req.entries.iter().enumerate() {
+                if let Err(e) = dispatcher.pin(entry.key) {
+                    pre_errors[i] = Some(error_result(entry.key, &e));
+                    batch_entries.push((entry.key, Vec::new()));
+                    continue;
+                }
+                pinned_keys.push(entry.key);
+
+                let regions: Vec<IpcHandle> = if entry.region_set_id > 0 {
+                    match resolve_registered_regions(
+                        &region_sets,
+                        entry.region_set_id,
+                        entry.block_id,
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            pre_errors[i] = Some(error_result(
+                                entry.key,
+                                &DispatcherError::InvalidParameter(e),
+                            ));
+                            batch_entries.push((entry.key, Vec::new()));
+                            continue;
+                        }
+                    }
+                } else {
+                    let mut r = Vec::new();
+                    let mut ok = true;
+                    for handle in &entry.ipc_handles {
+                        let handle_key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+                            Ok(k) => k,
+                            Err(_) => {
+                                pre_errors[i] = Some(error_result(
+                                    entry.key,
+                                    &DispatcherError::InvalidParameter(
+                                        "cuda_ipc_handle must be 64 bytes".into(),
+                                    ),
+                                ));
+                                ok = false;
+                                break;
+                            }
+                        };
+                        let dev_ptr = match local_ptrs.get(&handle_key) {
+                            Some(&ptr) => ptr,
+                            None => match ipc_cache_open(&cache, &handle_key, handle.gpu_device_id) {
+                                Ok(ptr) => {
+                                    local_ptrs.insert(handle_key, ptr);
+                                    ptr
+                                }
+                                Err(e) => {
+                                    pre_errors[i] = Some(error_result(
+                                        entry.key,
+                                        &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                                    ));
+                                    ok = false;
+                                    break;
+                                }
+                            },
+                        };
+                        r.push(IpcHandle {
+                            address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
+                            size: handle.size,
+                        });
+                    }
+                    if !ok {
+                        batch_entries.push((entry.key, Vec::new()));
+                        continue;
+                    }
+                    r
+                };
+                batch_entries.push((entry.key, regions));
+            }
+
+            // Step 2: Batch lookup (DMA DRAM/SSD→GPU)
+            let valid_indices: Vec<usize> = (0..batch_entries.len())
+                .filter(|&i| pre_errors[i].is_none())
+                .collect();
+            let valid_batch: Vec<(u64, Vec<IpcHandle>)> = valid_indices
+                .iter()
+                .map(|&i| {
+                    let (key, ref regions) = batch_entries[i];
+                    (key, regions.clone())
+                })
+                .collect();
+
+            let batch_results = dispatcher.batch_lookup(&valid_batch);
+
+            // Step 3: Merge results
+            let mut results: Vec<EntryResult> = Vec::with_capacity(req.entries.len());
+            let mut batch_iter = batch_results.into_iter();
+            for (i, entry) in req.entries.iter().enumerate() {
+                if let Some(err_result) = pre_errors[i].take() {
+                    results.push(err_result);
+                } else {
+                    match batch_iter.next().unwrap() {
+                        Ok(()) => results.push(success_result(entry.key)),
+                        Err(e) => results.push(error_result(entry.key, &e)),
+                    }
+                }
+            }
+
+            // Step 4: Unpin ALL pinned keys (even failed ones)
+            for key in &pinned_keys {
+                let _ = dispatcher.unpin(*key);
+            }
+
+            results
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(proto::LoadBatchResponse { results }))
     }
 }

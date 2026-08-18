@@ -27,6 +27,7 @@ class FakeStub:
         self.exists: dict[int, bool] = {}
         self.reserve_fail: set[int] = set()
         self.copy_fail: set[int] = set()
+        self.pin_fail: set[int] = set()
         self.events: list[pb.EvictionEvent] = []
         self.dropped_count = 0
 
@@ -59,10 +60,23 @@ class FakeStub:
             results=[pb.EntryResult(key=k, success=True) for k in req.keys]
         )
 
+    def StoreBatch(self, req):
+        self.calls.append(("StoreBatch", req))
+        results = []
+        for e in req.entries:
+            ok = e.key not in self.copy_fail
+            results.append(pb.EntryResult(key=e.key, success=ok, error_message="" if ok else "fail"))
+        return pb.StoreBatchResponse(results=results)
+
+    def LoadBatch(self, req):
+        self.calls.append(("LoadBatch", req))
+        results = [pb.EntryResult(key=e.key, success=True) for e in req.entries]
+        return pb.LoadBatchResponse(results=results)
+
     def Pin(self, req):
         self.calls.append(("Pin", req))
         return pb.BatchPinResponse(
-            results=[pb.EntryResult(key=k, success=True) for k in req.keys]
+            results=[pb.EntryResult(key=k, success=k not in self.pin_fail) for k in req.keys]
         )
 
     def Unpin(self, req):
@@ -127,12 +141,21 @@ def test_block_offset_includes_base_delta_and_stride():
 # ── manager: lookup / touch ──
 
 
-def test_lookup_maps_to_check():
+def test_lookup_uses_presence_and_inflight():
+    from certus_grpc_connector.compat import lookup_result, lookup_result_pending
+
     stub = FakeStub()
-    stub.exists[7] = True
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
-    assert mgr.lookup((7).to_bytes(8, "big")) is True
-    assert mgr.lookup((8).to_bytes(8, "big")) is False
+    # Initially everything is MISS (no RPC, just local sets).
+    assert mgr.lookup((7).to_bytes(8, "big")) == lookup_result(False)
+    # After complete_store, key is in _presence -> HIT.
+    mgr._presence.add(7)
+    assert mgr.lookup((7).to_bytes(8, "big")) == lookup_result(True)
+    # In-flight key -> HIT_PENDING.
+    mgr._inflight.add(8)
+    assert mgr.lookup((8).to_bytes(8, "big")) == lookup_result_pending()
+    # No RPCs issued — lookup is purely local.
+    assert _calls_of(stub, "Check") == []
 
 
 def test_touch_maps_to_touch_rpc_no_promote():
@@ -147,67 +170,49 @@ def test_touch_maps_to_touch_rpc_no_promote():
 # ── manager: prepare_store ──
 
 
-def test_prepare_store_filters_existing_and_reserves():
+def test_prepare_store_filters_presence_and_inflight():
     stub = FakeStub()
-    stub.exists[1] = True  # already cached -> filtered out
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=8192)
+    mgr._presence.add(1)  # already stored -> filtered out
     keys = [(1).to_bytes(8, "big"), (2).to_bytes(8, "big")]
     out = mgr.prepare_store(keys)
     assert out is not None
     assert out.keys_to_store == [keys[1]]
-    (reserve,) = _calls_of(stub, "Reserve")
-    assert [e.key for e in reserve.entries] == [2]
-    assert [e.size for e in reserve.entries] == [8192]
+    assert out.store_spec.keys == [2]
+    # Key 2 is now in-flight.
+    assert 2 in mgr._inflight
+    # No RPCs issued by prepare_store (StoreBatch is called by the worker).
+    assert _calls_of(stub, "Reserve") == []
+    assert _calls_of(stub, "StoreBatch") == []
 
 
 def test_prepare_store_all_existing_is_noop():
     stub = FakeStub()
-    stub.exists[1] = True
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    mgr._presence.add(1)
     out = mgr.prepare_store([(1).to_bytes(8, "big")])
     assert out is not None
     assert out.keys_to_store == []
-    assert _calls_of(stub, "Reserve") == []
+    assert mgr._inflight == set()
 
 
-def test_prepare_store_partial_reserve_keeps_reserved_drops_failed():
-    # Best-effort: reserve is per-key independent, so a partial failure stores
-    # the keys that fit and drops the rest (rather than rejecting the whole
-    # request, which triggers a vLLM retry+warning storm).
+def test_prepare_store_deduplicates_inflight():
     stub = FakeStub()
-    stub.reserve_fail = {3}  # key 3 fails to reserve; key 2 succeeds
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
     keys = [(2).to_bytes(8, "big"), (3).to_bytes(8, "big")]
-    out = mgr.prepare_store(keys)
-    assert out is not None
-    # Only the reserved key is offered for storage, in offload order.
-    assert out.keys_to_store == [keys[0]]
-    assert out.store_spec.keys == [2]
-    # The reserved key is kept (to be committed later), so no rollback; the
-    # failed key allocated nothing, so it needs no abort either.
-    assert _calls_of(stub, "AbortStore") == []
+    # First call: both go to inflight.
+    out1 = mgr.prepare_store(keys)
+    assert out1.keys_to_store == keys
+    assert mgr._inflight == {2, 3}
+    # Second call with same keys: all filtered (already in-flight).
+    out2 = mgr.prepare_store(keys)
+    assert out2.keys_to_store == []
 
 
-def test_prepare_store_all_reserve_fail_returns_empty_not_none():
-    # When nothing fits, return an empty (non-None) result so vLLM advances past
-    # these tokens quietly instead of retrying and warning every scheduler step.
+def test_prepare_store_preserves_offload_order():
     stub = FakeStub()
-    stub.reserve_fail = {2, 3}
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
-    keys = [(2).to_bytes(8, "big"), (3).to_bytes(8, "big")]
-    out = mgr.prepare_store(keys)
-    assert out is not None
-    assert out.keys_to_store == []
-    assert out.store_spec.keys == []
-    assert _calls_of(stub, "AbortStore") == []
-
-
-def test_prepare_store_preserves_offload_order_in_partial():
-    # store_spec must stay in offload order for the scheduler's positional zip
-    # of src GPU block ids with dst keys to line up on a partial subset.
-    stub = FakeStub()
-    stub.reserve_fail = {20}  # drop the middle key
-    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    mgr._presence.add(20)  # middle key already stored
     keys = [(10).to_bytes(8, "big"), (20).to_bytes(8, "big"), (30).to_bytes(8, "big")]
     out = mgr.prepare_store(keys)
     assert out.keys_to_store == [keys[0], keys[2]]
@@ -217,23 +222,27 @@ def test_prepare_store_preserves_offload_order_in_partial():
 # ── manager: complete_store / load ──
 
 
-def test_complete_store_success_commits():
+def test_complete_store_success_moves_inflight_to_presence():
     stub = FakeStub()
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    mgr._inflight.add(9)
     mgr.complete_store([(9).to_bytes(8, "big")], success=True)
-    assert _calls_of(stub, "CommitStore")
-    assert not _calls_of(stub, "AbortStore")
+    assert 9 in mgr._presence
+    assert 9 not in mgr._inflight
+    # No RPCs — StoreBatch already committed on the server.
+    assert _calls_of(stub, "CommitStore") == []
 
 
-def test_complete_store_failure_aborts():
+def test_complete_store_failure_removes_from_inflight():
     stub = FakeStub()
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    mgr._inflight.add(9)
     mgr.complete_store([(9).to_bytes(8, "big")], success=False)
-    assert _calls_of(stub, "AbortStore")
-    assert not _calls_of(stub, "CommitStore")
+    assert 9 not in mgr._inflight
+    assert 9 not in mgr._presence
 
 
-def test_prepare_load_pins_with_promote_and_complete_load_unpins():
+def test_prepare_load_pins_and_complete_load_unpins():
     stub = FakeStub()
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
     spec = mgr.prepare_load([(4).to_bytes(8, "big"), (5).to_bytes(8, "big")])
@@ -241,12 +250,22 @@ def test_prepare_load_pins_with_promote_and_complete_load_unpins():
     assert spec.keys == [4, 5]
     (pin,) = _calls_of(stub, "Pin")
     assert list(pin.keys) == [4, 5]
-    # promote must be False: Lookup promotes cold entries itself; a Pin-promote
-    # would race the Lookup-promote on mt.insert (AlreadyExists -> load crash).
     assert pin.promote is False
     mgr.complete_load([(4).to_bytes(8, "big"), (5).to_bytes(8, "big")])
     (unpin,) = _calls_of(stub, "Unpin")
     assert list(unpin.keys) == [4, 5]
+
+
+def test_prepare_load_pin_failure_invalidates_presence():
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    mgr._presence.update({4, 5})
+    # Simulate key 5 evicted between lookup and prepare_load.
+    stub.pin_fail = {5}
+    mgr.prepare_load([(4).to_bytes(8, "big"), (5).to_bytes(8, "big")])
+    # Key 5 removed from presence so next lookup returns MISS.
+    assert 4 in mgr._presence
+    assert 5 not in mgr._presence
 
 
 # ── manager: take_events ──
@@ -267,20 +286,59 @@ def test_take_events_surfaces_removed_not_demoted():
     assert list(mgr.take_events()) == []
 
 
+def test_take_events_eviction_clears_presence_and_inflight():
+    stub = FakeStub()
+    stub.events = [pb.EvictionEvent(key=42, reason=pb.EVICTION_REASON_REMOVED)]
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    mgr._presence.add(42)
+    mgr._inflight.add(42)
+    list(mgr.take_events())
+    assert 42 not in mgr._presence
+    assert 42 not in mgr._inflight
+
+
+def test_take_events_dropped_clears_all_caches():
+    stub = FakeStub()
+    stub.dropped_count = 5
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    mgr._presence.update({1, 2, 3})
+    mgr._inflight.update({4, 5})
+    list(mgr.take_events())
+    assert mgr._presence == set()
+    assert mgr._inflight == set()
+
+
+def test_full_store_lifecycle_hit_pending_to_hit():
+    from certus_grpc_connector.compat import lookup_result, lookup_result_pending
+
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    key = (99).to_bytes(8, "big")
+    # Before store: MISS.
+    assert mgr.lookup(key) == lookup_result(False)
+    # prepare_store puts key in-flight.
+    out = mgr.prepare_store([key])
+    assert out.keys_to_store == [key]
+    assert mgr.lookup(key) == lookup_result_pending()
+    # complete_store(success) promotes to presence.
+    mgr.complete_store([key], success=True)
+    assert mgr.lookup(key) == lookup_result(True)
+    assert 99 not in mgr._inflight
+    assert 99 in mgr._presence
+
+
 # ── handler offset wiring ──
 
 
-def test_store_handler_sends_offsets_per_block():
+def test_store_handler_sends_store_batch_with_offsets():
     from certus_grpc_connector.handler import worker_class
     from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
 
     stub = FakeStub()
     kv = KvCacheIpc(handle_bytes=b"z" * 64, gpu_device_id=1, stride_bytes=1024, base_delta=0)
     executor = ThreadPoolExecutor(max_workers=1)
-    # One worker serves both directions; transfer_async routes a store by the
-    # source spec being a GPULoadStoreSpec (≤0.24 medium-pair entrypoint). The
-    # worker holds a LIST of KV regions (N==1 here — single-tensor block).
-    h = worker_class()(stub, [kv], block_size_bytes=1024, executor=executor)
+    h = worker_class()(stub, [kv], block_size_bytes=1024,
+                       store_executor=executor, load_executor=executor)
 
     src = GPULoadStoreSpec(block_ids=[3, 7], group_sizes=[2], block_indices=[0])
     dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])
@@ -289,9 +347,8 @@ def test_store_handler_sends_offsets_per_block():
     results = h.get_finished()
     assert len(results) == 1 and results[0].success
 
-    (req,) = _calls_of(stub, "CopyToStore")
+    (req,) = _calls_of(stub, "StoreBatch")
     assert [e.key for e in req.entries] == [30, 70]
-    # Single-region (N==1): the one region lands in ipc_handles[0].
     assert all(len(e.ipc_handles) == 1 for e in req.entries)
     assert [e.ipc_handles[0].offset for e in req.entries] == [3 * 1024, 7 * 1024]
     assert all(e.ipc_handles[0].cuda_ipc_handle == b"z" * 64 for e in req.entries)
@@ -299,25 +356,24 @@ def test_store_handler_sends_offsets_per_block():
     executor.shutdown()
 
 
-def test_store_handler_never_reports_failure_and_aborts_failed_keys():
-    """Regression: a failed CopyToStore must NOT surface success=False (vLLM's
+def test_store_handler_reports_success_even_on_partial_failure():
+    """A partial StoreBatch failure must NOT surface success=False (vLLM's
     offloading worker asserts transfer_result.success and crashes the engine).
-    The failed keys are rolled back via AbortStore; the job reports success."""
+    Partial failures are logged but the job reports success."""
     from certus_grpc_connector.handler import worker_class
     from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
 
     stub = FakeStub()
-    stub.copy_fail = {70}  # one of two blocks fails to copy
+    stub.copy_fail = {70}  # one of two blocks fails server-side
     kv = KvCacheIpc(handle_bytes=b"z" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=0)
     executor = ThreadPoolExecutor(max_workers=1)
-    h = worker_class()(stub, [kv], block_size_bytes=1024, executor=executor)
+    h = worker_class()(stub, [kv], block_size_bytes=1024,
+                       store_executor=executor, load_executor=executor)
 
     src = GPULoadStoreSpec(block_ids=[3, 7], group_sizes=[2], block_indices=[0])
     dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])
     h.transfer_async(job_id=9, spec=(src, dst))
     h.wait({9})
     results = h.get_finished()
-    assert len(results) == 1 and results[0].success is True  # never False
-    (abort,) = _calls_of(stub, "AbortStore")
-    assert list(abort.keys) == [70]  # only the failed key rolled back
+    assert len(results) == 1 and results[0].success is True
     executor.shutdown()

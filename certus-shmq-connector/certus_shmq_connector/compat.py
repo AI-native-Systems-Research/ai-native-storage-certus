@@ -527,25 +527,15 @@ def lookup_result(exists: bool):
     """Return the shape ``OffloadingManager.lookup`` must yield for this version.
 
     * **0.26+** (``CAPS.lookup_returns_enum``): a ``LookupResult`` enum —
-      ``HIT`` when the key is present, ``MISS`` otherwise.
+      ``HIT`` when the key is present, ``MISS`` otherwise. (The richer
+      ``HIT_PENDING`` / ``RETRY`` states model in-flight/backpressure cases the
+      connector's synchronous certus-server lookup never produces.)
     * **≤0.24**: a plain ``bool``.
     """
     if CAPS.lookup_returns_enum:
         LookupResult = _lazy_base_attr("LookupResult")
         return LookupResult.HIT if exists else LookupResult.MISS
     return bool(exists)
-
-
-def lookup_result_pending():
-    """Return ``HIT_PENDING`` on 0.26+, or ``True`` on ≤0.24.
-
-    Used when a block is in-flight (store submitted but not yet committed).
-    The scheduler defers the request and re-polls on the next step.
-    """
-    if CAPS.lookup_returns_enum:
-        LookupResult = _lazy_base_attr("LookupResult")
-        return LookupResult.HIT_PENDING
-    return True
 
 
 def block_bytes_from_offloading_config(config) -> int:

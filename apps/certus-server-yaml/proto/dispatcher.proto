@@ -48,6 +48,14 @@ service Dispatcher {
 
   // Return cumulative per-direction SSD read/write byte/op/latency counters.
   rpc GetIoStats(GetIoStatsRequest) returns (IoStatsResponse);
+
+  // Fused store: Reserve + GPU→DRAM DMA + Commit in one round-trip.
+  // Replaces the 3-RPC sequence (Reserve → CopyToStore → CommitStore).
+  rpc StoreBatch(StoreBatchRequest) returns (StoreBatchResponse);
+
+  // Fused load: Pin + DRAM/SSD→GPU DMA + Unpin in one round-trip.
+  // Replaces the 3-RPC sequence (Pin → Lookup → Unpin).
+  rpc LoadBatch(LoadBatchRequest) returns (LoadBatchResponse);
 }
 
 // --- Common types ---
@@ -286,4 +294,44 @@ message IoStatsResponse {
   uint64 write_ops = 4;
   uint64 write_bytes = 5;
   uint64 write_latency_ns_sum = 6;
+}
+
+// --- StoreBatch (fused Reserve + DMA + Commit) ---
+
+message StoreBatchEntry {
+  uint64 key = 1;
+  uint32 size = 2;
+  uint64 session_id = 3;
+  // GPU source regions (same semantics as CopyToStoreEntry).
+  repeated IpcHandle ipc_handles = 4;
+  // Pre-registered region set (from RegisterRegions). Supersedes ipc_handles.
+  uint32 region_set_id = 5;
+  uint32 block_id = 6;
+}
+
+message StoreBatchRequest {
+  repeated StoreBatchEntry entries = 1;
+}
+
+message StoreBatchResponse {
+  repeated EntryResult results = 1;
+}
+
+// --- LoadBatch (fused Pin + DMA + Unpin) ---
+
+message LoadBatchEntry {
+  uint64 key = 1;
+  // GPU destination regions (same semantics as LookupEntry).
+  repeated IpcHandle ipc_handles = 2;
+  // Pre-registered region set (from RegisterRegions). Supersedes ipc_handles.
+  uint32 region_set_id = 3;
+  uint32 block_id = 4;
+}
+
+message LoadBatchRequest {
+  repeated LoadBatchEntry entries = 1;
+}
+
+message LoadBatchResponse {
+  repeated EntryResult results = 1;
 }

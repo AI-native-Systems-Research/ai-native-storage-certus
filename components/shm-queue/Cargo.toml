@@ -1,0 +1,19 @@
+[package]
+name = "shm-queue"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Cross-process shared-memory request/response mailbox transport used by the
+# certus-shmq prototype (a low-latency alternative to the gRPC control plane).
+# Pure userspace + Linux futex; no SPDK/GPU deps, so it builds and tests in the
+# default workspace without hardware.
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "shmq-echo"
+path = "src/bin/shmq_echo.rs"

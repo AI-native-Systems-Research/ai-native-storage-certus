@@ -14,15 +14,20 @@ implementing BOTH worker interfaces the plugin API has had:
   direction is in the method name, so there is no medium-pair routing and
   ``TransferResult`` no longer carries a ``transfer_type``).
 
-Both interfaces share one background thread pool, one pending-job deque, and the
-same store/load RPC bodies. The base class is resolved lazily via
-``compat.worker_base_class()`` (a factory builds the subclass on first use) so the
-base that is absent on the other era is never imported.
+Both interfaces share the same store/load RPC bodies but use separate thread
+pools per direction (store and load) so a burst of stores cannot starve load
+dispatch. Each direction also maintains its own pending-job deque so completed
+loads are reported independently of in-flight stores (head-of-line avoidance).
+The base class is resolved lazily via ``compat.worker_base_class()`` (a factory
+builds the subclass on first use) so the base that is absent on the other era
+is never imported.
 
 Each submit enqueues one gRPC call onto the pool and returns immediately;
-``get_finished`` reaps completed futures in FIFO order. Per block we build a proto
-``IpcHandle`` sharing the KV-cache allocation's IPC handle with ``offset`` set to
-the block's byte offset, so the server DMAs at ``open(handle) + offset``.
+``get_finished`` scans both deques and reaps any completed future regardless
+of submission order (unordered reaping — no straggler can block reporting of
+faster completions). Per block we build a proto ``IpcHandle`` sharing the
+KV-cache allocation's IPC handle with ``offset`` set to the block's byte
+offset, so the server DMAs at ``open(handle) + offset``.
 """
 
 from __future__ import annotations
@@ -85,8 +90,6 @@ class _PendingJob:
     future: Future
     start_time: float
     num_blocks: int
-    # Direction of this job; carried per-job because one deque now holds both
-    # store and load jobs (≤0.24 used two separate handler instances).
     transfer_type: tuple[str, str]
 
 
@@ -131,13 +134,16 @@ def _build_worker_class():
             stub,
             kv_regions: list[KvCacheIpc],
             block_size_bytes: int,
-            executor: ThreadPoolExecutor,
+            store_executor: ThreadPoolExecutor,
+            load_executor: ThreadPoolExecutor,
         ):
             self._stub = stub
             self._kv_regions = kv_regions
             self._block_size_bytes = int(block_size_bytes)
-            self._executor = executor
-            self._pending: deque[_PendingJob] = deque()
+            self._store_executor = store_executor
+            self._load_executor = load_executor
+            self._pending_stores: deque[_PendingJob] = deque()
+            self._pending_loads: deque[_PendingJob] = deque()
 
         # ── shared async plumbing ──
 
@@ -148,9 +154,11 @@ def _build_worker_class():
             keys: list[int],
             fn,
             transfer_type: tuple[str, str],
+            pending: deque[_PendingJob],
+            executor: ThreadPoolExecutor,
         ) -> bool:
-            future = self._executor.submit(fn, gpu_block_ids, keys)
-            self._pending.append(
+            future = executor.submit(fn, gpu_block_ids, keys)
+            pending.append(
                 _PendingJob(
                     job_id=job_id,
                     future=future,
@@ -161,34 +169,46 @@ def _build_worker_class():
             )
             return True
 
-        def get_finished(self) -> "list":
+        @staticmethod
+        def _reap(pending: deque[_PendingJob], now: float, block_size: int) -> "list":
             results = []
-            now = time.monotonic()
-            # Reap completed jobs in submission order (FIFO), stopping at the
-            # first still-running job so ordering guarantees are preserved.
-            while self._pending and self._pending[0].future.done():
-                job = self._pending.popleft()
-                try:
-                    success = bool(job.future.result())
-                except Exception as e:  # noqa: BLE001 - report as a failed transfer
-                    print(
-                        f"[certus-grpc] transfer job {job.job_id} failed: {e}",
-                        flush=True,
+            remaining: deque[_PendingJob] = deque()
+            for job in pending:
+                if job.future.done():
+                    try:
+                        success = bool(job.future.result())
+                    except Exception as e:  # noqa: BLE001 - report as a failed transfer
+                        print(
+                            f"[certus-grpc] transfer job {job.job_id} failed: {e}",
+                            flush=True,
+                        )
+                        success = False
+                    results.append(
+                        make_transfer_result(
+                            job_id=job.job_id,
+                            success=success,
+                            transfer_size=job.num_blocks * block_size,
+                            transfer_time=now - job.start_time,
+                            transfer_type=job.transfer_type,
+                        )
                     )
-                    success = False
-                results.append(
-                    make_transfer_result(
-                        job_id=job.job_id,
-                        success=success,
-                        transfer_size=job.num_blocks * self._block_size_bytes,
-                        transfer_time=now - job.start_time,
-                        transfer_type=job.transfer_type,
-                    )
-                )
+                else:
+                    remaining.append(job)
+            pending.clear()
+            pending.extend(remaining)
             return results
 
+        def get_finished(self) -> "list":
+            now = time.monotonic()
+            stores = self._reap(self._pending_stores, now, self._block_size_bytes)
+            loads = self._reap(self._pending_loads, now, self._block_size_bytes)
+            return stores + loads
+
         def wait(self, job_ids: set) -> None:
-            for job in list(self._pending):
+            for job in list(self._pending_stores):
+                if job.job_id in job_ids:
+                    job.future.result()
+            for job in list(self._pending_loads):
                 if job.job_id in job_ids:
                     job.future.result()
 
@@ -201,14 +221,16 @@ def _build_worker_class():
             """Async GPU -> Certus (0.26). src=GPU spec, dst=Certus spec."""
             block_ids = gpu_block_ids(src_spec)
             return self._submit(
-                job_id, block_ids, dst_spec.keys, self._do_store, _STORE_TYPE
+                job_id, block_ids, dst_spec.keys, self._do_store, _STORE_TYPE,
+                self._pending_stores, self._store_executor,
             )
 
         def submit_load(self, job_id: int, src_spec, dst_spec) -> bool:
             """Async Certus -> GPU (0.26). src=Certus spec, dst=GPU spec."""
             block_ids = gpu_block_ids(dst_spec)
             return self._submit(
-                job_id, block_ids, src_spec.keys, self._do_load, _LOAD_TYPE
+                job_id, block_ids, src_spec.keys, self._do_load, _LOAD_TYPE,
+                self._pending_loads, self._load_executor,
             )
 
         # ── ≤0.24 medium-pair interface ──
@@ -229,78 +251,45 @@ def _build_worker_class():
 
         def _do_store(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
             entries = [
-                pb.CopyToStoreEntry(
+                pb.StoreBatchEntry(
                     key=key,
+                    size=self._block_size_bytes,
+                    session_id=0,
                     ipc_handles=_ipc_handles(self._kv_regions, block_id),
                 )
                 for block_id, key in zip(gpu_block_ids, keys)
             ]
             try:
-                resp = self._stub.CopyToStore(
-                    pb.BatchCopyToStoreRequest(entries=entries)
+                resp = self._stub.StoreBatch(
+                    pb.StoreBatchRequest(entries=entries)
                 )
-            except Exception as e:  # noqa: BLE001 - store failure must not crash vLLM
-                # A whole-batch RPC failure: roll back all reservations and report
-                # success (see the invariant note below). Blocks stay uncached.
+            except Exception as e:  # noqa: BLE001
                 print(
-                    f"[certus-grpc] CopyToStore RPC error: {e} — aborting {len(keys)} keys",
+                    f"[certus-grpc] StoreBatch RPC error: {e}",
                     flush=True,
                 )
-                try:
-                    self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=keys))
-                except Exception:  # noqa: BLE001
-                    pass
                 return True
 
-            # CRITICAL: the store path must NEVER report success=False. vLLM's
-            # offloading worker asserts transfer_result.success and a False
-            # return kills the engine. A failed CopyToStore only means "this block
-            # won't be cached" — the KV data is still valid in GPU memory, so it
-            # is safe to drop. But because store is split-phase (Reserve ->
-            # CopyToStore -> CommitStore), we must roll back any key whose copy
-            # failed, so the subsequent CommitStore can't publish an unpopulated
-            # slot as a valid entry. Abort the failed keys; report success.
             failed_results = [r for r in resp.results if not r.success]
-            failed = [r.key for r in failed_results]
-            if failed:
-                # DIAGNOSTIC: the server already returns the real reason per key in
-                # error_message (e.g. "GPU async DMA copy failed: cudaMemcpyAsync
-                # D2H failed: ..." or "size (N) exceeds destination buffer length
-                # (M)"). We normally discard it; surface the first few distinct
-                # messages so a store-path regression isn't silent. Rate-limited so
-                # a 48k-failure run doesn't spew.
+            if failed_results:
                 _log_copy_failure(failed_results, len(keys))
-                print(
-                    f"[certus-grpc] CopyToStore failed for {len(failed)}/{len(keys)} "
-                    f"blocks — aborting those reservations, leaving them uncached",
-                    flush=True,
-                )
-                try:
-                    self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=failed))
-                except Exception as e:  # noqa: BLE001 - best-effort rollback
-                    print(f"[certus-grpc] AbortStore rollback failed: {e}", flush=True)
             return True
 
         def _do_load(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
             entries = [
-                pb.LookupEntry(
+                pb.LoadBatchEntry(
                     key=key,
                     ipc_handles=_ipc_handles(self._kv_regions, block_id),
                 )
                 for block_id, key in zip(gpu_block_ids, keys)
             ]
-            resp = self._stub.Lookup(pb.BatchLookupRequest(entries=entries))
-            # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
-            # able to — prepare_load pinned these keys. If the server reports any
-            # per-key failure, dump exactly which key + error so we can see WHY a
-            # Lookup missed a key that lookup()/Check said was present.
+            resp = self._stub.LoadBatch(pb.LoadBatchRequest(entries=entries))
             if not all_success(resp.results):
                 for r in resp.results:
                     if not r.success:
                         print(
                             f"[certus-grpc] LOAD FAILURE key={r.key} "
-                            f"error_code={r.error_code} msg={r.error_message!r} "
-                            f"(this key was Check-hit and Pinned in prepare_load)",
+                            f"error_code={r.error_code} msg={r.error_message!r}",
                             flush=True,
                         )
                 return False

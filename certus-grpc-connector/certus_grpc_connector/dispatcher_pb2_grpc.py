@@ -110,6 +110,16 @@ class DispatcherStub(object):
                 request_serializer=dispatcher__pb2.GetIoStatsRequest.SerializeToString,
                 response_deserializer=dispatcher__pb2.IoStatsResponse.FromString,
                 _registered_method=True)
+        self.StoreBatch = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/StoreBatch',
+                request_serializer=dispatcher__pb2.StoreBatchRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.StoreBatchResponse.FromString,
+                _registered_method=True)
+        self.LoadBatch = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/LoadBatch',
+                request_serializer=dispatcher__pb2.LoadBatchRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.LoadBatchResponse.FromString,
+                _registered_method=True)
 
 
 class DispatcherServicer(object):
@@ -187,7 +197,7 @@ class DispatcherServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def FlushToSsd(self, request, context):
-        """Flush all pending background write-through jobs to SSD and block until done.
+        """Flush all pending background write-through jobs to SSD and block until complete.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -216,6 +226,22 @@ class DispatcherServicer(object):
 
     def GetIoStats(self, request, context):
         """Return cumulative per-direction SSD read/write byte/op/latency counters.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StoreBatch(self, request, context):
+        """Fused store: Reserve + GPU→DRAM DMA + Commit in one round-trip.
+        Replaces the 3-RPC sequence (Reserve → CopyToStore → CommitStore).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def LoadBatch(self, request, context):
+        """Fused load: Pin + DRAM/SSD→GPU DMA + Unpin in one round-trip.
+        Replaces the 3-RPC sequence (Pin → Lookup → Unpin).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -298,6 +324,16 @@ def add_DispatcherServicer_to_server(servicer, server):
                     servicer.GetIoStats,
                     request_deserializer=dispatcher__pb2.GetIoStatsRequest.FromString,
                     response_serializer=dispatcher__pb2.IoStatsResponse.SerializeToString,
+            ),
+            'StoreBatch': grpc.unary_unary_rpc_method_handler(
+                    servicer.StoreBatch,
+                    request_deserializer=dispatcher__pb2.StoreBatchRequest.FromString,
+                    response_serializer=dispatcher__pb2.StoreBatchResponse.SerializeToString,
+            ),
+            'LoadBatch': grpc.unary_unary_rpc_method_handler(
+                    servicer.LoadBatch,
+                    request_deserializer=dispatcher__pb2.LoadBatchRequest.FromString,
+                    response_serializer=dispatcher__pb2.LoadBatchResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -706,6 +742,60 @@ class Dispatcher(object):
             '/certus.dispatcher.v1.Dispatcher/GetIoStats',
             dispatcher__pb2.GetIoStatsRequest.SerializeToString,
             dispatcher__pb2.IoStatsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StoreBatch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/StoreBatch',
+            dispatcher__pb2.StoreBatchRequest.SerializeToString,
+            dispatcher__pb2.StoreBatchResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def LoadBatch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/LoadBatch',
+            dispatcher__pb2.LoadBatchRequest.SerializeToString,
+            dispatcher__pb2.LoadBatchResponse.FromString,
             options,
             channel_credentials,
             insecure,
