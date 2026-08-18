@@ -1025,6 +1025,20 @@ impl Dispatcher for DispatcherService {
             write_latency_ns_sum: s.write_latency_ns_sum,
         }))
     }
+
+    async fn store_batch(
+        &self,
+        _request: tonic::Request<proto::StoreBatchRequest>,
+    ) -> Result<Response<proto::StoreBatchResponse>, Status> {
+        Err(Status::unimplemented("use certus-server-yaml for StoreBatch support"))
+    }
+
+    async fn load_batch(
+        &self,
+        _request: tonic::Request<proto::LoadBatchRequest>,
+    ) -> Result<Response<proto::LoadBatchResponse>, Status> {
+        Err(Status::unimplemented("use certus-server-yaml for LoadBatch support"))
+    }
 }
 
 #[cfg(test)]
