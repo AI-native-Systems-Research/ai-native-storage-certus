@@ -303,6 +303,31 @@ impl SegmentRow {
         Some(self.child_fan_in_sq_all / (sum * sum))
     }
 
+    /// The fraction of arrivals at this split that land on a **singleton** child.
+    ///
+    /// A child no other session takes is where a session becomes **private**: it walks off the
+    /// shared subtrie and, under rolling-prefix identity, can never rejoin it. So this is the
+    /// escape probability the trunk boundary is made of, and it is measured rather than inferred
+    /// from a rank law.
+    ///
+    /// # Why a rank law cannot supply it, which is a correction to FR-055j
+    ///
+    /// FR-055j fits the child law to the collision probability and argues the tail it ignores
+    /// "does not affect cohort decay". That was true while a drawn `shared_depth` was the
+    /// boundary. Under cohort exhaustion it is **false**: the tail is exactly where sessions go
+    /// private, so its *mass* decides when they leave. Measured on `qwen_code`, 24.8% of requests
+    /// share one block or less while a Zipf matching the head's collision probability leaves only
+    /// 1.3% that short — the tail keeps sessions in cohorts the trace has already scattered.
+    ///
+    /// `None` where there is no split to describe.
+    pub fn singleton_share(&self) -> Option<f64> {
+        if self.ends != SegmentEnd::Fanout || self.child_fan_in_sum == 0 {
+            return None;
+        }
+        let total = self.child_fan_in_sum as f64;
+        Some(((self.child_fan_in_sum - self.shared_fan_in_sum) as f64 / total).clamp(0.0, 1.0))
+    }
+
     /// `n_eff` as a fraction of the shared children it is taken over.
     ///
     /// 1.0 is uniform descent; below 1.0 is skew. Measured descent-weighted: qwen_code
@@ -384,6 +409,28 @@ pub fn fit_process(rows: &[SegmentRow]) -> Option<ProcessFit> {
         );
         if let (Some(length), Some(out_degree)) = (length, out_degree) {
             let skew = fit_skew(in_band(), &out_degree);
+            // Fan-in weighted, for the same reason everything else here is: a walker meets a
+            // split in proportion to the sessions arriving at it, and the escape probability is
+            // a property of an arrival.
+            let mut esc_num = 0.0f64;
+            let mut esc_den = 0.0f64;
+            for r in in_band() {
+                if let Some(q) = r.singleton_share() {
+                    let w = f64::from(r.fan_in).max(1.0);
+                    esc_num += w * q;
+                    esc_den += w;
+                }
+            }
+            // EXPERIMENT (`CERTUS_EXP_SINGLETON_ESCAPE=1`), off by default. The quantity is
+            // measured correctly — on `qwen_code` band 0 it comes out 0.2216 against the trace's
+            // 24.8% of requests sharing one block or less — but **composing** it over every split
+            // a walker meets along a ~700-block path escapes far too much: measured, reuse
+            // distance 0.0247 -> 0.1296 and `unique_keys` 0.1196 -> 0.5820, against `sharing_depth`
+            // 0.4045 -> 0.2847. A net loss on two of three, so it is not emitted by default. See
+            // research.md § Cohort exhaustion.
+            let singleton_share = (esc_den > 0.0
+                && std::env::var("CERTUS_EXP_SINGLETON_ESCAPE").is_ok_and(|v| v == "1"))
+            .then(|| esc_num / esc_den);
             // No effective-sample-size floor here, deliberately: one was built and measured on
             // 2026-08-18 and it is not a criterion. `BandSkew::ess` is reported instead, because
             // the measurement refuted the hypothesis that motivated the floor — see research.md
@@ -393,6 +440,7 @@ pub fn fit_process(rows: &[SegmentRow]) -> Option<ProcessFit> {
                 length,
                 out_degree,
                 skew: skew.as_ref().map(|s| s.skew),
+                singleton_share,
             });
             if let Some(mut s) = skew {
                 s.from_depth = *lo;

@@ -2079,7 +2079,7 @@ fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
          per-segment medians."
     );
     println!(
-        "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>10}  {:>9}  {:>9}",
+        "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>7}  {:>10}  {:>9}  {:>9}",
         "depths",
         "len_p10",
         "len_p50",
@@ -2088,6 +2088,7 @@ fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
         "deg_p50",
         "deg_mean",
         "skew",
+        "escape",
         "splits/blk",
         "decay/band",
         "cum"
@@ -2116,7 +2117,7 @@ fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
             Some(d) => format!("{d:.5}"),
         };
         println!(
-            "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>10}  {:>9}  {:>9}",
+            "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>7}  {:>10}  {:>9}  {:>9}",
             span,
             q(&b.length, 0.10),
             q(&b.length, 0.50),
@@ -2125,6 +2126,8 @@ fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
             q(&b.out_degree, 0.50),
             m(&b.out_degree),
             b.skew.map_or("-".to_string(), |s| format!("{s:.3}")),
+            b.singleton_share
+                .map_or("-".to_string(), |q| format!("{q:.4}")),
             this.map_or("-".to_string(), |x| format!("{:.4}", x.splits_per_block)),
             factor(this.and_then(|x| x.decay_in_band)),
             factor(this.and_then(|x| x.cumulative)),

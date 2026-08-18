@@ -261,6 +261,23 @@ pub struct SegmentBand {
     /// defect this rework exists to remove, of which there were three.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skew: Option<f64>,
+    /// Fraction of arrivals at a split that land on a child **no other session takes**.
+    ///
+    /// The escape probability the trunk boundary is made of: a session landing on a singleton
+    /// child is private from there, and under rolling-prefix identity can never rejoin the
+    /// shared subtrie. Measured per band from the census, not derived from `skew`.
+    ///
+    /// It exists because a rank law cannot supply it. `skew` is fitted to the collision
+    /// probability, whose justification was that the tail it ignores does not affect cohort
+    /// decay — true while a drawn `shared_depth` bounded the trunk, and false once cohort
+    /// exhaustion does, because the tail is precisely where sessions leave. Measured on
+    /// `qwen_code`, 24.8% of requests share one block or less against 1.3% under a Zipf that
+    /// matches the head exactly.
+    ///
+    /// Unset means no escape, which keeps every existing document's stream byte-identical: with
+    /// `None` the walk draws nothing at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub singleton_share: Option<f64>,
 }
 
 impl Default for Branching {

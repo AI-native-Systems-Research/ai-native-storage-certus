@@ -631,9 +631,47 @@ per-split division is too slow — `coll` 0.39-0.81 with mean run lengths of 13-
 over-division question that § The child-choice law left open is now **directly coupled to a gated
 statistic** instead of being hidden behind a drawn cap, which is the useful part of this result.
 
-**Not adopted.** It makes one gated statistic substantially worse on one trace, and by the same rule
-now enforced on the fit's own iteration loop, a trade between two gated statistics is not an
-improvement. The next step is calibrating the division rate so that realised sharing lands right, with
+#### Where the sharing distribution diverges, and the singleton escape it motivated
+
+`--explain`'s CDF table locates it in one glance. The trace's realised sharing is **bimodal with
+atoms at 1 and 7 blocks**: 24.8% of requests share one block or less and another 26.5% share exactly
+seven, so 57.2% are at or below depth 7. The synthetic under cohort exhaustion produces **1.3%** at or
+below one block and 21.7% by seven. So the model badly under-produces sessions that leave the trunk
+*immediately*.
+
+That is a mass-allocation problem in the child law's **tail**, and it is a correction to FR-055j.
+That requirement fits the law to the collision probability and argues the tail it ignores "does not
+affect cohort decay" — true while a drawn `shared_depth` bounded the trunk, **false** once cohort
+exhaustion does, because the tail is exactly where sessions go private. A Zipf that matches
+`qwen_code`'s head collision probability spreads the remaining mass over ranks 2-118 with enough
+weight each to keep those sessions in cohorts the trace has already scattered.
+
+So the census's **singleton share** — the fan-in-weighted fraction of arrivals at a split landing on a
+child no other session takes, `(Σc − Σc·[c≥2])/Σc` — was fitted per band and given to the walk as an
+escape probability. **The measurement is right**: on `qwen_code` band 0 it comes out **0.2216**
+against the trace's 24.8% at or below one block, which is close agreement from an independent route.
+
+**The composition is what fails.** Applied at every split a walker meets, over a path of ~700 blocks
+with 0.01-0.07 splits per block, the escape compounds until almost every session has left early:
+
+| `qwen_code` | reuse | `sharing_depth` | `unique_keys` |
+| --- | --- | --- | --- |
+| cohort exhaustion | **0.02473** | 0.40445 | **0.11961** |
+| + singleton escape | 0.12963 | **0.28469** | 0.58196 |
+
+It buys `sharing_depth` and pays 5x on reuse distance and 5x on `unique_keys`, which is a net loss on
+two of three. `tau2_airline` loses on all three. So the escape is fitted only under
+`CERTUS_EXP_SINGLETON_ESCAPE=1` and no fitted document carries it by default.
+
+**What this narrows the next step to.** The escape magnitude is right at the first split and wrong as
+a per-split hazard, which says the quantity the trace has is closer to a **per-session** escape — a
+session either lands in the shared spine or it does not — than to an independent coin at every split.
+That is the same class of error as the one this whole step exists to fix: an independent draw standing
+in for a correlated structure. Do not tune the per-split value; change what the draw is per.
+
+**Not adopted.** Cohort exhaustion makes one gated statistic substantially worse on one trace, and by
+the same rule now enforced on the fit's own iteration loop, a trade between two gated statistics is not
+an improvement. The next step is calibrating the division rate so that realised sharing lands right, with
 `sharing_depth` as the readout — not another marginal fix, since the mechanism is now doing the work
 and only its rate is wrong. Reproduce with `CERTUS_EXP_COHORT_BOUNDARY=1` and `--branching-segments`.
 

@@ -40,6 +40,11 @@ pub struct ProfileSegment {
     pub fanout: f64,
     /// Zipf exponent over child rank, or `None` to take the document-level one.
     pub skew: Option<f64>,
+    /// Fraction of arrivals at a split landing on a child no other session takes.
+    ///
+    /// `None` means no escape, and the walk then draws nothing — which is what keeps every
+    /// document that does not state one byte-identical.
+    pub singleton_share: Option<f64>,
 }
 
 /// A resolved fanout profile: ascending segments, the first at depth 0.
@@ -56,26 +61,42 @@ impl Profile {
                 from_depth: 0,
                 fanout,
                 skew: None,
+                singleton_share: None,
             }],
         }
     }
 
     /// A piecewise profile from explicit segments.
     pub fn from_segments(segs: &[Segment]) -> Profile {
-        let mut segments: Vec<ProfileSegment> = segs
-            .iter()
-            .map(|s| ProfileSegment {
-                from_depth: s.from_depth,
-                fanout: s.fanout,
-                skew: s.skew,
-            })
-            .collect();
+        Profile::from_parts(
+            segs.iter()
+                .map(|s| ProfileSegment {
+                    from_depth: s.from_depth,
+                    fanout: s.fanout,
+                    skew: s.skew,
+                    // The per-depth `branching` spelling has no singleton share: it describes
+                    // width by depth and cannot say how many children exist at a split, which is
+                    // the whole reason the node-level spelling exists. Only a fitted
+                    // `SegmentBand` carries one.
+                    singleton_share: None,
+                })
+                .collect(),
+        )
+    }
+
+    /// A profile from resolved segments, sorted, with a depth-0 segment guaranteed.
+    ///
+    /// The one place a `Profile` is assembled, so the node-level spelling can carry fields the
+    /// per-depth `Segment` has no room for — currently the singleton-escape probability — without
+    /// a second copy of the sort-and-backfill rule for the two to disagree over.
+    pub fn from_parts(mut segments: Vec<ProfileSegment>) -> Profile {
         segments.sort_by_key(|s| s.from_depth);
         if segments.is_empty() {
             segments.push(ProfileSegment {
                 from_depth: 0,
                 fanout: 1.0,
                 skew: None,
+                singleton_share: None,
             });
         }
         Profile { segments }
@@ -92,6 +113,11 @@ impl Profile {
     /// absent override has always meant in the schema and what nothing read until now.
     pub fn skew_at(&self, depth: u32) -> Option<f64> {
         self.at(depth).skew
+    }
+
+    /// The singleton-escape probability in force at `depth`, if the profile states one.
+    pub fn singleton_share_at(&self, depth: u32) -> Option<f64> {
+        self.at(depth).singleton_share
     }
 
     /// The segment in force at `depth`.
@@ -203,6 +229,7 @@ struct ResolvedBand {
     length: Dist,
     out_degree: Dist,
     skew: Option<f64>,
+    singleton_share: Option<f64>,
 }
 
 /// A [`crate::schema::SegmentProcess`] with its bands ordered for lookup.
@@ -223,6 +250,7 @@ impl ResolvedSegments {
                 length: s.length.clone(),
                 out_degree: s.out_degree.clone(),
                 skew: s.skew,
+                singleton_share: s.singleton_share,
             })
             .collect();
         bands.sort_by_key(|b| b.from_depth);
@@ -277,21 +305,24 @@ impl ResolvedSegments {
     /// [`Corpus::skew_at`] consults and a band mean that forgot its child law would put the
     /// two spellings on different laws.
     pub fn mean_profile(&self) -> Profile {
-        let segs: Vec<Segment> = self
-            .bands
-            .iter()
-            .map(|b| {
-                let l = b.length.mean().unwrap_or(1.0).max(1.0);
-                let d = b.out_degree.mean().unwrap_or(1.0).max(1.0);
-                Segment {
-                    from_depth: b.from_depth,
-                    fanout: d.powf(1.0 / l),
-                    skew: b.skew,
-                    churn_half_life: None,
-                }
-            })
-            .collect();
-        Profile::from_segments(&segs)
+        Profile::from_parts(
+            self.bands
+                .iter()
+                .map(|b| {
+                    let l = b.length.mean().unwrap_or(1.0).max(1.0);
+                    let d = b.out_degree.mean().unwrap_or(1.0).max(1.0);
+                    ProfileSegment {
+                        from_depth: b.from_depth,
+                        fanout: d.powf(1.0 / l),
+                        skew: b.skew,
+                        // Carried for the same reason `skew` is: the profile is what the walk
+                        // consults, so a band mean that dropped its escape probability would
+                        // silently generate a trunk nobody ever leaves.
+                        singleton_share: b.singleton_share,
+                    }
+                })
+                .collect(),
+        )
     }
 }
 
@@ -427,6 +458,15 @@ impl Corpus {
     /// the fix: `skew: 0.0` and `skew: 3.0` produced byte-identical streams.
     pub fn skew_at(&self, depth: u32) -> f64 {
         self.profile.skew_at(depth).unwrap_or(self.branch_skew)
+    }
+
+    /// The singleton-escape probability at `depth`, or `None` where the document states none.
+    ///
+    /// There is deliberately no document-level default to fall back on: an escape probability is
+    /// a measured property of a split's total out-degree, and inventing one would put sessions
+    /// into private tails at a rate nothing measured. Absent means no escape.
+    pub fn singleton_share_at(&self, depth: u32) -> Option<f64> {
+        self.profile.singleton_share_at(depth)
     }
 
     /// Which child a descending session picks, under the child law `skew`.
@@ -762,6 +802,7 @@ mod tests {
                 length: Dist::Scalar(length),
                 out_degree: Dist::Scalar(out_degree),
                 skew: None,
+                singleton_share: None,
             }],
         }))
     }
@@ -783,6 +824,7 @@ mod tests {
                 length: Dist::Shaped(crate::dist::Shape::Geometric { mean: 20.0 }),
                 out_degree: Dist::Scalar(3.0),
                 skew: None,
+                singleton_share: None,
             }],
         }));
         let firsts: Vec<u32> = (0..12u32)
@@ -947,12 +989,14 @@ mod tests {
                     from_depth: 0,
                     length: Dist::Scalar(4.0),
                     out_degree: Dist::Scalar(16.0),
+                    singleton_share: None,
                     skew: Some(2.5),
                 },
                 SegmentBand {
                     from_depth: 8,
                     length: Dist::Scalar(4.0),
                     out_degree: Dist::Scalar(16.0),
+                    singleton_share: None,
                     skew: Some(0.0),
                 },
             ],

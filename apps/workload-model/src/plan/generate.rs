@@ -96,6 +96,11 @@ const TAG_TRUNK_WALK: u64 = 0x7204_4B01;
 const TAG_GROWTH: u64 = 0x6407_0407;
 const TAG_ARRIVAL: u64 = 0x4881_1A15;
 const TAG_NODE: u64 = 0x0D0D_E101;
+/// Domain for the singleton-escape draw at a split.
+///
+/// Its own stream so that a document stating a `singleton_share` does not shift the child-choice
+/// draws of one that does not — the escape is an addition to the walk, not a reordering of it.
+const TAG_ESCAPE: u64 = 0x0E5C_4BE0;
 
 /// How the run ends. Exactly one, which the schema's rule 19 enforces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -747,11 +752,41 @@ impl Generator {
                     let (next, p) = self
                         .corpus
                         .trunk_step_stateful(cur, d, &mut split, &mut walk, gen);
+                    // A split, and the band states how many arrivals land on a child no other
+                    // session takes: draw whether this one did. That is where privacy comes from
+                    // in a real trace — a split with 4739 children of which 483 are shared — and
+                    // it is not derivable from the child law's rank curve, whose fit deliberately
+                    // ignores the tail. Measured, `qwen_code` has 24.8% of requests sharing one
+                    // block or less against 1.3% under a Zipf matching the head exactly.
+                    //
+                    // Only at a real split (`p < 1.0`): inside a run there is one child and no
+                    // choice to escape through. A band stating no share draws nothing, which is
+                    // what keeps existing streams byte-identical.
+                    let escaped = if p < 1.0 {
+                        match self.corpus.singleton_share_at(d) {
+                            Some(q) if q > 0.0 => {
+                                let mut esc = Stream::new(
+                                    self.seed ^ TAG_ESCAPE,
+                                    u64::from(live.s.id.0) ^ (u64::from(d) << 32),
+                                );
+                                esc.next_f64() < q
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
                     cohort *= p;
-                    if cohort < COHORT_FLOOR {
+                    if escaped || cohort < COHORT_FLOOR {
                         alone = true;
                     }
-                    next
+                    if escaped {
+                        // Landed on a child of its own: private from here, and a rolling-prefix
+                        // key cannot rejoin the trunk below.
+                        private_child(cur, live.s.id, d)
+                    } else {
+                        next
+                    }
                 } else {
                     private_child(cur, live.s.id, d)
                 };

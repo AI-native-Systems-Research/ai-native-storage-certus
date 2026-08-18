@@ -392,6 +392,20 @@ pub fn validate(d: &Document) -> Report {
                         ),
                     );
                 }
+                // A probability, and one the walk reads as "this fraction of arrivals goes
+                // private here". Above 1 every session leaves at its first split and the trunk
+                // has no sharing at all; below 0 is meaningless. Both are silent in the output
+                // rather than loud, which is why they are rejected rather than clamped.
+                if b.singleton_share.is_some_and(|q| !(0.0..=1.0).contains(&q)) {
+                    r.reject(
+                        "8",
+                        format!(
+                            "branching band at depth {} has singleton_share {} outside 0..=1",
+                            b.from_depth,
+                            b.singleton_share.unwrap_or_default()
+                        ),
+                    );
+                }
                 if let Some(prev) = prev {
                     if b.from_depth <= prev {
                         r.reject(
