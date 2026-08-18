@@ -62,6 +62,10 @@ CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
 SLAB_SIZE_BYTES=2097152
 TENSOR_PARALLEL_SIZE=1
+# enforce_eager: default off (0) for ALL backends — vLLM captures CUDA graphs +
+# torch.compile for lower decode latency. Pass --enforce-eager to force pure
+# eager mode (higher latency, faster startup, better per-op profiling).
+ENFORCE_EAGER=0
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server port
 DO_BUILD=0
 VLLM_VERSION=""        # pin the vLLM base-image version for ALL four backends
@@ -108,6 +112,8 @@ Flags (all optional; defaults shown):
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
   --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). [32G]
   --evict-threshold <f>        Certus-SPDK DRAM->SSD demotion threshold. [0.6]
+  --enforce-eager              Disable CUDA graphs + torch.compile (pure eager) for
+                               ALL backends. Default off: graphs are captured.
   --cpu-bytes <n>              CPUOffload host-RAM budget in bytes. [16Gi]
   --dram <n>                   SharedStorage DRAM budget in bytes. [32Gi]
   --build                      Build any missing bench image before its run
@@ -143,6 +149,7 @@ while [[ $# -gt 0 ]]; do
         --evict-threshold)  EVICT_THRESH="$2"; shift 2;;
         --cpu-bytes)        CPU_BYTES="$2"; shift 2;;
         --dram)             DRAM="$2"; shift 2;;
+        --enforce-eager)    ENFORCE_EAGER=1; shift;;
         --build)            DO_BUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
@@ -454,6 +461,7 @@ run_container_bench() {  # variant image extra-args...
         -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}" \
         -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}" \
         -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
+        -e "ENFORCE_EAGER=${ENFORCE_EAGER}" \
         -e "HF_HUB_OFFLINE=0" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${extra[@]}" \
@@ -587,6 +595,7 @@ if want certus-spdk; then
             MODEL="$MODEL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
+            ENFORCE_EAGER="$ENFORCE_EAGER" \
             HF_CACHE="$HF_CACHE" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \

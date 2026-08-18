@@ -44,6 +44,7 @@ MAX_ROUNDS="${MAX_ROUNDS:-0}"   # 0 = replay all turns; N caps at N rounds/turns
 MODEL="${MODEL:-ibm-granite/granite-4.1-8b}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
+ENFORCE_EAGER="${ENFORCE_EAGER:-0}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 
 # PROM_PORT — if set, publish the container's Prometheus exporter on that host
@@ -161,5 +162,6 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "MAX_ROUNDS=${MAX_ROUNDS}" \
     -e "MODEL=${MODEL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
+    -e "ENFORCE_EAGER=${ENFORCE_EAGER}" \
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
     "${IMAGE}"

@@ -21,8 +21,9 @@ Environment:
     LOG_STATS        emit vLLM engine + KV-offload stats (default 1; 0 = off)
     TENSOR_PARALLEL_SIZE    GPUs to shard each layer across (default 1)
     PIPELINE_PARALLEL_SIZE  pipeline stages across GPUs/nodes (default 1)
-    ENFORCE_EAGER    "1" (default) keeps eager mode; "0" enables CUDA graphs
-                     + torch.compile (faster, but rougher with some connectors)
+    ENFORCE_EAGER    "0" (default) enables CUDA graphs + torch.compile (faster);
+                     "1" forces pure eager mode (higher latency, faster startup,
+                     better per-op profiling visibility)
     KV_CACHE_DTYPE   KV-cache dtype: "auto" (default, = model dtype) or "fp8"
                      to halve per-sequence KV footprint (may reduce accuracy)
     CONV_MULTIPLIER  replicate the conversation set N× for a larger concurrent
@@ -171,7 +172,7 @@ if __name__ == "__main__":
         gpu_memory_utilization=GPU_MEM_UTIL,
         dtype=os.environ.get("DTYPE", "bfloat16"),
         enable_prefix_caching=True,
-        enforce_eager=(os.environ.get("ENFORCE_EAGER", "1") != "0"),
+        enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
         **_engine_kwargs,
         # KV_CACHE_DTYPE="fp8" stores KV-cache blocks in 8-bit, halving the
         # per-sequence KV footprint so larger MAX_NUM_SEQS fits before OOM.

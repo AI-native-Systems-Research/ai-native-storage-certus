@@ -147,7 +147,9 @@ def main():
         gpu_memory_utilization=GPU_MEM_UTIL,
         dtype="float16",
         enable_prefix_caching=True,
-        enforce_eager=True,
+        # ENFORCE_EAGER=1 disables CUDA graphs + torch.compile (pure eager);
+        # default "0" captures graphs for lower decode latency.
+        enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
         kv_transfer_config=KV_CONFIG,
         # LOG_STATS=1 keeps vLLM's stats logging on so its PrometheusStatLogger
         # registers metrics (incl. kv_offload counters). Default off.

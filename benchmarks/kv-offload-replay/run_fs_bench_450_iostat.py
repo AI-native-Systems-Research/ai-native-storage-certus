@@ -121,7 +121,9 @@ llm = LLM(
     gpu_memory_utilization=GPU_MEM_UTIL,
     dtype="float16",
     enable_prefix_caching=True,
-    enforce_eager=True,
+    # ENFORCE_EAGER=1 disables CUDA graphs + torch.compile (pure eager);
+    # default "0" captures graphs for lower decode latency.
+    enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
     kv_transfer_config=KV_CONFIG,
     disable_log_stats=False,  # enable built-in metrics: prefix-cache + preemption counters
 )
