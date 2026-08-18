@@ -52,6 +52,9 @@ MAX_ROUNDS="${MAX_ROUNDS:-0}"   # 0 = replay all turns; N caps at N rounds/turns
 MODEL="${MODEL:-ibm-granite/granite-4.1-8b}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
+# enforce_eager for the workload's vLLM engine. 0 (default) = CUDA graphs on,
+# matching the other backends; 1 = eager mode. Forwarded to the container.
+ENFORCE_EAGER="${ENFORCE_EAGER:-0}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 
 # PROM_PORT — if set, publish the container's Prometheus exporter on that host
@@ -174,4 +177,5 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "MODEL=${MODEL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
+    -e "ENFORCE_EAGER=${ENFORCE_EAGER}" \
     "${IMAGE}"

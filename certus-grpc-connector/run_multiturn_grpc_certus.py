@@ -200,7 +200,7 @@ if __name__ == "__main__":
         gpu_memory_utilization=GPU_MEM_UTIL,
         dtype=os.environ.get("DTYPE", "bfloat16"),
         enable_prefix_caching=True,
-        enforce_eager=(os.environ.get("ENFORCE_EAGER", "1") != "0"),
+        enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
         **_engine_kwargs,
         # KV_CACHE_DTYPE="fp8" stores KV-cache blocks in 8-bit, halving the
         # per-sequence KV footprint so larger MAX_NUM_SEQS fits before OOM.

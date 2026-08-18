@@ -74,6 +74,11 @@ CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
 SLAB_SIZE_BYTES=2097152
 TENSOR_PARALLEL_SIZE=1
+# enforce_eager: run vLLM in eager mode (no CUDA-graph capture, no torch.compile)
+# on EVERY backend. Default 0 (graphs on) so all variants match vLLM's own
+# default and stay apples-to-apples; --enforce-eager flips it to 1 for the whole
+# run. Plumbed to each driver as the ENFORCE_EAGER env var.
+ENFORCE_EAGER=0
 # Certus-SPDK client→server transport. "host" (default): share the host net
 # namespace (--network=host) and dial localhost:50051 — loopback, no proxy. This
 # is ~10% faster: the rootless-podman bridge otherwise routes every gRPC control
@@ -141,6 +146,10 @@ Flags (all optional; defaults shown):
   --client-network <mode>      Certus-SPDK client transport: host (--network=host +
                                localhost, loopback, no proxy) or bridge (host.containers
                                .internal, rootless slirp4netns/pasta proxy). [host]
+  --enforce-eager              Run vLLM in eager mode on ALL backends (no CUDA-graph
+                               capture / torch.compile). Default off (graphs on),
+                               matching vLLM's default; set this to keep the
+                               variants comparable when profiling per-op transfers.
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -188,6 +197,7 @@ while [[ $# -gt 0 ]]; do
         --rebuild)          DO_REBUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
         --client-network)   CLIENT_NET="$2"; shift 2;;
+        --enforce-eager)    ENFORCE_EAGER=1; shift;;
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
         --logdir)           LOGDIR="$2"; shift 2;;
@@ -669,6 +679,7 @@ run_container_bench() {  # variant image extra-args...
         -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}" \
         -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}" \
         -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
+        -e "ENFORCE_EAGER=${ENFORCE_EAGER}" \
         -e "HF_HUB_OFFLINE=0" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${extra[@]}" \
@@ -813,6 +824,7 @@ if want certus-spdk; then
             MODEL="$MODEL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
+            ENFORCE_EAGER="$ENFORCE_EAGER" \
             HF_CACHE="$HF_CACHE" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \

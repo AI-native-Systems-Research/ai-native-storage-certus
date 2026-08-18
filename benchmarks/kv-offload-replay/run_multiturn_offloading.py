@@ -277,6 +277,9 @@ if __name__ == "__main__":
         gpu_memory_utilization=GPU_MEM_UTIL,
         dtype="float16",
         enable_prefix_caching=True,
+        # ENFORCE_EAGER=1 disables CUDA-graph capture / torch.compile. Default 0
+        # (graphs on) — matches vLLM's default and the other profile backends.
+        enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
         kv_transfer_config=KV_CONFIG,
         **_mfu_kwargs,
         disable_log_stats=not CAPTURE_METRICS,
