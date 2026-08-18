@@ -5,11 +5,10 @@ All index/allocation/eviction state lives in the server. This class adapts
 between vLLM's Python types and the server's u64-keyed batch RPCs, per the
 mapping:
 
-    lookup        -> Check
-    prepare_store -> Check (filter) + Reserve (best-effort: store the subset
-                     that fits, drop blocks the saturated tier can't reserve)
-    complete_store-> CommitStore (success) / AbortStore (failure)
-    prepare_load  -> Pin(promote=true)
+    lookup        -> local _presence/_inflight sets (HIT/HIT_PENDING/MISS)
+    prepare_store -> (no RPC; StoreBatch is atomic on the worker side)
+    complete_store-> (no RPC; updates local presence tracking)
+    prepare_load  -> Pin (eviction protection until complete_load)
     complete_load -> Unpin
     touch         -> Touch
     take_events   -> TakeEvents(max_events=0)
@@ -73,6 +72,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         self._stub = stub
         self._block_size_bytes = int(block_size_bytes)
         self._presence: set[int] = set()
+        self._inflight: set[int] = set()
         self._store_dropped_blocks = 0
         self._store_drop_log_next = 1000
 
@@ -102,9 +102,11 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     # ── lookup / touch ──
 
     def lookup(self, key: OffloadKey, req_context=None):
-        from .compat import lookup_result
+        from .compat import lookup_result, lookup_result_pending
 
         int_key = _key_to_u64(key)
+        if int_key in self._inflight:
+            return lookup_result_pending()
         return lookup_result(int_key in self._presence)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
@@ -120,10 +122,10 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         keys_list = list(keys)
         int_keys = _keys_to_u64s(keys_list)
 
-        # Filter by local presence cache — no RPC needed.
+        # Filter out keys already stored or already in-flight.
         to_store_pairs = [
             (orig, k) for orig, k in zip(keys_list, int_keys)
-            if k not in self._presence
+            if k not in self._presence and k not in self._inflight
         ]
 
         if not to_store_pairs:
@@ -138,6 +140,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         # handled in _do_store (which calls StoreBatch).
         stored_orig = [orig for orig, _ in to_store_pairs]
         stored_ints = [k for _, k in to_store_pairs]
+        self._inflight.update(stored_ints)
         locations = [BlockLocation(key=k) for k in stored_ints]
         return PrepareStoreOutput(
             keys_to_store=stored_orig,
@@ -167,20 +170,28 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
+        self._inflight.difference_update(int_keys)
         if success:
-            # StoreBatch already committed server-side; just update presence.
             self._presence.update(int_keys)
 
     # ── load ──
 
     def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
-        # No Pin RPC — LoadBatch on the server does pin+DMA+unpin atomically.
         int_keys = _keys_to_u64s(keys)
+        # Pin: protect from eviction until complete_load. If a key was
+        # evicted between lookup() and now, Pin fails for that key —
+        # invalidate _presence so the next lookup returns MISS.
+        resp = self._stub.Pin(pb.BatchPinRequest(keys=int_keys, promote=False))
+        for r in resp.results:
+            if not r.success:
+                self._presence.discard(r.key)
+                self._inflight.discard(r.key)
         return CertusLoadStoreSpec([BlockLocation(key=k) for k in int_keys])
 
     def complete_load(self, keys: Iterable[OffloadKey], req_context=None) -> None:
-        # No Unpin RPC — LoadBatch already unpinned server-side.
-        pass
+        int_keys = _keys_to_u64s(keys)
+        if int_keys:
+            self._stub.Unpin(pb.BatchUnpinRequest(keys=int_keys))
 
     # ── events / shutdown ──
 
@@ -193,13 +204,15 @@ class GrpcCertusOffloadingManager(OffloadingManager):
                 file=sys.stderr,
                 flush=True,
             )
-            # Lost events mean our presence cache may be stale. Clear all
-            # positive entries so lookup() falls back to RPC for unknowns.
+            # Lost events mean our caches may be stale. Clear both so
+            # lookup() returns MISS for anything we can't verify.
             self._presence.clear()
+            self._inflight.clear()
         removed = []
         for e in resp.events:
             if e.reason == pb.EVICTION_REASON_REMOVED:
                 self._presence.discard(e.key)
+                self._inflight.discard(e.key)
                 removed.append(e.key.to_bytes(8, "big"))
         if removed:
             yield OffloadingEvent(
