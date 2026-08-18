@@ -16,11 +16,10 @@ build() {
   return 0
 }
 
-build nooffload \
-  podman build "${BA[@]}" -f benchmarks/kv-offload-replay/Dockerfile.nooffload -t certus-nooffload-bench .
-
-build cpuoffload \
-  podman build "${BA[@]}" -f benchmarks/kv-offload-replay/Dockerfile.cpu-offload -t certus-cpu-offload-bench .
+# NoOffload + CPUOffload + Tiered all share one image (run_multiturn_offloading.py
+# drives all three; backend picked at run time by OFFLOAD_MODE / DISK_DIR).
+build offload \
+  podman build "${BA[@]}" -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
 
 build sharedstorage \
   podman build "${BA[@]}" -f benchmarks/kv-offload-replay/Dockerfile.sharedstorage -t certus-sharedstorage-bench .

@@ -6,10 +6,10 @@
 # a CPU (host-RAM) primary tier + an "fs" disk secondary tier.
 #
 # Self-contained: this script has NO dependency on run-docker-common.sh and does
-# NOT bind-mount the host driver. The tiering config is baked into a dedicated
-# image (certus-cputier-bench, from Dockerfile.cputier); the script builds that
-# image if it is missing, then runs it. The only host mounts are the HF cache
-# and the disk-tier data dir.
+# NOT bind-mount the host driver. It builds the unified certus-offload-bench image
+# (from Dockerfile.offload) if it is missing, then runs it with DISK_DIR set so
+# the driver takes the tiering (CPU primary + fs secondary) path. The only host
+# mounts are the HF cache and the disk-tier data dir.
 #
 #   ./run-cputier-docker.sh
 #   CPU_BYTES=$((8*(1<<30))) DISK_DIR_HOST=/mnt/kv-fs ./run-cputier-docker.sh
@@ -20,9 +20,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # ── Image / build ─────────────────────────────────────────────────────────
-IMAGE="${IMAGE:-certus-cputier-bench}"
+IMAGE="${IMAGE:-certus-offload-bench}"
 VLLM_VERSION="${VLLM_VERSION:-0.26.0}"        # tiering.fs requires vLLM 0.26+
-DOCKERFILE="${DOCKERFILE:-${SCRIPT_DIR}/Dockerfile.cputier}"
+DOCKERFILE="${DOCKERFILE:-${SCRIPT_DIR}/Dockerfile.offload}"
 
 # ── Workload (mirrors the other kv-offload-replay backends) ─────────────────
 MODEL="${MODEL:-NousResearch/Meta-Llama-3-8B}"

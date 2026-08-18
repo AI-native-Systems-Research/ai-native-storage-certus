@@ -1,0 +1,92 @@
+# Unified vLLM workload-driver image for the KV-offload replay benchmark.
+#
+# ONE image + ONE driver (run_multiturn_offloading.py) drives three self-contained
+# backends, selected at run time by environment (this replaces the former
+# Dockerfile.nooffload / Dockerfile.cpu-offload / Dockerfile.cputier trio):
+#
+#   NoOffload    -e OFFLOAD_MODE=none
+#                GPU-only baseline: no kv_transfer_config, evicted KV recomputed.
+#   CPUOffload   (default; OFFLOAD_MODE unset, DISK_DIR empty)
+#                vLLM OffloadingConnector + CPUOffloadingSpec -> pinned host RAM.
+#   Tiered-CPU-FS -e DISK_DIR=/path
+#                OffloadingConnector + TieringOffloadingSpec: CPU primary (host RAM
+#                via /dev/shm) + "fs" disk secondary rooted at DISK_DIR.
+#
+# All three are self-contained: a single vLLM process, NO separate server, NO
+# gRPC, NO CUDA IPC (so no --ipc=host, no CERTUS_SERVER). They run the same
+# 450-conversation / 12-turn ShareGPT workload for head-to-head comparison. The
+# two Tracing* connector modules are baked in too, so TRACE_OFFLOAD=1 works.
+#
+# Build (context = repo root — needs benchmarks/kv-offload-replay/ + the dataset):
+#   podman build -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
+#
+# Run examples (GPU required for all three):
+#   # NoOffload baseline
+#   podman run --rm --device nvidia.com/gpu=all -e OFFLOAD_MODE=none \
+#       -v $HOME/.cache/huggingface:/root/.cache/huggingface certus-offload-bench
+#   # CPUOffload (pinned host RAM; CPU_BYTES < free RAM)
+#   podman run --rm --device nvidia.com/gpu=all -e CPU_BYTES=17179869184 \
+#       -v $HOME/.cache/huggingface:/root/.cache/huggingface certus-offload-bench
+#   # Tiered CPU+FS (CPU tier is a /dev/shm mmap -> --shm-size >= CPU_BYTES; bind
+#   # a host dir for the fs tier so it hits real disk, then point DISK_DIR at it)
+#   podman run --rm --device nvidia.com/gpu=all --shm-size 36g \
+#       -e CPU_BYTES=34359738368 -e DISK_DIR=/workspace/kv-fs-tier \
+#       -v /mnt/certus1/hf-cache:/root/.cache/huggingface:z \
+#       -v /mnt/certus1/kv-fs-tier:/workspace/kv-fs-tier:z certus-offload-bench
+#   # docker equivalent of --device nvidia.com/gpu=all: --gpus all
+
+# Tiering (DISK_DIR set) requires vLLM 0.26+ (the tiering.fs framework does
+# not exist earlier); NoOffload / CPUOffload work on older bases too. Default to
+# 0.26.0 so all three modes are available from one image. Override with
+#   podman build --build-arg VLLM_VERSION=<x.y.z> ...
+ARG VLLM_VERSION=0.26.0
+FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
+ENTRYPOINT []
+
+# GPU is REQUIRED at run time (vLLM loads the model on the GPU). WHICH GPU is a
+# run-time choice — select it on the run command, not here (do NOT bake
+# NVIDIA_VISIBLE_DEVICES into the image):
+#   docker:  --gpus all   |  --gpus '"device=0"'
+#   podman:  --device nvidia.com/gpu=all  |  --device nvidia.com/gpu=0
+# Those flags trigger the NVIDIA container runtime to inject the chosen GPU +
+# the host's libcuda.so — a HOST prerequisite (nvidia-container-toolkit / CDI).
+LABEL org.certus.gpu-required="true" \
+      org.certus.host-prereq="nvidia-container-toolkit (docker --gpus / podman CDI); Tiered mode needs --shm-size >= CPU_BYTES"
+
+WORKDIR /workspace
+
+# The unified driver + its two in-process connector modules (only imported when
+# TRACE_OFFLOAD=1), plus the shared dataset (paths relative to the repo-root build
+# context). torch/numpy/vllm come from the base image; no extra pip deps.
+COPY benchmarks/kv-offload-replay/run_multiturn_offloading.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/tracing_offloading_connector.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/tracing_offloading_manager.py /workspace/bench/
+COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
+
+COPY benchmarks/kv-offload-replay/docker-entrypoint-offload.sh /usr/local/bin/offload-entrypoint
+RUN chmod +x /usr/local/bin/offload-entrypoint
+
+# Defaults match the 450x12 runbook (RUNBOOK-cpu-and-sharedstorage.md). DATASET_PATH
+# + NUM_CONVS are set explicitly so the container runs the 450x12 workload
+# regardless of the driver's baked-in default. The mode defaults to CPUOffload
+# (OFFLOAD_MODE empty, DISK_DIR empty); set OFFLOAD_MODE=none for the baseline or
+# DISK_DIR=/path for tiering at run time. CPU_BYTES is the pinned host-RAM offload
+# tier — must fit free RAM (Tiered also needs --shm-size >= it).
+# PYTHONPATH lets vLLM import the two connector modules by name when TRACE_OFFLOAD=1.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/workspace/bench \
+    MODEL=NousResearch/Meta-Llama-3-8B \
+    DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
+    NUM_CONVS=450 \
+    MAX_MODEL_LEN=8192 \
+    OUTPUT_TOKENS=150 \
+    MAX_NUM_SEQS=64 \
+    GPU_MEM_UTIL=0.90 \
+    CPU_BYTES=17179869184 \
+    OFFLOAD_MODE= \
+    DISK_DIR= \
+    TRACE_OFFLOAD=0 \
+    HF_HUB_OFFLINE=1 \
+    WORKLOAD=/workspace/bench/run_multiturn_offloading.py
+
+ENTRYPOINT ["/usr/local/bin/offload-entrypoint"]
