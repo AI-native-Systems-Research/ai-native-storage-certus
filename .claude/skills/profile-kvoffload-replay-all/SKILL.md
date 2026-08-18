@@ -14,8 +14,9 @@ previews what will run, launches the orchestrator, and formats the result.
 
 | Variant | Backend | Image / binary |
 |---|---|---|
-| NoOffload | GPU-only baseline | `certus-nooffload-bench` |
-| CPUOffload | vLLM OffloadingConnector → host RAM | `certus-cpu-offload-bench` |
+| NoOffload | GPU-only baseline | `certus-offload-bench` (OFFLOAD_MODE=none) |
+| CPUOffload | vLLM OffloadingConnector → host RAM | `certus-offload-bench` (default mode) |
+| Tiered-CPU-FS | vLLM native CPU primary + FS secondary | `certus-offload-bench` (SECONDARY_TIER=fs) |
 | SharedStorage | `llmd_fs_backend` RAID0/XFS | `certus-sharedstorage-bench` |
 | Certus-SPDK | gRPC client + `certus-server-yaml` (SPDK NVMe) | `certus-grpc-bench` + host server |
 
@@ -44,8 +45,8 @@ previews what will run, launches the orchestrator, and formats the result.
 
 2. **Preflight summary.** Before launching, state which of the four variants will
    run vs SKIP and why:
-   - Check images: `podman image exists certus-nooffload-bench`, `…cpu-offload-bench`,
-     `…sharedstorage-bench`; gRPC image in the model-fs store
+   - Check images: `podman image exists certus-offload-bench` (covers NoOffload,
+     CPUOffload and Tiered-CPU-FS), `…sharedstorage-bench`; gRPC image in the model-fs store
      (`podman --root <model-fs>/podman/storage image exists localhost/certus-grpc-bench`).
    - SharedStorage needs `--shared-fs` pointing at a real dir; Certus-SPDK needs
      `--device-pci` and a built `target/release/certus-server-yaml`.

@@ -27,8 +27,9 @@ GPU="${GPU:-all}"
 # small and fills up mid-download).
 HF_CACHE="${HF_CACHE:-/mnt/certus1/hf-cache}"
 
-# Shared podman-run flags for the three self-contained images
-# (nooffload / cpu-offload / sharedstorage). Built from the resolved env above.
+# Shared podman-run flags for the self-contained images (the unified
+# certus-offload-bench, which covers nooffload/cpu/tiered via OFFLOAD_MODE, plus
+# sharedstorage). Built from the resolved env above.
 COMMON_RUN_ARGS=(
   --device "nvidia.com/gpu=${GPU}"
   -e "MODEL=${MODEL}"
