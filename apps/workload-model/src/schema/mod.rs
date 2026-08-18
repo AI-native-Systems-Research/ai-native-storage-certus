@@ -241,13 +241,26 @@ pub struct SegmentBand {
     pub length: Dist,
     /// Children at the split that ends the run — **total**, singletons included.
     pub out_degree: Dist,
-    // NO `n_eff_frac` HERE, deliberately. The child-choice law is `branch_skew`, which now
-    // works: `n_eff` is a different parameterisation of the same quantity, and accepting both
-    // would either double-count or — worse — be silently ignored. A field that looks fitted
-    // and does nothing is the exact defect this rework exists to remove, and there were three
-    // of them. Fitting `n_eff` per band and solving `branch_skew` from it is real work worth
-    // doing (it is the only functional occupancy, rule 16 and `branching: auto` depend on),
-    // and it is not done yet.
+    /// Zipf exponent over child rank at this band's splits; overrides `branch_skew`.
+    ///
+    /// `out_degree` and this are a **pair**, and stating one without the other is worse than
+    /// stating neither: `out_degree` says how many children exist, this says how a session
+    /// chooses among them, and only the product of the two decides how fast a cohort
+    /// subdivides. Measured — `qwen_code`'s root splits 4739 ways with 0.496 of sessions on
+    /// its top child, where the document-level default of 0.9 puts 0.072 — so a model given
+    /// the measured out-degree and the default law scattered sessions ~7x faster than the
+    /// trace and its realised sharing collapsed.
+    ///
+    /// Fitted as a scalar rather than as a rank curve because the generator's arithmetic is
+    /// `cohort *= p(child taken)`, whose expectation is `Σ p²`: that single number is the
+    /// child law's whole effect on cohort decay, and matching it recovers the head share as a
+    /// consequence (0.464 against the measured 0.496 on that root). See FR-055j.
+    ///
+    /// Still NO `n_eff_frac` here: it is a different parameterisation of this same quantity,
+    /// so accepting both would either double-count or leave one silently ignored — the exact
+    /// defect this rework exists to remove, of which there were three.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skew: Option<f64>,
 }
 
 impl Default for Branching {

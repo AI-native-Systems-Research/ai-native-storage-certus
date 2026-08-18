@@ -26,36 +26,80 @@ use crate::schema::{Branching, Segment, Trees};
 /// digits. Reality sits just under this, which is the right side for a floor.
 pub const TARGET_OCCUPANCY: f64 = 4.0;
 
+/// One resolved segment: where it starts, how wide it fans, and its child law.
+///
+/// A struct rather than the tuple this used to be because a segment carries two
+/// independent facts about a trunk node — **how many children exist** (`fanout`) and
+/// **how a session chooses among them** (`skew`) — and the second was silently dropped
+/// for as long as the tuple had room for only the first.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProfileSegment {
+    /// This segment holds from here until the next.
+    pub from_depth: u32,
+    /// Mean children per trunk node.
+    pub fanout: f64,
+    /// Zipf exponent over child rank, or `None` to take the document-level one.
+    pub skew: Option<f64>,
+}
+
 /// A resolved fanout profile: ascending segments, the first at depth 0.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Profile {
-    segments: Vec<(u32, f64)>,
+    segments: Vec<ProfileSegment>,
 }
 
 impl Profile {
     /// A uniform profile: one segment from depth 0.
     pub fn uniform(fanout: f64) -> Profile {
         Profile {
-            segments: vec![(0, fanout)],
+            segments: vec![ProfileSegment {
+                from_depth: 0,
+                fanout,
+                skew: None,
+            }],
         }
     }
 
     /// A piecewise profile from explicit segments.
     pub fn from_segments(segs: &[Segment]) -> Profile {
-        let mut segments: Vec<(u32, f64)> = segs.iter().map(|s| (s.from_depth, s.fanout)).collect();
-        segments.sort_by_key(|(d, _)| *d);
+        let mut segments: Vec<ProfileSegment> = segs
+            .iter()
+            .map(|s| ProfileSegment {
+                from_depth: s.from_depth,
+                fanout: s.fanout,
+                skew: s.skew,
+            })
+            .collect();
+        segments.sort_by_key(|s| s.from_depth);
         if segments.is_empty() {
-            segments.push((0, 1.0));
+            segments.push(ProfileSegment {
+                from_depth: 0,
+                fanout: 1.0,
+                skew: None,
+            });
         }
         Profile { segments }
     }
 
     /// The fanout in force at `depth`.
     pub fn fanout_at(&self, depth: u32) -> f64 {
-        let mut f = self.segments[0].1;
-        for (from, v) in &self.segments {
-            if depth >= *from {
-                f = *v;
+        self.at(depth).fanout
+    }
+
+    /// The child-choice exponent in force at `depth`, if the segment states one.
+    ///
+    /// `None` means the segment defers to `corpus.trees.branch_skew`, which is what an
+    /// absent override has always meant in the schema and what nothing read until now.
+    pub fn skew_at(&self, depth: u32) -> Option<f64> {
+        self.at(depth).skew
+    }
+
+    /// The segment in force at `depth`.
+    fn at(&self, depth: u32) -> &ProfileSegment {
+        let mut f = &self.segments[0];
+        for s in &self.segments {
+            if depth >= s.from_depth {
+                f = s;
             } else {
                 break;
             }
@@ -80,7 +124,7 @@ impl Profile {
     }
 
     /// The resolved segments, for the report.
-    pub fn segments(&self) -> &[(u32, f64)] {
+    pub fn segments(&self) -> &[ProfileSegment] {
         &self.segments
     }
 }
@@ -152,19 +196,44 @@ pub fn auto_fanout(sessions_per_window: f64, roots: u32, trunk_steps: u32) -> f6
     headroom.powf(1.0 / f64::from(trunk_steps)).max(1.0)
 }
 
+/// One resolved band of a node-level trunk process.
+#[derive(Debug, Clone)]
+struct ResolvedBand {
+    from_depth: u32,
+    length: Dist,
+    out_degree: Dist,
+    skew: Option<f64>,
+}
+
 /// A [`crate::schema::SegmentProcess`] with its bands ordered for lookup.
 #[derive(Debug, Clone)]
 pub struct ResolvedSegments {
-    /// `(from_depth, length, out_degree)`, ascending by depth.
-    bands: Vec<(u32, Dist, Dist)>,
+    /// Ascending by `from_depth`.
+    bands: Vec<ResolvedBand>,
 }
 
 impl ResolvedSegments {
+    /// The bands of a schema process, ordered for lookup.
+    fn new(p: &crate::schema::SegmentProcess) -> ResolvedSegments {
+        let mut bands: Vec<ResolvedBand> = p
+            .by_depth
+            .iter()
+            .map(|s| ResolvedBand {
+                from_depth: s.from_depth,
+                length: s.length.clone(),
+                out_degree: s.out_degree.clone(),
+                skew: s.skew,
+            })
+            .collect();
+        bands.sort_by_key(|b| b.from_depth);
+        ResolvedSegments { bands }
+    }
+
     /// The band covering `depth`.
-    fn at(&self, depth: u32) -> &(u32, Dist, Dist) {
+    fn at(&self, depth: u32) -> &ResolvedBand {
         let mut chosen = &self.bands[0];
         for b in &self.bands {
-            if depth >= b.0 {
+            if depth >= b.from_depth {
                 chosen = b;
             } else {
                 break;
@@ -179,14 +248,14 @@ impl ResolvedSegments {
     /// what keeps a long run reproducible and independent of arrival order, and it is why a
     /// walker needs no stored trie.
     pub fn run_length(&self, seed: u64, node: CacheKey, depth: u32) -> u32 {
-        let (_, len, _) = self.at(depth);
+        let len = &self.at(depth).length;
         let mut st = Stream::new(seed ^ node.0, u64::from(depth) ^ TAG_SEGMENT);
         len.sample_u64(&mut st).max(1).min(u64::from(u32::MAX)) as u32
     }
 
     /// Children at the split at `node` — the total, singletons included.
     pub fn out_degree(&self, seed: u64, node: CacheKey, depth: u32) -> u32 {
-        let (_, _, deg) = self.at(depth);
+        let deg = &self.at(depth).out_degree;
         let mut st = Stream::new(
             seed ^ node.0,
             (u64::from(depth) ^ TAG_SEGMENT).wrapping_add(1),
@@ -194,23 +263,30 @@ impl ResolvedSegments {
         deg.sample_u64(&mut st).max(1).min(u64::from(u32::MAX)) as u32
     }
 
+    // NO `skew_at` here. The band's skew reaches the walk through `mean_profile`, so
+    // `Corpus::skew_at` has one implementation covering both trunk spellings; a second
+    // accessor would be a place for the two to disagree.
+
     /// The band-mean fanout per depth, as a [`Profile`].
     ///
     /// A node-level process still has a mean fanout at each depth — `out_degree` children
     /// once every `length` blocks — and occupancy, rule 16 and the reports are all written
     /// against one. `E[deg]^(1/E[len])` per band is that mean in the geometric sense the
     /// profile multiplies in.
+    /// The band's own `skew` is carried through, because the profile is what
+    /// [`Corpus::skew_at`] consults and a band mean that forgot its child law would put the
+    /// two spellings on different laws.
     pub fn mean_profile(&self) -> Profile {
         let segs: Vec<Segment> = self
             .bands
             .iter()
-            .map(|(from, len, deg)| {
-                let l = len.mean().unwrap_or(1.0).max(1.0);
-                let d = deg.mean().unwrap_or(1.0).max(1.0);
+            .map(|b| {
+                let l = b.length.mean().unwrap_or(1.0).max(1.0);
+                let d = b.out_degree.mean().unwrap_or(1.0).max(1.0);
                 Segment {
-                    from_depth: *from,
+                    from_depth: b.from_depth,
                     fanout: d.powf(1.0 / l),
-                    skew: None,
+                    skew: b.skew,
                     churn_half_life: None,
                 }
             })
@@ -284,17 +360,7 @@ impl Corpus {
         trunk_steps: u32,
     ) -> Corpus {
         let segments = match &trees.branching {
-            Branching::Segments(p) if !p.by_depth.is_empty() => Some(ResolvedSegments {
-                bands: {
-                    let mut b: Vec<(u32, Dist, Dist)> = p
-                        .by_depth
-                        .iter()
-                        .map(|s| (s.from_depth, s.length.clone(), s.out_degree.clone()))
-                        .collect();
-                    b.sort_by_key(|x| x.0);
-                    b
-                },
-            }),
+            Branching::Segments(p) if !p.by_depth.is_empty() => Some(ResolvedSegments::new(p)),
             _ => None,
         };
         let profile = match &trees.branching {
@@ -348,16 +414,35 @@ impl Corpus {
         n.max(1.0) as u32
     }
 
-    /// Which child a descending session picks, skewed by `branch_skew`.
+    /// The child-choice exponent in force at `depth`.
+    ///
+    /// The segment's own `skew` where it states one, otherwise the document-level
+    /// `branch_skew`. Both trunk spellings arrive here: a node-level process carries its
+    /// band's skew through [`ResolvedSegments::mean_profile`], so there is one lookup
+    /// rather than one per spelling.
+    ///
+    /// The per-segment override is not new — `corpus.trees.branching[].skew` has been in the
+    /// schema since the profile spelling shipped — but nothing read it, so a document could
+    /// state a child law and be silently generated under a different one. Measured before
+    /// the fix: `skew: 0.0` and `skew: 3.0` produced byte-identical streams.
+    pub fn skew_at(&self, depth: u32) -> f64 {
+        self.profile.skew_at(depth).unwrap_or(self.branch_skew)
+    }
+
+    /// Which child a descending session picks, under the child law `skew`.
     ///
     /// Keyed on the *session's* stream rather than the node's, because this is a
     /// choice the session makes; the node's own stream decides only how many
     /// children exist.
-    pub fn pick_child(&self, st: &mut Stream, children: u32) -> u32 {
-        self.pick_child_p(st, children).0
+    pub fn pick_child(&self, st: &mut Stream, children: u32, skew: f64) -> u32 {
+        self.pick_child_p(st, children, skew).0
     }
 
     /// The chosen child **and the probability of choosing it**.
+    ///
+    /// `skew` is passed rather than read off `self`, so that the one place a child law can
+    /// come from is [`Corpus::skew_at`] and a caller cannot accidentally reach past a
+    /// segment's override to the document-level default.
     ///
     /// The probability is what lets a walker carry an *expected cohort size* down the
     /// trunk — `sessions on this root x PROD p(child taken)` — and so know, without any
@@ -372,22 +457,22 @@ impl Corpus {
     /// depends on how popular the branches it took were. That correlation is the whole
     /// point: an earlier design shed sessions off the trunk with a per-node coin flip,
     /// uncorrelated with the session, and it made `sharing_depth` three times worse.
-    pub fn pick_child_p(&self, st: &mut Stream, children: u32) -> (u32, f64) {
+    pub fn pick_child_p(&self, st: &mut Stream, children: u32, skew: f64) -> (u32, f64) {
         if children <= 1 {
             return (0, 1.0);
         }
         let n = u64::from(children);
-        if self.branch_skew <= 0.0 {
+        if skew <= 0.0 {
             return (st.next_below(n) as u32, 1.0 / children as f64);
         }
         let d = Dist::Shaped(crate::dist::Shape::Zipf {
-            s: self.branch_skew,
+            s: skew,
             n: Some(n),
         });
         // Zipf yields a 1-based rank; children are 0-based.
         let rank = d.sample_u64(st).max(1).min(n);
         let idx = (rank - 1) as u32;
-        (idx, crate::dist::zipf_pmf_at(self.branch_skew, n, rank))
+        (idx, crate::dist::zipf_pmf_at(skew, n, rank))
     }
 
     /// One step down the trunk, carrying the walk's split state.
@@ -409,10 +494,11 @@ impl Corpus {
         st: &mut Stream,
         gen: Generation,
     ) -> (CacheKey, f64) {
+        let skew = self.skew_at(depth);
         match &self.segments {
             None => {
                 let n = self.child_count(cur, depth);
-                let (idx, p) = self.pick_child_p(st, n);
+                let (idx, p) = self.pick_child_p(st, n, skew);
                 (trunk_child(cur, idx, gen), p)
             }
             Some(s) => {
@@ -421,7 +507,7 @@ impl Corpus {
                     (trunk_child(cur, 0, gen), 1.0)
                 } else {
                     let n = s.out_degree(self.seed, cur, depth);
-                    let (idx, p) = self.pick_child_p(st, n);
+                    let (idx, p) = self.pick_child_p(st, n, skew);
                     let child = trunk_child(cur, idx, gen);
                     state.next_split_depth =
                         depth.saturating_add(s.run_length(self.seed, child, depth));
@@ -458,7 +544,7 @@ impl Corpus {
         gen: Generation,
     ) -> CacheKey {
         let n = self.child_count(cur, depth);
-        let idx = self.pick_child(st, n);
+        let idx = self.pick_child(st, n, self.skew_at(depth));
         trunk_child(cur, idx, gen)
     }
 
@@ -662,7 +748,7 @@ mod tests {
         let mut st = Stream::new(5, 5);
         for n in 1..40u32 {
             for _ in 0..50 {
-                assert!(c.pick_child(&mut st, n) < n);
+                assert!(c.pick_child(&mut st, n, c.skew_at(1)) < n);
             }
         }
     }
@@ -675,6 +761,7 @@ mod tests {
                 from_depth: 0,
                 length: Dist::Scalar(length),
                 out_degree: Dist::Scalar(out_degree),
+                skew: None,
             }],
         }))
     }
@@ -695,6 +782,7 @@ mod tests {
                 from_depth: 0,
                 length: Dist::Shaped(crate::dist::Shape::Geometric { mean: 20.0 }),
                 out_degree: Dist::Scalar(3.0),
+                skew: None,
             }],
         }));
         let firsts: Vec<u32> = (0..12u32)
@@ -768,7 +856,7 @@ mod tests {
         // Discrete Zipf at s = 0.9 over two children: p_1 = 1/(1 + 2^-0.9) = 0.6511.
         let mut hist = [0u64; 2];
         for _ in 0..DRAWS {
-            hist[c.pick_child(&mut st, 2) as usize] += 1;
+            hist[c.pick_child(&mut st, 2, 0.9) as usize] += 1;
         }
         let p0 = hist[0] as f64 / DRAWS as f64;
         assert!(
@@ -783,7 +871,7 @@ mod tests {
         for n in 2..12u32 {
             let mut seen = vec![false; n as usize];
             for _ in 0..DRAWS {
-                seen[c.pick_child(&mut st, n) as usize] = true;
+                seen[c.pick_child(&mut st, n, 0.9) as usize] = true;
             }
             let missing: Vec<usize> = seen
                 .iter()
@@ -796,5 +884,109 @@ mod tests {
                 "every one of {n} children must be reachable; never picked {missing:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_segments_per_segment_skew_is_read_and_an_absent_one_falls_back() {
+        // `Segment.skew` has been in the schema since the profile spelling shipped and
+        // NOTHING read it — `Profile` kept only `(from_depth, fanout)`. So a document could
+        // state a child law and be generated under a different one, silently. Measured
+        // before this fix: `skew: 0.0` and `skew: 3.0` gave byte-identical streams.
+        let seg = |skew: Option<f64>| {
+            corpus(Branching::Profile(vec![Segment {
+                from_depth: 0,
+                fanout: 4.0,
+                skew,
+                churn_half_life: None,
+            }]))
+        };
+        assert_eq!(
+            seg(Some(0.0)).skew_at(1),
+            0.0,
+            "an override of 0 is uniform"
+        );
+        assert_eq!(seg(Some(3.0)).skew_at(1), 3.0);
+        assert_eq!(
+            seg(None).skew_at(1),
+            0.9,
+            "an absent override defers to the document's branch_skew"
+        );
+        // And the law reaching the walk really differs, not just the accessor: uniform
+        // descent over four children takes the head a quarter of the time, s = 3 nearly
+        // always.
+        let head = |c: &Corpus| {
+            let mut st = Stream::new(3, 3);
+            let n = 4;
+            let hits = (0..8000)
+                .filter(|_| c.pick_child(&mut st, n, c.skew_at(1)) == 0)
+                .count();
+            hits as f64 / 8000.0
+        };
+        let flat = head(&seg(Some(0.0)));
+        let steep = head(&seg(Some(3.0)));
+        assert!(
+            (flat - 0.25).abs() < 0.02,
+            "skew 0 must be uniform over 4 children, got {flat:.4}"
+        );
+        assert!(
+            steep > 0.8,
+            "skew 3 must concentrate on the head, got {steep:.4}"
+        );
+    }
+
+    #[test]
+    fn a_bands_skew_reaches_the_walk_and_only_its_own_depths() {
+        // The node-level spelling carries its skew through `mean_profile`, which is the one
+        // path `Corpus::skew_at` consults, so a two-band document must apply each band's law
+        // at that band's depths and nowhere else. Without this a fitted per-band law would be
+        // accepted and ignored exactly as `Segment.skew` was.
+        use crate::schema::{SegmentBand, SegmentProcess};
+        let c = corpus(Branching::Segments(SegmentProcess {
+            by_depth: vec![
+                SegmentBand {
+                    from_depth: 0,
+                    length: Dist::Scalar(4.0),
+                    out_degree: Dist::Scalar(16.0),
+                    skew: Some(2.5),
+                },
+                SegmentBand {
+                    from_depth: 8,
+                    length: Dist::Scalar(4.0),
+                    out_degree: Dist::Scalar(16.0),
+                    skew: Some(0.0),
+                },
+            ],
+        }));
+        assert_eq!(c.skew_at(0), 2.5);
+        assert_eq!(c.skew_at(7), 2.5, "the first band holds up to the second");
+        assert_eq!(c.skew_at(8), 0.0);
+        assert_eq!(c.skew_at(99), 0.0, "the last band holds to the end");
+        // The bands are otherwise identical, so any difference in realised cohort decay is
+        // the law's alone: at a 16-way split s = 2.5 keeps most of the cohort on the head
+        // while s = 0 divides it sixteen ways.
+        let decay = |depth: u32| {
+            let mut st = Stream::new(9, 9);
+            let mut state = SplitState::at_root(&c, c.root_key(0, Generation::STABLE));
+            state.next_split_depth = depth;
+            let (_, p) = c.trunk_step_stateful(
+                c.root_key(0, Generation::STABLE),
+                depth,
+                &mut state,
+                &mut st,
+                Generation::STABLE,
+            );
+            p
+        };
+        assert!(
+            decay(4) > decay(12),
+            "the skewed band must divide the cohort less than the uniform one: {} vs {}",
+            decay(4),
+            decay(12)
+        );
+        assert!(
+            (decay(12) - 1.0 / 16.0).abs() < 1e-12,
+            "a uniform 16-way split divides by exactly 16, got {}",
+            decay(12)
+        );
     }
 }

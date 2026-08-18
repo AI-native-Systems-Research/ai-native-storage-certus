@@ -434,7 +434,13 @@ fn summary(g: &Generator, stats: &PlanStats) -> CorpusSummary {
 
 /// The parts of the summary that come from resolution rather than from events.
 fn fill_configured(g: &Generator, cs: &mut CorpusSummary) {
-    cs.branching_resolved = g.corpus().profile.segments().to_vec();
+    cs.branching_resolved = g
+        .corpus()
+        .profile
+        .segments()
+        .iter()
+        .map(|s| (s.from_depth, s.fanout))
+        .collect();
     cs.root_boundary_depth = 0;
     cs.wss_window_requests = g
         .document()

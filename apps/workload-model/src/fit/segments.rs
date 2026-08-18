@@ -341,6 +341,7 @@ pub fn fit_process(rows: &[SegmentRow]) -> Option<crate::schema::SegmentProcess>
                 from_depth: *lo,
                 length,
                 out_degree,
+                skew: None,
             });
         }
     }

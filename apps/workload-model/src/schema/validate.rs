@@ -340,6 +340,16 @@ pub fn validate(d: &Document) -> Report {
                         ),
                     );
                 }
+                if s.skew.is_some_and(|k| k < 0.0) {
+                    r.reject(
+                        "8",
+                        format!(
+                            "branching segment at depth {} has skew {} < 0",
+                            s.from_depth,
+                            s.skew.unwrap_or_default()
+                        ),
+                    );
+                }
                 if let Some(p) = prev {
                     if s.from_depth <= p {
                         r.reject(
@@ -352,6 +362,48 @@ pub fn validate(d: &Document) -> Report {
                     }
                 }
                 prev = Some(s.from_depth);
+            }
+        }
+        // The node-level spelling had NO rule 8 at all, while `fit::segments::fit_process`
+        // carried a comment about a first-band-at-depth-0 requirement — an invariant honoured
+        // by the one writer and unchecked for every other. Same three clauses as the profile
+        // arm, since `ResolvedSegments::at` resolves a band exactly as `Profile::at` resolves
+        // a segment: a missing depth-0 band would silently take band 0's distributions for
+        // every depth above it.
+        Branching::Segments(p) => {
+            if p.by_depth.is_empty() {
+                r.reject(
+                    "8",
+                    "a node-level branching process must have at least one depth band",
+                );
+            }
+            if p.by_depth.first().map(|b| b.from_depth) != Some(0) {
+                r.reject("8", "the first branching band must start at from_depth 0");
+            }
+            let mut prev: Option<u32> = None;
+            for b in &p.by_depth {
+                if b.skew.is_some_and(|k| k < 0.0) {
+                    r.reject(
+                        "8",
+                        format!(
+                            "branching band at depth {} has skew {} < 0",
+                            b.from_depth,
+                            b.skew.unwrap_or_default()
+                        ),
+                    );
+                }
+                if let Some(prev) = prev {
+                    if b.from_depth <= prev {
+                        r.reject(
+                            "8",
+                            format!(
+                                "branching bands must ascend by from_depth; {} follows {prev}",
+                                b.from_depth
+                            ),
+                        );
+                    }
+                }
+                prev = Some(b.from_depth);
             }
         }
         _ => {}
@@ -765,6 +817,98 @@ run:
     #[test]
     fn a_clean_document_passes() {
         assert!(!validate(&doc("")).is_rejected());
+    }
+
+    /// A `corpus.trees.branching` clause appended to the base fixture.
+    fn branching_doc(branching: &str) -> Document {
+        let y = format!(
+            r#"
+version: 1
+seed: 1
+duration: 60s
+corpus:
+  block_bytes: 131072
+  trees:
+    roots: {{count: 4, popularity: {{dist: zipf, s: 0.9}}}}
+    shared_depth: {{dist: const, value: 8}}
+    branching: {branching}
+workload:
+  arrival: {{model: open_loop, rate: 1000/s}}
+  sessions:
+    turns: {{dist: geometric, mean: 4}}
+    think_time: {{dist: const, value: 1}}
+    private_depth: {{dist: const, value: 4}}
+    growth_per_turn: {{dist: const, value: 2}}
+run:
+  mode: hardware
+"#
+        );
+        Document::from_yaml(&y).expect("test fixture must parse")
+    }
+
+    /// Rule 8's rejection messages for one branching clause, concatenated.
+    fn rule_8(branching: &str) -> String {
+        validate(&branching_doc(branching))
+            .rejections()
+            .filter(|f| f.rule == "8")
+            .map(|f| f.message.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_node_level_branching_process_is_checked_the_way_a_profile_is() {
+        // The `Segments` spelling had NO rule 8 at all, while `fit::segments::fit_process`
+        // carried a comment about a first-band-at-depth-0 requirement — an invariant the one
+        // writer honoured and nothing checked. `ResolvedSegments::at` resolves a band exactly
+        // as `Profile::at` resolves a segment, so a missing depth-0 band silently applies
+        // band 0's distributions to every depth above it.
+        let band = |from: u32| {
+            format!("{{from_depth: {from}, length: {{dist: const, value: 4}}, out_degree: {{dist: const, value: 3}}}}")
+        };
+        let ok = format!("{{by_depth: [{}, {}]}}", band(0), band(8));
+        assert_eq!(rule_8(&ok), "", "two ascending bands from depth 0 are fine");
+
+        assert!(
+            rule_8("{by_depth: []}").contains("at least one depth band"),
+            "an empty band list must be rejected: {}",
+            rule_8("{by_depth: []}")
+        );
+        let deep = format!("{{by_depth: [{}]}}", band(4));
+        assert!(
+            rule_8(&deep).contains("must start at from_depth 0"),
+            "{}",
+            rule_8(&deep)
+        );
+        let descending = format!("{{by_depth: [{}, {}]}}", band(0), band(0));
+        assert!(
+            rule_8(&descending).contains("must ascend by from_depth"),
+            "{}",
+            rule_8(&descending)
+        );
+    }
+
+    #[test]
+    fn a_negative_child_skew_is_rejected_in_both_trunk_spellings() {
+        // `skew` is a Zipf exponent, and `pick_child_p` reads anything <= 0 as uniform, so a
+        // negative value is not a steeper law — it is a document meaning something the
+        // generator cannot express. Checked in both spellings because both now carry one.
+        let profile = "[{from_depth: 0, fanout: 2.0, skew: -1.0}]";
+        assert!(
+            rule_8(profile).contains("skew -1 < 0"),
+            "{}",
+            rule_8(profile)
+        );
+        let segments = "{by_depth: [{from_depth: 0, length: {dist: const, value: 4}, \
+                        out_degree: {dist: const, value: 3}, skew: -0.5}]}";
+        assert!(
+            rule_8(segments).contains("skew -0.5 < 0"),
+            "{}",
+            rule_8(segments)
+        );
+        // Zero is uniform descent, which is a real law and must be accepted — `ragbench`'s
+        // 2498 deep splits are measured exactly uniform.
+        let zero = "[{from_depth: 0, fanout: 2.0, skew: 0.0}]";
+        assert_eq!(rule_8(zero), "");
     }
 
     #[test]
