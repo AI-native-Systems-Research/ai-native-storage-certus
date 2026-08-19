@@ -35,7 +35,12 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
-from certus_shmq_connector.ring import REASON_DEMOTED, REASON_REMOVED
+from certus_shmq_connector.ring import (
+    CHECK_PENDING,
+    CHECK_RESIDENT,
+    REASON_DEMOTED,
+    REASON_REMOVED,
+)
 
 # GPU device index the script operates on; set from args.gpu in main().
 _GPU_DEVICE = 0
@@ -173,21 +178,29 @@ def test_prepare_store(ring, keys, block_size, ptrs, handles):
 
     Validates:
     - Reserve allocates slots for keys
-    - Entries are NOT visible before commit
+    - A reserved slot is PENDING (not committed / not loadable) before commit
     - Duplicate reserve is rejected (AlreadyExists)
     """
-    print("\n  [prepare_store] Reserve allocates invisible slots")
+    print("\n  [prepare_store] Reserve allocates pending (uncommitted) slots")
 
     reserve_entries = [(k, block_size, 0) for k in keys]
     oks = ring.reserve(reserve_entries)
     assert_all_success(oks, "Reserve", keys)
     print("    Reserve:          OK")
 
-    exists = check_exists(ring, keys)
-    for k in keys:
-        if exists.get(k, False):
-            raise AssertionError(f"Key {k} visible after Reserve (should be invisible)")
-    print("    Not visible:      OK")
+    # Tri-state Check: a reserved-but-uncommitted key reports PENDING (a store
+    # is in flight), never RESIDENT. The data is not yet loadable, so it must
+    # not read as committed. The bool exists-view (ring.check) intentionally
+    # counts PENDING as present so store-dedup won't re-reserve an in-flight
+    # key, so assert on the raw state rather than the collapsed exists bit.
+    states = ring.check_states(keys)
+    for k, s in zip(keys, states):
+        if s != CHECK_PENDING:
+            raise AssertionError(
+                f"Key {k} state={s} after Reserve (expected PENDING; "
+                f"RESIDENT={CHECK_RESIDENT} would mean wrongly committed)"
+            )
+    print("    Pending:          OK (not committed)")
 
     # Duplicate reserve should fail
     dup_oks = ring.reserve(reserve_entries[:1])
@@ -205,7 +218,7 @@ def test_transfer_store(ring, keys, block_size, ptrs, handles):
 
     Validates:
     - After Reserve, CopyToStore transfers GPU data into the DRAM slot
-    - Entry still not visible after CopyToStore (needs commit)
+    - Entry still PENDING (not committed) after CopyToStore (needs commit)
     """
     print("\n  [transfer_store] CopyToStore DMA from GPU to reserved slot")
 
@@ -223,11 +236,16 @@ def test_transfer_store(ring, keys, block_size, ptrs, handles):
     assert_all_success(oks, "CopyToStore", keys)
     print("    CopyToStore:      OK")
 
-    exists = check_exists(ring, keys)
-    for k in keys:
-        if exists.get(k, False):
-            raise AssertionError(f"Key {k} visible after CopyToStore (not committed)")
-    print("    Still invisible:  OK")
+    # Still uncommitted after the DMA: CopyToStore fills the reserved slot but
+    # only CommitStore makes it RESIDENT, so the key stays PENDING until then.
+    states = ring.check_states(keys)
+    for k, s in zip(keys, states):
+        if s != CHECK_PENDING:
+            raise AssertionError(
+                f"Key {k} state={s} after CopyToStore (expected PENDING, "
+                f"not yet committed)"
+            )
+    print("    Still pending:    OK (not committed)")
 
     # Cleanup via abort
     ring.abort_store(keys)

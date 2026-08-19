@@ -21,6 +21,9 @@ import struct
 import pytest
 
 from certus_shmq_connector.ring import (
+    CHECK_MISS,
+    CHECK_PENDING,
+    CHECK_RESIDENT,
     IO_STATS_FIELDS,
     OP_CLEAR_MEMORY_TIER,
     OP_FLUSH_TO_SSD,
@@ -29,6 +32,7 @@ from certus_shmq_connector.ring import (
     OP_REMOVE,
     decode_io_stats,
     decode_ok_flags,
+    decode_states,
     decode_u64,
     encode_handle_batch,
     encode_keys,
@@ -43,6 +47,36 @@ def test_new_opcodes_have_the_wire_values():
     # GET_IO_STATS=15.
     assert (OP_POPULATE, OP_REMOVE, OP_CLEAR_MEMORY_TIER, OP_FLUSH_TO_SSD,
             OP_GET_IO_STATS) == (11, 12, 13, 14, 15)
+
+
+# ── Check: req is a key list; resp is `[state:u8]*n` (0=miss/1=resident/2=pend)─
+
+
+def test_check_state_constants_match_wire_rs():
+    # wire.rs check_state: MISS=0, RESIDENT=1, PENDING=2. These bytes are the
+    # server's op_check response alphabet; a drift here silently remaps hits.
+    assert (CHECK_MISS, CHECK_RESIDENT, CHECK_PENDING) == (0, 1, 2)
+
+
+def test_decode_states_reads_one_byte_per_key_in_order():
+    # server writes exactly one state byte per requested key, in key order.
+    payload = bytes([CHECK_RESIDENT, CHECK_MISS, CHECK_PENDING])
+    assert decode_states(payload, 3) == [1, 0, 2]
+
+
+def test_decode_states_pads_short_payload_with_miss():
+    # A truncated response must never invent hits: missing tail bytes read MISS,
+    # so a lost/short frame degrades to "not present" rather than a false HIT.
+    assert decode_states(bytes([CHECK_RESIDENT]), 3) == [1, 0, 0]
+    assert decode_states(b"", 2) == [0, 0]
+
+
+def test_decode_states_backward_compatible_with_bool_check():
+    # The legacy exists-view is exactly `state != MISS`; pending counts as present
+    # for store-dedup, resident counts as present, only miss is absent.
+    payload = bytes([CHECK_MISS, CHECK_RESIDENT, CHECK_PENDING])
+    states = decode_states(payload, 3)
+    assert [s != CHECK_MISS for s in states] == [False, True, True]
 
 
 # ── Remove: req `{ n:u32, [key:u64]*n }` (shared encode_keys) resp `[ok:u8]*n`─

@@ -14,7 +14,11 @@
 //!
 //! ```text
 //! Check       (1): req  { n:u32, [key:u64]*n }
-//!                  resp { [exists:u8]*n }
+//!                  resp { [state:u8]*n }   // 0=miss, 1=resident, 2=pending
+//!                  (`state` widens the old `exists:u8`: 0/1 keep their meaning,
+//!                   2 = a store is in flight — Reserve seen, not yet committed.
+//!                   Any reader treating the byte as `!= 0 == exists` still works,
+//!                   since a pending key IS present for store-dedup purposes.)
 //! Touch       (2): req  { promote:u8, n:u32, [key:u64]*n }
 //!                  resp { [ok:u8]*n }
 //! Reserve     (3): req  { n:u32, [key:u64, size:u32, session:u64]*n }
@@ -89,6 +93,20 @@ pub mod op {
     pub const CLEAR_MEMORY_TIER: u32 = 13;
     pub const FLUSH_TO_SSD: u32 = 14;
     pub const GET_IO_STATS: u32 = 15;
+}
+
+/// Per-key states returned by the Check response byte. Widened from a plain
+/// `bool`: `MISS`/`RESIDENT` keep the old `0`/`1` meaning, `PENDING` is new, so a
+/// reader doing `byte != 0` still sees a pending key as "exists" (correct for
+/// store-dedup). Kept in sync with `ring.py`'s `CHECK_*` constants.
+pub mod check_state {
+    /// Not present in any tier.
+    pub const MISS: u8 = 0;
+    /// Committed and readable now.
+    pub const RESIDENT: u8 = 1;
+    /// Reserved with a store in flight (Reserve seen, Commit/Abort not yet):
+    /// coming, but not yet loadable. Maps to vLLM 0.26 `HIT_PENDING`.
+    pub const PENDING: u8 = 2;
 }
 
 /// Transport-level response status written to the response control word.
@@ -294,6 +312,16 @@ mod tests {
         assert_eq!(op::CLEAR_MEMORY_TIER, 13);
         assert_eq!(op::FLUSH_TO_SSD, 14);
         assert_eq!(op::GET_IO_STATS, 15);
+    }
+
+    /// The Check response byte is a tri-state wire contract shared with the
+    /// Python client (`certus_shmq_connector.ring`'s `CHECK_*`). Pin the values
+    /// so a renumber can't silently remap `HIT_PENDING`.
+    #[test]
+    fn check_state_values_are_stable() {
+        assert_eq!(check_state::MISS, 0);
+        assert_eq!(check_state::RESIDENT, 1);
+        assert_eq!(check_state::PENDING, 2);
     }
 
     /// Remove/Pin/Unpin share a `{ n:u32, [key:u64]*n }` request shape; the

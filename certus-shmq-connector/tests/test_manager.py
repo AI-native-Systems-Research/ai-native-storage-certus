@@ -33,15 +33,34 @@ class FakeRing:
     def __init__(self):
         self.calls: list[tuple[str, object]] = []
         self.exists: dict[int, bool] = {}
+        # Optional per-key state override (CHECK_MISS/RESIDENT/PENDING). Keys not
+        # listed fall back to exists -> RESIDENT/MISS, so exists-based tests are
+        # unaffected; set this to exercise the PENDING (HIT_PENDING) path.
+        self.states: dict[int, int] = {}
         self.reserve_fail: set[int] = set()
         self.copy_fail: set[int] = set()
         self.events: list[tuple[int, int]] = []
         self.dropped_count = 0
 
+    def _state_of(self, k):
+        from certus_shmq_connector.ring import CHECK_MISS, CHECK_RESIDENT
+
+        return self.states.get(
+            k, CHECK_RESIDENT if self.exists.get(k, False) else CHECK_MISS
+        )
+
     def check(self, keys):
+        from certus_shmq_connector.ring import CHECK_MISS
+
         keys = list(keys)
         self.calls.append(("check", keys))
-        return [self.exists.get(k, False) for k in keys]
+        # Existence view, matching ring.check == [s != MISS for s in states].
+        return [self._state_of(k) != CHECK_MISS for k in keys]
+
+    def check_states(self, keys):
+        keys = list(keys)
+        self.calls.append(("check_states", keys))
+        return [self._state_of(k) for k in keys]
 
     def touch(self, keys, promote=False):
         keys = list(keys)
@@ -148,15 +167,15 @@ def test_touch_batches_check_for_following_per_key_lookups():
     keys = [(1).to_bytes(8, "big"), (2).to_bytes(8, "big"), (3).to_bytes(8, "big")]
 
     mgr.touch(keys)
-    # Exactly one batched check over the full list.
-    checks = _calls_of(ring, "check")
+    # Exactly one batched (tri-state) check over the full list.
+    checks = _calls_of(ring, "check_states")
     assert checks == [[1, 2, 3]]
 
     # Per-key lookups answer from the cache, issuing NO further check.
     assert mgr.lookup(keys[0]) is True
     assert mgr.lookup(keys[1]) is True
     assert mgr.lookup(keys[2]) is False
-    assert _calls_of(ring, "check") == [[1, 2, 3]]  # still just the one
+    assert _calls_of(ring, "check_states") == [[1, 2, 3]]  # still just the one
 
 
 def test_lookup_miss_falls_back_to_single_check():
@@ -169,8 +188,8 @@ def test_lookup_miss_falls_back_to_single_check():
     mgr.touch([(1).to_bytes(8, "big")])  # bitmap covers key 1 only
     assert mgr.lookup((42).to_bytes(8, "big")) is True
     # The fallback single-key check happened for the uncached key.
-    assert [1] in _calls_of(ring, "check")
-    assert [42] in _calls_of(ring, "check")
+    assert [1] in _calls_of(ring, "check_states")
+    assert [42] in _calls_of(ring, "check_states")
 
 
 def test_touch_after_lookup_starts_new_pass_and_clears_bitmap():
@@ -188,6 +207,37 @@ def test_touch_after_lookup_starts_new_pass_and_clears_bitmap():
     ring.exists[5] = False
     mgr.touch([(5).to_bytes(8, "big")])
     assert mgr.lookup((5).to_bytes(8, "big")) is False
+
+
+def test_lookup_pending_maps_to_none_on_legacy_contract():
+    # A store in flight -> Check PENDING. On the ≤0.24 bool|None contract (the
+    # conftest default), pending is None ("delay + retry"), never True: the block
+    # is coming but not yet loadable. (On 0.26 the shim yields HIT_PENDING.)
+    from certus_shmq_connector.ring import CHECK_PENDING
+
+    ring = FakeRing()
+    ring.states[7] = CHECK_PENDING
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    assert mgr.lookup((7).to_bytes(8, "big")) is None
+
+
+def test_touch_caches_pending_state_for_following_lookups():
+    # The tri-state must survive the touch()-batched cache: a pending key looked
+    # up after touch answers from the cached state (no extra RPC) and still maps
+    # to the pending result, not resident.
+    from certus_shmq_connector.ring import CHECK_PENDING
+
+    ring = FakeRing()
+    ring.exists[1] = True  # resident
+    ring.states[2] = CHECK_PENDING  # store in flight
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    keys = [(1).to_bytes(8, "big"), (2).to_bytes(8, "big")]
+
+    mgr.touch(keys)
+    assert _calls_of(ring, "check_states") == [[1, 2]]
+    assert mgr.lookup(keys[0]) is True  # resident
+    assert mgr.lookup(keys[1]) is None  # pending -> legacy None, from cache
+    assert _calls_of(ring, "check_states") == [[1, 2]]  # no further RPC
 
 
 # ── manager: prepare_store ──
@@ -214,6 +264,23 @@ def test_prepare_store_all_existing_is_noop():
     assert out is not None
     assert out.keys_to_store == []
     assert _calls_of(ring, "reserve") == []
+
+
+def test_prepare_store_skips_key_with_store_in_flight():
+    # A pending key is already being written by another in-flight store; store
+    # dedup (via the bool check(), where pending counts as present) must not
+    # re-reserve it — only the genuinely-absent key is offered for storage.
+    from certus_shmq_connector.ring import CHECK_PENDING
+
+    ring = FakeRing()
+    ring.states[2] = CHECK_PENDING  # key 2 store in flight
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    keys = [(2).to_bytes(8, "big"), (3).to_bytes(8, "big")]
+    out = mgr.prepare_store(keys)
+    assert out is not None
+    assert out.keys_to_store == [keys[1]]  # only key 3
+    (entries,) = _calls_of(ring, "reserve")
+    assert [e[0] for e in entries] == [3]
 
 
 def test_prepare_store_partial_reserve_keeps_reserved_drops_failed():
