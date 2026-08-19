@@ -3,8 +3,9 @@
 
 Measures populate, hot lookup, and cold lookup throughput. gRPC futures pipelined
 many RPCs down one channel; the shmq ``Ring`` is one-in-flight per channel, so
-pipelining here is a ``ThreadPoolExecutor`` of ``--pipeline-depth`` workers, each
-holding its own channel (the server must expose at least that many --channels).
+pipelining here is a pool of ``--pipeline-depth`` worker threads (via
+``run_pipeline``), each holding its own channel and releasing it when the phase
+ends (the server must expose at least ``--pipeline-depth`` + 1 --channels).
 
 Usage:
     python certus-bench-single.py --block-size 2M --num-objects 16 --pipeline-depth 4
@@ -17,11 +18,16 @@ import os
 import statistics
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
+from certus_shmq_helpers import (
+    RingError,
+    add_shm_arg,
+    connect,
+    run_pipeline,
+    single_region,
+)
 
 # --- CUDA helpers ---
 
@@ -111,16 +117,16 @@ def phase_populate(ring, base_key, num_objects, block_size, batch_size,
 
     latencies = []
     errors = 0
-    futures = []
-    with ThreadPoolExecutor(max_workers=pipeline_depth) as ex:
-        for start in range(0, total, batch_size):
-            end = min(start + batch_size, total)
-            futures.append(ex.submit(do_batch, start, end))
-        for fut in futures:
-            count, failed, lat = fut.result()
-            errors += failed
-            if lat is not None:
-                latencies.append(lat)
+    batches = [
+        (start, min(start + batch_size, total))
+        for start in range(0, total, batch_size)
+    ]
+    for count, failed, lat in run_pipeline(
+        ring, lambda se: do_batch(*se), batches, pipeline_depth
+    ):
+        errors += failed
+        if lat is not None:
+            latencies.append(lat)
 
     return latencies, errors
 
@@ -151,11 +157,10 @@ def _lookup_iterations(ring, key_sets, block_size, pipeline_depth, ipc_handles,
 
     latencies = []
     errors = 0
-    with ThreadPoolExecutor(max_workers=pipeline_depth) as ex:
-        for failed, lat in ex.map(do_iter, key_sets):
-            errors += failed
-            if lat is not None:
-                latencies.append(lat)
+    for failed, lat in run_pipeline(ring, do_iter, key_sets, pipeline_depth):
+        errors += failed
+        if lat is not None:
+            latencies.append(lat)
     return latencies, errors
 
 
@@ -277,10 +282,13 @@ def main():
 
     # Connect to server
     ring = connect(args.shm_path)
-    if ring.channel_count < pipeline_depth:
+    # Peak = pipeline_depth pool workers + 1 for this (main) thread's own direct
+    # calls (warmup lookup, clear_memory_tier), which it holds across the phases.
+    needed_channels = pipeline_depth + 1
+    if ring.channel_count < needed_channels:
         print(f"  WARNING: server exposes {ring.channel_count} channels but "
-              f"--pipeline-depth is {pipeline_depth}; extra threads will error. "
-              f"Launch certus-server with --channels >= {pipeline_depth}.")
+              f"pipeline-depth+1 is {needed_channels}; extra threads will error. "
+              f"Launch certus-server with --channels >= {needed_channels}.")
 
     # --- Phase 1: Populate ---
     print("  Populating...")
@@ -371,7 +379,7 @@ def main():
         cuda_free(ptr)
     for ptr in cold_ptrs:
         cuda_free(ptr)
-    ring.close()
+    ring.close()  # releases this thread's channel, then drops the mapping
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ mirrored here.
 
 from __future__ import annotations
 
+import atexit
 import ctypes
 import errno
 import mmap
@@ -320,6 +321,20 @@ class Ring:
 
         self._attach(ready_timeout)
 
+        # Release the attaching thread's channel at interpreter exit, so scripts
+        # that exit (or sys.exit) without an explicit close() do not leave a
+        # stale owner word in the persistent server's shared segment. Idempotent
+        # with close(); a no-op once the segment is unmapped. Worker threads that
+        # outlive their channel use still release explicitly (see run_pipeline).
+        atexit.register(self._release_at_exit)
+
+    def _release_at_exit(self) -> None:
+        # Swallow errors: at interpreter shutdown the segment may already be gone.
+        try:
+            self.release_channel()
+        except Exception:
+            pass
+
     # ── attach / geometry ──
 
     def _attach(self, ready_timeout: float) -> None:
@@ -448,6 +463,33 @@ class Ring:
             ch = self._claim_channel()
             self._tls.channel = ch
         return ch
+
+    def release_channel(self) -> None:
+        """Release this thread's claimed channel back to the free pool.
+
+        Channels are claimed sticky-per-thread on first use (see
+        :meth:`_my_channel`) and normally held for the life of the thread. A
+        caller that churns threads — a ``ThreadPoolExecutor`` recreated per
+        phase, or fresh worker threads per benchmark round — must release before
+        the thread exits, otherwise the owner word stays set and the channel is
+        leaked (a later ``_claim_channel`` scan will never find it free).
+
+        Safe to call with no channel held (no-op). Releasing is safe even though
+        seq counters are *not* reset: ``self._seqs`` is indexed by channel, not
+        by thread, so a later claimer of the same channel simply continues the
+        monotonic sequence. Do not call with a request in flight on the channel.
+        """
+        ch = getattr(self._tls, "channel", None)
+        if ch is None:
+            return
+        # If the segment is already unmapped (post-close), the owner word is
+        # gone with it — just forget the claim rather than dereference address 0.
+        if not self._base:
+            self._tls.channel = None
+            return
+        with self._claim_lock:
+            self._wr_u32(self._channel_base(ch) + OFF_OWNER, 0)
+        self._tls.channel = None
 
     def _next_seq(self, ch: int) -> int:
         s = (self._seqs[ch] + 1) & 0xFFFFFFFF
@@ -643,6 +685,14 @@ class Ring:
     # ── teardown ──
 
     def close(self) -> None:
+        # Release this thread's channel first, while the mapping is still valid.
+        # The owner word lives in the shared /dev/shm segment, so a client that
+        # exits without releasing leaves the channel marked owned on a persistent
+        # server — starving later client processes. Worker threads that outlive
+        # their channel use should call release_channel() directly; close() (run
+        # by the thread that attached) covers the common single-threaded scripts.
+        self.release_channel()
+        atexit.unregister(self._release_at_exit)  # explicit close: drop the hook
         # Drop the ctypes view before unmapping (mmap.close() errors if exported
         # pointers still reference the buffer).
         self._buf = None

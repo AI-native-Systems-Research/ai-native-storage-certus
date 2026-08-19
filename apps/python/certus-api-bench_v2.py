@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Multi-client throughput and latency benchmark for the Certus shmq Dispatcher (v2).
 
-Both hot and cold lookups are pipelined across a ThreadPoolExecutor of
---pipeline-depth workers, keeping that many requests in flight simultaneously,
-like iperf -P. The shmq Ring is one-request-in-flight per channel, so each
-worker holds its own sticky channel; this saturates the server's GPU PCIe link
-which sequential requests cannot fill alone. Use --sequential-hot for
-per-request latency measurement on the hot path.
+Both hot and cold lookups are pipelined across a pool of --pipeline-depth
+worker threads, keeping that many requests in flight simultaneously, like
+iperf -P. The shmq Ring is one-request-in-flight per channel, so each worker
+holds its own sticky channel; this saturates the server's GPU PCIe link which
+sequential requests cannot fill alone. Use --sequential-hot for per-request
+latency measurement on the hot path.
+
+The pipeline workers release their channels when the phase ends (a stock
+ThreadPoolExecutor would leak one channel per worker thread, since channels are
+sticky-per-thread and the executor's threads are torn down between phases), so
+a client needs only --pipeline-depth channels for its pool plus one for its own
+direct calls. Launch certus-server with --channels >= clients*(pipeline-depth+1).
 
 Usage:
     python certus-api-bench_v2.py --clients 1 --num-objects 64 --pipeline-depth 4
@@ -20,12 +26,17 @@ import statistics
 import sys
 import threading
 import time
-from concurrent import futures as _futures
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import torch
-from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
+from certus_shmq_helpers import (
+    RingError,
+    add_shm_arg,
+    connect,
+    run_pipeline,
+    single_region,
+)
 
 assert torch.cuda.is_available(), "CUDA GPU required"
 
@@ -350,9 +361,11 @@ def run_client(
 ):
     """Single client worker: populate objects, then measure hot and cold lookups.
 
-    ``ring`` is the shared shmq client created in main; this worker (and its
-    pipeline ThreadPoolExecutor workers) each auto-claim a distinct sticky
-    channel on first use.
+    ``ring`` is the shared shmq client created in main; this worker thread and
+    each of its :func:`run_pipeline` worker threads auto-claim a distinct sticky
+    channel on first use. The pipeline workers release their channels when the
+    phase ends, and this worker releases its own in the cleanup below, so
+    channels are not leaked across phases or (in --continuous mode) rounds.
     """
 
     # Pin this client to its assigned GPU.
@@ -494,14 +507,13 @@ def run_client(
             except RingError as e:
                 return num_objects, None, str(e)
 
-        with _futures.ThreadPoolExecutor(max_workers=pipeline_depth) as ex:
-            for failed, lat, err in ex.map(do_hot_iter, range(iterations)):
-                if err is not None:
-                    result.errors.append(f"hot lookup error: {err}")
-                elif failed:
-                    result.errors.append(f"hot lookup failed: {failed} keys")
-                if lat is not None:
-                    result.hot_latencies.append(lat)
+        for failed, lat, err in run_pipeline(ring, do_hot_iter, range(iterations), pipeline_depth):
+            if err is not None:
+                result.errors.append(f"hot lookup error: {err}")
+            elif failed:
+                result.errors.append(f"hot lookup failed: {failed} keys")
+            if lat is not None:
+                result.hot_latencies.append(lat)
 
     result.hot_end = time.perf_counter()
     result.hot_objects = num_objects * iterations
@@ -540,16 +552,15 @@ def run_client(
         except RingError as e:
             return iter_idx, num_objects, None, str(e)
 
-    with _futures.ThreadPoolExecutor(max_workers=pipeline_depth) as ex:
-        for iter_idx, failed, lat, err in ex.map(do_cold_iter, range(iterations)):
-            if err is not None:
-                result.errors.append(f"cold lookup error: {err}")
-            elif failed:
-                result.errors.append(
-                    f"cold lookup iter {iter_idx} failed: {failed} keys"
-                )
-            if lat is not None:
-                result.cold_latencies.append(lat)
+    for iter_idx, failed, lat, err in run_pipeline(ring, do_cold_iter, range(iterations), pipeline_depth):
+        if err is not None:
+            result.errors.append(f"cold lookup error: {err}")
+        elif failed:
+            result.errors.append(
+                f"cold lookup iter {iter_idx} failed: {failed} keys"
+            )
+        if lat is not None:
+            result.cold_latencies.append(lat)
 
     result.cold_end = time.perf_counter()
     result.cold_objects = num_objects * iterations
@@ -568,6 +579,10 @@ def run_client(
         _cuda_free(ptr)
     for ptr in cold_lookup_ptrs:
         _cuda_free(ptr)
+
+    # Release this client thread's own sticky channel so the next --continuous
+    # round (which spawns fresh client threads) does not leak it.
+    ring.release_channel()
 
 
 def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
@@ -734,8 +749,8 @@ def main():
     print(f"  Total per client:  {total_per_client} objects")
     print(f"  Cold per client:   {cold_per_client} objects")
     print(f"  Pipeline depth:    {args.pipeline_depth}")
-    print(f"  (server needs --channels >= clients*pipeline = "
-          f"{num_clients * args.pipeline_depth})")
+    print(f"  (server needs --channels >= clients*(pipeline+1) = "
+          f"{num_clients * (args.pipeline_depth + 1)})")
     print()
 
     # Each client gets a non-overlapping key range.
@@ -749,14 +764,16 @@ def main():
     round_num = 0
     pipeline_depth = args.pipeline_depth
 
-    # One shared shmq client for all client threads; each thread (and each of its
-    # pipeline ThreadPoolExecutor workers) auto-claims a distinct sticky channel.
+    # One shared shmq client for all client threads; each client thread and each
+    # of its _run_pipeline worker threads auto-claims a distinct sticky channel.
+    # Peak per client = pipeline_depth pool workers + 1 for the client thread's
+    # own direct calls (populate/warmup/clear/remove), which it holds throughout.
     ring = connect(args.shm_path)
-    needed_channels = num_clients * pipeline_depth
+    needed_channels = num_clients * (pipeline_depth + 1)
     if ring.channel_count < needed_channels:
         print(f"  WARNING: server exposes {ring.channel_count} channels but "
-              f"clients*pipeline-depth = {needed_channels}; extra threads will "
-              f"error. Launch certus-server with --channels >= {needed_channels}.")
+              f"clients*(pipeline-depth+1) = {needed_channels}; extra threads "
+              f"will error. Launch certus-server with --channels >= {needed_channels}.")
 
     while True:
         round_num += 1

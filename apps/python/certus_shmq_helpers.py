@@ -19,17 +19,23 @@ This module is the single place that:
 Concurrency note: the ``Ring`` client is one-request-in-flight *per channel*, and
 each calling thread claims its own channel on first use. The gRPC scripts got
 pipelining from ``stub.X.future(req)`` (many in-flight on one channel); the shmq
-equivalent is a ``ThreadPoolExecutor`` whose worker count is the pipeline depth,
-each worker submitting a blocking ``ring.X(...)`` call. The server must expose
-at least that many ``--channels`` or the extra threads get no channel and error.
+equivalent is a pool of worker threads (pipeline depth), each submitting a
+blocking ``ring.X(...)`` call. Use :func:`run_pipeline` for this rather than a
+bare ``ThreadPoolExecutor``: channels are sticky-per-thread and never released
+implicitly, so an executor whose threads are torn down between phases leaks one
+channel per worker per phase. ``run_pipeline`` releases each worker's channel
+when the phase drains. The server must expose at least ``pipeline_depth`` (+1
+for the caller thread's own direct calls) ``--channels``.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import queue
 import sys
-from typing import Sequence
+import threading
+from typing import Callable, Iterable, List, Sequence, TypeVar
 
 # ── locate + import the connector's Ring client ─────────────────────────────
 
@@ -51,9 +57,58 @@ __all__ = [
     "DEFAULT_SHM_PATH",
     "add_shm_arg",
     "connect",
+    "run_pipeline",
     "single_region",
     "single_region_entries",
 ]
+
+_T = TypeVar("_T")
+_R = TypeVar("_R")
+
+
+def run_pipeline(
+    ring: Ring, fn: Callable[[_T], _R], items: Iterable[_T], depth: int
+) -> List[_R]:
+    """Run ``fn(item)`` for each item across up to ``depth`` worker threads,
+    returning the results in the original ``items`` order.
+
+    This is the correct replacement for a per-phase ``ThreadPoolExecutor`` when
+    driving the ``Ring``: each worker holds one sticky shmq channel and releases
+    it (via :meth:`Ring.release_channel`) once the work drains, so the pool can
+    be recreated per phase (or per --continuous round) without leaking a channel
+    per worker thread. Peak channel use is ``min(depth, len(items))`` for the
+    pool, plus one for the calling thread if it also issues direct ``ring`` calls.
+
+    Exceptions raised by ``fn`` propagate from the worker and abort the phase;
+    ``fn`` in the benchmark scripts catches :class:`RingError` and returns a
+    sentinel instead, so a slow/failed op does not tear the pool down.
+    """
+    items = list(items)
+    n = len(items)
+    if n == 0:
+        return []
+    results: List[_R] = [None] * n  # type: ignore[list-item]
+    work: "queue.SimpleQueue[int]" = queue.SimpleQueue()
+    for idx in range(n):
+        work.put(idx)
+
+    def worker() -> None:
+        try:
+            while True:
+                try:
+                    idx = work.get_nowait()
+                except queue.Empty:
+                    return
+                results[idx] = fn(items[idx])
+        finally:
+            ring.release_channel()
+
+    threads = [threading.Thread(target=worker) for _ in range(min(depth, n))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return results
 
 
 def add_shm_arg(parser: argparse.ArgumentParser) -> None:
