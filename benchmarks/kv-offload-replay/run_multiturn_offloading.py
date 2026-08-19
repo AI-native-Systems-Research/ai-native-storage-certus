@@ -243,7 +243,7 @@ if __name__ == "__main__":
                 and f.endswith(".jsonl"):
             os.remove(os.path.join(_here, f))
 
-    from vllm import LLM, SamplingParams
+    from vllm import SamplingParams
 
     # Capturing vLLM's Prometheus counters requires the engine's stat logging to
     # be on (it's what advances the metrics). Enabling it has a small overhead, so
@@ -251,26 +251,18 @@ if __name__ == "__main__":
     # CAPTURE_METRICS=0 restores that baseline and skips the per-round snapshot.
     CAPTURE_METRICS = os.environ.get("CAPTURE_METRICS", "1") != "0"
 
-    # Model FLOPs Utilization (MFU): enable_mfu_metrics makes the engine emit
-    # estimated per-GPU FLOPs / read+write bytes as monotonic Counters
-    # (vllm:estimated_flops_per_gpu_total et al.), captured per round by the
-    # prom_counters() snapshot below. The arg only exists on newer vLLM — detect
-    # support at runtime so older versions don't reject the kwarg.
-    _mfu_kwargs = {}
-    if CAPTURE_METRICS:
-        try:
-            import dataclasses as _dc
-            from vllm.engine.arg_utils import EngineArgs as _EA
-            if any(f.name == "enable_mfu_metrics" for f in _dc.fields(_EA)):
-                _mfu_kwargs["enable_mfu_metrics"] = True
-        except Exception as e:  # noqa: BLE001
-            print(f"[prom] enable_mfu_metrics unavailable: {e}", file=sys.stderr)
-        print(f"[prom] enable_mfu_metrics={bool(_mfu_kwargs)} "
-              f"(estimated_flops_per_gpu_total "
-              f"{'captured per round' if _mfu_kwargs else 'ABSENT'})",
-              file=sys.stderr)
+    # WORKLOAD_MODE=async runs one vLLM coroutine per conversation (V1 AsyncLLM;
+    # concurrency bounded by max_num_seqs, the rest queue in WAITING). "batched"
+    # (default) runs the synchronous per-round generate loop. Both share the
+    # engine_kwargs below — the backend offload config is not duplicated.
+    WORKLOAD_MODE = os.environ.get("WORKLOAD_MODE", "batched").strip().lower()
 
-    llm = LLM(
+    # Model FLOPs Utilization probe (shared): adds enable_mfu_metrics iff the
+    # running vLLM's EngineArgs accepts it, so estimated_flops_per_gpu_total et
+    # al. advance and get captured per round / per sample.
+    _mfu_kwargs = mw.mfu_kwargs(CAPTURE_METRICS)
+
+    engine_kwargs = dict(
         model=MODEL,
         max_model_len=MAX_MODEL_LEN,
         max_num_seqs=MAX_NUM_SEQS,
@@ -284,32 +276,13 @@ if __name__ == "__main__":
         # KV transfers per request, and the async batch-queue scheduler path
         # (step_with_batch_queue) trips a KeyError in the native tiering manager's
         # prepare_store (self._req_state[req_id]) — EngineDeadError at round 1.
-        # This is ORTHOGONAL to cudagraph: disabling it keeps the fair cudagraph
-        # config while taking the synchronous, connector-correct scheduling path
-        # (mirrors run_multiturn_shmq_certus.py's needs_disable_async_scheduling).
-        # Override with ASYNC_SCHED=1 to reproduce the crash.
+        # ORTHOGONAL to cudagraph AND to WORKLOAD_MODE=async (that switches the
+        # request-submission API, not the scheduler). Override with ASYNC_SCHED=1.
         async_scheduling=(os.environ.get("ASYNC_SCHED", "0") != "0"),
         kv_transfer_config=KV_CONFIG,
-        **_mfu_kwargs,
         disable_log_stats=not CAPTURE_METRICS,
+        **_mfu_kwargs,
     )
-
-    # Optional Prometheus exporter. When PROM_PORT is set, expose vLLM's engine
-    # + KV-offload metrics over HTTP at :PROM_PORT/metrics for live scraping.
-    # Requires LOG_STATS=1 (above) so the metrics are registered — otherwise the
-    # endpoint serves an empty registry. No-op when PROM_PORT is unset.
-    _prom_port = os.environ.get("PROM_PORT")
-    if _prom_port:
-        from prometheus_client import start_http_server
-
-        start_http_server(int(_prom_port))
-        print(f"[prom] metrics exporter listening on :{_prom_port}/metrics", file=sys.stderr)
-        if os.environ.get("LOG_STATS", "0") == "0":
-            print(
-                "[prom] warning: LOG_STATS is off — vLLM metrics are not "
-                "registered, so /metrics will be empty. Set LOG_STATS=1.",
-                file=sys.stderr,
-            )
 
     sp = SamplingParams(
         temperature=0.7,
@@ -317,105 +290,134 @@ if __name__ == "__main__":
         max_tokens=OUTPUT_TOKENS,
     )
 
-    tokenizer = llm.get_tokenizer()
+    if WORKLOAD_MODE == "async":
+        # One vLLM coroutine per conversation on a V1 AsyncLLM. The async
+        # orchestration (engine build, 1 Hz disk+prom sampler, asyncio.run,
+        # latency percentiles, summary) lives in multiturn_async so it isn't
+        # re-forked here; this branch just supplies the backend engine_kwargs,
+        # this driver's disk closure, and its summary fields.
+        import multiturn_async as ma
 
-    def n_tokens(text: str) -> int:
-        return len(tokenizer(text).input_ids)
+        summary = ma.run_async_driver(
+            engine_kwargs, convs, sp,
+            prompt_budget=PROMPT_BUDGET,
+            max_rounds=MAX_ROUNDS,
+            capture_metrics=CAPTURE_METRICS,
+            disk_rw_bytes=disk_rw_bytes,
+            summary_base={
+                "model": MODEL,
+                "max_model_len": MAX_MODEL_LEN,
+                "output_tokens": OUTPUT_TOKENS,
+                "cpu_bytes_to_use": CPU_BYTES,
+                "disk_dir": DISK_DIR or None,
+                "tier": "cpu+disk" if DISK_DIR else "cpu",
+            },
+        )
+        elapsed = summary["elapsed_time"]
+        rounds_done = summary["num_rounds"]
+        total_generations = summary["total_generations"]
+    else:
+        llm = mw.build_engine(engine_kwargs, async_mode=False)
+        mw.start_prom_exporter()
 
-    # ── vLLM Prometheus counters (per round) ──────────────────────────────
-    # Snapshot each vllm: counter at the end of every round and log the delta;
-    # the full per-round series is also dumped to JSON. prom_counters/
-    # prom_histograms/hist_pct live in multiturn_workload (get_metrics() +
-    # REGISTRY branches).
-    prom_prev = [mw.prom_counters(llm, CAPTURE_METRICS)]
-    prom_rounds = []  # (round, {counter_name: delta})
-    # Disk bytes are bracketed around generate(): snapshot in on_round_start
-    # (pre-generate), diff in on_round_end (post-generate).
-    disk_pre = [None, None]
+        tokenizer = llm.get_tokenizer()
+        n_tokens = mw.make_n_tokens(tokenizer)
 
-    def on_round_start(round_idx, n_prompts):
-        disk_pre[0], disk_pre[1] = disk_rw_bytes()
+        # ── vLLM Prometheus counters (per round) ──────────────────────────────
+        # Snapshot each vllm: counter at the end of every round and log the delta;
+        # the full per-round series is also dumped to JSON. prom_counters/
+        # prom_histograms/hist_pct live in multiturn_workload (get_metrics() +
+        # REGISTRY branches).
+        prom_prev = [mw.prom_counters(llm, CAPTURE_METRICS)]
+        prom_rounds = []  # (round, {counter_name: delta})
+        # Disk bytes are bracketed around generate(): snapshot in on_round_start
+        # (pre-generate), diff in on_round_end (post-generate).
+        disk_pre = [None, None]
 
-    def on_round_end(round_idx, n_prompts, round_elapsed, n_alive):
-        rd0, wr0 = disk_pre
-        rd1, wr1 = disk_rw_bytes()
-        d_rd = None if rd0 is None or rd1 is None else rd1 - rd0
-        d_wr = None if wr0 is None or wr1 is None else wr1 - wr0
-        print(f"[run] round {round_idx}: {n_prompts} prompts in "
-              f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
-              f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
-              file=sys.stderr, flush=True)
-        if CAPTURE_METRICS:
-            prom_now = mw.prom_counters(llm, CAPTURE_METRICS)
-            d_prom = {k: prom_now.get(k, 0.0) - prom_prev[0].get(k, 0.0)
-                      for k in prom_now}
-            prom_prev[0] = prom_now
-            prom_rounds.append((round_idx, d_prom))
-            shown = " ".join(f"{k[len('vllm:'):]}={d_prom[k]:.0f}"
-                             for k in sorted(d_prom) if d_prom[k])
-            print(f"[prom] round {round_idx}: {shown or '(no counter movement)'}",
+        def on_round_start(round_idx, n_prompts):
+            disk_pre[0], disk_pre[1] = disk_rw_bytes()
+
+        def on_round_end(round_idx, n_prompts, round_elapsed, n_alive):
+            rd0, wr0 = disk_pre
+            rd1, wr1 = disk_rw_bytes()
+            d_rd = None if rd0 is None or rd1 is None else rd1 - rd0
+            d_wr = None if wr0 is None or wr1 is None else wr1 - wr0
+            print(f"[run] round {round_idx}: {n_prompts} prompts in "
+                  f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
+                  f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
                   file=sys.stderr, flush=True)
+            if CAPTURE_METRICS:
+                prom_now = mw.prom_counters(llm, CAPTURE_METRICS)
+                d_prom = {k: prom_now.get(k, 0.0) - prom_prev[0].get(k, 0.0)
+                          for k in prom_now}
+                prom_prev[0] = prom_now
+                prom_rounds.append((round_idx, d_prom))
+                shown = " ".join(f"{k[len('vllm:'):]}={d_prom[k]:.0f}"
+                                 for k in sorted(d_prom) if d_prom[k])
+                print(f"[prom] round {round_idx}: {shown or '(no counter movement)'}",
+                      file=sys.stderr, flush=True)
 
-    result = mw.run_batched(
-        llm, convs, sp,
-        prompt_budget=PROMPT_BUDGET,
-        max_rounds=MAX_ROUNDS,
-        n_tokens=n_tokens,
-        skip_empty=False,
-        on_round_start=on_round_start,
-        on_round_end=on_round_end,
-    )
-    elapsed = result["elapsed"]
-    rounds_done = result["rounds_done"]
-    total_generations = result["total_generations"]
+        result = mw.run_batched(
+            llm, convs, sp,
+            prompt_budget=PROMPT_BUDGET,
+            max_rounds=MAX_ROUNDS,
+            n_tokens=n_tokens,
+            skip_empty=False,
+            on_round_start=on_round_start,
+            on_round_end=on_round_end,
+        )
+        elapsed = result["elapsed"]
+        rounds_done = result["rounds_done"]
+        total_generations = result["total_generations"]
 
-    if CAPTURE_METRICS and prom_rounds:
-        try:
-            with open(os.path.join(_here, "prom_counters_rounds.json"), "w") as f:
-                json.dump([{"round": r, "counters": d} for r, d in prom_rounds],
-                          f, indent=2)
-        except OSError as e:
-            print(f"[prom] could not save json: {e}", file=sys.stderr)
-
-    # Latency-distribution histograms: sampled once here (cumulative over the run,
-    # not per round) — queue time (WAITING phase) and decode time (DECODE phase).
-    if CAPTURE_METRICS:
-        hists = mw.prom_histograms(llm, {"vllm:request_queue_time_seconds",
-                                         "vllm:request_decode_time_seconds"},
-                                   CAPTURE_METRICS)
-        for name, h in sorted(hists.items()):
-            cnt, tot = h["count"], h["sum"]
-            mean = tot / cnt if cnt else 0.0
-            fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
-            print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
-                  f"p50={fmt(mw.hist_pct(h['buckets'], cnt, 0.50))} "
-                  f"p90={fmt(mw.hist_pct(h['buckets'], cnt, 0.90))} "
-                  f"p99={fmt(mw.hist_pct(h['buckets'], cnt, 0.99))}",
-                  file=sys.stderr, flush=True)
-        if hists:
-            # Full buckets on one stderr line so the per-variant teed log is a
-            # complete source (the shared-name JSON below is overwritten when two
-            # variants share this driver / dir).
-            print(f"[prom] histjson {json.dumps(hists, separators=(',', ':'))}",
-                  file=sys.stderr, flush=True)
+        if CAPTURE_METRICS and prom_rounds:
             try:
-                with open(os.path.join(_here, "prom_histograms.json"), "w") as f:
-                    json.dump(hists, f, indent=2)
+                with open(os.path.join(_here, "prom_counters_rounds.json"), "w") as f:
+                    json.dump([{"round": r, "counters": d} for r, d in prom_rounds],
+                              f, indent=2)
             except OSError as e:
-                print(f"[prom] could not save histogram json: {e}", file=sys.stderr)
+                print(f"[prom] could not save json: {e}", file=sys.stderr)
 
-    summary = {
-        "elapsed_time": elapsed,
-        "num_conversations": len(convs),
-        "num_rounds": rounds_done,
-        "total_generations": total_generations,
-        "model": MODEL,
-        "max_model_len": MAX_MODEL_LEN,
-        "output_tokens": OUTPUT_TOKENS,
-        "cpu_bytes_to_use": CPU_BYTES,
-        "disk_dir": DISK_DIR or None,
-        "tier": "cpu+disk" if DISK_DIR else "cpu",
-    }
+        # Latency-distribution histograms: sampled once here (cumulative over the
+        # run, not per round) — queue time (WAITING) and decode time (DECODE).
+        if CAPTURE_METRICS:
+            hists = mw.prom_histograms(llm, {"vllm:request_queue_time_seconds",
+                                             "vllm:request_decode_time_seconds"},
+                                       CAPTURE_METRICS)
+            for name, h in sorted(hists.items()):
+                cnt, tot = h["count"], h["sum"]
+                mean = tot / cnt if cnt else 0.0
+                fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
+                print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
+                      f"p50={fmt(mw.hist_pct(h['buckets'], cnt, 0.50))} "
+                      f"p90={fmt(mw.hist_pct(h['buckets'], cnt, 0.90))} "
+                      f"p99={fmt(mw.hist_pct(h['buckets'], cnt, 0.99))}",
+                      file=sys.stderr, flush=True)
+            if hists:
+                # Full buckets on one stderr line so the per-variant teed log is a
+                # complete source (the shared-name JSON below is overwritten when
+                # two variants share this driver / dir).
+                print(f"[prom] histjson {json.dumps(hists, separators=(',', ':'))}",
+                      file=sys.stderr, flush=True)
+                try:
+                    with open(os.path.join(_here, "prom_histograms.json"), "w") as f:
+                        json.dump(hists, f, indent=2)
+                except OSError as e:
+                    print(f"[prom] could not save histogram json: {e}", file=sys.stderr)
+
+        summary = {
+            "elapsed_time": elapsed,
+            "num_conversations": len(convs),
+            "num_rounds": rounds_done,
+            "total_generations": total_generations,
+            "model": MODEL,
+            "max_model_len": MAX_MODEL_LEN,
+            "output_tokens": OUTPUT_TOKENS,
+            "cpu_bytes_to_use": CPU_BYTES,
+            "disk_dir": DISK_DIR or None,
+            "tier": "cpu+disk" if DISK_DIR else "cpu",
+        }
+
     with open(os.path.join(_here, "sharegpt_multiturn_results.json"), "w") as f:
         json.dump(summary, f, indent=2)
     print(f"\n[run] done. wall={elapsed:.1f}s  generations={total_generations} "
