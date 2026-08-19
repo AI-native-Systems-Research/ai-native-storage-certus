@@ -67,6 +67,29 @@ pub const DEFAULT_HORIZON_EVENTS: usize = 64 * 1024;
 /// flip per node, which is what an earlier design got wrong.
 const COHORT_FLOOR: f64 = 2.0;
 
+/// Whether a session's aloneness is **drawn** rather than thresholded at [`COHORT_FLOOR`].
+///
+/// EXPERIMENT (`CERTUS_EXP_COHORT_BERNOULLI=1`), off by default. Read once.
+///
+/// # The defect it addresses
+///
+/// An **expected** cohort cannot represent "two of these three went that way". With an expected
+/// cohort `c` at a split and this session taking a child of probability `p`, the threshold test
+/// `c·p < 2` declares the session alone — but the sessions that would have followed it are integers,
+/// and the chance that *none* of the other `c − 1` took the same child is `(1 − p)^(c−1)`. At
+/// `c = 3, p = 0.6` that is 0.16, so 84% of the time the session really does keep company, while the
+/// threshold calls it private because `1.8 < 2`.
+///
+/// That matters because it is exactly where real traces keep most of their sharing. The measured
+/// median cohort of a shared segment is **2 to 3 sessions** on every trace examined, over thousands
+/// of segments — small groups walking long shared runs. Thresholding at 2 destroys sharing precisely
+/// there, which is why the generated trunk has 3x too few shared segments on `qwen_code` with
+/// cohorts 15-60x too thick: the model can only keep a cohort by keeping it *large*.
+fn cohort_bernoulli() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CERTUS_EXP_COHORT_BERNOULLI").is_ok_and(|v| v == "1"))
+}
+
 /// Whether cohort exhaustion is the **sole** trunk boundary, ignoring the drawn cap.
 ///
 /// EXPERIMENT (`CERTUS_EXP_COHORT_BOUNDARY=1`), off by default. Read once — a per-step
@@ -101,6 +124,8 @@ const TAG_NODE: u64 = 0x0D0D_E101;
 /// Its own stream so that a document stating a `singleton_share` does not shift the child-choice
 /// draws of one that does not — the escape is an addition to the walk, not a reordering of it.
 const TAG_ESCAPE: u64 = 0x0E5C_4BE0;
+/// Domain for the "did anyone follow me?" draw at a split.
+const TAG_COMPANION: u64 = 0xC011_4A10;
 
 /// How the run ends. Exactly one, which the schema's rule 19 enforces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -777,8 +802,23 @@ impl Generator {
                     } else {
                         false
                     };
+                    // Did anyone follow? Either drawn against `(1 - p)^(c-1)` — the chance that
+                    // none of the other expected sessions took this child — or thresholded on the
+                    // expected cohort, which cannot express a surviving pair. Only at a real
+                    // split; inside a run the cohort is intact by construction.
+                    let left_alone = if cohort_bernoulli() && p < 1.0 {
+                        let others = (cohort - 1.0).max(0.0);
+                        let none_followed = (1.0 - p).max(0.0).powf(others);
+                        let mut st = Stream::new(
+                            self.seed ^ TAG_COMPANION,
+                            u64::from(live.s.id.0) ^ (u64::from(d) << 32),
+                        );
+                        st.next_f64() < none_followed
+                    } else {
+                        false
+                    };
                     cohort *= p;
-                    if escaped || cohort < COHORT_FLOOR {
+                    if escaped || left_alone || (!cohort_bernoulli() && cohort < COHORT_FLOOR) {
                         alone = true;
                     }
                     if escaped {
