@@ -3,7 +3,7 @@
 # Usage:
 #   cd deploy/grafana && docker compose up -d
 #
-# Then run certus-server with: --otel-endpoint http://<this-host>:4317
+# Then run certus-server-yaml with: --otel-endpoint http://<this-host>:4318
 # Grafana UI: http://localhost:3000 (no login required)
 
 services:

@@ -14,7 +14,7 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 ## Put Flow
 
-1. **Client submits request via gRPC.** The client sends the key and an IPC handle (64-byte CUDA IPC memory handle + size) to the certus-server in a BatchPopulateRequest. The server opens the IPC handle via `cudaIpcOpenMemHandle` to obtain a device pointer in its own CUDA context.
+1. **Client submits request via shmq.** The client writes the key and an IPC handle (64-byte CUDA IPC memory handle + size) into the certus-server's `/dev/shm` mailbox as a Populate op (HandleBatch framing). The server opens the IPC handle via `cudaIpcOpenMemHandle` to obtain a device pointer in its own CUDA context.
 
 2. **Memory-tier eviction (if needed).** If the memory-tier pool lacks space for the new entry, the dispatcher evicts entries (chosen by the bound eviction policy) whose write-through has completed (ssd_offset is set). Evicted entries transition from MemoryTier to BlockDevice in the dispatch-map — their data remains on SSD. If nothing is evictable (all entries are still writing through), the put fails with AllocationFailed.
 
@@ -24,7 +24,7 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 5. **Dispatch-map registration.** The dispatcher atomically registers the entry in the dispatch-map as a MemoryTier entry (key → pointer + size), acquiring a write reference. The entry is now visible to `check` and `lookup` requests.
 
-6. **Client receives acknowledgement.** The gRPC response is returned. From the client's perspective the put is complete. The CUDA IPC handle is closed.
+6. **Client receives acknowledgement.** The shmq response is written back to the mailbox channel. From the client's perspective the put is complete. The CUDA IPC handle is closed.
 
 7. **Write reference downgrade.** The write reference is downgraded to a read reference, allowing concurrent lookups while the background writer holds a ref.
 
@@ -47,7 +47,7 @@ An alternative to the single-call `populate` is the split-populate path, which s
 3. **`memory_populated(key, size)`** — Finalizes the entry: registers in the dispatch-map and enqueues background write-through (equivalent to steps 5–9 of the put flow).
 4. **`release_memory(key)`** — Cancellation path: frees the reserved slot without populating.
 
-This API enables the gRPC service layer to overlap reservation with other batch work, and supports external DMA engines that populate the slot outside the dispatcher's control.
+This API enables the shmq serve layer to overlap reservation with other batch work, and supports external DMA engines that populate the slot outside the dispatcher's control.
 
 ## Duplicate Key Handling
 

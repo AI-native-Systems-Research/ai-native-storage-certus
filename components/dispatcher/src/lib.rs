@@ -2,11 +2,11 @@
 //!
 //! # Architecture
 //!
-//! The dispatcher sits between gRPC clients and the storage/GPU subsystems,
+//! The dispatcher sits between shmq clients and the storage/GPU subsystems,
 //! implementing all cache operations: populate, lookup, check, remove, touch.
 //!
 //! ```text
-//! ┌──────────┐     gRPC      ┌────────────┐
+//! ┌──────────┐     shmq      ┌────────────┐
 //! │ Client   │──────────────▶│ Dispatcher │
 //! │ (GPU app)│◀──────────────│            │
 //! └──────────┘               └─────┬──────┘
@@ -41,7 +41,7 @@
 //!
 //! # Threading model
 //!
-//! - gRPC requests arrive on tokio async runtime → `spawn_blocking`
+//! - Control-plane requests arrive from the shmq serve layer on blocking worker threads
 //! - Hot path: runs on the blocking thread, multi-stream GPU DMA
 //! - Cold path: `std::thread::scope` spawns per-drive queue threads
 //!   (up to 2 per NVMe drive) for parallel SSD reads
@@ -374,7 +374,7 @@ impl DispatcherComponent {
     }
 
     /// Create a bounded eviction event channel and install the sender.
-    /// Returns the receiver that the gRPC layer should drain via `TakeEvents`.
+    /// Returns the receiver that the shmq serve layer should drain via `TakeEvents`.
     pub fn create_eviction_channel(
         &self,
         capacity: usize,

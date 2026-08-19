@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """run_multiturn_shmq_certus.py — multi-turn e2e workload via CertusShmqOffloadingSpec.
 
-Same ShareGPT multi-turn workload as certus-grpc-connector/run_multiturn_grpc_certus.py,
-but drives the *shared-memory* connector (CertusShmqOffloadingSpec) against a
-running certus-shmq-server over a /dev/shm mailbox instead of gRPC. The control
-plane is the only thing that changes transport; KV bytes still move GPU<->DRAM<->SSD
-via CUDA IPC + SPDK DMA exactly as with the gRPC path.
+Drives the *shared-memory* connector (CertusShmqOffloadingSpec) against a
+running certus-server over a /dev/shm mailbox. The control plane rides the shmq
+ring; KV bytes move GPU<->DRAM<->SSD via CUDA IPC + SPDK DMA.
 
 Defaults target the 450-conversation / 12-turn dataset shipped with the
 in-process connector:
-    DATASET_PATH = ../certus-connector/sharegpt_12turn_450.json
+    DATASET_PATH = ../data/sharegpt_12turn_450.json
     NUM_CONVS    = 450
 
 Environment:
@@ -54,7 +52,7 @@ if __name__ == "__main__":
         sys.path.insert(0, _here)
 
     DEFAULT_DATASET = os.path.join(
-        _here, "..", "certus-connector", "sharegpt_12turn_450.json"
+        _here, "..", "data", "sharegpt_12turn_450.json"
     )
     DATASET_PATH = os.environ.get("DATASET_PATH", DEFAULT_DATASET)
     if not os.path.exists(DATASET_PATH):

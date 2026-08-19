@@ -14,7 +14,8 @@
 #   --mem SIZE     Memory-tier pool size (default: 4G).
 #   --server-only  Build and start the server, but skip the benchmark.
 #   --bench-only   Skip build and server launch; run only the benchmark
-#                  (assumes server is already running on localhost:50051).
+#                  (assumes a server is already serving the shmq mailbox
+#                   at /dev/shm/certus-shmq).
 #   --no-build     Skip the cargo build step (use existing binary).
 #
 set -euo pipefail
@@ -25,7 +26,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # --- Defaults ----------------------------------------------------------------
 DRIVE_COUNT=4
 NUMA_NODE=0
-LISTEN="0.0.0.0:50051"
+SHM_PATH="/dev/shm/certus-shmq"
+CHANNELS=32
 MEMORY_TIER_SIZE="4G"
 FORMAT_FLAG=""
 SERVER_ONLY=0
@@ -90,7 +92,8 @@ if [[ "$BENCH_ONLY" -eq 0 ]]; then
         numactl --cpunodebind="$NUMA_NODE" --membind="$NUMA_NODE"
         "$SERVER_BIN"
         --drive-count "$DRIVE_COUNT"
-        --listen "$LISTEN"
+        --shm-path "$SHM_PATH"
+        --channels "$CHANNELS"
         --memory-tier-size "$MEMORY_TIER_SIZE"
     )
     [[ -n "$FORMAT_FLAG" ]] && SERVER_CMD+=("$FORMAT_FLAG")
@@ -100,23 +103,21 @@ if [[ "$BENCH_ONLY" -eq 0 ]]; then
     SERVER_PID=$!
     trap cleanup EXIT
 
-    # Wait for server readiness (gRPC port accepting connections).
-    PORT="${LISTEN##*:}"
-    log "Waiting for server on port $PORT..."
+    # Wait for server readiness. The server publishes its /dev/shm mailbox
+    # file last, so the mailbox appearing on disk signals "serving".
+    log "Waiting for shmq mailbox at $SHM_PATH..."
     DEADLINE=$((SECONDS + 60))
     while [[ $SECONDS -lt $DEADLINE ]]; do
-        if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
-            exec 3>&-
+        if [[ -e "$SHM_PATH" ]]; then
             log "Server ready (pid $SERVER_PID)."
             break
         fi
         sleep 0.5
     done
 
-    if ! (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
+    if [[ ! -e "$SHM_PATH" ]]; then
         die "Server did not become ready within 60s."
     fi
-    exec 3>&- 2>/dev/null || true
 
     if [[ "$SERVER_ONLY" -eq 1 ]]; then
         log "Server running. Press Ctrl-C to stop."
@@ -131,7 +132,7 @@ log "  pipeline-depth=$PIPELINE_DEPTH, block-size=$BLOCK_SIZE, writes-settle=${W
 
 BENCH_CMD=(
     "$PYTHON" "$BENCH_SCRIPT"
-    --server "localhost:${LISTEN##*:}"
+    --shm-path "$SHM_PATH"
     --clients "$CLIENTS"
     --num-objects "$NUM_OBJECTS"
     --iterations "$ITERATIONS"

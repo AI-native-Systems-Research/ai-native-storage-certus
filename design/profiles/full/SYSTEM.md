@@ -16,9 +16,9 @@ The system sits between GPU inference engines (e.g., vLLM) and NVMe storage, pro
 ## 2. High-Level Data Flow
 
 ```
-┌──────────────┐   gRPC/IPC    ┌─────────────────────────────────┐
+┌──────────────┐  shmq + IPC   ┌─────────────────────────────────┐
 │  GPU Client  │◄─────────────►│         certus-server           │
-│  (vLLM)      │               │  (Dispatcher + component stack) │
+│  (vLLM)      │ (/dev/shm)    │  (Dispatcher + component stack) │
 └──────────────┘               └──────────┬──────────────────────┘
                                           │
               ┌───────────────────────────┬┴──────────────────────┐
@@ -37,7 +37,7 @@ The system sits between GPU inference engines (e.g., vLLM) and NVMe storage, pro
 
 ### Populate (PUT) Path
 
-1. Client sends key + CUDA IPC handle via gRPC
+1. Client sends key + CUDA IPC handle via shmq (`/dev/shm` mailbox)
 2. Dispatcher opens IPC handle, evicts DRAM if needed
 3. `cudaMemcpy` (D2H): GPU → memory-tier slot
 4. Entry registered in dispatch-map; acknowledgement sent to client
@@ -45,7 +45,7 @@ The system sits between GPU inference engines (e.g., vLLM) and NVMe storage, pro
 
 ### Lookup (GET) Path — Warm
 
-1. Client sends key + destination IPC handle via gRPC
+1. Client sends key + destination IPC handle via shmq (`/dev/shm` mailbox)
 2. Dispatch-map lookup returns MemoryTier pointer
 3. `cudaMemcpyAsync` (H2D): memory-tier → GPU (via dedicated CUDA stream)
 4. Stream handle returned; client synchronizes before accessing data
@@ -143,8 +143,8 @@ components/
 ├── example-helloworld/      # Example component
 └── console-logger/          # Example logger
 apps/
-├── certus-server/           # gRPC server exposing IDispatcher
-├── certus-server-yaml/      # YAML-profile-configured server
+├── certus-server/           # shmq server exposing IDispatcher (/dev/shm mailbox)
+├── certus-server-yaml/      # YAML-profile-configured server (shmq)
 ├── iops-benchmark/          # NVMe IOPS benchmark
 ├── extent-benchmark/        # Extent manager benchmark
 ├── gpu-bb-vs-p2p/           # GPU bounce-buffer vs P2P benchmark
@@ -377,15 +377,18 @@ CUDA integration layer providing:
 
 ### certus-server (`apps/certus-server/`)
 
-A gRPC server (tonic + tokio) exposing the `IDispatcher` interface:
+A shared-memory-queue (shmq) server exposing the `IDispatcher` interface over a
+`/dev/shm` mailbox file. There is no TCP port and no network transport; clients
+reach the server by sharing the host IPC namespace and `/dev/shm` (podman
+`--ipc=host` or k8s `hostIPC: true`).
 
 **CLI options:**
 - `--device-pci` — NVMe PCI addresses (repeatable)
 - `--device-path` — Filesystem device path (alternative to PCI, e.g., `/dev/null` for testing)
-- `--listen` — gRPC listen address (default: `0.0.0.0:50051`)
+- `--shm-path` — Shared-memory mailbox file path (default: `/dev/shm/certus-shmq`)
+- `--channels` — Number of mailbox channels (= max in-flight requests = worker threads; e.g. `32`)
 - `--memory-tier-size` — Pool size (e.g., `256M`, `1G`, `4G`)
 - `--format` — Format SSD extents on startup (start fresh)
-- `--tls-cert` / `--tls-key` — Optional TLS
 
 **Startup sequence:**
 1. SPDK environment initialization
@@ -393,17 +396,22 @@ A gRPC server (tonic + tokio) exposing the `IDispatcher` interface:
 3. Dispatch map creation
 4. Memory-tier allocation + CUDA host registration
 5. Dispatcher initialization (creates block devices + extent managers)
-6. gRPC server start
+6. shmq mailbox creation + poller/worker start
 
-**gRPC API** (proto: `apps/certus-server/proto/dispatcher.proto`):
+**shmq ops** (opcode-framed binary wire: `components/shmq-dispatcher/src/wire.rs`):
 - `Populate` — Batch insert from GPU memory
 - `Lookup` — Batch retrieve to GPU memory
 - `Check` — Batch existence check
 - `Remove` — Batch delete
 - `Touch` — Batch LRU refresh
 - `ClearMemoryTier` — Evict all DRAM entries
+- `FlushToSsd` / `GetIoStats` — flush write-through / read I/O counters
 
-All operations accept batches and use CUDA IPC handles (64-byte `cudaIpcMemHandle_t`) for cross-process GPU memory sharing.
+The full `IDispatcher` surface (Reserve, CopyToStore, CommitStore, AbortStore,
+Pin, Unpin, TakeEvents, …) is carried as additional opcodes. All operations
+accept batches and use CUDA IPC handles (64-byte `cudaIpcMemHandle_t`) for
+cross-process GPU memory sharing (the shared IPC namespace lets the server open
+the client's handles).
 
 ### certus-connector (`certus-connector/`)
 

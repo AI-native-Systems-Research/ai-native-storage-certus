@@ -16,7 +16,7 @@ start on any other architecture — do not port it to a weakly ordered ISA witho
 adding fences.
 
 The wire framing (opcode + little-endian blob) mirrors, byte-for-byte,
-``apps/certus-shmq-server/src/wire.rs`` and the shared-memory layout mirrors
+``components/shmq-dispatcher/src/wire.rs`` and the shared-memory layout mirrors
 ``components/shm-queue/src/lib.rs``. Any change to either Rust file must be
 mirrored here.
 """
@@ -60,7 +60,7 @@ _HDR_SERVER_PID = 36
 # _pad at 40 ; heartbeat (u64) at 48
 _HEADER_SIZE = 56
 
-# ── wire opcodes / status (mirror apps/certus-shmq-server/src/wire.rs) ───────
+# ── wire opcodes / status (mirror components/shmq-dispatcher/src/wire.rs) ────
 
 OP_CHECK = 1
 OP_TOUCH = 2
@@ -72,6 +72,11 @@ OP_PIN = 7
 OP_UNPIN = 8
 OP_LOOKUP = 9
 OP_TAKE_EVENTS = 10
+OP_POPULATE = 11
+OP_REMOVE = 12
+OP_CLEAR_MEMORY_TIER = 13
+OP_FLUSH_TO_SSD = 14
+OP_GET_IO_STATS = 15
 
 STATUS_OK = 0
 
@@ -245,6 +250,34 @@ def decode_take_events(payload: bytes) -> tuple[list[tuple[int, int]], int]:
         events.append((key, reason))
     (dropped,) = struct.unpack_from("<Q", payload, off)
     return events, dropped
+
+
+# Field order of the GetIoStats response (mirror translate.rs op_get_io_stats).
+IO_STATS_FIELDS = (
+    "read_ops",
+    "read_bytes",
+    "read_latency_ns_sum",
+    "write_ops",
+    "write_bytes",
+    "write_latency_ns_sum",
+)
+
+
+def decode_u64(payload: bytes) -> int:
+    """`{ u64 }` response → int. ClearMemoryTier / FlushToSsd reply shape."""
+    (val,) = struct.unpack_from("<Q", payload, 0)
+    return val
+
+
+def decode_io_stats(payload: bytes) -> dict[str, int]:
+    """`{ 6×u64 }` response → dict keyed by :data:`IO_STATS_FIELDS`.
+
+    Order matches the gRPC ``IoStatsResponse`` (no histogram buckets):
+    ``read_ops, read_bytes, read_latency_ns_sum, write_ops, write_bytes,
+    write_latency_ns_sum``.
+    """
+    vals = struct.unpack_from("<6Q", payload, 0)
+    return dict(zip(IO_STATS_FIELDS, vals))
 
 
 # ── the ring client ──────────────────────────────────────────────────────────
@@ -570,6 +603,42 @@ class Ring:
     def take_events(self, max_events: int = 0) -> tuple[list[tuple[int, int]], int]:
         payload = self._dispatch(OP_TAKE_EVENTS, struct.pack("<I", max_events & 0xFFFFFFFF))
         return decode_take_events(payload)
+
+    def populate(self, entries) -> list[bool]:
+        """Populate cache entries by DMA from GPU, chunked to fit cap_req.
+
+        ``entries`` is ``[(key, regions)]`` in the same shape ``copy_to_store``
+        takes, but every entry must carry **exactly one** region — ``populate``
+        takes a single CUDA IPC handle per key (the server rejects ``nreg != 1``,
+        returning a False flag for that entry). Results are in entry order.
+        """
+        entries = list(entries)
+        for key, regions in entries:
+            if len(regions) != 1:
+                raise RingError(
+                    f"populate requires exactly one region per entry "
+                    f"(key={key} has {len(regions)}); use copy_to_store for multi-region"
+                )
+        return self._handle_batch_op(OP_POPULATE, entries)
+
+    def remove(self, keys: Sequence[int]) -> list[bool]:
+        """Remove entries entirely. Returns per-key success flags in order."""
+        keys = list(keys)
+        if not keys:
+            return []
+        return decode_ok_flags(self._dispatch(OP_REMOVE, encode_keys(keys)), len(keys))
+
+    def clear_memory_tier(self) -> int:
+        """Evict the whole memory tier. Returns the number of entries cleared."""
+        return decode_u64(self._dispatch(OP_CLEAR_MEMORY_TIER, b""))
+
+    def flush_to_ssd(self) -> int:
+        """Drain pending write-through jobs. Returns the number flushed."""
+        return decode_u64(self._dispatch(OP_FLUSH_TO_SSD, b""))
+
+    def get_io_stats(self) -> dict[str, int]:
+        """Cumulative SSD read/write counters (see :data:`IO_STATS_FIELDS`)."""
+        return decode_io_stats(self._dispatch(OP_GET_IO_STATS, b""))
 
     # ── teardown ──
 

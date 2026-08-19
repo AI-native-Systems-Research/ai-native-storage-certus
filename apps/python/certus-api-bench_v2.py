@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Multi-client throughput and latency benchmark for the Certus gRPC Dispatcher (v2).
+"""Multi-client throughput and latency benchmark for the Certus shmq Dispatcher (v2).
 
-Both hot and cold lookups use pipelined gRPC futures (stub.Lookup.future()) to
-keep --pipeline-depth RPCs in flight simultaneously, like iperf -P. This
-saturates the server's GPU PCIe link which sequential RPCs cannot fill alone.
-Use --sequential-hot for per-request latency measurement on the hot path.
+Both hot and cold lookups are pipelined across a ThreadPoolExecutor of
+--pipeline-depth workers, keeping that many requests in flight simultaneously,
+like iperf -P. The shmq Ring is one-request-in-flight per channel, so each
+worker holds its own sticky channel; this saturates the server's GPU PCIe link
+which sequential requests cannot fill alone. Use --sequential-hot for
+per-request latency measurement on the hot path.
 
 Usage:
     python certus-api-bench_v2.py --clients 1 --num-objects 64 --pipeline-depth 4
@@ -18,13 +20,12 @@ import statistics
 import sys
 import threading
 import time
+from concurrent import futures as _futures
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
 import torch
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
 
 assert torch.cuda.is_available(), "CUDA GPU required"
 
@@ -140,7 +141,7 @@ def _gpu_read(dev_ptr, size):
     return bytes(buf)
 
 
-def run_integrity_check(server_addr, num_objects):
+def run_integrity_check(ring, num_objects):
     """Verify data integrity across memory-tier (hot) and SSD-tier (cold) paths.
 
     Uses raw cudaMalloc for IPC buffers (PyTorch's caching allocator is
@@ -161,25 +162,17 @@ def run_integrity_check(server_addr, num_objects):
     print(f"  Test objects:   {num_objects}")
     print()
 
-    channel = grpc.insecure_channel(
-        server_addr,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
-
     base_key = random.randint(50_000_000, 90_000_000)
     pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
     passed = 0
     failed = 0
 
     # Allocate two raw CUDA buffers for IPC (one for populate, one for lookup).
+    # The integrity check does not call cudaSetDevice, so buffers live on GPU 0.
     pop_ptr, pop_handle_bytes = _cuda_alloc(BLOCK_SIZE)
     look_ptr, look_handle_bytes = _cuda_alloc(BLOCK_SIZE)
-    pop_ipc = dispatcher_pb2.IpcHandle(cuda_ipc_handle=pop_handle_bytes, size=BLOCK_SIZE)
-    look_ipc = dispatcher_pb2.IpcHandle(cuda_ipc_handle=look_handle_bytes, size=BLOCK_SIZE)
+    pop_region = single_region(pop_handle_bytes, 0, BLOCK_SIZE)
+    look_region = single_region(look_handle_bytes, 0, BLOCK_SIZE)
 
     # --- Phase 1: Populate test objects with unique patterns ---
     print("  Phase 1: Populating test objects with unique patterns...", end="", flush=True)
@@ -189,13 +182,9 @@ def run_integrity_check(server_addr, num_objects):
         _gpu_write(pop_ptr, pattern)
         _libcudart.cudaDeviceSynchronize()
 
-        resp = stub.Populate(
-            dispatcher_pb2.BatchPopulateRequest(
-                entries=[dispatcher_pb2.PopulateEntry(key=key, ipc_handle=pop_ipc)]
-            )
-        )
-        if not resp.results[0].success:
-            print(f"\n  FAIL: populate key {key}: {resp.results[0].error_message}")
+        oks = ring.populate([(key, [pop_region])])
+        if not oks[0]:
+            print(f"\n  FAIL: populate key {key}")
             failed += 1
     print(" done")
 
@@ -204,13 +193,9 @@ def run_integrity_check(server_addr, num_objects):
     for i in range(num_objects):
         key = base_key + i
 
-        resp = stub.Lookup(
-            dispatcher_pb2.BatchLookupRequest(
-                entries=[dispatcher_pb2.LookupEntry(key=key, ipc_handle=look_ipc)]
-            )
-        )
-        if not resp.results[0].success:
-            print(f"\n  FAIL: hot lookup key {key}: {resp.results[0].error_message}")
+        oks = ring.lookup([(key, [look_region])])
+        if not oks[0]:
+            print(f"\n  FAIL: hot lookup key {key}")
             failed += 1
             continue
 
@@ -239,11 +224,8 @@ def run_integrity_check(server_addr, num_objects):
     deadline = time.time() + 15.0
     while time.time() < deadline:
         # Check if all test objects are still accessible (not lost to eviction).
-        req = dispatcher_pb2.BatchCheckRequest(
-            keys=[base_key + i for i in range(num_objects)]
-        )
-        resp = stub.Check(req)
-        if all(r.exists for r in resp.results):
+        oks = ring.check([base_key + i for i in range(num_objects)])
+        if all(oks):
             time.sleep(0.5)
             break
         time.sleep(0.5)
@@ -264,14 +246,11 @@ def run_integrity_check(server_addr, num_objects):
     for batch_start in range(0, evict_count, batch_size):
         batch_end = min(batch_start + batch_size, evict_count)
         keys = [evict_base + j for j in range(batch_start, batch_end)]
-        entries = [
-            dispatcher_pb2.PopulateEntry(key=k, ipc_handle=pop_ipc)
-            for k in keys
-        ]
-        resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
-        err = [r for r in resp.results if not r.success]
+        entries = [(k, [pop_region]) for k in keys]
+        oks = ring.populate(entries)
+        err = [ok for ok in oks if not ok]
         if err:
-            print(f"\n  WARNING: eviction populate failed: {err[0].error_message}")
+            print(f"\n  WARNING: eviction populate failed: {len(err)} keys")
     print(" done")
 
     # --- Phase 4: Cold-path verification (SSD-tier) ---
@@ -283,17 +262,13 @@ def run_integrity_check(server_addr, num_objects):
         key = base_key + i
 
         try:
-            resp = stub.Lookup(
-                dispatcher_pb2.BatchLookupRequest(
-                    entries=[dispatcher_pb2.LookupEntry(key=key, ipc_handle=look_ipc)]
-                )
-            )
-        except grpc.RpcError as e:
-            print(f"\n  FAIL: cold lookup key {key}: RPC error: {e.details()}")
+            oks = ring.lookup([(key, [look_region])])
+        except RingError as e:
+            print(f"\n  FAIL: cold lookup key {key}: ring error: {str(e)}")
             cold_failed += 1
             continue
-        if not resp.results[0].success:
-            print(f"\n  FAIL: cold lookup key {key}: {resp.results[0].error_message}")
+        if not oks[0]:
+            print(f"\n  FAIL: cold lookup key {key}")
             cold_failed += 1
             continue
 
@@ -334,7 +309,7 @@ def run_integrity_check(server_addr, num_objects):
     all_keys += [evict_base + j for j in range(evict_count)]
     for batch_start in range(0, len(all_keys), batch_size):
         batch_end = min(batch_start + batch_size, len(all_keys))
-        stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=all_keys[batch_start:batch_end]))
+        ring.remove(all_keys[batch_start:batch_end])
     print(" done")
 
     _cuda_free(pop_ptr)
@@ -360,7 +335,7 @@ def run_integrity_check(server_addr, num_objects):
 
 def run_client(
     client_id,
-    server_addr,
+    ring,
     num_objects,
     iterations,
     base_key,
@@ -373,20 +348,16 @@ def run_client(
     writes_settle=30.0,
     sequential_hot=False,
 ):
-    """Single client worker: populate objects, then measure hot and cold lookups."""
+    """Single client worker: populate objects, then measure hot and cold lookups.
+
+    ``ring`` is the shared shmq client created in main; this worker (and its
+    pipeline ThreadPoolExecutor workers) each auto-claim a distinct sticky
+    channel on first use.
+    """
 
     # Pin this client to its assigned GPU.
     _libcudart.cudaSetDevice(gpu_id)
     cuda_device = f"cuda:{gpu_id}"
-
-    channel = grpc.insecure_channel(
-        server_addr,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
 
     # Each client gets its own GPU buffer (4 MiB) filled with unique data.
     torch.manual_seed(base_key)
@@ -394,31 +365,25 @@ def run_client(
         0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device=cuda_device
     )
     populate_handle_bytes = _get_cuda_ipc_handle(populate_tensor.data_ptr())
-    populate_ipc = dispatcher_pb2.IpcHandle(
-        cuda_ipc_handle=populate_handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id
-    )
+    populate_region = single_region(populate_handle_bytes, gpu_id, BLOCK_SIZE)
 
     # Separate GPU buffers for lookups — one per key in the batch.
     # A shared IPC handle allows the server to coalesce DMA writes to the
     # same destination, producing artificially low latencies. Distinct buffers
     # force a real H2D transfer per object.
     hot_lookup_ptrs = []
-    hot_lookup_ipcs = []
+    hot_lookup_handles = []
     for _ in range(num_objects):
         ptr, handle_bytes = _cuda_alloc(BLOCK_SIZE)
         hot_lookup_ptrs.append(ptr)
-        hot_lookup_ipcs.append(
-            dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id)
-        )
+        hot_lookup_handles.append(handle_bytes)
 
     cold_lookup_ptrs = []
-    cold_lookup_ipcs = []
+    cold_lookup_handles = []
     for _ in range(num_objects):
         ptr, handle_bytes = _cuda_alloc(BLOCK_SIZE)
         cold_lookup_ptrs.append(ptr)
-        cold_lookup_ipcs.append(
-            dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id)
-        )
+        cold_lookup_handles.append(handle_bytes)
 
     # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects total.
     # With num_clients concurrent clients each gets a fair share of the pool.
@@ -441,25 +406,20 @@ def run_client(
         populate_tensor.copy_(
             torch.randint(0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device=cuda_device)
         )
-        entries = [
-            dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
-            for k in keys
-        ]
+        entries = [(k, [populate_region]) for k in keys]
         try:
             t0 = time.perf_counter()
-            resp = stub.Populate(
-                dispatcher_pb2.BatchPopulateRequest(entries=entries)
-            )
+            oks = ring.populate(entries)
             t1 = time.perf_counter()
-            failed = [r for r in resp.results if not r.success]
+            failed = [ok for ok in oks if not ok]
             if failed:
                 result.errors.append(
-                    f"populate batch failed: {failed[0].error_message}"
+                    f"populate batch failed: {len(failed)} keys"
                 )
                 break
             result.populate_latencies.append((t1 - t0) / len(keys))
-        except grpc.RpcError as e:
-            result.errors.append(f"populate RPC error: {e.details()}")
+        except RingError as e:
+            result.errors.append(f"populate error: {str(e)}")
             break
     t_pop_end = time.perf_counter()
     result.populate_start = t_pop_start
@@ -469,8 +429,8 @@ def run_client(
     # All clients synchronously flush background write-through, then barrier
     # to ensure every client's writes are on SSD before proceeding.
     try:
-        stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
-    except grpc.RpcError:
+        ring.flush_to_ssd()
+    except RingError:
         pass
     barrier.wait()
     if writes_settle > 0:
@@ -485,13 +445,13 @@ def run_client(
     ]
 
     # Warmup
-    entries = [
-        dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+    warmup_entries = [
+        (k, [single_region(hot_lookup_handles[i], gpu_id, BLOCK_SIZE)])
         for i, k in enumerate(hot_keys)
     ]
     try:
-        stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
-    except grpc.RpcError:
+        ring.lookup(warmup_entries)
+    except RingError:
         pass
 
     barrier.wait()  # synchronize hot-lookup start
@@ -500,53 +460,48 @@ def run_client(
     if sequential_hot:
         for _ in range(iterations):
             entries = [
-                dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+                (k, [single_region(hot_lookup_handles[i], gpu_id, BLOCK_SIZE)])
                 for i, k in enumerate(hot_keys)
             ]
             try:
                 t0 = time.perf_counter()
-                resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
+                oks = ring.lookup(entries)
                 _libcudart.cudaDeviceSynchronize()
                 t1 = time.perf_counter()
-                failed = [r for r in resp.results if not r.success]
+                failed = [ok for ok in oks if not ok]
                 if failed:
                     result.errors.append(
-                        f"hot lookup failed: {failed[0].error_message}"
+                        f"hot lookup failed: {len(failed)} keys"
                     )
                 result.hot_latencies.append((t1 - t0) / num_objects)
-            except grpc.RpcError as e:
-                result.errors.append(f"hot lookup RPC error: {e.details()}")
+            except RingError as e:
+                result.errors.append(f"hot lookup error: {str(e)}")
     else:
-        in_flight = []
-        next_to_send = 0
-        completed = 0
+        # Pipeline pipeline_depth lookups concurrently: each worker thread claims
+        # its own shmq channel and does one blocking ring.lookup, timing inside.
+        def do_hot_iter(_iter_idx):
+            entries = [
+                (k, [single_region(hot_lookup_handles[i], gpu_id, BLOCK_SIZE)])
+                for i, k in enumerate(hot_keys)
+            ]
+            t0 = time.perf_counter()
+            try:
+                oks = ring.lookup(entries)
+                _libcudart.cudaDeviceSynchronize()
+                t1 = time.perf_counter()
+                failed = sum(1 for ok in oks if not ok)
+                return failed, (t1 - t0) / num_objects, None
+            except RingError as e:
+                return num_objects, None, str(e)
 
-        while completed < iterations:
-            while next_to_send < iterations and len(in_flight) < pipeline_depth:
-                entries = [
-                    dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
-                    for i, k in enumerate(hot_keys)
-                ]
-                req = dispatcher_pb2.BatchLookupRequest(entries=entries)
-                future = stub.Lookup.future(req)
-                in_flight.append((next_to_send, future, time.perf_counter()))
-                next_to_send += 1
-
-            if in_flight:
-                iter_idx, future, t_submit = in_flight.pop(0)
-                try:
-                    resp = future.result()
-                    _libcudart.cudaDeviceSynchronize()
-                    t_done = time.perf_counter()
-                    failed = [r for r in resp.results if not r.success]
-                    if failed:
-                        result.errors.append(
-                            f"hot lookup failed: {failed[0].error_message}"
-                        )
-                    result.hot_latencies.append((t_done - t_submit) / num_objects)
-                except grpc.RpcError as e:
-                    result.errors.append(f"hot lookup RPC error: {e.details()}")
-                completed += 1
+        with _futures.ThreadPoolExecutor(max_workers=pipeline_depth) as ex:
+            for failed, lat, err in ex.map(do_hot_iter, range(iterations)):
+                if err is not None:
+                    result.errors.append(f"hot lookup error: {err}")
+                elif failed:
+                    result.errors.append(f"hot lookup failed: {failed} keys")
+                if lat is not None:
+                    result.hot_latencies.append(lat)
 
     result.hot_end = time.perf_counter()
     result.hot_objects = num_objects * iterations
@@ -557,51 +512,44 @@ def run_client(
     barrier.wait()
     if client_id == 0:
         try:
-            stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-        except grpc.RpcError as e:
-            result.errors.append(f"ClearMemoryTier failed: {e.details()}")
+            ring.clear_memory_tier()
+        except RingError as e:
+            result.errors.append(f"ClearMemoryTier failed: {str(e)}")
     barrier.wait()
 
     # Cold lookups use batched requests with SEPARATE IPC handles per key.
     # A shared IPC handle allows the server to skip SSD reads for entries whose
     # GPU buffer will be overwritten — distinct buffers force real SSD reads.
-    # Pipelined: keep pipeline_depth RPCs in flight concurrently (like iperf -P).
+    # Pipelined: keep pipeline_depth requests in flight concurrently (iperf -P).
     barrier.wait()
     result.cold_start = time.perf_counter()
 
-    in_flight = []
-    next_to_send = 0
-    completed = 0
+    def do_cold_iter(iter_idx):
+        cold_start = iter_idx * num_objects
+        cold_keys = [base_key + cold_start + i for i in range(num_objects)]
+        entries = [
+            (k, [single_region(cold_lookup_handles[i], gpu_id, BLOCK_SIZE)])
+            for i, k in enumerate(cold_keys)
+        ]
+        t0 = time.perf_counter()
+        try:
+            oks = ring.lookup(entries)
+            t1 = time.perf_counter()
+            failed = sum(1 for ok in oks if not ok)
+            return iter_idx, failed, (t1 - t0) / num_objects, None
+        except RingError as e:
+            return iter_idx, num_objects, None, str(e)
 
-    while completed < iterations:
-        # Fill pipeline up to pipeline_depth
-        while next_to_send < iterations and len(in_flight) < pipeline_depth:
-            cold_start = next_to_send * num_objects
-            cold_keys = [base_key + cold_start + i for i in range(num_objects)]
-            entries = [
-                dispatcher_pb2.LookupEntry(key=k, ipc_handle=cold_lookup_ipcs[i])
-                for i, k in enumerate(cold_keys)
-            ]
-            req = dispatcher_pb2.BatchLookupRequest(entries=entries)
-            future = stub.Lookup.future(req)
-            in_flight.append((next_to_send, future, time.perf_counter()))
-            next_to_send += 1
-
-        # Wait for the oldest in-flight RPC to complete
-        if in_flight:
-            iter_idx, future, t_submit = in_flight.pop(0)
-            try:
-                resp = future.result()
-                t_done = time.perf_counter()
-                failed = [r for r in resp.results if not r.success]
-                if failed:
-                    result.errors.append(
-                        f"cold lookup iter {iter_idx} failed: {failed[0].error_message}"
-                    )
-                result.cold_latencies.append((t_done - t_submit) / num_objects)
-            except grpc.RpcError as e:
-                result.errors.append(f"cold lookup RPC error: {e.details()}")
-            completed += 1
+    with _futures.ThreadPoolExecutor(max_workers=pipeline_depth) as ex:
+        for iter_idx, failed, lat, err in ex.map(do_cold_iter, range(iterations)):
+            if err is not None:
+                result.errors.append(f"cold lookup error: {err}")
+            elif failed:
+                result.errors.append(
+                    f"cold lookup iter {iter_idx} failed: {failed} keys"
+                )
+            if lat is not None:
+                result.cold_latencies.append(lat)
 
     result.cold_end = time.perf_counter()
     result.cold_objects = num_objects * iterations
@@ -611,17 +559,15 @@ def run_client(
     for batch_start in range(0, len(all_cleanup_keys), batch_size):
         batch_end = min(batch_start + batch_size, len(all_cleanup_keys))
         try:
-            stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=all_cleanup_keys[batch_start:batch_end]))
-        except grpc.RpcError:
+            ring.remove(all_cleanup_keys[batch_start:batch_end])
+        except RingError:
             pass
 
-    # Free lookup GPU buffers.
+    # Free lookup GPU buffers. The shmq ring is shared and closed by main.
     for ptr in hot_lookup_ptrs:
         _cuda_free(ptr)
     for ptr in cold_lookup_ptrs:
         _cuda_free(ptr)
-
-    channel.close()
 
 
 def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
@@ -663,11 +609,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Certus multi-client throughput/latency benchmark"
     )
-    parser.add_argument(
-        "--server",
-        default="localhost:50051",
-        help="Server address (default: localhost:50051)",
-    )
+    add_shm_arg(parser)
     parser.add_argument(
         "--clients",
         type=int,
@@ -780,7 +722,7 @@ def main():
     print(f"{'='*70}")
     print(f"Certus Multi-Client Benchmark")
     print(f"{'='*70}")
-    print(f"  Server:            {args.server}")
+    print(f"  Server:            {args.shm_path}")
     print(f"  Clients:           {num_clients}")
     print(f"  GPUs:              {num_gpus}")
     print(f"  Block size:        {BLOCK_SIZE // (1024*1024)} MiB")
@@ -791,6 +733,9 @@ def main():
     print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB) / {client_pool_share} per client")
     print(f"  Total per client:  {total_per_client} objects")
     print(f"  Cold per client:   {cold_per_client} objects")
+    print(f"  Pipeline depth:    {args.pipeline_depth}")
+    print(f"  (server needs --channels >= clients*pipeline = "
+          f"{num_clients * args.pipeline_depth})")
     print()
 
     # Each client gets a non-overlapping key range.
@@ -803,6 +748,15 @@ def main():
     continuous = args.continuous
     round_num = 0
     pipeline_depth = args.pipeline_depth
+
+    # One shared shmq client for all client threads; each thread (and each of its
+    # pipeline ThreadPoolExecutor workers) auto-claims a distinct sticky channel.
+    ring = connect(args.shm_path)
+    needed_channels = num_clients * pipeline_depth
+    if ring.channel_count < needed_channels:
+        print(f"  WARNING: server exposes {ring.channel_count} channels but "
+              f"clients*pipeline-depth = {needed_channels}; extra threads will "
+              f"error. Launch certus-server with --channels >= {needed_channels}.")
 
     while True:
         round_num += 1
@@ -826,7 +780,7 @@ def main():
                 target=run_client,
                 args=(
                     i,
-                    args.server,
+                    ring,
                     num_objects,
                     iterations,
                     base_keys[i],
@@ -943,9 +897,10 @@ def main():
         # --- Integrity verification (optional, first round only) ---
         integrity_ok = True
         if args.verify_integrity and round_num == 1:
-            integrity_ok = run_integrity_check(args.server, args.integrity_objects)
+            integrity_ok = run_integrity_check(ring, args.integrity_objects)
 
         if not continuous:
+            ring.close()
             sys.exit(1 if (all_errors or not integrity_ok) else 0)
 
 

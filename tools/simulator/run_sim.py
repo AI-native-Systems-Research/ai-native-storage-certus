@@ -35,7 +35,7 @@ import simpy
 
 from certus_sim.config import SimConfig
 from certus_sim.dispatcher import Dispatcher
-from certus_sim.grpc_server import GrpcServer
+from certus_sim.server import Server
 from certus_sim.metrics import Metrics
 from certus_sim.workload import WorkloadDriver, generate_synthetic, load_trace
 
@@ -188,7 +188,7 @@ def main():
     env = simpy.Environment()
     metrics = Metrics()
     dispatcher = Dispatcher(env, config, metrics)
-    server = GrpcServer(env, config, dispatcher, metrics)
+    server = Server(env, config, dispatcher, metrics)
     driver = WorkloadDriver(env, server, config)
 
     env.process(driver._run(ops))

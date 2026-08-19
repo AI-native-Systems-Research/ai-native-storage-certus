@@ -1,7 +1,7 @@
 #!/bin/bash
 # Entrypoint for the CPU-offload backend image.
 #
-# This backend is self-contained: no external server, no gRPC. It just runs the
+# This backend is self-contained: no external server, no shmq mailbox. It just runs the
 # multi-turn workload through vLLM's in-process CPU-offload tier (pinned host
 # RAM). So there is nothing to wait for — we only sanity-check the environment,
 # then exec the driver.

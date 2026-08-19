@@ -7,7 +7,7 @@ Connector selection via MODE env var: "cpu", "certus", or "sharedstorage".
 HISTORICAL / PROVENANCE (archived, not run in-tree)
 ------------------------------------------------------------------------------
 This is the original out-of-tree script whose conversation-selection filter
-produced the committed dataset ``certus-connector/sharegpt_12turn_450.json``.
+produced the committed dataset ``data/sharegpt_12turn_450.json``.
 It is preserved here purely as a record of how that dataset was built; it is
 NOT wired to run inside this repo (it expects vLLM, ``certus_connector.spec``,
 a ``sharegpt_v3.json`` beside a ``kvconn-trace`` root, and host-specific NVMe

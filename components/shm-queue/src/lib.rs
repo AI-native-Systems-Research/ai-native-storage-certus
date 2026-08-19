@@ -1,11 +1,10 @@
 //! Cross-process shared-memory request/response mailbox transport.
 //!
-//! This is the low-latency control-plane transport for the certus-shmq
-//! prototype — a drop-in alternative to the gRPC dispatcher protocol that
-//! removes protobuf encode/decode and socket syscalls from the per-op hot path.
+//! This is the low-latency control-plane transport for certus-server: it keeps
+//! protobuf encode/decode and socket syscalls off the per-op hot path.
 //! It carries only *small* control messages (batches of keys and CUDA IPC
-//! handle records); the KV bytes themselves never travel through the queue,
-//! exactly as with gRPC (the server DMAs GPU↔DRAM↔SSD out of band).
+//! handle records); the KV bytes themselves never travel through the queue
+//! (the server DMAs GPU↔DRAM↔SSD out of band).
 //!
 //! # Model
 //!

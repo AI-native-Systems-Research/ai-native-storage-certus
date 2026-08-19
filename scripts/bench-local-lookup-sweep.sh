@@ -40,8 +40,10 @@
 #   --max-flight-mib M skip any config whose GPU landing buffer
 #                      (workers*inflight*batch*object_size) exceeds M MiB
 #                      (default 8192). Skips are printed, never silent.
-#   --no-server        assume a server is already listening; do not launch or
-#                      stop one. Populate still runs.
+#   --no-server        assume a server is already serving its shmq mailbox; do
+#                      not launch or stop one. Populate still runs. You are then
+#                      responsible for its --channels: it must be >= the largest
+#                      workers*inflight in --sweep, or the bench errors out.
 #   -h, --help         show this help.
 #
 # Requires: certus-server-yaml and remote-lookup-bench built at
@@ -55,7 +57,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SERVER_BIN="${CERTUS_SERVER_BIN:-$REPO_ROOT/target/release/certus-server-yaml}"
 BENCH_BIN="${CERTUS_BENCH_BIN:-$REPO_ROOT/target/release/remote-lookup-bench}"
 LIB_PATH="${CERTUS_LD_LIBRARY_PATH:-$REPO_ROOT/deps/zyre-build/lib:$REPO_ROOT/deps/zyre-build/lib64}"
-GRPC_PORT="${CERTUS_TEST_GRPC_PORT:-50051}"
+SHM_PATH="${CERTUS_TEST_SHM_PATH:-/dev/shm/certus-shmq}"
 
 KEYS_SPEC="112000"
 OBJECT_SIZE="64K"
@@ -102,7 +104,6 @@ KEY_COUNT=$(( ${KEY_RANGE##*-} - ${KEY_RANGE%%-*} + 1 ))
 
 export LD_LIBRARY_PATH="$LIB_PATH:${LD_LIBRARY_PATH:-}"
 export RUST_LOG="${CERTUS_TEST_RUST_LOG:-warn}"
-EP="http://127.0.0.1:$GRPC_PORT"
 LABEL="local:$(hostname -s)"
 
 RESULT_DIR="$(mktemp -d "/tmp/certus-localsweep-$$.XXXXXX")"
@@ -139,14 +140,19 @@ cleanup() {
 trap cleanup EXIT
 
 start_server() {
-    log "Launching server: --drive-count $DRIVE_COUNT --memory-tier-size $MEM_SIZE"
+    log "Launching server: --drive-count $DRIVE_COUNT --memory-tier-size $MEM_SIZE --channels $MAX_SLOTS"
+    # Drop any stale mailbox from a prior crash so the readiness check below can
+    # only pass on the file this server creates.
+    rm -f "$SHM_PATH"
     "$SERVER_BIN" --drive-count "$DRIVE_COUNT" --format \
-        --memory-tier-size "$MEM_SIZE" --listen "0.0.0.0:$GRPC_PORT" \
+        --memory-tier-size "$MEM_SIZE" --shm-path "$SHM_PATH" --channels "$MAX_SLOTS" \
         > "$RESULT_DIR/server.log" 2>&1 &
     SRV_PID=$!
+    # shmq has no TCP port; the mailbox file appears once Server::create has run.
+    # The bench's attach() then spins for the ready magic, so a client that races
+    # create by a few ms simply waits — no log-level dependence here.
     for _ in $(seq 1 240); do
-        if (exec 3<>"/dev/tcp/127.0.0.1/$GRPC_PORT") 2>/dev/null; then
-            exec 3>&-
+        if [[ -e "$SHM_PATH" ]]; then
             log "Server ready (pid $SRV_PID)."
             return 0
         fi
@@ -172,7 +178,11 @@ print(int(s[:-1]) * m[s[-1].upper()] if s[-1].upper() in m else int(s))' "$1"
 OBJ_BYTES="$(objbytes "$OBJECT_SIZE")"
 
 # --- Parse the matrix, dropping configs that will not fit in GPU memory ------
-SPECS=(); SKIPPED=()
+# MAX_SLOTS = the largest workers*inflight kept, i.e. the most concurrent lanes
+# any config drives. shmq lanes are OS threads each holding one mailbox channel,
+# so the launched server must expose at least this many --channels or the bench
+# rejects the run up front.
+SPECS=(); SKIPPED=(); MAX_SLOTS=1
 IFS=';' read -r -a raw_specs <<< "$SWEEP"
 for s in "${raw_specs[@]}"; do
     [[ -n "$s" ]] || continue
@@ -183,6 +193,8 @@ for s in "${raw_specs[@]}"; do
         SKIPPED+=("batch=$b workers=$w inflight=$f needs ${flight} MiB > ${MAX_FLIGHT_MIB}")
         continue
     fi
+    slots=$(( w * f ))
+    (( slots > MAX_SLOTS )) && MAX_SLOTS=$slots
     SPECS+=("$b:$w:$f")
 done
 [[ ${#SPECS[@]} -gt 0 ]] || { echo "error: every config was skipped or --sweep was empty" >&2; exit 1; }
@@ -204,7 +216,7 @@ fi
 
 # --- Populate once. Local lookups do not mutate, so the whole matrix reuses it.
 log "Populating $KEY_COUNT keys at $OBJECT_SIZE ..."
-if ! "$BENCH_BIN" populate --server "$EP" --keys "$KEY_RANGE" \
+if ! "$BENCH_BIN" populate --shm-path "$SHM_PATH" --keys "$KEY_RANGE" \
         --object-size "$OBJECT_SIZE" --batch-size 64 --workers 4 --inflight 4 \
         > "$RESULT_DIR/populate.json" 2> "$RESULT_DIR/populate.err"; then
     echo "error: populate failed" >&2
@@ -232,7 +244,7 @@ for ci in "${!SPECS[@]}"; do
             "$round" "$TOTAL" "$b" "$w" "$f" "$r"
         # No --cleanup, and --iterations 1 --warmup-keys 0: both removal paths
         # would delete the dataset this sweep is reading.
-        if "$BENCH_BIN" lookup --server "$EP" --keys "$KEY_RANGE" \
+        if "$BENCH_BIN" lookup --shm-path "$SHM_PATH" --keys "$KEY_RANGE" \
                 --object-size "$OBJECT_SIZE" --batch-size "$b" \
                 --workers "$w" --inflight "$f" \
                 --iterations 1 --warmup-keys 0 \

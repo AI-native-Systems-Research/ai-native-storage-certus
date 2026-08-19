@@ -5,7 +5,7 @@
 #             stop-servers.sh. Not meant to be executed directly.
 #
 # One certus-server instance is launched per NVMe SSD. Each instance:
-#   * binds a distinct gRPC port           (BASE_PORT + i)
+#   * serves a distinct shmq mailbox        (${BASE_SHM_PATH}-i, in /dev/shm)
 #   * pins its NVMe poller to a dedicated   (--poller-base-cpu CORE)
 #     physical core in the SSD's NUMA zone
 #   * is optionally wrapped in `numactl` so the server threads and the
@@ -24,12 +24,19 @@ PYTHON="${CERTUS_PYTHON:-python3.12}"
 
 # --- Tunables (override via environment) -------------------------------------
 SESSION="${CERTUS_SESSION:-certus}"          # tmux session name
-BASE_PORT="${CERTUS_BASE_PORT:-50051}"       # instance i listens on BASE_PORT+i
+# Base shmq mailbox path; instance i serves "${BASE_SHM_PATH}-i" (e.g.
+# /dev/shm/certus-shmq-0, -1, ...). Each instance gets a distinct path so
+# there is no shared resource to collide on.
+BASE_SHM_PATH="${CERTUS_BASE_SHM_PATH:-/dev/shm/certus-shmq}"
+# Number of mailbox channels per instance (= max in-flight requests = worker
+# threads). The server default is 8; 32 avoids the local-check channel-claim
+# race seen at lower counts.
+CHANNELS="${CERTUS_CHANNELS:-32}"
 RUN_DIR="${CERTUS_RUNDIR:-/tmp/certus-multi-instance}"  # logs + instance map
 INSTANCES_TSV="$RUN_DIR/instances.tsv"
 
 # Number of leading physical cores to reserve (skip) on each NUMA node before
-# allocating poller cores -- keeps core 0 etc. free for the OS / gRPC threads.
+# allocating poller cores -- keeps core 0 etc. free for the OS / server threads.
 POLLER_RESERVE_CORES="${CERTUS_POLLER_RESERVE:-1}"
 
 # Per-instance memory-tier pool size passed to certus-server (e.g. 2G, 512M).
@@ -95,33 +102,12 @@ server_pids() {
     done
 }
 
-# True (0) if any local TCP socket currently occupies port $1 -- in any state
-# (LISTEN, ESTABLISHED, TIME_WAIT, ...). The default gRPC ports (50051+) fall
-# inside the Linux ephemeral range (see /proc/sys/net/ipv4/ip_local_port_range),
-# so a transient outbound connection can steal one and make the server's bind()
-# fail with EADDRINUSE -- this lets us pick a port that is actually free.
-port_in_use() {  # <port>
-    # Capture first, then grep from a here-string: a piped `grep -q` would exit
-    # on the first match and SIGPIPE `ss`, which under `set -o pipefail` reports
-    # the pipeline as failed even on a match.
-    local addrs
-    addrs="$(ss -tanH 2>/dev/null | awk '{print $4}')" || true
-    grep -qE "(^|[:.])$1\$" <<< "$addrs"
-}
-
-# Echo the first free TCP port >= $1.
-next_free_port() {  # <start_port>
-    local p="$1"
-    while port_in_use "$p"; do p=$((p + 1)); done
-    echo "$p"
-}
-
-# True (0) if a TCP listener on localhost:$1 accepts a connection right now.
-# This is the authoritative readiness signal -- certus-server logs "listening
-# on" just *before* the bind, so the log line alone can be a false positive.
-port_listening() {  # <port>
-    (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && { exec 3>&-; return 0; }
-    return 1
+# True (0) if the shmq mailbox at path $1 exists on disk. certus-server publishes
+# the mailbox file *last*, only after the poller and worker pool are up, so the
+# path's existence is the authoritative readiness signal (no false positives
+# from a log line printed before init completes).
+mailbox_ready() {  # <shm_path>
+    [[ -e "$1" ]]
 }
 
 # Map each NVIDIA GPU to its NUMA node. Emits one "<numa_node>\t<gpu_index>" line

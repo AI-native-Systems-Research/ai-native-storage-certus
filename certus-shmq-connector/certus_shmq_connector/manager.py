@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""OffloadingManager backed by a remote certus-shmq-server over shared memory.
+"""OffloadingManager backed by a remote certus-server over shared memory.
 
 Identical in behaviour to the gRPC connector's manager — only the transport
 changes: every ``self._stub.X(pb.Y(...))`` gRPC call becomes a ``self._ring.x``
@@ -68,7 +68,7 @@ def _session_id_to_u64(req_context) -> int:
 
 
 class ShmqCertusOffloadingManager(OffloadingManager):
-    """Manager delegating to a remote certus-shmq-server via a shared-memory ring."""
+    """Manager delegating to a remote certus-server via a shared-memory ring."""
 
     def __init__(self, ring, block_size_bytes: int):
         self._ring = ring

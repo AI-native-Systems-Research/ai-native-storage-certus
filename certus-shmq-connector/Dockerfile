@@ -2,9 +2,9 @@
 #
 # This image is the CLIENT side only: vLLM + the pure-Python shmq connector +
 # the multi-turn workload driver. It offloads KV blocks over a /dev/shm mailbox
-# to a SEPARATELY-RUN certus-shmq-server (which owns SPDK/NVMe/hugepages on the
+# to a SEPARATELY-RUN certus-server (which owns SPDK/NVMe/hugepages on the
 # host). The server is intentionally NOT built into this image — run it on the
-# host (cargo build -p certus-shmq-server after deps/build_spdk.sh) and point
+# host (cargo build -p certus-server after deps/build_spdk.sh) and point
 # this image at its mailbox via SHM_PATH.
 #
 # The mailbox lives on the host's /dev/shm; --ipc=host makes it (and the CUDA
@@ -55,7 +55,7 @@ WORKDIR /workspace
 # context). torch/numpy/vllm come from the base image. NOTE: no grpcio/protobuf
 # install here — the shmq connector's transport is pure ctypes + mmap.
 COPY certus-shmq-connector/ /workspace/certus-shmq-connector/
-COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
+COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 RUN pip install --no-cache-dir -e /workspace/certus-shmq-connector
 
@@ -68,7 +68,7 @@ ENV PYTHONUNBUFFERED=1 \
     MODEL=ibm-granite/granite-4.1-8b \
     DTYPE=bfloat16 \
     SLAB_SIZE_BYTES=2097152 \
-    DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
+    DATASET_PATH=/workspace/data/sharegpt_12turn_450.json \
     WORKLOAD=/workspace/certus-shmq-connector/run_multiturn_shmq_certus.py
 
 # Waits for the SHM_PATH mailbox to reach READY, then runs the workload.

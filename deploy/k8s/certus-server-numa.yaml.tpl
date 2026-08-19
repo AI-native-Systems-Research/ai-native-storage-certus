@@ -28,6 +28,10 @@ spec:
       imagePullSecrets:
       - name: artifactory-creds
       hostNetwork: true
+      # Share the host IPC namespace + /dev/shm so co-located client (vLLM) pods
+      # can reach this instance's shmq mailbox and this server can open their
+      # CUDA IPC handles (k8s equivalent of podman `--ipc=host`).
+      hostIPC: true
       initContainers:
       - name: discover-drives
         image: busybox:latest
@@ -62,17 +66,14 @@ spec:
           for dev in $(cat /config/drives.txt | tr ',' ' '); do
             ARGS="$ARGS --device-pci $dev"
           done
-          exec certus-server-yaml $ARGS --listen 0.0.0.0:${CERTUS_PORT} --memory-tier-size 4G
+          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 32 --memory-tier-size 4G
+        # Each NUMA instance publishes a DISTINCT mailbox on the shared host
+        # /dev/shm; a client selects an instance by pointing at its shm path.
         env:
-        - name: CERTUS_PORT
-          value: "50051"
+        - name: CERTUS_SHM_PATH
+          value: "/dev/shm/certus-shmq-numa0"
         - name: CERTUS_NUMA_ID
           value: "0"
-        ports:
-        - containerPort: 50051
-          name: grpc
-        - containerPort: 50053
-          name: peer
         resources:
           limits:
             rdma/rdma_shared_device_a: 1
@@ -91,6 +92,8 @@ spec:
           mountPath: /dev/vfio
         - name: infiniband
           mountPath: /dev/infiniband
+        - name: dev-shm
+          mountPath: /dev/shm
       volumes:
       - name: config
         emptyDir: {}
@@ -108,6 +111,10 @@ spec:
       - name: infiniband
         hostPath:
           path: /dev/infiniband
+          type: Directory
+      - name: dev-shm
+        hostPath:
+          path: /dev/shm
           type: Directory
       nodeSelector:
         certus.ai/worker: "true"
@@ -136,6 +143,10 @@ spec:
       imagePullSecrets:
       - name: artifactory-creds
       hostNetwork: true
+      # Share the host IPC namespace + /dev/shm so co-located client (vLLM) pods
+      # can reach this instance's shmq mailbox and this server can open their
+      # CUDA IPC handles (k8s equivalent of podman `--ipc=host`).
+      hostIPC: true
       initContainers:
       - name: discover-drives
         image: busybox:latest
@@ -170,17 +181,14 @@ spec:
           for dev in $(cat /config/drives.txt | tr ',' ' '); do
             ARGS="$ARGS --device-pci $dev"
           done
-          exec certus-server-yaml $ARGS --listen 0.0.0.0:${CERTUS_PORT} --memory-tier-size 4G
+          exec certus-server-yaml $ARGS --shm-path ${CERTUS_SHM_PATH} --channels 32 --memory-tier-size 4G
+        # Each NUMA instance publishes a DISTINCT mailbox on the shared host
+        # /dev/shm; a client selects an instance by pointing at its shm path.
         env:
-        - name: CERTUS_PORT
-          value: "50052"
+        - name: CERTUS_SHM_PATH
+          value: "/dev/shm/certus-shmq-numa1"
         - name: CERTUS_NUMA_ID
           value: "1"
-        ports:
-        - containerPort: 50052
-          name: grpc
-        - containerPort: 50054
-          name: peer
         resources:
           limits:
             rdma/rdma_shared_device_a: 1
@@ -199,6 +207,8 @@ spec:
           mountPath: /dev/vfio
         - name: infiniband
           mountPath: /dev/infiniband
+        - name: dev-shm
+          mountPath: /dev/shm
       volumes:
       - name: config
         emptyDir: {}
@@ -217,68 +227,16 @@ spec:
         hostPath:
           path: /dev/infiniband
           type: Directory
+      - name: dev-shm
+        hostPath:
+          path: /dev/shm
+          type: Directory
       nodeSelector:
         certus.ai/worker: "true"
----
-# Client service for NUMA 0 instances
-apiVersion: v1
-kind: Service
-metadata:
-  name: certus-server-numa0
-  namespace: certus
-  labels:
-    app: certus-server
-    app.kubernetes.io/instance: numa0
-spec:
-  selector:
-    app: certus-server
-    app.kubernetes.io/instance: numa0
-  ports:
-  - port: 50051
-    targetPort: 50051
-    name: grpc
-    protocol: TCP
-  internalTrafficPolicy: Local
----
-# Client service for NUMA 1 instances
-apiVersion: v1
-kind: Service
-metadata:
-  name: certus-server-numa1
-  namespace: certus
-  labels:
-    app: certus-server
-    app.kubernetes.io/instance: numa1
-spec:
-  selector:
-    app: certus-server
-    app.kubernetes.io/instance: numa1
-  ports:
-  - port: 50052
-    targetPort: 50052
-    name: grpc
-    protocol: TCP
-  internalTrafficPolicy: Local
----
-# Headless service for server-to-server peer discovery (all instances)
-# Servers resolve certus-servers.certus.svc.cluster.local
-apiVersion: v1
-kind: Service
-metadata:
-  name: certus-servers
-  namespace: certus
-  labels:
-    app: certus-server
-spec:
-  clusterIP: None
-  selector:
-    app: certus-server
-  ports:
-  - port: 50053
-    targetPort: 50053
-    name: peer-numa0
-    protocol: TCP
-  - port: 50054
-    targetPort: 50054
-    name: peer-numa1
-    protocol: TCP
+# NOTE: no client-facing or peer Services. The shmq control transport is a
+# node-local /dev/shm mailbox (one per NUMA instance:
+# /dev/shm/certus-shmq-numa0 and -numa1), not a network endpoint — a client
+# (vLLM) pod reaches an instance only by co-scheduling on the SAME node with
+# `hostIPC: true`, the same `/dev/shm` hostPath mount, and the matching shm
+# path. Cross-node server-to-server peer discovery (remote-lookup) is handled
+# by zyre over the host network, so no peer Service is needed.

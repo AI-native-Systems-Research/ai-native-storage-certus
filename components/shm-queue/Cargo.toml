@@ -7,7 +7,7 @@ license.workspace = true
 publish = false
 
 # Cross-process shared-memory request/response mailbox transport used by the
-# certus-shmq prototype (a low-latency alternative to the gRPC control plane).
+# certus-shmq — the low-latency /dev/shm control-plane transport.
 # Pure userspace + Linux futex; no SPDK/GPU deps, so it builds and tests in the
 # default workspace without hardware.
 

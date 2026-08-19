@@ -16,7 +16,7 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 ## Put Flow
 
-1. **Client submits request via gRPC.** The client sends the key and an IPC handle (64-byte CUDA IPC memory handle + size) in a BatchPopulateRequest. The server opens the IPC handle via `cudaIpcOpenMemHandle`.
+1. **Client submits request via shmq.** The client writes the key and an IPC handle (64-byte CUDA IPC memory handle + size) into the `/dev/shm` mailbox as a Populate op (HandleBatch framing). The server opens the IPC handle via `cudaIpcOpenMemHandle`.
 
 2. **Memory-tier eviction (if needed).** If the memory-tier pool lacks space, the dispatcher evicts entries (chosen by the bound eviction policy) whose write-through has completed. Evicted entries transition from MemoryTier to BlockDevice in the dispatch-map.
 
@@ -26,7 +26,7 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 5. **Dispatch-map registration.** The entry is atomically registered as a MemoryTier entry, acquiring a write reference. The entry is now visible to local lookups AND resolvable when a peer queries its key (served by the RemoteLookupRdmaInitiator push path).
 
-6. **Client receives acknowledgement.** The gRPC response is returned.
+6. **Client receives acknowledgement.** The shmq response is written back to the mailbox channel.
 
 7. **Write reference downgrade.** Downgraded to read reference for the background writer.
 
@@ -45,7 +45,7 @@ Same as `full` profile:
 ## Remote Visibility
 
 Once step 5 completes (dispatch-map registration), the entry is visible to:
-- Local lookups via gRPC
+- Local lookups via shmq
 - Peers that query the key: on receiving a `KeyQuery`, this node resolves the value in its memory-tier and RDMA-writes it out via the RemoteLookupRdmaInitiator
 
 Any entry resolvable in the local memory-tier (whether MemoryTier or promoted from BlockDevice state) can be served to a querying peer. Populate itself does **not** notify peers — discovery is pull-driven by peer queries.

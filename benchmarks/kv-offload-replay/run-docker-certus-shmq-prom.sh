@@ -1,6 +1,6 @@
 #!/bin/bash
 # Certus-SHMQ + Prometheus — same as run-docker-certus-shmq.sh (host
-# certus-shmq-server over SPDK NVMe + /dev/shm mailbox client), but with the
+# certus-server over SPDK NVMe + /dev/shm mailbox client), but with the
 # client's vLLM engine exposing Prometheus metrics on port 8000.
 #
 # The bench drives vLLM through the offline LLM(...) engine (no OpenAI server),
@@ -14,7 +14,7 @@
 # Scrape the client from the host at:  http://localhost:8000/metrics
 #
 # NOTE: these are the CLIENT-side vLLM + KV-offload metrics. The SPDK/SSD-side
-# counters live in the host certus-shmq-server and are NOT in this registry.
+# counters live in the host certus-server and are NOT in this registry.
 #
 #   ./run-docker-certus-shmq-prom.sh
 #   PROM_PORT=9100 DEVICE_PCI="0000:61:00.0" ./run-docker-certus-shmq-prom.sh
@@ -41,7 +41,7 @@ POLLER_BASE_CPU="${POLLER_BASE_CPU:-2}"            # NVMe SPDK pollers -> base+N
 SHMQ_POLLER_CPU="${SHMQ_POLLER_CPU:-6}"            # shm-queue busy-poll core (empty to skip)
 SERVER_WAIT="${SERVER_WAIT:-180}"                  # seconds to wait for "serving"
 NUMA_NODE="${NUMA_NODE:-0}"                         # pin server to the NVMe/hugepage node
-SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/certus-shmq-server}"
+SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/certus-server}"
 LOG="${LOG:-${SCRIPT_DIR}/certus-shmq-prom_$(stamp).log}"
 SERVER_LOG="${SERVER_LOG:-${SCRIPT_DIR}/server-shmq_$(stamp).log}"
 
@@ -55,7 +55,7 @@ WORKLOAD_SRC="${WORKLOAD_SRC:-${REPO_ROOT}/certus-shmq-connector/run_multiturn_s
 
 [[ -x "$SERVER_BIN" ]] || {
   echo "error: server binary not built at ${SERVER_BIN}" >&2
-  echo "       build it: cargo build --release -p certus-shmq-server" >&2
+  echo "       build it: cargo build --release -p certus-server" >&2
   exit 1
 }
 require_image "$IMAGE" --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT"

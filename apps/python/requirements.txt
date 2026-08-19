@@ -1,3 +1,12 @@
-grpcio>=1.60.0
-grpcio-tools>=1.60.0
-protobuf>=4.25.0
+# These benchmark/test scripts talk to certus-server over its /dev/shm mailbox
+# (shmq), not gRPC. The wire client is the pure-Python Ring in
+# ../../certus-shmq-connector/certus_shmq_connector/ring.py, located at runtime
+# via certus_shmq_helpers.py (a sys.path insert) — it is NOT pip-installed here,
+# so its heavy vLLM/torch runtime deps are not pulled in just to run a bench.
+#
+# ring.py itself is dependency-light (stdlib struct/mmap/ctypes only), so there
+# are no required third-party packages for the shmq transport. torch is needed
+# only by the scripts that allocate real GPU buffers; install it separately for
+# your CUDA version:
+#
+#   pip install torch

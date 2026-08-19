@@ -5,7 +5,7 @@ chat workload.
 
 By default this uses vLLM's built-in OffloadingConnector + CPUOffloadingSpec
 (host-RAM offload tier, no tracing) — the clean baseline for comparing against
-the Certus gRPC backend, which also uses the plain OffloadingConnector. Set
+the Certus shmq backend, which also uses the plain OffloadingConnector. Set
 TRACE_OFFLOAD=1 to swap in the local Tracing* wrappers, which additionally
 record per-op offload traces (offloading_mgr_<pid>.jsonl etc.) at some overhead.
 
@@ -17,7 +17,7 @@ vLLM's own output is what makes prefix tokens match exactly turn-to-turn so
 the offload cache sees real read-path traffic), and the k'th human turn.
 
 Defaults to the 450-conversation / 12-turn ShareGPT dataset shared with the
-gRPC connector (../../certus-connector/sharegpt_12turn_450.json).
+Certus connector (../../data/sharegpt_12turn_450.json).
 
 Configurable via env vars:
     DATASET_PATH   override ShareGPT-format json       (default 450x12 dataset)
@@ -51,10 +51,10 @@ if __name__ == "__main__":
         sys.path.insert(0, _here)
 
     # Default to the 450-conversation / 12-turn ShareGPT workload shared with
-    # the gRPC connector (certus-connector/sharegpt_12turn_450.json). Override
+    # the Certus connector (data/sharegpt_12turn_450.json). Override
     # with DATASET_PATH to point at a different ShareGPT-format json.
     DEFAULT_DATASET = os.path.join(
-        _here, "..", "..", "certus-connector", "sharegpt_12turn_450.json"
+        _here, "..", "..", "data", "sharegpt_12turn_450.json"
     )
     SUBSET_PATH = os.environ.get("DATASET_PATH", DEFAULT_DATASET)
     if not os.path.exists(SUBSET_PATH):
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     # ── Init vLLM with the CPU-offload connector ──────────────────────────
     # Default is vLLM's built-in OffloadingConnector + CPUOffloadingSpec (no
     # tracing) — this is the clean baseline for comparing against the Certus
-    # gRPC backend, which also uses the plain OffloadingConnector. Set
+    # shmq backend, which also uses the plain OffloadingConnector. Set
     # TRACE_OFFLOAD=1 to instead use the local Tracing* wrappers, which record
     # per-op offload traces (offloading_mgr_<pid>.jsonl etc.) at some overhead.
     if DISK_DIR:

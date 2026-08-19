@@ -1,8 +1,7 @@
 #!/bin/bash
-# Certus-SHMQ — host certus-shmq-server (SPDK NVMe) + shared-memory client container.
+# Certus-SHMQ — host certus-server (SPDK NVMe) + shared-memory client container.
 #
-# Sibling of run-docker-certus-spdk.sh, but the control transport is a /dev/shm
-# mailbox instead of gRPC. The two consequences:
+# The control transport is a /dev/shm mailbox. The two consequences:
 #   * the server takes --shm-path (NOT --listen); there is no TCP port to poll,
 #     so readiness = the server logging "serving" (it publishes the mailbox last).
 #   * the client container shares the mailbox via --ipc=host (run-bench.sh does
@@ -35,13 +34,13 @@ POLLER_BASE_CPU="${POLLER_BASE_CPU:-2}"            # NVMe SPDK pollers -> base+N
 SHMQ_POLLER_CPU="${SHMQ_POLLER_CPU:-6}"            # shm-queue busy-poll core (empty to skip)
 SERVER_WAIT="${SERVER_WAIT:-180}"                  # seconds to wait for "serving"
 NUMA_NODE="${NUMA_NODE:-0}"                         # pin server to the NVMe/hugepage node
-SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/certus-shmq-server}"
+SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/certus-server}"
 LOG="${LOG:-${SCRIPT_DIR}/certus-shmq_$(stamp).log}"
 SERVER_LOG="${SERVER_LOG:-${SCRIPT_DIR}/server-shmq_$(stamp).log}"
 
 [[ -x "$SERVER_BIN" ]] || {
   echo "error: server binary not built at ${SERVER_BIN}" >&2
-  echo "       build it: cargo build --release -p certus-shmq-server" >&2
+  echo "       build it: cargo build --release -p certus-server" >&2
   exit 1
 }
 require_image "$IMAGE" --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT"

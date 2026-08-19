@@ -6,7 +6,7 @@ V=/mnt/certus1/venv_vllm/bin/python
 common_env() {
   export HF_HOME=/mnt/certus1/hf_cache
   export HF_HUB_OFFLINE=1
-  export DATASET_PATH=$PWD/../../certus-connector/sharegpt_12turn_450.json
+  export DATASET_PATH=$PWD/../../data/sharegpt_12turn_450.json
   export NUM_CONVS=20
   export MAX_MODEL_LEN=8192
   export OUTPUT_TOKENS=150

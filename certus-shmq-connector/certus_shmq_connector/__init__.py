@@ -4,7 +4,7 @@ shared-memory control transport (drop-in alternative to the gRPC connector).
 
 Unlike the in-process ``certus-connector`` (which embeds a PyO3 Rust engine),
 this package is a pure-Python client that talks to a running
-``certus-shmq-server`` over a lock-free ``/dev/shm`` mailbox
+``certus-server`` over a lock-free ``/dev/shm`` mailbox
 (``certus_shmq_connector.ring``). vLLM offloads KV blocks by DMA over CUDA IPC
 handles; the server owns the SPDK/NVMe + DRAM tiers. The ring carries only the
 small control plane — the KV bytes never cross it.

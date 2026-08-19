@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Single-client pipelined benchmark for the Certus gRPC Dispatcher.
+"""Single-client pipelined benchmark for the Certus shmq Dispatcher.
 
-Measures populate, hot lookup, and cold lookup throughput using pipelined
-gRPC futures to saturate the server's GPU PCIe link from a single client.
+Measures populate, hot lookup, and cold lookup throughput. gRPC futures pipelined
+many RPCs down one channel; the shmq ``Ring`` is one-in-flight per channel, so
+pipelining here is a ``ThreadPoolExecutor`` of ``--pipeline-depth`` workers, each
+holding its own channel (the server must expose at least that many --channels).
 
 Usage:
     python certus-bench-single.py --block-size 2M --num-objects 16 --pipeline-depth 4
@@ -15,12 +17,11 @@ import os
 import statistics
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
 
 # --- CUDA helpers ---
 
@@ -84,8 +85,9 @@ def parse_size(s):
 
 # --- Benchmark phases ---
 
-def phase_populate(stub, base_key, num_objects, block_size, batch_size, pipeline_depth, gpu_ptrs, ipc_handles):
-    """Populate objects into the server's memory tier with pipelined RPCs."""
+def phase_populate(ring, base_key, num_objects, block_size, batch_size,
+                   pipeline_depth, gpu_ptrs, ipc_handles, gpu_device):
+    """Populate objects into the server's memory tier, pipelined across threads."""
     total = num_objects
     pattern = bytes(0xAB for _ in range(block_size))
 
@@ -93,127 +95,88 @@ def phase_populate(stub, base_key, num_objects, block_size, batch_size, pipeline
     for ptr in gpu_ptrs[:total]:
         gpu_write(ptr, pattern)
 
+    def do_batch(start, end):
+        entries = [
+            (base_key + i, [single_region(ipc_handles[i], gpu_device, block_size)])
+            for i in range(start, end)
+        ]
+        t0 = time.perf_counter()
+        try:
+            oks = ring.populate(entries)
+            t1 = time.perf_counter()
+            failed = sum(1 for ok in oks if not ok)
+            return (end - start), failed, (t1 - t0) / (end - start)
+        except RingError:
+            return (end - start), (end - start), None
+
     latencies = []
     errors = 0
-    in_flight = []
-    next_to_send = 0
-    completed = 0
-
-    while completed < total:
-        while next_to_send < total and len(in_flight) < pipeline_depth * batch_size:
-            batch_end = min(next_to_send + batch_size, total)
-            entries = []
-            for i in range(next_to_send, batch_end):
-                entries.append(dispatcher_pb2.PopulateEntry(
-                    key=base_key + i,
-                    ipc_handle=dispatcher_pb2.IpcHandle(
-                        cuda_ipc_handle=ipc_handles[i],
-                        size=block_size,
-                    ),
-                ))
-            req = dispatcher_pb2.BatchPopulateRequest(entries=entries)
-            future = stub.Populate.future(req)
-            in_flight.append((batch_end - next_to_send, future, time.perf_counter()))
-            next_to_send = batch_end
-
-        if in_flight:
-            count, future, t0 = in_flight.pop(0)
-            try:
-                resp = future.result()
-                t1 = time.perf_counter()
-                failed = sum(1 for r in resp.results if not r.success)
-                errors += failed
-                latencies.append((t1 - t0) / count)
-            except grpc.RpcError:
-                errors += count
-            completed += count
+    futures = []
+    with ThreadPoolExecutor(max_workers=pipeline_depth) as ex:
+        for start in range(0, total, batch_size):
+            end = min(start + batch_size, total)
+            futures.append(ex.submit(do_batch, start, end))
+        for fut in futures:
+            count, failed, lat = fut.result()
+            errors += failed
+            if lat is not None:
+                latencies.append(lat)
 
     return latencies, errors
 
 
-def phase_hot_lookup(stub, base_key, num_objects, block_size, iterations, pipeline_depth, ipc_handles):
+def _lookup_iterations(ring, key_sets, block_size, pipeline_depth, ipc_handles,
+                       gpu_device):
+    """Run one lookup RPC per key-set, pipelined across ``pipeline_depth`` threads.
+
+    ``key_sets`` is a list of key lists (one per iteration). Each iteration looks
+    up its keys against the (constant) handle buffers and syncs the GPU.
+    """
+    num_objects = len(key_sets[0]) if key_sets else 0
+
+    def do_iter(keys):
+        entries = [
+            (k, [single_region(ipc_handles[i], gpu_device, block_size)])
+            for i, k in enumerate(keys)
+        ]
+        t0 = time.perf_counter()
+        try:
+            oks = ring.lookup(entries)
+            _libcudart.cudaDeviceSynchronize()
+            t1 = time.perf_counter()
+            failed = sum(1 for ok in oks if not ok)
+            return failed, (t1 - t0) / num_objects
+        except RingError:
+            return num_objects, None
+
+    latencies = []
+    errors = 0
+    with ThreadPoolExecutor(max_workers=pipeline_depth) as ex:
+        for failed, lat in ex.map(do_iter, key_sets):
+            errors += failed
+            if lat is not None:
+                latencies.append(lat)
+    return latencies, errors
+
+
+def phase_hot_lookup(ring, base_key, num_objects, block_size, iterations,
+                     pipeline_depth, ipc_handles, gpu_device):
     """Pipelined hot lookups — all objects are in memory tier."""
     keys = [base_key + i for i in range(num_objects)]
-    latencies = []
-    errors = 0
-    in_flight = []
-    next_to_send = 0
-    completed = 0
-
-    while completed < iterations:
-        while next_to_send < iterations and len(in_flight) < pipeline_depth:
-            entries = [
-                dispatcher_pb2.LookupEntry(
-                    key=k,
-                    ipc_handle=dispatcher_pb2.IpcHandle(
-                        cuda_ipc_handle=ipc_handles[i],
-                        size=block_size,
-                    ),
-                )
-                for i, k in enumerate(keys)
-            ]
-            req = dispatcher_pb2.BatchLookupRequest(entries=entries)
-            future = stub.Lookup.future(req)
-            in_flight.append((future, time.perf_counter()))
-            next_to_send += 1
-
-        if in_flight:
-            future, t0 = in_flight.pop(0)
-            try:
-                resp = future.result()
-                _libcudart.cudaDeviceSynchronize()
-                t1 = time.perf_counter()
-                failed = sum(1 for r in resp.results if not r.success)
-                errors += failed
-                latencies.append((t1 - t0) / num_objects)
-            except grpc.RpcError:
-                errors += num_objects
-            completed += 1
-
-    return latencies, errors
+    key_sets = [list(keys) for _ in range(iterations)]
+    return _lookup_iterations(ring, key_sets, block_size, pipeline_depth,
+                              ipc_handles, gpu_device)
 
 
-def phase_cold_lookup(stub, base_key, num_objects, block_size, iterations, pipeline_depth, cold_ipc_handles):
+def phase_cold_lookup(ring, base_key, num_objects, block_size, iterations,
+                      pipeline_depth, cold_ipc_handles, gpu_device):
     """Pipelined cold lookups — objects must be promoted from SSD."""
-    latencies = []
-    errors = 0
-    in_flight = []
-    next_to_send = 0
-    completed = 0
-
-    while completed < iterations:
-        while next_to_send < iterations and len(in_flight) < pipeline_depth:
-            cold_start = next_to_send * num_objects
-            keys = [base_key + cold_start + i for i in range(num_objects)]
-            entries = [
-                dispatcher_pb2.LookupEntry(
-                    key=k,
-                    ipc_handle=dispatcher_pb2.IpcHandle(
-                        cuda_ipc_handle=cold_ipc_handles[i],
-                        size=block_size,
-                    ),
-                )
-                for i, k in enumerate(keys)
-            ]
-            req = dispatcher_pb2.BatchLookupRequest(entries=entries)
-            future = stub.Lookup.future(req)
-            in_flight.append((future, time.perf_counter()))
-            next_to_send += 1
-
-        if in_flight:
-            future, t0 = in_flight.pop(0)
-            try:
-                resp = future.result()
-                _libcudart.cudaDeviceSynchronize()
-                t1 = time.perf_counter()
-                failed = sum(1 for r in resp.results if not r.success)
-                errors += failed
-                latencies.append((t1 - t0) / num_objects)
-            except grpc.RpcError:
-                errors += num_objects
-            completed += 1
-
-    return latencies, errors
+    key_sets = [
+        [base_key + it * num_objects + i for i in range(num_objects)]
+        for it in range(iterations)
+    ]
+    return _lookup_iterations(ring, key_sets, block_size, pipeline_depth,
+                              cold_ipc_handles, gpu_device)
 
 
 def print_phase(label, latencies, num_objects_per_iter, block_size, wall_time):
@@ -238,8 +201,7 @@ def print_phase(label, latencies, num_objects_per_iter, block_size, wall_time):
 def main():
     parser = argparse.ArgumentParser(
         description="Single-client pipelined Certus benchmark")
-    parser.add_argument("--server", default="localhost:50051",
-                        help="Server address (default: localhost:50051)")
+    add_shm_arg(parser)
     parser.add_argument("--block-size", type=parse_size, default=2 * 1024 * 1024,
                         help="Block size (default: 2M)")
     parser.add_argument("--num-objects", type=int, default=16,
@@ -279,7 +241,7 @@ def main():
     print("=" * 70)
     print("Certus Single-Client Benchmark")
     print("=" * 70)
-    print(f"  Server:          {args.server}")
+    print(f"  Server:          {args.shm_path}")
     print(f"  GPU:             {args.gpu}")
     print(f"  Block size:      {block_size // (1024*1024)} MiB")
     print(f"  Objects/batch:   {num_objects}")
@@ -314,21 +276,18 @@ def main():
         cold_handles.append(handle)
 
     # Connect to server
-    channel = grpc.insecure_channel(
-        args.server,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+    ring = connect(args.shm_path)
+    if ring.channel_count < pipeline_depth:
+        print(f"  WARNING: server exposes {ring.channel_count} channels but "
+              f"--pipeline-depth is {pipeline_depth}; extra threads will error. "
+              f"Launch certus-server with --channels >= {pipeline_depth}.")
 
     # --- Phase 1: Populate ---
     print("  Populating...")
     t0 = time.perf_counter()
     pop_latencies, pop_errors = phase_populate(
-        stub, base_key, total_objects, block_size, batch_size,
-        pipeline_depth, populate_ptrs, populate_handles,
+        ring, base_key, total_objects, block_size, batch_size,
+        pipeline_depth, populate_ptrs, populate_handles, args.gpu,
     )
     t_populate = time.perf_counter() - t0
     print(f"    populated {total_objects} objects in {t_populate:.1f}s "
@@ -345,24 +304,21 @@ def main():
     hot_base_key = base_key + total_objects - num_objects
 
     # Warmup
-    entries = [
-        dispatcher_pb2.LookupEntry(
-            key=hot_base_key + i,
-            ipc_handle=dispatcher_pb2.IpcHandle(cuda_ipc_handle=hot_handles[i], size=block_size),
-        )
+    warmup_entries = [
+        (hot_base_key + i, [single_region(hot_handles[i], args.gpu, block_size)])
         for i in range(num_objects)
     ]
     try:
-        stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
+        ring.lookup(warmup_entries)
         _libcudart.cudaDeviceSynchronize()
-    except grpc.RpcError:
+    except RingError:
         pass
 
     print("  Running hot lookups...")
     t0 = time.perf_counter()
     hot_latencies, hot_errors = phase_hot_lookup(
-        stub, hot_base_key, num_objects, block_size, iterations,
-        pipeline_depth, hot_handles,
+        ring, hot_base_key, num_objects, block_size, iterations,
+        pipeline_depth, hot_handles, args.gpu,
     )
     t_hot = time.perf_counter() - t0
 
@@ -370,15 +326,15 @@ def main():
     # Evict memory tier so lookups hit SSD
     print("  Clearing memory tier for cold lookups...")
     try:
-        stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-    except grpc.RpcError as e:
-        print(f"    WARNING: ClearMemoryTier failed: {e.details()}")
+        ring.clear_memory_tier()
+    except RingError as e:
+        print(f"    WARNING: ClearMemoryTier failed: {e}")
 
     print("  Running cold lookups...")
     t0 = time.perf_counter()
     cold_latencies, cold_errors = phase_cold_lookup(
-        stub, base_key, num_objects, block_size, iterations,
-        pipeline_depth, cold_handles,
+        ring, base_key, num_objects, block_size, iterations,
+        pipeline_depth, cold_handles, args.gpu,
     )
     t_cold = time.perf_counter() - t0
 
@@ -415,7 +371,7 @@ def main():
         cuda_free(ptr)
     for ptr in cold_ptrs:
         cuda_free(ptr)
-    channel.close()
+    ring.close()
 
 
 if __name__ == "__main__":

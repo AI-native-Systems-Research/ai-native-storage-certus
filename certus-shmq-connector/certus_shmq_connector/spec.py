@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """CertusShmqOffloadingSpec — vLLM OffloadingSpec talking to a remote
-certus-shmq-server over a shared-memory ring (drop-in for the gRPC spec).
+certus-server over a shared-memory ring (drop-in for the gRPC spec).
 
 Plugs into vLLM's OffloadingConnector via kv_connector_extra_config:
 {
@@ -10,11 +10,9 @@ Plugs into vLLM's OffloadingConnector via kv_connector_extra_config:
     "slab_size_bytes": 131072
 }
 
-Identical role/lifecycle logic to ``CertusGrpcOffloadingSpec``; the only
-transport change is that the process-level singleton is a ``Ring`` attached to
-the ``/dev/shm`` mailbox (keyed by ``shm_path``) instead of a gRPC channel/stub.
-The server owns the hardware; this process only mmaps the ring and shares CUDA
-IPC handles for its KV-cache blocks.
+The process-level singleton is a ``Ring`` attached to the ``/dev/shm`` mailbox
+(keyed by ``shm_path``). The server owns the hardware; this process only mmaps
+the ring and shares CUDA IPC handles for its KV-cache blocks.
 """
 
 from __future__ import annotations
@@ -55,7 +53,7 @@ def _get_or_create_ring(shm_path: str) -> Ring:
 
 
 class CertusShmqOffloadingSpec(OffloadingSpec):
-    """OffloadingSpec backed by a remote certus-shmq-server over shared memory."""
+    """OffloadingSpec backed by a remote certus-server over shared memory."""
 
     def __init__(self, *args):
         # The base ctor signature changed with the 0.26 API rewrite:

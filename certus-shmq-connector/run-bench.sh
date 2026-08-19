@@ -1,6 +1,6 @@
 #!/bin/bash
 # run-bench.sh — launch the certus-shmq-connector workload container against a
-# separately-running certus-shmq-server.
+# separately-running certus-server.
 #
 # Thin wrapper over `podman run` that wires the flags this workload needs:
 #   * GPU passthrough  (--device nvidia.com/gpu=$GPU via CDI)
@@ -91,10 +91,10 @@ fi
 # would just spin until WAIT_SECS. Fail fast with a clear message instead.
 if [[ ! -e "${SHM_PATH}" ]]; then
     cat >&2 <<EOF
-error: mailbox file '${SHM_PATH}' not present on the host — is certus-shmq-server
+error: mailbox file '${SHM_PATH}' not present on the host — is certus-server
        running with --shm-path ${SHM_PATH}? Start it first:
 
-         target/release/certus-shmq-server --device-pci <bdf> \\
+         target/release/certus-server --device-pci <bdf> \\
            --memory-tier-size <N>G --shm-path ${SHM_PATH} --format
 EOF
     exit 1

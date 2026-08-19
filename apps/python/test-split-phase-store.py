@@ -11,8 +11,11 @@ AbortStore cancellation path. Verifies:
   6. Double-commit is rejected (AlreadyExists or KeyNotFound)
   7. CommitStore without prior Reserve is rejected (KeyNotFound)
 
+Talks to certus-server over the /dev/shm shmq mailbox (the Ring client);
+the old gRPC Dispatcher transport has been removed.
+
 Usage:
-    python test-split-phase-store.py --server localhost:50051 --block-size 64K --num-objects 8
+    python test-split-phase-store.py --shm-path /dev/shm/certus-shmq --block-size 64K --num-objects 8
 """
 
 import argparse
@@ -23,9 +26,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
+from certus_shmq_connector.ring import REASON_DEMOTED, REASON_REMOVED
 
 # --- CUDA helpers ---
 
@@ -92,23 +94,21 @@ def parse_size(s):
 
 # --- Test helpers ---
 
-def check_exists(stub, keys):
-    resp = stub.Check(dispatcher_pb2.BatchCheckRequest(keys=keys))
-    return {r.key: r.exists for r in resp.results}
+def check_exists(ring, keys):
+    oks = ring.check(keys)
+    return {k: ok for k, ok in zip(keys, oks)}
 
 
-def assert_all_success(resp, op_name):
-    for r in resp.results:
-        if not r.success:
-            raise AssertionError(
-                f"{op_name} failed for key={r.key}: {r.error_message}"
-            )
+def assert_all_success(oks, keys, op_name):
+    for key, ok in zip(keys, oks):
+        if not ok:
+            raise AssertionError(f"{op_name} failed for key={key}")
 
 
-def assert_result_error(resp, key, expected_code, op_name):
-    for r in resp.results:
-        if r.key == key:
-            if r.success:
+def assert_result_error(oks, keys, key, expected_code, op_name):
+    for k, ok in zip(keys, oks):
+        if k == key:
+            if ok:
                 raise AssertionError(
                     f"{op_name} key={key}: expected error {expected_code}, got success"
                 )
@@ -118,7 +118,7 @@ def assert_result_error(resp, key, expected_code, op_name):
 
 # --- Tests ---
 
-def test_happy_path(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles):
+def test_happy_path(ring, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles, gpu):
     """Reserve → CopyToStore → CommitStore → Lookup with integrity check."""
     print("\n  [TEST] Happy path: Reserve → CopyToStore → CommitStore → Lookup")
 
@@ -130,16 +130,13 @@ def test_happy_path(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, 
         gpu_write(pop_ptrs[i], pattern)
 
     # Step 1: Reserve
-    entries = [
-        dispatcher_pb2.ReserveEntry(key=k, size=block_size)
-        for k in keys
-    ]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve")
+    entries = [(k, block_size, 0) for k in keys]
+    oks = ring.reserve(entries)
+    assert_all_success(oks, keys, "Reserve")
     print("    Reserve:     OK")
 
     # Step 2: Verify NOT visible yet
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if exists.get(k, False):
             raise AssertionError(f"Key {k} visible after Reserve (should not be)")
@@ -147,33 +144,27 @@ def test_happy_path(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, 
 
     # Step 3: CopyToStore
     copy_entries = [
-        dispatcher_pb2.CopyToStoreEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=pop_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(pop_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=copy_entries))
-    assert_all_success(resp, "CopyToStore")
+    oks = ring.copy_to_store(copy_entries)
+    assert_all_success(oks, keys, "CopyToStore")
     print("    CopyToStore: OK")
 
     # Step 4: Still NOT visible (DMA done, but not committed)
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if exists.get(k, False):
             raise AssertionError(f"Key {k} visible after CopyToStore (should not be)")
     print("    Still hidden: OK (not committed yet)")
 
     # Step 5: CommitStore
-    resp = stub.CommitStore(dispatcher_pb2.BatchCommitStoreRequest(keys=keys))
-    assert_all_success(resp, "CommitStore")
+    oks = ring.commit_store(keys)
+    assert_all_success(oks, keys, "CommitStore")
     print("    CommitStore: OK")
 
     # Step 6: Now visible
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} not visible after CommitStore")
@@ -181,18 +172,12 @@ def test_happy_path(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, 
 
     # Step 7: Lookup and verify data integrity
     lookup_entries = [
-        dispatcher_pb2.LookupEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=lookup_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(lookup_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lookup_entries))
+    oks = ring.lookup(lookup_entries)
     _libcudart.cudaDeviceSynchronize()
-    assert_all_success(resp, "Lookup")
+    assert_all_success(oks, keys, "Lookup")
 
     integrity_ok = True
     for i, k in enumerate(keys):
@@ -210,11 +195,11 @@ def test_happy_path(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, 
         raise AssertionError("Data integrity check failed")
 
     # Cleanup
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:     OK")
 
 
-def test_abort_path(stub, keys, block_size, pop_ptrs, pop_handles):
+def test_abort_path(ring, keys, block_size, pop_ptrs, pop_handles, gpu):
     """Reserve → AbortStore → verify entry never becomes visible."""
     print("\n  [TEST] Abort path: Reserve → AbortStore → verify invisible")
 
@@ -223,96 +208,84 @@ def test_abort_path(stub, keys, block_size, pop_ptrs, pop_handles):
         gpu_write(pop_ptrs[i], make_pattern(key, block_size))
 
     # Reserve
-    entries = [
-        dispatcher_pb2.ReserveEntry(key=k, size=block_size)
-        for k in keys
-    ]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve")
+    entries = [(k, block_size, 0) for k in keys]
+    oks = ring.reserve(entries)
+    assert_all_success(oks, keys, "Reserve")
     print("    Reserve:     OK")
 
     # CopyToStore (data in DRAM but not committed)
     copy_entries = [
-        dispatcher_pb2.CopyToStoreEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=pop_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(pop_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=copy_entries))
-    assert_all_success(resp, "CopyToStore")
+    oks = ring.copy_to_store(copy_entries)
+    assert_all_success(oks, keys, "CopyToStore")
     print("    CopyToStore: OK")
 
     # Abort instead of commit
-    resp = stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=keys))
-    assert_all_success(resp, "AbortStore")
+    oks = ring.abort_store(keys)
+    assert_all_success(oks, keys, "AbortStore")
     print("    AbortStore:  OK")
 
     # Verify NOT visible
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if exists.get(k, False):
             raise AssertionError(f"Key {k} visible after AbortStore (should not be)")
     print("    Invisible:   OK (entries correctly discarded)")
 
 
-def test_abort_without_copy(stub, keys, block_size):
+def test_abort_without_copy(ring, keys, block_size):
     """Reserve → AbortStore (skip CopyToStore) → verify invisible."""
     print("\n  [TEST] Abort without copy: Reserve → AbortStore (no DMA)")
 
-    entries = [
-        dispatcher_pb2.ReserveEntry(key=k, size=block_size)
-        for k in keys
-    ]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve")
+    entries = [(k, block_size, 0) for k in keys]
+    oks = ring.reserve(entries)
+    assert_all_success(oks, keys, "Reserve")
     print("    Reserve:     OK")
 
-    resp = stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=keys))
-    assert_all_success(resp, "AbortStore")
+    oks = ring.abort_store(keys)
+    assert_all_success(oks, keys, "AbortStore")
     print("    AbortStore:  OK")
 
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if exists.get(k, False):
             raise AssertionError(f"Key {k} visible after AbortStore")
     print("    Invisible:   OK")
 
 
-def test_commit_without_reserve(stub, block_size):
+def test_commit_without_reserve(ring, block_size):
     """CommitStore without prior Reserve should fail with KeyNotFound."""
     print("\n  [TEST] CommitStore without Reserve → expect KeyNotFound")
 
     bogus_key = 0xDEAD_BEEF_0001
-    resp = stub.CommitStore(dispatcher_pb2.BatchCommitStoreRequest(keys=[bogus_key]))
-    assert_result_error(resp, bogus_key, "KEY_NOT_FOUND", "CommitStore")
+    oks = ring.commit_store([bogus_key])
+    assert_result_error(oks, [bogus_key], bogus_key, "KEY_NOT_FOUND", "CommitStore")
     print("    CommitStore: correctly rejected (KeyNotFound)")
 
 
-def test_double_reserve(stub, block_size):
+def test_double_reserve(ring, block_size):
     """Reserve same key twice → second should fail with AlreadyExists."""
     print("\n  [TEST] Double Reserve → expect AlreadyExists")
 
     key = 0xDEAD_BEEF_0002
-    entry = [dispatcher_pb2.ReserveEntry(key=key, size=block_size)]
+    entry = [(key, block_size, 0)]
 
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entry))
-    assert_all_success(resp, "Reserve (first)")
+    oks = ring.reserve(entry)
+    assert_all_success(oks, [key], "Reserve (first)")
     print("    First Reserve:  OK")
 
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entry))
-    assert_result_error(resp, key, "ALREADY_EXISTS", "Reserve (second)")
+    oks = ring.reserve(entry)
+    assert_result_error(oks, [key], key, "ALREADY_EXISTS", "Reserve (second)")
     print("    Second Reserve: correctly rejected (AlreadyExists)")
 
     # Cleanup
-    stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=[key]))
+    ring.abort_store([key])
     print("    Cleanup:        OK")
 
 
-def test_reserve_after_abort_reuse(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles):
+def test_reserve_after_abort_reuse(ring, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles, gpu):
     """Reserve → Abort → Reserve again → full lifecycle (slot reuse)."""
     print("\n  [TEST] Slot reuse: Reserve → Abort → Reserve → CopyToStore → Commit")
 
@@ -320,53 +293,41 @@ def test_reserve_after_abort_reuse(stub, keys, block_size, pop_ptrs, pop_handles
         gpu_write(pop_ptrs[i], make_pattern(key, block_size))
 
     # First reserve + abort
-    entries = [dispatcher_pb2.ReserveEntry(key=k, size=block_size) for k in keys]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve (first)")
-    resp = stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=keys))
-    assert_all_success(resp, "AbortStore")
+    entries = [(k, block_size, 0) for k in keys]
+    oks = ring.reserve(entries)
+    assert_all_success(oks, keys, "Reserve (first)")
+    oks = ring.abort_store(keys)
+    assert_all_success(oks, keys, "AbortStore")
     print("    Reserve+Abort:  OK")
 
     # Second reserve + full lifecycle
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve (second)")
+    oks = ring.reserve(entries)
+    assert_all_success(oks, keys, "Reserve (second)")
 
     copy_entries = [
-        dispatcher_pb2.CopyToStoreEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=pop_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(pop_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=copy_entries))
-    assert_all_success(resp, "CopyToStore")
+    oks = ring.copy_to_store(copy_entries)
+    assert_all_success(oks, keys, "CopyToStore")
 
-    resp = stub.CommitStore(dispatcher_pb2.BatchCommitStoreRequest(keys=keys))
-    assert_all_success(resp, "CommitStore")
+    oks = ring.commit_store(keys)
+    assert_all_success(oks, keys, "CommitStore")
     print("    Re-Reserve+Commit: OK")
 
     # Verify visible + integrity
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} not visible after re-reserve+commit")
 
     lookup_entries = [
-        dispatcher_pb2.LookupEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=lookup_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(lookup_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lookup_entries))
+    oks = ring.lookup(lookup_entries)
     _libcudart.cudaDeviceSynchronize()
-    assert_all_success(resp, "Lookup")
+    assert_all_success(oks, keys, "Lookup")
 
     for i, k in enumerate(keys):
         actual = gpu_read(lookup_ptrs[i], block_size)
@@ -376,11 +337,11 @@ def test_reserve_after_abort_reuse(stub, keys, block_size, pop_ptrs, pop_handles
     print("    Integrity:      OK")
 
     # Cleanup
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:        OK")
 
 
-def test_pin_unpin(stub, keys, block_size, pop_ptrs, pop_handles):
+def test_pin_unpin(ring, keys, block_size, pop_ptrs, pop_handles, gpu):
     """Populate → Pin → verify pinned key cannot be evicted → Unpin → cleanup."""
     print("\n  [TEST] Pin/Unpin: Populate → Pin → Unpin → Remove")
 
@@ -389,62 +350,56 @@ def test_pin_unpin(stub, keys, block_size, pop_ptrs, pop_handles):
         gpu_write(pop_ptrs[i], make_pattern(key, block_size))
 
     pop_entries = [
-        dispatcher_pb2.PopulateEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=pop_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(pop_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=pop_entries))
-    assert_all_success(resp, "Populate")
+    oks = ring.populate(pop_entries)
+    assert_all_success(oks, keys, "Populate")
     print("    Populate:  OK")
 
     # Pin all keys
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
-    assert_all_success(resp, "Pin")
+    oks = ring.pin(keys)
+    assert_all_success(oks, keys, "Pin")
     print("    Pin:       OK")
 
     # Verify keys still exist (pinning should not remove them)
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} disappeared after Pin")
     print("    Still exists: OK")
 
     # Unpin all keys
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    assert_all_success(resp, "Unpin")
+    oks = ring.unpin(keys)
+    assert_all_success(oks, keys, "Unpin")
     print("    Unpin:     OK")
 
     # Cleanup
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:   OK")
 
 
-def test_unpin_without_pin(stub, block_size):
+def test_unpin_without_pin(ring, block_size):
     """Unpin a key that was never pinned → should fail with KeyNotFound."""
     print("\n  [TEST] Unpin without Pin → expect error")
 
     bogus_key = 0xDEAD_BEEF_0010
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=[bogus_key]))
-    assert_result_error(resp, bogus_key, "KEY_NOT_FOUND", "Unpin")
+    oks = ring.unpin([bogus_key])
+    assert_result_error(oks, [bogus_key], bogus_key, "KEY_NOT_FOUND", "Unpin")
     print("    Unpin:     correctly rejected (KeyNotFound)")
 
 
-def test_pin_nonexistent(stub, block_size):
+def test_pin_nonexistent(ring, block_size):
     """Pin a key that doesn't exist → should fail with KeyNotFound."""
     print("\n  [TEST] Pin nonexistent key → expect error")
 
     bogus_key = 0xDEAD_BEEF_0011
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=[bogus_key]))
-    assert_result_error(resp, bogus_key, "KEY_NOT_FOUND", "Pin")
+    oks = ring.pin([bogus_key])
+    assert_result_error(oks, [bogus_key], bogus_key, "KEY_NOT_FOUND", "Pin")
     print("    Pin:       correctly rejected (KeyNotFound)")
 
 
-def test_pin_double_pin_unpin(stub, keys, block_size, pop_ptrs, pop_handles):
+def test_pin_double_pin_unpin(ring, keys, block_size, pop_ptrs, pop_handles, gpu):
     """Pin twice → Unpin once → entry still pinned → Unpin again → fully unpinned."""
     print("\n  [TEST] Double Pin: Pin×2 → Unpin×1 (still pinned) → Unpin×1 → Remove")
 
@@ -453,49 +408,43 @@ def test_pin_double_pin_unpin(stub, keys, block_size, pop_ptrs, pop_handles):
         gpu_write(pop_ptrs[i], make_pattern(key, block_size))
 
     pop_entries = [
-        dispatcher_pb2.PopulateEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=pop_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(pop_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=pop_entries))
-    assert_all_success(resp, "Populate")
+    oks = ring.populate(pop_entries)
+    assert_all_success(oks, keys, "Populate")
     print("    Populate:    OK")
 
     # Pin twice (refcount should go to 2)
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
-    assert_all_success(resp, "Pin (first)")
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
-    assert_all_success(resp, "Pin (second)")
+    oks = ring.pin(keys)
+    assert_all_success(oks, keys, "Pin (first)")
+    oks = ring.pin(keys)
+    assert_all_success(oks, keys, "Pin (second)")
     print("    Pin×2:       OK (refcount=2)")
 
     # Unpin once (refcount drops to 1, still pinned)
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    assert_all_success(resp, "Unpin (first)")
+    oks = ring.unpin(keys)
+    assert_all_success(oks, keys, "Unpin (first)")
     print("    Unpin×1:     OK (refcount=1)")
 
     # Entries should still exist
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} disappeared while still pinned (refcount=1)")
     print("    Still exists: OK")
 
     # Unpin again (refcount drops to 0, fully unpinned)
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    assert_all_success(resp, "Unpin (second)")
+    oks = ring.unpin(keys)
+    assert_all_success(oks, keys, "Unpin (second)")
     print("    Unpin×2:     OK (refcount=0)")
 
     # Cleanup
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:     OK")
 
 
-def test_pin_lookup_while_pinned(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles):
+def test_pin_lookup_while_pinned(ring, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles, gpu):
     """Populate → Pin → Lookup (data still accessible) → Unpin → Remove."""
     print("\n  [TEST] Lookup while pinned: Populate → Pin → Lookup → Unpin → Remove")
 
@@ -507,38 +456,26 @@ def test_pin_lookup_while_pinned(stub, keys, block_size, pop_ptrs, pop_handles, 
         gpu_write(pop_ptrs[i], pattern)
 
     pop_entries = [
-        dispatcher_pb2.PopulateEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=pop_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(pop_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=pop_entries))
-    assert_all_success(resp, "Populate")
+    oks = ring.populate(pop_entries)
+    assert_all_success(oks, keys, "Populate")
     print("    Populate:  OK")
 
     # Pin
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
-    assert_all_success(resp, "Pin")
+    oks = ring.pin(keys)
+    assert_all_success(oks, keys, "Pin")
     print("    Pin:       OK")
 
     # Lookup while pinned — should work and return correct data
     lookup_entries = [
-        dispatcher_pb2.LookupEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=lookup_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(lookup_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lookup_entries))
+    oks = ring.lookup(lookup_entries)
     _libcudart.cudaDeviceSynchronize()
-    assert_all_success(resp, "Lookup")
+    assert_all_success(oks, keys, "Lookup")
 
     for i, k in enumerate(keys):
         actual = gpu_read(lookup_ptrs[i], block_size)
@@ -552,16 +489,16 @@ def test_pin_lookup_while_pinned(stub, keys, block_size, pop_ptrs, pop_handles, 
     print(f"    Lookup:    OK ({len(keys)} objects verified while pinned)")
 
     # Unpin
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    assert_all_success(resp, "Unpin")
+    oks = ring.unpin(keys)
+    assert_all_success(oks, keys, "Unpin")
     print("    Unpin:     OK")
 
     # Cleanup
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:   OK")
 
 
-def test_unpin_underflow(stub, keys, block_size, pop_ptrs, pop_handles):
+def test_unpin_underflow(ring, keys, block_size, pop_ptrs, pop_handles, gpu):
     """Populate → Pin → Unpin → Unpin again → expect error (refcount underflow)."""
     print("\n  [TEST] Unpin underflow: Pin×1 → Unpin×2 → expect error on second")
 
@@ -570,44 +507,38 @@ def test_unpin_underflow(stub, keys, block_size, pop_ptrs, pop_handles):
         gpu_write(pop_ptrs[i], make_pattern(key, block_size))
 
     pop_entries = [
-        dispatcher_pb2.PopulateEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=pop_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(pop_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=pop_entries))
-    assert_all_success(resp, "Populate")
+    oks = ring.populate(pop_entries)
+    assert_all_success(oks, keys, "Populate")
     print("    Populate:  OK")
 
     # Pin once
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
-    assert_all_success(resp, "Pin")
+    oks = ring.pin(keys)
+    assert_all_success(oks, keys, "Pin")
     print("    Pin:       OK")
 
     # Unpin once (valid — returns to 0)
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    assert_all_success(resp, "Unpin (first)")
+    oks = ring.unpin(keys)
+    assert_all_success(oks, keys, "Unpin (first)")
     print("    Unpin×1:   OK")
 
     # Unpin again — should fail (refcount already 0)
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    for r in resp.results:
-        if r.success:
+    oks = ring.unpin(keys)
+    for k, ok in zip(keys, oks):
+        if ok:
             raise AssertionError(
-                f"Unpin key={r.key} succeeded when refcount should be 0 (expected error)"
+                f"Unpin key={k} succeeded when refcount should be 0 (expected error)"
             )
     print("    Unpin×2:   correctly rejected (underflow)")
 
     # Cleanup
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:   OK")
 
 
-def test_pin_with_split_phase_store(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles):
+def test_pin_with_split_phase_store(ring, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles, gpu):
     """Reserve → CopyToStore → CommitStore → Pin → Lookup → Unpin → Remove.
 
     Verifies Pin/Unpin works with entries created via the split-phase store path.
@@ -622,51 +553,36 @@ def test_pin_with_split_phase_store(stub, keys, block_size, pop_ptrs, pop_handle
         gpu_write(pop_ptrs[i], pattern)
 
     # Reserve
-    entries = [
-        dispatcher_pb2.ReserveEntry(key=k, size=block_size)
-        for k in keys
-    ]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve")
+    entries = [(k, block_size, 0) for k in keys]
+    oks = ring.reserve(entries)
+    assert_all_success(oks, keys, "Reserve")
 
     # CopyToStore
     copy_entries = [
-        dispatcher_pb2.CopyToStoreEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=pop_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(pop_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=copy_entries))
-    assert_all_success(resp, "CopyToStore")
+    oks = ring.copy_to_store(copy_entries)
+    assert_all_success(oks, keys, "CopyToStore")
 
     # CommitStore
-    resp = stub.CommitStore(dispatcher_pb2.BatchCommitStoreRequest(keys=keys))
-    assert_all_success(resp, "CommitStore")
+    oks = ring.commit_store(keys)
+    assert_all_success(oks, keys, "CommitStore")
     print("    Split-phase store: OK")
 
     # Pin the committed entries
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
-    assert_all_success(resp, "Pin")
+    oks = ring.pin(keys)
+    assert_all_success(oks, keys, "Pin")
     print("    Pin:       OK")
 
     # Lookup while pinned — verify data integrity
     lookup_entries = [
-        dispatcher_pb2.LookupEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=lookup_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(lookup_handles[i], gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lookup_entries))
+    oks = ring.lookup(lookup_entries)
     _libcudart.cudaDeviceSynchronize()
-    assert_all_success(resp, "Lookup")
+    assert_all_success(oks, keys, "Lookup")
 
     for i, k in enumerate(keys):
         actual = gpu_read(lookup_ptrs[i], block_size)
@@ -675,30 +591,30 @@ def test_pin_with_split_phase_store(stub, keys, block_size, pop_ptrs, pop_handle
     print(f"    Integrity: OK ({len(keys)} objects)")
 
     # Unpin
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    assert_all_success(resp, "Unpin")
+    oks = ring.unpin(keys)
+    assert_all_success(oks, keys, "Unpin")
     print("    Unpin:     OK")
 
     # Cleanup
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:   OK")
 
 
-def test_take_events_empty(stub):
+def test_take_events_empty(ring):
     """TakeEvents on an empty queue returns zero events."""
     print("  [take_events_empty]")
-    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
-    assert len(resp.events) == 0, f"Expected 0 events, got {len(resp.events)}"
-    assert resp.dropped_count == 0, f"Expected 0 dropped, got {resp.dropped_count}"
+    events, dropped = ring.take_events(max_events=0)
+    assert len(events) == 0, f"Expected 0 events, got {len(events)}"
+    assert dropped == 0, f"Expected 0 dropped, got {dropped}"
     print("    Empty drain: OK")
 
 
-def test_take_events_after_eviction(stub, block_size, pop_ptrs, pop_handles):
+def test_take_events_after_eviction(ring, block_size, pop_ptrs, pop_handles, gpu):
     """Fill memory-tier to trigger eviction, then drain events."""
     print("  [take_events_after_eviction]")
 
     # Drain any stale events first
-    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    ring.take_events(max_events=0)
 
     # Populate many entries to force eviction (memory-tier is 256 MiB).
     # Use large objects to fill faster.
@@ -717,50 +633,44 @@ def test_take_events_after_eviction(stub, block_size, pop_ptrs, pop_handles):
         entries = []
         for idx, k in enumerate(batch_keys):
             ptr_idx = idx % len(pop_ptrs)
-            entries.append(dispatcher_pb2.PopulateEntry(
-                key=k,
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=pop_handles[ptr_idx],
-                    size=block_size,
-                ),
-            ))
-        resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
-        # Some may fail due to pool full — that's expected
-        for r in resp.results:
-            if not r.success and r.error_code != dispatcher_pb2.ERROR_CODE_ALREADY_EXISTS:
-                pass  # Pool full or other transient errors are fine
+            entries.append(
+                (k, [single_region(pop_handles[ptr_idx], gpu, block_size)])
+            )
+        # Some may fail due to pool full — that's expected (no per-key error
+        # strings over shmq; a False just means that entry was not stored).
+        ring.populate(entries)
 
     # Now drain eviction events
-    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
-    print(f"    Events drained: {len(resp.events)} (dropped: {resp.dropped_count})")
-    assert len(resp.events) > 0 or resp.dropped_count > 0, \
+    events, dropped = ring.take_events(max_events=0)
+    print(f"    Events drained: {len(events)} (dropped: {dropped})")
+    assert len(events) > 0 or dropped > 0, \
         "Expected at least some eviction events after overflowing memory-tier"
 
     # Verify event structure
-    for ev in resp.events:
-        assert ev.key > 0, f"Event key should be > 0, got {ev.key}"
-        assert ev.reason in (
-            dispatcher_pb2.EVICTION_REASON_DEMOTED,
-            dispatcher_pb2.EVICTION_REASON_REMOVED,
-        ), f"Unexpected reason: {ev.reason}"
+    for ev in events:
+        assert ev[0] > 0, f"Event key should be > 0, got {ev[0]}"
+        assert ev[1] in (
+            REASON_DEMOTED,
+            REASON_REMOVED,
+        ), f"Unexpected reason: {ev[1]}"
     print(f"    Event structure: OK")
 
     # Second drain should be empty
-    resp2 = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
-    assert len(resp2.events) == 0, f"Expected 0 events on second drain, got {len(resp2.events)}"
+    events2, _dropped2 = ring.take_events(max_events=0)
+    assert len(events2) == 0, f"Expected 0 events on second drain, got {len(events2)}"
     print(f"    Second drain empty: OK")
 
     # Cleanup
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys_to_populate))
+    ring.remove(keys_to_populate)
     print("    Cleanup: OK")
 
 
-def test_take_events_max_limit(stub, block_size, pop_ptrs, pop_handles):
+def test_take_events_max_limit(ring, block_size, pop_ptrs, pop_handles, gpu):
     """TakeEvents with max_events limit returns at most that many."""
     print("  [take_events_max_limit]")
 
     # Drain stale events
-    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    ring.take_events(max_events=0)
 
     # Populate enough to trigger evictions
     num_entries = (256 * 1024 * 1024) // block_size + 16
@@ -776,28 +686,24 @@ def test_take_events_max_limit(stub, block_size, pop_ptrs, pop_handles):
         entries = []
         for idx, k in enumerate(batch_keys):
             ptr_idx = idx % len(pop_ptrs)
-            entries.append(dispatcher_pb2.PopulateEntry(
-                key=k,
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=pop_handles[ptr_idx],
-                    size=block_size,
-                ),
-            ))
-        stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
+            entries.append(
+                (k, [single_region(pop_handles[ptr_idx], gpu, block_size)])
+            )
+        ring.populate(entries)
 
     # Request only 3 events
-    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=3))
-    if len(resp.events) > 0:
-        assert len(resp.events) <= 3, f"Expected at most 3 events, got {len(resp.events)}"
-        print(f"    max_events=3: got {len(resp.events)} events (OK)")
+    events, _dropped = ring.take_events(max_events=3)
+    if len(events) > 0:
+        assert len(events) <= 3, f"Expected at most 3 events, got {len(events)}"
+        print(f"    max_events=3: got {len(events)} events (OK)")
     else:
         print(f"    max_events=3: no events available (evictions may be pending)")
 
     # Drain remaining
-    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    ring.take_events(max_events=0)
 
     # Cleanup
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys_to_populate))
+    ring.remove(keys_to_populate)
     print("    Cleanup: OK")
 
 
@@ -805,7 +711,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Integration test for split-phase store APIs"
     )
-    parser.add_argument("--server", default="localhost:50051")
+    add_shm_arg(parser)
     parser.add_argument(
         "--block-size", type=parse_size, default=64 * 1024,
         help="Object size (default: 64K)"
@@ -826,7 +732,7 @@ def main():
     print("=" * 60)
     print("Split-Phase Store API Integration Test")
     print("=" * 60)
-    print(f"  Server:      {args.server}")
+    print(f"  Server:      {args.shm_path}")
     print(f"  Block size:  {block_size // 1024} KiB")
     print(f"  Objects:     {num_objects}")
     print(f"  GPU:         {args.gpu}")
@@ -850,57 +756,50 @@ def main():
     ]
 
     # Connect
-    channel = grpc.insecure_channel(
-        args.server,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+    ring = connect(args.shm_path)
 
     passed = 0
     failed = 0
     tests = [
         ("happy_path", lambda: test_happy_path(
-            stub, key_sets[0], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
+            ring, key_sets[0], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles, args.gpu
         )),
         ("abort_path", lambda: test_abort_path(
-            stub, key_sets[1], block_size, pop_ptrs, pop_handles
+            ring, key_sets[1], block_size, pop_ptrs, pop_handles, args.gpu
         )),
         ("abort_without_copy", lambda: test_abort_without_copy(
-            stub, key_sets[2], block_size
+            ring, key_sets[2], block_size
         )),
         ("commit_without_reserve", lambda: test_commit_without_reserve(
-            stub, block_size
+            ring, block_size
         )),
-        ("double_reserve", lambda: test_double_reserve(stub, block_size)),
+        ("double_reserve", lambda: test_double_reserve(ring, block_size)),
         ("slot_reuse", lambda: test_reserve_after_abort_reuse(
-            stub, key_sets[5], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
+            ring, key_sets[5], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles, args.gpu
         )),
         ("pin_unpin", lambda: test_pin_unpin(
-            stub, key_sets[6], block_size, pop_ptrs, pop_handles
+            ring, key_sets[6], block_size, pop_ptrs, pop_handles, args.gpu
         )),
-        ("unpin_without_pin", lambda: test_unpin_without_pin(stub, block_size)),
-        ("pin_nonexistent", lambda: test_pin_nonexistent(stub, block_size)),
+        ("unpin_without_pin", lambda: test_unpin_without_pin(ring, block_size)),
+        ("pin_nonexistent", lambda: test_pin_nonexistent(ring, block_size)),
         ("pin_double_pin_unpin", lambda: test_pin_double_pin_unpin(
-            stub, key_sets[7], block_size, pop_ptrs, pop_handles
+            ring, key_sets[7], block_size, pop_ptrs, pop_handles, args.gpu
         )),
         ("pin_lookup_while_pinned", lambda: test_pin_lookup_while_pinned(
-            stub, key_sets[8], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
+            ring, key_sets[8], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles, args.gpu
         )),
         ("unpin_underflow", lambda: test_unpin_underflow(
-            stub, key_sets[9], block_size, pop_ptrs, pop_handles
+            ring, key_sets[9], block_size, pop_ptrs, pop_handles, args.gpu
         )),
         ("pin_with_split_phase_store", lambda: test_pin_with_split_phase_store(
-            stub, key_sets[10], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
+            ring, key_sets[10], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles, args.gpu
         )),
-        ("take_events_empty", lambda: test_take_events_empty(stub)),
+        ("take_events_empty", lambda: test_take_events_empty(ring)),
         ("take_events_after_eviction", lambda: test_take_events_after_eviction(
-            stub, block_size, pop_ptrs, pop_handles
+            ring, block_size, pop_ptrs, pop_handles, args.gpu
         )),
         ("take_events_max_limit", lambda: test_take_events_max_limit(
-            stub, block_size, pop_ptrs, pop_handles
+            ring, block_size, pop_ptrs, pop_handles, args.gpu
         )),
     ]
 
@@ -909,16 +808,16 @@ def main():
         try:
             test_fn()
             passed += 1
-        except (AssertionError, grpc.RpcError) as e:
+        except (AssertionError, RingError) as e:
             print(f"    FAILED: {e}")
             failed += 1
             # Attempt cleanup on failure
             try:
-                stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=all_keys))
+                ring.abort_store(all_keys)
             except Exception:
                 pass
             try:
-                stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=all_keys))
+                ring.remove(all_keys)
             except Exception:
                 pass
 
@@ -927,7 +826,7 @@ def main():
         cuda_free(ptr)
     for ptr in lookup_ptrs:
         cuda_free(ptr)
-    channel.close()
+    ring.close()
 
     # Summary
     print("\n" + "=" * 60)
