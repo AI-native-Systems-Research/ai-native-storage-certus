@@ -1,9 +1,34 @@
+// Kill any certus-server / iops-benchmark left holding the NVMe vfio group by a
+// prior stage or a previous (possibly crashed) pipeline run, then wait for the
+// device to actually be released. SPDK does not release the vfio group instantly
+// on SIGTERM, and a lingering holder makes spdk_nvme_probe abort the next server
+// with "Device or resource busy". The [c]/[i] bracket trick keeps pgrep/pkill
+// from matching their own command line.
+def freeNvmeDevice() {
+  sh '''
+    pkill -TERM -f "release/[c]ertus-server" || true
+    pkill -TERM -f "[i]ops-benchmark" || true
+    for i in $(seq 1 15); do
+      pgrep -f "release/[c]ertus-server" >/dev/null 2>&1 || break
+      sleep 1
+    done
+    pkill -KILL -f "release/[c]ertus-server" || true
+    pkill -KILL -f "[i]ops-benchmark" || true
+    sleep 3
+  '''
+}
+
 pipeline {
   agent any
   environment {
     LD_LIBRARY_PATH = '${LD_LIBRARYPATH}:/usr/local/lib'
   }
   stages {
+    stage('Reap Stale Processes') {
+      steps {
+        script { freeNvmeDevice() }
+      }
+    }
     stage('Build Server') {
       steps {
           sh 'pwd'
@@ -57,13 +82,13 @@ pipeline {
           def output1 = sh(script: 'cd apps/python && python3 test-promote.py', returnStdout: true).trim()
           echo output1
           if (!output1.contains('PASS')) {
-            sh 'pkill -f certus-server || true'
+            freeNvmeDevice()
             error("test-promote.py did not output PASS")
           }
 
           def output2 = sh(script: 'cd apps/python && python3 test-tier-batch.py', returnStdout: true).trim()
           echo output2
-          sh 'pkill -f certus-server || true'
+          freeNvmeDevice()
           if (!output2.contains('PASS: All tiers returned expected results')) {
             error("test-tier-batch.py did not output expected PASS message")
           }
@@ -73,6 +98,10 @@ pipeline {
     stage('vLLM Connector') {
       steps {
         script {
+          // The Integration Tests stage's certus-server may not have released
+          // the NVMe vfio group yet; free the device before we attach it.
+          freeNvmeDevice()
+
           // certus-server-yaml is not a default member, so this is its first
           // *release* build in the pipeline. Build it up front (blocking) —
           // otherwise the backgrounded launch below races the mailbox wait, and
@@ -92,7 +121,7 @@ pipeline {
           if (sh(script: '[ -e /dev/shm/certus-shmq ]', returnStatus: true) != 0) {
             echo '=== certus-server-yaml did not create the mailbox — server log follows ==='
             sh 'cat /tmp/certus-server-yaml.log || true'
-            sh 'pkill -f certus-server-yaml || true'
+            freeNvmeDevice()
             error('certus-server-yaml failed to start (no /dev/shm/certus-shmq)')
           }
 
@@ -100,8 +129,7 @@ pipeline {
           echo "test-offloading-spec.py exit status: ${status}"
           echo '=== certus-server-yaml log ==='
           sh 'cat /tmp/certus-server-yaml.log || true'
-          sh 'pkill -f certus-server-yaml || true'
-          sh 'sleep 2'
+          freeNvmeDevice()
 
           if (status != 0) {
             error("test-offloading-spec.py failed with exit status ${status}")
