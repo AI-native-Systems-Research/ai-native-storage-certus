@@ -1,5 +1,10 @@
 import os, sys, json, time
 
+_here = os.path.dirname(os.path.abspath(__file__))
+if _here not in sys.path:
+    sys.path.insert(0, _here)
+import multiturn_workload as mw
+
 
 def _pin_to_numa_node():
     """Pin CPUs + memory to one NUMA node (default 0); the GPU stays wherever it
@@ -72,21 +77,14 @@ KV_CONFIG = {
 # all filesystem I/O across the RAID0 members in one place.
 DISK_DEV = os.environ.get("DISK_DEV", "md0")
 DISK_STAT = f"/sys/block/{DISK_DEV}/stat"
-SECTOR = 512
 
 
 def disk_rw_bytes():
     """Return (bytes_read, bytes_written) cumulative for DISK_DEV, or (None, None)."""
-    try:
-        with open(DISK_STAT) as f:
-            fields = f.read().split()
-        return int(fields[2]) * SECTOR, int(fields[6]) * SECTOR
-    except (OSError, IndexError, ValueError):
-        return None, None
+    return mw.disk_rw_bytes(DISK_STAT)
 
 
-def gib(n):
-    return "n/a" if n is None else f"{n / (1024**3):.2f} GiB"
+gib = mw.gib
 
 
 def preflight():
@@ -124,16 +122,7 @@ def main():
 
     t0 = time.perf_counter()
     print(f"[trace] +0.0s loading dataset", file=sys.stderr, flush=True)
-    with open(SUBSET_PATH) as f:
-        all_data = json.load(f)
-    convs = []
-    for entry in all_data:
-        if len(convs) >= NUM_CONVS:
-            break
-        turns = entry.get("conversations", [])
-        human_turns = [t["value"] for t in turns if t.get("from") == "human"]
-        if len(human_turns) >= 2:
-            convs.append(human_turns)
+    convs = mw.load_convs(SUBSET_PATH, NUM_CONVS)
     print(f"[trace] +{time.perf_counter()-t0:.1f}s loaded {len(convs)} conversations", file=sys.stderr, flush=True)
 
     print(f"[trace] +{time.perf_counter()-t0:.1f}s importing vllm", file=sys.stderr, flush=True)
@@ -188,122 +177,57 @@ def main():
         print(f"[trace] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled "
               f"(set DISK_DEV or check mode)", file=sys.stderr, flush=True)
 
-    alive = [True] * len(convs)
-    next_turn = [0] * len(convs)
-    contexts = [""] * len(convs)
-    total_generations = 0
-    rounds_done = 0
     round_io = []  # (round, prompts, read_bytes, write_bytes)
 
     # ── vLLM Prometheus counters (per round) ──────────────────────────────
-    # vLLM registers every metric on the default prometheus_client REGISTRY under
-    # the `vllm:` prefix, updated as the engine steps (present on both the V0 and
-    # V1 engines whenever stat logging is on). Snapshot each counter (samples
-    # named `vllm:*_total`, summed across label sets) at the end of every round
-    # and log the delta; the full per-round series is also dumped to JSON.
-    def prom_counters():
-        # Prefer the V1 offline snapshot: engine counters (prompt/generation
-        # tokens, prefix-cache queries/hits, preemptions) are exposed by
-        # llm.get_metrics() and are NOT on the global prometheus REGISTRY in
-        # offline mode — reading only the REGISTRY (or the log_stats logger) misses
-        # them. Then supplement with the REGISTRY for older (V0) engines, where
-        # get_metrics() is absent, and for connector-registered metrics
-        # (vllm:kv_offload_*) which only ever live on the global registry.
-        # Names differ by source: get_metrics() uses bare names
-        # (vllm:prefix_cache_queries); REGISTRY counter samples carry the _total
-        # suffix — we keep both keys so the delta shows under whichever the
-        # running version populates.
-        vals = {}
-        if not CAPTURE_METRICS:
-            return vals
-        try:
-            for m in llm.get_metrics():
-                if type(m).__name__ != "Counter":
-                    continue
-                name = getattr(m, "name", "")
-                val = getattr(m, "value", None)
-                if name.startswith("vllm:") and isinstance(val, (int, float)):
-                    # Sum across label sets: get_metrics() emits one Counter per
-                    # sample, so labeled metrics (request_success by finish_reason,
-                    # prompt_tokens_by_source, per-engine under TP>1) share a name.
-                    vals[name] = vals.get(name, 0.0) + float(val)
-        except Exception:  # noqa: BLE001 - get_metrics() is V1-only; skip on V0
-            pass
-        try:
-            from prometheus_client import REGISTRY
-            for metric in REGISTRY.collect():
-                if not metric.name.startswith("vllm:"):
-                    continue
-                for s in metric.samples:
-                    if s.name.endswith("_total"):
-                        vals[s.name] = vals.get(s.name, 0.0) + float(s.value)
-        except Exception as e:  # noqa: BLE001
-            print(f"[prom] collect failed: {e}", file=sys.stderr, flush=True)
-        return vals
-
-    prom_prev = prom_counters()
+    # Snapshot each vllm: counter at the end of every round and log the delta;
+    # the full per-round series is also dumped to JSON. prom_counters lives in
+    # multiturn_workload (get_metrics() + REGISTRY branches).
+    prom_prev = [mw.prom_counters(llm, CAPTURE_METRICS)]
     prom_rounds = []  # (round, {counter_name: delta})
+    disk_pre = [None, None]
 
-    t_start = time.perf_counter()
-    print(f"[trace] +{time.perf_counter()-t0:.1f}s entering generate loop", file=sys.stderr, flush=True)
+    def on_round_start(round_idx, n_prompts):
+        print(f"[trace] +{time.perf_counter()-t0:.1f}s calling generate round "
+              f"{round_idx} ({n_prompts} prompts)", file=sys.stderr, flush=True)
+        disk_pre[0], disk_pre[1] = disk_rw_bytes()
 
-    while True:
-        if MAX_ROUNDS and rounds_done >= MAX_ROUNDS:
-            break
-        active_idx = []
-        active_prompts = []
-        for i, conv in enumerate(convs):
-            if not alive[i]:
-                continue
-            k = next_turn[i]
-            if k >= len(conv):
-                alive[i] = False
-                continue
-            human = conv[k]
-            candidate = human if k == 0 else contexts[i] + "\n\n" + human
-            if n_tokens(candidate) > PROMPT_BUDGET:
-                alive[i] = False
-                continue
-            contexts[i] = candidate
-            active_idx.append(i)
-            active_prompts.append(candidate)
-
-        if not active_prompts:
-            break
-
-        rounds_done += 1
-        print(f"[trace] +{time.perf_counter()-t0:.1f}s calling generate round {rounds_done} ({len(active_prompts)} prompts)", file=sys.stderr, flush=True)
-        rd0, wr0 = disk_rw_bytes()
-        round_start = time.perf_counter()
-        outs = llm.generate(active_prompts, sp)
-        round_elapsed = time.perf_counter() - round_start
+    def on_round_end(round_idx, n_prompts, round_elapsed, n_alive):
+        rd0, wr0 = disk_pre
         rd1, wr1 = disk_rw_bytes()
-        for i, out in zip(active_idx, outs):
-            response = out.outputs[0].text if out.outputs else ""
-            contexts[i] = contexts[i] + response
-            next_turn[i] += 1
-        total_generations += len(active_prompts)
-        n_alive = sum(alive)
         # Delta of cumulative counters = bytes moved during this round.
         d_rd = (rd1 - rd0) if (rd0 is not None and rd1 is not None) else None
         d_wr = (wr1 - wr0) if (wr0 is not None and wr1 is not None) else None
-        round_io.append((rounds_done, len(active_prompts), d_rd, d_wr))
-        print(f"[run] round {rounds_done}: {len(active_prompts)} prompts in "
+        round_io.append((round_idx, n_prompts, d_rd, d_wr))
+        print(f"[run] round {round_idx}: {n_prompts} prompts in "
               f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
               f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
               file=sys.stderr, flush=True)
         if CAPTURE_METRICS:
-            prom_now = prom_counters()
-            d_prom = {k: prom_now.get(k, 0.0) - prom_prev.get(k, 0.0)
+            prom_now = mw.prom_counters(llm, CAPTURE_METRICS)
+            d_prom = {k: prom_now.get(k, 0.0) - prom_prev[0].get(k, 0.0)
                       for k in prom_now}
-            prom_prev = prom_now
-            prom_rounds.append((rounds_done, d_prom))
+            prom_prev[0] = prom_now
+            prom_rounds.append((round_idx, d_prom))
             shown = " ".join(f"{k[len('vllm:'):]}={d_prom[k]:.0f}"
                              for k in sorted(d_prom) if d_prom[k])
-            print(f"[prom] round {rounds_done}: {shown or '(no counter movement)'}",
+            print(f"[prom] round {round_idx}: {shown or '(no counter movement)'}",
                   file=sys.stderr, flush=True)
 
-    elapsed = time.perf_counter() - t_start
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s entering generate loop", file=sys.stderr, flush=True)
+    result = mw.run_batched(
+        llm, convs, sp,
+        prompt_budget=PROMPT_BUDGET,
+        max_rounds=MAX_ROUNDS,
+        n_tokens=n_tokens,
+        skip_empty=False,
+        on_round_start=on_round_start,
+        on_round_end=on_round_end,
+    )
+    elapsed = result["elapsed"]
+    rounds_done = result["rounds_done"]
+    total_generations = result["total_generations"]
+
     if CAPTURE_METRICS and prom_rounds:
         try:
             _prom_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
