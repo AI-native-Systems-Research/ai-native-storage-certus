@@ -372,6 +372,23 @@ pub struct Sessions {
     pub think_time: Dist,
     /// Turn-1 path depth below the shared trunk, private to this session.
     pub private_depth: Dist,
+    /// Turn-1 **total** path depth, measured directly instead of summed (FR-054i).
+    ///
+    /// When stated it replaces `shared_depth + private_depth` as turn-1's depth. The two are
+    /// not equivalent: summing two independently drawn marginals loses their **joint**
+    /// distribution, and the loss is not academic — it lets a session draw a total path shorter
+    /// than the shared preamble it walks, which is impossible in a trace where the preamble *is*
+    /// a prefix of every one of that root's requests. Measured, that produced attrition on 27% of
+    /// the generated trunk's shared runs against **zero** in the source trace, fragmenting a
+    /// 124-block preamble into runs of 7.
+    ///
+    /// `fit` measures it from the per-session `(turn-1 path length, realised shared prefix)`
+    /// pairs it already retains, so it is the observed joint rather than a reconstruction.
+    ///
+    /// Optional, and absent means the old sum — which keeps every existing document's stream
+    /// byte-identical, since with `None` nothing is drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn1_path_length: Option<Dist>,
     /// Blocks added by each turn after the first. Drawn per turn.
     ///
     /// Either one distribution, or one **per session-length band** — see [`Growth`].
@@ -582,6 +599,13 @@ pub struct MixEntry {
     /// Overrides `sessions.private_depth`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_depth: Option<Dist>,
+    /// Overrides `sessions.turn1_path_length`.
+    ///
+    /// Per-arm for the same reason `private_depth` is: an arm is a parameter set, and a turn-1
+    /// path length is one of its parameters. Absent falls back to the sessions-level value, which
+    /// may itself be absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn1_path_length: Option<Dist>,
     /// Overrides `sessions.growth_per_turn`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub growth_per_turn: Option<Growth>,

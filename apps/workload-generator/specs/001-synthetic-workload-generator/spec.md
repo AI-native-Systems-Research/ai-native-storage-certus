@@ -2189,6 +2189,25 @@ report segments statistics into before/after windows around the event.
 - **FR-056**: `fit` MUST validate the fitted model by comparing four statistics between the
   real trace and synthetic output: reuse-distance CDF (primary), prefix-sharing depth
   histogram, request-length distribution, and unique-keys-over-time curve.
+- **FR-054i**: Turn-1 path depth MAY be stated as a **measured total** (`sessions.turn1_path_length`)
+  instead of the sum `shared_depth + private_depth`, and where it is, the total MUST take precedence.
+  Summing two independently drawn marginals discards their **joint** distribution, and the loss is
+  structural rather than cosmetic: it lets a session draw a total path **shorter than the shared
+  preamble it walks**, which is impossible in a trace where the preamble *is* a prefix of every one of
+  that root's requests. Measured 2026-08-18, that produced **attrition on 27% of the generated
+  trunk's shared runs against zero in the source trace**, fragmenting a 124-block preamble into runs
+  of 7.
+  It MUST be measured from the per-session `(turn-1 path length, realised shared prefix)` pairs `fit`
+  already retains, so that it is the observed joint rather than a reconstruction, and it MUST be
+  optional — absent meaning the sum — because stating it changes every generated path.
+  **Measured effect, and the limit of it:** the realised root preamble improves from 7 blocks to
+  **44** against the trace's 124, a 6.3x gain, but attrition is **not** eliminated (9 of 25 root
+  segments still chopped) and `unique_keys` worsens from 0.434 to 0.584. So the joint is necessary and
+  not sufficient. The residual is a **correlation**, not a marginal: in a trace, path length is
+  correlated with the root a session binds to — one root is one task family, whose paths comfortably
+  exceed their shared preamble — while the model draws the two independently. That is the same
+  independent-versus-correlated defect as the rest of FR-057c's step 3, and it is the fifth place it
+  has appeared.
 - **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
   measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
   sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first

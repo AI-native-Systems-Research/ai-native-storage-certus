@@ -625,6 +625,7 @@ impl Generator {
         let depth = crate::session::depth_at_turn(
             shared_depth,
             params.private_depth,
+            params.turn1_path_length,
             &params.growth_per_turn,
             1,
             params.max_depth,
@@ -992,6 +993,7 @@ run:
             let stated = depth_at_turn(
                 shared,
                 private,
+                None,
                 &growth,
                 *turn,
                 max_depth,

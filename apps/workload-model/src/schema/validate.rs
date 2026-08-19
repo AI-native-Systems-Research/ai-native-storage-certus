@@ -1517,6 +1517,7 @@ run:
             super::Growth::Uniform(_) => panic!("fixture is banded"),
         };
         d.workload.mix = vec![super::super::MixEntry {
+            turn1_path_length: None,
             weight: 1.0,
             turns: None,
             think_time: None,

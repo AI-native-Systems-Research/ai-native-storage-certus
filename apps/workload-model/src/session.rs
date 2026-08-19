@@ -224,6 +224,10 @@ pub struct SessionParams {
     pub turns: u16,
     /// Turn-1 private path depth.
     pub private_depth: u32,
+    /// Turn-1 total path depth, when the document states one directly.
+    ///
+    /// `Some` replaces `shared_depth + private_depth` in [`depth_at_turn`]; see the schema field.
+    pub turn1_path_length: Option<u32>,
     /// Gap between turns, in seconds.
     pub think_time_s: f64,
     /// Per-turn path growth.
@@ -261,6 +265,12 @@ pub fn draw_params(w: &Workload, st: &mut Stream) -> SessionParams {
         mix_index,
         turns,
         private_depth: priv_d.sample_u64(st).min(u64::from(u32::MAX)) as u32,
+        // Drawn only when stated, so a document without it consumes no stream position and
+        // generates byte-identically to before.
+        turn1_path_length: entry
+            .and_then(|e| e.turn1_path_length.clone())
+            .or_else(|| s.turn1_path_length.clone())
+            .map(|d| d.sample_u64(st).min(u64::from(u32::MAX)) as u32),
         think_time_s: think_d.sample(st).max(0.0),
         // Banding resolved HERE, once, where the turn count is known — so
         // `depth_at_turn` and the incremental advance both still see one `Dist` and
@@ -332,12 +342,16 @@ fn pick_mix<'a>(mix: &'a [MixEntry], st: &mut Stream) -> (u8, Option<&'a MixEntr
 pub fn depth_at_turn(
     shared_depth: u32,
     private_depth: u32,
+    turn1_path_length: Option<u32>,
     growth: &Dist,
     turn: u16,
     max_depth: Option<u32>,
     st: &mut Stream,
 ) -> u32 {
-    let base = shared_depth.saturating_add(private_depth);
+    // A measured turn-1 total wins over the sum of two marginals, because the sum loses their
+    // joint distribution and can put a session's whole path below the preamble it walks. Both
+    // terms are still taken as arguments so FR-014a's formula stays stated exactly once.
+    let base = turn1_path_length.unwrap_or_else(|| shared_depth.saturating_add(private_depth));
     // Never below turn 1's own depth: the cap bounds how far a conversation grows, not
     // how much prefix it starts with.
     let ceiling = max_depth.map(|c| c.max(base)).unwrap_or(u32::MAX);
@@ -395,6 +409,7 @@ mod tests {
                 concurrency: None,
             },
             sessions: Sessions {
+                turn1_path_length: None,
                 max_depth: None,
                 turns: Dist::Shaped(Shape::Geometric { mean: turns_mean }),
                 think_time: Dist::Scalar(think),
@@ -482,8 +497,8 @@ mod tests {
         // FR-014a, and the strict-prefix property the rolling hash requires.
         let g = Dist::Scalar(6.0);
         let mut st = Stream::new(1, 1);
-        let d1 = depth_at_turn(18, 8, &g, 1, None, &mut st.clone());
-        let d6 = depth_at_turn(18, 8, &g, 6, None, &mut st);
+        let d1 = depth_at_turn(18, 8, None, &g, 1, None, &mut st.clone());
+        let d6 = depth_at_turn(18, 8, None, &g, 6, None, &mut st);
         assert_eq!(d1, 26);
         assert_eq!(d6, 26 + 5 * 6, "six turns adds five growth increments");
         assert!(d6 > d1);
@@ -496,15 +511,15 @@ mod tests {
         let g = Dist::Scalar(6.0);
         let cap = Some(40);
         let st = Stream::new(1, 1);
-        assert_eq!(depth_at_turn(18, 8, &g, 1, cap, &mut st.clone()), 26);
-        assert_eq!(depth_at_turn(18, 8, &g, 3, cap, &mut st.clone()), 38);
+        assert_eq!(depth_at_turn(18, 8, None, &g, 1, cap, &mut st.clone()), 26);
+        assert_eq!(depth_at_turn(18, 8, None, &g, 3, cap, &mut st.clone()), 38);
         assert_eq!(
-            depth_at_turn(18, 8, &g, 4, cap, &mut st.clone()),
+            depth_at_turn(18, 8, None, &g, 4, cap, &mut st.clone()),
             40,
             "44 uncapped, so the ceiling binds here"
         );
         assert_eq!(
-            depth_at_turn(18, 8, &g, 20, cap, &mut st.clone()),
+            depth_at_turn(18, 8, None, &g, 20, cap, &mut st.clone()),
             40,
             "and it stays there rather than creeping"
         );
@@ -514,7 +529,7 @@ mod tests {
         // later turn would not extend the earlier one.
         let mut last = 0;
         for turn in 1..=20 {
-            let d = depth_at_turn(18, 8, &g, turn, cap, &mut Stream::new(1, 1));
+            let d = depth_at_turn(18, 8, None, &g, turn, cap, &mut Stream::new(1, 1));
             assert!(d >= last, "turn {turn} shrank from {last} to {d}");
             last = d;
         }
@@ -530,12 +545,12 @@ mod tests {
         let g = Dist::Scalar(6.0);
         let st = Stream::new(1, 1);
         assert_eq!(
-            depth_at_turn(18, 8, &g, 1, Some(5), &mut st.clone()),
+            depth_at_turn(18, 8, None, &g, 1, Some(5), &mut st.clone()),
             26,
             "turn 1 keeps its full shared + private depth"
         );
         assert_eq!(
-            depth_at_turn(18, 8, &g, 9, Some(5), &mut st.clone()),
+            depth_at_turn(18, 8, None, &g, 9, Some(5), &mut st.clone()),
             26,
             "and such a session simply never grows"
         );
@@ -551,8 +566,16 @@ mod tests {
             sigma: 0.5,
         });
         for turn in [1u16, 2, 7, 50] {
-            let uncapped = depth_at_turn(18, 8, &g, turn, None, &mut Stream::new(9, 9));
-            let huge = depth_at_turn(18, 8, &g, turn, Some(u32::MAX), &mut Stream::new(9, 9));
+            let uncapped = depth_at_turn(18, 8, None, &g, turn, None, &mut Stream::new(9, 9));
+            let huge = depth_at_turn(
+                18,
+                8,
+                None,
+                &g,
+                turn,
+                Some(u32::MAX),
+                &mut Stream::new(9, 9),
+            );
             assert_eq!(uncapped, huge, "turn {turn}");
         }
     }
@@ -562,6 +585,7 @@ mod tests {
         let mut w = workload(6.0, 3.0);
         w.mix = vec![
             MixEntry {
+                turn1_path_length: None,
                 weight: 0.0,
                 turns: None,
                 think_time: None,
@@ -569,6 +593,7 @@ mod tests {
                 growth_per_turn: None,
             },
             MixEntry {
+                turn1_path_length: None,
                 weight: 1.0,
                 turns: Some(Dist::Scalar(1.0)),
                 think_time: None,
@@ -588,6 +613,7 @@ mod tests {
         let mut w = workload(6.0, 3.0);
         w.mix = vec![
             MixEntry {
+                turn1_path_length: None,
                 weight: 70.0,
                 turns: None,
                 think_time: None,
@@ -595,6 +621,7 @@ mod tests {
                 growth_per_turn: None,
             },
             MixEntry {
+                turn1_path_length: None,
                 weight: 30.0,
                 turns: Some(Dist::Scalar(1.0)),
                 think_time: None,
@@ -656,6 +683,7 @@ mod tests {
             node: 0,
             root_index: 0,
             params: SessionParams {
+                turn1_path_length: None,
                 max_depth: None,
                 mix_index: 0,
                 turns: 3,

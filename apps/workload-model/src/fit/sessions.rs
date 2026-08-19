@@ -363,6 +363,25 @@ impl SessionShapes {
     ///
     /// Clamped at zero: a session whose attempted sharing exceeds its own path has no
     /// private part, and a negative one is not expressible.
+    /// The measured turn-1 **total** path length (FR-054i).
+    ///
+    /// The same per-session `turn_one` pairs `private_depth_at` differences, but taking the path
+    /// length itself. Emitted only under `CERTUS_EXP_TURN1_PATH=1` while the trunk boundary it
+    /// supports is unadopted: stating it changes every generated path, so it must not ride along
+    /// with an experiment that is off.
+    ///
+    /// `None` when nothing was observed, or when the experiment is off.
+    pub fn turn1_path_length(&self) -> Option<Dist> {
+        if !std::env::var("CERTUS_EXP_TURN1_PATH").is_ok_and(|v| v == "1") {
+            return None;
+        }
+        let mut h = Hist::new();
+        for (path, _) in &self.turn_one {
+            h.add(*path);
+        }
+        empirical_from(&h)
+    }
+
     pub fn private_depth_at(&mut self, scale: f64) -> Option<Dist> {
         self.seal();
         let mut h = Hist::new();
@@ -737,6 +756,7 @@ impl SessionShapes {
             sessions: self.live.len() as u64,
             turns: empirical_from(&self.turns),
             private_depth: self.private_depth_at(1.0),
+            turn1_path_length: self.turn1_path_length(),
             growth_per_turn: self.fit_growth(),
             // Seconds, which is what `think_time` is in (`SessionParams::think_time_s`).
             think_time: empirical_from(&self.think_ms).map(|d| scale(&d, 1.0 / 1000.0)),
@@ -867,6 +887,13 @@ pub struct FittedSessions {
     pub turns: Option<Dist>,
     /// Turn-1 depth beyond the shared prefix.
     pub private_depth: Option<Dist>,
+    /// Turn-1 **total** path depth, measured directly rather than as a sum (FR-054i).
+    ///
+    /// The same `turn_one` pairs `private_depth` is derived from, but taking the path length
+    /// itself instead of its difference from the realised sharing. It exists because the sum
+    /// `shared_depth + private_depth` loses the joint distribution of two correlated quantities,
+    /// and can therefore give a session a total path shorter than the preamble it walks.
+    pub turn1_path_length: Option<Dist>,
     /// Depth increment between consecutive turns.
     pub growth_per_turn: Option<Growth>,
     /// Seconds between consecutive turns of one session; `None` without timestamps.

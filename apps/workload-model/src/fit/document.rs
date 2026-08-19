@@ -444,6 +444,9 @@ pub fn assemble(
                 concurrency: None,
             },
             sessions: Sessions {
+                // The measured joint turn-1 path length (FR-054i). `Some` only under the
+                // experiment toggle, since stating it changes every generated path.
+                turn1_path_length: sessions.turn1_path_length.clone(),
                 turns,
                 think_time,
                 private_depth,
@@ -455,6 +458,7 @@ pub fn assemble(
                 spawn: None,
             },
             mix: vec![MixEntry {
+                turn1_path_length: None,
                 weight: 1.0,
                 turns: None,
                 think_time: None,
