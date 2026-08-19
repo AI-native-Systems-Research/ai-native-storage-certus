@@ -37,7 +37,6 @@ mkdir -p "$DISK_DIR_HOST"
 run_container "$LOG" "$IMAGE" \
   --shm-size "${SHM_BYTES}" \
   -e "CPU_BYTES=${CPU_BYTES}" \
-  -e "ENFORCE_EAGER=${ENFORCE_EAGER:-0}" \
   -e "DISK_DIR=${DISK_DIR_CTR}" \
   -e "DISK_READ_THREADS=${DISK_READ_THREADS}" \
   -e "DISK_WRITE_THREADS=${DISK_WRITE_THREADS}" \
