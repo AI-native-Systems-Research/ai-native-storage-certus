@@ -252,13 +252,17 @@ struct Live {
     /// the trace's do. Computed from a **clone** of the growth stream so the per-turn draws are
     /// untouched, which keeps it exact rather than an estimate.
     final_depth: u32,
-    /// This session's **root's** path level, where the document states one (FR-054k).
+    /// How long a run on this session's root may be: the shortest path among its sessions.
     ///
-    /// Per root, not per session, which is the property that matters: it caps how long a run may be
-    /// without making two sessions at one node disagree about where that run ends. Capping at a
-    /// session's own depth instead was tried and is wrong for exactly that reason — it made run
-    /// length session-dependent, so walkers diverged mid-run and the attrition it was meant to
-    /// remove came straight back.
+    /// Per **root**, not per session, which is the property that matters — it caps a run without
+    /// making two sessions at one node disagree about where that run ends. Capping at a session's own
+    /// depth was tried and is wrong for exactly that reason: run length became session-dependent,
+    /// walkers diverged mid-run, and the attrition it was meant to remove came straight back.
+    ///
+    /// Derived as the `1/(k+1)` quantile — the expected minimum of `k` draws — with `k` the root's
+    /// expected session count. See [`Generator::run_cap_for`].
+    run_cap: Option<u32>,
+    /// This root's own path level, kept so the walk can re-cap as the cohort subdivides.
     root_path_level: Option<u32>,
     /// A **ceiling** on how much of this session's path is shared trunk, drawn at birth.
     ///
@@ -640,6 +644,41 @@ impl Generator {
         out.len()
     }
 
+    /// How long a run may be, given the cohort that will walk it (FR-054k).
+    ///
+    /// `None` unless the document states a `turn1_path_length`; the cap is meaningless without one.
+    ///
+    /// # The derivation
+    ///
+    /// A run is completed by every session on it only if it is no longer than the **shortest** of
+    /// them, and the expected minimum of `k` draws sits at the `1/(k+1)` quantile. `k` is the cohort
+    /// **at that depth**, not the root's whole population: near the root a run must suit every
+    /// session on the root, while at depth 300 the cohort has subdivided to two or three and the
+    /// bound is far weaker. Using the root's count everywhere was measured and capped the trunk
+    /// before depth 512, where the trace has 35 shared segments.
+    ///
+    /// Mixed with the root's own level so the cap inherits FR-054j's between-root correlation rather
+    /// than coming from the population marginal.
+    fn run_cap_for(&self, root_path_level: Option<u32>, cohort: f64) -> Option<u32> {
+        let (d, level) = (self.turn1_path_length.as_ref()?, root_path_level?);
+        let q = 1.0 / (cohort.max(1.0) + 1.0);
+        let low = d.quantile(q).unwrap_or(0.0).clamp(0.0, f64::from(u32::MAX)) as u32;
+        Some(crate::session::mix_root_share(
+            level,
+            low,
+            d.mean().unwrap_or(f64::from(low)),
+            self.turn1_path_root_share,
+        ))
+    }
+
+    /// [`Self::run_cap_for`] against the walk's current cohort, when FR-054k is in force.
+    fn run_cap_at(&self, root_path_level: Option<u32>, cohort: f64) -> Option<u32> {
+        if !run_completion() {
+            return None;
+        }
+        self.run_cap_for(root_path_level, cohort).map(|c| c.max(1))
+    }
+
     /// Whether `keys` more block references fit inside the budget.
     fn can_start(&self, keys: u64) -> bool {
         match self.budget {
@@ -730,6 +769,16 @@ impl Generator {
         // cohort — which is why a session on an unpopular root shares less, as in the
         // trace, without anything having to be told to it.
         let root_cohort = self.sessions_per_window * self.root_rank_p(root_index, roots);
+        // The run-length cap: the SHORTEST path among the sessions that will walk this root
+        // (FR-054k). Derived rather than tuned. A run is only completed by every session on it if it
+        // is no longer than the shortest of them, and the expected minimum of `k` draws sits at the
+        // `1/(k+1)` quantile — with `k` the root's expected session count, which is `root_cohort`,
+        // already computed above from `roots.popularity`.
+        //
+        // Capping at the root's LEVEL instead was measured and is not enough: sessions vary around
+        // the level (eta² of 0.99 still leaves ~11% within-root spread), so about half fall short,
+        // decline the run, and collapse the realised preamble from 88 blocks to 1.
+        let run_cap = self.run_cap_for(root_path_level, root_cohort);
         // The last turn's depth, from a clone so the real growth stream is not advanced.
         let final_depth = crate::session::depth_at_turn(
             shared_depth,
@@ -742,6 +791,7 @@ impl Generator {
         );
         Live {
             final_depth,
+            run_cap,
             root_path_level,
             turn_one_depth: depth,
             s: Session {
@@ -835,8 +885,8 @@ impl Generator {
         // requests walking it would be declined by every one of them, which empties the trunk
         // rather than lengthening it. All sessions on this root share a path level, so the cap is
         // still a property of the node and the trie stays consistent between walkers.
-        let split_cap = match (run_completion(), live.root_path_level) {
-            (true, Some(level)) => level,
+        let split_cap = match (run_completion(), live.run_cap) {
+            (true, Some(cap)) => cap.max(1),
             _ => u32::MAX,
         };
         let mut split = crate::corpus::SplitState::at_root(&self.corpus, cur, split_cap);
@@ -863,6 +913,12 @@ impl Generator {
                     // it returns probability 1.0 inside a run and divides the cohort only at
                     // a real split, which is what makes a long run a shared segment rather
                     // than a slow fanout.
+                    // Re-cap by the cohort actually here, not the root's whole population: a run
+                    // is completed by the sessions still on it, and by depth 300 the cohort has
+                    // subdivided. See `Generator::run_cap_for`.
+                    if let Some(c) = self.run_cap_at(live.root_path_level, cohort) {
+                        split.set_cap(c);
+                    }
                     let (next, p) = self
                         .corpus
                         .trunk_step_stateful(cur, d, &mut split, &mut walk, gen);

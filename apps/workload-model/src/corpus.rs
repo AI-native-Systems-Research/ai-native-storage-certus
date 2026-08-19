@@ -349,6 +349,23 @@ pub struct SplitState {
     path_cap: u32,
 }
 
+impl SplitState {
+    /// Re-cap the runs below this point.
+    ///
+    /// The cap is not fixed for a walk: a run is completed by the sessions **still on it**, and that
+    /// is the cohort at this depth rather than the root's whole population. Near the root a run must
+    /// suit 44 sessions and is bounded by the shortest of 44; at depth 300 the cohort has subdivided
+    /// to two or three and the bound is the shortest of those — a far weaker constraint, which is
+    /// what lets sharing run deep. Measured, using the root's count everywhere capped the trunk
+    /// before depth 512 while the trace has 35 shared segments beyond it.
+    ///
+    /// Still a property of the node: two sessions at one node arrived by the same path, so they
+    /// carry the same cohort estimate and agree on the cap.
+    pub fn set_cap(&mut self, cap: u32) {
+        self.path_cap = cap;
+    }
+}
+
 /// Domain separator for a node's own run-length and out-degree draws.
 const TAG_SEGMENT: u64 = 0x5E67_3E27;
 
