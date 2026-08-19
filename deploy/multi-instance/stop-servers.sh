@@ -42,6 +42,17 @@ else
     log "No running certus-server processes found."
 fi
 
+# --- Remove stale mailbox files ----------------------------------------------
+# certus-server unlinks its mailbox on a clean shutdown, but a SIGKILL (or crash)
+# can leave the file behind in /dev/shm. Remove the mailboxes recorded in the
+# instance map so the next launch starts clean.
+if [[ -f "$INSTANCES_TSV" ]]; then
+    while IFS=$'\t' read -r i bdf node shm_path core; do
+        [[ -n "$shm_path" ]] || continue
+        rm -f "$shm_path"
+    done < "$INSTANCES_TSV"
+fi
+
 # --- Tear down tmux session --------------------------------------------------
 if tmux has-session -t "$SESSION" 2>/dev/null; then
     log "Killing tmux session '$SESSION'"

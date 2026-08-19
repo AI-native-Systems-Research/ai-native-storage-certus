@@ -1,5 +1,5 @@
 #!/bin/bash
-# Client-side entrypoint: wait for the external certus-shmq-server to publish its
+# Client-side entrypoint: wait for the external certus-server to publish its
 # /dev/shm mailbox (file present + header READY), then run the multi-turn
 # workload through the shared-memory connector.
 #
@@ -15,7 +15,7 @@ WORKLOAD="${WORKLOAD:-/workspace/certus-shmq-connector/run_multiturn_shmq_certus
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"
 WAIT_SECS="${WAIT_SECS:-120}"
 
-echo "[entrypoint] waiting up to ${WAIT_SECS}s for certus-shmq-server mailbox at ${SHM_PATH} ..."
+echo "[entrypoint] waiting up to ${WAIT_SECS}s for certus-server mailbox at ${SHM_PATH} ..."
 if ! python3 - "$SHM_PATH" "$WAIT_SECS" <<'PY'
 import sys
 from certus_shmq_connector.ring import Ring, RingError
@@ -31,7 +31,7 @@ except RingError as e:
     sys.exit(1)
 PY
 then
-    echo "[entrypoint]        Start certus-shmq-server on the host (it creates ${SHM_PATH})" >&2
+    echo "[entrypoint]        Start certus-server on the host (it creates ${SHM_PATH})" >&2
     echo "[entrypoint]        and check --ipc=host so this container shares /dev/shm." >&2
     exit 1
 fi

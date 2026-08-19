@@ -2,12 +2,12 @@
 
 How to run the 450-conversation / 12-turn multi-turn workload against the two
 **non-Certus** KV-offload backends, for head-to-head comparison with the Certus
-gRPC connector (see `../../certus-grpc-connector/README.md` for the Certus path).
+shmq connector (see `../../certus-shmq-connector/README.md` for the Certus path).
 
 All three backends run the **same** ShareGPT 450-conv × 12-turn workload
 (Llama-3-8B, `max_model_len=8192`, `output_tokens=150`, `max_num_seqs=64`) so
 per-round time and IO are directly comparable. Dataset:
-`../../certus-connector/sharegpt_12turn_450.json` (tracked in-repo).
+`../../data/sharegpt_12turn_450.json` (tracked in-repo).
 
 > **Neither driver configures the host.** They run (SS also *preflight-checks*).
 > Host setup is always `sudo tools/configure-bench.sh <mode>` first.
@@ -31,7 +31,7 @@ this backend — there is no host-RAM tier to squeeze.)
 ### Run
 ```bash
 V=~/kvconn-trace/.venv-v0.20.0/bin/python   # vLLM 0.20.0 venv
-DATASET_PATH=$PWD/../../certus-connector/sharegpt_12turn_450.json \
+DATASET_PATH=$PWD/../../data/sharegpt_12turn_450.json \
 NUM_CONVS=450 MAX_MODEL_LEN=8192 OUTPUT_TOKENS=150 MAX_NUM_SEQS=64 GPU_MEM_UTIL=0.90 \
 MODEL=NousResearch/Meta-Llama-3-8B HF_HUB_OFFLINE=1 \
 $V run_multiturn_nooffload.py 2>&1 | tee nooffload_450.log
@@ -48,9 +48,9 @@ baseline as well as CPU-offload and tiered — one image, one driver
 (`run_multiturn_offloading.py`), backend picked at run time. For the GPU-only
 baseline, set `OFFLOAD_MODE=none`: the driver passes no `kv_transfer_config`, so
 there is no offload tier to size. The base is `vllm/vllm-openai` (default
-`v0.26.0`; override with `--build-arg VLLM_VERSION=...`). No server, no gRPC, no
-`--ipc=host`. Its `ENV` defaults match this section (`NUM_CONVS=450`, 450×12
-dataset).
+`v0.26.0`; override with `--build-arg VLLM_VERSION=...`). No server, no shmq
+mailbox, no `--ipc=host`. Its `ENV` defaults match this section (`NUM_CONVS=450`,
+450×12 dataset).
 ```bash
 # build from the repo root (context needs the bench dir + dataset)
 podman build -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
@@ -79,7 +79,7 @@ virtual-memory paging (`/proc/vmstat`), captured by the `_iostat` variant.
 
 **Driver:** `run_multiturn_offloading.py` — uses vLLM's built-in
 `OffloadingConnector` + `CPUOffloadingSpec` by default (the same connector
-family the Certus gRPC driver uses, so the two are directly comparable). Set
+family the Certus shmq driver uses, so the two are directly comparable). Set
 `TRACE_OFFLOAD=1` to swap in the local `Tracing*` wrappers, which additionally
 write per-op offload traces (`offloading_mgr_<pid>.jsonl` etc.) at some overhead
 — use that only when you want the traces, not for a throughput baseline.
@@ -98,7 +98,7 @@ The CPU tier is a **pinned, unswappable** allocation, so it must fit in
 ### Run
 ```bash
 V=~/kvconn-trace/.venv-v0.20.0/bin/python   # vLLM 0.20.0 venv
-DATASET_PATH=$PWD/../../certus-connector/sharegpt_12turn_450.json \
+DATASET_PATH=$PWD/../../data/sharegpt_12turn_450.json \
 NUM_CONVS=450 MAX_MODEL_LEN=8192 OUTPUT_TOKENS=150 MAX_NUM_SEQS=64 GPU_MEM_UTIL=0.90 \
 CPU_BYTES=$((16 * (1<<30))) \                # 16 GiB tier; keep < free RAM
 MODEL=NousResearch/Meta-Llama-3-8B HF_HUB_OFFLINE=1 \
@@ -116,11 +116,11 @@ The unified image (`Dockerfile.offload` → `certus-offload-bench`) covers this
 backend too — it is the **default** mode (no `OFFLOAD_MODE`, no `SECONDARY_TIER`),
 so the driver uses the in-process `OffloadingConnector` + `CPUOffloadingSpec`. Base
 is `vllm/vllm-openai` (default `v0.26.0`; override with `--build-arg
-VLLM_VERSION=...`). No server, no gRPC, no `--ipc=host`. Its `ENV` defaults match
+VLLM_VERSION=...`). No server, no shmq mailbox, no `--ipc=host`. Its `ENV` defaults match
 this section (`NUM_CONVS=450`, `CPU_BYTES=16 GiB`, `TRACE_OFFLOAD=0`, 450×12
 dataset). Note: the in-process `CPUOffloadingSpec`/`OffloadingConnector` API
-shifted across vLLM releases (the same multi-region change that broke the gRPC
-path at 0.23+), so a newer-version image builds but the driver may need
+shifted across vLLM releases (the same multi-region change that broke the Certus
+connector path at 0.23+), so a newer-version image builds but the driver may need
 connector-side fixes to run.
 ```bash
 # build from the repo root (context needs the bench dir + dataset)
@@ -170,7 +170,7 @@ must be capped). Preflight enforces this.
 `run_fs_bench_450.py` pins NUMA itself — do **not** wrap it in `numactl`.
 ```bash
 V=~/kvconn-trace/.venv-v0.20.0/bin/python
-DATASET_PATH=$PWD/../../certus-connector/sharegpt_12turn_450.json \
+DATASET_PATH=$PWD/../../data/sharegpt_12turn_450.json \
 NUM_CONVS=450 MAX_MODEL_LEN=8192 OUTPUT_TOKENS=150 MAX_NUM_SEQS=64 GPU_MEM_UTIL=0.90 \
 DRAM=$((8 * (1<<30))) \                       # staging RAM (max_staging_memory_gb)
 MODEL=NousResearch/Meta-Llama-3-8B HF_HUB_OFFLINE=1 \
@@ -257,6 +257,6 @@ rather than only *how much* IO it moved.
 | Backend | Driver (this dir unless noted) | Offload tier | Host setup |
 |---|---|---|---|
 | No offload | `run_multiturn_nooffload.py` | none (GPU recompute) | none |
-| Certus | `certus-grpc-connector/run_multiturn_grpc_certus.py` + `run-bench.sh` | DRAM (SPDK hugepages) + NVMe | `configure-bench.sh certus` |
+| Certus | `certus-shmq-connector/run_multiturn_shmq_certus.py` + `run-bench.sh` | DRAM (SPDK hugepages) + NVMe | `configure-bench.sh certus` |
 | CPU offload | `run_multiturn_offloading.py` | host RAM (pinned) | free hugepages; else none |
 | SharedStorage | `run_fs_bench_450.py` | RAID0 XFS filesystem | `configure-bench.sh sharedstorage` |

@@ -30,7 +30,7 @@ rectangle "**Client Host**" as client_box #F5F5F5 {
 ' ============================================================
 rectangle "**Certus Server**" as server_box #FAFAFA {
 
-    agent "gRPC Service\nPopulate | Lookup | Check | Remove" as grpc #F0F0F0
+    agent "Shmq Mailbox\nPopulate | Lookup | Check | Remove" as shmq #F0F0F0
 
     rectangle "**Dispatcher**  (4)\ndispatcher | dispatcher-p2p" as dispatcher #DBEAFE {
         agent "BackgroundWriter  (1)\nBackgroundEvictor\nPipelineRing" as bg #EFF6FF
@@ -58,9 +58,9 @@ cloud "**Peer Certus Nodes**" as peers #FEE2E2
 ' ============================================================
 ' PATHS
 ' ============================================================
-pyclient -down-> grpc : gRPC
+pyclient -down-> shmq : shmq
 client_gpu .down.> gpu : CUDA IPC
-grpc -down-> dispatcher
+shmq -down-> dispatcher
 
 dispatcher -down-> mt
 dispatcher -down-> dm

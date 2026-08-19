@@ -8,7 +8,7 @@
 
 use interfaces::{NvmeBlockError, TelemetrySnapshot};
 #[cfg(feature = "telemetry")]
-use interfaces::ReadWriteStats;
+use interfaces::{ReadWriteStats, IO_SIZE_BUCKETS};
 
 /// Internal telemetry collector using atomic counters.
 ///
@@ -30,6 +30,11 @@ pub(crate) struct TelemetryStats {
     write_ops: std::sync::atomic::AtomicU64,
     write_bytes: std::sync::atomic::AtomicU64,
     write_latency_ns_sum: std::sync::atomic::AtomicU64,
+    // Per-transfer-size histograms (one bucket per power-of-two size band; see
+    // interfaces::IO_SIZE_BUCKETS). Each completed IO bumps exactly one bucket
+    // on its direction's array, giving the on-device block-size distribution.
+    read_size_buckets: [std::sync::atomic::AtomicU64; IO_SIZE_BUCKETS],
+    write_size_buckets: [std::sync::atomic::AtomicU64; IO_SIZE_BUCKETS],
 }
 
 #[cfg(feature = "telemetry")]
@@ -49,6 +54,8 @@ impl TelemetryStats {
             write_ops: std::sync::atomic::AtomicU64::new(0),
             write_bytes: std::sync::atomic::AtomicU64::new(0),
             write_latency_ns_sum: std::sync::atomic::AtomicU64::new(0),
+            read_size_buckets: std::array::from_fn(|_| std::sync::atomic::AtomicU64::new(0)),
+            write_size_buckets: std::array::from_fn(|_| std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -64,14 +71,17 @@ impl TelemetryStats {
         self.sum_latency_ns.fetch_add(latency_ns, Relaxed);
         self.total_bytes.fetch_add(bytes, Relaxed);
 
+        let bucket = ReadWriteStats::size_bucket(bytes);
         if is_read {
             self.read_ops.fetch_add(1, Relaxed);
             self.read_bytes.fetch_add(bytes, Relaxed);
             self.read_latency_ns_sum.fetch_add(latency_ns, Relaxed);
+            self.read_size_buckets[bucket].fetch_add(1, Relaxed);
         } else {
             self.write_ops.fetch_add(1, Relaxed);
             self.write_bytes.fetch_add(bytes, Relaxed);
             self.write_latency_ns_sum.fetch_add(latency_ns, Relaxed);
+            self.write_size_buckets[bucket].fetch_add(1, Relaxed);
         }
 
         // Update min with CAS loop.
@@ -146,6 +156,8 @@ impl TelemetryStats {
             write_ops: self.write_ops.load(Relaxed),
             write_bytes: self.write_bytes.load(Relaxed),
             write_latency_ns_sum: self.write_latency_ns_sum.load(Relaxed),
+            read_size_buckets: std::array::from_fn(|i| self.read_size_buckets[i].load(Relaxed)),
+            write_size_buckets: std::array::from_fn(|i| self.write_size_buckets[i].load(Relaxed)),
         }
     }
 }

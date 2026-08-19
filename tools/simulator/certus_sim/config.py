@@ -38,7 +38,7 @@ class SimConfig:
     ipc_close_latency_us: float = 10.0
     memory_tier_insert_us: float = 1.0
     dispatch_map_op_us: float = 0.5
-    grpc_overhead_us: float = 50.0
+    ctrl_latency_us: float = 50.0  # control-plane ingress overhead per request (shmq mailbox)
 
     # --- Pipeline ---
     mdts_bytes: int = 131072  # 128 KiB max NVMe transfer size

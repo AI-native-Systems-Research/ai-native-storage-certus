@@ -4,8 +4,10 @@
 
 Certus is a generative domain-specific cache/filesystem for GPU inferencing
 workloads, built on a COM-inspired Rust component framework. A `certus-server`
-process fronts a tiered cache (CUDA-pinned DRAM over NVMe SSD) behind a gRPC
-API, and can optionally cooperate with peer nodes over RDMA.
+process fronts a tiered cache (CUDA-pinned DRAM over NVMe SSD) behind a
+shared-memory-queue (shmq) control API — a `/dev/shm` mailbox reached by
+sharing the host IPC namespace — and can optionally cooperate with peer nodes
+over RDMA.
 
 Components are wired through typed interfaces (`I…`) and receptacles, so most of
 the behaviour below is a matter of *which implementation is bound* rather than a
@@ -14,7 +16,7 @@ hard-coded path.
 ## Core path
 
 ```
-GPU app --gRPC--> Dispatcher --> MemoryTier (DRAM) --> BlockDevice --> NVMe SSD
+GPU app --shmq--> Dispatcher --> MemoryTier (DRAM) --> BlockDevice --> NVMe SSD
                        |             ^                     ^
                        |             | promote (cold hit)  | async write-through
                     GpuServices (CUDA DMA / CUDA IPC to client GPU)

@@ -72,6 +72,7 @@ podman run --rm --pull=never \
   -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}" \
   -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}" \
   -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
+  -e "ENFORCE_EAGER=${ENFORCE_EAGER:-0}" \
   -e "CPU_BYTES=${CPU_BYTES}" \
   -e "DISK_DIR=${DISK_DIR_CTR}" \
   -e "DISK_READ_THREADS=${DISK_READ_THREADS}" \

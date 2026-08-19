@@ -39,7 +39,9 @@
 #                            server binary is not rpath'd against them.
 #   CERTUS_TEST_GROUP        shared zyre group (default clustertest_<uid>_<pid>,
 #                            unique so concurrent testers do not collide)
-#   CERTUS_TEST_GRPC_PORT    gRPC listen port on every node (default 50051)
+#   CERTUS_TEST_SHM_PATH     shmq mailbox path on every node
+#                            (default /dev/shm/certus-shmq)
+#   CERTUS_TEST_CHANNELS     mailbox channels per server (default 8)
 #   CERTUS_RDMA_BIND_IP      RoCE IPv4 the responder binds (default: auto-detect)
 #   CERTUS_RL_OP_DEADLINE_MS overall op deadline (default 5000; the built-in
 #                            50ms is too low for cold RDMA connects). This is how
@@ -66,7 +68,8 @@
 #     every node); build with scripts/build-certus-full-remote-spdk.sh.
 #   - Hugepages/vfio configured if using SPDK NVMe (scripts/spdk-scripts/
 #     cfg_user_spdk.sh, bind_vfio.sh); an up RoCE/IB device; a CUDA GPU + libcudart.
-#   - python3 with grpcio (apps/python/requirements.txt).
+#   - python3 with the certus-shmq-connector importable from apps/python
+#     (certus_shmq_helpers locates it in the repo tree; no pip install needed).
 #   - All nodes on one L2 subnet (zyre UDP-beacon discovery).
 
 set -euo pipefail
@@ -87,7 +90,10 @@ SERVER_BIN="${CERTUS_SERVER_BIN:-$REPO_ROOT/target/release/certus-server-yaml}"
 # like the SERVER_BIN same-path assumption above.
 LIB_PATH="${CERTUS_LD_LIBRARY_PATH:-$REPO_ROOT/deps/zyre-build/lib:$REPO_ROOT/deps/zyre-build/lib64}"
 GROUP="${CERTUS_TEST_GROUP:-clustertest_${UID:-$(id -u)}_$$}"
-GRPC_PORT="${CERTUS_TEST_GRPC_PORT:-50051}"
+SHM_PATH="${CERTUS_TEST_SHM_PATH:-/dev/shm/certus-shmq}"
+# This correctness gate drives one holder and one requester at low concurrency,
+# so the server default is ample; overridable for parity with the perf test.
+CHANNELS="${CERTUS_TEST_CHANNELS:-8}"
 RDMA_BIND_IP="${CERTUS_RDMA_BIND_IP:-}"
 OP_DEADLINE_MS="${CERTUS_RL_OP_DEADLINE_MS:-5000}"
 PHASE1_MS="${CERTUS_RL_PHASE1_MS:-500}"
@@ -149,18 +155,21 @@ fi
 HOLDER="${NODES[0]}"
 REQUESTER="${NODES[1]}"
 RUN_TAG="$$"
+# The driver runs IN PLACE from each node's own repo checkout (the same
+# same-path-on-every-node assumption as SERVER_BIN/LIB_PATH above). It imports
+# the shmq Ring client via certus_shmq_helpers, which locates the
+# certus-shmq-connector package relative to apps/python inside the repo — so a
+# lone copy scp'd to /tmp could not resolve those sibling imports. There are no
+# generated stubs to ship anymore.
 DRIVER="$PYDIR/remote-lookup-clustertest.py"
-STUBS=("$PYDIR/dispatcher_pb2.py" "$PYDIR/dispatcher_pb2_grpc.py")
-REMOTE_DRIVER="/tmp/remote-lookup-clustertest-${RUN_TAG}.py"
+REMOTE_DRIVER="$DRIVER"
 
-for f in "$DRIVER" "${STUBS[@]}"; do
-    [[ -f "$f" ]] || { echo "error: missing $f" >&2; exit 1; }
-done
+[[ -f "$DRIVER" ]] || { echo "error: missing $DRIVER" >&2; exit 1; }
 
-# Also remove this run's driver and the (untagged) generated stubs.
+# The driver runs from the repo checkout, so there are no per-run scratch files
+# to remove on the nodes — teardown only kills this run's servers.
 cleanup() {
-    cluster_cleanup "'$REMOTE_DRIVER'" \
-        "/tmp/dispatcher_pb2.py" "/tmp/dispatcher_pb2_grpc.py"
+    cluster_cleanup
 }
 trap cleanup EXIT
 
@@ -183,19 +192,15 @@ REMOTE_ENV="RUST_LOG=${CERTUS_TEST_RUST_LOG:-info} LD_LIBRARY_PATH=\"$LIB_PATH:\
 
 cluster_launch
 
-# --- 2. Wait for every gRPC endpoint, then let zyre beacon peers discover ---
+# --- 2. Wait for every shmq mailbox, then let zyre beacon peers discover ---
 cluster_wait_ready || exit 1
 
-# --- 3. Ship the driver + stubs to holder and requester ---
-for node in "$HOLDER" "$REQUESTER"; do
-    scp -q "${SSH_OPTS[@]}" "$DRIVER" "$node:$REMOTE_DRIVER"
-    scp -q "${SSH_OPTS[@]}" "${STUBS[@]}" "$node:/tmp/"
-done
+# --- 3. Driver runs in place from each node's repo checkout (nothing to ship) ---
 
 # --- 4. Populate on the holder ---
 log "Populating keys $KEYS on holder $HOLDER ..."
 if ! ssh "${SSH_OPTS[@]}" "$HOLDER" \
-    "$PYTHON '$REMOTE_DRIVER' populate --server localhost:$GRPC_PORT \
+    "$PYTHON '$REMOTE_DRIVER' populate --shm-path '$SHM_PATH' \
          --keys '$KEYS' --object-size '$OBJECT_SIZE'"
 then
     echo "error: populate failed on $HOLDER" >&2
@@ -206,7 +211,7 @@ fi
 # --- 5. Look up from the requester and prove remoteness ---
 log "Looking up keys $KEYS from requester $REQUESTER ..."
 if ssh "${SSH_OPTS[@]}" "$REQUESTER" \
-    "$PYTHON '$REMOTE_DRIVER' lookup --server localhost:$GRPC_PORT \
+    "$PYTHON '$REMOTE_DRIVER' lookup --shm-path '$SHM_PATH' \
          --keys '$KEYS' --object-size '$OBJECT_SIZE' $VERIFY"
 then
     echo ""

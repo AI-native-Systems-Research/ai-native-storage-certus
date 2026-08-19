@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""End-to-end test exercising both gRPC (populate) and RDMA (lookup) data paths.
+"""End-to-end test exercising both shmq (populate) and RDMA (lookup) data paths.
 
-Populates the Certus cache via the standard gRPC Dispatcher API, then performs
+Populates the Certus cache via the standard shmq Ring API, then performs
 lookups via the RDMA remote-request-handler endpoint using the Rust test-client
 binary. Optionally verifies data integrity.
 
@@ -11,7 +11,7 @@ Requires:
   - certus-server-yaml running with full-remote profile
 
 Usage:
-    python test-remote.py --grpc-server localhost:50051 --rdma-server 10.0.0.100 --rdma-port 18515
+    python test-remote.py --shm-path /dev/shm/certus-shmq --rdma-server 10.0.0.100 --rdma-port 18515
     python test-remote.py --check-integrity --object-size 4M --batch-size 16 --iterations 5
 """
 
@@ -26,9 +26,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
 
 # --- CUDA helpers (same pattern as certus-api-bench.py) ---
 
@@ -112,19 +110,16 @@ def find_test_client():
     return None
 
 
-# --- Phase 1: Populate via gRPC ---
+# --- Phase 1: Populate via shmq ---
 
 
-def populate_cache(stub, keys, block_size, gpu_device):
-    """Populate cache entries via gRPC with deterministic patterns."""
+def populate_cache(ring, keys, block_size, gpu_device):
+    """Populate cache entries via shmq with deterministic patterns."""
     err = _libcudart.cudaSetDevice(gpu_device)
     if err != 0:
         raise RuntimeError(f"cudaSetDevice({gpu_device}) failed: {err}")
 
     dev_ptr, handle_bytes = _cuda_alloc(block_size)
-    ipc_handle = dispatcher_pb2.IpcHandle(
-        cuda_ipc_handle=handle_bytes, size=block_size, gpu_device_id=gpu_device
-    )
 
     populated = 0
     failed = 0
@@ -135,20 +130,15 @@ def populate_cache(stub, keys, block_size, gpu_device):
         _gpu_write(dev_ptr, pattern)
         _libcudart.cudaDeviceSynchronize()
 
-        resp = stub.Populate(
-            dispatcher_pb2.BatchPopulateRequest(
-                entries=[dispatcher_pb2.PopulateEntry(key=key, ipc_handle=ipc_handle)]
-            )
-        )
-        if resp.results[0].success:
+        oks = ring.populate([(key, [single_region(handle_bytes, gpu_device, block_size)])])
+        if oks[0]:
             populated += 1
-        elif "already exists" in resp.results[0].error_message:
-            populated += 1  # key is already in cache, counts as available
         else:
+            # A populate of a key already resident returns ok=False (the old
+            # "already exists" path); we can no longer distinguish that from a
+            # genuine store failure, so count it as failed and warn.
             failed += 1
-            print(
-                f"  WARN: populate key {key} failed: {resp.results[0].error_message}"
-            )
+            print(f"  WARN: populate key {key} failed")
 
     elapsed = time.time() - t0
     _cuda_free(dev_ptr)
@@ -248,13 +238,9 @@ def check_integrity(parsed_results):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="End-to-end test: gRPC populate + RDMA lookup"
+        description="End-to-end test: shmq populate + RDMA lookup"
     )
-    parser.add_argument(
-        "--grpc-server",
-        default="localhost:50051",
-        help="gRPC endpoint for populate [default: localhost:50051]",
-    )
+    add_shm_arg(parser)
     parser.add_argument(
         "--rdma-server",
         default="localhost",
@@ -306,7 +292,7 @@ def main():
     print("=" * 70)
     print("Certus Remote Request Test")
     print("=" * 70)
-    print(f"  gRPC server:    {args.grpc_server}")
+    print(f"  shmq server:    {args.shm_path}")
     print(f"  RDMA server:    {args.rdma_server}:{args.rdma_port}")
     print(f"  Object size:    {object_size // (1024*1024)} MiB")
     print(f"  Batch size:     {args.batch_size}")
@@ -324,9 +310,9 @@ def main():
     print(f"  test-client:    {test_client}")
     print()
 
-    # --- Phase 1: Populate via gRPC ---
+    # --- Phase 1: Populate via shmq ---
     print("-" * 70)
-    print("Phase 1: Populate cache via gRPC")
+    print("Phase 1: Populate cache via shmq")
     print("-" * 70)
 
     # Keys must match what the test-client generates:
@@ -335,21 +321,14 @@ def main():
     num_to_populate = args.batch_size * args.iterations
     keys = list(range(1, num_to_populate + 1))
 
-    channel = grpc.insecure_channel(
-        args.grpc_server,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+    ring = connect(args.shm_path)
 
     try:
         populated, failed, elapsed = populate_cache(
-            stub, keys, object_size, args.gpu_device
+            ring, keys, object_size, args.gpu_device
         )
-    except grpc.RpcError as e:
-        print(f"  ERROR: gRPC connection failed: {e.details()}")
+    except RingError as e:
+        print(f"  ERROR: shmq connection failed: {str(e)}")
         sys.exit(1)
 
     populate_bytes = populated * object_size
@@ -417,7 +396,7 @@ def main():
     print("Summary")
     print("=" * 70)
     print(f"  Object size:     {object_size // (1024*1024)} MiB")
-    print(f"  Populate (gRPC): {populated}/{num_to_populate} objects, {populate_gbs:.3f} GB/s")
+    print(f"  Populate (shmq): {populated}/{num_to_populate} objects, {populate_gbs:.3f} GB/s")
     if "us_per_batch" in results:
         print(
             f"  Lookup (RDMA):   {results['us_per_batch']:.1f} us/batch, "

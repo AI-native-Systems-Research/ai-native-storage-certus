@@ -11,7 +11,7 @@ Three checks, in increasing hardware requirements:
                  mmap/header/publish/spin-then-futex/response path across two
                  processes — no GPU/SPDK. Auto-spawns the harness if given
                  --echo-bin, else expects one already serving at --path.
-  3. --server    Check/Reserve a few keys against a live `certus-shmq-server`
+  3. --server    Check/Reserve a few keys against a live `certus-server`
                  (needs SPDK + GPU; run on an RDMA node). Expects it serving at
                  --path.
 
@@ -209,7 +209,7 @@ def test_echo(path: str, echo_bin: str | None) -> bool:
 
 
 def test_server(path: str) -> bool:
-    print(f"[server] Check/Reserve against certus-shmq-server at {path}")
+    print(f"[server] Check/Reserve against certus-server at {path}")
     r = Ring(path, ready_timeout=10.0)
     print(
         f"  attached: channels={r.channel_count} cap_req={r.cap_req} "

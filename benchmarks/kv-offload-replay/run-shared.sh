@@ -1,6 +1,6 @@
 #!/bin/bash
 V=/mnt/certus1/venv_vllm/bin/python   # vLLM 0.20.0 venv
-DATASET_PATH=$PWD/../../certus-connector/sharegpt_12turn_450.json \
+DATASET_PATH=$PWD/../../data/sharegpt_12turn_450.json \
 	    NUM_CONVS=450 \
 	    MAX_MODEL_LEN=8192 \
 	    OUTPUT_TOKENS=150 \

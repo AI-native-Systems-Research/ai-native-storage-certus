@@ -2,15 +2,14 @@
 # setup-host.sh — one-time host provisioning for the certus-shmq-connector
 # benchmark (RHEL/Fedora, root).
 #
-# Identical host provisioning to the gRPC connector's setup-host.sh — the host
-# prerequisites (GPU passthrough, NVMe→vfio, hugepages) are transport-independent.
-# Only the closing "Next:" hint differs (certus-shmq-server + --shm-path instead
-# of certus-server + --listen).
+# Host prerequisites (GPU passthrough, NVMe→vfio, hugepages) for running the
+# certus-server storage backend; these are transport-independent. The closing
+# "Next:" hint launches certus-server with --shm-path.
 #
 # Covers BOTH host prerequisites that a container cannot provide:
 #   A. GPU  — nvidia-container-toolkit + CDI spec (so podman can pass the GPU
 #             and inject the host libcuda.so into the workload container).
-#   B. Server storage — bind the certus-shmq-server NVMe drives to vfio-pci and
+#   B. Server storage — bind the certus-server NVMe drives to vfio-pci and
 #             allocate 1 GiB hugepages for the SPDK DRAM tier.
 #
 # The reusable repo script tools/configure-bench.sh does the broader NUMA/cgroup
@@ -155,8 +154,8 @@ Done.
   Hugepages: $(cat "/sys/devices/system/node/node${NVME_NUMA}/hugepages/hugepages-1048576kB/nr_hugepages" 2>/dev/null || echo '?') x 1G on node ${NVME_NUMA}
 
 Next:
-  deps/build_spdk.sh && cargo build --release -p certus-shmq-server
-  target/release/certus-shmq-server $(for b in ${NVME_BDFS}; do printf -- '--device-pci %s ' "$b"; done)\\
+  deps/build_spdk.sh && cargo build --release -p certus-server
+  target/release/certus-server $(for b in ${NVME_BDFS}; do printf -- '--device-pci %s ' "$b"; done)\\
       --memory-tier-size <=N>G --shm-path /dev/shm/certus-shmq --format
   ./certus-shmq-connector/run-bench.sh     # container shares /dev/shm via --ipc=host
 EOF

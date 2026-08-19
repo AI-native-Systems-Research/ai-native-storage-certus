@@ -51,8 +51,8 @@ pipeline {
     stage('Integration Tests') {
       steps {
         script {
-          sh '. ~/.cargo/env ; cargo r -r -p certus-server -- --device-pci 0000:86:00.0 --format &'
-          sh 'for i in $(seq 1 10); do nc -z localhost 50051 && break || sleep 5; done'
+          sh '. ~/.cargo/env ; cargo r -r -p certus-server -- --device-pci 0000:86:00.0 --shm-path /dev/shm/certus-shmq --channels 32 --format &'
+          sh 'for i in $(seq 1 10); do [ -e /dev/shm/certus-shmq ] && break || sleep 5; done'
 
           def output1 = sh(script: 'cd apps/python && python3 test-promote.py', returnStdout: true).trim()
           echo output1
@@ -73,8 +73,8 @@ pipeline {
     stage('OffloadingSpec Tests') {
       steps {
         script {
-          sh '. ~/.cargo/env ; CERTUS_PROFILE=full cargo r -r -p certus-server-yaml -- --memory-tier-size 256M --format --device-pci 0000:86:00.0 &'
-          sh 'for i in $(seq 1 60); do nc -z localhost 50051 && break || sleep 2; done'
+          sh '. ~/.cargo/env ; CERTUS_PROFILE=full cargo r -r -p certus-server-yaml -- --memory-tier-size 256M --shm-path /dev/shm/certus-shmq --channels 32 --format --device-pci 0000:86:00.0 &'
+          sh 'for i in $(seq 1 60); do [ -e /dev/shm/certus-shmq ] && break || sleep 2; done'
 
           def status = sh(script: 'cd apps/python && python3 test-offloading-spec.py --memory-tier-size 256M', returnStatus: true)
           echo "test-offloading-spec.py exit status: ${status}"

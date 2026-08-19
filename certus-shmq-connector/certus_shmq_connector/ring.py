@@ -16,13 +16,14 @@ start on any other architecture — do not port it to a weakly ordered ISA witho
 adding fences.
 
 The wire framing (opcode + little-endian blob) mirrors, byte-for-byte,
-``apps/certus-shmq-server/src/wire.rs`` and the shared-memory layout mirrors
+``components/shmq-dispatcher/src/wire.rs`` and the shared-memory layout mirrors
 ``components/shm-queue/src/lib.rs``. Any change to either Rust file must be
 mirrored here.
 """
 
 from __future__ import annotations
 
+import atexit
 import ctypes
 import errno
 import mmap
@@ -60,7 +61,7 @@ _HDR_SERVER_PID = 36
 # _pad at 40 ; heartbeat (u64) at 48
 _HEADER_SIZE = 56
 
-# ── wire opcodes / status (mirror apps/certus-shmq-server/src/wire.rs) ───────
+# ── wire opcodes / status (mirror components/shmq-dispatcher/src/wire.rs) ────
 
 OP_CHECK = 1
 OP_TOUCH = 2
@@ -72,6 +73,11 @@ OP_PIN = 7
 OP_UNPIN = 8
 OP_LOOKUP = 9
 OP_TAKE_EVENTS = 10
+OP_POPULATE = 11
+OP_REMOVE = 12
+OP_CLEAR_MEMORY_TIER = 13
+OP_FLUSH_TO_SSD = 14
+OP_GET_IO_STATS = 15
 
 STATUS_OK = 0
 
@@ -247,6 +253,34 @@ def decode_take_events(payload: bytes) -> tuple[list[tuple[int, int]], int]:
     return events, dropped
 
 
+# Field order of the GetIoStats response (mirror translate.rs op_get_io_stats).
+IO_STATS_FIELDS = (
+    "read_ops",
+    "read_bytes",
+    "read_latency_ns_sum",
+    "write_ops",
+    "write_bytes",
+    "write_latency_ns_sum",
+)
+
+
+def decode_u64(payload: bytes) -> int:
+    """`{ u64 }` response → int. ClearMemoryTier / FlushToSsd reply shape."""
+    (val,) = struct.unpack_from("<Q", payload, 0)
+    return val
+
+
+def decode_io_stats(payload: bytes) -> dict[str, int]:
+    """`{ 6×u64 }` response → dict keyed by :data:`IO_STATS_FIELDS`.
+
+    Order matches the gRPC ``IoStatsResponse`` (no histogram buckets):
+    ``read_ops, read_bytes, read_latency_ns_sum, write_ops, write_bytes,
+    write_latency_ns_sum``.
+    """
+    vals = struct.unpack_from("<6Q", payload, 0)
+    return dict(zip(IO_STATS_FIELDS, vals))
+
+
 # ── the ring client ──────────────────────────────────────────────────────────
 
 
@@ -286,6 +320,20 @@ class Ring:
         self._seqs: list[int] = []
 
         self._attach(ready_timeout)
+
+        # Release the attaching thread's channel at interpreter exit, so scripts
+        # that exit (or sys.exit) without an explicit close() do not leave a
+        # stale owner word in the persistent server's shared segment. Idempotent
+        # with close(); a no-op once the segment is unmapped. Worker threads that
+        # outlive their channel use still release explicitly (see run_pipeline).
+        atexit.register(self._release_at_exit)
+
+    def _release_at_exit(self) -> None:
+        # Swallow errors: at interpreter shutdown the segment may already be gone.
+        try:
+            self.release_channel()
+        except Exception:
+            pass
 
     # ── attach / geometry ──
 
@@ -415,6 +463,33 @@ class Ring:
             ch = self._claim_channel()
             self._tls.channel = ch
         return ch
+
+    def release_channel(self) -> None:
+        """Release this thread's claimed channel back to the free pool.
+
+        Channels are claimed sticky-per-thread on first use (see
+        :meth:`_my_channel`) and normally held for the life of the thread. A
+        caller that churns threads — a ``ThreadPoolExecutor`` recreated per
+        phase, or fresh worker threads per benchmark round — must release before
+        the thread exits, otherwise the owner word stays set and the channel is
+        leaked (a later ``_claim_channel`` scan will never find it free).
+
+        Safe to call with no channel held (no-op). Releasing is safe even though
+        seq counters are *not* reset: ``self._seqs`` is indexed by channel, not
+        by thread, so a later claimer of the same channel simply continues the
+        monotonic sequence. Do not call with a request in flight on the channel.
+        """
+        ch = getattr(self._tls, "channel", None)
+        if ch is None:
+            return
+        # If the segment is already unmapped (post-close), the owner word is
+        # gone with it — just forget the claim rather than dereference address 0.
+        if not self._base:
+            self._tls.channel = None
+            return
+        with self._claim_lock:
+            self._wr_u32(self._channel_base(ch) + OFF_OWNER, 0)
+        self._tls.channel = None
 
     def _next_seq(self, ch: int) -> int:
         s = (self._seqs[ch] + 1) & 0xFFFFFFFF
@@ -571,9 +646,53 @@ class Ring:
         payload = self._dispatch(OP_TAKE_EVENTS, struct.pack("<I", max_events & 0xFFFFFFFF))
         return decode_take_events(payload)
 
+    def populate(self, entries) -> list[bool]:
+        """Populate cache entries by DMA from GPU, chunked to fit cap_req.
+
+        ``entries`` is ``[(key, regions)]`` in the same shape ``copy_to_store``
+        takes, but every entry must carry **exactly one** region — ``populate``
+        takes a single CUDA IPC handle per key (the server rejects ``nreg != 1``,
+        returning a False flag for that entry). Results are in entry order.
+        """
+        entries = list(entries)
+        for key, regions in entries:
+            if len(regions) != 1:
+                raise RingError(
+                    f"populate requires exactly one region per entry "
+                    f"(key={key} has {len(regions)}); use copy_to_store for multi-region"
+                )
+        return self._handle_batch_op(OP_POPULATE, entries)
+
+    def remove(self, keys: Sequence[int]) -> list[bool]:
+        """Remove entries entirely. Returns per-key success flags in order."""
+        keys = list(keys)
+        if not keys:
+            return []
+        return decode_ok_flags(self._dispatch(OP_REMOVE, encode_keys(keys)), len(keys))
+
+    def clear_memory_tier(self) -> int:
+        """Evict the whole memory tier. Returns the number of entries cleared."""
+        return decode_u64(self._dispatch(OP_CLEAR_MEMORY_TIER, b""))
+
+    def flush_to_ssd(self) -> int:
+        """Drain pending write-through jobs. Returns the number flushed."""
+        return decode_u64(self._dispatch(OP_FLUSH_TO_SSD, b""))
+
+    def get_io_stats(self) -> dict[str, int]:
+        """Cumulative SSD read/write counters (see :data:`IO_STATS_FIELDS`)."""
+        return decode_io_stats(self._dispatch(OP_GET_IO_STATS, b""))
+
     # ── teardown ──
 
     def close(self) -> None:
+        # Release this thread's channel first, while the mapping is still valid.
+        # The owner word lives in the shared /dev/shm segment, so a client that
+        # exits without releasing leaves the channel marked owned on a persistent
+        # server — starving later client processes. Worker threads that outlive
+        # their channel use should call release_channel() directly; close() (run
+        # by the thread that attached) covers the common single-threaded scripts.
+        self.release_channel()
+        atexit.unregister(self._release_at_exit)  # explicit close: drop the hook
         # Drop the ctypes view before unmapping (mmap.close() errors if exported
         # pointers still reference the buffer).
         self._buf = None

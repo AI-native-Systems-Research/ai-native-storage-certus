@@ -82,30 +82,32 @@ STATS_SETTLE=${STATS_SETTLE:-15}
 
 # ---- KV-offload connector (optional) --------------------------------------
 # CONNECTOR=none   -> plain baseline vLLM (the control; default).
-# CONNECTOR=certus -> attach Certus' gRPC OffloadingConnector. The certus-server
+# CONNECTOR=certus -> attach Certus' shmq OffloadingConnector. The certus-server
 #   must ALREADY be running on the host (target/release/certus-server ...
-#   --listen 0.0.0.0:50051 --format) — this script does NOT start it. Requires:
-#     * the connector-equipped image (certus-grpc-bench = vllm-openai + the
-#       certus_grpc_connector package). Its ENTRYPOINT runs the multiturn driver,
+#   --shm-path /dev/shm/certus-shmq --channels 32 --format) — this script does NOT
+#   start it. Requires:
+#     * the connector-equipped image (certus-shmq-bench = vllm-openai + the
+#       certus_shmq_connector package). Its ENTRYPOINT runs the multiturn driver,
 #       so we reset it to `vllm serve` below.
-#     * --ipc=host, so the host certus-server can open the CUDA IPC handles the
-#       container's vLLM process exports for its KV cache.
-#   With --network host the container's localhost IS the host, so the default
-#   CERTUS_SERVER=localhost:50051 reaches the server.
+#     * --ipc=host, which does double duty: the host certus-server can open the
+#       CUDA IPC handles the container's vLLM process exports for its KV cache,
+#       AND the container sees the host /dev/shm mailbox at SHM_PATH.
+#   There is no network transport — the shared /dev/shm path IS the endpoint, so
+#   the container just needs SHM_PATH to match the server's --shm-path.
 CONNECTOR=${CONNECTOR:-none}
-CERTUS_SERVER=${CERTUS_SERVER:-localhost:50051}
+SHM_PATH=${SHM_PATH:-/dev/shm/certus-shmq}
 # MUST be >= the per-block Reserve stride (block_bytes = KV page_size x num_layers,
 # e.g. 917504 for Qwen2.5-7B). If slab_size < block_bytes the server's CopyToStore
 # D2H bounds check fails on every block and offload silently dies (see the
-# certus-grpc CopyToStore size bug). 2 MiB clears Qwen; bump for larger models.
+# certus CopyToStore size bug). 2 MiB clears Qwen; bump for larger models.
 SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES:-2097152}
 ENFORCE_EAGER=${ENFORCE_EAGER:-1}       # connectors are more robust without cudagraphs
 
 ENGINE=${ENGINE:-podman}
 # Connector-aware defaults: Certus needs the connector-equipped image (stock
-# vllm-openai lacks certus_grpc_connector) and its own result/container names.
+# vllm-openai lacks certus_shmq_connector) and its own result/container names.
 if [ "${CONNECTOR}" = "certus" ]; then
-    _def_server_image=localhost/certus-grpc-bench:latest
+    _def_server_image=localhost/certus-shmq-bench:latest
     _def_server_name=ldq-vllm-certus
     _def_results=$PWD/results/certus-smoke
 else
@@ -140,7 +142,7 @@ entrypoint_flag=()
 if [ "${CONNECTOR}" = "certus" ]; then
     entrypoint_flag=(--entrypoint '["vllm","serve"]')
     server_extra_run+=(--ipc=host)
-    kv_cfg="{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"CertusGrpcOffloadingSpec\",\"spec_module_path\":\"certus_grpc_connector.spec\",\"server\":\"${CERTUS_SERVER}\",\"slab_size_bytes\":${SLAB_SIZE_BYTES}}}"
+    kv_cfg="{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"CertusShmqOffloadingSpec\",\"spec_module_path\":\"certus_shmq_connector.spec\",\"shm_path\":\"${SHM_PATH}\",\"slab_size_bytes\":${SLAB_SIZE_BYTES}}}"
     server_extra_args+=(--kv-transfer-config "${kv_cfg}")
     [ "${ENFORCE_EAGER}" = "1" ] && server_extra_args+=(--enforce-eager)
 fi
@@ -148,7 +150,7 @@ fi
 # ---- 1. launch vLLM OpenAI server (unless SERVE=0) ------------------------
 if [ "${SERVE}" = "1" ]; then
     echo ">> launching vLLM server (connector=${CONNECTOR}) for ${MODEL} on :${PORT}" >&2
-    [ "${CONNECTOR}" = "certus" ] && echo ">> Certus offload -> ${CERTUS_SERVER} (slab=${SLAB_SIZE_BYTES}B); server must be up" >&2
+    [ "${CONNECTOR}" = "certus" ] && echo ">> Certus offload -> ${SHM_PATH} (slab=${SLAB_SIZE_BYTES}B); server must be up" >&2
     ${ENGINE} rm -f "${SERVER_NAME}" >/dev/null 2>&1 || true
     # host networking: rootless-podman `-p` publishing is unreliable on this
     # box, and the client already uses --network host — so bind vLLM straight

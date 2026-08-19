@@ -4,7 +4,7 @@
 #                     server instance (in parallel) and aggregate the results.
 #
 # Reads the instance map written by launch-servers.sh and fires benchmark
-# client(s) at each server's gRPC port concurrently, then parses the per-phase
+# client(s) at each server's shmq mailbox concurrently, then parses the per-phase
 # aggregate throughput (Populate / Lookup hot / Lookup cold) from every client,
 # sums each instance's clients together, and prints a per-instance breakdown
 # plus the system-wide totals.
@@ -112,29 +112,29 @@ N=${#ROWS[@]}
 
 TOTAL=$((N * PER_SERVER))
 
-# Pre-flight: a server that failed to start (e.g. out of hugepages) leaves its
-# port unreachable; without this check the client just yields a misleading
-# 0.00 GB/s. Warn up front so the cause is obvious.
+# Pre-flight: a server that failed to start (e.g. out of hugepages) never
+# publishes its mailbox file; without this check the client just yields a
+# misleading 0.00 GB/s. Warn up front so the cause is obvious.
 down=0
 for row in "${ROWS[@]}"; do
-    IFS=$'\t' read -r i bdf node port core <<< "$row"
-    if ! port_listening "$port"; then
-        warn "instance $i endpoint localhost:$port NOT reachable -- server likely failed to start (see $RUN_DIR/srv-$i.log)"
+    IFS=$'\t' read -r i bdf node shm_path core <<< "$row"
+    if ! mailbox_ready "$shm_path"; then
+        warn "instance $i mailbox $shm_path NOT present -- server likely failed to start (see $RUN_DIR/srv-$i.log)"
         down=$((down + 1))
     fi
 done
-[[ $down -eq 0 ]] || warn "$down of $N endpoint(s) unreachable; their results will be reported as FAILED"
+[[ $down -eq 0 ]] || warn "$down of $N mailbox(es) missing; their results will be reported as FAILED"
 
 log "Running $TOTAL client process(es) = $N instance(s) x $PER_SERVER per server: ${BENCH_ARGS[*]}"
 
 T_BENCH_START="$(date +%s.%N)"
 
 # Per-job (flat) tracking arrays.
-declare -a PIDS=() J_INST=() J_PORT=() J_OUT=()
+declare -a PIDS=() J_INST=() J_SHM=() J_OUT=()
 gpu_idx=0
 
 for row in "${ROWS[@]}"; do
-    IFS=$'\t' read -r i bdf node port core <<< "$row"
+    IFS=$'\t' read -r i bdf node shm_path core <<< "$row"
     for ((r = 0; r < PER_SERVER; r++)); do
         out="$RUN_DIR/bench-$i-$r.log"
 
@@ -146,18 +146,19 @@ for row in "${ROWS[@]}"; do
                 gpu="$(pick_gpu "$node")"
             fi
             gpu_env=(env "CUDA_VISIBLE_DEVICES=$gpu")
-            log "  instance $i (NUMA $node) client $r -> localhost:$port (GPU $gpu)"
+            log "  instance $i (NUMA $node) client $r -> $shm_path (GPU $gpu)"
         else
-            log "  instance $i (NUMA $node) client $r -> localhost:$port"
+            log "  instance $i (NUMA $node) client $r -> $shm_path"
         fi
         gpu_idx=$((gpu_idx + 1))
 
-        # Each client runs from the bench script's dir so its pb2 stubs import.
+        # Each client runs from the bench script's dir so its shmq helper
+        # (certus_shmq_helpers / certus_shmq_connector) resolves on sys.path.
         ( cd "$BENCH_DIR" && "${gpu_env[@]}" "$PYTHON" "$BENCH_SCRIPT" \
-            --server "localhost:$port" "${BENCH_ARGS[@]}" ) > "$out" 2>&1 &
+            --shm-path "$shm_path" "${BENCH_ARGS[@]}" ) > "$out" 2>&1 &
         PIDS+=("$!")
         J_INST+=("$i")
-        J_PORT+=("$port")
+        J_SHM+=("$shm_path")
         J_OUT+=("$out")
     done
 done
@@ -166,7 +167,7 @@ done
 fail=0
 for j in "${!PIDS[@]}"; do
     if ! wait "${PIDS[$j]}"; then
-        warn "instance ${J_INST[$j]} client (port ${J_PORT[$j]}) exited non-zero -- see ${J_OUT[$j]}"
+        warn "instance ${J_INST[$j]} client (${J_SHM[$j]}) exited non-zero -- see ${J_OUT[$j]}"
         fail=1
     fi
 done
@@ -204,8 +205,8 @@ fadd() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.6f", a + b }'; }
 
 # Accumulate each client's throughput into its parent instance. Track whether
 # any replica produced parseable data: an instance with none (server down /
-# connection refused) is reported as FAILED rather than a misleading 0.00.
-declare -A INST_POP=() INST_HOT=() INST_COLD=() INST_PORT=() INST_NCLI=() INST_DATA=()
+# mailbox missing) is reported as FAILED rather than a misleading 0.00.
+declare -A INST_POP=() INST_HOT=() INST_COLD=() INST_SHM=() INST_NCLI=() INST_DATA=()
 for j in "${!J_OUT[@]}"; do
     i="${J_INST[$j]}"
     pop_raw="$(parse_agg "${J_OUT[$j]}" "Populate")"
@@ -213,7 +214,7 @@ for j in "${!J_OUT[@]}"; do
     cold_raw="$(parse_agg "${J_OUT[$j]}" "Lookup (cold)")"
     [[ -n "${pop_raw}${hot_raw}${cold_raw}" ]] && INST_DATA[$i]=1
     pop="${pop_raw:-0}"; hot="${hot_raw:-0}"; cold="${cold_raw:-0}"
-    INST_PORT[$i]="${J_PORT[$j]}"
+    INST_SHM[$i]="${J_SHM[$j]}"
     INST_NCLI[$i]=$(( ${INST_NCLI[$i]:-0} + 1 ))
     INST_POP[$i]="$(fadd "${INST_POP[$i]:-0}" "$pop")"
     INST_HOT[$i]="$(fadd "${INST_HOT[$i]:-0}" "$hot")"
@@ -222,35 +223,35 @@ done
 
 log "Aggregating results..."
 echo
-printf '%-5s %-16s %5s %12s %12s %12s\n' "IDX" "ENDPOINT" "NCLI" "POPULATE" "HOT" "COLD"
-printf '%-5s %-16s %5s %12s %12s %12s\n' "---" "----------------" "-----" "------------" "------------" "------------"
+printf '%-5s %-26s %5s %12s %12s %12s\n' "IDX" "MAILBOX" "NCLI" "POPULATE" "HOT" "COLD"
+printf '%-5s %-26s %5s %12s %12s %12s\n' "---" "--------------------------" "-----" "------------" "------------" "------------"
 
 sum_pop=0; sum_hot=0; sum_cold=0; counted=0; failed=0
 # Iterate instances in map order for deterministic output.
 for row in "${ROWS[@]}"; do
-    IFS=$'\t' read -r i bdf node port core <<< "$row"
-    [[ -n "${INST_PORT[$i]:-}" ]] || continue
+    IFS=$'\t' read -r i bdf node shm_path core <<< "$row"
+    [[ -n "${INST_SHM[$i]:-}" ]] || continue
     if [[ "${INST_DATA[$i]:-0}" != 1 ]]; then
-        # No parseable throughput from any replica: distinguish "unreachable"
-        # (connection refused in the client log) from generic "no data".
+        # No parseable throughput from any replica: distinguish "mailbox
+        # missing" (no such file in the client log) from generic "no data".
         reason="no data"
-        grep -q "Connection refused" "$RUN_DIR/bench-$i-0.log" 2>/dev/null && reason="unreachable"
-        printf '%-5s %-16s %5s %14s %14s %14s   (%s)\n' \
-            "$i" "localhost:${INST_PORT[$i]}" "${INST_NCLI[$i]}" "FAILED" "FAILED" "FAILED" "$reason"
+        grep -qE "No such file|mailbox|not found" "$RUN_DIR/bench-$i-0.log" 2>/dev/null && reason="unreachable"
+        printf '%-5s %-26s %5s %14s %14s %14s   (%s)\n' \
+            "$i" "${INST_SHM[$i]}" "${INST_NCLI[$i]}" "FAILED" "FAILED" "FAILED" "$reason"
         failed=$((failed + 1)); fail=1
         continue
     fi
     pop="${INST_POP[$i]}"; hot="${INST_HOT[$i]}"; cold="${INST_COLD[$i]}"
-    printf '%-5s %-16s %5s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
-        "$i" "localhost:${INST_PORT[$i]}" "${INST_NCLI[$i]}" "$pop" "$hot" "$cold"
+    printf '%-5s %-26s %5s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
+        "$i" "${INST_SHM[$i]}" "${INST_NCLI[$i]}" "$pop" "$hot" "$cold"
     sum_pop="$(fadd "$sum_pop" "$pop")"
     sum_hot="$(fadd "$sum_hot" "$hot")"
     sum_cold="$(fadd "$sum_cold" "$cold")"
     counted=$((counted + 1))
 done
 
-printf '%-5s %-16s %5s %12s %12s %12s\n' "---" "----------------" "-----" "------------" "------------" "------------"
-printf '%-5s %-16s %5s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
+printf '%-5s %-26s %5s %12s %12s %12s\n' "---" "--------------------------" "-----" "------------" "------------" "------------"
+printf '%-5s %-26s %5s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
     "SUM" "$counted ok$([[ $failed -gt 0 ]] && echo " / $failed FAILED")" "$TOTAL" "$sum_pop" "$sum_hot" "$sum_cold"
 
 # Compute effective system throughput from wall-clock elapsed time.
@@ -267,7 +268,7 @@ done
 if [[ "$total_objs" -gt 0 && "$(awk "BEGIN{print ($BENCH_WALL > 0)}")" == 1 ]]; then
     total_gib="$(awk "BEGIN{printf \"%.6f\", $total_objs * $block_mib / 1024}")"
     eff_gbps="$(awk "BEGIN{printf \"%.2f\", $total_gib / $BENCH_WALL}")"
-    printf '%-5s %-16s %5s %38s\n' \
+    printf '%-5s %-26s %5s %38s\n' \
         "EFF" "wall=${BENCH_WALL}s" "" "${eff_gbps} GB/s effective (all phases, wall-clock)"
 fi
 
@@ -286,7 +287,7 @@ fi
 # Check server logs for memory-tier exhaustion warnings.
 mt_exhausted=0
 for row in "${ROWS[@]}"; do
-    IFS=$'\t' read -r i bdf node port core <<< "$row"
+    IFS=$'\t' read -r i bdf node shm_path core <<< "$row"
     srvlog="$RUN_DIR/srv-$i.log"
     if [[ -f "$srvlog" ]] && grep -q "memory-tier exhausted" "$srvlog"; then
         mt_exhausted=$((mt_exhausted + 1))

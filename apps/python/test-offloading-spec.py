@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Validate all Certus gRPC APIs that map to the vLLM OffloadingSpec interface.
+"""Validate all Certus shmq APIs that map to the vLLM OffloadingSpec interface.
 
 Tests the complete OffloadingManager lifecycle as exercised by vLLM's
 KV-cache offloading connector. Each test section is named after the
 OffloadingSpec operation it validates.
 
-OffloadingSpec → Certus gRPC mapping:
+OffloadingSpec → Certus shmq mapping:
     prepare_store(keys)              → Reserve
     transfer_async(store: GPU→DRAM)  → CopyToStore
     complete_store(keys, success)    → CommitStore / AbortStore
@@ -20,9 +20,9 @@ OffloadingSpec → Certus gRPC mapping:
     [persistence flush]              → FlushToSsd
 
 Usage:
-    python test-offloading-spec.py --server localhost:50051 --block-size 64K
+    python test-offloading-spec.py --shm-path /dev/shm/certus-shmq --block-size 64K
 
-Requires: GPU with CUDA, running certus-server-yaml with --memory-tier-size 256M
+Requires: GPU with CUDA, running certus-server with --memory-tier-size 256M
 """
 
 import argparse
@@ -34,9 +34,11 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
+from certus_shmq_connector.ring import REASON_DEMOTED, REASON_REMOVED
+
+# GPU device index the script operates on; set from args.gpu in main().
+_GPU_DEVICE = 0
 
 # --- CUDA helpers ---
 
@@ -109,86 +111,64 @@ def parse_size(s):
 
 # --- Assertion helpers ---
 
-def ensure_pool_quiescent(stub):
+def ensure_pool_quiescent(ring):
     """Clear memory-tier, flush pending writes, drain events, and let evictor settle.
 
     The background evictor runs asynchronously and may still be demoting entries
     from a prior flood. We clear+flush+drain, sleep to let it finish, then repeat.
     """
     for _ in range(3):
-        stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-        stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
-        stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+        ring.clear_memory_tier()
+        ring.flush_to_ssd()
+        ring.take_events(0)
         time.sleep(0.5)
 
 
-def assert_all_success(resp, op_name):
-    for r in resp.results:
-        if not r.success:
-            raise AssertionError(
-                f"{op_name} failed for key={r.key}: "
-                f"code={r.error_code} msg={r.error_message}"
-            )
+def assert_all_success(oks, op_name, keys=None):
+    for i, ok in enumerate(oks):
+        if not ok:
+            key = keys[i] if keys is not None else i
+            raise AssertionError(f"{op_name} failed for key {key}")
 
 
-def assert_result_error(resp, key, op_name):
-    for r in resp.results:
-        if r.key == key:
-            if r.success:
-                raise AssertionError(f"{op_name} key={key}: expected error, got success")
-            return r
-    raise AssertionError(f"{op_name}: key={key} not found in results")
-
-
-def check_exists(stub, keys):
-    resp = stub.Check(dispatcher_pb2.BatchCheckRequest(keys=keys))
-    return {r.key: r.exists for r in resp.results}
+def check_exists(ring, keys):
+    oks = ring.check(keys)
+    return {k: oks[i] for i, k in enumerate(keys)}
 
 
 # --- Helpers to populate entries (used across tests) ---
 
-def populate_entries(stub, keys, block_size, ptrs, handles):
+def populate_entries(ring, keys, block_size, ptrs, handles):
     """Store entries via the split-phase path (Reserve → CopyToStore → Commit)."""
-    entries = [dispatcher_pb2.ReserveEntry(key=k, size=block_size) for k in keys]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve")
+    oks = ring.reserve([(k, block_size, 0) for k in keys])
+    assert_all_success(oks, "Reserve", keys)
 
     copy_entries = [
-        dispatcher_pb2.CopyToStoreEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=handles[i], size=block_size,
-            ),
-        )
+        (k, [single_region(handles[i], _GPU_DEVICE, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=copy_entries))
-    assert_all_success(resp, "CopyToStore")
+    oks = ring.copy_to_store(copy_entries)
+    assert_all_success(oks, "CopyToStore", keys)
 
-    resp = stub.CommitStore(dispatcher_pb2.BatchCommitStoreRequest(keys=keys))
-    assert_all_success(resp, "CommitStore")
+    oks = ring.commit_store(keys)
+    assert_all_success(oks, "CommitStore", keys)
 
 
-def populate_via_populate_rpc(stub, keys, block_size, ptrs, handles):
+def populate_via_populate_rpc(ring, keys, block_size, ptrs, handles):
     """Store entries via the single-phase Populate RPC."""
     entries = [
-        dispatcher_pb2.PopulateEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=handles[i], size=block_size,
-            ),
-        )
+        (k, [single_region(handles[i], _GPU_DEVICE, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
-    assert_all_success(resp, "Populate")
+    oks = ring.populate(entries)
+    assert_all_success(oks, "Populate", keys)
 
 
 # ============================================================
 # TEST FUNCTIONS — one per OffloadingSpec operation
 # ============================================================
 
-def test_prepare_store(stub, keys, block_size, ptrs, handles):
+def test_prepare_store(ring, keys, block_size, ptrs, handles):
     """OffloadingSpec.prepare_store → Reserve
 
     Validates:
@@ -198,28 +178,29 @@ def test_prepare_store(stub, keys, block_size, ptrs, handles):
     """
     print("\n  [prepare_store] Reserve allocates invisible slots")
 
-    entries = [dispatcher_pb2.ReserveEntry(key=k, size=block_size) for k in keys]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve")
+    reserve_entries = [(k, block_size, 0) for k in keys]
+    oks = ring.reserve(reserve_entries)
+    assert_all_success(oks, "Reserve", keys)
     print("    Reserve:          OK")
 
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if exists.get(k, False):
             raise AssertionError(f"Key {k} visible after Reserve (should be invisible)")
     print("    Not visible:      OK")
 
     # Duplicate reserve should fail
-    dup_resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries[:1]))
-    assert_result_error(dup_resp, keys[0], "Reserve (duplicate)")
+    dup_oks = ring.reserve(reserve_entries[:1])
+    if dup_oks[0]:
+        raise AssertionError(f"Reserve (duplicate) key={keys[0]}: expected error, got success")
     print("    Dup rejected:     OK (AlreadyExists)")
 
     # Cleanup
-    stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=keys))
+    ring.abort_store(keys)
     print("    Cleanup:          OK")
 
 
-def test_transfer_store(stub, keys, block_size, ptrs, handles):
+def test_transfer_store(ring, keys, block_size, ptrs, handles):
     """OffloadingSpec transfer_async (store direction) → CopyToStore
 
     Validates:
@@ -231,35 +212,29 @@ def test_transfer_store(stub, keys, block_size, ptrs, handles):
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
 
-    entries = [dispatcher_pb2.ReserveEntry(key=k, size=block_size) for k in keys]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve")
+    oks = ring.reserve([(k, block_size, 0) for k in keys])
+    assert_all_success(oks, "Reserve", keys)
 
     copy_entries = [
-        dispatcher_pb2.CopyToStoreEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=handles[i], size=block_size,
-            ),
-        )
+        (k, [single_region(handles[i], _GPU_DEVICE, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=copy_entries))
-    assert_all_success(resp, "CopyToStore")
+    oks = ring.copy_to_store(copy_entries)
+    assert_all_success(oks, "CopyToStore", keys)
     print("    CopyToStore:      OK")
 
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if exists.get(k, False):
             raise AssertionError(f"Key {k} visible after CopyToStore (not committed)")
     print("    Still invisible:  OK")
 
     # Cleanup via abort
-    stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=keys))
+    ring.abort_store(keys)
     print("    Cleanup:          OK")
 
 
-def test_complete_store_success(stub, keys, block_size, ptrs, handles, lu_ptrs, lu_handles):
+def test_complete_store_success(ring, keys, block_size, ptrs, handles, lu_ptrs, lu_handles):
     """OffloadingSpec.complete_store(success=True) → CommitStore
 
     Validates:
@@ -274,10 +249,10 @@ def test_complete_store_success(stub, keys, block_size, ptrs, handles, lu_ptrs, 
         patterns[k] = pat
         gpu_write(ptrs[i], pat)
 
-    populate_entries(stub, keys, block_size, ptrs, handles)
+    populate_entries(ring, keys, block_size, ptrs, handles)
     print("    Reserve+Copy+Commit: OK")
 
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} not visible after CommitStore")
@@ -285,17 +260,12 @@ def test_complete_store_success(stub, keys, block_size, ptrs, handles, lu_ptrs, 
 
     # Integrity check via Lookup
     lu_entries = [
-        dispatcher_pb2.LookupEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=lu_handles[i], size=block_size,
-            ),
-        )
+        (k, [single_region(lu_handles[i], _GPU_DEVICE, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lu_entries))
+    oks = ring.lookup(lu_entries)
     _libcudart.cudaDeviceSynchronize()
-    assert_all_success(resp, "Lookup")
+    assert_all_success(oks, "Lookup", keys)
 
     for i, k in enumerate(keys):
         actual = gpu_read(lu_ptrs[i], block_size)
@@ -303,11 +273,11 @@ def test_complete_store_success(stub, keys, block_size, ptrs, handles, lu_ptrs, 
             raise AssertionError(f"Integrity fail: key={k}")
     print("    Integrity:        OK")
 
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:          OK")
 
 
-def test_complete_store_abort(stub, keys, block_size, ptrs, handles):
+def test_complete_store_abort(ring, keys, block_size, ptrs, handles):
     """OffloadingSpec.complete_store(success=False) → AbortStore
 
     Validates:
@@ -320,40 +290,35 @@ def test_complete_store_abort(stub, keys, block_size, ptrs, handles):
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
 
-    entries = [dispatcher_pb2.ReserveEntry(key=k, size=block_size) for k in keys]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve")
+    reserve_entries = [(k, block_size, 0) for k in keys]
+    oks = ring.reserve(reserve_entries)
+    assert_all_success(oks, "Reserve", keys)
 
     copy_entries = [
-        dispatcher_pb2.CopyToStoreEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=handles[i], size=block_size,
-            ),
-        )
+        (k, [single_region(handles[i], _GPU_DEVICE, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=copy_entries))
-    assert_all_success(resp, "CopyToStore")
+    oks = ring.copy_to_store(copy_entries)
+    assert_all_success(oks, "CopyToStore", keys)
 
-    resp = stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=keys))
-    assert_all_success(resp, "AbortStore")
+    oks = ring.abort_store(keys)
+    assert_all_success(oks, "AbortStore", keys)
     print("    AbortStore:       OK")
 
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if exists.get(k, False):
             raise AssertionError(f"Key {k} visible after AbortStore")
     print("    Invisible:        OK")
 
     # Verify slot is reusable
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve (reuse)")
-    stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=keys))
+    oks = ring.reserve(reserve_entries)
+    assert_all_success(oks, "Reserve (reuse)", keys)
+    ring.abort_store(keys)
     print("    Slot reuse:       OK")
 
 
-def test_lookup_check(stub, keys, block_size, ptrs, handles):
+def test_lookup_check(ring, keys, block_size, ptrs, handles):
     """OffloadingSpec.lookup → Check (existence query)
 
     Validates:
@@ -364,7 +329,7 @@ def test_lookup_check(stub, keys, block_size, ptrs, handles):
     print("\n  [lookup] Check existence without data transfer")
 
     # Missing keys
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if exists.get(k, False):
             raise AssertionError(f"Key {k} exists before population")
@@ -373,27 +338,27 @@ def test_lookup_check(stub, keys, block_size, ptrs, handles):
     # Populate
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
-    populate_via_populate_rpc(stub, keys, block_size, ptrs, handles)
+    populate_via_populate_rpc(ring, keys, block_size, ptrs, handles)
 
     # Present keys
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} not found after populate")
     print("    Present keys:     OK (exists=true)")
 
     # Non-destructive: check again
-    exists2 = check_exists(stub, keys)
+    exists2 = check_exists(ring, keys)
     for k in keys:
         if not exists2.get(k, False):
             raise AssertionError(f"Key {k} disappeared after Check")
     print("    Non-destructive:  OK")
 
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:          OK")
 
 
-def test_prepare_load(stub, keys, block_size, ptrs, handles):
+def test_prepare_load(ring, keys, block_size, ptrs, handles):
     """OffloadingSpec.prepare_load → Pin(promote=true)
 
     Validates:
@@ -405,27 +370,27 @@ def test_prepare_load(stub, keys, block_size, ptrs, handles):
 
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
-    populate_via_populate_rpc(stub, keys, block_size, ptrs, handles)
+    populate_via_populate_rpc(ring, keys, block_size, ptrs, handles)
 
     # Pin with promote (single call replaces Pin + Touch(promote=true))
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys, promote=True))
-    assert_all_success(resp, "Pin(promote)")
+    oks = ring.pin(keys, promote=True)
+    assert_all_success(oks, "Pin(promote)", keys)
     print("    Pin(promote):     OK")
 
     # Entry still visible (not evicted)
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} disappeared while pinned")
     print("    Still exists:     OK")
 
     # Cleanup: unpin then remove
-    stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.unpin(keys)
+    ring.remove(keys)
     print("    Cleanup:          OK")
 
 
-def test_transfer_load(stub, keys, block_size, ptrs, handles, lu_ptrs, lu_handles):
+def test_transfer_load(ring, keys, block_size, ptrs, handles, lu_ptrs, lu_handles):
     """OffloadingSpec transfer_async (load direction) → Lookup (DMA readback)
 
     Validates:
@@ -441,7 +406,7 @@ def test_transfer_load(stub, keys, block_size, ptrs, handles, lu_ptrs, lu_handle
         patterns[k] = pat
         gpu_write(ptrs[i], pat)
 
-    populate_via_populate_rpc(stub, keys, block_size, ptrs, handles)
+    populate_via_populate_rpc(ring, keys, block_size, ptrs, handles)
 
     # Zero the lookup GPU buffers to ensure we're reading fresh data
     for ptr in lu_ptrs:
@@ -449,17 +414,12 @@ def test_transfer_load(stub, keys, block_size, ptrs, handles, lu_ptrs, lu_handle
     _libcudart.cudaDeviceSynchronize()
 
     lu_entries = [
-        dispatcher_pb2.LookupEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=lu_handles[i], size=block_size,
-            ),
-        )
+        (k, [single_region(lu_handles[i], _GPU_DEVICE, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lu_entries))
+    oks = ring.lookup(lu_entries)
     _libcudart.cudaDeviceSynchronize()
-    assert_all_success(resp, "Lookup")
+    assert_all_success(oks, "Lookup", keys)
     print("    Lookup DMA:       OK")
 
     for i, k in enumerate(keys):
@@ -471,11 +431,11 @@ def test_transfer_load(stub, keys, block_size, ptrs, handles, lu_ptrs, lu_handle
             raise AssertionError(f"Integrity fail: key={k}, mismatch at byte {first_bad}")
     print(f"    Integrity:        OK ({len(keys)} objects)")
 
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:          OK")
 
 
-def test_complete_load(stub, keys, block_size, ptrs, handles):
+def test_complete_load(ring, keys, block_size, ptrs, handles):
     """OffloadingSpec.complete_load → Unpin
 
     Validates:
@@ -489,45 +449,45 @@ def test_complete_load(stub, keys, block_size, ptrs, handles):
     """
     print("\n  [complete_load] Unpin releases eviction protection")
 
-    ensure_pool_quiescent(stub)
+    ensure_pool_quiescent(ring)
 
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
-    populate_via_populate_rpc(stub, keys, block_size, ptrs, handles)
+    populate_via_populate_rpc(ring, keys, block_size, ptrs, handles)
 
     # Flush to SSD to drain the background writer's internal read-ref.
     # After this, entries have read_ref=0 (only user Pins matter).
-    stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+    ring.flush_to_ssd()
 
     # Pin (read_ref 0→1)
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
-    assert_all_success(resp, "Pin")
+    oks = ring.pin(keys)
+    assert_all_success(oks, "Pin", keys)
 
     # Entry still exists (protected by pin)
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} disappeared while pinned")
     print("    Pin + exists:     OK")
 
     # Unpin (read_ref 1→0) — entry now evictable but still present
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    assert_all_success(resp, "Unpin")
+    oks = ring.unpin(keys)
+    assert_all_success(oks, "Unpin", keys)
     print("    Unpin:            OK")
 
     # Double-unpin should fail (refcount underflow)
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    for r in resp.results:
-        if r.success:
-            raise AssertionError(f"Unpin key={r.key} succeeded on zero refcount")
+    oks = ring.unpin(keys)
+    for i, ok in enumerate(oks):
+        if ok:
+            raise AssertionError(f"Unpin key={keys[i]} succeeded on zero refcount")
     print("    Underflow reject: OK")
 
     # Cleanup (entries may have been evicted, best-effort)
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:          OK")
 
 
-def test_touch(stub, keys, block_size, ptrs, handles):
+def test_touch(ring, keys, block_size, ptrs, handles):
     """OffloadingSpec.touch → Touch (update eviction timestamps)
 
     Validates:
@@ -539,20 +499,20 @@ def test_touch(stub, keys, block_size, ptrs, handles):
 
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
-    populate_via_populate_rpc(stub, keys, block_size, ptrs, handles)
+    populate_via_populate_rpc(ring, keys, block_size, ptrs, handles)
 
     # Touch without promote
-    resp = stub.Touch(dispatcher_pb2.BatchTouchRequest(keys=keys, promote=False))
-    assert_all_success(resp, "Touch(no promote)")
+    oks = ring.touch(keys, promote=False)
+    assert_all_success(oks, "Touch(no promote)", keys)
     print("    Touch(no promote): OK")
 
     # Touch with promote (no-op for DRAM-resident, but should succeed)
-    resp = stub.Touch(dispatcher_pb2.BatchTouchRequest(keys=keys, promote=True))
-    assert_all_success(resp, "Touch(promote)")
+    oks = ring.touch(keys, promote=True)
+    assert_all_success(oks, "Touch(promote)", keys)
     print("    Touch(promote):    OK")
 
     # Entries still exist after touch
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} disappeared after Touch")
@@ -560,17 +520,17 @@ def test_touch(stub, keys, block_size, ptrs, handles):
 
     # Touch on non-existent key
     bogus = [0xBEEF_DEAD_0001]
-    resp = stub.Touch(dispatcher_pb2.BatchTouchRequest(keys=bogus, promote=False))
-    for r in resp.results:
-        if r.success:
+    oks = ring.touch(bogus, promote=False)
+    for ok in oks:
+        if ok:
             raise AssertionError("Touch succeeded on non-existent key")
     print("    Missing key:       OK (rejected)")
 
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:           OK")
 
 
-def test_take_events(stub, block_size, ptrs, handles, pool_size):
+def test_take_events(ring, block_size, ptrs, handles, pool_size):
     """OffloadingSpec.take_events → TakeEvents (eviction drain)
 
     Validates:
@@ -579,18 +539,18 @@ def test_take_events(stub, block_size, ptrs, handles, pool_size):
     - Events have valid structure (key > 0, known reason)
     - max_events limits response size
     - Second drain is empty (events consumed)
-    - dropped_count reports overflow
+    - dropped count reports overflow
     """
     print("\n  [take_events] TakeEvents drains eviction notifications")
 
     # Start from a completely clean slate: clear pool + flush + drain stale events
-    stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-    stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
-    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    ring.clear_memory_tier()
+    ring.flush_to_ssd()
+    ring.take_events(0)
 
     # Empty drain
-    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
-    assert len(resp.events) == 0, f"Expected 0 events initially, got {len(resp.events)}"
+    events, _dropped = ring.take_events(0)
+    assert len(events) == 0, f"Expected 0 events initially, got {len(events)}"
     print("    Empty drain:      OK")
 
     # Flood memory-tier with pool_capacity + overflow to guarantee eviction.
@@ -606,20 +566,14 @@ def test_take_events(stub, block_size, ptrs, handles, pool_size):
     for batch_start in range(0, len(flood_keys), batch_size):
         batch = flood_keys[batch_start:batch_start + batch_size]
         entries = [
-            dispatcher_pb2.PopulateEntry(
-                key=k,
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=handles[idx % len(handles)], size=block_size,
-                ),
-            )
+            (k, [single_region(handles[idx % len(handles)], _GPU_DEVICE, block_size)])
             for idx, k in enumerate(batch)
         ]
-        stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
+        ring.populate(entries)
 
     # Drain events
-    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
-    total_events = len(resp.events)
-    total_dropped = resp.dropped_count
+    events, total_dropped = ring.take_events(0)
+    total_events = len(events)
     print(f"    Events: {total_events} drained, {total_dropped} dropped")
 
     assert total_events > 0 or total_dropped > 0, \
@@ -627,17 +581,17 @@ def test_take_events(stub, block_size, ptrs, handles, pool_size):
     print("    Evictions fired:  OK")
 
     # Validate event structure
-    for ev in resp.events:
-        assert ev.key > 0, f"Event key should be > 0, got {ev.key}"
-        assert ev.reason in (
-            dispatcher_pb2.EVICTION_REASON_DEMOTED,
-            dispatcher_pb2.EVICTION_REASON_REMOVED,
-        ), f"Unknown reason: {ev.reason}"
+    for ev_key, ev_reason in events:
+        assert ev_key > 0, f"Event key should be > 0, got {ev_key}"
+        assert ev_reason in (
+            REASON_DEMOTED,
+            REASON_REMOVED,
+        ), f"Unknown reason: {ev_reason}"
     print("    Event structure:  OK")
 
     # Second drain should be empty
-    resp2 = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
-    assert len(resp2.events) == 0, f"Second drain not empty: {len(resp2.events)} events"
+    events2, _dropped2 = ring.take_events(0)
+    assert len(events2) == 0, f"Second drain not empty: {len(events2)} events"
     print("    Drain-once:       OK")
 
     # Test max_events limit — flood again with different keys
@@ -646,32 +600,27 @@ def test_take_events(stub, block_size, ptrs, handles, pool_size):
     for batch_start in range(0, len(flood_keys2), batch_size):
         batch = flood_keys2[batch_start:batch_start + batch_size]
         entries = [
-            dispatcher_pb2.PopulateEntry(
-                key=k,
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=handles[idx % len(handles)], size=block_size,
-                ),
-            )
+            (k, [single_region(handles[idx % len(handles)], _GPU_DEVICE, block_size)])
             for idx, k in enumerate(batch)
         ]
-        stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
+        ring.populate(entries)
 
-    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=5))
-    if len(resp.events) > 0:
-        assert len(resp.events) <= 5, f"max_events=5 but got {len(resp.events)}"
-        print(f"    max_events=5:     OK (got {len(resp.events)})")
+    events, _dropped = ring.take_events(5)
+    if len(events) > 0:
+        assert len(events) <= 5, f"max_events=5 but got {len(events)}"
+        print(f"    max_events=5:     OK (got {len(events)})")
     else:
         print("    max_events=5:     OK (no events pending)")
 
     # Drain remainder
-    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    ring.take_events(0)
 
     # Cleanup — best-effort remove both flood sets
-    stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
+    ring.clear_memory_tier()
     print("    Cleanup:          OK")
 
 
-def test_remove(stub, keys, block_size, ptrs, handles):
+def test_remove(ring, keys, block_size, ptrs, handles):
     """Explicit removal → Remove
 
     Validates:
@@ -682,42 +631,42 @@ def test_remove(stub, keys, block_size, ptrs, handles):
     """
     print("\n  [remove] Remove deletes cache entry")
 
-    ensure_pool_quiescent(stub)
+    ensure_pool_quiescent(ring)
 
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
-    populate_via_populate_rpc(stub, keys, block_size, ptrs, handles)
+    populate_via_populate_rpc(ring, keys, block_size, ptrs, handles)
 
     # Flush background writer so its internal read-ref is released.
     # Without this, Remove can fail with "key not found" (ActiveReferences).
-    stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+    ring.flush_to_ssd()
 
     # Verify present
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         assert exists.get(k, False), f"Key {k} missing before Remove"
 
     # Remove
-    resp = stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
-    assert_all_success(resp, "Remove")
+    oks = ring.remove(keys)
+    assert_all_success(oks, "Remove", keys)
     print("    Remove:           OK")
 
     # Verify gone
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if exists.get(k, False):
             raise AssertionError(f"Key {k} still visible after Remove")
     print("    Gone:             OK")
 
     # Remove non-existent
-    resp = stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
-    for r in resp.results:
-        if r.success:
-            raise AssertionError(f"Remove key={r.key} succeeded on deleted entry")
+    oks = ring.remove(keys)
+    for i, ok in enumerate(oks):
+        if ok:
+            raise AssertionError(f"Remove key={keys[i]} succeeded on deleted entry")
     print("    Already removed:  OK (rejected)")
 
 
-def test_clear_memory_tier(stub, keys, block_size, ptrs, handles):
+def test_clear_memory_tier(ring, keys, block_size, ptrs, handles):
     """Bulk clear → ClearMemoryTier
 
     Validates:
@@ -729,18 +678,18 @@ def test_clear_memory_tier(stub, keys, block_size, ptrs, handles):
 
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
-    populate_via_populate_rpc(stub, keys, block_size, ptrs, handles)
+    populate_via_populate_rpc(ring, keys, block_size, ptrs, handles)
 
     # Verify present
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     populated_count = sum(1 for k in keys if exists.get(k, False))
     assert populated_count == len(keys), f"Only {populated_count}/{len(keys)} present"
 
     # Clear
-    resp = stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-    print(f"    Cleared:          {resp.entries_cleared} entries")
-    assert resp.entries_cleared >= len(keys), \
-        f"Expected >= {len(keys)} cleared, got {resp.entries_cleared}"
+    cleared_count = ring.clear_memory_tier()
+    print(f"    Cleared:          {cleared_count} entries")
+    assert cleared_count >= len(keys), \
+        f"Expected >= {len(keys)} cleared, got {cleared_count}"
     print("    ClearMemoryTier:  OK")
 
     # Entries gone (or demoted to SSD — either way, they're out of memory-tier)
@@ -749,7 +698,7 @@ def test_clear_memory_tier(stub, keys, block_size, ptrs, handles):
     print("    Count valid:      OK")
 
 
-def test_flush_to_ssd(stub, keys, block_size, ptrs, handles):
+def test_flush_to_ssd(ring, keys, block_size, ptrs, handles):
     """Persistence flush → FlushToSsd
 
     Validates:
@@ -761,25 +710,25 @@ def test_flush_to_ssd(stub, keys, block_size, ptrs, handles):
 
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
-    populate_via_populate_rpc(stub, keys, block_size, ptrs, handles)
+    populate_via_populate_rpc(ring, keys, block_size, ptrs, handles)
 
     # Flush
-    resp = stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
-    print(f"    Flushed:          {resp.jobs_flushed} jobs")
+    jobs_flushed = ring.flush_to_ssd()
+    print(f"    Flushed:          {jobs_flushed} jobs")
     print("    FlushToSsd:       OK")
 
     # Entries still visible
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         if not exists.get(k, False):
             raise AssertionError(f"Key {k} disappeared after flush")
     print("    Still visible:    OK")
 
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:          OK")
 
 
-def test_full_offloading_lifecycle(stub, keys, block_size, ptrs, handles, lu_ptrs, lu_handles):
+def test_full_offloading_lifecycle(ring, keys, block_size, ptrs, handles, lu_ptrs, lu_handles):
     """End-to-end OffloadingSpec lifecycle: store → lookup → load → touch → evict
 
     Simulates the full vLLM KV-cache offloading workflow:
@@ -802,39 +751,33 @@ def test_full_offloading_lifecycle(stub, keys, block_size, ptrs, handles, lu_ptr
         gpu_write(ptrs[i], pat)
 
     # 1. prepare_store → Reserve
-    entries = [dispatcher_pb2.ReserveEntry(key=k, size=block_size) for k in keys]
-    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
-    assert_all_success(resp, "Reserve")
+    oks = ring.reserve([(k, block_size, 0) for k in keys])
+    assert_all_success(oks, "Reserve", keys)
     print("    1. prepare_store: OK")
 
     # 2. transfer_async store → CopyToStore
     copy_entries = [
-        dispatcher_pb2.CopyToStoreEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=handles[i], size=block_size,
-            ),
-        )
+        (k, [single_region(handles[i], _GPU_DEVICE, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=copy_entries))
-    assert_all_success(resp, "CopyToStore")
+    oks = ring.copy_to_store(copy_entries)
+    assert_all_success(oks, "CopyToStore", keys)
     print("    2. transfer(store): OK")
 
     # 3. complete_store → CommitStore
-    resp = stub.CommitStore(dispatcher_pb2.BatchCommitStoreRequest(keys=keys))
-    assert_all_success(resp, "CommitStore")
+    oks = ring.commit_store(keys)
+    assert_all_success(oks, "CommitStore", keys)
     print("    3. complete_store: OK")
 
     # 4. lookup → Check
-    exists = check_exists(stub, keys)
+    exists = check_exists(ring, keys)
     for k in keys:
         assert exists.get(k, False), f"Key {k} not found in Check"
     print("    4. lookup:        OK")
 
     # 5. prepare_load → Pin(promote=true)
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys, promote=True))
-    assert_all_success(resp, "Pin(promote)")
+    oks = ring.pin(keys, promote=True)
+    assert_all_success(oks, "Pin(promote)", keys)
     print("    5. prepare_load:  OK")
 
     # 6. transfer_async load → Lookup (DMA to GPU)
@@ -843,17 +786,12 @@ def test_full_offloading_lifecycle(stub, keys, block_size, ptrs, handles, lu_ptr
     _libcudart.cudaDeviceSynchronize()
 
     lu_entries = [
-        dispatcher_pb2.LookupEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=lu_handles[i], size=block_size,
-            ),
-        )
+        (k, [single_region(lu_handles[i], _GPU_DEVICE, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lu_entries))
+    oks = ring.lookup(lu_entries)
     _libcudart.cudaDeviceSynchronize()
-    assert_all_success(resp, "Lookup")
+    assert_all_success(oks, "Lookup", keys)
 
     for i, k in enumerate(keys):
         actual = gpu_read(lu_ptrs[i], block_size)
@@ -862,25 +800,25 @@ def test_full_offloading_lifecycle(stub, keys, block_size, ptrs, handles, lu_ptr
     print("    6. transfer(load): OK (integrity verified)")
 
     # 7. complete_load → Unpin
-    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
-    assert_all_success(resp, "Unpin")
+    oks = ring.unpin(keys)
+    assert_all_success(oks, "Unpin", keys)
     print("    7. complete_load: OK")
 
     # 8. touch (keep alive after load completes)
-    resp = stub.Touch(dispatcher_pb2.BatchTouchRequest(keys=keys, promote=False))
-    assert_all_success(resp, "Touch")
+    oks = ring.touch(keys, promote=False)
+    assert_all_success(oks, "Touch", keys)
     print("    8. touch:         OK")
 
     # 9. take_events (verify we can poll — no evictions expected for these keys)
-    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    events, _dropped = ring.take_events(0)
     # We don't assert empty — other tests may have residual events
-    print(f"    9. take_events:   OK ({len(resp.events)} pending)")
+    print(f"    9. take_events:   OK ({len(events)} pending)")
 
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    ring.remove(keys)
     print("    Cleanup:          OK")
 
 
-def test_pin_prevents_eviction(stub, block_size, ptrs, handles, pool_size):
+def test_pin_prevents_eviction(ring, block_size, ptrs, handles, pool_size):
     """Pin semantics: pinned entries survive memory pressure.
 
     Validates that a pinned entry is NOT evicted even when the memory-tier
@@ -889,20 +827,20 @@ def test_pin_prevents_eviction(stub, block_size, ptrs, handles, pool_size):
     print("\n  [pin_eviction] Pinned entries survive memory pressure")
 
     # Clear memory-tier and drain stale events for a clean start
-    stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    ring.clear_memory_tier()
+    ring.take_events(0)
 
     # Store a sentinel entry and pin it immediately
     sentinel_key = 600_000_001
     gpu_write(ptrs[0], make_pattern(sentinel_key, block_size))
-    populate_via_populate_rpc(stub, [sentinel_key], block_size, [ptrs[0]], [handles[0]])
+    populate_via_populate_rpc(ring, [sentinel_key], block_size, [ptrs[0]], [handles[0]])
 
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=[sentinel_key]))
-    assert_all_success(resp, "Pin sentinel")
+    oks = ring.pin([sentinel_key])
+    assert_all_success(oks, "Pin sentinel", [sentinel_key])
     print("    Sentinel pinned:  OK")
 
     # Drain any events from the populate (in case it triggered eviction of old entries)
-    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    ring.take_events(0)
 
     # Flood memory-tier to trigger eviction
     num_flood = pool_size // block_size + 16
@@ -913,32 +851,27 @@ def test_pin_prevents_eviction(stub, block_size, ptrs, handles, pool_size):
     for batch_start in range(0, len(flood_keys), batch_size):
         batch = flood_keys[batch_start:batch_start + batch_size]
         entries = [
-            dispatcher_pb2.PopulateEntry(
-                key=k,
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=handles[idx % len(handles)], size=block_size,
-                ),
-            )
+            (k, [single_region(handles[idx % len(handles)], _GPU_DEVICE, block_size)])
             for idx, k in enumerate(batch)
         ]
-        stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
+        ring.populate(entries)
 
     # Sentinel should still exist (pinned)
-    exists = check_exists(stub, [sentinel_key])
+    exists = check_exists(ring, [sentinel_key])
     assert exists.get(sentinel_key, False), "Pinned sentinel was evicted!"
     print("    Survived flood:   OK")
 
     # Drain events — sentinel should NOT appear (it was pinned before flood)
-    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
-    evicted_keys = {ev.key for ev in resp.events if ev.reason == dispatcher_pb2.EVICTION_REASON_REMOVED}
+    events, _dropped = ring.take_events(0)
+    evicted_keys = {ev_key for ev_key, ev_reason in events if ev_reason == REASON_REMOVED}
     if sentinel_key in evicted_keys:
         raise AssertionError("Pinned sentinel appeared in REMOVED eviction events!")
     print("    Not in events:    OK")
 
     # Cleanup
-    stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=[sentinel_key]))
-    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=[sentinel_key]))
-    stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
+    ring.unpin([sentinel_key])
+    ring.remove([sentinel_key])
+    ring.clear_memory_tier()
     print("    Cleanup:          OK")
 
 
@@ -947,10 +880,12 @@ def test_pin_prevents_eviction(stub, block_size, ptrs, handles, pool_size):
 # ============================================================
 
 def main():
+    global _GPU_DEVICE
+
     parser = argparse.ArgumentParser(
-        description="Validate Certus gRPC APIs against OffloadingSpec contract"
+        description="Validate Certus shmq APIs against OffloadingSpec contract"
     )
-    parser.add_argument("--server", default="localhost:50051")
+    add_shm_arg(parser)
     parser.add_argument(
         "--block-size", type=parse_size, default=64 * 1024,
         help="Object size (default: 64K)"
@@ -969,12 +904,13 @@ def main():
     block_size = args.block_size
     num_objects = args.num_objects
 
+    _GPU_DEVICE = args.gpu
     _libcudart.cudaSetDevice(args.gpu)
 
     print("=" * 60)
     print("Certus OffloadingSpec Compliance Test")
     print("=" * 60)
-    print(f"  Server:      {args.server}")
+    print(f"  Server:      {args.shm_path}")
     print(f"  Block size:  {block_size // 1024} KiB")
     print(f"  Objects:     {num_objects}")
     print(f"  GPU:         {args.gpu}")
@@ -997,63 +933,58 @@ def main():
         base = random.randint(1_000_000_000, 2_000_000_000)
         key_sets.append([base + i for i in range(num_objects)])
 
-    channel = grpc.insecure_channel(
-        args.server,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+    # Multiple threads would share one ring (per-thread sticky channel auto-claimed);
+    # this test is single-threaded, so one channel suffices.
+    ring = connect(args.shm_path)
 
     # Ensure clean starting state (server may have residual entries from prior runs)
-    ensure_pool_quiescent(stub)
+    ensure_pool_quiescent(ring)
 
     passed = 0
     failed = 0
     tests = [
         # Store path
         ("prepare_store", lambda: test_prepare_store(
-            stub, key_sets[0], block_size, store_ptrs, store_handles)),
+            ring, key_sets[0], block_size, store_ptrs, store_handles)),
         ("transfer_store", lambda: test_transfer_store(
-            stub, key_sets[1], block_size, store_ptrs, store_handles)),
+            ring, key_sets[1], block_size, store_ptrs, store_handles)),
         ("complete_store_success", lambda: test_complete_store_success(
-            stub, key_sets[2], block_size, store_ptrs, store_handles,
+            ring, key_sets[2], block_size, store_ptrs, store_handles,
             load_ptrs, load_handles)),
         ("complete_store_abort", lambda: test_complete_store_abort(
-            stub, key_sets[3], block_size, store_ptrs, store_handles)),
+            ring, key_sets[3], block_size, store_ptrs, store_handles)),
         # Lookup
         ("lookup_check", lambda: test_lookup_check(
-            stub, key_sets[4], block_size, store_ptrs, store_handles)),
+            ring, key_sets[4], block_size, store_ptrs, store_handles)),
         # Load path
         ("prepare_load", lambda: test_prepare_load(
-            stub, key_sets[5], block_size, store_ptrs, store_handles)),
+            ring, key_sets[5], block_size, store_ptrs, store_handles)),
         ("transfer_load", lambda: test_transfer_load(
-            stub, key_sets[6], block_size, store_ptrs, store_handles,
+            ring, key_sets[6], block_size, store_ptrs, store_handles,
             load_ptrs, load_handles)),
         ("complete_load", lambda: test_complete_load(
-            stub, key_sets[7], block_size, store_ptrs, store_handles)),
+            ring, key_sets[7], block_size, store_ptrs, store_handles)),
         # Touch
         ("touch", lambda: test_touch(
-            stub, key_sets[8], block_size, store_ptrs, store_handles)),
+            ring, key_sets[8], block_size, store_ptrs, store_handles)),
         # Removal (before flooding tests to avoid background evictor interference)
         ("remove", lambda: test_remove(
-            stub, key_sets[10], block_size, store_ptrs, store_handles)),
+            ring, key_sets[10], block_size, store_ptrs, store_handles)),
         # Bulk operations
         ("clear_memory_tier", lambda: test_clear_memory_tier(
-            stub, key_sets[11], block_size, store_ptrs, store_handles)),
+            ring, key_sets[11], block_size, store_ptrs, store_handles)),
         ("flush_to_ssd", lambda: test_flush_to_ssd(
-            stub, key_sets[12], block_size, store_ptrs, store_handles)),
+            ring, key_sets[12], block_size, store_ptrs, store_handles)),
         # End-to-end lifecycle
         ("full_lifecycle", lambda: test_full_offloading_lifecycle(
-            stub, key_sets[13], block_size, store_ptrs, store_handles,
+            ring, key_sets[13], block_size, store_ptrs, store_handles,
             load_ptrs, load_handles)),
         # Eviction events (floods memory-tier — run after non-pressure tests)
         ("take_events", lambda: test_take_events(
-            stub, block_size, store_ptrs, store_handles, args.memory_tier_size)),
+            ring, block_size, store_ptrs, store_handles, args.memory_tier_size)),
         # Pin-under-pressure
         ("pin_prevents_eviction", lambda: test_pin_prevents_eviction(
-            stub, block_size, store_ptrs, store_handles, args.memory_tier_size)),
+            ring, block_size, store_ptrs, store_handles, args.memory_tier_size)),
     ]
 
     all_keys = [k for ks in key_sets for k in ks]
@@ -1061,20 +992,20 @@ def main():
         try:
             test_fn()
             passed += 1
-        except (AssertionError, grpc.RpcError) as e:
+        except (AssertionError, RingError) as e:
             print(f"    FAILED: {e}")
             failed += 1
             # Best-effort cleanup
             try:
-                stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=all_keys))
+                ring.abort_store(all_keys)
             except Exception:
                 pass
             try:
-                stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=all_keys))
+                ring.unpin(all_keys)
             except Exception:
                 pass
             try:
-                stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=all_keys))
+                ring.remove(all_keys)
             except Exception:
                 pass
 
@@ -1083,7 +1014,7 @@ def main():
         cuda_free(ptr)
     for ptr in load_ptrs:
         cuda_free(ptr)
-    channel.close()
+    ring.close()
 
     print("\n" + "=" * 60)
     print(f"Results: {passed} passed, {failed} failed, {passed + failed} total")
