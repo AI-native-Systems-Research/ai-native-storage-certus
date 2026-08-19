@@ -127,7 +127,7 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
 
-    from vllm import LLM, SamplingParams
+    from vllm import SamplingParams
 
     from certus_shmq_connector.compat import CAPS as _CAPS
     from certus_shmq_connector.compat import VERSION as _VLLM_VERSION
@@ -147,6 +147,8 @@ if __name__ == "__main__":
         # 0.22+ auto-enables async scheduling, which breaks the OffloadingConnector's
         # per-request transfer serialization (a re-scheduled load races an in-flight
         # store -> `assert not req_status.transfer_jobs` -> EngineDeadError). Opt out.
+        # Orthogonal to WORKLOAD_MODE=async (which switches the request-submission
+        # API, not the scheduler) — this stays set in both modes.
         _engine_kwargs["async_scheduling"] = False
         print(
             f"[run] vLLM {_VLLM_VERSION[0]}.{_VLLM_VERSION[1]}: "
@@ -154,8 +156,15 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
 
-    print("Running across ", TENSOR_PARALLEL_SIZE, " GPUs")
-    llm = LLM(
+    # WORKLOAD_MODE=async runs one vLLM coroutine per conversation (V1 AsyncLLM);
+    # "batched" (default) runs the synchronous per-round generate loop. Both share
+    # the engine_kwargs below (same CertusShmq kv_transfer_config + compat flags).
+    WORKLOAD_MODE = os.environ.get("WORKLOAD_MODE", "batched").strip().lower()
+    # LOG_STATS gates the PrometheusStatLogger; async metrics read the global
+    # REGISTRY, so counters only populate when LOG_STATS=1 (disable_log_stats off).
+    _log_stats_off = os.environ.get("LOG_STATS", "0") == "0"
+
+    engine_kwargs = dict(
         model=MODEL,
         max_model_len=MAX_MODEL_LEN,
         max_num_seqs=MAX_NUM_SEQS,
@@ -165,7 +174,6 @@ if __name__ == "__main__":
         dtype=os.environ.get("DTYPE", "float16"),
         enable_prefix_caching=True,
         enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
-        **_engine_kwargs,
         # KV_CACHE_DTYPE="fp8" stores KV-cache blocks in 8-bit, halving the
         # per-sequence KV footprint so larger MAX_NUM_SEQS fits before OOM.
         # Default "auto" = same as model dtype (fp16 here).
@@ -175,67 +183,81 @@ if __name__ == "__main__":
         # OffloadingConnector's KVConnectorStats (per-interval blocks/tokens
         # loaded and stored over the KV-offload API). Default off to keep the
         # per-round output clean.
-        disable_log_stats=(os.environ.get("LOG_STATS", "0") == "0"),
+        disable_log_stats=_log_stats_off,
+        **_engine_kwargs,
     )
 
-    # Optional Prometheus exporter. When PROM_PORT is set, expose vLLM's engine
-    # + KV-offload metrics over HTTP at :PROM_PORT/metrics for live scraping.
-    # Requires LOG_STATS=1 (above) so the PrometheusStatLogger is registered in
-    # the global client registry — otherwise the endpoint serves an empty
-    # registry. No-op when PROM_PORT is unset, so normal bench runs are
-    # unchanged.
-    _prom_port = os.environ.get("PROM_PORT")
-    if _prom_port:
-        from prometheus_client import start_http_server
-
-        start_http_server(int(_prom_port))
-        print(f"[prom] metrics exporter listening on :{_prom_port}/metrics", file=sys.stderr)
-        if os.environ.get("LOG_STATS", "0") == "0":
-            print(
-                "[prom] warning: LOG_STATS is off — vLLM metrics are not "
-                "registered, so /metrics will be empty. Set LOG_STATS=1.",
-                file=sys.stderr,
-            )
-
     sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
-    tokenizer = llm.get_tokenizer()
 
-    def n_tokens(text: str) -> int:
-        return len(tokenizer(text).input_ids)
-
-    # NOTE: no per-round SSD I/O accounting here. The gRPC driver polled the
-    # server's GetIoStats RPC each round for read/write byte deltas; the ring
-    # transport has no equivalent op (it carries only the connector control
-    # plane). Read SSD I/O from the server side instead (its stderr telemetry
-    # when built with --features rw-telemetry, or host `iostat`).
+    print("Running across ", TENSOR_PARALLEL_SIZE, " GPUs")
 
     # Tag each request with its conversation as the KV-offload session_id. The
     # conversation index is stable across rounds, so every turn of the same
     # conversation shares one session_id; the connector forwards it (hashed to
     # u64) on Reserve -> the dispatcher logs it. +1 so conversation 0 gets a
     # non-zero id (0 == "unset" sentinel).
-    _gen_total = [0]
+    _session_id_fn = lambda i: i + 1  # noqa: E731
 
-    def on_round_end(round_idx, n_prompts, round_elapsed, n_alive):
-        _gen_total[0] += n_prompts
-        print(
-            f"[run] round {round_idx}: {n_prompts} prompts, "
-            f"{_gen_total[0]} total generations",
-            file=sys.stderr,
+    if WORKLOAD_MODE == "async":
+        import multiturn_async as ma
+
+        summary = ma.run_async_driver(
+            engine_kwargs, convs, sp,
+            prompt_budget=PROMPT_BUDGET,
+            max_rounds=MAX_ROUNDS,
+            capture_metrics=(not _log_stats_off),
+            session_id_fn=_session_id_fn,
+            skip_empty=True,
+            summary_base={
+                "model": MODEL, "shm_path": SHM_PATH,
+                "max_model_len": MAX_MODEL_LEN, "output_tokens": OUTPUT_TOKENS,
+                "num_convs": _base_convs, "conv_multiplier": CONV_MULTIPLIER,
+                "backend": "certus-shmq",
+            },
         )
+        rounds_done = summary["num_rounds"]
+        total_generations = summary["total_generations"]
+        elapsed = summary["elapsed_time"]
+        try:
+            with open(os.path.join(_here, "shmq_async_results.json"), "w") as f:
+                json.dump(summary, f, indent=2)
+        except OSError as e:
+            print(f"[run] could not save async results: {e}", file=sys.stderr)
+    else:
+        llm = mw.build_engine(engine_kwargs, async_mode=False)
+        mw.start_prom_exporter()
 
-    result = mw.run_batched(
-        llm, convs, sp,
-        prompt_budget=PROMPT_BUDGET,
-        max_rounds=MAX_ROUNDS,
-        n_tokens=n_tokens,
-        skip_empty=True,
-        session_id_fn=lambda i: i + 1,
-        on_round_end=on_round_end,
-    )
-    rounds_done = result["rounds_done"]
-    total_generations = result["total_generations"]
-    elapsed = result["elapsed"]
+        tokenizer = llm.get_tokenizer()
+        n_tokens = mw.make_n_tokens(tokenizer)
+
+        # NOTE: no per-round SSD I/O accounting here. The gRPC driver polled the
+        # server's GetIoStats RPC each round for read/write byte deltas; the ring
+        # transport has no equivalent op (it carries only the connector control
+        # plane). Read SSD I/O from the server side instead (its stderr telemetry
+        # when built with --features rw-telemetry, or host `iostat`).
+        _gen_total = [0]
+
+        def on_round_end(round_idx, n_prompts, round_elapsed, n_alive):
+            _gen_total[0] += n_prompts
+            print(
+                f"[run] round {round_idx}: {n_prompts} prompts, "
+                f"{_gen_total[0]} total generations",
+                file=sys.stderr,
+            )
+
+        result = mw.run_batched(
+            llm, convs, sp,
+            prompt_budget=PROMPT_BUDGET,
+            max_rounds=MAX_ROUNDS,
+            n_tokens=n_tokens,
+            skip_empty=True,
+            session_id_fn=_session_id_fn,
+            on_round_end=on_round_end,
+        )
+        rounds_done = result["rounds_done"]
+        total_generations = result["total_generations"]
+        elapsed = result["elapsed"]
+
     print(
         f"[run] DONE rounds={rounds_done} generations={total_generations} "
         f"elapsed={elapsed:.1f}s ({total_generations / elapsed:.1f} gen/s)",
