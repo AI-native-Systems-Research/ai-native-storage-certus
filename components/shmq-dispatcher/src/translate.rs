@@ -319,12 +319,45 @@ impl Translator {
     }
 
     fn op_check(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+        use wire::check_state::{MISS, PENDING, RESIDENT};
         let keys = Self::read_keys(r)?;
         check_duplicate_keys(&keys)?;
+
+        // Snapshot the reserved-but-uncommitted set once (one lock, not one per
+        // key). A key here has a store in flight — Reserve was seen, Commit/Abort
+        // is not — so it is coming but not yet loadable. Answering PENDING from
+        // this map, *before* consulting the dispatcher, is deliberate on two
+        // counts:
+        //   * `dispatcher.check()` -> `dispatch_map.lookup()` blocks waiting for
+        //     an active writer, which would stall this Check until the store
+        //     commits; surfacing PENDING lets the caller defer instead of block.
+        //   * keys are content-addressed and the client only reserves keys that
+        //     Check reported absent, so a pending key is being written for the
+        //     first time and is not already resident — no HIT is being masked.
+        // Abort and the stale-reservation reaper both drop the pending record (and
+        // release the slot), so a dropped store re-checks as MISS, never a
+        // permanent PENDING.
+        let pending: HashSet<u64> = {
+            let map = self
+                .pending_stores
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            keys.iter()
+                .copied()
+                .filter(|k| map.contains_key(k))
+                .collect()
+        };
+
         let mut w = Writer::with_capacity(keys.len());
         for &key in &keys {
-            let exists = self.dispatcher.check(key).unwrap_or_default();
-            w.u8(exists as u8);
+            let state = if pending.contains(&key) {
+                PENDING
+            } else if self.dispatcher.check(key).unwrap_or_default() {
+                RESIDENT
+            } else {
+                MISS
+            };
+            w.u8(state);
         }
         Ok(w.into_bytes())
     }
@@ -681,5 +714,226 @@ impl Translator {
         w.u64(s.write_bytes);
         w.u64(s.write_latency_ns_sum);
         Ok(w.into_bytes())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use interfaces::{
+        CacheKey, DispatcherConfig, DispatcherError, GpuStream, IDispatcher, IpcHandle,
+        ReadWriteStats,
+    };
+    use std::sync::atomic::AtomicU64;
+
+    /// Minimal in-memory dispatcher: a key becomes "resident" only after a
+    /// completed store (`copy_gpu_to_memory_completed`) or an explicit
+    /// `populate`; `reserve_memory` succeeds unless the key is in `reserve_fail`.
+    /// Enough to drive `op_check`'s tri-state across the Reserve→Commit and
+    /// Reserve→Abort lifecycles through the public `dispatch()` surface.
+    #[derive(Default)]
+    struct MockDispatcher {
+        resident: Mutex<HashSet<u64>>,
+        reserve_fail: Mutex<HashSet<u64>>,
+    }
+
+    impl IDispatcher for MockDispatcher {
+        fn initialize(&self, _config: DispatcherConfig) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+        fn shutdown(&self) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+        fn lookup(&self, _key: CacheKey, _h: IpcHandle) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+        fn lookup_async(
+            &self,
+            _key: CacheKey,
+            _h: IpcHandle,
+        ) -> Result<GpuStream, DispatcherError> {
+            Ok(GpuStream(std::ptr::null_mut()))
+        }
+        fn batch_lookup(
+            &self,
+            entries: &[(CacheKey, Vec<IpcHandle>)],
+        ) -> Vec<Result<(), DispatcherError>> {
+            entries.iter().map(|_| Ok(())).collect()
+        }
+        fn check(&self, key: CacheKey) -> Result<bool, DispatcherError> {
+            Ok(self.resident.lock().unwrap().contains(&key))
+        }
+        fn remove(&self, key: CacheKey) -> Result<(), DispatcherError> {
+            self.resident.lock().unwrap().remove(&key);
+            Ok(())
+        }
+        fn populate(&self, key: CacheKey, _h: IpcHandle) -> Result<(), DispatcherError> {
+            self.resident.lock().unwrap().insert(key);
+            Ok(())
+        }
+        fn reserve_memory(
+            &self,
+            key: CacheKey,
+            _size: u32,
+            _session_id: u64,
+        ) -> Result<*mut u8, DispatcherError> {
+            if self.reserve_fail.lock().unwrap().contains(&key) {
+                Err(DispatcherError::AllocationFailed("test".into()))
+            } else {
+                Ok(std::ptr::NonNull::<u8>::dangling().as_ptr())
+            }
+        }
+        fn copy_gpu_to_memory_async(
+            &self,
+            _key: CacheKey,
+            _regions: &[IpcHandle],
+            _stream: GpuStream,
+        ) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+        fn copy_gpu_to_memory_completed(
+            &self,
+            key: CacheKey,
+            _size: u32,
+        ) -> Result<(), DispatcherError> {
+            self.resident.lock().unwrap().insert(key);
+            Ok(())
+        }
+        fn release_memory(&self, _key: CacheKey) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+        fn pin(&self, _key: CacheKey) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+        fn unpin(&self, _key: CacheKey) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+        fn touch(&self, _key: CacheKey) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+        fn promote_to_memory_tier(&self, _keys: &[CacheKey]) {}
+        fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
+            Ok(0)
+        }
+        fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
+            Ok(0)
+        }
+        fn read_write_stats(&self) -> ReadWriteStats {
+            ReadWriteStats::default()
+        }
+    }
+
+    fn translator(disp: Arc<MockDispatcher>) -> Translator {
+        // Eviction channel is unused by op_check; keep the sender alive so the
+        // receiver does not report "disconnected".
+        let (_tx, rx) = crossbeam_channel::unbounded::<dispatcher::EvictionEvent>();
+        std::mem::forget(_tx);
+        Translator::new(disp, rx, Arc::new(AtomicU64::new(0)))
+    }
+
+    fn enc_keys(keys: &[u64]) -> Vec<u8> {
+        let mut w = Writer::default();
+        w.u32(keys.len() as u32);
+        for &k in keys {
+            w.u64(k);
+        }
+        w.into_bytes()
+    }
+
+    fn enc_reserve(entries: &[(u64, u32, u64)]) -> Vec<u8> {
+        let mut w = Writer::default();
+        w.u32(entries.len() as u32);
+        for &(k, size, session) in entries {
+            w.u64(k);
+            w.u32(size);
+            w.u64(session);
+        }
+        w.into_bytes()
+    }
+
+    #[test]
+    fn op_check_reports_tristate_across_store_lifecycle() {
+        use wire::check_state::{MISS, PENDING, RESIDENT};
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp);
+
+        // Unknown key -> MISS.
+        assert_eq!(tr.dispatch(op::CHECK, &enc_keys(&[7])).unwrap(), vec![MISS]);
+
+        // Reserve populates pending_stores -> Check reports PENDING (without
+        // blocking on the dispatcher).
+        assert_eq!(
+            tr.dispatch(op::RESERVE, &enc_reserve(&[(7, 4096, 0)]))
+                .unwrap(),
+            vec![1]
+        );
+        assert_eq!(
+            tr.dispatch(op::CHECK, &enc_keys(&[7])).unwrap(),
+            vec![PENDING]
+        );
+
+        // Commit clears pending and makes the key resident -> RESIDENT.
+        assert_eq!(
+            tr.dispatch(op::COMMIT_STORE, &enc_keys(&[7])).unwrap(),
+            vec![1]
+        );
+        assert_eq!(
+            tr.dispatch(op::CHECK, &enc_keys(&[7])).unwrap(),
+            vec![RESIDENT]
+        );
+    }
+
+    #[test]
+    fn op_check_abort_returns_to_miss() {
+        use wire::check_state::{MISS, PENDING};
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp);
+
+        tr.dispatch(op::RESERVE, &enc_reserve(&[(9, 4096, 0)]))
+            .unwrap();
+        assert_eq!(
+            tr.dispatch(op::CHECK, &enc_keys(&[9])).unwrap(),
+            vec![PENDING]
+        );
+
+        // Abort drops the pending record; the key never became resident.
+        tr.dispatch(op::ABORT_STORE, &enc_keys(&[9])).unwrap();
+        assert_eq!(tr.dispatch(op::CHECK, &enc_keys(&[9])).unwrap(), vec![MISS]);
+    }
+
+    #[test]
+    fn op_check_mixed_batch_states() {
+        use wire::check_state::{MISS, PENDING, RESIDENT};
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp.clone());
+
+        // key 1 resident, key 2 pending, key 3 absent.
+        disp.resident.lock().unwrap().insert(1);
+        tr.dispatch(op::RESERVE, &enc_reserve(&[(2, 4096, 0)]))
+            .unwrap();
+
+        assert_eq!(
+            tr.dispatch(op::CHECK, &enc_keys(&[1, 2, 3])).unwrap(),
+            vec![RESIDENT, PENDING, MISS]
+        );
+    }
+
+    #[test]
+    fn op_check_stale_reservation_reaped_to_miss() {
+        use wire::check_state::{MISS, PENDING};
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp);
+
+        tr.dispatch(op::RESERVE, &enc_reserve(&[(5, 4096, 0)]))
+            .unwrap();
+        assert_eq!(
+            tr.dispatch(op::CHECK, &enc_keys(&[5])).unwrap(),
+            vec![PENDING]
+        );
+
+        // The reaper reclaims a never-committed reservation; re-check is MISS,
+        // never a permanent PENDING.
+        assert_eq!(tr.reap_stale_reservations(Duration::from_secs(0)), 1);
+        assert_eq!(tr.dispatch(op::CHECK, &enc_keys(&[5])).unwrap(), vec![MISS]);
     }
 }
