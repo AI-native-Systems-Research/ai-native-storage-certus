@@ -126,15 +126,20 @@ def main():
     print(f"[trace] +{time.perf_counter()-t0:.1f}s loaded {len(convs)} conversations", file=sys.stderr, flush=True)
 
     print(f"[trace] +{time.perf_counter()-t0:.1f}s importing vllm", file=sys.stderr, flush=True)
-    from vllm import LLM, SamplingParams
+    from vllm import SamplingParams
 
-    print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
     # Capturing vLLM's Prometheus counters requires the engine's stat logging to
     # be on (it's what advances the metrics). Enabling it has a small overhead, so
     # a capture run is not byte-identical to the stats-off timing baseline —
     # CAPTURE_METRICS=0 restores that baseline and skips the per-round snapshot.
     CAPTURE_METRICS = os.environ.get("CAPTURE_METRICS", "1") != "0"
-    llm = LLM(
+
+    # WORKLOAD_MODE=async runs one vLLM coroutine per conversation (V1 AsyncLLM);
+    # "batched" (default) runs the synchronous per-round generate loop. Both share
+    # the engine_kwargs below (same SharedStorage kv_transfer_config).
+    WORKLOAD_MODE = os.environ.get("WORKLOAD_MODE", "batched").strip().lower()
+
+    engine_kwargs = dict(
         model=MODEL,
         max_model_len=MAX_MODEL_LEN,
         max_num_seqs=MAX_NUM_SEQS,
@@ -147,31 +152,52 @@ def main():
         kv_transfer_config=KV_CONFIG,
         disable_log_stats=not CAPTURE_METRICS,
     )
-    print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
-
-    # Optional Prometheus exporter. When PROM_PORT is set, expose vLLM's engine
-    # + KV-offload metrics over HTTP at :PROM_PORT/metrics for live scraping.
-    # Requires LOG_STATS=1 (above) so metrics are registered — otherwise the
-    # endpoint serves an empty registry. No-op when PROM_PORT is unset. (The
-    # end-of-run REGISTRY dump below still works independently of this.)
-    _prom_port = os.environ.get("PROM_PORT")
-    if _prom_port:
-        from prometheus_client import start_http_server
-
-        start_http_server(int(_prom_port))
-        print(f"[prom] metrics exporter listening on :{_prom_port}/metrics", file=sys.stderr)
-        if os.environ.get("LOG_STATS", "0") == "0":
-            print(
-                "[prom] warning: LOG_STATS is off — vLLM metrics are not "
-                "registered, so /metrics will be empty. Set LOG_STATS=1.",
-                file=sys.stderr,
-            )
 
     sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
-    tokenizer = llm.get_tokenizer()
 
-    def n_tokens(text):
-        return len(tokenizer.encode(text))
+    if WORKLOAD_MODE == "async":
+        # Async model: one coroutine per conv. The elaborate per-round disk-I/O
+        # table below is a batched-only artifact; here the 1 Hz sampler in
+        # run_async_driver captures md0 read/write bytes into the summary's
+        # `samples` instead, and prints whole-run counter movement + the KV
+        # REGISTRY dump equivalent via counter_movement.
+        import multiturn_async as ma
+
+        print(f"[trace] +{time.perf_counter()-t0:.1f}s WORKLOAD_MODE=async",
+              file=sys.stderr, flush=True)
+        summary = ma.run_async_driver(
+            engine_kwargs, convs, sp,
+            prompt_budget=PROMPT_BUDGET,
+            max_rounds=MAX_ROUNDS,
+            capture_metrics=CAPTURE_METRICS,
+            disk_rw_bytes=disk_rw_bytes,
+            n_tokens_flavor="encode",
+            skip_empty=False,
+            summary_base={"model": MODEL, "max_model_len": MAX_MODEL_LEN,
+                          "output_tokens": OUTPUT_TOKENS, "backend": "sharedstorage",
+                          "dev": DISK_DEV},
+        )
+        elapsed = summary["elapsed_time"]
+        rounds_done = summary["num_rounds"]
+        total_generations = summary["total_generations"]
+        try:
+            with open(os.path.join(_here, f"ss_async_results_{int(elapsed)}.json"),
+                      "w") as f:
+                json.dump(summary, f, indent=2)
+        except OSError as e:
+            print(f"[io] could not save json: {e}", file=sys.stderr)
+        print(f"\n[run] done. wall={elapsed:.1f}s  generations={total_generations} "
+              f"rounds={rounds_done}", file=sys.stderr)
+        return
+
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
+    llm = mw.build_engine(engine_kwargs, async_mode=False)
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
+
+    mw.start_prom_exporter()
+
+    tokenizer = llm.get_tokenizer()
+    n_tokens = mw.make_n_tokens(tokenizer, "encode")
 
     if disk_rw_bytes()[1] is None:
         print(f"[trace] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled "

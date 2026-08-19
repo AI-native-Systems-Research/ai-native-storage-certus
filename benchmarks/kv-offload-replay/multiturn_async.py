@@ -139,7 +139,8 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
 
 def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
                      max_rounds, capture_metrics=True, disk_rw_bytes=None,
-                     session_id_fn=None, skip_empty=False, summary_base=None):
+                     session_id_fn=None, skip_empty=False, summary_base=None,
+                     n_tokens_flavor="input_ids"):
     """Run the async execution model end-to-end and return a summary dict.
 
     This is the single entry point a backend driver's ``WORKLOAD_MODE=async``
@@ -163,6 +164,10 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
         stats-off baseline) and ``prom_counters`` is not read.
     session_id_fn : Callable[[int], int] | None
         Per-conversation KV-offload ``session_id`` tagging (shmq driver).
+    n_tokens_flavor : str
+        ``"input_ids"`` (default) or ``"encode"`` — the driver's tokenizer-length
+        flavor, forwarded to ``make_n_tokens`` so the async path counts prompt
+        tokens exactly as the batched path did (the fs_bench drivers use encode).
     summary_base : dict | None
         Backend fields merged into the returned summary (model, tier, …).
 
@@ -190,7 +195,7 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
 
     async def _amain():
         tokenizer = await get_tokenizer(engine)
-        n_tokens = mw.make_n_tokens(tokenizer)
+        n_tokens = mw.make_n_tokens(tokenizer, n_tokens_flavor)
         return await run_async(
             engine, convs, sampling_params,
             prompt_budget=prompt_budget,
