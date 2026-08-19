@@ -371,6 +371,10 @@ def main(argv=None):
                     help="subtitle line (default: auto from results.json)")
     ap.add_argument("--variants", default=None,
                     help="comma list; keep only these (matched loosely by name)")
+    ap.add_argument("--color", action="append", default=[], metavar="TAG=HEX",
+                    help="override a run's line/bar colour by its legend tag, e.g. "
+                         "--color shmq+fix-sq='#7048e8' (repeatable). Lets one run "
+                         "of a shared variant stand out from its same-coloured kin.")
     ap.add_argument("--dark", action="store_true", help="dark theme")
     ap.add_argument("--dpi", type=int, default=200)
     args = ap.parse_args(argv)
@@ -394,6 +398,19 @@ def main(argv=None):
         series = [s for s in series if norm(s["variant"]) in keep]
     if not series:
         ap.error("no variants found (bad dirs, or --variants filtered everything)")
+
+    # Per-run colour overrides (by legend tag), applied after variant colouring so
+    # one run of a shared variant can be given a distinct hue.
+    if args.color:
+        overrides = {}
+        for spec in args.color:
+            if "=" not in spec:
+                ap.error(f"--color expects TAG=HEX, got: {spec}")
+            tag, hexv = spec.split("=", 1)
+            overrides[tag] = hexv
+        for s in series:
+            if s["tag"] in overrides:
+                s["color"] = overrides[s["tag"]]
 
     subtitle = args.subtitle
     if subtitle is None:
