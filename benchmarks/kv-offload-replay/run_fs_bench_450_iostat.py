@@ -108,10 +108,15 @@ convs = mw.load_convs(SUBSET_PATH, NUM_CONVS)
 print(f"[trace] +{time.perf_counter()-t0:.1f}s loaded {len(convs)} conversations", file=sys.stderr, flush=True)
 
 print(f"[trace] +{time.perf_counter()-t0:.1f}s importing vllm", file=sys.stderr, flush=True)
-from vllm import LLM, SamplingParams
+from vllm import SamplingParams
 
-print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
-llm = LLM(
+# WORKLOAD_MODE=async runs one vLLM coroutine per conversation (V1 AsyncLLM);
+# "batched" (default) runs the synchronous per-round generate loop. Both share
+# engine_kwargs below.
+WORKLOAD_MODE = os.environ.get("WORKLOAD_MODE", "batched").strip().lower()
+MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # async per-conv turn cap
+
+engine_kwargs = dict(
     model=MODEL,
     max_model_len=MAX_MODEL_LEN,
     max_num_seqs=MAX_NUM_SEQS,
@@ -124,13 +129,8 @@ llm = LLM(
     kv_transfer_config=KV_CONFIG,
     disable_log_stats=False,  # enable built-in metrics: prefix-cache + preemption counters
 )
-print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
 
 sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
-tokenizer = llm.get_tokenizer()
-
-def n_tokens(text):
-    return len(tokenizer.encode(text))
 
 # --- Per-round disk I/O accounting -------------------------------------------
 # /sys/block/<dev>/stat exposes cumulative sectors read (field 3) and sectors
@@ -149,6 +149,45 @@ gib = mw.gib
 if disk_rw_bytes()[1] is None:
     print(f"[trace] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled "
           f"(set DISK_DEV or check mode)", file=sys.stderr, flush=True)
+
+if WORKLOAD_MODE == "async":
+    # The rich per-round prefix_stats table below is a batched-only artifact —
+    # under the one-coroutine-per-conv model there are no rounds, so this path is
+    # aggregate-only: the 1 Hz sampler captures md0 read/write bytes, and the
+    # whole-run vllm: counter movement (external_prefix_cache_queries/hits,
+    # num_preemptions) lands in the summary instead of per-round deltas.
+    import multiturn_async as ma
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s WORKLOAD_MODE=async "
+          "(aggregate-only; no per-round prefix table)", file=sys.stderr, flush=True)
+    summary = ma.run_async_driver(
+        engine_kwargs, convs, sp,
+        prompt_budget=PROMPT_BUDGET,
+        max_rounds=MAX_ROUNDS,
+        capture_metrics=True,
+        disk_rw_bytes=disk_rw_bytes,
+        n_tokens_flavor="encode",
+        skip_empty=False,
+        summary_base={"model": MODEL, "max_model_len": MAX_MODEL_LEN,
+                      "output_tokens": OUTPUT_TOKENS, "backend": "sharedstorage",
+                      "dev": DISK_DEV},
+    )
+    try:
+        with open(os.path.join(_here,
+                  f"ss_async_results_{int(summary['elapsed_time'])}.json"), "w") as f:
+            json.dump(summary, f, indent=2)
+    except OSError as e:
+        print(f"[io] could not save json: {e}", file=sys.stderr)
+    print(f"\n[run] done. wall={summary['elapsed_time']:.1f}s  "
+          f"generations={summary['total_generations']} rounds={summary['num_rounds']}",
+          file=sys.stderr)
+    sys.exit(0)
+
+print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
+llm = mw.build_engine(engine_kwargs, async_mode=False)
+print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
+
+tokenizer = llm.get_tokenizer()
+n_tokens = mw.make_n_tokens(tokenizer, "encode")
 
 # --- vLLM-layer offload / recompute counters ---------------------------------
 # LLM.get_metrics() returns a Prometheus snapshot of cumulative counters. The
