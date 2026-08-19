@@ -81,6 +81,11 @@ TENSOR_PARALLEL_SIZE=1
 # default and stay apples-to-apples; --enforce-eager flips it to 1 for the whole
 # run. Plumbed to each driver as the ENFORCE_EAGER env var.
 ENFORCE_EAGER=0
+# Workload execution model, forwarded to every driver as the WORKLOAD_MODE env
+# var. "batched" (default) is the synchronous per-round generate loop; "async"
+# runs one vLLM coroutine per conversation (V1 AsyncLLM). --async flips it for
+# the whole run; --workload-mode <mode> sets it explicitly.
+WORKLOAD_MODE=batched
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
 DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
@@ -145,6 +150,12 @@ Flags (all optional; defaults shown):
                                capture / torch.compile). Default off (graphs on),
                                matching vLLM's default; set this to keep the
                                variants comparable when profiling per-op transfers.
+  --async                      Run every backend in async mode (one vLLM coroutine
+                               per conversation, V1 AsyncLLM) instead of the default
+                               synchronous batched-round loop. Shorthand for
+                               --workload-mode async.
+  --workload-mode <mode>       Execution model for all backends: batched (default)
+                               or async. Forwarded as the WORKLOAD_MODE env var.
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -192,6 +203,8 @@ while [[ $# -gt 0 ]]; do
         --rebuild)          DO_REBUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
         --enforce-eager)    ENFORCE_EAGER=1; shift;;
+        --async)            WORKLOAD_MODE=async; shift;;
+        --workload-mode)    WORKLOAD_MODE="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
         --logdir)           LOGDIR="$2"; shift 2;;
@@ -690,6 +703,7 @@ run_container_bench() {  # variant image extra-args...
         -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}" \
         -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
         -e "ENFORCE_EAGER=${ENFORCE_EAGER}" \
+        -e "WORKLOAD_MODE=${WORKLOAD_MODE}" \
         -e "HF_HUB_OFFLINE=0" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${extra[@]}" \
@@ -836,6 +850,7 @@ if want certus-spdk; then
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
             ENFORCE_EAGER="$ENFORCE_EAGER" \
+            WORKLOAD_MODE="$WORKLOAD_MODE" \
             HF_CACHE="$HF_CACHE" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \

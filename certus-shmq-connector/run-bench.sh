@@ -199,5 +199,6 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
     -e "ENFORCE_EAGER=${ENFORCE_EAGER:-0}" \
+    -e "WORKLOAD_MODE=${WORKLOAD_MODE:-batched}" \
     -e "DTYPE=${DTYPE:-float16}" \
     "${IMAGE}"
