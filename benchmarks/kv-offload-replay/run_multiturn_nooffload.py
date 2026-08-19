@@ -60,7 +60,7 @@ if __name__ == "__main__":
         gpu_memory_utilization=GPU_MEM_UTIL,
         dtype="float16",
         enable_prefix_caching=True,
-        enforce_eager=True,
+        enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
         # LOG_STATS=1 keeps vLLM's stats logging on so its PrometheusStatLogger
         # registers metrics. Default off to keep per-round output clean.
         disable_log_stats=(os.environ.get("LOG_STATS", "0") == "0"),

@@ -101,7 +101,11 @@ pub(crate) struct NvmeController {
     numa_node: i32,
     /// NVMe specification version (populated from controller data if available).
     version: NvmeVersion,
-    /// Maximum data transfer size in bytes (default 128KB).
+    /// Maximum data transfer size in bytes.
+    ///
+    /// Auto-detected from the controller's MDTS (Maximum Data Transfer Size)
+    /// via `spdk_nvme_ctrlr_get_max_xfer_size`. Falls back to 128 KiB only if
+    /// the controller reports no limit (MDTS == 0 ⇒ helper returns 0).
     max_transfer_size: u32,
     /// Maximum IO queue depth from controller opts.
     max_queue_depth: u32,
@@ -149,13 +153,28 @@ impl NvmeController {
         let num_io_queues = opts.num_io_queues;
         let max_queue_depth = opts.io_queue_size;
 
-        // Default version and transfer size (not available from minimal bindings).
+        // Default version (not available from minimal bindings).
         let version = NvmeVersion {
             major: 1,
             minor: 0,
             tertiary: 0,
         };
-        let max_transfer_size = 131072; // 128KB default
+
+        // Auto-detect the maximum data transfer size from the controller's MDTS
+        // so I/O is fragmented to the device's real limit (e.g. 1 MiB) rather
+        // than a conservative fixed default. The helper folds MDTS together with
+        // the minimum memory page size and returns the limit directly in bytes.
+        // SAFETY: ctrlr_ptr is non-null (checked at entry) and obtained from
+        // SPDK probe; the helper only reads controller data.
+        const DEFAULT_MAX_TRANSFER_SIZE: u32 = 131072; // 128 KiB fallback
+        let detected_max_transfer =
+            spdk_sys::spdk_nvme_ctrlr_get_max_xfer_size(ctrlr_ptr as *const _);
+        let max_transfer_size = if detected_max_transfer == 0 {
+            // MDTS == 0 means "no limit"; keep a sane, conservative default.
+            DEFAULT_MAX_TRANSFER_SIZE
+        } else {
+            detected_max_transfer
+        };
 
         // Discover namespaces using available API.
         let namespaces = Self::discover_namespaces(ctrlr_ptr);

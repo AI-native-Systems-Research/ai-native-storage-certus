@@ -1,7 +1,7 @@
 #!/bin/bash
 # Entrypoint for the native Tiering CPU+FS backend image (certus-cputier-bench).
 #
-# Self-contained: no external server, no gRPC. It runs the multi-turn workload
+# Self-contained: no external server, no shmq mailbox. It runs the multi-turn workload
 # through vLLM 0.26's native multi-tier offload — a CPU (host-RAM) primary tier
 # plus an "fs" disk secondary tier rooted at DISK_DIR. So there is nothing to
 # wait for; we sanity-check the environment, then exec the driver.

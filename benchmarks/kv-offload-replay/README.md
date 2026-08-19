@@ -9,17 +9,17 @@ evictions without re-running the model.
 
 > **Running the live 450×12 comparison workload?** See
 > [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md) for the
-> CPU-offload and SharedStorage backends, and `../../certus-grpc-connector/README.md`
-> for the Certus gRPC path.
+> CPU-offload and SharedStorage backends, and `../../certus-shmq-connector/README.md`
+> for the Certus shmq path.
 
 > **All four backends' container files live here.** The NoOffload / CPU-offload /
 > SharedStorage images are built from `Dockerfile.{nooffload,cpu-offload,sharedstorage}`
-> in this directory. The Certus gRPC backend's container files are **symlinks** into
-> `../../certus-grpc-connector/` (`Dockerfile.certus-grpc`, `run-bench-certus-grpc.sh`,
-> `docker-entrypoint-certus-grpc.sh`) — the real files stay there because that image's
+> in this directory. The Certus (shmq) backend's container files are **symlinks** into
+> `../../certus-shmq-connector/` (`Dockerfile.certus-shmq`, `run-bench-certus-shmq.sh`,
+> `docker-entrypoint-certus-shmq.sh`) — the real files stay there because that image's
 > build needs the connector Python package in its context, but building via the symlink
 > works (build context is still the repo root: `podman build -f
-> benchmarks/kv-offload-replay/Dockerfile.certus-grpc -t certus-grpc-bench .`). All four
+> benchmarks/kv-offload-replay/Dockerfile.certus-shmq -t certus-shmq-bench .`). All four
 > Dockerfiles take `--build-arg VLLM_VERSION=<x.y.z>` (default `0.23.0`).
 
 ## Files
@@ -361,7 +361,7 @@ Diff `bench_native.json` and `bench_policy.json` for the "what did SPDK NVMe cos
 ## Comparing all backends: `profile_all.sh`
 
 `profile_all.sh` runs the same 12-turn ShareGPT replay workload through up to four
-KV-offload backends — `nooffload` (GPU-only baseline), `certus-spdk` (gRPC client +
+KV-offload backends — `nooffload` (GPU-only baseline), `certus-spdk` (shmq client +
 `certus-server` over DRAM + raw NVMe), `cpuoffload` (vLLM's host-RAM
 `OffloadingConnector`), and `sharedstorage` (`llmd_fs_backend` RAID0/XFS) — and emits
 a side-by-side throughput table. Each backend is preflighted independently: ready ones
@@ -399,7 +399,7 @@ time benchmarks/kv-offload-replay/profile_all.sh \
 |------|---------|
 | `--device-pci <DDDD:BB:DD.F>` | NVMe PCIe address of the shared drive group; **repeatable** (one per drive). The `certus-spdk` phase binds these to `vfio-pci`; needed for that backend to run at all. |
 | `--max-rounds <n>` | Cap every backend at N replay rounds/turns (`0` = replay all turns). `12` matches the 12-turn dataset. |
-| `--model-fs <dir>` | Filesystem for the HF model cache and the gRPC podman image store. Default `/mnt/certus1`. Also the default location of the run's `--logdir`. |
+| `--model-fs <dir>` | Filesystem for the HF model cache and the shmq podman image store. Default `/mnt/certus1`. Also the default location of the run's `--logdir`. |
 | `--vllm-version <x.y.z>` | Pin the vLLM base-image version for the built images (passed as the `VLLM_VERSION` build arg; images are tagged `:vllm<x.y.z>` so versions coexist). Implies the images must be built at that version — pass `--build` too. |
 | `--only certus-spdk` | Run only the Certus-SPDK backend. Other valid names: `nooffload`, `cpuoffload`, `sharedstorage` (comma-separated). |
 | `--evict-threshold <f>` | Certus-SPDK DRAM→SSD demotion threshold. Default `0.6`; `1` effectively defers demotion until the DRAM tier is full. |
@@ -411,9 +411,10 @@ GPU selector: `all` | `0` | `0,1` | `<uuid>`), and `--logdir <dir>` (output dir;
 defaults to `<model-fs>/kvprofile-<runid>`). Run `profile_all.sh --help` for the full
 list.
 
-> **Note:** the container network mode is not a CLI flag — `profile_all.sh` launches
-> the gRPC client with `--ipc=host` already, so the host `certus-server` can open the
-> container's CUDA IPC handles. There is no `--client-network` option; passing an
+> **Note:** the container IPC mode is not a CLI flag — `profile_all.sh` launches
+> the shmq client with `--ipc=host` already, which does double duty: the host
+> `certus-server` can open the container's CUDA IPC handles, and the container sees
+> the host `/dev/shm` mailbox. There is no `--client-network` option; passing an
 > unknown flag exits with an error.
 
 ### Outputs

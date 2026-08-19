@@ -1,1 +1,0 @@
-../../certus-grpc-connector/docker-entrypoint.sh

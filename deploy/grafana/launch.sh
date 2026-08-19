@@ -12,8 +12,8 @@
 #   - OTLP gRPC:        localhost:4317
 #   - OTLP HTTP:        localhost:4318
 #
-# Run certus-server with:
-#   certus-server --drive-count 4 --format --otel-endpoint http://localhost:4317
+# Run certus-server-yaml (the only binary with OTel) with:
+#   certus-server-yaml --drive-count 4 --format --otel-endpoint http://localhost:4318
 #
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"

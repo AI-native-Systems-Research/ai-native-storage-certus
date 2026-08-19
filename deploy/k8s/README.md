@@ -420,7 +420,7 @@ in both DaemonSets:
           for dev in $(cat /config/drives.txt | tr ',' ' '); do
             ARGS="$ARGS --device-pci $dev"
           done
-          exec certus-server-yaml $ARGS --format --listen 0.0.0.0:${CERTUS_PORT} --memory-tier-size 4G
+          exec certus-server-yaml $ARGS --format --shm-path ${CERTUS_SHM_PATH} --channels 32 --memory-tier-size 4G
 ```
 
 Apply the manifest with `--format`, verify the pods start successfully, then

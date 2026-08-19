@@ -1,0 +1,24 @@
+[package]
+name = "shmq-dispatcher"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Transport-agnostic shared-memory-queue control plane for the Certus
+# dispatcher. Shared by both `certus-server` (the plain shmq server) and
+# `certus-server-yaml` (the YAML-composed server) so they use ONE wire
+# protocol, ONE opcode→IDispatcher translator, and ONE serve loop (poller +
+# blocking worker pool + reaper).
+#
+# Requires SPDK + GPU (it opens CUDA IPC handles and calls the SPDK-backed
+# dispatcher), so it is a workspace member but NOT a default member.
+
+[dependencies]
+shm-queue.workspace = true
+interfaces = { workspace = true, features = ["spdk"] }
+dispatcher = { workspace = true, features = ["spdk-backend"] }
+gpu-services = { workspace = true, features = ["gpu"] }
+
+crossbeam-channel = "0.5"
+libc = "0.2"
