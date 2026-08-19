@@ -1819,8 +1819,17 @@ struct BandShape {
     segments: u64,
     len_med: u64,
     fan_in_med: u64,
-    deg_med: u64,
-    max_fan_in: u32,
+    /// Segments ending in a real split.
+    fanout: u64,
+    /// Segments ending because the cohort SHRANK without dividing.
+    ///
+    /// The discriminator for why a preamble is fragmented. A run ends in `Fanout` when the
+    /// structure branches, and in `Attrition` when sessions simply stopped arriving — which in a
+    /// generated plan means they ran out of path length part-way along the run. A trace's root
+    /// preamble ends in fanout: every session on the root walks the whole thing and then they
+    /// split together. So attrition-heavy bands say the model's departures are spread across a
+    /// run where the trace's are synchronised to its end.
+    attrition: u64,
 }
 
 /// Summarise a census's rows into the same bands the fit uses.
@@ -1848,8 +1857,14 @@ fn band_shapes(rows: &[workload_model::fit::segments::SegmentRow]) -> Vec<(u32, 
                     segments: in_band.len() as u64,
                     len_med: med(in_band.iter().map(|r| u64::from(r.length)).collect()),
                     fan_in_med: med(in_band.iter().map(|r| u64::from(r.fan_in)).collect()),
-                    deg_med: med(in_band.iter().map(|r| u64::from(r.out_degree)).collect()),
-                    max_fan_in: in_band.iter().map(|r| r.fan_in).max().unwrap_or(0),
+                    fanout: in_band
+                        .iter()
+                        .filter(|r| r.ends == workload_model::fit::segments::SegmentEnd::Fanout)
+                        .count() as u64,
+                    attrition: in_band
+                        .iter()
+                        .filter(|r| r.ends == workload_model::fit::segments::SegmentEnd::Attrition)
+                        .count() as u64,
                 },
             )
         })
@@ -1910,22 +1925,25 @@ fn print_structure_diff(
     let plan_rows = census.finish(2);
 
     println!(
-        "\n  trunk structure — the GENERATED trunk against the source's, same census both sides\n           Four marginal tests cannot see the trunk's shape: a collapsed trunk passes all of them.\n           T = trace, S = synthetic; fanin~ is the median cohort, fanmax the biggest spine.\n  \
-         Read the ratios, not the absolutes — the two sides differ in size."
+        "\n  trunk structure — the GENERATED trunk against the source's, same census both sides\n           Four marginal tests cannot see the trunk's shape: a collapsed trunk passes all of them.\n           T = trace, S = synthetic; fanin~ is the median cohort. attrit vs fanout is WHY a run\n  \
+         ended: fanout means the structure branched, attrition means sessions stopped arriving\n  \
+         part-way along it. A trace preamble ends in FANOUT — every session walks it, then they\n  \
+         split together. Attrition-heavy means departures are spread across a run, not \
+         synchronised."
     );
     println!(
-        "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}",
+        "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}  {:>9} {:>9}",
         "depths",
         "segs T",
         "segs S",
         "len T",
         "len S",
-        "deg T",
-        "deg S",
         "fanin~T",
         "fanin~S",
-        "fanmax T",
-        "fanmax S"
+        "attrit T",
+        "attrit S",
+        "fanout T",
+        "fanout S"
     );
     let (t, p) = (band_shapes(trace_rows), band_shapes(&plan_rows));
     for ((lo, ts), (_, ps)) in t.iter().zip(p.iter()) {
@@ -1933,18 +1951,18 @@ fn print_structure_diff(
             continue;
         }
         println!(
-            "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}",
+            "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}  {:>9} {:>9}",
             format!("{lo}+"),
             ts.segments,
             ps.segments,
             ts.len_med,
             ps.len_med,
-            ts.deg_med,
-            ps.deg_med,
             ts.fan_in_med,
             ps.fan_in_med,
-            ts.max_fan_in,
-            ps.max_fan_in
+            ts.attrition,
+            ps.attrition,
+            ts.fanout,
+            ps.fanout
         );
     }
     let (tt, pt): (u64, u64) = (

@@ -723,6 +723,54 @@ Median segment length per band on `tau2_airline`, trace against three arms:
 All three arms also carry **~2.5x too many shared segments** (389-438 against 158), so the generated
 trunk is over-fragmented in every spelling.
 
+#### Why runs end — a near-invariant of the traces that the model violates
+
+A segment ends in a **fanout** (the structure branched), a **leaf**, or **attrition** (sessions
+stopped arriving part-way along it). The census already classifies it, and the classification is the
+discriminator:
+
+| | segments | attrition | reading |
+| --- | --- | --- | --- |
+| `tau2_airline` trace | 158 | **0** | every run ends by branching |
+| `tau2_airline` synthetic | 413 | **111 (27%)** | departures spread across runs |
+| `exgentic_swebench` trace | 85 | **0** | |
+| `qwen_code` trace | 9998 | 254 (2.5%) | almost none, and only deep |
+
+**A real trace's shared runs end by branching, essentially always.** Every session on a root walks
+the whole preamble and then they split *together* — departures are **synchronised to splits**. The
+generated trunk breaks that on `tau2_airline` 27% of the time.
+
+The mechanism is path-length truncation, and it is a direct consequence of removing the drawn cap
+without fixing path length. Under the cap, `depth_at_turn` makes a path `shared_depth +
+private_depth`, so a path is never shorter than the trunk walk by construction. Under cohort
+exhaustion the realised walk can exceed `shared_depth`, so a session that drew a short total path
+simply stops part-way along a 124-block preamble, and the nodes below it lose a session — which the
+census reads, correctly, as attrition. In the trace the two are **correlated**: sessions on one root
+are one task family and their paths comfortably exceed their root's preamble. The model draws path
+length independently of the root it binds to. This is the coupling already recorded as
+"`{shared_depth, private_depth}` must become one measured `turn1_path_length`", now with a structural
+measurement behind it rather than an argument.
+
+#### The two traces fail in OPPOSITE directions, and both name the same missing mechanism
+
+| `qwen_code`, median cohort per segment | trace | synthetic |
+| --- | --- | --- |
+| depths 8+ | 2 | **129** |
+| depths 32+ | 2 | **76** |
+| depths 128+ | 3 | **31** |
+| total shared segments | **9998** | 3289 |
+
+`tau2_airline` is **over-fragmented** (2.5x too many segments); `qwen_code` is **under-fragmented**
+(3x too few) with cohorts **15-60x too thick**. The trace's typical shared segment is walked by
+**2-3 sessions**; the model's by 8 to 129. So the trace's sharing is broad and thin — thousands of
+tiny mid-trie cohorts — and the model's is narrow and thick, concentrating the same sharing into a
+few large ones.
+
+That is one mechanism stated twice: **the model cannot express many small cohorts sharing a subtree
+below the root.** It is the mechanism the 2026-08-14 fan-out named as the one thing every regime in
+the corpus has and the model has none of, and it has still not been built. Both failure directions,
+and both traces' `sharing_depth`, follow from it.
+
 ### The achievable floor — the derivation behind FR-057c, and what it says about the gate
 
 The tolerances of FR-057b were calibrated from the generator against itself across seeds. That is a
