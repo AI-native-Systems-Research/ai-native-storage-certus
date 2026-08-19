@@ -43,7 +43,8 @@ members = [
     "components/zyre",
     "components/shm-queue",
     "components/shmq-dispatcher",
-    "apps/certus-server"
+    "apps/certus-server",
+    "apps/certus-shmq-server"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
