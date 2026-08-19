@@ -216,6 +216,26 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
           f"p50={_pct(lat, 0.50)} p90={_pct(lat, 0.90)} p99={_pct(lat, 0.99)}  "
           f"ttft_p50={_pct(ttfts, 0.50)}", file=sys.stderr, flush=True)
 
+    # vLLM counter movement across the run (first sample -> last). AsyncLLM has
+    # no get_metrics(), so the sampler read the global REGISTRY; the batched path
+    # prints per-round deltas, this prints the whole-run delta. If the REGISTRY
+    # stayed empty the run is aggregate-only — timing/percentiles are still valid.
+    proms = [v["prom"] for _, v in result["samples"] if v.get("prom")]
+    counter_movement = {}
+    if proms:
+        first, last = proms[0], proms[-1]
+        counter_movement = {k: last.get(k, 0.0) - first.get(k, 0.0)
+                            for k in last if last.get(k, 0.0) - first.get(k, 0.0)}
+    if capture_metrics and not proms:
+        print("[prom] async: REGISTRY empty under AsyncLLM — aggregate-only "
+              "(timing/percentiles valid, no vllm: counters)",
+              file=sys.stderr, flush=True)
+    elif counter_movement:
+        shown = " ".join(f"{k[len('vllm:'):] if k.startswith('vllm:') else k}"
+                         f"={counter_movement[k]:.0f}"
+                         for k in sorted(counter_movement))
+        print(f"[prom] async counter movement: {shown}", file=sys.stderr, flush=True)
+
     summary = dict(summary_base or {})
     summary.update({
         "elapsed_time": result["elapsed"],
@@ -227,6 +247,7 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
         "turn_latency_p90": _pct(lat, 0.90),
         "turn_latency_p99": _pct(lat, 0.99),
         "ttft_p50": _pct(ttfts, 0.50),
+        "counter_movement": counter_movement,
         "samples": [
             {"t": t, "read_bytes": v["read_bytes"], "write_bytes": v["write_bytes"]}
             for t, v in result["samples"]
