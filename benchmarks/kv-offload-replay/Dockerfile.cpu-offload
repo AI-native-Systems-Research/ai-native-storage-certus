@@ -52,6 +52,8 @@ RUN chmod +x /usr/local/bin/cpu-offload-entrypoint
 # workload regardless of the driver's baked-in default. CPU_BYTES is the pinned
 # host-RAM offload tier — must be < free RAM (16 GiB here); shrink for smaller
 # hosts. PYTHONPATH lets vLLM import the two connector modules by name.
+# SECONDARY_TIER=fs switches this same image to vLLM's native tiering manager
+# (CPU primary + filesystem secondary at FS_ROOT_DIR); empty = CPU-only.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/workspace/bench \
     MODEL=NousResearch/Meta-Llama-3-8B \
@@ -63,6 +65,8 @@ ENV PYTHONUNBUFFERED=1 \
     GPU_MEM_UTIL=0.90 \
     CPU_BYTES=17179869184 \
     TRACE_OFFLOAD=0 \
+    SECONDARY_TIER= \
+    FS_ROOT_DIR=/mnt/fs-tier/kv-tier \
     HF_HUB_OFFLINE=1 \
     WORKLOAD=/workspace/bench/run_multiturn_offloading.py
 

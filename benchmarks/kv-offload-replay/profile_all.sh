@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
-# profile_all.sh — run the four KV-offload benchmark variants against the same
+# profile_all.sh — run the KV-offload benchmark variants against the same
 # 12-turn ShareGPT replay workload and emit a side-by-side throughput table.
 #
 # Variants (run in this order):
 #   NoOffload      GPU-only baseline                 (image certus-nooffload-bench)
 #   Certus-SPDK    shmq client + certus-server-yaml  (image certus-shmq-bench + host server)
 #   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-cpu-offload-bench)
-#   SharedStorage  llmd_fs_backend RAID0/XFS         (image certus-sharedstorage-bench)
+#   SharedStorage  llmd_fs_backend on RAID0/XFS      (image certus-sharedstorage-bench)
+#                  vLLM <= 0.23 path (native tiering not yet available)
+#   Tiered-CPU-FS  vLLM TieringOffloadingManager: CPU primary + FS secondary
+#                  vLLM >= 0.23 path (reuses certus-cpu-offload-bench; FS tier on RAID0/XFS)
 #
 # Certus-SPDK runs first (of the storage backends) on purpose: it consumes the
 # boot-reserved 1G hugepage pool while it is still intact (no runtime realloc, no
 # reboot). Once it has run, the pool is released back to normal RAM (see
-# free_1g_hugepages) so the host-RAM backends (CPUOffload) and the XFS page cache
-# (SharedStorage) get that ~16 GiB back under mem=32G.
+# free_1g_hugepages) so the host-RAM backends (CPUOffload) and the RAID0/XFS
+# page cache (SharedStorage, Tiered-CPU-FS) get that ~16 GiB back under mem=32G.
 #
 # Each variant is preflighted independently: ready ones run, the rest are marked
 # SKIPPED with a reason. Missing bench images are built only when --build is
 # passed. The shared NVMe group (--device-pci) is reconfigured in-run between the
-# SharedStorage (kernel nvme + RAID0/XFS) and Certus-SPDK (vfio-pci + 1G hugepages)
+# FS backends (kernel nvme + RAID0/XFS) and Certus-SPDK (vfio-pci + 1G hugepages)
 # phases via tools/configure-bench.sh — so all storage backends use the SAME drives.
 # This is runtime-only (no reboot); a reboot is requested only if the 1G-hugepage
 # allocation falls short. Needs sudo (cached once, up front).
@@ -59,14 +62,30 @@ CHANNELS="${CHANNELS:-32}"                      # server worker threads / max in
 # the same margin configure-bench.sh declares (DPDK_HUGEPAGE_OVERHEAD_GIB=3) so the
 # two scripts agree: pool 16 -> 13G tier.
 MEM_TIER_SIZE="${MEM_TIER_SIZE:-$(( ${CERTUS_HUGEPAGES:-16} - 3 ))G}"
+MEM_TIER_EXPLICIT=0     # set when --memory-tier-size is passed (wins over --total-mem)
+# --total-mem derives MEM_TIER_SIZE = total − vLLM floor − DPDK/SPDK overhead.
+# Values mirror configure-bench.sh so the two scripts agree.
+TOTAL_MEM_GIB=""        # set by --total-mem <GiB>; empty = derivation off
+VLLM_MIN_RAM_GIB="${VLLM_MIN_RAM_GIB:-16}"           # RAM floor reserved for vLLM
+DPDK_HUGEPAGE_OVERHEAD_GIB="${DPDK_HUGEPAGE_OVERHEAD_GIB:-3}"  # DPDK heap + SPDK DMA
+DPDK_MEMSEG_LIST_GIB="${DPDK_MEMSEG_LIST_GIB:-64}"   # DPDK single-alloc ceiling (pool cap)
 EVICT_THRESH="0.6"
 CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
 SLAB_SIZE_BYTES=2097152
 TENSOR_PARALLEL_SIZE=1
+# Certus-SPDK client→server transport. "host" (default): share the host net
+# namespace (--network=host) and dial localhost:50051 — loopback, no proxy. This
+# is ~10% faster: the rootless-podman bridge otherwise routes every gRPC control
+# RPC through the slirp4netns/pasta userspace proxy (measured +125.8 s / +10.6%
+# on the 450×12 v0.20 run). "bridge": the vLLM container reaches the host server
+# via host.containers.internal over that userspace proxy — kept for hosts where
+# --network=host is unavailable or the port would collide. Only affects
+# Certus-SPDK; NoOffload/CPUOffload/SharedStorage don't use the gRPC socket.
+CLIENT_NET="host"
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server port
 DO_BUILD=0
-VLLM_VERSION=""        # pin the vLLM base-image version for ALL four backends
+VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
 ONLY=""
 SKIP=""
 LOGDIR=""
@@ -79,6 +98,8 @@ IMG_CPU="${IMG_CPU:-certus-cpu-offload-bench}"
 IMG_SHARED="${IMG_SHARED:-certus-sharedstorage-bench}"
 IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-bench}"
 
+# Host copy of the replay dataset, used only for the preflight existence warn
+# (container runs bake their own copy).
 DATASET_HOST="${SCRIPT_DIR}/../../data/sharegpt_12turn_450.json"
 SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
 # llmd_fs_backend repo (for --build of the SharedStorage image). Empty = auto:
@@ -88,13 +109,13 @@ FS_BACKEND_DIR="${FS_BACKEND_DIR:-}"
 
 usage() {
     cat <<'EOF'
-profile_all.sh — run the four KV-offload benchmark variants and print one table.
+profile_all.sh — run the KV-offload benchmark variants and print one table.
 
 Flags (all optional; defaults shown):
   --device-pci <DDDD:BB:DD.F>   NVMe PCIe addr of the SHARED drive group (repeatable).
-                                Used for BOTH SharedStorage (RAID0/XFS) and Certus-SPDK
-                                (vfio/SPDK): the host is reconfigured onto this group
-                                between the two phases via tools/configure-bench.sh, so
+                                Used for BOTH the RAID0/XFS FS backends (SharedStorage,
+                                Tiered-CPU-FS) and Certus-SPDK (vfio/SPDK): the host is reconfigured onto this
+                                group between the two phases via tools/configure-bench.sh, so
                                 the storage backends compare on identical devices.
                                 [default 0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0]
   --model-fs <dir>              Filesystem for HF cache + shmq podman store. [/mnt/certus1]
@@ -108,21 +129,33 @@ Flags (all optional; defaults shown):
   --max-num-seqs <n>           vLLM max concurrent sequences. [64]
   --gpu-mem-util <f>           vLLM GPU memory utilization. [0.90]
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
-  --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). [32G]
+  --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). Wins over
+                               --total-mem if both are given. [CERTUS_HUGEPAGES-3 G]
+  --total-mem <GiB>            Derive the Certus-SPDK DRAM tier from total system
+                               memory: tier = GiB − vLLM floor (${VLLM_MIN_RAM_GIB}G) − DPDK/SPDK
+                               overhead (${DPDK_HUGEPAGE_OVERHEAD_GIB}G), clamped to the reserved 1G pool
+                               (CERTUS_HUGEPAGES − ${DPDK_HUGEPAGE_OVERHEAD_GIB}G). Ignored if --memory-tier-size set.
   --evict-threshold <f>        Certus-SPDK DRAM->SSD demotion threshold. [0.6]
-  --cpu-bytes <n>              CPUOffload host-RAM budget in bytes. [16Gi]
-  --dram <n>                   SharedStorage DRAM budget in bytes. [32Gi]
+  --client-network <mode>      Certus-SPDK client transport: host (--network=host +
+                               localhost, loopback, no proxy) or bridge (host.containers
+                               .internal, rootless slirp4netns/pasta proxy). [host]
+  --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
+                               Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
+  --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
   --build                      Build any missing bench image before its run
-                               (SharedStorage needs FS_BACKEND_DIR; shmq via Dockerfile).
-  --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL four backends
+                               (all images via their Dockerfiles). Tiered-CPU-FS
+                               reuses the CPUOffload image; SharedStorage builds
+                               certus-sharedstorage-bench (needs FS_BACKEND_DIR).
+  --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL backends
                                (--build-arg VLLM_VERSION). Images are tagged
                                :vllm<x.y.z> so versions coexist. Implies the images
                                must be built at that version — pass --build too (or
-                               pre-build them). SharedStorage's compiled wheel ABI is
-                               auto-matched to the base image's torch on build.
+                               pre-build them). Tiered-CPU-FS needs the native
+                               TieringOffloadingSpec (vLLM >= 0.23); use SharedStorage
+                               on older. [default 0.26.0]
   --only a,b                   Run only these variants.
   --skip a,b                   Skip these variants.
-                               Names: nooffload, cpuoffload, sharedstorage, certus-spdk.
+                               Names: nooffload, cpuoffload, certus-spdk, sharedstorage, tiered-cpu-fs.
   --logdir <dir>               Output dir. [<model-fs>/kvprofile-<runid>]
   -h, --help                   This help.
 EOF
@@ -141,12 +174,14 @@ while [[ $# -gt 0 ]]; do
         --max-num-seqs)     MAX_NUM_SEQS="$2"; shift 2;;
         --gpu-mem-util)     GPU_MEM_UTIL="$2"; shift 2;;
         --gpu)              GPU="$2"; shift 2;;
-        --memory-tier-size) MEM_TIER_SIZE="$2"; shift 2;;
+        --memory-tier-size) MEM_TIER_SIZE="$2"; MEM_TIER_EXPLICIT=1; shift 2;;
+        --total-mem)        TOTAL_MEM_GIB="$2"; shift 2;;
         --evict-threshold)  EVICT_THRESH="$2"; shift 2;;
         --cpu-bytes)        CPU_BYTES="$2"; shift 2;;
         --dram)             DRAM="$2"; shift 2;;
         --build)            DO_BUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
+        --client-network)   CLIENT_NET="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
         --logdir)           LOGDIR="$2"; shift 2;;
@@ -158,7 +193,7 @@ done
 # Reject unknown --only/--skip tokens up front. want() does substring-on-comma
 # matching, so a typo (e.g. --only cpu, --only certus) silently selects nothing and
 # that variant just never runs — fail loudly instead.
-VALID_VARIANTS="nooffload cpuoffload certus-spdk sharedstorage"
+VALID_VARIANTS="nooffload cpuoffload certus-spdk sharedstorage tiered-cpu-fs"
 for _list in "$ONLY" "$SKIP"; do
     [[ -z "$_list" ]] && continue
     IFS=',' read -ra _toks <<<"$_list"
@@ -235,8 +270,17 @@ HUGEPAGES_1G_NODE="${RESOURCE_NUMA:-0}"
 # only ever stops the shared-group RAID — never the model-fs array.
 SHARED_FS="/mnt/ss-kv"
 SS_XFS_LABEL="sskv"
-DISK_DEV="$(findmnt -no SOURCE --target "$SHARED_FS" 2>/dev/null | xargs -r basename)"
-if [[ -z "$DISK_DEV" ]]; then
+# Reuse an EXISTING md array only if one is mounted at the exact SharedStorage
+# mountpoint. Note: NO --target here. `findmnt --target <dir>` resolves the mount
+# that *contains* <dir>, walking UP to the parent when <dir> itself isn't a mount —
+# so when $SHARED_FS is unmounted (e.g. the drives are on vfio for the certus phase)
+# it returned the ROOT device /dev/mapper/rhel-root, which then became mdadm's array
+# node (MD_DEVICE=/dev/rhel-root) — creating a RAID over the live root device node.
+# Plain `findmnt <mountpoint>` matches only an exact mountpoint (empty otherwise).
+DISK_DEV="$(findmnt -no SOURCE "$SHARED_FS" 2>/dev/null | xargs -r basename)"
+# Accept only a real md array; otherwise pick the lowest free /dev/mdN
+# (md0 is the persistent model-fs array -> md1, and so on).
+if [[ "$DISK_DEV" != md* ]]; then
     _n=0; while [[ -e "/dev/md${_n}" ]]; do _n=$((_n + 1)); done; DISK_DEV="md${_n}"
 fi
 
@@ -294,6 +338,72 @@ declare -a R_VARIANT=() R_STATUS=() R_WALL=() R_ROUNDS=() R_GENS=() R_TPS=() R_N
 log()  { echo "[profile] $*"; }
 warn() { echo "[profile] WARN: $*" >&2; }
 
+# ── Derive the Certus DRAM tier from total system memory (--total-mem) ─────────
+# tier = total − vLLM RAM floor − DPDK/SPDK overhead, clamped to the reserved 1G
+# hugepage pool (the tier is a single spdk_zmalloc from that pool, so it can't
+# exceed CERTUS_HUGEPAGES − DPDK_HUGEPAGE_OVERHEAD_GIB regardless of total RAM).
+# An explicit --memory-tier-size always wins.
+if [[ -n "$TOTAL_MEM_GIB" ]]; then
+    if ! [[ "$TOTAL_MEM_GIB" =~ ^[0-9]+$ ]]; then
+        echo "error: --total-mem expects an integer GiB (got '${TOTAL_MEM_GIB}')" >&2; exit 2
+    fi
+    # Reject values larger than the RAM physically present. MemTotal runs a bit
+    # below nominal (firmware/kernel reserve), so round it up to the next 4 GiB
+    # to recover the installed size before comparing — 29.6G MemTotal -> 32G.
+    _memtotal_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null)
+    if [[ -n "$_memtotal_kib" ]]; then
+        _phys_gib=$(( _memtotal_kib / 1048576 ))
+        _phys_installed=$(( ( (_phys_gib + 3) / 4 ) * 4 ))   # round up to 4 GiB
+        if [[ $TOTAL_MEM_GIB -gt $_phys_installed ]]; then
+            echo "error: --total-mem ${TOTAL_MEM_GIB}G exceeds physical RAM" \
+                 "(MemTotal ${_phys_gib}G, ~${_phys_installed}G installed)" >&2
+            exit 2
+        fi
+    fi
+    if [[ "$MEM_TIER_EXPLICIT" -eq 1 ]]; then
+        warn "--total-mem ignored: --memory-tier-size ${MEM_TIER_SIZE} was given explicitly"
+    else
+        _overhead=$(( VLLM_MIN_RAM_GIB + DPDK_HUGEPAGE_OVERHEAD_GIB ))
+        _derived=$(( TOTAL_MEM_GIB - _overhead ))
+        if [[ $_derived -le 0 ]]; then
+            echo "error: --total-mem ${TOTAL_MEM_GIB}G leaves no room for a DRAM tier after" \
+                 "vLLM ${VLLM_MIN_RAM_GIB}G + DPDK/SPDK ${DPDK_HUGEPAGE_OVERHEAD_GIB}G = ${_overhead}G" >&2
+            exit 2
+        fi
+        # Size the hugepage pool the same way configure-bench.sh does — reserve
+        # everything above the vLLM floor, capped just under the DPDK single-alloc
+        # ceiling — unless CERTUS_HUGEPAGES pins it explicitly. Deriving from the
+        # same total means the pool exactly fits the tier (no clamp); an explicit,
+        # smaller pool still clamps the tier down to what actually fits.
+        if [[ -n "${CERTUS_HUGEPAGES:-}" ]]; then
+            _pool=$CERTUS_HUGEPAGES
+        else
+            _pool=$(( TOTAL_MEM_GIB - VLLM_MIN_RAM_GIB ))
+            (( _pool > DPDK_MEMSEG_LIST_GIB - 1 )) && _pool=$(( DPDK_MEMSEG_LIST_GIB - 1 ))
+            (( _pool < 0 )) && _pool=0
+            # Propagate the derived pool so it actually gets reserved. Without this
+            # --total-mem only resized the tier: HUGEPAGES_1G_TARGET, the pre-start
+            # preflight, and the reconfigure hand-off (all keyed on CERTUS_HUGEPAGES)
+            # stayed at the 16-page default, so a 45G tier was aimed at a 16-page
+            # pool → spdk_zmalloc fails every time.
+            CERTUS_HUGEPAGES=$_pool
+        fi
+        # HUGEPAGES_1G_TARGET was captured from CERTUS_HUGEPAGES above (before this
+        # block ran); re-sync it so the pre-start preflight checks the derived pool.
+        HUGEPAGES_1G_TARGET="$CERTUS_HUGEPAGES"
+        _ceiling=$(( _pool - DPDK_HUGEPAGE_OVERHEAD_GIB ))
+        if [[ $_derived -gt $_ceiling ]]; then
+            warn "--total-mem implies a ${_derived}G tier, but the reserved 1G pool caps it at" \
+                 "${_ceiling}G (CERTUS_HUGEPAGES=${_pool} − ${DPDK_HUGEPAGE_OVERHEAD_GIB}G DPDK). Clamping;" \
+                 "raise CERTUS_HUGEPAGES and reboot for a larger tier."
+            _derived=$_ceiling
+        fi
+        MEM_TIER_SIZE="${_derived}G"
+        log "Certus DRAM tier ${MEM_TIER_SIZE} derived from --total-mem ${TOTAL_MEM_GIB}G" \
+            "(− vLLM ${VLLM_MIN_RAM_GIB}G − DPDK/SPDK ${DPDK_HUGEPAGE_OVERHEAD_GIB}G)"
+    fi
+fi
+
 # Selection helpers
 want() {
     local v="$1"
@@ -343,6 +453,7 @@ parse_log() {
 
 finish_variant() {  # variant rc logfile
     local variant="$1" rc="$2" f="$3"
+    gpu_mark end "$variant"
     local parsed wall gens rounds native tps
     parsed="$(parse_log "$f")"
     IFS='|' read -r wall gens rounds native tps <<<"$parsed"
@@ -364,7 +475,7 @@ mkdir -p "$LOGDIR" "$HF_CACHE" || { echo "error: cannot create logdir/HF cache" 
 # Reconfiguring the shared NVMe group (RAID0/XFS <-> vfio/hugepages) needs root.
 # Cache the sudo credential ONCE, up front — before any long-running work — but
 # only when a storage backend is actually selected.
-if want sharedstorage || want certus-spdk; then
+if want sharedstorage || want tiered-cpu-fs || want certus-spdk; then
     log "shared NVMe group for storage backends: [${NVME_BDFS}]"
     # Fail fast on a mistyped or absent PCI address: every device in the group must
     # exist in sysfs. Otherwise a bad BDF (e.g. a dropped domain digit, 000:61:00.0
@@ -430,6 +541,101 @@ else
     warn "nvidia-smi not found — cannot verify GPU availability"
 fi
 
+# ── Pin GPU clocks for stable cross-backend timing ──
+# The A30/A100 auto-boost clock drifts with temperature and power draw across
+# back-to-back runs, so generation throughput (and thus wall time) wanders even
+# on byte-identical work — measured ~12% wall spread on repeat Certus-SPDK runs,
+# larger than the backend differences we're trying to measure. Lock every GPU to
+# its OWN max SM clock (queried per host, never hardcoded) and enable persistence
+# mode so all four backends see the same clock. Applies host-wide (the bench uses
+# GPU=all). Needs root; this is a stability knob, so warn-and-continue if we can't
+# — and always reset to auto-boost on exit (see the EXIT trap) so the GPU isn't
+# left pinned after the run.
+GPU_CLOCK_LOCKED=0
+lock_gpu_clocks() {
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    local maxsm
+    maxsm="$(nvidia-smi --query-gpu=clocks.max.sm --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
+    if [[ ! "$maxsm" =~ ^[0-9]+$ ]]; then
+        warn "could not read GPU max SM clock — leaving clocks on auto-boost (runs may drift ~10%)"
+        return 0
+    fi
+    # Acquire sudo non-fatally (the storage-backend preflight may not have run for
+    # a GPU-only variant). Cached/NOPASSWD works headless; else prompt once here.
+    if ! sudo -n true 2>/dev/null && ! sudo -v; then
+        warn "no sudo — cannot pin GPU clocks; generation throughput may drift across backends"
+        return 0
+    fi
+    if sudo -n nvidia-smi -pm 1 >/dev/null 2>&1 \
+       && sudo -n nvidia-smi -lgc "${maxsm},${maxsm}" >/dev/null 2>&1; then
+        GPU_CLOCK_LOCKED=1
+        log "pinned GPU SM clock to ${maxsm} MHz (persistence on) — stable cross-backend timing"
+    else
+        warn "failed to pin GPU clocks (nvidia-smi -pm/-lgc) — continuing on auto-boost"
+    fi
+}
+unlock_gpu_clocks() {
+    [[ "${GPU_CLOCK_LOCKED:-0}" == 1 ]] || return 0
+    log "resetting GPU clocks to default (auto-boost)"
+    sudo -n nvidia-smi -rgc >/dev/null 2>&1 || warn "could not reset GPU clocks (sudo nvidia-smi -rgc)"
+    GPU_CLOCK_LOCKED=0
+}
+lock_gpu_clocks
+
+# ── GPU utilization sampler (time series over the whole run) ──
+# A background poller snapshots per-GPU utilization/clock/mem/power every
+# GPU_SAMPLE_SEC to gpu-timeline.csv; gpu_mark records the start/end epoch of each
+# variant's window to gpu-markers.csv. gpu_report (end of run) slices the timeline
+# by those windows into a per-variant table + an over-time sparkline. 2 s is fine
+# grain for a ~20 min/variant run (~600 samples) without flooding the file.
+GPU_SAMPLE_SEC="${GPU_SAMPLE_SEC:-2}"
+GPU_SAMPLER_PID=""
+start_gpu_sampler() {
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    [[ -n "${LOGDIR:-}" && -d "${LOGDIR:-}" ]] || return 0
+    local tl="${LOGDIR}/gpu-timeline.csv"
+    echo "epoch_s,gpu_idx,util_gpu_pct,util_mem_pct,mem_used_mib,sm_clock_mhz,temp_c,power_w" > "$tl"
+    (
+        while true; do
+            ts="$(date +%s)"
+            nvidia-smi --query-gpu=index,utilization.gpu,utilization.memory,memory.used,clocks.sm,temperature.gpu,power.draw \
+                --format=csv,noheader,nounits 2>/dev/null \
+                | sed "s/^/${ts}, /; s/, /,/g" >> "$tl" || true
+            sleep "$GPU_SAMPLE_SEC"
+        done
+    ) &
+    GPU_SAMPLER_PID=$!
+    log "sampling GPU telemetry every ${GPU_SAMPLE_SEC}s -> $(basename "$tl")"
+}
+stop_gpu_sampler() {
+    [[ -n "${GPU_SAMPLER_PID:-}" ]] || return 0
+    kill "$GPU_SAMPLER_PID" 2>/dev/null
+    wait "$GPU_SAMPLER_PID" 2>/dev/null
+    GPU_SAMPLER_PID=""
+}
+# Record a variant-window boundary (start|end) with a wall-clock epoch.
+gpu_mark() {  # phase variant
+    [[ -n "${LOGDIR:-}" && -d "${LOGDIR:-}" ]] || return 0
+    local mk="${LOGDIR}/gpu-markers.csv"
+    [[ -f "$mk" ]] || echo "epoch_s,phase,variant" > "$mk"
+    echo "$(date +%s),$1,$2" >> "$mk"
+}
+# Slice the timeline by variant window and print a table + sparkline.
+gpu_report() {
+    local tl="${LOGDIR}/gpu-timeline.csv" mk="${LOGDIR}/gpu-markers.csv"
+    [[ -f "$tl" ]] || return 0
+    command -v python3 >/dev/null 2>&1 || { warn "python3 not found — skipping GPU report"; return 0; }
+    python3 "${SCRIPT_DIR}/gpu_report.py" "$tl" "$mk" 2>/dev/null | tee "${LOGDIR}/gpu-summary.txt"
+    echo "gpu timeline    -> ${tl}"
+    echo "gpu summary     -> ${LOGDIR}/gpu-summary.txt"
+}
+start_gpu_sampler
+
+# Reset clocks / stop the sampler on any exit from here on. Superseded below by a
+# combined handler once the Certus-SPDK server exists, so an early exit here still
+# unpins the GPU and reaps the sampler.
+trap 'stop_gpu_sampler; unlock_gpu_clocks' EXIT
+
 img_exists()      { command podman image exists "$1" >/dev/null 2>&1; }
 img_exists_shmq() { command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" image exists "$1" >/dev/null 2>&1; }
 
@@ -446,6 +652,7 @@ run_container_bench() {  # variant image extra-args...
     local variant="$1" image="$2"; shift 2
     local extra=("$@") f="${LOGDIR}/${variant}.log"
     log "starting ${variant} (image ${image})"
+    gpu_mark start "$variant"
     command podman run --rm \
         --pull=never \
         --device "nvidia.com/gpu=${GPU}" \
@@ -499,7 +706,7 @@ stop_server() {
     wait "$SERVER_PID" 2>/dev/null
     SERVER_PID=""
 }
-trap stop_server EXIT
+trap 'stop_server; stop_gpu_sampler; unlock_gpu_clocks' EXIT
 
 if want certus-spdk; then
     cs_skip=""
@@ -587,6 +794,7 @@ if want certus-spdk; then
         else
             log "server serving, mailbox ${SHM_PATH} — launching shmq client"
             f="${LOGDIR}/certus-spdk.log"
+            gpu_mark start "Certus-SPDK"
             # No CERTUS_SERVER: the shared /dev/shm mailbox at SHM_PATH is the
             # endpoint (run-bench.sh shares it into the container via --ipc=host).
             IMAGE="$IMG_SHMQ" \
@@ -612,7 +820,7 @@ fi
 # Certus-SPDK is the only backend that needs the boot-reserved 1G pool. Now that it
 # has run (and its server is stopped), release those ~16 GiB back to normal RAM so
 # the host-RAM backends below aren't starved under mem=32G. Runtime, no reboot.
-if want cpuoffload || want sharedstorage; then
+if want cpuoffload || want sharedstorage || want tiered-cpu-fs; then
     free_1g_hugepages
 fi
 
@@ -633,6 +841,8 @@ if want cpuoffload; then
 fi
 
 # ══ SharedStorage ═════════════════════════════════════════════════════════════
+# vLLM <= 0.23 path: llmd_fs_backend on kernel nvme + RAID0/XFS. (For 0.23+ prefer
+# the Tiered variant below, which uses vLLM's native TieringOffloadingManager.)
 # Runs AFTER Certus-SPDK (1G pool already released by free_1g_hugepages above): the
 # reconfigure rebinds the shared group from vfio-pci back to kernel nvme + RAID0/XFS.
 if want sharedstorage; then
@@ -693,6 +903,65 @@ if want sharedstorage; then
             -e "SKIP_PREFLIGHT=1"
     fi
 fi
+
+# ══ Tiered-CPU-FS (CPU primary + FS secondary) ═══════════════════════════════
+# vLLM 0.23+ path: the native TieringOffloadingManager — CPU tier as primary, a
+# filesystem tier as secondary. Reuses the CPUOffload image (same
+# OffloadingConnector); the only difference is SECONDARY_TIER=fs, which selects
+# TieringOffloadingSpec + the fs secondary written to FS_ROOT_DIR on the RAID0/XFS
+# group. Runs in the same kernel-nvme/RAID0 phase as SharedStorage (after
+# Certus-SPDK + free_1g_hugepages).
+if want tiered-cpu-fs; then
+    t_skip=""
+    # Native TieringOffloadingSpec requires vLLM >= 0.23 (SharedStorage covers older).
+    if [[ -n "$VLLM_VERSION" ]]; then
+        _mm="${VLLM_VERSION%.*}"
+        _min="$(printf '%s\n0.23\n' "$_mm" | sort -V | head -1)"
+        [[ "$_min" == "$_mm" && "$_mm" != "0.23" ]] && \
+            t_skip="Tiered-CPU-FS needs vLLM >= 0.23 (got ${VLLM_VERSION}); use SharedStorage for older"
+    fi
+    # Bring the shared group up as kernel nvme + RAID0/XFS at $SHARED_FS (the fs tier).
+    if [[ -z "$t_skip" ]] && ! reconfigure sharedstorage; then
+        t_skip="host reconfigure -> RAID0/XFS failed (see reconfigure-sharedstorage.log)"
+    elif [[ -z "$t_skip" && ! -d "$SHARED_FS" ]]; then
+        t_skip="'$SHARED_FS' not present after reconfigure (see reconfigure-sharedstorage.log)"
+    fi
+    # Reuses the CPUOffload image. Build it here if it is missing (e.g. --only tiered-cpu-fs).
+    if [[ -z "$t_skip" ]] && ! img_exists "$IMG_CPU"; then
+        if [[ "$DO_BUILD" -eq 1 ]] && ! build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
+            t_skip="image ${IMG_CPU} build failed (see build-cpu-offload.log)"
+        elif [[ "$DO_BUILD" -ne 1 ]]; then
+            t_skip="image ${IMG_CPU} missing (pass --build)"
+        fi
+    fi
+    if [[ -n "$t_skip" ]]; then
+        record "Tiered-CPU-FS" "SKIPPED" "" "" "" "" "" "$t_skip" ""
+        warn "Tiered-CPU-FS SKIPPED: $t_skip"
+    else
+        # fs secondary-tier root on the RAID0/XFS group, mounted into the container.
+        mkdir -p "${SHARED_FS}/kv-tier"
+        # The TieringOffloadingSpec CPU primary tier is a SINGLE mmap in /dev/shm
+        # (/dev/shm/vllm_offload_*.mmap), sized to cpu_bytes_to_use and faulted in
+        # with MADV_POPULATE_WRITE. The container's default /dev/shm is 64 MiB, so
+        # populating a 16 GiB region dies with "OSError: [Errno 14] Bad address".
+        # (Plain CPUOffload uses a CUDA pinned buffer, not /dev/shm, so it is fine.)
+        # Give /dev/shm the tier size + 2 GiB headroom.
+        tier_shm=$((CPU_BYTES + 2 * (1 << 30)))
+        # DISK_DEV lets the runner snapshot /sys/block/<md>/stat per round so the
+        # fs secondary tier's real SSD read/write is recorded (like SharedStorage).
+        run_container_bench "Tiered-CPU-FS" "$IMG_CPU" \
+            --shm-size="${tier_shm}" \
+            -v "${SHARED_FS}:/mnt/fs-tier:z" \
+            -e "CPU_BYTES=${CPU_BYTES}" \
+            -e "SECONDARY_TIER=fs" \
+            -e "FS_ROOT_DIR=/mnt/fs-tier/kv-tier" \
+            -e "DISK_DEV=${DISK_DEV}"
+    fi
+fi
+
+# ── GPU utilization report (stop the sampler first so the CSV is complete) ─────
+stop_gpu_sampler
+gpu_report
 
 # ── Emit results.json ─────────────────────────────────────────────────────────
 json="${LOGDIR}/results.json"

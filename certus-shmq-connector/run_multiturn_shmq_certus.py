@@ -264,6 +264,7 @@ if __name__ == "__main__":
         if not active_prompts:
             break
 
+        t_round = time.perf_counter()
         outputs = llm.generate(active_prompts, active_sps)
         for j, out in enumerate(outputs):
             i = active_idx[j]
@@ -271,10 +272,11 @@ if __name__ == "__main__":
             contexts[i] = contexts[i] + gen
             next_turn[i] += 1
             total_generations += 1
+        round_s = time.perf_counter() - t_round
         rounds_done += 1
 
         print(
-            f"[run] round {rounds_done}: {len(active_prompts)} prompts, "
+            f"[run] round {rounds_done}: {len(active_prompts)} prompts in {round_s:.1f}s, "
             f"{total_generations} total generations",
             file=sys.stderr,
         )
