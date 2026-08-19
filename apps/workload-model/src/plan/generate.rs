@@ -67,6 +67,14 @@ pub const DEFAULT_HORIZON_EVENTS: usize = 64 * 1024;
 /// flip per node, which is what an earlier design got wrong.
 const COHORT_FLOOR: f64 = 2.0;
 
+/// Whether a session declines a trunk run it cannot walk to the end of (FR-054k).
+///
+/// EXPERIMENT (`CERTUS_EXP_RUN_COMPLETION=1`), off by default. Read once.
+fn run_completion() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CERTUS_EXP_RUN_COMPLETION").is_ok_and(|v| v == "1"))
+}
+
 /// Whether a session's aloneness is **drawn** rather than thresholded at [`COHORT_FLOOR`].
 ///
 /// EXPERIMENT (`CERTUS_EXP_COHORT_BERNOULLI=1`), off by default. Read once.
@@ -235,6 +243,23 @@ impl std::error::Error for GenError {}
 #[derive(Debug, Clone)]
 struct Live {
     s: Session,
+    /// The depth this session's **last** turn reaches, computed once at birth.
+    ///
+    /// The trunk is re-walked from the session id every turn, so a later turn traverses the same
+    /// nodes to a greater depth, and a node is reached by this session if *any* of its turns reaches
+    /// it. That makes the final turn's depth the right bound for "can this session finish the run it
+    /// is about to join" (FR-054k) — turn 1's would make sessions leave the trunk far earlier than
+    /// the trace's do. Computed from a **clone** of the growth stream so the per-turn draws are
+    /// untouched, which keeps it exact rather than an estimate.
+    final_depth: u32,
+    /// This session's **root's** path level, where the document states one (FR-054k).
+    ///
+    /// Per root, not per session, which is the property that matters: it caps how long a run may be
+    /// without making two sessions at one node disagree about where that run ends. Capping at a
+    /// session's own depth instead was tried and is wrong for exactly that reason — it made run
+    /// length session-dependent, so walkers diverged mid-run and the attrition it was meant to
+    /// remove came straight back.
+    root_path_level: Option<u32>,
     /// A **ceiling** on how much of this session's path is shared trunk, drawn at birth.
     ///
     /// FR-012a always called the drawn value an upper bound on the realised one; since
@@ -663,13 +688,23 @@ impl Generator {
         // 0.99 on the agentic traces: request length is very nearly a property of the root, and
         // drawing it independently is what let an 11-block request land on a root with a 124-block
         // preamble and fragment it.
-        let turn1 = match (&self.turn1_path_length, params.turn1_path_length) {
-            (Some(d), Some(session_level)) if self.turn1_path_root_share > 0.0 => {
-                let mut rs = Stream::new(
-                    self.seed ^ TAG_ROOT_PATH,
-                    u64::from(root_index) ^ (u64::from(roots) << 32),
-                );
-                let root_level = d.sample_u64(&mut rs).min(u64::from(u32::MAX)) as u32;
+        // The ROOT's own path level, drawn from the root's stream — a per-root quantity, which is
+        // what lets it cap run lengths without making the trie disagree between walkers.
+        let root_path_level = self.turn1_path_length.as_ref().map(|d| {
+            let mut rs = Stream::new(
+                self.seed ^ TAG_ROOT_PATH,
+                u64::from(root_index) ^ (u64::from(roots) << 32),
+            );
+            d.sample_u64(&mut rs).min(u64::from(u32::MAX)) as u32
+        });
+        let turn1 = match (
+            &self.turn1_path_length,
+            params.turn1_path_length,
+            root_path_level,
+        ) {
+            (Some(d), Some(session_level), Some(root_level))
+                if self.turn1_path_root_share > 0.0 =>
+            {
                 Some(crate::session::mix_root_share(
                     root_level,
                     session_level,
@@ -677,7 +712,7 @@ impl Generator {
                     self.turn1_path_root_share,
                 ))
             }
-            (_, other) => other,
+            (_, other, _) => other,
         };
         let mut growth = Stream::new(self.seed ^ TAG_GROWTH, u64::from(id.0));
         let depth = crate::session::depth_at_turn(
@@ -695,7 +730,19 @@ impl Generator {
         // cohort — which is why a session on an unpopular root shares less, as in the
         // trace, without anything having to be told to it.
         let root_cohort = self.sessions_per_window * self.root_rank_p(root_index, roots);
+        // The last turn's depth, from a clone so the real growth stream is not advanced.
+        let final_depth = crate::session::depth_at_turn(
+            shared_depth,
+            params.private_depth,
+            turn1,
+            &params.growth_per_turn,
+            params.turns,
+            params.max_depth,
+            &mut growth.clone(),
+        );
         Live {
+            final_depth,
+            root_path_level,
             turn_one_depth: depth,
             s: Session {
                 id,
@@ -784,7 +831,15 @@ impl Generator {
         let mut alone = false;
         // Where this root's first split is, drawn from the root's own stream — which is what
         // lets two roots have preambles of different lengths.
-        let mut split = crate::corpus::SplitState::at_root(&self.corpus, cur);
+        // Capped at the session's own reach when FR-054k is in force: a run longer than the
+        // requests walking it would be declined by every one of them, which empties the trunk
+        // rather than lengthening it. All sessions on this root share a path level, so the cap is
+        // still a property of the node and the trie stays consistent between walkers.
+        let split_cap = match (run_completion(), live.root_path_level) {
+            (true, Some(level)) => level,
+            _ => u32::MAX,
+        };
+        let mut split = crate::corpus::SplitState::at_root(&self.corpus, cur, split_cap);
         for d in 0..depth {
             if d > 0 {
                 // The boundary is the EARLIER of cohort exhaustion and the drawn cap.
@@ -850,13 +905,31 @@ impl Generator {
                     } else {
                         false
                     };
+                    // DO NOT JOIN A RUN YOU CANNOT FINISH (FR-054k).
+                    //
+                    // In every trace examined a shared run ends by **branching**, never by sessions
+                    // dropping off it: 0 attrition of 158 segments on `tau2_airline`, 0 of 85 on
+                    // `swebench`. Every session on a run walks the whole run. The generator broke
+                    // that on 32% of its runs, because a session whose path ends part-way along one
+                    // stops emitting and every node below it loses a session.
+                    //
+                    // Rather than correlate ever more parameters until paths happen to be long
+                    // enough, the session **declines** the run: if its deepest turn cannot reach the
+                    // far end, it goes private at the split instead of part-way down. That makes the
+                    // invariant hold by construction at every depth rather than in expectation, and
+                    // it is decidable here from what the session already knows.
+                    let cannot_finish = run_completion() && split.next_split() > live.final_depth;
                     cohort *= p;
-                    if escaped || left_alone || (!cohort_bernoulli() && cohort < COHORT_FLOOR) {
+                    if escaped
+                        || left_alone
+                        || cannot_finish
+                        || (!cohort_bernoulli() && cohort < COHORT_FLOOR)
+                    {
                         alone = true;
                     }
-                    if escaped {
-                        // Landed on a child of its own: private from here, and a rolling-prefix
-                        // key cannot rejoin the trunk below.
+                    if escaped || cannot_finish {
+                        // Landed on a child of its own, or declined the run: private from here, and
+                        // a rolling-prefix key cannot rejoin the trunk below.
                         private_child(cur, live.s.id, d)
                     } else {
                         next

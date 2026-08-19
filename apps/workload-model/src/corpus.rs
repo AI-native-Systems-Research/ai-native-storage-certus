@@ -336,24 +336,45 @@ impl ResolvedSegments {
 pub struct SplitState {
     /// Depth at which the next split happens.
     next_split_depth: u32,
+    /// A cap on how deep a run may extend — the root's own path level (FR-054k).
+    ///
+    /// A run longer than the requests of the sessions walking it cannot be completed, and under
+    /// FR-054k those sessions decline it, which empties the trunk instead of lengthening it. The two
+    /// are a **joint per-root pair**: a root's preamble and its sessions' path length are not
+    /// independent in a trace, because the preamble *is* a prefix of those requests. Capping here
+    /// keeps run length a function of the node — every session at a node arrived through the same
+    /// root and so carries the same cap — which is what keeps the trie consistent between walkers.
+    ///
+    /// `u32::MAX` is no cap, which is the behaviour before this existed.
+    path_cap: u32,
 }
 
 /// Domain separator for a node's own run-length and out-degree draws.
 const TAG_SEGMENT: u64 = 0x5E67_3E27;
 
 impl SplitState {
+    /// The depth at which this walk's next split falls.
+    ///
+    /// Exposed so a walker can ask whether it will still be issuing requests that deep before it
+    /// commits to a run — see FR-054k. A run a session cannot finish is one it must not join.
+    pub fn next_split(&self) -> u32 {
+        self.next_split_depth
+    }
+
     /// The state a walk starts in at `root`.
     ///
     /// The root is itself a split node, so its run length comes from *its* stream — which is
     /// exactly what gives each root its own preamble length. Under a per-depth profile every
     /// depth is a potential split, which is the degenerate case of the same state.
-    pub fn at_root(corpus: &Corpus, root: CacheKey) -> SplitState {
+    pub fn at_root(corpus: &Corpus, root: CacheKey, path_cap: u32) -> SplitState {
         match &corpus.segments {
             None => SplitState {
                 next_split_depth: 0,
+                path_cap,
             },
             Some(s) => SplitState {
-                next_split_depth: s.run_length(corpus.seed, root, 0),
+                next_split_depth: s.run_length(corpus.seed, root, 0).min(path_cap),
+                path_cap,
             },
         }
     }
@@ -549,8 +570,9 @@ impl Corpus {
                     let n = s.out_degree(self.seed, cur, depth);
                     let (idx, p) = self.pick_child_p(st, n, skew);
                     let child = trunk_child(cur, idx, gen);
-                    state.next_split_depth =
-                        depth.saturating_add(s.run_length(self.seed, child, depth));
+                    state.next_split_depth = depth
+                        .saturating_add(s.run_length(self.seed, child, depth))
+                        .min(state.path_cap);
                     (child, p)
                 }
             }
@@ -828,7 +850,10 @@ mod tests {
             }],
         }));
         let firsts: Vec<u32> = (0..12u32)
-            .map(|i| SplitState::at_root(&c, c.root_key(i, Generation::STABLE)).next_split_depth)
+            .map(|i| {
+                SplitState::at_root(&c, c.root_key(i, Generation::STABLE), u32::MAX)
+                    .next_split_depth
+            })
             .collect();
         let distinct: std::collections::BTreeSet<u32> = firsts.iter().copied().collect();
         assert!(
@@ -849,7 +874,7 @@ mod tests {
         // expected cohort is unchanged. Only a split divides it.
         let c = seg_corpus(5.0, 4.0);
         let root = c.root_key(0, Generation::STABLE);
-        let mut state = SplitState::at_root(&c, root);
+        let mut state = SplitState::at_root(&c, root, u32::MAX);
         assert_eq!(state.next_split_depth, 5, "a const run length of 5");
         let mut st = Stream::new(1, 1);
         let mut cur = root;
@@ -1010,7 +1035,7 @@ mod tests {
         // while s = 0 divides it sixteen ways.
         let decay = |depth: u32| {
             let mut st = Stream::new(9, 9);
-            let mut state = SplitState::at_root(&c, c.root_key(0, Generation::STABLE));
+            let mut state = SplitState::at_root(&c, c.root_key(0, Generation::STABLE), u32::MAX);
             state.next_split_depth = depth;
             let (_, p) = c.trunk_step_stateful(
                 c.root_key(0, Generation::STABLE),

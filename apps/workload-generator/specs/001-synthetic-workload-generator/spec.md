@@ -2227,6 +2227,30 @@ report segments statistics into before/after windows around the event.
   to its own preamble length**, because those are two independent per-root draws. Preventing attrition
   needs `path_level(root) >= preamble(root)` for the *same* root, i.e. a joint per-root law, not two
   marginals that happen to be per-root. Recorded rather than tuned around.
+- **FR-054k**: A session MUST NOT join a trunk run it cannot walk to the end of, and a run's length
+  MUST be capped by a **per-root** quantity rather than a per-session one.
+  The invariant being enforced is measured: in every trace examined a shared run ends by
+  **branching**, never by sessions dropping off it — **0 attrition of 158 segments** on
+  `exgentic_tau2_airline`, **0 of 85** on `exgentic_swebench`. Every session on a run walks the whole
+  run. The generator broke that on **32%** of its runs, because a session whose path ends part-way
+  along one stops emitting and every node below it loses a session.
+  Enforcing it works: attrition goes to **exactly 0 in every band**, and cohort sizes come within one
+  session of the trace's (3/4/2 against 3/3/3 in the mid bands).
+  **The cap MUST be per root.** Capping at the session's own reach was implemented and is wrong for a
+  specific reason: run length then becomes session-dependent, so two sessions at one node disagree
+  about where the run ends, the trie stops being consistent between walkers, and the attrition the
+  rule exists to remove comes straight back — measured, identically to before the rule.
+  **THE TENSION THIS EXPOSES, which is the substantive result.** Attrition and preamble length are in
+  direct opposition under the present parameterisation. A root's run may be as long as its *level*,
+  but a session's own path varies around that level (`eta²` 0.99 still leaves ~11% within-root
+  spread), so roughly half of a root's sessions fall short of it and decline the run — collapsing the
+  realised preamble from 88 blocks to 1. Both cannot hold unless a run is bounded by the **minimum**
+  path among the sessions that will walk it.
+  That is derivable rather than a tuning knob: the minimum of `k` draws from the session-level
+  distribution, where `k` is the root's expected session count, which the model already has from
+  `roots.popularity`. So the joint per-root law wants **(preamble, path level, within-root spread,
+  session count)** together, and bounding the preamble by a low quantile of the path distribution —
+  not by its level. Recorded rather than guessed at.
 - **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
   measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
   sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first
