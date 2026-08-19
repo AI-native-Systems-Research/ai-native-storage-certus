@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """run_multiturn_nooffload.py — multi-turn e2e benchmark, NO KV offloading.
 
-Same workload/driver loop as run_multiturn_certus.py, but vLLM runs with no
-kv_transfer_config at all — the plain GPU-only baseline. Prefix caching stays
-on (matching the offload runs); the only difference is that evicted KV is
-recomputed rather than fetched from an offload tier. Use this as the
-"no offload" reference point against Certus / CPU / SharedStorage.
+Same workload/driver loop as the other backends (via multiturn_workload), but
+vLLM runs with no kv_transfer_config at all — the plain GPU-only baseline.
+Prefix caching stays on (matching the offload runs); the only difference is that
+evicted KV is recomputed rather than fetched from an offload tier. Use this as
+the "no offload" reference point against Certus / CPU / SharedStorage.
 """
 
 if __name__ == "__main__":
@@ -17,6 +17,8 @@ if __name__ == "__main__":
     _here = os.path.dirname(os.path.abspath(__file__))
     if _here not in sys.path:
         sys.path.insert(0, _here)
+
+    import multiturn_workload as mw
 
     SUBSET_PATH = os.environ.get("DATASET_PATH",
                                    os.path.join(_here, "sharegpt_subset_5000.json"))
@@ -39,16 +41,7 @@ if __name__ == "__main__":
           f"output_tokens={OUTPUT_TOKENS} max_num_seqs={MAX_NUM_SEQS}",
           file=sys.stderr)
 
-    with open(SUBSET_PATH) as f:
-        all_data = json.load(f)
-    convs = []
-    for entry in all_data:
-        if len(convs) >= NUM_CONVS:
-            break
-        turns = entry.get("conversations", [])
-        human_turns = [t["value"] for t in turns if t.get("from") == "human"]
-        if len(human_turns) >= 2:
-            convs.append(human_turns)
+    convs = mw.load_convs(SUBSET_PATH, NUM_CONVS)
     print(f"[run] loaded {len(convs)} conversations", file=sys.stderr)
 
     from vllm import LLM, SamplingParams
@@ -115,160 +108,39 @@ if __name__ == "__main__":
     def n_tokens(text: str) -> int:
         return len(tokenizer(text).input_ids)
 
-    contexts = [""] * len(convs)
-    alive = [True] * len(convs)
-    next_turn = [0] * len(convs)
+    # ── Per-round vLLM Prometheus counter deltas ──────────────────────────
+    prom_prev = [mw.prom_counters(llm, CAPTURE_METRICS)]
+    prom_rounds = []   # (round, {counter_name: delta})
+    round_stats = []   # (round, prompts, elapsed, n_alive)
 
-    # ── vLLM Prometheus counters (per round) ──────────────────────────────
-    # vLLM registers every metric on the default prometheus_client REGISTRY under
-    # the `vllm:` prefix, updated as the engine steps (present on both the V0 and
-    # V1 engines whenever stat logging is on). Snapshot each counter (samples
-    # named `vllm:*_total`, summed across label sets) at the end of every round
-    # and log the delta; the full per-round series is also dumped to JSON.
-    def prom_counters():
-        # Prefer the V1 offline snapshot: engine counters (prompt/generation
-        # tokens, prefix-cache queries/hits, preemptions) are exposed by
-        # llm.get_metrics() and are NOT on the global prometheus REGISTRY in
-        # offline mode — reading only the REGISTRY (or the log_stats logger) misses
-        # them. Then supplement with the REGISTRY for older (V0) engines, where
-        # get_metrics() is absent, and for connector-registered metrics
-        # (vllm:kv_offload_*) which only ever live on the global registry.
-        # Names differ by source: get_metrics() uses bare names
-        # (vllm:prefix_cache_queries); REGISTRY counter samples carry the _total
-        # suffix — we keep both keys so the delta shows under whichever the
-        # running version populates.
-        vals = {}
-        if not CAPTURE_METRICS:
-            return vals
-        try:
-            for m in llm.get_metrics():
-                if type(m).__name__ != "Counter":
-                    continue
-                name = getattr(m, "name", "")
-                val = getattr(m, "value", None)
-                if name.startswith("vllm:") and isinstance(val, (int, float)):
-                    # Sum across label sets: get_metrics() emits one Counter per
-                    # sample, so labeled metrics (request_success by finish_reason,
-                    # prompt_tokens_by_source, per-engine under TP>1) share a name.
-                    vals[name] = vals.get(name, 0.0) + float(val)
-        except Exception:  # noqa: BLE001 - get_metrics() is V1-only; skip on V0
-            pass
-        try:
-            from prometheus_client import REGISTRY
-            for metric in REGISTRY.collect():
-                if not metric.name.startswith("vllm:"):
-                    continue
-                for s in metric.samples:
-                    if s.name.endswith("_total"):
-                        vals[s.name] = vals.get(s.name, 0.0) + float(s.value)
-        except Exception as e:  # noqa: BLE001
-            print(f"[prom] collect failed: {e}", file=sys.stderr, flush=True)
-        return vals
-
-    def prom_histograms(names):
-        # Sample the named vLLM latency histograms ONCE (cumulative over the whole
-        # run). get_metrics() exposes each as Histogram(count, sum, buckets) where
-        # buckets maps an upper bound `le` -> cumulative count <= le; sum across
-        # label sets (per-engine / finish-reason) into one distribution per name.
-        out = {}
-        if not CAPTURE_METRICS:
-            return out
-        try:
-            for m in llm.get_metrics():
-                if type(m).__name__ != "Histogram":
-                    continue
-                name = getattr(m, "name", "")
-                if name not in names:
-                    continue
-                agg = out.setdefault(name, {"count": 0, "sum": 0.0, "buckets": {}})
-                agg["count"] += int(getattr(m, "count", 0))
-                agg["sum"] += float(getattr(m, "sum", 0.0))
-                for le, c in (getattr(m, "buckets", {}) or {}).items():
-                    agg["buckets"][le] = agg["buckets"].get(le, 0) + int(c)
-        except Exception as e:  # noqa: BLE001 - get_metrics() is V1-only
-            print(f"[prom] histogram sample failed: {e}", file=sys.stderr)
-        return out
-
-    def _hist_pct(buckets, count, p):
-        # Percentile from cumulative buckets: the smallest upper bound `le` whose
-        # cumulative count first reaches p*count. Bucket-granular approximation;
-        # returns inf when the crossing lands in the +Inf bucket.
-        if not count:
-            return None
-        target = p * count
-
-        def _le(k):
-            return float("inf") if k in ("+Inf", "inf", "Inf") else float(k)
-
-        for le in sorted(buckets, key=_le):
-            if buckets[le] >= target:
-                return _le(le)
-        return float("inf")
-
-    prom_prev = prom_counters()
-    prom_rounds = []  # (round, {counter_name: delta})
-
-    rounds_done = 0
-    total_generations = 0
-    round_stats = []  # (round, prompts, elapsed, n_alive)
-
-    t_start = time.perf_counter()
-
-    while True:
-        if MAX_ROUNDS and rounds_done >= MAX_ROUNDS:
-            break
-        active_idx = []
-        active_prompts = []
-        for i, conv in enumerate(convs):
-            if not alive[i]:
-                continue
-            k = next_turn[i]
-            if k >= len(conv):
-                alive[i] = False
-                continue
-            human = conv[k]
-            candidate = human if k == 0 else contexts[i] + "\n\n" + human
-            # Guard both bounds: some ShareGPT turns are empty strings, which
-            # granite tokenizes to 0 tokens. An empty decoder prompt makes vLLM
-            # raise "The decoder prompt cannot be empty" and abort the engine, so
-            # drop those convs (nt == 0) alongside the over-budget ones.
-            nt = n_tokens(candidate)
-            if nt == 0 or nt > PROMPT_BUDGET:
-                alive[i] = False
-                continue
-            contexts[i] = candidate
-            active_idx.append(i)
-            active_prompts.append(candidate)
-
-        if not active_prompts:
-            break
-
-        rounds_done += 1
-        round_start = time.perf_counter()
-        outs = llm.generate(active_prompts, sp)
-        round_elapsed = time.perf_counter() - round_start
-        for i, out in zip(active_idx, outs):
-            response = out.outputs[0].text if out.outputs else ""
-            contexts[i] = contexts[i] + response
-            next_turn[i] += 1
-        total_generations += len(active_prompts)
-        n_alive = sum(alive)
-        round_stats.append((rounds_done, len(active_prompts), round_elapsed, n_alive))
-        print(f"[run] round {rounds_done}: {len(active_prompts)} prompts in "
+    def on_round_end(round_idx, n_prompts, round_elapsed, n_alive):
+        round_stats.append((round_idx, n_prompts, round_elapsed, n_alive))
+        print(f"[run] round {round_idx}: {n_prompts} prompts in "
               f"{round_elapsed:.1f}s  ({n_alive} convs still alive)",
               file=sys.stderr, flush=True)
         if CAPTURE_METRICS:
-            prom_now = prom_counters()
-            d_prom = {k: prom_now.get(k, 0.0) - prom_prev.get(k, 0.0)
+            prom_now = mw.prom_counters(llm, CAPTURE_METRICS)
+            d_prom = {k: prom_now.get(k, 0.0) - prom_prev[0].get(k, 0.0)
                       for k in prom_now}
-            prom_prev = prom_now
-            prom_rounds.append((rounds_done, d_prom))
+            prom_prev[0] = prom_now
+            prom_rounds.append((round_idx, d_prom))
             shown = " ".join(f"{k[len('vllm:'):]}={d_prom[k]:.0f}"
                              for k in sorted(d_prom) if d_prom[k])
-            print(f"[prom] round {rounds_done}: {shown or '(no counter movement)'}",
+            print(f"[prom] round {round_idx}: {shown or '(no counter movement)'}",
                   file=sys.stderr, flush=True)
 
-    elapsed = time.perf_counter() - t_start
+    result = mw.run_batched(
+        llm, convs, sp,
+        prompt_budget=PROMPT_BUDGET,
+        max_rounds=MAX_ROUNDS,
+        n_tokens=n_tokens,
+        skip_empty=True,
+        on_round_end=on_round_end,
+    )
+    elapsed = result["elapsed"]
+    rounds_done = result["rounds_done"]
+    total_generations = result["total_generations"]
+
     if CAPTURE_METRICS and prom_rounds:
         try:
             with open(os.path.join(_here, "prom_counters_rounds.json"), "w") as f:
@@ -280,16 +152,17 @@ if __name__ == "__main__":
     # Latency-distribution histograms: sampled once here (cumulative over the run,
     # not per round) — queue time (WAITING phase) and decode time (DECODE phase).
     if CAPTURE_METRICS:
-        hists = prom_histograms({"vllm:request_queue_time_seconds",
-                                 "vllm:request_decode_time_seconds"})
+        hists = mw.prom_histograms(llm, {"vllm:request_queue_time_seconds",
+                                         "vllm:request_decode_time_seconds"},
+                                   CAPTURE_METRICS)
         for name, h in sorted(hists.items()):
             cnt, tot = h["count"], h["sum"]
             mean = tot / cnt if cnt else 0.0
             fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
             print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
-                  f"p50={fmt(_hist_pct(h['buckets'], cnt, 0.50))} "
-                  f"p90={fmt(_hist_pct(h['buckets'], cnt, 0.90))} "
-                  f"p99={fmt(_hist_pct(h['buckets'], cnt, 0.99))}",
+                  f"p50={fmt(mw.hist_pct(h['buckets'], cnt, 0.50))} "
+                  f"p90={fmt(mw.hist_pct(h['buckets'], cnt, 0.90))} "
+                  f"p99={fmt(mw.hist_pct(h['buckets'], cnt, 0.99))}",
                   file=sys.stderr, flush=True)
         if hists:
             # Full buckets on one stderr line so the per-variant teed log is a
