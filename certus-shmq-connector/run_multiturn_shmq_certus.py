@@ -50,6 +50,11 @@ if __name__ == "__main__":
     _here = os.path.dirname(os.path.abspath(__file__))
     if _here not in sys.path:
         sys.path.insert(0, _here)
+    # The shared workload module lives in the benchmarks dir, not here.
+    _bench_dir = os.path.join(_here, "..", "benchmarks", "kv-offload-replay")
+    if _bench_dir not in sys.path:
+        sys.path.insert(0, _bench_dir)
+    import multiturn_workload as mw
 
     DEFAULT_DATASET = os.path.join(
         _here, "..", "data", "sharegpt_12turn_450.json"
@@ -111,30 +116,12 @@ if __name__ == "__main__":
         },
     }
 
-    with open(DATASET_PATH) as f:
-        all_data = json.load(f)
-    convs = []
-    for entry in all_data:
-        if len(convs) >= NUM_CONVS:
-            break
-        turns = entry.get("conversations", [])
-        human_turns = [t["value"] for t in turns if t.get("from") == "human"]
-        if len(human_turns) >= 2:
-            convs.append(human_turns)
-    print(f"[run] loaded {len(convs)} conversations", file=sys.stderr)
-
-    # Replicate for a larger concurrent working set. Each replica's first turn
-    # is tagged with a unique marker so the accumulated context hashes
-    # distinctly per replica -- otherwise byte-identical copies would dedup at
-    # the prefix cache / KV-block layer and store no extra data.
+    convs = mw.load_convs(DATASET_PATH, NUM_CONVS, CONV_MULTIPLIER)
+    # load_convs returns the replicated set; report the base count first (as the
+    # inline loop did), then the replicated total.
+    _base_convs = len(convs) // CONV_MULTIPLIER if CONV_MULTIPLIER > 1 else len(convs)
+    print(f"[run] loaded {_base_convs} conversations", file=sys.stderr)
     if CONV_MULTIPLIER > 1:
-        base = convs
-        convs = []
-        for r in range(CONV_MULTIPLIER):
-            for conv in base:
-                tagged = list(conv)
-                tagged[0] = f"[r{r}] {tagged[0]}"
-                convs.append(tagged)
         print(
             f"[run] replicated x{CONV_MULTIPLIER} -> {len(convs)} conversations",
             file=sys.stderr,
@@ -216,70 +203,39 @@ if __name__ == "__main__":
     def n_tokens(text: str) -> int:
         return len(tokenizer(text).input_ids)
 
-    contexts = [""] * len(convs)
-    alive = [True] * len(convs)
-    next_turn = [0] * len(convs)
-
     # NOTE: no per-round SSD I/O accounting here. The gRPC driver polled the
     # server's GetIoStats RPC each round for read/write byte deltas; the ring
     # transport has no equivalent op (it carries only the connector control
     # plane). Read SSD I/O from the server side instead (its stderr telemetry
     # when built with --features rw-telemetry, or host `iostat`).
 
-    rounds_done = 0
-    total_generations = 0
-    t_start = time.perf_counter()
+    # Tag each request with its conversation as the KV-offload session_id. The
+    # conversation index is stable across rounds, so every turn of the same
+    # conversation shares one session_id; the connector forwards it (hashed to
+    # u64) on Reserve -> the dispatcher logs it. +1 so conversation 0 gets a
+    # non-zero id (0 == "unset" sentinel).
+    _gen_total = [0]
 
-    while True:
-        if MAX_ROUNDS and rounds_done >= MAX_ROUNDS:
-            break
-        active_idx = []
-        active_prompts = []
-        active_sps = []
-        for i, conv in enumerate(convs):
-            if not alive[i]:
-                continue
-            k = next_turn[i]
-            if k >= len(conv):
-                alive[i] = False
-                continue
-            human = conv[k]
-            candidate = human if k == 0 else contexts[i] + "\n\n" + human
-            nt = n_tokens(candidate)
-            if nt == 0 or nt > PROMPT_BUDGET:
-                alive[i] = False
-                continue
-            contexts[i] = candidate
-            active_idx.append(i)
-            active_prompts.append(candidate)
-            # Tag each request with its conversation as the KV-offload session_id.
-            # The conversation index is stable across rounds, so every turn of
-            # the same conversation shares one session_id; the connector forwards
-            # it (hashed to u64) on Reserve -> the dispatcher logs it.
-            # +1 so conversation 0 gets a non-zero id (0 == "unset" sentinel).
-            sp_i = sp.clone()
-            sp_i.extra_args = {"kv_transfer_params": {"session_id": i + 1}}
-            active_sps.append(sp_i)
-
-        if not active_prompts:
-            break
-
-        outputs = llm.generate(active_prompts, active_sps)
-        for j, out in enumerate(outputs):
-            i = active_idx[j]
-            gen = out.outputs[0].text
-            contexts[i] = contexts[i] + gen
-            next_turn[i] += 1
-            total_generations += 1
-        rounds_done += 1
-
+    def on_round_end(round_idx, n_prompts, round_elapsed, n_alive):
+        _gen_total[0] += n_prompts
         print(
-            f"[run] round {rounds_done}: {len(active_prompts)} prompts, "
-            f"{total_generations} total generations",
+            f"[run] round {round_idx}: {n_prompts} prompts, "
+            f"{_gen_total[0]} total generations",
             file=sys.stderr,
         )
 
-    elapsed = time.perf_counter() - t_start
+    result = mw.run_batched(
+        llm, convs, sp,
+        prompt_budget=PROMPT_BUDGET,
+        max_rounds=MAX_ROUNDS,
+        n_tokens=n_tokens,
+        skip_empty=True,
+        session_id_fn=lambda i: i + 1,
+        on_round_end=on_round_end,
+    )
+    rounds_done = result["rounds_done"]
+    total_generations = result["total_generations"]
+    elapsed = result["elapsed"]
     print(
         f"[run] DONE rounds={rounds_done} generations={total_generations} "
         f"elapsed={elapsed:.1f}s ({total_generations / elapsed:.1f} gen/s)",
