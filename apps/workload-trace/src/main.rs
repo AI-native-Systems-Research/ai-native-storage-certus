@@ -762,6 +762,7 @@ fn cmd_fit(
         );
         // Structure, not marginals: the four gated statistics cannot see the trunk's shape, and
         // a collapsed trunk passes all of them. Compared through the same census both sides.
+        print_root_path_correlation(&trace.invocations, &trace_rows);
         if let Err(e) = print_structure_diff(&trace_rows, &doc) {
             println!("\n  trunk structure — unavailable: {e}");
         }
@@ -1805,6 +1806,101 @@ fn print_path_budget(
             "  An increment at position i of a T-turn session is inherited by every later turn, so\n              it enters the sum with weight (T - i) — quadratic in T once summed over a session. An\n              i.i.d. per-turn draw is right only if the mean increment under THAT weighting equals\n              the pooled mean. Where the longest sessions grow at a different rate from the\n              population, these two diverge while every marginal distribution stays correct."
         );
     }
+}
+
+/// How much of turn-1 path length is explained by **which root** a session binds to.
+///
+/// The standing hypothesis behind both the unmoved `sharing_depth` and the 42%-against-2.5%
+/// attrition gap is that a trace correlates these two and the model draws them independently: one
+/// root is one task family, whose requests comfortably exceed their shared preamble, so no session
+/// ever stops part-way along it. That is a *claim*, and this measures it before anything is built on
+/// it — the ratio is `eta^2`, the between-root share of the total variance in turn-1 path length.
+///
+/// Near 0 means root identity says nothing about how long a session's requests are, and the
+/// hypothesis is dead. Near 1 means path length is essentially a property of the root.
+///
+/// Also reported: how many roots have a session whose turn-1 path is **shorter than the root's own
+/// shared preamble**, which is the exact condition that produces attrition. In a trace that count
+/// should be zero or near it.
+fn print_root_path_correlation(
+    invocations: &[read::NormalisedInvocation],
+    trace_rows: &[workload_model::fit::segments::SegmentRow],
+) {
+    use workload_model::keys::CacheKey;
+    use workload_model::stats::FastMap;
+
+    // Turn-1 path length per session, and the root it starts at. The lowest-numbered turn, not the
+    // first arrival — a disordered session's first arrival is mid-conversation, a trap already
+    // recorded for `private_depth`.
+    let mut first: FastMap<u32, (u32, CacheKey, usize)> = FastMap::default();
+    for inv in invocations {
+        if inv.blocks.is_empty() {
+            continue;
+        }
+        let e = first
+            .entry(inv.session.0)
+            .or_insert((u32::MAX, inv.blocks[0], 0));
+        if inv.turn <= e.0 {
+            *e = (inv.turn, inv.blocks[0], inv.blocks.len());
+        }
+    }
+    if first.len() < 2 {
+        return;
+    }
+
+    let mut by_root: FastMap<u64, (u64, f64)> = FastMap::default();
+    let mut n = 0u64;
+    let mut sum = 0.0f64;
+    for (_, root, len) in first.values() {
+        let l = *len as f64;
+        let e = by_root.entry(root.0).or_insert((0, 0.0));
+        e.0 += 1;
+        e.1 += l;
+        n += 1;
+        sum += l;
+    }
+    let grand = sum / n as f64;
+    let mut between = 0.0f64;
+    for (c, s) in by_root.values() {
+        let m = s / *c as f64;
+        between += *c as f64 * (m - grand).powi(2);
+    }
+    let mut total = 0.0f64;
+    for (_, _, len) in first.values() {
+        total += (*len as f64 - grand).powi(2);
+    }
+    let eta2 = if total > 0.0 { between / total } else { 0.0 };
+
+    // Roots whose preamble outruns one of their own sessions' turn-1 paths.
+    let root_preamble: Vec<u32> = trace_rows
+        .iter()
+        .filter(|r| r.start_depth == 0)
+        .map(|r| r.length)
+        .collect();
+    let shortest_path = first.values().map(|(_, _, l)| *l as u32).min().unwrap_or(0);
+    let outrun = root_preamble.iter().filter(|p| **p > shortest_path).count();
+
+    println!(
+        "\n  root vs path length — is turn-1 path length a property of the ROOT?\n  \
+         eta^2 is the between-root share of the variance in turn-1 path length: near 0 means root\n  \
+         identity says nothing about request length, near 1 means it says everything."
+    );
+    println!(
+        "    sessions {n}, roots {}, mean turn-1 path {grand:.1} blocks, eta^2 {eta2:.4}",
+        by_root.len()
+    );
+    // Compared against the GLOBAL shortest path, not each root's own sessions, because the
+    // census rows do not carry the root key. So it is an UPPER BOUND on the real violation count,
+    // and a loose one exactly when eta^2 is high — short-path sessions are then concentrated on
+    // particular roots, whose own preambles are short too. Stated rather than presented as the
+    // per-root figure it is not.
+    println!(
+        "    shortest turn-1 path {shortest_path} blocks; {outrun} of {} depth-0 segments exceed \
+         it —\n    an UPPER BOUND on preamble-outruns-path violations, loose when eta^2 is high, \
+         since the\n    comparison is against the global minimum rather than each root's own \
+         sessions",
+        root_preamble.len()
+    );
 }
 
 /// A per-band structural summary of one census, for comparing two of them.

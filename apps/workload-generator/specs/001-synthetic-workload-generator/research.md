@@ -751,6 +751,43 @@ length independently of the root it binds to. This is the coupling already recor
 "`{shared_depth, private_depth}` must become one measured `turn1_path_length`", now with a structural
 measurement behind it rather than an argument.
 
+#### Turn-1 path length is a property of the ROOT — measured, and it is the largest correlation found
+
+Both the unmoved `sharing_depth` and the attrition gap (42% of generated shared runs against 2.5% in
+the trace) were attributed to one hypothesis: a trace correlates a session's request length with the
+root it binds to — one root is one task family — while the model draws the two independently. That
+claim is now measured, as `eta²`, the between-root share of the total variance in turn-1 path length:
+
+| trace | sessions | roots | mean turn-1 path | **eta²** |
+| --- | --- | --- | --- | --- |
+| `exgentic_swebench` | 1 959 | 18 | 300.7 blocks | **0.9941** |
+| `exgentic_tau2_airline` | 957 | 27 | 422.4 blocks | **0.9869** |
+| `qwen_code` | 26 406 | 153 | 355.3 blocks | **0.5791** |
+
+**On the agentic traces, root identity explains 99% of the variance in request length.** Turn-1 path
+length is very nearly a *function of the root*, and the generator draws it from a population marginal
+with no reference to the root at all. That is the single largest mis-specification measured in this
+work, and it is a fifth independent instance of one defect: an independent draw standing in where the
+trace has a correlation.
+
+It also explains both symptoms at once, which is the test a diagnosis should pass. A preamble is only
+walked in full by sessions whose requests are longer than it; with path length pinned to the root, no
+session on a root can fall short of that root's own preamble, so **attrition cannot occur** — matching
+the measured zero. And realised sharing depth is bounded by path length, so drawing the two
+independently mixes sessions with 11-block requests into a root whose preamble is 124, capping their
+sharing at 11 for a reason the trace does not contain.
+
+`qwen_code`'s 0.58 says the effect is weaker on production traffic with 153 roots and short
+conversations, so the mechanism wants a **fitted** between-root share rather than a hard "path length
+is the root's". The obvious form is a two-level draw: a per-root level from the root's own stream, a
+per-session value around it, with the mixing weight fitted to reproduce the measured `eta²`.
+
+*Caveat on the companion figure* printed beside it: the count of depth-0 segments longer than the
+shortest observed turn-1 path is an **upper bound** on real violations, and a loose one precisely when
+`eta²` is high, because the comparison is against the global minimum rather than each root's own
+sessions — the census rows do not carry the root key. It is reported as a bound, not as the per-root
+number.
+
 #### The two traces fail in OPPOSITE directions, and both name the same missing mechanism
 
 | `qwen_code`, median cohort per segment | trace | synthetic |
