@@ -90,8 +90,9 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # and clears the map (so a positive bit can never be reused across steps,
         # after the key may have been evicted). A cache miss falls back to the
         # authoritative single-key ``Check`` — an unseen key is never answered
-        # wrong, only un-batched.
-        self._lookup_cache: dict[int, bool] = {}
+        # wrong, only un-batched. Values are raw Check *states* (miss/resident/
+        # pending), not bools, so a pending store surfaces as HIT_PENDING on 0.26.
+        self._lookup_cache: dict[int, int] = {}
         self._last_op_was_lookup = False
 
     def set_block_size_bytes(self, block_size_bytes: int) -> None:
@@ -120,22 +121,24 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     # ── lookup / touch ──
 
     def lookup(self, key: OffloadKey, req_context=None):
-        # Returns ``bool`` on ≤0.24 and a ``LookupResult`` enum (HIT/MISS) on
-        # 0.26+, which rewrote ``lookup``'s return type. The shim absorbs the
-        # difference so this body stays a single Check call.
+        # Returns ``bool`` on ≤0.24 and a ``LookupResult`` enum
+        # (MISS/HIT/HIT_PENDING) on 0.26+, which rewrote ``lookup``'s return type.
+        # The shim maps the raw Check state to whichever this version expects, so
+        # this body stays a single Check call.
         from .compat import lookup_result
+        from .ring import CHECK_MISS
 
         self._last_op_was_lookup = True
         int_key = _key_to_u64(key)
-        # Fast path: answer from the bitmap the preceding touch() batched. A
+        # Fast path: answer from the state map the preceding touch() batched. A
         # miss (key not in this pass's batch, e.g. the scheduler looking up a
         # key it never touched) falls back to the authoritative single-key
         # Check — correctness is never traded for the batch, only latency.
-        cached = self._lookup_cache.get(int_key)
-        if cached is None:
-            exists = self._ring.check([int_key])
-            cached = bool(exists and exists[0])
-        return lookup_result(cached)
+        state = self._lookup_cache.get(int_key)
+        if state is None:
+            states = self._ring.check_states([int_key])
+            state = states[0] if states else CHECK_MISS
+        return lookup_result(state)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         # A touch that follows a lookup opens a new scheduling pass — retire the
@@ -151,11 +154,10 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # Batch the existence probe for the whole key list here, where we
         # already hold it, so the scheduler's subsequent per-key lookup loop
         # (offloading/scheduler.py::_maximal_prefix_lookup) is served from this
-        # map instead of firing one Check RPC per key.
-        flags = self._ring.check(int_keys)
-        self._lookup_cache.update(
-            (k, bool(f)) for k, f in zip(int_keys, flags)
-        )
+        # map instead of firing one Check RPC per key. Cache the tri-state so a
+        # pending store carries through to HIT_PENDING at lookup time.
+        states = self._ring.check_states(int_keys)
+        self._lookup_cache.update(zip(int_keys, states))
 
     # ── store ──
 

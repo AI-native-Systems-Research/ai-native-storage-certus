@@ -81,6 +81,12 @@ OP_GET_IO_STATS = 15
 
 STATUS_OK = 0
 
+# Per-key Check response states (mirror wire.rs `check_state`). Widened from a
+# plain exists-bool: MISS/RESIDENT keep the old 0/1 meaning, PENDING is new.
+CHECK_MISS = 0
+CHECK_RESIDENT = 1
+CHECK_PENDING = 2
+
 # Eviction-reason encoding in the TakeEvents response (mirror translate.rs).
 REASON_DEMOTED = 0
 REASON_REMOVED = 1
@@ -237,6 +243,12 @@ def chunk_handle_batches(entries, cap_req: int, log=None):
 def decode_ok_flags(payload: bytes, n: int) -> list[bool]:
     """`[ok:u8]*n` response → list of bools (missing bytes default False)."""
     return [i < len(payload) and payload[i] != 0 for i in range(n)]
+
+
+def decode_states(payload: bytes, n: int) -> list[int]:
+    """`[state:u8]*n` Check response → list of raw state ints (missing bytes
+    default ``CHECK_MISS``). Values are 0=miss, 1=resident, 2=pending."""
+    return [payload[i] if i < len(payload) else CHECK_MISS for i in range(n)]
 
 
 def decode_take_events(payload: bytes) -> tuple[list[tuple[int, int]], int]:
@@ -573,11 +585,19 @@ class Ring:
 
     # ── typed ops (mirror the gRPC connector's call-sites) ──
 
-    def check(self, keys: Sequence[int]) -> list[bool]:
+    def check_states(self, keys: Sequence[int]) -> list[int]:
+        """Tri-state Check: per key, ``CHECK_MISS`` / ``CHECK_RESIDENT`` /
+        ``CHECK_PENDING`` (a store in flight). This is the full-fidelity probe;
+        ``check()`` collapses it to a bool for callers that only need existence."""
         keys = list(keys)
         if not keys:
             return []
-        return decode_ok_flags(self._dispatch(OP_CHECK, encode_keys(keys)), len(keys))
+        return decode_states(self._dispatch(OP_CHECK, encode_keys(keys)), len(keys))
+
+    def check(self, keys: Sequence[int]) -> list[bool]:
+        # Existence view over check_states: a pending key counts as present, so
+        # store-dedup does not re-store a block already being written.
+        return [s != CHECK_MISS for s in self.check_states(keys)]
 
     def touch(self, keys: Sequence[int], promote: bool = False) -> list[bool]:
         keys = list(keys)
