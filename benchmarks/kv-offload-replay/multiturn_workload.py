@@ -284,3 +284,205 @@ def hist_pct(buckets, count, p):
         if buckets[le] >= target:
             return _le(le)
     return float("inf")
+
+
+# ── Shared engine construction / setup (lifted from the drivers) ─────────────
+# These own the boilerplate every driver repeated around the backend-specific
+# kv_transfer_config: the common LLM kwargs, the MFU-metrics probe, the optional
+# Prometheus exporter, and the tokenizer-length closure. Keeping them here means
+# the async path (build_engine(..., async_mode=True) + run_async) reuses exactly
+# the same setup instead of forking a second copy.
+def build_engine(engine_kwargs, *, async_mode=False):
+    """Construct the vLLM engine from a fully-assembled kwargs dict.
+
+    ``async_mode=False`` (default) returns a synchronous ``LLM(**engine_kwargs)``
+    — byte-identical to the drivers' former inline construction. ``async_mode=True``
+    returns a V1 ``AsyncLLM`` built from ``AsyncEngineArgs(**engine_kwargs)`` for
+    the per-conversation :func:`run_async` path; a ``kv_transfer_config`` given as
+    a dict is converted to ``KVTransferConfig`` (AsyncEngineArgs wants the typed
+    object, whereas ``LLM`` accepts the dict directly).
+
+    The same ``engine_kwargs`` feed both modes, so a driver flips between batched
+    and async by toggling this one flag — the backend config is not duplicated.
+    """
+    if not async_mode:
+        from vllm import LLM
+        return LLM(**engine_kwargs)
+
+    from vllm import AsyncEngineArgs
+    from vllm.v1.engine.async_llm import AsyncLLM
+
+    kwargs = dict(engine_kwargs)
+    kv = kwargs.get("kv_transfer_config")
+    if isinstance(kv, dict):
+        from vllm.config import KVTransferConfig
+        kwargs["kv_transfer_config"] = KVTransferConfig(**kv)
+    return AsyncLLM.from_engine_args(AsyncEngineArgs(**kwargs))
+
+
+async def get_tokenizer(engine):
+    """Return the engine's tokenizer, awaiting if the accessor is a coroutine.
+
+    ``LLM.get_tokenizer()`` is synchronous; a V1 ``AsyncLLM`` may expose it as a
+    coroutine. This normalizes both so the async driver path can build its
+    ``n_tokens`` closure uniformly."""
+    import inspect
+    tok = engine.get_tokenizer()
+    if inspect.isawaitable(tok):
+        tok = await tok
+    return tok
+
+
+def make_n_tokens(tokenizer, flavor="input_ids"):
+    """Return a ``text -> token count`` callable.
+
+    ``flavor="input_ids"`` uses ``len(tokenizer(text).input_ids)`` (nooffload,
+    offloading, shmq); ``flavor="encode"`` uses ``len(tokenizer.encode(text))``
+    (the fs_bench drivers). Both count the same for these tokenizers; the flavor
+    only preserves each driver's exact prior call."""
+    if flavor == "encode":
+        return lambda text: len(tokenizer.encode(text))
+    return lambda text: len(tokenizer(text).input_ids)
+
+
+def mfu_kwargs(capture=True, *, verbose=True):
+    """Return ``{"enable_mfu_metrics": True}`` iff the running vLLM's EngineArgs
+    accepts it, else ``{}``. Emits the same two ``[prom]`` lines the drivers
+    printed. ``capture=False`` short-circuits to ``{}`` with no probe/print."""
+    kwargs = {}
+    if not capture:
+        return kwargs
+    try:
+        import dataclasses as _dc
+        from vllm.engine.arg_utils import EngineArgs as _EA
+        if any(f.name == "enable_mfu_metrics" for f in _dc.fields(_EA)):
+            kwargs["enable_mfu_metrics"] = True
+    except Exception as e:  # noqa: BLE001
+        if verbose:
+            print(f"[prom] enable_mfu_metrics unavailable: {e}", file=sys.stderr)
+    if verbose:
+        print(f"[prom] enable_mfu_metrics={bool(kwargs)} "
+              f"(estimated_flops_per_gpu_total "
+              f"{'captured per round' if kwargs else 'ABSENT'})",
+              file=sys.stderr)
+    return kwargs
+
+
+def start_prom_exporter():
+    """Start the optional Prometheus HTTP exporter iff ``PROM_PORT`` is set.
+
+    Reads ``PROM_PORT``/``LOG_STATS`` from the environment and reproduces the
+    drivers' former inline block (start the server, warn when LOG_STATS is off so
+    the endpoint would serve an empty registry). No-op when ``PROM_PORT`` is
+    unset."""
+    import os
+    port = os.environ.get("PROM_PORT")
+    if not port:
+        return
+    from prometheus_client import start_http_server
+    start_http_server(int(port))
+    print(f"[prom] metrics exporter listening on :{port}/metrics", file=sys.stderr)
+    if os.environ.get("LOG_STATS", "0") == "0":
+        print(
+            "[prom] warning: LOG_STATS is off — vLLM metrics are not "
+            "registered, so /metrics will be empty. Set LOG_STATS=1.",
+            file=sys.stderr,
+        )
+
+
+# ── The async per-conversation loop (opt-in; batched stays the default) ──────
+async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds,
+                    n_tokens, skip_empty=False, session_id_fn=None,
+                    sampler=None, sample_hz=1.0, on_turn_end=None):
+    """Drive the same multi-turn workload as one coroutine per conversation.
+
+    Every conversation is launched at once; within a coroutine its turns run
+    sequentially (each turn's prompt is the running context + the next human
+    turn, exactly as :func:`run_batched` builds it). vLLM's ``max_num_seqs``
+    bounds how many run concurrently — the rest queue in WAITING — so this is the
+    max-concurrency analogue of the batched rounds, not a behavioral change to
+    the workload itself.
+
+    Each turn issues a unique ``request_id=f"{conv}:{turn}"`` and consumes
+    ``engine.generate`` to the finished output, recording a turn record
+    ``(conv, turn, prompt_toks, gen_toks, ttft, latency)``. When ``sampler`` is
+    given, a concurrent task calls it every ``1/sample_hz`` seconds and appends
+    ``(t, sampler())`` — the async analogue of the batched per-round snapshot
+    (``AsyncLLM`` has no ``get_metrics()``, so a sampler typically reads the
+    global prometheus REGISTRY via :func:`prom_counters`).
+
+    ``max_rounds`` here is a per-conversation turn cap (0 = all turns).
+
+    Returns a dict with ``rounds_done`` (max turns reached by any conv),
+    ``total_generations``, ``elapsed``, ``turn_records`` and ``samples``.
+    """
+    import asyncio
+
+    turn_records = []  # (conv, turn, prompt_toks, gen_toks, ttft, latency)
+    samples = []       # (t, sampler_value)
+
+    async def run_conv(i, conv):
+        context = ""
+        if session_id_fn is not None:
+            sp = sampling_params.clone()
+            sp.extra_args = {
+                "kv_transfer_params": {"session_id": session_id_fn(i)}
+            }
+        else:
+            sp = sampling_params
+        n_turns = min(len(conv), max_rounds) if max_rounds else len(conv)
+        for k in range(n_turns):
+            human = conv[k]
+            candidate = human if k == 0 else context + "\n\n" + human
+            nt = n_tokens(candidate)
+            if (skip_empty and nt == 0) or nt > prompt_budget:
+                break
+            context = candidate
+            t0 = time.perf_counter()
+            ttft = None
+            final = None
+            async for out in engine.generate(candidate, sp, f"{i}:{k}"):
+                if ttft is None:
+                    ttft = time.perf_counter() - t0
+                final = out
+                if out.finished:
+                    break
+            latency = time.perf_counter() - t0
+            if final and final.outputs:
+                response = final.outputs[0].text
+                gen_toks = len(final.outputs[0].token_ids)
+            else:
+                response, gen_toks = "", 0
+            context = context + response
+            turn_records.append((i, k, nt, gen_toks, ttft, latency))
+            if on_turn_end is not None:
+                on_turn_end(i, k, nt, gen_toks, ttft, latency)
+
+    async def sample_loop():
+        while True:
+            await asyncio.sleep(1.0 / sample_hz)
+            try:
+                samples.append((time.perf_counter(), sampler()))
+            except Exception:  # noqa: BLE001 - a sampler hiccup must not kill the run
+                pass
+
+    t_start = time.perf_counter()
+    sampler_task = asyncio.create_task(sample_loop()) if sampler else None
+    try:
+        await asyncio.gather(*(run_conv(i, c) for i, c in enumerate(convs)))
+    finally:
+        if sampler_task is not None:
+            sampler_task.cancel()
+            try:
+                await sampler_task
+            except asyncio.CancelledError:
+                pass
+
+    elapsed = time.perf_counter() - t_start
+    return {
+        "rounds_done": max((r[1] + 1 for r in turn_records), default=0),
+        "total_generations": len(turn_records),
+        "elapsed": elapsed,
+        "turn_records": turn_records,
+        "samples": samples,
+    }
