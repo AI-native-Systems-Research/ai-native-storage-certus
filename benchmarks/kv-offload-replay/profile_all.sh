@@ -18,8 +18,10 @@
 # page cache (SharedStorage, Tiered-CPU-FS) get that ~16 GiB back under mem=32G.
 #
 # Each variant is preflighted independently: ready ones run, the rest are marked
-# SKIPPED with a reason. Missing bench images are built only when --build is
-# passed. The shared NVMe group (--device-pci) is reconfigured in-run between the
+# SKIPPED with a reason. Bench images are (re)built only when --rebuild is
+# passed — which forces a fresh build even if the image already exists, so an
+# updated driver/connector COPY'd in at image-build time is baked in; without it
+# a missing image is SKIPPED. The shared NVMe group (--device-pci) is reconfigured in-run between the
 # FS backends (kernel nvme + RAID0/XFS) and Certus-SPDK (vfio-pci + 1G hugepages)
 # phases via tools/configure-bench.sh — so all storage backends use the SAME drives.
 # This is runtime-only (no reboot); a reboot is requested only if the 1G-hugepage
@@ -34,7 +36,7 @@
 #   profile_all.sh --help
 #   profile_all.sh --only nooffload,cpuoffload
 #   profile_all.sh --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
-#                  --model-fs /mnt/fs-backend-bench --build
+#                  --model-fs /mnt/fs-backend-bench --rebuild
 
 set -uo pipefail   # NOT -e: per-variant failures are handled, not fatal.
 
@@ -78,7 +80,7 @@ TENSOR_PARALLEL_SIZE=1
 # server share the /dev/shm mailbox (SHM_PATH) via --ipc=host, so there is no
 # socket, no port, and no host-vs-bridge transport choice to make.
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
-DO_BUILD=0
+DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
 ONLY=""
 SKIP=""
@@ -96,7 +98,7 @@ IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-bench}"
 # (container runs bake their own copy).
 DATASET_HOST="${SCRIPT_DIR}/../../data/sharegpt_12turn_450.json"
 SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
-# llmd_fs_backend repo (for --build of the SharedStorage image). Empty = auto:
+# llmd_fs_backend repo (for --rebuild of the SharedStorage image). Empty = auto:
 # resolved after --model-fs is parsed, preferring <model-fs>/llm-d-kv-cache/...
 # (where it lives on this host) with a $HOME fallback. Override via env.
 FS_BACKEND_DIR="${FS_BACKEND_DIR:-}"
@@ -133,14 +135,17 @@ Flags (all optional; defaults shown):
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
-  --build                      Build any missing bench image before its run
-                               (all images via their Dockerfiles). Tiered-CPU-FS
-                               reuses the CPUOffload image; SharedStorage builds
-                               certus-sharedstorage-bench (needs FS_BACKEND_DIR).
+  --rebuild                    Force a fresh build of each bench image before its
+                               run EVEN IF it already exists (all images via their
+                               Dockerfiles) — so an updated driver/connector COPY'd
+                               in at build time is baked in. Without it a missing
+                               image is SKIPPED. Tiered-CPU-FS reuses the CPUOffload
+                               image; SharedStorage builds certus-sharedstorage-bench
+                               (needs FS_BACKEND_DIR).
   --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL backends
                                (--build-arg VLLM_VERSION). Images are tagged
                                :vllm<x.y.z> so versions coexist. Implies the images
-                               must be built at that version — pass --build too (or
+                               must be built at that version — pass --rebuild too (or
                                pre-build them). Tiered-CPU-FS needs the native
                                TieringOffloadingSpec (vLLM >= 0.23); use SharedStorage
                                on older. [default 0.26.0]
@@ -170,7 +175,7 @@ while [[ $# -gt 0 ]]; do
         --evict-threshold)  EVICT_THRESH="$2"; shift 2;;
         --cpu-bytes)        CPU_BYTES="$2"; shift 2;;
         --dram)             DRAM="$2"; shift 2;;
-        --build)            DO_BUILD=1; shift;;
+        --rebuild)          DO_REBUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
@@ -663,17 +668,20 @@ run_container_bench() {  # variant image extra-args...
 
 # ══ NoOffload ═════════════════════════════════════════════════════════════════
 if want nooffload; then
-    if ! img_exists "$IMG_NOOFFLOAD"; then
-        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_NOOFFLOAD" Dockerfile.nooffload nooffload; then
+    if [[ "$DO_REBUILD" -eq 1 ]]; then
+        if build_simple "$IMG_NOOFFLOAD" Dockerfile.nooffload nooffload; then
             run_container_bench "NoOffload" "$IMG_NOOFFLOAD"
         else
-            reason="image ${IMG_NOOFFLOAD} missing (pass --build)"
-            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_NOOFFLOAD} build failed (see build-nooffload.log)"
+            reason="image ${IMG_NOOFFLOAD} build failed (see build-nooffload.log)"
             record "NoOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
             warn "NoOffload SKIPPED: $reason"
         fi
-    else
+    elif img_exists "$IMG_NOOFFLOAD"; then
         run_container_bench "NoOffload" "$IMG_NOOFFLOAD"
+    else
+        reason="image ${IMG_NOOFFLOAD} missing (pass --rebuild to build it)"
+        record "NoOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
+        warn "NoOffload SKIPPED: $reason"
     fi
 fi
 
@@ -705,8 +713,8 @@ if want certus-spdk; then
     elif [[ ! -x "$SERVER_BIN" ]]; then
         cs_skip="server binary not built at ${SERVER_BIN} (cargo build --release -p certus-server-yaml --features rw-telemetry)"
     fi
-    if [[ -z "$cs_skip" ]] && ! img_exists_shmq "$IMG_SHMQ"; then
-        if [[ "$DO_BUILD" -eq 1 ]]; then
+    if [[ -z "$cs_skip" ]] && { [[ "$DO_REBUILD" -eq 1 ]] || ! img_exists_shmq "$IMG_SHMQ"; }; then
+        if [[ "$DO_REBUILD" -eq 1 ]]; then
             log "building ${IMG_SHMQ} into ${PODMAN_STORE}"
             command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" build \
                 "${BUILD_ARGS[@]}" \
@@ -715,7 +723,7 @@ if want certus-spdk; then
                 > "${LOGDIR}/build-shmq.log" 2>&1 \
                 || cs_skip="shmq image build failed (see build-shmq.log)"
         else
-            cs_skip="image ${IMG_SHMQ} missing (pass --build)"
+            cs_skip="image ${IMG_SHMQ} missing (pass --rebuild to build it)"
         fi
     fi
 
@@ -816,17 +824,20 @@ fi
 
 # ══ CPUOffload ════════════════════════════════════════════════════════════════
 if want cpuoffload; then
-    if ! img_exists "$IMG_CPU"; then
-        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
+    if [[ "$DO_REBUILD" -eq 1 ]]; then
+        if build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
             run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
         else
-            reason="image ${IMG_CPU} missing (pass --build)"
-            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_CPU} build failed (see build-cpu-offload.log)"
+            reason="image ${IMG_CPU} build failed (see build-cpu-offload.log)"
             record "CPUOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
             warn "CPUOffload SKIPPED: $reason"
         fi
-    else
+    elif img_exists "$IMG_CPU"; then
         run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
+    else
+        reason="image ${IMG_CPU} missing (pass --rebuild to build it)"
+        record "CPUOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
+        warn "CPUOffload SKIPPED: $reason"
     fi
 fi
 
@@ -843,8 +854,8 @@ if want sharedstorage; then
     elif [[ ! -d "$SHARED_FS" ]]; then
         ss_skip="'$SHARED_FS' not present after reconfigure (see reconfigure-sharedstorage.log)"
     fi
-    if [[ -z "$ss_skip" ]] && ! img_exists "$IMG_SHARED"; then
-        if [[ "$DO_BUILD" -eq 1 ]]; then
+    if [[ -z "$ss_skip" ]] && { [[ "$DO_REBUILD" -eq 1 ]] || ! img_exists "$IMG_SHARED"; }; then
+        if [[ "$DO_REBUILD" -eq 1 ]]; then
             if [[ -f "${FS_BACKEND_DIR}/Dockerfile.wheel" ]]; then
                 log "building ${IMG_SHARED} (FS_BACKEND_DIR=${FS_BACKEND_DIR})"
                 # When a vLLM version is pinned, match the compiled wheel's torch
@@ -873,7 +884,7 @@ if want sharedstorage; then
                 ss_skip="image missing and FS_BACKEND_DIR '${FS_BACKEND_DIR}' has no Dockerfile.wheel"
             fi
         else
-            ss_skip="image ${IMG_SHARED} missing (pass --build with FS_BACKEND_DIR set)"
+            ss_skip="image ${IMG_SHARED} missing (pass --rebuild with FS_BACKEND_DIR set)"
         fi
     fi
     if [[ -n "$ss_skip" ]]; then
@@ -916,12 +927,14 @@ if want tiered-cpu-fs; then
     elif [[ -z "$t_skip" && ! -d "$SHARED_FS" ]]; then
         t_skip="'$SHARED_FS' not present after reconfigure (see reconfigure-sharedstorage.log)"
     fi
-    # Reuses the CPUOffload image. Build it here if it is missing (e.g. --only tiered-cpu-fs).
+    # Reuses the CPUOffload image. If CPUOffload ran earlier this invocation with
+    # --rebuild it is already fresh; build here only when the image is missing
+    # (e.g. --only tiered-cpu-fs), and only if --rebuild permits a build.
     if [[ -z "$t_skip" ]] && ! img_exists "$IMG_CPU"; then
-        if [[ "$DO_BUILD" -eq 1 ]] && ! build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
+        if [[ "$DO_REBUILD" -eq 1 ]] && ! build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
             t_skip="image ${IMG_CPU} build failed (see build-cpu-offload.log)"
-        elif [[ "$DO_BUILD" -ne 1 ]]; then
-            t_skip="image ${IMG_CPU} missing (pass --build)"
+        elif [[ "$DO_REBUILD" -ne 1 ]]; then
+            t_skip="image ${IMG_CPU} missing (pass --rebuild to build it)"
         fi
     fi
     if [[ -n "$t_skip" ]]; then
