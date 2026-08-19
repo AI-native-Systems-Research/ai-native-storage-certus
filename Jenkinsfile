@@ -70,14 +70,36 @@ pipeline {
         }
       }
     }
-    stage('OffloadingSpec Tests') {
+    stage('vLLM Connector') {
       steps {
         script {
-          sh '. ~/.cargo/env ; CERTUS_PROFILE=full cargo r -r -p certus-server-yaml -- --memory-tier-size 256M --shm-path /dev/shm/certus-shmq --channels 32 --format --device-pci 0000:86:00.0 &'
+          // certus-server-yaml is not a default member, so this is its first
+          // *release* build in the pipeline. Build it up front (blocking) —
+          // otherwise the backgrounded launch below races the mailbox wait, and
+          // a cold build that overruns leaves the test attaching to a shm file
+          // that does not exist yet.
+          def build = sh(script: '. ~/.cargo/env ; CERTUS_PROFILE=full cargo build -r -p certus-server-yaml', returnStatus: true)
+          if (build != 0) {
+            error("certus-server-yaml release build failed with status ${build}")
+          }
+
+          // Launch the already-built binary, capturing stdout/stderr so a
+          // startup crash (e.g. a full-profile component failing to init) is
+          // visible in the console instead of silently yielding "no mailbox".
+          sh '. ~/.cargo/env ; CERTUS_PROFILE=full target/release/certus-server-yaml --memory-tier-size 256M --shm-path /dev/shm/certus-shmq --channels 32 --format --device-pci 0000:86:00.0 > /tmp/certus-server-yaml.log 2>&1 &'
           sh 'for i in $(seq 1 60); do [ -e /dev/shm/certus-shmq ] && break || sleep 2; done'
+
+          if (sh(script: '[ -e /dev/shm/certus-shmq ]', returnStatus: true) != 0) {
+            echo '=== certus-server-yaml did not create the mailbox — server log follows ==='
+            sh 'cat /tmp/certus-server-yaml.log || true'
+            sh 'pkill -f certus-server-yaml || true'
+            error('certus-server-yaml failed to start (no /dev/shm/certus-shmq)')
+          }
 
           def status = sh(script: 'cd apps/python && python3 test-offloading-spec.py --memory-tier-size 256M', returnStatus: true)
           echo "test-offloading-spec.py exit status: ${status}"
+          echo '=== certus-server-yaml log ==='
+          sh 'cat /tmp/certus-server-yaml.log || true'
           sh 'pkill -f certus-server-yaml || true'
           sh 'sleep 2'
 
