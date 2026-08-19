@@ -28,7 +28,6 @@ members = [
     "components/gpu-services",
     "apps/gpu-handle-test-server",
     "apps/gpu-show",
-    "apps/certus-server",
     "apps/gpu-bb-vs-p2p",
     "certus-connector",
     "components/example-helloworld-dylib",
@@ -39,10 +38,12 @@ members = [
     "components/remote-lookup-rdma-responder",
     "apps/dynamic-loading-example",
     "apps/certus-server-yaml",
-    "apps/baseline-generalized-fs",
     "apps/remote-lookup-bench",
     "apps/eviction-replay-benchmark",
-    "components/zyre"
+    "components/zyre",
+    "components/shm-queue",
+    "components/shmq-dispatcher",
+    "apps/certus-server"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -70,7 +71,8 @@ default-members = [
     "components/gpu-services",
     "components/eviction-policy-lru",
     "components/eviction-policy-session-lists",
-    "apps/eviction-replay-benchmark"
+    "apps/eviction-replay-benchmark",
+    "components/shm-queue"
 ]
 
 resolver = "2"
@@ -107,4 +109,6 @@ remote-lookup-rdma-initiator = { path = "components/remote-lookup-rdma-initiator
 remote-lookup-rdma-responder = { path = "components/remote-lookup-rdma-responder" }
 zyre = { path = "components/zyre" }
 certus-connector = { path = "certus-connector" }
+shm-queue = { path = "components/shm-queue" }
+shmq-dispatcher = { path = "components/shmq-dispatcher" }
 libloading = "0.8"

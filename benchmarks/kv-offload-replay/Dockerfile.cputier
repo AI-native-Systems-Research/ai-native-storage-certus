@@ -6,7 +6,7 @@
 # OffloadingConnector -> TieringOffloadingSpec with a CPU (host-RAM) primary
 # tier plus an "fs" disk secondary tier (FileSystemTierManager). Like the
 # cpu-offload image it is SELF-CONTAINED: a single vLLM process, no separate
-# server, no gRPC, no CUDA IPC.
+# server, no shmq mailbox, no CUDA IPC.
 #
 # Unlike certus-cpu-offload-bench, the tiering driver config is BAKED IN here
 # (DISK_DIR is set), so it runs the CPU+FS path purely from the image with no
@@ -44,7 +44,7 @@ WORKDIR /workspace
 # repo-root build context). The driver's DISK_DIR branch wires the tiering
 # CPU+FS config; torch/numpy/vllm come from the base image (no extra pip deps).
 COPY benchmarks/kv-offload-replay/run_multiturn_offloading.py /workspace/bench/
-COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
+COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 COPY benchmarks/kv-offload-replay/docker-entrypoint-cputier.sh /usr/local/bin/cputier-entrypoint
 RUN chmod +x /usr/local/bin/cputier-entrypoint
@@ -56,7 +56,7 @@ RUN chmod +x /usr/local/bin/cputier-entrypoint
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/workspace/bench \
     MODEL=NousResearch/Meta-Llama-3-8B \
-    DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
+    DATASET_PATH=/workspace/data/sharegpt_12turn_450.json \
     NUM_CONVS=450 \
     MAX_MODEL_LEN=8192 \
     OUTPUT_TOKENS=150 \

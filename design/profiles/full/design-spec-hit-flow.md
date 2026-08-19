@@ -16,7 +16,7 @@ The get/lookup flow serves a cached block from either DRAM (memory-tier) or SSD 
 
 ### Warm Path (MemoryTier → GPU)
 
-1. **Client submits lookup request via gRPC.** The client sends the key and an IPC handle (64-byte CUDA IPC memory handle + size) in a BatchLookupRequest. The server opens the IPC handle via `cudaIpcOpenMemHandle` (cached within the batch to avoid repeated open/close for shared handles).
+1. **Client submits lookup request via shmq.** The client writes the key and an IPC handle (64-byte CUDA IPC memory handle + size) into the `/dev/shm` mailbox as a Lookup op (HandleBatch framing). The server opens the IPC handle via `cudaIpcOpenMemHandle` (cached within the batch to avoid repeated open/close for shared handles).
 
 2. **Dispatch-map lookup.** The dispatcher looks up the key in the dispatch-map, which atomically takes a read reference if the entry exists.
 
@@ -28,7 +28,7 @@ The get/lookup flow serves a cached block from either DRAM (memory-tier) or SSD 
 
 6. **Release read reference, touch LRU.** The read reference is released and the memory-tier's LRU tracker is touched for this key (refreshing its eviction timestamp).
 
-7. **Return stream handle.** The async stream handle is returned so the gRPC layer can synchronize before responding. The client's GPU memory is valid after stream completion.
+7. **Return stream handle.** The async stream handle is returned so the shmq serve layer can synchronize before responding. The client's GPU memory is valid after stream completion.
 
 ### Cold Path (BlockDevice → MemoryTier → GPU)
 

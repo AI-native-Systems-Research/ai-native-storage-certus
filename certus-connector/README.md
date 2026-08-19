@@ -225,10 +225,12 @@ Eviction is the vLLM contract requirement. DRAM demotion is internal to the disp
 - **Capacity**: fixed at init — extent manager knows total slabs from NVMe device size, DRAM pool from config.
 - **Staging**: dispatcher stages ALL writes in DRAM first, background thread migrates to NVMe. DRAM is a write-through cache.
 
-### gRPC handler equivalence
+### shmq handler equivalence
 
-If implementing a gRPC service fronting the Rust components directly (bypassing Python),
-the handlers must preserve these same semantics — particularly:
+The `certus-server` shmq path fronts the same Rust components directly (bypassing
+this Python adapter), serving shmq ops over the `/dev/shm` mailbox and translating
+them into the same component calls. Any such front-end must preserve these same
+semantics — particularly:
 
 - Eviction only from `prepare_store` (no background/timer eviction)
 - Pinning bracket: blocks between `prepare_*` and `complete_*` cannot be evicted

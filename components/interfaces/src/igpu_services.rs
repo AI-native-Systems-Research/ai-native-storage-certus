@@ -485,7 +485,7 @@ define_interface! {
         ///
         /// # Parameters
         ///
-        /// * `base64_payload` — base64-encoded 72-byte IPC handle from PyTorch (via gRPC).
+        /// * `base64_payload` — base64-encoded 72-byte IPC handle from PyTorch (via the shmq wire).
         /// * `device_index` — optional CUDA device ordinal; if `Some`, sets the
         ///   device context before opening the handle. If `None`, uses the current
         ///   CUDA device.

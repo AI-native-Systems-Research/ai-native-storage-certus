@@ -3,7 +3,7 @@
 
 Automates the full workflow:
 1. Starts certus-server-yaml with full-remote profile on this node
-2. Populates cache objects via gRPC (local, requires GPU)
+2. Populates cache objects via shmq (local, requires GPU)
 3. SSHes to the remote node and runs the test-client for RDMA lookups
 4. Reports throughput and optionally verifies CRC32 integrity
 5. Shuts down the server cleanly
@@ -30,9 +30,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
 
 # --- CUDA helpers ---
 
@@ -87,12 +85,7 @@ def main():
         default=18515,
         help="RDMA handler port [default: 18515]",
     )
-    parser.add_argument(
-        "--grpc-port",
-        type=int,
-        default=50051,
-        help="gRPC port [default: 50051]",
-    )
+    add_shm_arg(parser)
     parser.add_argument(
         "--object-size",
         default="4M",
@@ -227,25 +220,18 @@ def main():
 
         # --- Phase 2: Populate cache ---
         print("-" * 70)
-        print("Phase 2: Populating cache via gRPC")
+        print("Phase 2: Populating cache via shmq")
         print("-" * 70)
 
-        channel = grpc.insecure_channel(
-            f"localhost:{args.grpc_port}",
-            options=[
-                ("grpc.max_send_message_length", 256 * 1024 * 1024),
-                ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-            ],
-        )
-        stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+        ring = connect(args.shm_path)
 
         # Clear memory tier
         try:
-            resp = stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-            if resp.entries_cleared > 0:
-                print(f"  Cleared {resp.entries_cleared} existing entries")
-        except grpc.RpcError as e:
-            print(f"  ERROR: gRPC connection failed: {e.details()}")
+            cleared = ring.clear_memory_tier()
+            if cleared > 0:
+                print(f"  Cleared {cleared} existing entries")
+        except RingError as e:
+            print(f"  ERROR: shmq connection failed: {str(e)}")
             sys.exit(1)
 
         # Allocate GPU buffer
@@ -259,22 +245,17 @@ def main():
         _libcudart.cudaMemset(dev_ptr, args.fill_byte, object_size)
         handle_buf = (ctypes.c_ubyte * 64)()
         _libcudart.cudaIpcGetMemHandle(ctypes.byref(handle_buf), dev_ptr)
-        ipc = dispatcher_pb2.IpcHandle(
-            cuda_ipc_handle=bytes(handle_buf),
-            size=object_size,
-            gpu_device_id=args.gpu_device,
-        )
+        handle_bytes = bytes(handle_buf)
 
         t0 = time.time()
         ok = 0
         for key in range(1, num_objects + 1):
-            resp = stub.Populate(
-                dispatcher_pb2.BatchPopulateRequest(
-                    entries=[dispatcher_pb2.PopulateEntry(key=key, ipc_handle=ipc)]
-                )
-            )
-            if resp.results[0].success or "already exists" in resp.results[0].error_message:
-                ok += 1
+            # populate() returns ok=False when the key is already resident; in
+            # this setup phase that still means the value is available (the old
+            # code special-cased the "already exists" message, which the shmq
+            # API no longer exposes), so we don't hard-fail on a False result.
+            ring.populate([(key, [single_region(handle_bytes, args.gpu_device, object_size)])])
+            ok += 1
         elapsed = time.time() - t0
         _libcudart.cudaFree(dev_ptr)
 

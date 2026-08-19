@@ -9,7 +9,7 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::Resource;
 
-use crate::service::ServiceCounters;
+use crate::metrics::ServiceCounters;
 
 pub struct OtelMetrics {
     _provider: Arc<SdkMeterProvider>,
@@ -28,7 +28,7 @@ impl OtelMetrics {
         use opentelemetry_sdk::runtime::Tokio;
 
         let exporter = MetricExporter::builder()
-            .with_tonic()
+            .with_http()
             .with_endpoint(endpoint)
             .build()
             .map_err(|e| format!("failed to create OTLP exporter: {e}"))?;

@@ -17,7 +17,7 @@ The `full-remote` lookup flow extends the `full` profile with a **remote path**:
 ### Warm Path (MemoryTier → GPU)
 
 Same as `full` profile:
-1. Client submits lookup request via gRPC with key + IPC handle.
+1. Client submits lookup request via shmq (`/dev/shm` mailbox) with key + IPC handle.
 2. Dispatch-map lookup atomically takes read reference.
 3. Cache miss → proceeds to cold path or remote path.
 4. MemoryTier hit → `cudaMemcpyAsync` (H2D) via `warm_stream`.

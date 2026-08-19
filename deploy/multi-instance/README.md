@@ -1,10 +1,15 @@
 # Multi-Instance Certus Launcher
 
 Launch **N independent `certus-server` instances — one per NVMe SSD** — each
-bound to its own gRPC port and with its NVMe poller pinned to a dedicated
-physical core in the **same NUMA zone as the drive**. A companion script fires
-one `certus-api-bench.py` client at each server in parallel and aggregates the
-throughput into a system-wide total.
+serving its own shared-memory (shmq) mailbox and with its NVMe poller pinned to
+a dedicated physical core in the **same NUMA zone as the drive**. A companion
+script fires one `certus-api-bench.py` client at each server in parallel and
+aggregates the throughput into a system-wide total.
+
+The sole control transport is a `/dev/shm` mailbox: there is no TCP port. Each
+instance `i` gets a distinct mailbox path `${BASE_SHM_PATH}-i`
+(e.g. `/dev/shm/certus-shmq-0`, `-1`, ...), so instances never contend for a
+shared resource.
 
 This is the "scale-out on a single box" topology: rather than one server
 driving many drives, each drive gets a dedicated server + poller core, and
@@ -15,7 +20,7 @@ driving many drives, each drive gets a dedicated server + poller core, and
 | Script | Purpose |
 |--------|---------|
 | `config.sh` | Shared config + topology helpers (sourced, not run directly). |
-| `launch-servers.sh` | Discover SSDs, plan NUMA-aware core/port assignment, launch one server per SSD in its own **tmux window**. |
+| `launch-servers.sh` | Discover SSDs, plan NUMA-aware core assignment + per-instance mailbox path, launch one server per SSD in its own **tmux window**. |
 | `run-benchmarks.sh` | Run one benchmark client per server in parallel; aggregate results. |
 | `stop-servers.sh` | SIGTERM the servers, then kill the tmux session. |
 
@@ -97,13 +102,16 @@ NVMe controller bound to `vfio-pci` becomes one server instance.
 ### 4. Install the benchmark client deps
 
 ```bash
-pip install -r apps/python/requirements.txt      # grpcio, protobuf
+pip install -r apps/python/requirements.txt      # shmq connector: stdlib-only, no deps
 pip install torch                                # match your CUDA version
 ```
 
-The client uses CUDA (`torch.cuda` + cudaIpc handles), so a working NVIDIA GPU
-and driver are required. If `apps/python/dispatcher_pb2.py` is missing,
-regenerate the stubs with `apps/python/generate_pb.sh`.
+The shmq wire client is the pure-Python `Ring` in
+`certus-shmq-connector/certus_shmq_connector/ring.py` (stdlib `struct`/`mmap`/
+`ctypes` only — no `grpcio`/`protobuf`), located at runtime by
+`apps/python/certus_shmq_helpers.py`. The client uses CUDA (`torch.cuda` +
+cudaIpc handles), so a working NVIDIA GPU and driver are still required; install
+`torch` for your CUDA version as shown above.
 
 ### 5. Launch the servers
 
@@ -121,13 +129,13 @@ Expected output (2-drive example):
 
 ```
 [multi] Planning 2 instance(s):
-  IDX BDF            NUMA  PORT   POLLER_CPU
-  0   0000:61:00.0   0     50051  1
-  1   0000:62:00.0   0     50052  2
+  IDX BDF            NUMA  SHM_PATH                    POLLER_CPU
+  0   0000:61:00.0   0     /dev/shm/certus-shmq-0      1
+  1   0000:62:00.0   0     /dev/shm/certus-shmq-1      2
 [multi] Launching servers in tmux session 'certus' (logs in /tmp/certus-multi-instance)
 [multi] Waiting for servers to come up...
-[multi]   srv0 (port 50051, 0000:61:00.0) ready
-[multi]   srv1 (port 50052, 0000:62:00.0) ready
+[multi]   srv0 (/dev/shm/certus-shmq-0, 0000:61:00.0) ready
+[multi]   srv1 (/dev/shm/certus-shmq-1, 0000:62:00.0) ready
 [multi] All 2 server(s) ready.
 ```
 
@@ -146,11 +154,11 @@ One client runs per server (GPU round-robin), and the per-phase aggregate
 throughput is summed across instances:
 
 ```
-IDX   ENDPOINT          POPULATE      HOT          COLD
-0     localhost:50051   0.33 GB/s    10.42 GB/s    2.14 GB/s
-1     localhost:50052   0.30 GB/s     3.14 GB/s    1.87 GB/s
----   ----------------  -----------  -----------   -----------
-ALL   2 instance(s)     0.63 GB/s    13.56 GB/s    4.01 GB/s
+IDX   MAILBOX                     POPULATE      HOT          COLD
+0     /dev/shm/certus-shmq-0      0.33 GB/s    10.42 GB/s    2.14 GB/s
+1     /dev/shm/certus-shmq-1      0.30 GB/s     3.14 GB/s    1.87 GB/s
+---   --------------------------  -----------  -----------   -----------
+SUM   2 ok                        0.63 GB/s    13.56 GB/s    4.01 GB/s
 ```
 
 `POPULATE` is write throughput, `HOT` is memory-tier (DRAM) read throughput,
@@ -171,11 +179,14 @@ per-client output is kept in `/tmp/certus-multi-instance/bench-<i>.log`.
 
 For instance `i` (SSD `i` in discovery order, sorted by NUMA node then BDF):
 
-- **gRPC port** = `BASE_PORT + i` (default base `50051`).
+- **shmq mailbox** = `${BASE_SHM_PATH}-i` (default base `/dev/shm/certus-shmq`,
+  so `/dev/shm/certus-shmq-0`, `-1`, ...). Passed to the server as
+  `--shm-path <path> --channels <N>` (default 32 channels). Any stale mailbox at
+  that path is removed before the instance launches.
 - **NUMA node** = the SSD's `numa_node` from sysfs.
 - **`--poller-base-cpu`** = the next free physical core on that NUMA node
   (a per-node cursor starts after `POLLER_RESERVE_CORES` leading cores, so the
-  OS / gRPC threads keep core 0 etc.). With one drive per server, the poller
+  OS / server threads keep core 0 etc.). With one drive per server, the poller
   occupies exactly that one core.
 - The server is wrapped in `numactl --cpunodebind=<node> --membind=<node>`
   (unless `--no-numactl`) so its threads and the 2 GiB memory-tier pool stay
@@ -184,14 +195,14 @@ For instance `i` (SSD `i` in discovery order, sorted by NUMA node then BDF):
 Example on a 2-socket box (NUMA0 = drives `61/62/63/64`, NUMA1 = `c1/c2/c3`):
 
 ```
-IDX BDF            NUMA  PORT   POLLER_CPU
-0   0000:61:00.0   0     50051  1
-1   0000:62:00.0   0     50052  2
-2   0000:63:00.0   0     50053  3
-3   0000:64:00.0   0     50054  4
-4   0000:c1:00.0   1     50055  17
-5   0000:c2:00.0   1     50056  18
-6   0000:c3:00.0   1     50057  19
+IDX BDF            NUMA  SHM_PATH                    POLLER_CPU
+0   0000:61:00.0   0     /dev/shm/certus-shmq-0      1
+1   0000:62:00.0   0     /dev/shm/certus-shmq-1      2
+2   0000:63:00.0   0     /dev/shm/certus-shmq-2      3
+3   0000:64:00.0   0     /dev/shm/certus-shmq-3      4
+4   0000:c1:00.0   1     /dev/shm/certus-shmq-4      17
+5   0000:c2:00.0   1     /dev/shm/certus-shmq-5      18
+6   0000:c3:00.0   1     /dev/shm/certus-shmq-6      19
 ```
 
 The plan is written to `/tmp/certus-multi-instance/instances.tsv`; per-server
@@ -202,7 +213,8 @@ client replica `r`) in the same dir.
 
 ```
 -n NUM         Number of instances/SSDs (default: all discovered)
--p BASE_PORT   First gRPC port (default 50051)
+-p PATH        Base shmq mailbox path; instance i serves PATH-i
+               (default /dev/shm/certus-shmq)
 -s SESSION     tmux session name (default "certus")
 --format       Pass --format to each server (DESTROYS existing data)
 --mem SIZE     Per-instance memory-tier size (e.g. 2G, 512M)
@@ -240,7 +252,7 @@ they compose, e.g. `-c 2 -- --clients 4` = 8 concurrent threads per server.
 GPU→NUMA mapping is read from sysfs (`/sys/bus/pci/devices/<gpu_bdf>/numa_node`)
 via `nvidia-smi`. On the reference box GPU 0 is on NUMA 0 and GPU 1 on NUMA 1,
 so node-0 SSDs (`61–64`) drive GPU 0 and node-1 SSDs (`c1–c4`) drive GPU 1 —
-keeping the gRPC client, server, poller, and GPU all on one socket.
+keeping the shmq client, server, poller, and GPU all on one socket.
 
 Useful forwarded bench args: `--clients`, `--num-objects`, `--iterations`,
 `--block-size`, `--batch-size`, `--skip-flush`.
@@ -252,11 +264,11 @@ Example — 2 client processes per server, all on GPU 0:
 ```
 
 ```
-IDX   ENDPOINT          NCLI   POPULATE      HOT          COLD
-0     localhost:50051   2      0.66 GB/s    4.81 GB/s    1.80 GB/s
-1     localhost:50052   2      0.61 GB/s    3.34 GB/s    1.84 GB/s
----   ----------------  ----   ----------   ----------   ----------
-ALL   2 instance(s)     4      1.27 GB/s    8.15 GB/s    3.64 GB/s
+IDX   MAILBOX                     NCLI   POPULATE      HOT          COLD
+0     /dev/shm/certus-shmq-0      2      0.66 GB/s    4.81 GB/s    1.80 GB/s
+1     /dev/shm/certus-shmq-1      2      0.61 GB/s    3.34 GB/s    1.84 GB/s
+---   --------------------------  ----   ----------   ----------   ----------
+SUM   2 ok                        4      1.27 GB/s    8.15 GB/s    3.64 GB/s
 ```
 
 ## Troubleshooting
@@ -266,18 +278,17 @@ ALL   2 instance(s)     4      1.27 GB/s    8.15 GB/s    3.64 GB/s
   vfio-pci devices at startup and cannot open the ones already claimed by its
   sibling instances. Every server still successfully opens its own assigned
   drive (look for `data drive 0 initialized at <bdf>, poller pinned to CPU N`
-  followed by `listening on`).
+  followed by the `mailbox <path> channels=...` line — the server publishes the
+  mailbox file *last*, once the poller and worker pool are up).
 
-- **One endpoint reports `0.00 GB/s` for every phase**: its server failed to
-  bind its gRPC port (`bind() EADDRINUSE`) and the benchmark client got
-  connection-refused. The default ports (`50051+`) sit inside the Linux
-  ephemeral range (`/proc/sys/net/ipv4/ip_local_port_range`, typically
-  `32768-60999`), so a transient outbound connection from another process can
-  transiently occupy one. `launch-servers.sh` now skips in-use ports at launch
-  (logging `port N in use; instance i will use M instead`) and verifies each
-  server is *actually accepting connections* before declaring it ready, so this
-  should self-correct. Choose a base port below the ephemeral range
-  (`-p 9000`) to avoid the collision window entirely.
+- **One instance reports `FAILED` (mailbox missing) for every phase**: its
+  server never published its mailbox file, so `${BASE_SHM_PATH}-i` does not
+  exist in `/dev/shm` and the benchmark client had nothing to open. This means
+  the server failed to initialize (out of hugepages, could not open its drive,
+  panicked) — check `srv-<i>.log`. Each instance uses a **distinct** mailbox
+  path, so there is no cross-instance collision to work around; `launch-servers.sh`
+  removes any stale mailbox before launch and treats the mailbox file appearing
+  on disk as the readiness signal.
 
 - **Clients exit non-zero with `FlushToSsd failed`**: the SPDK-NVMe backend may
   not support the benchmark's explicit DRAM-cache flush. Throughput numbers are
@@ -289,5 +300,6 @@ ALL   2 instance(s)     4      1.27 GB/s    8.15 GB/s    3.64 GB/s
 
 All defaults in `config.sh` can be overridden via environment variables:
 `CERTUS_SERVER_BIN`, `CERTUS_BENCH_SCRIPT`, `CERTUS_PYTHON`, `CERTUS_SESSION`,
-`CERTUS_BASE_PORT`, `CERTUS_RUNDIR`, `CERTUS_POLLER_RESERVE`,
-`CERTUS_MEMORY_TIER_SIZE`, `CERTUS_USE_NUMACTL`, `CERTUS_READY_TIMEOUT`.
+`CERTUS_BASE_SHM_PATH`, `CERTUS_CHANNELS`, `CERTUS_RUNDIR`,
+`CERTUS_POLLER_RESERVE`, `CERTUS_MEMORY_TIER_SIZE`, `CERTUS_USE_NUMACTL`,
+`CERTUS_READY_TIMEOUT`.

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "certus-shmq-connector"
+version = "0.1.0"
+description = "Certus storage connector for vLLM — pure-Python shared-memory-ring client to certus-server"
+# The ring client leans on x86-TSO ordering (Python cannot emit a fence), so it
+# is x86_64-only and asserts platform.machine() at startup.
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "numpy",
+]
+# No grpcio/protobuf: the transport is a pure ctypes+mmap /dev/shm mailbox
+# (certus_shmq_connector.ring), so there is no compiled client and no wire codegen.
+#
+# vLLM is provided by the runtime environment (heavy GPU dependency); the
+# connector targets its v1 kv_offload OffloadingSpec API. Multiple versions are
+# supported from this single package via certus_shmq_connector.compat (version
+# detection + capability matrix); select the base image with the Dockerfile's
+# VLLM_VERSION build arg.
+# Supported (built + smoke-tested): vllm in {0.20.0, 0.22.0, 0.23.0, 0.24.0, 0.26.0}
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["certus_shmq_connector"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

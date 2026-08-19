@@ -1,4 +1,4 @@
-# Build context exclusions for certus-grpc-connector/Dockerfile (built from the
+# Build context exclusions for certus-shmq-connector/Dockerfile (built from the
 # repo root). SPDK is cloned/built inside the image, so exclude any local copy;
 # exclude Rust target/ and .git to keep the context small.
 .git/

@@ -5,9 +5,9 @@ Local Docker-based observability stack for Certus metrics.
 ## Architecture
 
 ```
-certus-server --otel-endpoint localhost:4317
+certus-server-yaml --otel-endpoint http://localhost:4318
        │
-       ▼ (OTLP gRPC)
+       ▼ (OTLP HTTP)
 ┌──────────────────┐
 │  OTel Collector  │ ──► Prometheus exporter (:8889)
 └──────────────────┘
@@ -29,11 +29,12 @@ certus-server --otel-endpoint localhost:4317
 # 1. Launch the stack
 ./launch.sh
 
-# 2. Build and run certus-server with OTel enabled
-cargo build -p certus-server --features otel --release
-./target/release/certus-server \
+# 2. Build and run certus-server-yaml with OTel enabled
+cargo build -p certus-server-yaml --features otel --release
+./target/release/certus-server-yaml \
   --drive-count 4 --format \
-  --otel-endpoint http://localhost:4317
+  --shm-path /dev/shm/certus-shmq --channels 32 \
+  --otel-endpoint http://localhost:4318
 
 # 3. Open Grafana
 open http://localhost:3000
@@ -54,7 +55,7 @@ The "Certus Dispatcher" dashboard is auto-provisioned with:
 - **Operations/sec** — rate by operation type (populate, lookup, check, remove, touch)
 - **Error rate** — failed operations per second
 - **Latency percentiles** — P50/P95/P99 per operation type (µs)
-- **Batch size** — average entries per gRPC request
+- **Batch size** — average entries per shmq request
 - **Memory-tier clears** — total entries evicted
 - **SSD flush jobs** — background writes completed
 
@@ -70,4 +71,4 @@ The "Certus Dispatcher" dashboard is auto-provisioned with:
 ## Requirements
 
 - Docker with Compose v2 (`docker compose`)
-- certus-server built with `--features otel`
+- certus-server-yaml built with `--features otel`

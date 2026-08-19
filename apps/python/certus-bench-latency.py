@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Single-client latency benchmark for the Certus gRPC Dispatcher.
+"""Single-client latency benchmark for the Certus shmq Dispatcher.
 
 Measures per-operation latency for sporadic small-batch requests (no pipelining).
-Each RPC is a single batch of N objects, sent one at a time with the response
+Each request is a single batch of N objects, sent one at a time with the response
 fully received before the next is sent. Reports percentile latency distribution.
 
 Usage:
@@ -18,9 +18,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
 
 # --- CUDA helpers ---
 
@@ -109,7 +107,7 @@ def print_latency(label, latencies_us):
 def main():
     parser = argparse.ArgumentParser(
         description="Single-client latency benchmark (no pipelining)")
-    parser.add_argument("--server", default="localhost:50051")
+    add_shm_arg(parser)
     parser.add_argument("--block-size", type=parse_size, default=2 * 1024 * 1024,
                         help="Block size (default: 2M)")
     parser.add_argument("--num-objects", type=int, default=20,
@@ -135,7 +133,7 @@ def main():
     print("=" * 70)
     print("Certus Latency Benchmark (single client, no pipelining)")
     print("=" * 70)
-    print(f"  Server:          {args.server}")
+    print(f"  Server:          {args.shm_path}")
     print(f"  Block size:      {block_size // 1024} KiB")
     print(f"  Objects/batch:   {num_objects}")
     print(f"  Iterations:      {iterations}")
@@ -162,14 +160,7 @@ def main():
         gpu_write(ptr, pattern)
 
     # Connect
-    channel = grpc.insecure_channel(
-        args.server,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+    ring = connect(args.shm_path)
 
     # --- Populate phase: measure per-batch latency ---
     print("  Running populate latency test...")
@@ -177,18 +168,11 @@ def main():
     for it in range(warmup + iterations):
         keys = [base_key + it * num_objects + i for i in range(num_objects)]
         entries = [
-            dispatcher_pb2.PopulateEntry(
-                key=k,
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=pop_handles[i],
-                    size=block_size,
-                ),
-            )
+            (k, [single_region(pop_handles[i], args.gpu, block_size)])
             for i, k in enumerate(keys)
         ]
-        req = dispatcher_pb2.BatchPopulateRequest(entries=entries)
         t0 = time.perf_counter()
-        resp = stub.Populate(req)
+        oks = ring.populate(entries)
         t1 = time.perf_counter()
         if it >= warmup:
             pop_latencies.append((t1 - t0) * 1e6)
@@ -209,22 +193,15 @@ def main():
     hot_latencies = []
     for it in range(warmup + iterations):
         entries = [
-            dispatcher_pb2.LookupEntry(
-                key=k,
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=lookup_handles[i],
-                    size=block_size,
-                ),
-            )
+            (k, [single_region(lookup_handles[i], args.gpu, block_size)])
             for i, k in enumerate(hot_keys)
         ]
-        req = dispatcher_pb2.BatchLookupRequest(entries=entries)
         t0 = time.perf_counter()
-        resp = stub.Lookup(req)
+        oks = ring.lookup(entries)
         _libcudart.cudaDeviceSynchronize()
         t1 = time.perf_counter()
         if it >= warmup:
-            failed = sum(1 for r in resp.results if not r.success)
+            failed = sum(1 for ok in oks if not ok)
             if failed:
                 continue  # skip failed iterations
             hot_latencies.append((t1 - t0) * 1e6)
@@ -232,9 +209,9 @@ def main():
     # --- Cold lookup phase: clear memory tier, force SSD reads ---
     print("  Clearing memory tier...")
     try:
-        stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-    except grpc.RpcError as e:
-        print(f"    WARNING: ClearMemoryTier failed: {e.details()}")
+        ring.clear_memory_tier()
+    except RingError as e:
+        print(f"    WARNING: ClearMemoryTier failed: {e}")
 
     # Use early keys (written to SSD during settle)
     cold_keys = [base_key + i for i in range(num_objects)]
@@ -245,22 +222,15 @@ def main():
         # Use different keys each iteration to avoid re-promote caching
         cold_iter_keys = [base_key + it * num_objects + i for i in range(num_objects)]
         entries = [
-            dispatcher_pb2.LookupEntry(
-                key=k,
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=lookup_handles[i],
-                    size=block_size,
-                ),
-            )
+            (k, [single_region(lookup_handles[i], args.gpu, block_size)])
             for i, k in enumerate(cold_iter_keys)
         ]
-        req = dispatcher_pb2.BatchLookupRequest(entries=entries)
         t0 = time.perf_counter()
-        resp = stub.Lookup(req)
+        oks = ring.lookup(entries)
         _libcudart.cudaDeviceSynchronize()
         t1 = time.perf_counter()
         if it >= warmup:
-            failed = sum(1 for r in resp.results if not r.success)
+            failed = sum(1 for ok in oks if not ok)
             if failed:
                 continue
             cold_latencies.append((t1 - t0) * 1e6)
@@ -325,7 +295,7 @@ def main():
         cuda_free(ptr)
     for ptr in lookup_ptrs:
         cuda_free(ptr)
-    channel.close()
+    ring.close()
 
 
 if __name__ == "__main__":

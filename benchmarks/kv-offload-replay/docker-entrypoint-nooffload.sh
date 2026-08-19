@@ -1,7 +1,7 @@
 #!/bin/bash
 # Entrypoint for the NO-OFFLOAD (GPU-only) baseline image.
 #
-# This baseline is fully self-contained: no external server, no gRPC, and no
+# This baseline is fully self-contained: no external server, no shmq mailbox, and no
 # offload tier at all. vLLM runs with no kv_transfer_config, so evicted KV is
 # recomputed on the GPU. There is nothing to wait for and nothing to size — we
 # just log the config, then exec the driver.

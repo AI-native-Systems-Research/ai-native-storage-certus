@@ -192,6 +192,9 @@ fn main() {
         .allowlist_function("spdk_nvme_ctrlr_get_default_ctrlr_opts")
         .allowlist_function("spdk_nvme_ctrlr_reset")
         .allowlist_function("spdk_nvme_ctrlr_get_data")
+        // Maximum data transfer size (derived from the controller's MDTS); used
+        // to fragment I/O to the device's real limit instead of a fixed default.
+        .allowlist_function("spdk_nvme_ctrlr_get_max_xfer_size")
         // NVMe admin commands
         .allowlist_function("spdk_nvme_ctrlr_cmd_admin_raw")
         // NVMe namespace management

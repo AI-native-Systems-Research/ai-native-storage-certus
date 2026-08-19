@@ -31,9 +31,9 @@ So on any single node the two RDMA components play opposite roles depending on t
 ## 2. High-Level Data Flow
 
 ```
-┌──────────────┐   gRPC/IPC    ┌─────────────────────────────────────────────┐
+┌──────────────┐  shmq + IPC   ┌─────────────────────────────────────────────┐
 │  GPU Client  │◄─────────────►│              certus-server                   │
-│  (vLLM)      │               │  (Dispatcher + Remote Cache Layer)            │
+│  (vLLM)      │ (/dev/shm)    │  (Dispatcher + Remote Cache Layer)            │
 └──────────────┘               └──────────┬───────────────────────────────────┘
                                           │
               ┌───────────────────────────┬┴──────────────────────┐
@@ -70,7 +70,7 @@ So on any single node the two RDMA components play opposite roles depending on t
 ### Populate (PUT) Path
 
 Same as `full` profile — **local-only**, no remote propagation:
-1. Client sends key + CUDA IPC handle via gRPC
+1. Client sends key + CUDA IPC handle via shmq (`/dev/shm` mailbox)
 2. Dispatcher opens IPC handle, evicts DRAM if needed
 3. `cudaMemcpy` (D2H): GPU → memory-tier slot
 4. Entry registered in dispatch-map; acknowledgement sent to client
@@ -81,7 +81,7 @@ Peers discover the entry only later, when they query for its key.
 ### Lookup (GET) Path — Warm
 
 Same as `full` profile:
-1. Client sends key + destination IPC handle via gRPC
+1. Client sends key + destination IPC handle via shmq (`/dev/shm` mailbox)
 2. Dispatch-map lookup returns MemoryTier pointer
 3. `cudaMemcpyAsync` (H2D): memory-tier → GPU (via dedicated CUDA stream)
 4. Stream handle returned; client synchronizes before accessing data
