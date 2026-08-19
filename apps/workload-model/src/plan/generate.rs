@@ -126,6 +126,8 @@ const TAG_NODE: u64 = 0x0D0D_E101;
 const TAG_ESCAPE: u64 = 0x0E5C_4BE0;
 /// Domain for the "did anyone follow me?" draw at a split.
 const TAG_COMPANION: u64 = 0xC011_4A10;
+/// Domain for the **root-level** half of the two-level turn-1 path-length draw.
+const TAG_ROOT_PATH: u64 = 0x4007_9A14;
 
 /// How the run ends. Exactly one, which the schema's rule 19 enforces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,6 +333,13 @@ pub struct Generator {
     /// Expected live sessions per occupancy window, the cohort estimate's numerator.
     sessions_per_window: f64,
     shared_depth: Dist,
+    /// The measured turn-1 total path length, and how much of it belongs to the root.
+    ///
+    /// Held here rather than taken from `SessionParams` alone because the **root-level** half of
+    /// the draw has to come from the root's own stream, and the root is bound in `birth` — after
+    /// `draw_params` has run.
+    turn1_path_length: Option<Dist>,
+    turn1_path_root_share: f64,
     seed: u64,
     nodes: u16,
     placement: Placement,
@@ -436,6 +445,8 @@ impl Generator {
                 d.corpus.trees.roots.count,
             ),
             shared_depth: d.corpus.trees.shared_depth.clone(),
+            turn1_path_length: d.workload.sessions.turn1_path_length.clone(),
+            turn1_path_root_share: d.workload.sessions.turn1_path_root_share.unwrap_or(0.0),
             // Carried so a session's cohort estimate starts from the population it is
             // actually competing for sharing with, over the window every occupancy
             // quantity in this model is defined over (FR-009h).
@@ -646,11 +657,33 @@ impl Generator {
             // Drawn per request instead; the field below is then unused.
             Placement::PerRequest => 0,
         };
+        // Turn-1 path length as a TWO-LEVEL draw (FR-054j). `params.turn1_path_length` is the
+        // session-level half; the root-level half comes from the root's own stream, which is why it
+        // is drawn here and not in `draw_params` — the root is bound above. Measured, `eta²` is
+        // 0.99 on the agentic traces: request length is very nearly a property of the root, and
+        // drawing it independently is what let an 11-block request land on a root with a 124-block
+        // preamble and fragment it.
+        let turn1 = match (&self.turn1_path_length, params.turn1_path_length) {
+            (Some(d), Some(session_level)) if self.turn1_path_root_share > 0.0 => {
+                let mut rs = Stream::new(
+                    self.seed ^ TAG_ROOT_PATH,
+                    u64::from(root_index) ^ (u64::from(roots) << 32),
+                );
+                let root_level = d.sample_u64(&mut rs).min(u64::from(u32::MAX)) as u32;
+                Some(crate::session::mix_root_share(
+                    root_level,
+                    session_level,
+                    d.mean().unwrap_or(f64::from(session_level)),
+                    self.turn1_path_root_share,
+                ))
+            }
+            (_, other) => other,
+        };
         let mut growth = Stream::new(self.seed ^ TAG_GROWTH, u64::from(id.0));
         let depth = crate::session::depth_at_turn(
             shared_depth,
             params.private_depth,
-            params.turn1_path_length,
+            turn1,
             &params.growth_per_turn,
             1,
             params.max_depth,

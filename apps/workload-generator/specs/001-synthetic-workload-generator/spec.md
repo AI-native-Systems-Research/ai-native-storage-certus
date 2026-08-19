@@ -2208,6 +2208,25 @@ report segments statistics into before/after windows around the event.
   exceed their shared preamble — while the model draws the two independently. That is the same
   independent-versus-correlated defect as the rest of FR-057c's step 3, and it is the fifth place it
   has appeared.
+- **FR-054j**: Where `turn1_path_length` is stated, the draw MUST be **two-level** — a per-root level
+  from the root's own stream and a per-session value around it — with the between-root share
+  (`sessions.turn1_path_root_share`) **fitted** to the measured `eta²` rather than assumed.
+  Measured 2026-08-19, `eta²` is **0.9941** on `exgentic_swebench` and **0.9869** on
+  `exgentic_tau2_airline`: on an agentic trace, root identity explains 99% of the variance in turn-1
+  path length, because one root is one task family. `qwen_code` — production traffic over 153 roots
+  with short conversations — reads **0.5791**, which is why the share is fitted.
+  The mixture MUST preserve the marginal's **spread** as well as its correlation: a weighted sum of
+  two draws from one distribution has variance `(w² + (1−w)²)·Var(X)`, which is 83% of `Var(X)` at
+  `eta² = 0.99`, so the deviation from the mean MUST be rescaled by `√(w² + (1−w)²)`. Fixing a
+  correlation by quietly narrowing a distribution trades one defect for another.
+  **Measured effect, and the prediction that FAILED.** The realised root preamble improves from 44
+  blocks to **88** against the trace's 124 — a 2x gain on top of FR-054i's — and `sharing_depth`
+  improves only marginally, 0.309 to 0.296. **Attrition was predicted to fall to near zero and did
+  not: it is 32%, against the trace's 0.** The prediction was wrong for a locatable reason, and it is
+  the same defect one level up: pinning path length to the root does not couple a root's **path level
+  to its own preamble length**, because those are two independent per-root draws. Preventing attrition
+  needs `path_level(root) >= preamble(root)` for the *same* root, i.e. a joint per-root law, not two
+  marginals that happen to be per-root. Recorded rather than tuned around.
 - **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
   measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
   sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first

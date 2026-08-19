@@ -609,6 +609,9 @@ fn cmd_fit(
         rate_per_s: rate.or(measured_rate),
         wss_window_requests: wss_window,
         seed,
+        // Measured here because `SessionShapes` does not observe root identity; see
+        // `root_path_eta2`. One computation feeds both the emitted parameter and the diagnostic.
+        turn1_path_root_share: root_path_eta2(&trace.invocations).map(|m| m.eta2),
     };
     // The segment census, and the node-level trunk process fitted from it. Built once:
     // it is the only description that can state per-root preamble lengths and the TOTAL
@@ -1808,30 +1811,30 @@ fn print_path_budget(
     }
 }
 
-/// How much of turn-1 path length is explained by **which root** a session binds to.
+/// What [`root_path_eta2`] measured.
+#[derive(Debug, Clone, Copy)]
+struct RootPathShare {
+    /// Between-root share of the variance in turn-1 path length.
+    eta2: f64,
+    sessions: u64,
+    roots: usize,
+    mean_turn1_path: f64,
+}
+
+/// The between-root share of the variance in turn-1 path length — `eta²` (FR-054j).
 ///
-/// The standing hypothesis behind both the unmoved `sharing_depth` and the 42%-against-2.5%
-/// attrition gap is that a trace correlates these two and the model draws them independently: one
-/// root is one task family, whose requests comfortably exceed their shared preamble, so no session
-/// ever stops part-way along it. That is a *claim*, and this measures it before anything is built on
-/// it — the ratio is `eta^2`, the between-root share of the total variance in turn-1 path length.
+/// Measured here rather than in `fit::sessions` because `SessionShapes` accumulates per-session
+/// shapes and does not observe **root identity**: a root is a property of a session's path.
+/// Teaching it about roots for one statistic is the larger change, and measuring it here keeps the
+/// emitted parameter and the diagnostic below as one computation rather than two that could
+/// disagree.
 ///
-/// Near 0 means root identity says nothing about how long a session's requests are, and the
-/// hypothesis is dead. Near 1 means path length is essentially a property of the root.
-///
-/// Also reported: how many roots have a session whose turn-1 path is **shorter than the root's own
-/// shared preamble**, which is the exact condition that produces attrition. In a trace that count
-/// should be zero or near it.
-fn print_root_path_correlation(
-    invocations: &[read::NormalisedInvocation],
-    trace_rows: &[workload_model::fit::segments::SegmentRow],
-) {
+/// Turn-1 is the **lowest-numbered** turn, never the first arrival — a disordered session's first
+/// arrival is mid-conversation, a trap already recorded for `private_depth`.
+fn root_path_eta2(invocations: &[read::NormalisedInvocation]) -> Option<RootPathShare> {
     use workload_model::keys::CacheKey;
     use workload_model::stats::FastMap;
 
-    // Turn-1 path length per session, and the root it starts at. The lowest-numbered turn, not the
-    // first arrival — a disordered session's first arrival is mid-conversation, a trap already
-    // recorded for `private_depth`.
     let mut first: FastMap<u32, (u32, CacheKey, usize)> = FastMap::default();
     for inv in invocations {
         if inv.blocks.is_empty() {
@@ -1845,9 +1848,8 @@ fn print_root_path_correlation(
         }
     }
     if first.len() < 2 {
-        return;
+        return None;
     }
-
     let mut by_root: FastMap<u64, (u64, f64)> = FastMap::default();
     let mut n = 0u64;
     let mut sum = 0.0f64;
@@ -1860,24 +1862,53 @@ fn print_root_path_correlation(
         sum += l;
     }
     let grand = sum / n as f64;
-    let mut between = 0.0f64;
-    for (c, s) in by_root.values() {
-        let m = s / *c as f64;
-        between += *c as f64 * (m - grand).powi(2);
-    }
-    let mut total = 0.0f64;
-    for (_, _, len) in first.values() {
-        total += (*len as f64 - grand).powi(2);
-    }
-    let eta2 = if total > 0.0 { between / total } else { 0.0 };
+    let between: f64 = by_root
+        .values()
+        .map(|(c, s)| *c as f64 * (s / *c as f64 - grand).powi(2))
+        .sum();
+    let total: f64 = first
+        .values()
+        .map(|(_, _, len)| (*len as f64 - grand).powi(2))
+        .sum();
+    Some(RootPathShare {
+        eta2: if total > 0.0 {
+            (between / total).clamp(0.0, 1.0)
+        } else {
+            0.0
+        },
+        sessions: n,
+        roots: by_root.len(),
+        mean_turn1_path: grand,
+    })
+}
 
-    // Roots whose preamble outruns one of their own sessions' turn-1 paths.
+/// Report whether turn-1 path length is a property of the **root**, and what was fitted from it.
+///
+/// The hypothesis behind both the unmoved `sharing_depth` and the 42%-against-2.5% attrition gap is
+/// that a trace correlates these two while the model draws them independently: one root is one task
+/// family, whose requests comfortably exceed their shared preamble, so no session ever stops
+/// part-way along it. Measured, `eta²` is **0.9941** on `exgentic_swebench` and **0.9869** on
+/// `exgentic_tau2_airline` — on an agentic trace, root identity explains 99% of how long a session's
+/// requests are — against **0.5791** on `qwen_code`, which is why FR-054j fits the share rather than
+/// assuming it is 1.
+fn print_root_path_correlation(
+    invocations: &[read::NormalisedInvocation],
+    trace_rows: &[workload_model::fit::segments::SegmentRow],
+) {
+    let Some(m) = root_path_eta2(invocations) else {
+        return;
+    };
+    let shortest_path = invocations
+        .iter()
+        .filter(|i| !i.blocks.is_empty())
+        .map(|i| i.blocks.len() as u32)
+        .min()
+        .unwrap_or(0);
     let root_preamble: Vec<u32> = trace_rows
         .iter()
         .filter(|r| r.start_depth == 0)
         .map(|r| r.length)
         .collect();
-    let shortest_path = first.values().map(|(_, _, l)| *l as u32).min().unwrap_or(0);
     let outrun = root_preamble.iter().filter(|p| **p > shortest_path).count();
 
     println!(
@@ -1886,13 +1917,13 @@ fn print_root_path_correlation(
          identity says nothing about request length, near 1 means it says everything."
     );
     println!(
-        "    sessions {n}, roots {}, mean turn-1 path {grand:.1} blocks, eta^2 {eta2:.4}",
-        by_root.len()
+        "    sessions {}, roots {}, mean turn-1 path {:.1} blocks, eta^2 {:.4}",
+        m.sessions, m.roots, m.mean_turn1_path, m.eta2
     );
-    // Compared against the GLOBAL shortest path, not each root's own sessions, because the
-    // census rows do not carry the root key. So it is an UPPER BOUND on the real violation count,
-    // and a loose one exactly when eta^2 is high — short-path sessions are then concentrated on
-    // particular roots, whose own preambles are short too. Stated rather than presented as the
+    // Compared against the GLOBAL shortest path, not each root's own sessions, because the census
+    // rows do not carry the root key. So it is an UPPER BOUND on the real violation count, and a
+    // loose one exactly when eta^2 is high — short-path sessions are then concentrated on
+    // particular roots whose own preambles are short too. Stated rather than presented as the
     // per-root figure it is not.
     println!(
         "    shortest turn-1 path {shortest_path} blocks; {outrun} of {} depth-0 segments exceed \

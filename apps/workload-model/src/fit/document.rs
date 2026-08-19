@@ -192,6 +192,16 @@ pub struct Supplied {
     /// A property of the *sample*, not of the workload, so it is the caller's to fix
     /// and a fit does not invent one that would look measured.
     pub seed: u64,
+    /// The measured between-root share of turn-1 path-length variance — `eta²` (FR-054j).
+    ///
+    /// Supplied by the caller rather than measured in `fit::sessions`, because `SessionShapes`
+    /// accumulates per-session shapes and does not observe **root identity** — a root is a
+    /// property of a session's path. Teaching it about roots for one statistic would be the larger
+    /// change, and supplying it keeps the diagnostic and the emitted parameter as one computation
+    /// rather than two that could disagree.
+    ///
+    /// `None` leaves the parameter unstated, which is the independent draw.
+    pub turn1_path_root_share: Option<f64>,
 }
 
 /// A fitted document, and everything a reader needs to judge it.
@@ -447,6 +457,13 @@ pub fn assemble(
                 // The measured joint turn-1 path length (FR-054i). `Some` only under the
                 // experiment toggle, since stating it changes every generated path.
                 turn1_path_length: sessions.turn1_path_length.clone(),
+                // The measured between-root share of turn-1 path-length variance (FR-054j).
+                // Only meaningful beside the joint above, so it rides the same toggle.
+                // Only meaningful beside the joint above, so it is stated only when that is.
+                turn1_path_root_share: sessions
+                    .turn1_path_length
+                    .as_ref()
+                    .and(supplied.turn1_path_root_share),
                 turns,
                 think_time,
                 private_depth,
@@ -563,6 +580,7 @@ mod tests {
 
     fn supplied() -> Supplied {
         Supplied {
+            turn1_path_root_share: None,
             block_bytes: Dist::Scalar(131_072.0),
             rate_per_s: Some(2000.0),
             wss_window_requests: 20_000,

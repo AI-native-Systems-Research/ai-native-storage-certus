@@ -389,6 +389,26 @@ pub struct Sessions {
     /// byte-identical, since with `None` nothing is drawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn1_path_length: Option<Dist>,
+    /// How much of `turn1_path_length` is a property of the **root**, in `[0, 1]` (FR-054j).
+    ///
+    /// Measured as `eta²` — the between-root share of the variance in turn-1 path length — and it
+    /// is not a small correction: **0.9941 on `exgentic_swebench` and 0.9869 on
+    /// `exgentic_tau2_airline`**, so on an agentic trace root identity explains 99% of how long a
+    /// session's requests are. One root is one task family. `qwen_code`, production traffic over
+    /// 153 roots with short conversations, reads **0.5791**, which is why this is fitted rather
+    /// than assumed to be 1.
+    ///
+    /// Drawing the two independently — which is what a bare `turn1_path_length` does — mixes an
+    /// 11-block request into a root whose shared preamble is 124 blocks. That session then stops
+    /// part-way along the preamble, which the trie reads as **attrition**: measured, 42% of the
+    /// generated trunk's shared runs ended that way against **2.5%** in the trace. It also caps
+    /// that session's realised sharing for a reason the trace does not contain, which is the
+    /// standing `sharing_depth` failure.
+    ///
+    /// `0` is the old independent draw and absent means `0`, so a document without it is
+    /// unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn1_path_root_share: Option<f64>,
     /// Blocks added by each turn after the first. Drawn per turn.
     ///
     /// Either one distribution, or one **per session-length band** — see [`Growth`].

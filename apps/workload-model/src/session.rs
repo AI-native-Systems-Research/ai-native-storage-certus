@@ -339,6 +339,42 @@ fn pick_mix<'a>(mix: &'a [MixEntry], st: &mut Stream) -> (u8, Option<&'a MixEntr
 /// position is unchanged — a session that hits its cap draws the same numbers it would
 /// have and simply does not use them. That keeps a capped run's keys comparable with an
 /// uncapped one's rather than shifting every subsequent draw.
+/// Combine a root-level and a session-level draw so that the **between-root share** of the
+/// resulting variance is `share` (FR-054j).
+///
+/// # The construction, and why it is rescaled
+///
+/// Both inputs are draws from the same distribution, so a weighted sum `w·root + (1−w)·session` has
+/// the right mean and a between-root variance share of `w² / (w² + (1−w)²)`. Setting that equal to
+/// the target and solving gives
+///
+/// ```text
+/// w = √share / (√share + √(1 − share))
+/// ```
+///
+/// which is monotone on `[0, 1]` and hits both ends exactly: `share = 1` takes the root's draw
+/// alone, `share = 0` the session's.
+///
+/// The sum's *total* variance is `(w² + (1−w)²)·Var(X)`, which is below `Var(X)` for every interior
+/// weight — at `share = 0.99` it is 83% of it. Left alone that would quietly narrow the emitted
+/// path-length distribution while fixing its correlation, trading one defect for another, so the
+/// deviation from the mean is divided by `√(w² + (1−w)²)` to restore the variance exactly. The
+/// result is a two-level draw with the measured correlation **and** the measured spread.
+pub fn mix_root_share(root_level: u32, session_level: u32, mean: f64, share: f64) -> u32 {
+    let share = share.clamp(0.0, 1.0);
+    if share <= 0.0 {
+        return session_level;
+    }
+    if share >= 1.0 {
+        return root_level;
+    }
+    let w = share.sqrt() / (share.sqrt() + (1.0 - share).sqrt());
+    let mixed = w * f64::from(root_level) + (1.0 - w) * f64::from(session_level);
+    let shrink = (w * w + (1.0 - w) * (1.0 - w)).sqrt();
+    let restored = mean + (mixed - mean) / shrink.max(f64::MIN_POSITIVE);
+    restored.max(0.0).min(f64::from(u32::MAX)) as u32
+}
+
 pub fn depth_at_turn(
     shared_depth: u32,
     private_depth: u32,
@@ -409,6 +445,7 @@ mod tests {
                 concurrency: None,
             },
             sessions: Sessions {
+                turn1_path_root_share: None,
                 turn1_path_length: None,
                 max_depth: None,
                 turns: Dist::Shaped(Shape::Geometric { mean: turns_mean }),
