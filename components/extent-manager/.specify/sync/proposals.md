@@ -1,53 +1,68 @@
-# Sync Proposals: extent-manager
+# Sync Proposals — extent-manager (Phase B)
 
-**Spec**: `components/extent-manager/specs/001-extent-manager-v2/spec.md`
-**Generated**: 2026-05-21
+**Generated**: 2026-08-20
+**Based on**: `drift-report.json` (extent-manager, 2 drifted, 0 not_implemented, 0 unspecced)
 
----
+Both drift items classify as **BACKFILL** (spec-lag: code/reality is correct, spec text
+is stale). No ALIGN, no UNSPECCED, no RESOLVED, no HUMAN_DECISION.
 
-## Applied Proposals
-
-### BACKFILL-FR-001: Rename ExtentManagerV2 to ExtentManager in spec
-
-- **Type**: Backfill (spec trails code)
-- **Status**: Applied
-- **Requirement**: FR-001
-- **Rationale**: The V2 suffix was intentionally removed from the component name during development. The spec lagged behind this deliberate naming decision.
-- **Change**: Replaced all occurrences of `ExtentManagerV2` with `ExtentManager` throughout the spec (FR-001 text, User Story 1 test description, Assumptions section).
-
-### BACKFILL-FORMAT-VERSION: Update on-disk format version from 4 to 5
-
-- **Type**: Backfill (spec trails code)
-- **Status**: Applied
-- **Requirement**: On-Disk Format Reference / Key Entities (Superblock)
-- **Rationale**: Code uses `FORMAT_VERSION = 5` with magic `CERTUSV5` (`0x4345_5254_5553_5635`). The spec documented the previous version 4. This is a code-correct backfill.
-- **Change**: Updated magic constant from `0x4345_5254_5553_5634` ("CERTUSV4") to `0x4345_5254_5553_5635` ("CERTUSV5") and version field from 4 to 5 in both the Key Entities section and the Superblock table.
+| ID | Requirement | Direction | Severity | Verdict |
+|----|-------------|-----------|----------|---------|
+| P1 | FR-030 | BACKFILL | moderate | `volatile_write_cache` fix has landed; remove stale "does not compile" status |
+| P2 | plan.md-layout-refs | BACKFILL | minor | Drop non-existent `block_device` receptacle + `v2/` path from plan.md |
 
 ---
 
-## Deferred Proposals (require human decision)
+## P1 — FR-030 (`volatile_write_cache`)  →  BACKFILL
 
-### DEFERRED-SC-005: 100M extent scalability claim unverified
+**Spec (before)**: FR-030's parenthetical and the top Sync note stated *"Implementation
+status 2026-08-07: this feature does not yet compile"* — `BlockDeviceClient::flush()`
+missing, `Command::FlushSync`/`Completion::FlushDone` absent from interfaces, a fix
+"drafted on the branch", an align-task queued, and "add a CI job".
 
-- **Type**: Deferred
-- **Status**: Pending human decision
-- **Requirement**: SC-005
-- **Summary**: The spec claims ~100 million extent support on a 10 TB data device but no test validates this scale. The largest test uses 800 extents on 256 MiB.
-- **Options**:
-  1. Add a large-scale benchmark (expensive, may need dedicated CI)
-  2. Relax the claim to "design supports" without hard verification
-  3. Accept the claim as an architectural design statement
+**Code (actual)**: The cross-crate fix has **landed** on the current tree:
+- `BlockDeviceClient::flush()` exists, gated on `volatile_write_cache`, sending
+  `Command::FlushSync` and awaiting `Completion::FlushDone` (`block_io.rs:168`).
+- The interfaces crate defines `Command::FlushSync` (`iblock_device.rs:411`) and
+  `Completion::FlushDone` (`iblock_device.rs:501`).
+- The checkpoint path calls `metadata_client.flush()` under the feature gate
+  (`lib.rs:308-310`).
 
-### DEFERRED-UNSPECCED-METHODS: Unspecified implemented features
+**Rationale**: Spec-lag — the code now satisfies the intended FR-030 semantics; the
+only drift is the stale "does not compile / drafted / queued" status. BACKFILL the
+FR-030 parenthetical and the top Sync note to state the feature is implemented and
+building.
 
-- **Type**: Deferred
-- **Status**: Pending human decision
-- **Requirement**: N/A (new requirements needed)
-- **Summary**: Several implemented features have no spec coverage:
-  - `used_bytes()` and `capacity_bytes()` monitoring methods on IExtentManager
-  - Fault injection test infrastructure (`FaultConfig`, `MockBlockDevice` fault modes)
-  - `WriteHandle` defined in the `interfaces` crate rather than the component crate
-- **Options**:
-  1. Add informational requirements for monitoring methods
-  2. Document test infrastructure as non-normative
-  3. Leave as implementation details outside spec scope
+**Before**
+> (Implementation status 2026-08-07: this feature does not yet compile — see the Sync
+> note at the top of this spec and `.specify/sync/align-tasks.md`.)
+
+**After**
+> (Implementation status 2026-08-20: implemented and building. `BlockDeviceClient::flush()`
+> (`block_io.rs:168`) sends `Command::FlushSync` and awaits `Completion::FlushDone` — both
+> defined in the interfaces crate (`iblock_device.rs:411,501`) — and is called from the
+> checkpoint path (`lib.rs:308-310`). Enable with `--features volatile_write_cache`.)
+
+---
+
+## P2 — plan.md layout references  →  BACKFILL
+
+**Spec (before)**: `plan.md` describes a `block_device` data-device `IBlockDevice`
+receptacle (Technical Context "Storage" block, line 25; Component Structure receptacle
+list, line 39) and roots the source tree at `components/extent-manager/v2/` (line 213).
+
+**Code (actual)**: The shipped component exposes only `metadata_device` + `logger`
+receptacles (spec FR-001) over a flat `src/` — there is no `v2/` path. The data path
+is owned by the caller (`dispatcher`/`dispatcher-p2p`, FR-036); the component performs
+no data-device I/O.
+
+**Rationale**: Spec-lag in the planning doc — code and `spec.md` already agree on the
+`metadata_device` + `logger` receptacle model and flat `src/`. BACKFILL the plan to
+reality.
+
+**Before**: two receptacles incl. `block_device: IBlockDevice (data device)`; tree
+rooted at `components/extent-manager/v2/`.
+
+**After**: single `metadata_device` receptacle (plus `logger`), with a note that the
+data device is caller-owned per FR-036; tree rooted at `components/extent-manager/`; a
+Last-Synced 2026-08-20 note added to the plan header.

@@ -56,3 +56,17 @@ no logic change.
 - [ ] `src/lib.rs:4-7` no longer claims the dylib and host "dynamically link the same shared libraries".
 - [ ] The comment states each side statically embeds its own rlib and that `TypeId` equality is a same-`rustc` compile-time property (matching FR-4 / Overview).
 - [ ] No functional/logic change; `cargo test -p example-helloworld-dylib` still passes.
+
+---
+
+# 2026-08-20 Phase B (per `.specify/sync/PHASE_B_POLICY.md`)
+
+Regenerated drift report (2026-08-20T09:24): 7 checked, 6 aligned, **1 drifted**
+(FR-4, moderate), 0 not-implemented, 0 unspecced. Classified FR-4 as **ALIGN**:
+the spec (FR-4 / Overview) is already correct, and the runtime behaviour
+satisfies it; the drift is the source module doc comment (`src/lib.rs:4-7`) still
+carrying the stale "dynamically link the same shared libraries" claim that
+contradicts the corrected spec (spec→code direction, not spec-lag ⇒ not
+BACKFILL). Per policy the `.rs` source is not edited. This ALIGN item is
+**Task 2** above (still open) — no new task is created, as Task 2 already covers
+FR-4 exactly. No spec BACKFILL was applied (spec text already correct).

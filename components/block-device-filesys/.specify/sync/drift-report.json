@@ -1,52 +1,43 @@
 {
-  "generated": "2026-08-07T15:31:02Z",
+  "generated": "pending",
   "project": "block-device-filesys",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 26,
-    "aligned": 25,
+    "requirements_checked": 28,
+    "aligned": 27,
     "drifted": 1,
     "not_implemented": 0,
-    "unspecced_features": 4
+    "unspecced_features": 1
   },
   "specs": [
     {
-      "spec": "001-block-device-filesys",
-      "requirements": [
-        {"id": "FR-001", "status": "aligned", "severity": null, "location": "src/lib.rs:224", "note": "implements IBlockDevice"},
-        {"id": "FR-002", "status": "aligned", "severity": null, "location": "src/lib.rs:59;src/actor.rs:127,436,563", "note": "ILogger receptacle; info/debug/warn levels and SQ-full-as-error-completion match spec"},
-        {"id": "FR-003", "status": "aligned", "severity": null, "location": "src/lib.rs:54", "note": "define_component! macro"},
-        {"id": "FR-004", "status": "aligned", "severity": null, "location": "src/lib.rs:27,82,113,187", "note": "public config module + create/initialize/shutdown"},
-        {"id": "FR-005", "status": "aligned", "severity": null, "location": "src/config.rs:114", "note": "regular-file backing store"},
-        {"id": "FR-006", "status": "aligned", "severity": null, "location": "src/lib.rs:82;src/config.rs:59-64", "note": "explicit create() config; power-of-2 min-512 validated"},
-        {"id": "FR-007", "status": "aligned", "severity": null, "location": "src/actor.rs:349,366;src/config.rs:173,181", "note": "pread/pwrite + fdatasync; O_DIRECT|O_SYNC with EINVAL buffered fallback + eprintln"},
-        {"id": "FR-008", "status": "aligned", "severity": null, "location": "src/actor.rs:534-543,468,591", "note": "io_uring async with IO_LINK write+fsync; sync fallback"},
-        {"id": "FR-009", "status": "aligned", "severity": null, "location": "src/actor.rs:636", "note": "WriteZeros + fdatasync"},
-        {"id": "FR-010", "status": "aligned", "severity": null, "location": "src/actor.rs:237-241", "note": "BatchSubmit sequential"},
-        {"id": "FR-011", "status": "aligned", "severity": null, "location": "src/actor.rs:711", "note": "AbortOp AsyncCancel + AbortAck"},
-        {"id": "FR-012", "status": "aligned", "severity": null, "location": "src/actor.rs:726", "note": "NsProbe single namespace"},
-        {"id": "FR-013", "status": "aligned", "severity": null, "location": "src/actor.rs:897", "note": "actor model with io_uring event loop"},
-        {"id": "FR-014", "status": "aligned", "severity": null, "location": "benches/latency.rs;benches/throughput.rs", "note": "Criterion benches present"},
-        {"id": "FR-015", "status": "drifted", "severity": "minor", "location": "src/config.rs:106-113", "note": "spec claims open_or_create_backing_file has a doc example; it has only prose, no code block. create() and DeviceConfig do have examples."},
-        {"id": "FR-016", "status": "aligned", "severity": null, "location": "src/config.rs:118-166", "note": "fallocate-if-absent / open-if-exists with size-mismatch error"},
-        {"id": "FR-017", "status": "aligned", "severity": null, "location": "src/actor.rs:296-306,345", "note": "direct DmaBuffer slice access"},
-        {"id": "FR-018", "status": "aligned", "severity": null, "location": "Cargo.toml", "note": "io-uring 0.7 dependency"},
-        {"id": "FR-019", "status": "aligned", "severity": null, "location": "src/telemetry.rs:13;src/lib.rs:308-335;src/actor.rs:320", "note": "feature-gated TelemetryStats; latency-always-0 is a defect explicitly documented by the spec"},
-        {"id": "FR-020", "status": "aligned", "severity": null, "location": "src/actor.rs:39,60,70,855", "note": "per-client FIFO backlog non-blocking delivery"},
-        {"id": "SC-001", "status": "aligned", "severity": null, "location": "src/actor.rs:366;tests/integration.rs", "note": "read-after-write durability"},
-        {"id": "SC-002", "status": "aligned", "severity": null, "location": "src/actor.rs", "note": "concurrency capability present; no dedicated throughput test"},
-        {"id": "SC-003", "status": "aligned", "severity": null, "location": "benches/latency.rs", "note": "latency outcome; bench available, not statically verifiable"},
-        {"id": "SC-004", "status": "aligned", "severity": null, "location": "src/lib.rs:345;src/config.rs:199;tests/integration.rs", "note": "unit tests use temp files, no hardware/root"},
-        {"id": "SC-005", "status": "aligned", "severity": null, "location": "benches/throughput.rs", "note": "Criterion benches present; CV not statically verifiable"},
-        {"id": "SC-006", "status": "aligned", "severity": null, "location": "src/lib.rs:198,224", "note": "full IBlockDevice/IBlockDeviceAdmin surface for drop-in use"}
-      ]
+      "id": "001-block-device-filesys",
+      "title": "Block Device Filesys Component",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-015",
+          "spec_text": "The create() constructor and DeviceConfig::new have runnable doc examples.",
+          "actual": "DeviceConfig::new has a runnable ``` example (config.rs:42-57); create()'s doc example is a ```ignore block, so it is not compiled or run by cargo test.",
+          "location": "src/lib.rs:77",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
     }
   ],
   "unspecced": [
-    {"item": "set_file_path/set_block_size/set_num_blocks pub(crate) setters", "location": "src/lib.rs:95,101,107", "note": "internal, #[allow(dead_code)], not in spec"},
-    {"item": "read_write_stats() returns zeroed ReadWriteStats", "location": "src/lib.rs:340", "note": "IBlockDevice method not mentioned by spec"},
-    {"item": "numa_node()/nvme_version()/num_io_queues() device-info methods", "location": "src/lib.rs:288,300,304", "note": "not enumerated in spec device-info scenarios"},
-    {"item": "max_transfer_size() = block_size * 256", "location": "src/lib.rs:292", "note": "multiplier value not specified"}
+    {
+      "feature": "Internal config setters set_file_path/set_block_size/set_num_blocks (pub(crate), #[allow(dead_code)])",
+      "location": "src/lib.rs",
+      "lines": "95-109",
+      "suggested_spec": "Not public API; either remove as dead code or note as reserved config mutators. Out of scope for functional requirements."
+    }
   ],
   "conflicts": []
 }

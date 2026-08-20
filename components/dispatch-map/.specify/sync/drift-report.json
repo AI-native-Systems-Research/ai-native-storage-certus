@@ -1,71 +1,44 @@
 {
-  "generated": "2026-08-06T23:27:50Z",
+  "generated": "pending",
   "project": "dispatch-map",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 32,
-    "aligned": 27,
-    "drifted": 3,
-    "not_implemented": 2,
-    "unspecced_features": 3
+    "aligned": 30,
+    "drifted": 2,
+    "not_implemented": 0,
+    "unspecced_features": 1
   },
   "specs": [
     {
       "id": "001-dispatch-map",
       "title": "Dispatch Map Component",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-013", "FR-015", "FR-016",
-        "FR-017", "FR-018", "FR-020", "FR-022", "FR-023", "FR-024", "FR-025",
-        "FR-026", "SC-001", "SC-002", "SC-003", "SC-005", "SC-006"
-      ],
+      "aligned": 30,
       "drifted": [
-        {
-          "requirement": "FR-014",
-          "spec_text": "System MUST use the ILogger receptacle for info, debug, and error logging throughout the component.",
-          "actual": "Only logger.info and logger.debug are called; logger.error is never invoked on any fallible/error-return path.",
-          "location": "components/dispatch-map/src/lib.rs",
-          "severity": "moderate"
-        },
         {
           "requirement": "FR-012",
           "spec_text": "On initialization, the IEvictionPolicy receptacle MUST be connected (returns an error if unbound).",
-          "actual": "initialize() calls get_pool_id() which does eviction_policy.get().unwrap(), panicking on an unbound receptacle instead of returning DispatchMapError::NotInitialized; the map_err guard is unreachable in that case.",
-          "location": "components/dispatch-map/src/lib.rs:50-59,68-71",
-          "severity": "minor"
+          "actual": "initialize() calls get_pool_id() first, which does eviction_policy.get().unwrap(); an unbound eviction_policy panics before the graceful map_err(NotInitialized) path is reached. Same unwrap in create_memory_tier_entry, recover_extent, oldest_keys.",
+          "location": "src/lib.rs:55",
+          "severity": "moderate"
         },
         {
-          "requirement": "SC-004",
-          "spec_text": "The DispatchEntry struct size varies by Location variant.",
-          "actual": "Location is a Rust enum sized to its largest variant at compile time; size_of::<DispatchEntry>() is a fixed constant, not per-instance variable.",
-          "location": "components/dispatch-map/src/entry.rs:9-19,28-43; components/dispatch-map/src/lib.rs:16-18",
-          "severity": "minor"
+          "requirement": "FR-003",
+          "spec_text": "US1/AS3 + Edge Cases: create_memory_tier_entry with a null pointer returns an error; no entry is recorded.",
+          "actual": "create_memory_tier_entry only validates size == 0 (InvalidSize); there is no null-pointer check, so a null pointer is accepted and an entry is recorded.",
+          "location": "src/lib.rs:381",
+          "severity": "moderate"
         }
       ],
-      "not_implemented": [
-        "US1-AS3 (create_memory_tier_entry null-pointer rejection)",
-        "US2-AS4 (lookup size-mismatch -> MismatchSize; lookup takes no expected-size parameter)"
-      ]
+      "not_implemented": []
     }
   ],
   "unspecced": [
     {
-      "feature": "integrity-check feature: checksum field + set_checksum/get_checksum methods (CRC-32)",
-      "location": "components/dispatch-map/Cargo.toml:8-11; components/dispatch-map/src/entry.rs:41-42; components/dispatch-map/src/lib.rs:594-615; components/interfaces/src/idispatch_map.rs",
-      "lines": 30,
-      "suggested_spec": "001-dispatch-map"
-    },
-    {
-      "feature": "reuse_count AtomicU32 field (incremented on lookup/take_read/downgrade_reference, never read or exposed)",
-      "location": "components/dispatch-map/src/entry.rs:37,54-55; components/dispatch-map/src/lib.rs:142,221,314",
-      "lines": 8,
-      "suggested_spec": "001-dispatch-map"
-    },
-    {
-      "feature": "Creusot verification claims P1-P10 referencing non-existent components/dispatch-map/verif/",
-      "location": "components/interfaces/src/idispatch_map.rs:84-99",
-      "lines": 16,
-      "suggested_spec": "001-dispatch-map"
+      "feature": "reuse_count AtomicU32 field on DispatchEntry, incremented on every lookup/take_read/downgrade_reference",
+      "location": "src/entry.rs, src/lib.rs",
+      "lines": "entry.rs:37; lib.rs:142-143,220-222,313-315",
+      "suggested_spec": "Either spec a per-entry read-hit counter with a query method, or remove the field (spec's Last Synced note already lists reuse_count removal as a pending code-side align)."
     }
   ],
   "conflicts": []

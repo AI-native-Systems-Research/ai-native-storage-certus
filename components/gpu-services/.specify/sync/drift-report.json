@@ -1,119 +1,45 @@
 {
-  "generated": "2026-08-07T15:27:21Z",
+  "generated": "pending",
   "project": "gpu-services",
   "summary": {
     "specs_analyzed": 3,
-    "total_requirements": 61,
-    "aligned": 59,
-    "drifted": 2,
+    "requirements_checked": 78,
+    "aligned": 77,
+    "drifted": 1,
     "not_implemented": 0,
-    "unspecced": 5,
-    "conflicts": 1
+    "unspecced_features": 0
   },
   "specs": [
     {
       "id": "001-gpu-cuda-services",
-      "path": "specs/001-gpu-cuda-services/spec.md",
-      "counts": { "aligned": 23, "drifted": 2, "not_implemented": 0 },
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-006", "FR-007", "FR-009",
-        "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016",
-        "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023",
-        "FR-024", "FR-025",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007", "SC-008"
-      ],
-      "drifted": [
-        {
-          "id": "FR-005",
-          "severity": "minor",
-          "spec": "States 'For locally-pinned memory, full CUDA unregistration is performed.'",
-          "code": "unpin_memory only removes the pointer from the internal pinned HashSet; no cudaHostUnregister and no locally-pinned path exists in pin_memory/unpin_memory.",
-          "location": "src/lib.rs:249-267"
-        },
-        {
-          "id": "FR-008",
-          "severity": "minor",
-          "spec": "Expose all functionality exclusively through the IGpuServices interface.",
-          "code": "P2P/GDRCopy DMA-buffer builders are pub functions in the dma module and are called directly by the p2p_server binary, not via IGpuServices.",
-          "location": "src/dma.rs:113-702; src/bin/p2p_server.rs:21"
-        }
-      ],
-      "not_implemented": [],
-      "notes": [
-        "User Story 3 acceptance scenario 2 implies contiguity vs pin distinction; check_memory_attributes (src/memory.rs:26) only validates memory type == device. Normative FR-004 is aligned; narrative is broader. Minor/informational."
-      ]
+      "title": "GPU CUDA Services",
+      "aligned": 33,
+      "drifted": [],
+      "not_implemented": []
     },
     {
       "id": "002-gpu-ssd-dma-prepare",
-      "path": "specs/002-gpu-ssd-dma-prepare/spec.md",
-      "counts": { "aligned": 24, "drifted": 0, "not_implemented": 0 },
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
-        "FR-022", "FR-023", "FR-024",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005"
-      ],
+      "title": "GPU-to-SSD DMA Buffer Preparation",
+      "aligned": 29,
       "drifted": [],
-      "not_implemented": [],
-      "notes": [
-        "Clean. Key locations: src/lib.rs:352 (prepare_memory_for_spdk), src/ipc.rs:55 (lazy peer access), src/dma.rs:113/353/547/635, src/gdrcopy_ffi.rs:16-33 (GPU_PAGE_SIZE 64 KiB + GDRCopy FFI)."
-      ]
+      "not_implemented": []
     },
     {
       "id": "003-gpu-p2p-server",
-      "path": "specs/003-gpu-p2p-server/spec.md",
-      "counts": { "aligned": 12, "drifted": 0, "not_implemented": 0 },
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
-        "SC-001", "SC-002", "SC-003", "SC-004"
+      "title": "GPU P2P Server",
+      "aligned": 15,
+      "drifted": [
+        {
+          "requirement": "FR-012",
+          "spec_text": "All transfer handlers MUST perform NVMe reads in --chunk-size increments (not exceeding the NVMe controller's MDTS).",
+          "actual": "Chunked reads implemented (do_chunked_read); MDTS ceiling only stated in CLI doc comment, not validated at runtime against the device.",
+          "location": "components/gpu-services/src/bin/p2p_server.rs:54,273",
+          "severity": "minor"
+        }
       ],
-      "drifted": [],
-      "not_implemented": [],
-      "notes": [
-        "Clean. Backfilled spec matches src/bin/p2p_server.rs and Cargo.toml:40-43 (required-features p2p)."
-      ]
+      "not_implemented": []
     }
   ],
-  "unspecced": [
-    {
-      "item": "create_spdk_dma_buffer_from_cuda_malloc + spdk_unregister_and_cuda_free",
-      "location": "src/dma.rs:189, src/dma.rs:169",
-      "severity": "minor",
-      "notes": "Public SPDK builder for cudaMalloc-backed GPU memory; not referenced by any FR."
-    },
-    {
-      "item": "get_phys_addr",
-      "location": "src/dma.rs:522",
-      "severity": "minor",
-      "notes": "Public p2p helper wrapping spdk_vtophys; not mentioned in any spec."
-    },
-    {
-      "item": "GPU_PAGE_SHIFT constant",
-      "location": "src/gdrcopy_ffi.rs:16",
-      "severity": "trivial",
-      "notes": "Exported alongside spec'd GPU_PAGE_SIZE; spec 002 FR-024 names only GPU_PAGE_SIZE."
-    },
-    {
-      "item": "GpuServicesComponent::initialized (AtomicBool) + is_initialized()",
-      "location": "src/lib.rs:70, src/lib.rs:92",
-      "severity": "trivial",
-      "notes": "Lock-free mirror of GpuState.initialized for async-copy hot paths; not in GpuState Key Entity description."
-    },
-    {
-      "item": "GpuIpcHandle::{verified,pinned} fields + set_verified/set_pinned/is_verified/is_pinned",
-      "location": "components/interfaces/src/igpu_services.rs:63-118",
-      "severity": "minor",
-      "notes": "Defined but never read/written by the component, which tracks state via its own HashSet. Dead API surface."
-    }
-  ],
-  "conflicts": [
-    {
-      "between": ["001-gpu-cuda-services:FR-008", "002-gpu-ssd-dma-prepare:FR-021..FR-024", "003-gpu-p2p-server"],
-      "severity": "minor",
-      "description": "FR-008 mandates exclusive exposure through IGpuServices, but P2P DMA-buffer builders are pub dma-module functions consumed directly by the gpu-p2p-server binary. Specs are behaviorally consistent; FR-008 'exclusively' wording is contradicted.",
-      "location": "src/dma.rs; src/bin/p2p_server.rs:21"
-    }
-  ]
+  "unspecced": [],
+  "conflicts": []
 }

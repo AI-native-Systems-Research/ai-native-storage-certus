@@ -1,17 +1,28 @@
 {
-  "generated": "2026-05-21T00:00:00Z",
-  "based_on": "drift-report from 2026-05-21T00:00:00Z",
+  "generated": "2026-08-20T00:00:00Z",
+  "based_on": "drift-report (components/logger/.specify/sync/drift-report.json)",
+  "summary": {
+    "backfill": 1,
+    "align": 0,
+    "backfill_unspecced": 0,
+    "resolved": 0,
+    "human_decision": 0
+  },
   "proposals": [
     {
       "id": 1,
       "spec": "001-logger-component",
-      "requirement": "FR-001",
+      "requirement": "FR-006",
       "direction": "BACKFILL",
-      "description": "Update spec to use LoggerComponent instead of LoggerComponentV1",
-      "spec_text": "The component MUST be named LoggerComponentV1 and defined using the define_component! macro.",
-      "actual": "Component is named LoggerComponent (without V1 suffix) at src/lib.rs:124. The V1 suffix was removed intentionally as part of a codebase-wide naming cleanup.",
-      "resolution": "Replace all occurrences of LoggerComponentV1 with LoggerComponent in spec.md",
-      "rationale": "The V1 suffix removal was intentional and applied codebase-wide. Only one version exists. The spec should reflect the actual component name.",
+      "severity": "minor",
+      "description": "Rewrite FR-006 to name the exact ANSI escapes emitted by LogLevel::ansi_color; warn is 256-color orange, not yellow.",
+      "location": "src/lib.rs:84-90 (ansi_color); test_all_levels_colored src/lib.rs:378,386",
+      "before": "**FR-006**: Console output MUST include ANSI color codes to distinguish log levels (e.g., red for error, yellow for warn, green for info, blue/cyan for debug).",
+      "after": "**FR-006**: Console output MUST include ANSI color codes to distinguish log levels: red (`\\x1b[31m`) for error, orange (256-color `\\x1b[38;5;208m`) for warn, green (`\\x1b[32m`) for info, and cyan (`\\x1b[36m`) for debug.",
+      "rationale": "Cosmetic spec/impl mismatch. Warn uses 256-color orange (\\x1b[38;5;208m) which is asserted by the passing unit test test_all_levels_colored; the code is intentional and working. Stale spec wording -> BACKFILL per Phase B default.",
+      "scenarios_added": [
+        "User Story 1, scenario 5: warn line prefixed with \\x1b[38;5;208m and terminated with \\x1b[0m when color enabled and RUST_LOG=warn."
+      ],
       "confidence": "HIGH",
       "approved": true
     }

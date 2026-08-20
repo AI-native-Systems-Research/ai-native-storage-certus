@@ -142,3 +142,84 @@ review per the branch-work-only directive.
 3. Decide whether to fix the CI blind spot (add kernel/filesys to
    `default-members`, or a dedicated CI job that builds them).
 4. Commit on the branch only — never to `unstable`.
+
+---
+
+# 2026-08-20 Phase B (Spec-Sync)
+
+Component: `block-device-kernel`
+
+Mode: Spec-Sync Phase B (policy `.specify/sync/PHASE_B_POLICY.md`)
+
+Applied: 2026-08-20
+
+Source: `.specify/sync/drift-report.{json,md}` (regenerated 2026-08-20 — 43
+requirements checked, 41 aligned, 2 drifted, 0 not-implemented, 1 unspecced).
+
+Pre-edit spec backup: `.specify/sync/backups/001-block-device-kernel.spec.md.20260820T171219Z.bak`.
+
+**No `.rs` source was modified and no cargo command was run by this sync.**
+
+## Key finding
+
+The 2026-08-07 telemetry-latency fix ("drafted on branch") only **partially**
+landed. The sync paths (`src/actor.rs:332,397,637`) and the blocking
+`wait_for_cqe` completion site (`:718`) now record real elapsed latency, but the
+primary async-completion path `harvest_completions()` still records a hardcoded
+`0` (`src/actor.rs:776`). Async `ReadAsync`/`WriteAsync` ops thus log 0 ns
+latency, so FR-021/SC-006 do **not** hold for async IO. Routed to an ALIGN task.
+
+## Changes Made
+
+### Specs Updated
+
+| Spec | Requirement | Change Type | Direction |
+|------|-------------|-------------|-----------|
+| 001-block-device-kernel | FR-027 (new) | Added — `FlushSync` validated no-op | BACKFILL-UNSPECCED |
+| 001-block-device-kernel | US2 acceptance scenario 5 (new) | Added — `FlushSync` behavior | BACKFILL-UNSPECCED |
+| 001-block-device-kernel | Header `Last Synced` note | Modified — corrected the 2026-08-07 "fully fixed" claim to "partial; async path still 0 ns" | metadata |
+
+FR-021 requirement text was **not** changed — it is correct as written; the
+defect is in code, so it was routed to `align-tasks.md` rather than backfilled
+(BACKFILL vs ALIGN rule).
+
+### Align Tasks Generated
+
+1 task in `.specify/sync/align-tasks.md` ("2026-08-20 Phase B" section):
+
+- **FR-021 & SC-006 (moderate)** — `harvest_completions()` (`src/actor.rs:776`)
+  records 0 ns latency for async ops despite `InflightOp.start: Instant` being
+  populated. Single task covers both requirements (same root cause). Suggested
+  fix: pass `op.start.elapsed().as_nanos() as u64`, mirroring the existing
+  correct site at `:718`.
+
+### Unspecced Backfilled
+
+- **`Command::FlushSync` handler** (`src/actor.rs:233-247`) → new **FR-027** +
+  US2 acceptance scenario 5. Validated no-op for `ns_id==1` (device is
+  `O_DIRECT|O_DSYNC`, no volatile write cache); `ns_id!=1` → `InvalidNamespace`.
+  Parallel to `block-device-filesys` FR-022 (which issues a real `fdatasync`).
+
+### Resolved
+
+None this run.
+
+### Human Decision
+
+None this run.
+
+## Counts
+
+| Category | Count |
+|----------|-------|
+| BACKFILL applied (drifted requirement) | 0 |
+| UNSPECCED backfilled | 1 |
+| ALIGN tasks | 1 (FR-021 + SC-006) |
+| RESOLVED | 0 |
+| HUMAN_DECISION | 0 |
+
+## Next Steps
+
+1. Review the corrected header note and new FR-027 in
+   `specs/001-block-device-kernel/spec.md`.
+2. Implement the one-line async-latency fix per `align-tasks.md` (small effort).

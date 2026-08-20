@@ -1,42 +1,52 @@
 {
-  "applied": "2026-07-21",
+  "applied": "2026-08-20",
   "component": "gpu-services",
-  "based_on": "proposals from 2026-07-21",
-  "target_spec": "001-gpu-cuda-services",
-  "spec_files_modified": [
-    "specs/001-gpu-cuda-services/spec.md"
-  ],
-  "backup": ".specify/sync/backups/spec.md.bak",
-  "before": {
-    "spec_001_fr_count": 20,
-    "highest_fr": "FR-020"
+  "based_on": "proposals from 2026-08-20 (drift-report 2026-08-20)",
+  "summary": {
+    "backfill_applied": 1,
+    "align_tasks": 0,
+    "unspecced_backfilled": 0,
+    "resolved": 0,
+    "human_decision": 0
   },
-  "after": {
-    "spec_001_fr_count": 22,
-    "highest_fr": "FR-022"
-  },
-  "proposals_applied": [
+  "specs_updated": [
     {
-      "id": 1,
-      "spec_id": "001-gpu-cuda-services",
-      "requirement": "FR-021",
-      "feature": "set_device",
-      "direction": "BACKFILL",
-      "confidence": "HIGH",
-      "location": "src/lib.rs:566-592, interfaces/src/igpu_services.rs:555",
-      "approved": true,
-      "status": "applied"
-    },
-    {
-      "id": 2,
-      "spec_id": "001-gpu-cuda-services",
-      "requirement": "FR-022",
-      "feature": "device_of_ptr",
-      "direction": "BACKFILL",
-      "confidence": "HIGH",
-      "location": "src/lib.rs:594-633, interfaces/src/igpu_services.rs:577",
-      "approved": true,
-      "status": "applied"
+      "spec_id": "003-gpu-p2p-server",
+      "spec_file": "specs/003-gpu-p2p-server/spec.md",
+      "backup": ".specify/sync/backups/003-spec.md.20260820T171427Z.bak",
+      "changes": [
+        {
+          "requirement": "FR-012",
+          "change_type": "BACKFILL (requirement reworded: MDTS ceiling is operator responsibility documented via CLI help, not runtime-validated)"
+        },
+        {
+          "requirement": "US1 Acceptance Scenario 4",
+          "change_type": "ADD (chunked-read scenario: ceil(size/chunk-size) chunks, <n> reported)"
+        },
+        {
+          "requirement": "Assumptions",
+          "change_type": "ADD (bullet: operator responsible for --chunk-size <= MDTS)"
+        },
+        {
+          "requirement": "Metadata",
+          "change_type": "ADD (Last-Synced: 2026-08-20 line)"
+        }
+      ]
     }
+  ],
+  "align_tasks_generated": [],
+  "unspecced_backfilled": [],
+  "resolved": [],
+  "backups": [
+    {
+      "spec_file": "specs/003-gpu-p2p-server/spec.md",
+      "backup": ".specify/sync/backups/003-spec.md.20260820T171427Z.bak"
+    }
+  ],
+  "prior_deliverables_archived": [
+    "proposals-20260721.json",
+    "proposals-20260721.md",
+    "apply-report-20260721.json",
+    "apply-report-20260721.md"
   ]
 }
