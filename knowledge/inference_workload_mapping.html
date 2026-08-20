@@ -530,6 +530,69 @@ Late rounds (9–12):  Load-dominated (massive contexts, heavy eviction reload)
 
 <hr>
 
+<h2 id="client-model">Reality Check: Single Client vs Multi Client</h2>
+
+<p><strong>In production with Certus, there is ONE gRPC client per vLLM worker process.</strong></p>
+
+<pre><code>vLLM Engine (1 process, TP=1)
+  └── CertusGrpcOffloadingSpec (singleton per worker process)
+       └── 1 gRPC channel → 1 stub (process-level singleton)
+            └── certus-server (Rust, SPDK)</code></pre>
+
+<table>
+<tr><th>TP Size</th><th>Clients to Server</th><th>Notes</th></tr>
+<tr><td>TP=1</td><td><strong>1 client</strong></td><td>Single engine, most common</td></tr>
+<tr><td>TP=2</td><td><strong>2 clients</strong></td><td>One per GPU worker process</td></tr>
+<tr><td>TP=8</td><td><strong>8 clients</strong></td><td>Each with own gRPC channel</td></tr>
+</table>
+
+<p>Concurrency within that single client: <code>ThreadPoolExecutor(max_workers=4)</code> + pipelined async gRPC futures. <code>cuMemcpyBatchAsync</code> batches N block copies per driver call.</p>
+
+<p><strong>For bench</strong>: <code>--clients 1 --pipeline-depth 4</code> = realistic single-engine. <code>--clients 4+</code> = TP&gt;1 or multi-tenant.</p>
+
+<hr>
+
+<h2 id="region-granularity">GPU Region Granularity: 64 KB per-layer vs 2 MB SSD</h2>
+
+<p><strong>The mismatch is real and performance-critical.</strong></p>
+
+<table>
+<tr><th>Layer</th><th>Granularity</th><th>What it represents</th></tr>
+<tr><td>GPU KV cache (per-layer, vLLM 0.23+)</td><td><strong>~64 KB</strong></td><td><code>block_size(16) × num_kv_heads(8) × head_dim(128) × dtype(2) × 2(K+V)</code></td></tr>
+<tr><td>GPU page (cross-layer, all layers)</td><td><strong>~2 MB</strong></td><td>All 32 layers packed: <code>64KB × 32</code></td></tr>
+<tr><td>Certus DRAM slot</td><td><strong>2 MB</strong></td><td>One contiguous slot per block (slab_size_bytes)</td></tr>
+<tr><td>Certus SSD extent</td><td><strong>2 MB</strong></td><td>One extent per block</td></tr>
+<tr><td>NVMe MDTS segments</td><td><strong>128 KB</strong></td><td>Max transfer size per NVMe command</td></tr>
+</table>
+
+<h4>Scatter/Gather Flow (vLLM 0.23+ per-layer → Certus)</h4>
+
+<div class="store-load-diagram">
+STORE (GPU→Server):
+  Connector sends N=32 IPC handles per block (each ~64 KB stride)
+  Server copies 64KB × 32 → ONE contiguous 2 MB DRAM slot
+  Background writer flushes 2 MB slot to SSD as one extent
+
+LOAD (Server→GPU):
+  Server reads 2 MB from SSD → DRAM staging
+  Single-region (N==1): 1 × cudaMemcpyAsync(2MB, H2D)     ← OPTIMAL
+  Multi-region (N>1):   32 × cudaMemcpyAsync(64KB, H2D)   ← scatter
+  cuMemcpyBatchAsync:   1 driver call for all 32 copies    ← amortized
+</div>
+
+<h4>Performance per Path</h4>
+<table>
+<tr><th>Path</th><th>Operations</th><th>Driver Calls</th><th>Bottleneck</th></tr>
+<tr><td>Store (per-layer, N=32)</td><td>32 × D2H 64KB</td><td>32 (or 1 with batch)</td><td>Driver call overhead</td></tr>
+<tr><td>Load (per-layer, N=32)</td><td>1 × SSD 2MB + 32 × H2D 64KB</td><td>1 + 32 (or 1+1)</td><td>Scatter overhead</td></tr>
+<tr><td>Load (cross-layer, N=1)</td><td>1 × SSD 2MB + 1 × H2D 2MB</td><td>2</td><td class="coverage-full">Optimal</td></tr>
+<tr><td>SSD I/O (either)</td><td>2MB / 128KB MDTS = 16 segments</td><td>16 NVMe commands</td><td>Sequential per block</td></tr>
+</table>
+
+<p><strong>For bench design</strong>: certus-api-bench uses <code>--block-size 4M</code> with ONE IPC handle per block → models the N==1 cross-layer case. Real vLLM 0.23+ sends 32 × 64KB regions. <code>cuMemcpyBatchAsync</code> amortizes this to near-N==1 overhead. A future bench variant could model per-region scatter by issuing 32 × 64KB operations per logical block.</p>
+
+<hr>
+
 <p style="text-align: center; color: #64748b; font-size: 0.85em; margin-top: 3rem;">
 Generated from <code>knowledge/inference_workload_mapping.md</code> · 8 papers investigated · 13 patterns cataloged
 </p>
