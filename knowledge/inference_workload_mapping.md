@@ -13,7 +13,7 @@ Mapping high-level LLM inference serving behaviors to concrete storage access pa
 | §1 Prefill | New unique tokens only | Prefix blocks that were evicted | **Load** if prefix was evicted; else pure **Store** |
 | §2 Cohort sharing | First request stores prefix | N-1 requests Load if prefix evicted | **Load** (only when eviction happened between requests) |
 | §3 Decode | 1 block per 16 tokens (background) | Full block on cache miss (critical path) | **Load** under pressure, else **0 IO** |
-| §4 Eviction | Flush cold blocks to SSD (scattered) | Reload evicted blocks on reaccess | **Both** simultaneously |
+| §4 Eviction | No IO (DRAM pointer free; SSD write already done by background writer) | Cold Load on reaccess (SSD→DRAM→GPU) | **Cold Load** on reaccess; eviction itself is free |
 | §5 Shared→Unique | First stores prefix + all store M unique | N-1 Load K shared (if evicted) | **Store** always + **Load** if evicted |
 | §6a Chunked prefill | Chunks of new tokens stored | Cached chunks loaded (if evicted) | Mixed per chunk |
 | §6b Speculative | 3–5× Store amplification (most discarded) | Load shared prefix for verification | **Store** (amplified) |
@@ -154,23 +154,32 @@ GPU HBM  ←──────→  DRAM (memory-tier, 32 GiB)  ←────�
 
 ---
 
-## 4. Eviction Pressure → Store (flush) + Load (reload on reaccess)
+## 4. Eviction Pressure → DRAM Free (no IO) + Cold Load (on reaccess)
 
-**Inference behavior**: GPU HBM and DRAM staging tiers are full. New requests arrive, requiring space. LRU/ARC eviction selects cold blocks to push down the tier hierarchy (GPU → DRAM → SSD). When an evicted block is needed again later, it must be reloaded.
+**Inference behavior**: DRAM memory-tier is full. New Stores need slots. LRU eviction frees cold DRAM slots to make room. When an evicted block is needed again later, it must be Cold-Loaded from SSD.
+
+**Critical clarification**: Eviction from DRAM is **NOT an IO operation**. The data is already on SSD (written by the background writer during the original Store). Eviction just:
+1. Transitions dispatch-map entry from `MemoryTier{pointer}` → `BlockDevice{offset}`
+2. Frees the DRAM slot
+
+The block remains on SSD — a future access becomes a Cold Load (SSD→DRAM→GPU) instead of a Hot Load (DRAM→GPU).
 
 **Storage operations:**
 
-| Operation | When | Direction | Pattern |
-|-----------|------|-----------|---------|
-| **Store** (eviction flush) | DRAM tier exceeds watermark | DRAM→SSD | Scattered (LRU blocks are spatially random) |
-| **Load** (reload on miss) | Evicted block needed by decode/prefill | SSD→DRAM→GPU | Random (which block gets reaccessed is workload-dependent) |
+| Operation | When | What happens | IO? |
+|-----------|------|-------------|-----|
+| **Eviction** (DRAM free) | Memory-tier full, new Store needs slot | Pointer transition + DRAM free | **NO IO** — data already on SSD |
+| **Cold Load** (on reaccess) | Evicted block needed by prefill/decode | SSD read → DRAM → GPU copy | **Yes** — NVMe read + H2D DMA |
 
-**The key contention**: Eviction Stores and prefix-cache Loads happen **simultaneously** — new requests need to Load prefixes while the tier is full and evicting. This is the bidirectional contention v3 measures.
+**The key contention**: New Stores (which trigger eviction to free DRAM) happen **simultaneously** with Cold Loads (which need DRAM slots + NVMe bandwidth). Both compete for:
+- DRAM slots (Store needs a slot, Load promotes into a slot)
+- NVMe bandwidth (background writer flushing vs Cold Load reading)
+- This is the bidirectional contention v3 measures.
 
 **Storage pattern**:
-- Stores: Burst of eviction writes when watermark triggers. Blocks are LRU-cold → spatially scattered on SSD.
-- Loads: Demand-driven when evicted block is reaccessed. Random timing (depends on scheduler rescheduling the preempted request).
-- Contention: Store (eviction) and Load (prefix/reload) compete for same NVMe bandwidth + DRAM staging buffers.
+- Eviction itself: Zero IO. Just pointer state change.
+- The REAL IO is: background writer Stores (DRAM→SSD) from earlier + Cold Loads (SSD→DRAM→GPU) from reaccess.
+- Contention: Store background writes and Cold Load reads on same NVMe drives simultaneously.
 
 **Bench parameters**:
 | Parameter | Typical range | Notes |
@@ -569,23 +578,25 @@ The two fundamental operations are **Store** (GPU→DRAM→SSD, "offload") and *
 
 | Trigger | Pattern | Size | Frequency |
 |---------|---------|------|-----------|
-| Prefill completes | §1 | All prompt KV at once (N blocks) | Once per new request |
+| Prefill completes (new unique blocks only) | §1 | Unique suffix KV (M blocks) | Once per new request |
 | Decode accumulates a full block | §3 | 1 block (16 tokens worth) | Every 16 decode steps |
-| Eviction (DRAM tier full) | §4 | 1–32 blocks per eviction cycle | Per scheduling step under pressure |
 | Chunked prefill chunk completes | §6a | 1 chunk (~512 tokens = 32 blocks) | Per chunk boundary |
 | Speculative branches generated | §6b | Per-branch KV (discarded soon) | Per speculation step |
 | Disaggregated: prefill node done | §6f | Entire request KV (GB-scale) | Once per request |
+
+**Note**: Eviction (§4) does NOT trigger a Store. The SSD write already happened via the background writer when the block was originally Stored. Eviction just frees the DRAM slot.
 
 #### LOAD happens when:
 
 | Trigger | Pattern | Size | Frequency |
 |---------|---------|------|-----------|
-| Prefix cache hit (new request reuses stored prefix) | §2, §5 | Shared prefix blocks | Once per new request with cache hit |
-| Decode cache miss (evicted KV needed) | §3, §4 | Full block(s) | On eviction + reaccess |
-| New turn in multi-turn conversation | §6e | ALL prior turns' KV | Once per new turn |
-| Preempted request rescheduled | §6d | Previously evicted request's KV | On scheduler reschedule |
-| Disaggregated: decode node starts | §6f | Entire request KV (GB-scale) | Once per request |
+| Prefix cache hit (block in certus, not on GPU) | §1b, §2, §5 | Shared prefix blocks | Once per new request with certus hit |
+| Preempted request rescheduled (KV was evicted from DRAM) | §3, §4 | Full request's KV blocks | On scheduler reschedule |
+| New turn in multi-turn conversation (prior turns evicted) | §6e | ALL prior turns' KV | Once per new turn (if evicted) |
+| Disaggregated: decode node starts | §6f | Entire request KV (GB-scale) | Once per request (always — different node) |
 | Selective retrieval (sparse) | §6g | Subset of prior KV (10–30%) | Per decode step (if applicable) |
+
+**Note**: All Loads except §6f require that the block was previously evicted from DRAM. If it's still in DRAM → Hot Load (fast, DRAM→GPU only). If evicted → Cold Load (slow, SSD→DRAM→GPU).
 
 #### Temporal Interleave (what the server sees):
 
