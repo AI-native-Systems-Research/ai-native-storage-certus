@@ -3,7 +3,8 @@ import os, sys, json, time
 _here = os.path.dirname(os.path.abspath(__file__))
 if _here not in sys.path:
     sys.path.insert(0, _here)
-import multiturn_workload as mw
+import run_multiturn_common as common
+import run_multiturn_sync_batched as batched
 
 
 def _pin_to_numa_node():
@@ -81,10 +82,10 @@ DISK_STAT = f"/sys/block/{DISK_DEV}/stat"
 
 def disk_rw_bytes():
     """Return (bytes_read, bytes_written) cumulative for DISK_DEV, or (None, None)."""
-    return mw.disk_rw_bytes(DISK_STAT)
+    return common.disk_rw_bytes(DISK_STAT)
 
 
-gib = mw.gib
+gib = common.gib
 
 
 def preflight():
@@ -122,7 +123,7 @@ def main():
 
     t0 = time.perf_counter()
     print(f"[trace] +0.0s loading dataset", file=sys.stderr, flush=True)
-    convs = mw.load_convs(SUBSET_PATH, NUM_CONVS)
+    convs = common.load_convs(SUBSET_PATH, NUM_CONVS)
     print(f"[trace] +{time.perf_counter()-t0:.1f}s loaded {len(convs)} conversations", file=sys.stderr, flush=True)
 
     print(f"[trace] +{time.perf_counter()-t0:.1f}s importing vllm", file=sys.stderr, flush=True)
@@ -161,11 +162,11 @@ def main():
         # run_async_driver captures md0 read/write bytes into the summary's
         # `samples` instead, and prints whole-run counter movement + the KV
         # REGISTRY dump equivalent via counter_movement.
-        import multiturn_async as ma
+        import run_multiturn_async as async_run
 
         print(f"[trace] +{time.perf_counter()-t0:.1f}s WORKLOAD_MODE=async",
               file=sys.stderr, flush=True)
-        summary = ma.run_async_driver(
+        summary = async_run.run_async_driver(
             engine_kwargs, convs, sp,
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,
@@ -191,13 +192,13 @@ def main():
         return
 
     print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
-    llm = mw.build_engine(engine_kwargs, async_mode=False)
+    llm = common.build_engine(engine_kwargs, async_mode=False)
     print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
 
-    mw.start_prom_exporter()
+    common.start_prom_exporter()
 
     tokenizer = llm.get_tokenizer()
-    n_tokens = mw.make_n_tokens(tokenizer, "encode")
+    n_tokens = common.make_n_tokens(tokenizer, "encode")
 
     if disk_rw_bytes()[1] is None:
         print(f"[trace] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled "
@@ -208,8 +209,8 @@ def main():
     # ── vLLM Prometheus counters (per round) ──────────────────────────────
     # Snapshot each vllm: counter at the end of every round and log the delta;
     # the full per-round series is also dumped to JSON. prom_counters lives in
-    # multiturn_workload (get_metrics() + REGISTRY branches).
-    prom_prev = [mw.prom_counters(llm, CAPTURE_METRICS)]
+    # run_multiturn_common (get_metrics() + REGISTRY branches).
+    prom_prev = [common.prom_counters(llm, CAPTURE_METRICS)]
     prom_rounds = []  # (round, {counter_name: delta})
     disk_pre = [None, None]
 
@@ -230,7 +231,7 @@ def main():
               f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
               file=sys.stderr, flush=True)
         if CAPTURE_METRICS:
-            prom_now = mw.prom_counters(llm, CAPTURE_METRICS)
+            prom_now = common.prom_counters(llm, CAPTURE_METRICS)
             d_prom = {k: prom_now.get(k, 0.0) - prom_prev[0].get(k, 0.0)
                       for k in prom_now}
             prom_prev[0] = prom_now
@@ -241,7 +242,7 @@ def main():
                   file=sys.stderr, flush=True)
 
     print(f"[trace] +{time.perf_counter()-t0:.1f}s entering generate loop", file=sys.stderr, flush=True)
-    result = mw.run_batched(
+    result = batched.run_batched(
         llm, convs, sp,
         prompt_budget=PROMPT_BUDGET,
         max_rounds=MAX_ROUNDS,

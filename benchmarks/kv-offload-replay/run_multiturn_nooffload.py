@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """run_multiturn_nooffload.py — multi-turn e2e benchmark, NO KV offloading.
 
-Same workload/driver loop as the other backends (via multiturn_workload), but
+Same workload/driver loop as the other backends (via run_multiturn_common), but
 vLLM runs with no kv_transfer_config at all — the plain GPU-only baseline.
 Prefix caching stays on (matching the offload runs); the only difference is that
 evicted KV is recomputed rather than fetched from an offload tier. Use this as
@@ -18,7 +18,8 @@ if __name__ == "__main__":
     if _here not in sys.path:
         sys.path.insert(0, _here)
 
-    import multiturn_workload as mw
+    import run_multiturn_common as common
+    import run_multiturn_sync_batched as batched
 
     SUBSET_PATH = os.environ.get("DATASET_PATH",
                                    os.path.join(_here, "sharegpt_subset_5000.json"))
@@ -41,7 +42,7 @@ if __name__ == "__main__":
           f"output_tokens={OUTPUT_TOKENS} max_num_seqs={MAX_NUM_SEQS}",
           file=sys.stderr)
 
-    convs = mw.load_convs(SUBSET_PATH, NUM_CONVS)
+    convs = common.load_convs(SUBSET_PATH, NUM_CONVS)
     print(f"[run] loaded {len(convs)} conversations", file=sys.stderr)
 
     from vllm import SamplingParams
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     WORKLOAD_MODE = os.environ.get("WORKLOAD_MODE", "batched").strip().lower()
 
     # MFU probe (shared): adds enable_mfu_metrics iff EngineArgs accepts it.
-    _mfu_kwargs = mw.mfu_kwargs(CAPTURE_METRICS)
+    _mfu_kwargs = common.mfu_kwargs(CAPTURE_METRICS)
 
     engine_kwargs = dict(
         model=MODEL,
@@ -78,10 +79,10 @@ if __name__ == "__main__":
 
     if WORKLOAD_MODE == "async":
         # No kv_transfer_config here (GPU-only baseline); the async model is the
-        # same one-coroutine-per-conv path — see multiturn_async.run_async_driver.
-        import multiturn_async as ma
+        # same one-coroutine-per-conv path — see run_multiturn_async.run_async_driver.
+        import run_multiturn_async as async_run
 
-        summary = ma.run_async_driver(
+        summary = async_run.run_async_driver(
             engine_kwargs, convs, sp,
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,
@@ -100,14 +101,14 @@ if __name__ == "__main__":
         tok_per_s = (total_generations * OUTPUT_TOKENS) / elapsed if elapsed else 0
         summary["tokens_per_sec"] = tok_per_s
     else:
-        llm = mw.build_engine(engine_kwargs, async_mode=False)
-        mw.start_prom_exporter()
+        llm = common.build_engine(engine_kwargs, async_mode=False)
+        common.start_prom_exporter()
 
         tokenizer = llm.get_tokenizer()
-        n_tokens = mw.make_n_tokens(tokenizer)
+        n_tokens = common.make_n_tokens(tokenizer)
 
         # ── Per-round vLLM Prometheus counter deltas ──────────────────────────
-        prom_prev = [mw.prom_counters(llm, CAPTURE_METRICS)]
+        prom_prev = [common.prom_counters(llm, CAPTURE_METRICS)]
         prom_rounds = []   # (round, {counter_name: delta})
         round_stats = []   # (round, prompts, elapsed, n_alive)
 
@@ -117,7 +118,7 @@ if __name__ == "__main__":
                   f"{round_elapsed:.1f}s  ({n_alive} convs still alive)",
                   file=sys.stderr, flush=True)
             if CAPTURE_METRICS:
-                prom_now = mw.prom_counters(llm, CAPTURE_METRICS)
+                prom_now = common.prom_counters(llm, CAPTURE_METRICS)
                 d_prom = {k: prom_now.get(k, 0.0) - prom_prev[0].get(k, 0.0)
                           for k in prom_now}
                 prom_prev[0] = prom_now
@@ -127,7 +128,7 @@ if __name__ == "__main__":
                 print(f"[prom] round {round_idx}: {shown or '(no counter movement)'}",
                       file=sys.stderr, flush=True)
 
-        result = mw.run_batched(
+        result = batched.run_batched(
             llm, convs, sp,
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,
@@ -150,7 +151,7 @@ if __name__ == "__main__":
         # Latency-distribution histograms: sampled once (cumulative over the run,
         # not per round) — queue time (WAITING phase) and decode time (DECODE).
         if CAPTURE_METRICS:
-            hists = mw.prom_histograms(llm, {"vllm:request_queue_time_seconds",
+            hists = common.prom_histograms(llm, {"vllm:request_queue_time_seconds",
                                              "vllm:request_decode_time_seconds"},
                                        CAPTURE_METRICS)
             for name, h in sorted(hists.items()):
@@ -158,9 +159,9 @@ if __name__ == "__main__":
                 mean = tot / cnt if cnt else 0.0
                 fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
                 print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
-                      f"p50={fmt(mw.hist_pct(h['buckets'], cnt, 0.50))} "
-                      f"p90={fmt(mw.hist_pct(h['buckets'], cnt, 0.90))} "
-                      f"p99={fmt(mw.hist_pct(h['buckets'], cnt, 0.99))}",
+                      f"p50={fmt(common.hist_pct(h['buckets'], cnt, 0.50))} "
+                      f"p90={fmt(common.hist_pct(h['buckets'], cnt, 0.90))} "
+                      f"p99={fmt(common.hist_pct(h['buckets'], cnt, 0.99))}",
                       file=sys.stderr, flush=True)
             if hists:
                 # Full buckets on one stderr line so the per-variant teed log is a

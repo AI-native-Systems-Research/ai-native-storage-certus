@@ -1,0 +1,2 @@
+INFO 07-28 20:16:18 [loggers.py:271] Engine 000: Avg prompt throughput: 2140.1 tokens/s, Avg generation throughput: 0.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 8.4%, Prefix cache hit rate: 0.0%, External prefix cache hit rate: 0.0%
+INFO 07-28 20:16:28 [loggers.py:271] Engine 000: Avg prompt throughput: 3000.7 tokens/s, Avg generation throughput: 0.8 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 47.6%, External prefix cache hit rate: 0.0%

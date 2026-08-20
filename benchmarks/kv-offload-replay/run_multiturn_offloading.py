@@ -50,7 +50,8 @@ if __name__ == "__main__":
     if _here not in sys.path:
         sys.path.insert(0, _here)
 
-    import multiturn_workload as mw
+    import run_multiturn_common as common
+    import run_multiturn_sync_batched as batched
 
     # Default to the 450-conversation / 12-turn ShareGPT workload shared with
     # the Certus connector (data/sharegpt_12turn_450.json). Override
@@ -110,9 +111,9 @@ if __name__ == "__main__":
 
     def disk_rw_bytes():
         """Return (bytes_read, bytes_written) cumulative for DISK_DEV, or (None, None)."""
-        return mw.disk_rw_bytes(DISK_STAT)
+        return common.disk_rw_bytes(DISK_STAT)
 
-    gib = mw.gib
+    gib = common.gib
 
     if DISK_DEV and disk_rw_bytes()[1] is None:
         print(f"[run] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled",
@@ -131,7 +132,7 @@ if __name__ == "__main__":
     print(f"[run] cpu_offload_bytes={CPU_BYTES}", file=sys.stderr)
 
     # ── Load conversations and extract human-turn streams ─────────────────
-    convs = mw.load_convs(SUBSET_PATH, NUM_CONVS)
+    convs = common.load_convs(SUBSET_PATH, NUM_CONVS)
     print(f"[run] loaded {len(convs)} conversations  "
           f"(human-turn count: min={min(len(c) for c in convs)} "
           f"median={sorted(len(c) for c in convs)[len(convs)//2]} "
@@ -260,7 +261,7 @@ if __name__ == "__main__":
     # Model FLOPs Utilization probe (shared): adds enable_mfu_metrics iff the
     # running vLLM's EngineArgs accepts it, so estimated_flops_per_gpu_total et
     # al. advance and get captured per round / per sample.
-    _mfu_kwargs = mw.mfu_kwargs(CAPTURE_METRICS)
+    _mfu_kwargs = common.mfu_kwargs(CAPTURE_METRICS)
 
     engine_kwargs = dict(
         model=MODEL,
@@ -293,12 +294,12 @@ if __name__ == "__main__":
     if WORKLOAD_MODE == "async":
         # One vLLM coroutine per conversation on a V1 AsyncLLM. The async
         # orchestration (engine build, 1 Hz disk+prom sampler, asyncio.run,
-        # latency percentiles, summary) lives in multiturn_async so it isn't
+        # latency percentiles, summary) lives in run_multiturn_async so it isn't
         # re-forked here; this branch just supplies the backend engine_kwargs,
         # this driver's disk closure, and its summary fields.
-        import multiturn_async as ma
+        import run_multiturn_async as async_run
 
-        summary = ma.run_async_driver(
+        summary = async_run.run_async_driver(
             engine_kwargs, convs, sp,
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,
@@ -317,18 +318,18 @@ if __name__ == "__main__":
         rounds_done = summary["num_rounds"]
         total_generations = summary["total_generations"]
     else:
-        llm = mw.build_engine(engine_kwargs, async_mode=False)
-        mw.start_prom_exporter()
+        llm = common.build_engine(engine_kwargs, async_mode=False)
+        common.start_prom_exporter()
 
         tokenizer = llm.get_tokenizer()
-        n_tokens = mw.make_n_tokens(tokenizer)
+        n_tokens = common.make_n_tokens(tokenizer)
 
         # ── vLLM Prometheus counters (per round) ──────────────────────────────
         # Snapshot each vllm: counter at the end of every round and log the delta;
         # the full per-round series is also dumped to JSON. prom_counters/
-        # prom_histograms/hist_pct live in multiturn_workload (get_metrics() +
+        # prom_histograms/hist_pct live in run_multiturn_common (get_metrics() +
         # REGISTRY branches).
-        prom_prev = [mw.prom_counters(llm, CAPTURE_METRICS)]
+        prom_prev = [common.prom_counters(llm, CAPTURE_METRICS)]
         prom_rounds = []  # (round, {counter_name: delta})
         # Disk bytes are bracketed around generate(): snapshot in on_round_start
         # (pre-generate), diff in on_round_end (post-generate).
@@ -347,7 +348,7 @@ if __name__ == "__main__":
                   f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
                   file=sys.stderr, flush=True)
             if CAPTURE_METRICS:
-                prom_now = mw.prom_counters(llm, CAPTURE_METRICS)
+                prom_now = common.prom_counters(llm, CAPTURE_METRICS)
                 d_prom = {k: prom_now.get(k, 0.0) - prom_prev[0].get(k, 0.0)
                           for k in prom_now}
                 prom_prev[0] = prom_now
@@ -357,7 +358,7 @@ if __name__ == "__main__":
                 print(f"[prom] round {round_idx}: {shown or '(no counter movement)'}",
                       file=sys.stderr, flush=True)
 
-        result = mw.run_batched(
+        result = batched.run_batched(
             llm, convs, sp,
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,
@@ -381,7 +382,7 @@ if __name__ == "__main__":
         # Latency-distribution histograms: sampled once here (cumulative over the
         # run, not per round) — queue time (WAITING) and decode time (DECODE).
         if CAPTURE_METRICS:
-            hists = mw.prom_histograms(llm, {"vllm:request_queue_time_seconds",
+            hists = common.prom_histograms(llm, {"vllm:request_queue_time_seconds",
                                              "vllm:request_decode_time_seconds"},
                                        CAPTURE_METRICS)
             for name, h in sorted(hists.items()):
@@ -389,9 +390,9 @@ if __name__ == "__main__":
                 mean = tot / cnt if cnt else 0.0
                 fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
                 print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
-                      f"p50={fmt(mw.hist_pct(h['buckets'], cnt, 0.50))} "
-                      f"p90={fmt(mw.hist_pct(h['buckets'], cnt, 0.90))} "
-                      f"p99={fmt(mw.hist_pct(h['buckets'], cnt, 0.99))}",
+                      f"p50={fmt(common.hist_pct(h['buckets'], cnt, 0.50))} "
+                      f"p90={fmt(common.hist_pct(h['buckets'], cnt, 0.90))} "
+                      f"p99={fmt(common.hist_pct(h['buckets'], cnt, 0.99))}",
                       file=sys.stderr, flush=True)
             if hists:
                 # Full buckets on one stderr line so the per-variant teed log is a

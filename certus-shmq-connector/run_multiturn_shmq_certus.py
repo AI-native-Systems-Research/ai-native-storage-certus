@@ -54,7 +54,8 @@ if __name__ == "__main__":
     _bench_dir = os.path.join(_here, "..", "benchmarks", "kv-offload-replay")
     if _bench_dir not in sys.path:
         sys.path.insert(0, _bench_dir)
-    import multiturn_workload as mw
+    import run_multiturn_common as common
+    import run_multiturn_sync_batched as batched
 
     DEFAULT_DATASET = os.path.join(
         _here, "..", "data", "sharegpt_12turn_450.json"
@@ -116,7 +117,7 @@ if __name__ == "__main__":
         },
     }
 
-    convs = mw.load_convs(DATASET_PATH, NUM_CONVS, CONV_MULTIPLIER)
+    convs = common.load_convs(DATASET_PATH, NUM_CONVS, CONV_MULTIPLIER)
     # load_convs returns the replicated set; report the base count first (as the
     # inline loop did), then the replicated total.
     _base_convs = len(convs) // CONV_MULTIPLIER if CONV_MULTIPLIER > 1 else len(convs)
@@ -199,9 +200,9 @@ if __name__ == "__main__":
     _session_id_fn = lambda i: i + 1  # noqa: E731
 
     if WORKLOAD_MODE == "async":
-        import multiturn_async as ma
+        import run_multiturn_async as async_run
 
-        summary = ma.run_async_driver(
+        summary = async_run.run_async_driver(
             engine_kwargs, convs, sp,
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,
@@ -224,11 +225,11 @@ if __name__ == "__main__":
         except OSError as e:
             print(f"[run] could not save async results: {e}", file=sys.stderr)
     else:
-        llm = mw.build_engine(engine_kwargs, async_mode=False)
-        mw.start_prom_exporter()
+        llm = common.build_engine(engine_kwargs, async_mode=False)
+        common.start_prom_exporter()
 
         tokenizer = llm.get_tokenizer()
-        n_tokens = mw.make_n_tokens(tokenizer)
+        n_tokens = common.make_n_tokens(tokenizer)
 
         # NOTE: no per-round SSD I/O accounting here. The gRPC driver polled the
         # server's GetIoStats RPC each round for read/write byte deltas; the ring
@@ -245,7 +246,7 @@ if __name__ == "__main__":
                 file=sys.stderr,
             )
 
-        result = mw.run_batched(
+        result = batched.run_batched(
             llm, convs, sp,
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,

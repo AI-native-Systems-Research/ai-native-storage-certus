@@ -1,35 +1,32 @@
-"""multiturn_workload.py — the shared multi-turn ShareGPT replay workload.
+"""run_multiturn_common.py — shared setup for the multi-turn ShareGPT replay.
 
-This module owns the *workload* — dataset loading, per-conversation turn
-assembly, the prompt-budget / empty-prompt guards, and the generation loop —
-so the five backend drivers
+This module owns the pieces both execution models need, so the five backend
+drivers
 (``run_multiturn_nooffload.py``, ``run_multiturn_offloading.py``,
 ``run_fs_bench_450.py``, ``run_fs_bench_450_iostat.py`` and
-``certus-shmq-connector/run_multiturn_shmq_certus.py``) stop copy-pasting it.
+``certus-shmq-connector/run_multiturn_shmq_certus.py``) stop copy-pasting them:
+dataset loading + turn extraction (``load_convs``), engine construction
+(``build_engine``), the tokenizer-length closure (``make_n_tokens``), the MFU
+probe (``mfu_kwargs``), the Prometheus exporter (``start_prom_exporter``), and
+the telemetry helpers (``prom_counters``, ``prom_histograms``, ``hist_pct``,
+``disk_rw_bytes``, ``gib``).
+
+The two *execution models* live in their own siblings and both build on this
+module: the default synchronous batched-round loop in
+:mod:`run_multiturn_sync_batched` (``run_batched``) and the async
+per-conversation model in :mod:`run_multiturn_async` (``run_async`` /
+``run_async_driver``).
 
 The *backend* — how vLLM is constructed (``kv_transfer_config``, engine kwargs)
-and what telemetry each run captures — stays in the driver. The driver hands the
-loop its ``LLM``, its ``SamplingParams``, an ``n_tokens`` callable, and optional
-per-round callbacks; the loop drives the conversation state machine and calls
-back at the points where a driver wants to snapshot / print.
+and what telemetry each run captures — stays in the driver, which assembles
+``engine_kwargs`` and passes them here.
 
-Behavior is intentionally identical to the pre-extraction inline loops. The two
-places the drivers differed are parameters here:
-
-* ``skip_empty`` — nooffload and the shmq driver drop a turn whose prompt
-  tokenizes to 0 tokens (granite renders some ShareGPT turns empty, which aborts
-  the vLLM engine); the offload/SharedStorage drivers did not have that guard.
-* ``session_id_fn`` — the shmq driver tags every request with a per-conversation
-  KV-offload ``session_id`` via a cloned ``SamplingParams``; the others pass one
-  shared ``SamplingParams``.
-
-Nothing here imports vllm, so the driver stays in control of when the (heavy)
-engine import happens.
+Nothing here imports vllm at module load, so the driver stays in control of when
+the (heavy) engine import happens.
 """
 
 import json
 import sys
-import time
 
 
 # ── Workload input ────────────────────────────────────────────────────────
@@ -66,127 +63,6 @@ def load_convs(dataset_path, num_convs, conv_multiplier=1):
                 tagged[0] = f"[r{r}] {tagged[0]}"
                 convs.append(tagged)
     return convs
-
-
-# ── The batched round loop (current, synchronous behavior) ──────────────────
-def run_batched(llm, convs, sampling_params, *, prompt_budget, max_rounds,
-                n_tokens, skip_empty=False, session_id_fn=None,
-                on_round_start=None, on_round_end=None):
-    """Drive the multi-turn workload as synchronous batched rounds.
-
-    Round k submits, for every still-alive conversation, the cumulative prompt
-    (all prior human turns + all prior vLLM responses + the k'th human turn) in
-    one ``llm.generate`` batch, then appends each response for the next round.
-
-    Parameters
-    ----------
-    llm : vllm.LLM
-        Constructed by the driver with its backend ``kv_transfer_config``.
-    convs : list[list[str]]
-        Human-turn streams from :func:`load_convs`.
-    sampling_params : vllm.SamplingParams
-        Base sampling params. When ``session_id_fn`` is given it is
-        ``.clone()``d per request; otherwise the same object is reused.
-    prompt_budget : int
-        Max prompt tokens (``max_model_len - output_tokens``); a conversation
-        whose next prompt exceeds this is dropped from further rounds.
-    max_rounds : int
-        Cap on rounds (0 = run until conversations are exhausted).
-    n_tokens : Callable[[str], int]
-        Token-length function (the driver owns tokenizer choice).
-    skip_empty : bool
-        Also drop a turn whose prompt tokenizes to 0 tokens.
-    session_id_fn : Callable[[int], int] | None
-        If given, each request gets ``sampling_params.clone()`` with
-        ``extra_args={"kv_transfer_params": {"session_id": session_id_fn(i)}}``
-        where ``i`` is the conversation index.
-    on_round_start : Callable[[int, int], None] | None
-        Called after the round's batch is assembled, before ``generate``, as
-        ``on_round_start(round_idx, n_prompts)``. Use to snapshot pre-generate
-        counters (disk bytes, etc.).
-    on_round_end : Callable[[int, int, float, int], None] | None
-        Called after outputs are folded back in, as
-        ``on_round_end(round_idx, n_prompts, round_elapsed, n_alive)``. Use to
-        snapshot post-generate counters, print the ``[run] round N:`` line, and
-        record per-round telemetry.
-
-    Returns
-    -------
-    dict with ``rounds_done``, ``total_generations`` and ``elapsed`` (loop-only
-    wall time, excluding model load).
-    """
-    n = len(convs)
-    alive = [True] * n
-    next_turn = [0] * n
-    contexts = [""] * n
-
-    rounds_done = 0
-    total_generations = 0
-    t_start = time.perf_counter()
-
-    while True:
-        if max_rounds and rounds_done >= max_rounds:
-            break
-
-        active_idx = []
-        active_prompts = []
-        active_sps = [] if session_id_fn is not None else None
-        for i, conv in enumerate(convs):
-            if not alive[i]:
-                continue
-            k = next_turn[i]
-            if k >= len(conv):
-                alive[i] = False
-                continue
-            human = conv[k]
-            candidate = human if k == 0 else contexts[i] + "\n\n" + human
-            nt = n_tokens(candidate)
-            if (skip_empty and nt == 0) or nt > prompt_budget:
-                alive[i] = False
-                continue
-            contexts[i] = candidate
-            active_idx.append(i)
-            active_prompts.append(candidate)
-            if session_id_fn is not None:
-                # Tag each request with its conversation as the KV-offload
-                # session_id. The conversation index is stable across rounds, so
-                # every turn of the same conversation shares one session_id.
-                sp_i = sampling_params.clone()
-                sp_i.extra_args = {
-                    "kv_transfer_params": {"session_id": session_id_fn(i)}
-                }
-                active_sps.append(sp_i)
-
-        if not active_prompts:
-            break
-
-        rounds_done += 1
-        if on_round_start is not None:
-            on_round_start(rounds_done, len(active_prompts))
-
-        round_start = time.perf_counter()
-        outs = llm.generate(
-            active_prompts,
-            active_sps if session_id_fn is not None else sampling_params,
-        )
-        round_elapsed = time.perf_counter() - round_start
-
-        for i, out in zip(active_idx, outs):
-            response = out.outputs[0].text if out.outputs else ""
-            contexts[i] = contexts[i] + response
-            next_turn[i] += 1
-        total_generations += len(active_prompts)
-        n_alive = sum(alive)
-
-        if on_round_end is not None:
-            on_round_end(rounds_done, len(active_prompts), round_elapsed, n_alive)
-
-    elapsed = time.perf_counter() - t_start
-    return {
-        "rounds_done": rounds_done,
-        "total_generations": total_generations,
-        "elapsed": elapsed,
-    }
 
 
 # ── Shared telemetry helpers (lifted verbatim from the drivers) ─────────────
@@ -290,8 +166,9 @@ def hist_pct(buckets, count, p):
 # These own the boilerplate every driver repeated around the backend-specific
 # kv_transfer_config: the common LLM kwargs, the MFU-metrics probe, the optional
 # Prometheus exporter, and the tokenizer-length closure. Both execution models
-# use them — the batched loop below and the async model in multiturn_async
-# (build_engine(..., async_mode=True) + run_async) — so setup is not forked.
+# use them — run_batched in run_multiturn_sync_batched and the async model in
+# run_multiturn_async (build_engine(..., async_mode=True) + run_async) — so
+# setup is not forked.
 def build_engine(engine_kwargs, *, async_mode=False):
     """Construct the vLLM engine from a fully-assembled kwargs dict.
 
@@ -377,6 +254,7 @@ def start_prom_exporter():
         )
 
 
-# The async per-conversation execution model (run_async, run_async_driver) lives
-# in multiturn_async — an opt-in sibling; the batched loop above stays the
-# default and this module carries no async code.
+# The two execution models live in their own siblings and carry no shared setup:
+# the default synchronous batched-round loop (run_batched) in
+# run_multiturn_sync_batched, and the opt-in async per-conversation model
+# (run_async, run_async_driver) in run_multiturn_async.

@@ -60,12 +60,13 @@ WORKDIR /workspace
 # TRACE_OFFLOAD=1), plus the shared dataset (paths relative to the repo-root build
 # context). torch/numpy/vllm come from the base image; no extra pip deps.
 COPY benchmarks/kv-offload-replay/run_multiturn_offloading.py /workspace/bench/
-# Shared workload modules the driver imports: multiturn_workload (batched loop +
-# engine/telemetry setup, imported at top) and multiturn_async (async
+# Shared workload modules the driver imports: run_multiturn_common (batched loop +
+# engine/telemetry setup, imported at top) and run_multiturn_async (async
 # per-conversation model, imported only on WORKLOAD_MODE=async). Both must be
 # present or the driver ModuleNotFound's.
-COPY benchmarks/kv-offload-replay/multiturn_workload.py /workspace/bench/
-COPY benchmarks/kv-offload-replay/multiturn_async.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_multiturn_common.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_multiturn_sync_batched.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/tracing_offloading_connector.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/tracing_offloading_manager.py /workspace/bench/
 COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json

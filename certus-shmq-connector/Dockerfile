@@ -57,9 +57,11 @@ WORKDIR /workspace
 COPY certus-shmq-connector/ /workspace/certus-shmq-connector/
 # The shmq driver imports the shared workload modules from the sibling bench dir
 # (sys.path insert of ../benchmarks/kv-offload-replay -> /workspace/benchmarks/...):
-# multiturn_workload (batched loop + setup) and multiturn_async (WORKLOAD_MODE=async).
-COPY benchmarks/kv-offload-replay/multiturn_workload.py /workspace/benchmarks/kv-offload-replay/
-COPY benchmarks/kv-offload-replay/multiturn_async.py /workspace/benchmarks/kv-offload-replay/
+# run_multiturn_common (engine/telemetry setup), run_multiturn_sync_batched (the
+# batched loop) and run_multiturn_async (WORKLOAD_MODE=async) — all three needed.
+COPY benchmarks/kv-offload-replay/run_multiturn_common.py /workspace/benchmarks/kv-offload-replay/
+COPY benchmarks/kv-offload-replay/run_multiturn_sync_batched.py /workspace/benchmarks/kv-offload-replay/
+COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/benchmarks/kv-offload-replay/
 COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 RUN pip install --no-cache-dir -e /workspace/certus-shmq-connector

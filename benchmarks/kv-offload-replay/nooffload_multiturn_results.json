@@ -1,0 +1,80 @@
+{
+  "model": "NousResearch/Meta-Llama-3-8B",
+  "max_model_len": 8192,
+  "output_tokens": 150,
+  "offload": "none",
+  "elapsed_time": 10.755249683003058,
+  "num_conversations": 16,
+  "num_rounds": 3,
+  "total_generations": 48,
+  "mode": "async",
+  "turn_latency_p50": 3.511122930998681,
+  "turn_latency_p90": 3.791640526993433,
+  "turn_latency_p99": 3.7965382959955605,
+  "ttft_p50": 0.1008359150000615,
+  "counter_movement": {
+    "vllm:estimated_flops_per_gpu_total": 97021200957440.0,
+    "vllm:estimated_read_bytes_per_gpu_total": 6051696066560.0,
+    "vllm:estimated_write_bytes_per_gpu_total": 25991310336.0,
+    "vllm:prefix_cache_queries_total": 7445.0,
+    "vllm:prefix_cache_hits_total": 6144.0,
+    "vllm:prompt_tokens_total": 7445.0,
+    "vllm:prompt_tokens_by_source_total": 7445.0,
+    "vllm:prompt_tokens_cached_total": 6144.0,
+    "vllm:generation_tokens_total": 5205.0,
+    "vllm:request_success_total": 36.0
+  },
+  "samples": [
+    {
+      "t": 88131.618797027,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 88132.621827317,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 88133.624442926,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 88134.628708718,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 88135.631348051,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 88136.63453428,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 88137.637275893,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 88138.640686268,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 88139.64385279,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 88140.647213352,
+      "read_bytes": null,
+      "write_bytes": null
+    }
+  ],
+  "tokens_per_sec": 669.4405255303782
+}

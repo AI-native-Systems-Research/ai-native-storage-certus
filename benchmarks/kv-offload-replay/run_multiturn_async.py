@@ -1,12 +1,13 @@
-"""multiturn_async.py — the opt-in async per-conversation execution model.
+"""run_multiturn_async.py — the opt-in async per-conversation execution model.
 
-The default, synchronous batched-round workload lives in
-:mod:`multiturn_workload` (``run_batched``) alongside the shared setup every
+The default, synchronous batched-round loop lives in
+:mod:`run_multiturn_sync_batched` (``run_batched``); the shared setup every
 driver uses (``build_engine``, ``make_n_tokens``, ``mfu_kwargs``,
-``start_prom_exporter``, the telemetry helpers). This module is the *other*
-execution model — one vLLM coroutine per conversation on a V1 ``AsyncLLM`` — kept
-in its own file so the default path stays lean and the async orchestration lands
-in exactly one place instead of being copy-pasted into each backend driver's
+``start_prom_exporter``, the telemetry helpers) lives in
+:mod:`run_multiturn_common`. This module is the *other* execution model — one
+vLLM coroutine per conversation on a V1 ``AsyncLLM`` — kept in its own file so
+the default path stays lean and the async orchestration lands in exactly one
+place instead of being copy-pasted into each backend driver's
 ``WORKLOAD_MODE=async`` branch.
 
 A driver opts in with a single call to :func:`run_async_driver`, handing it the
@@ -17,14 +18,14 @@ async-specific — building the ``AsyncLLM``, the 1 Hz disk+Prometheus sampler,
 here. The low-level :func:`run_async` loop is exposed too for drivers that need
 finer control (e.g. a per-conversation ``session_id_fn``).
 
-Like :mod:`multiturn_workload`, nothing here imports vllm at module load — the
-engine import happens lazily inside ``multiturn_workload.build_engine``.
+Like :mod:`run_multiturn_common`, nothing here imports vllm at module load — the
+engine import happens lazily inside ``run_multiturn_common.build_engine``.
 """
 
 import sys
 import time
 
-import multiturn_workload as mw
+import run_multiturn_common as common
 
 
 async def get_tokenizer(engine):
@@ -47,7 +48,7 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
 
     Every conversation is launched at once; within a coroutine its turns run
     sequentially (each turn's prompt is the running context + the next human
-    turn, exactly as ``multiturn_workload.run_batched`` builds it). vLLM's
+    turn, exactly as ``run_multiturn_sync_batched.run_batched`` builds it). vLLM's
     ``max_num_seqs`` bounds how many run concurrently — the rest queue in WAITING
     — so this is the max-concurrency analogue of the batched rounds, not a
     behavioral change to the workload itself.
@@ -58,7 +59,7 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
     given, a concurrent task calls it every ``1/sample_hz`` seconds and appends
     ``(t, sampler())`` — the async analogue of the batched per-round snapshot
     (``AsyncLLM`` has no ``get_metrics()``, so a sampler typically reads the
-    global prometheus REGISTRY via ``multiturn_workload.prom_counters``).
+    global prometheus REGISTRY via ``run_multiturn_common.prom_counters``).
 
     ``max_rounds`` here is a per-conversation turn cap (0 = all turns).
 
@@ -145,7 +146,7 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
 
     This is the single entry point a backend driver's ``WORKLOAD_MODE=async``
     branch calls. It builds a V1 ``AsyncLLM`` from ``engine_kwargs`` (via
-    ``multiturn_workload.build_engine(..., async_mode=True)`` — the same kwargs
+    ``run_multiturn_common.build_engine(..., async_mode=True)`` — the same kwargs
     the batched path uses, so the backend config is not duplicated), starts the
     optional Prometheus exporter, replays ``convs`` through :func:`run_async`
     with a 1 Hz disk+counter sampler, then folds the per-turn latency / TTFT
@@ -176,8 +177,8 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
     """
     import asyncio
 
-    engine = mw.build_engine(engine_kwargs, async_mode=True)
-    mw.start_prom_exporter()
+    engine = common.build_engine(engine_kwargs, async_mode=True)
+    common.start_prom_exporter()
     print("[run] WORKLOAD_MODE=async — one coroutine per conversation "
           "(max_num_seqs bounds the running batch)", file=sys.stderr)
 
@@ -190,12 +191,12 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
     # per-round disk+counter deltas.
     def sampler():
         rd, wr = _disk()
-        return {"prom": mw.prom_counters(engine, capture_metrics),
+        return {"prom": common.prom_counters(engine, capture_metrics),
                 "read_bytes": rd, "write_bytes": wr}
 
     async def _amain():
         tokenizer = await get_tokenizer(engine)
-        n_tokens = mw.make_n_tokens(tokenizer, n_tokens_flavor)
+        n_tokens = common.make_n_tokens(tokenizer, n_tokens_flavor)
         return await run_async(
             engine, convs, sampling_params,
             prompt_budget=prompt_budget,
