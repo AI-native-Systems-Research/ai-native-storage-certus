@@ -907,6 +907,49 @@ thin deep spine laid exactly where sessions are ending; the trace's is thick and
 That is the same broad-and-thin against narrow-and-thick statement as the section above, and it is
 still the unbuilt mechanism.
 
+#### Why the realised run length collapses: a per-node draw from an arrival-weighted law (FR-054m)
+
+The realised deep run length was the sharpest open fitted-against-realised gap, and the obvious
+suspect was attrition truncating a long draw. **It is not.** Splitting the realised median by *why*
+the run ended separates a short draw from a truncated walk, and on `qwen_code` the runs that end in a
+real **split** are 1 block long in every band while the ones ending in **attrition** are 2-7 — so the
+long draws are the ones being truncated, and the short ones are simply short. On
+`exgentic_tau2_airline` the same table shows attrition-terminated runs of 132/141/12/51/29/19 against
+fanout-terminated runs of 124/1/2/1/1/27: attrition is what ends a *long* run, not what makes runs
+short.
+
+Nor is the sampler at fault. Drawing each band's own stated `length` 20000 times reproduces its
+stated median **exactly** in every band of both traces. The defect is which median was fitted:
+
+| `qwen_code` band | stated (fan-in weighted) | per-node draw yields | trace's per-SEGMENT median |
+| --- | --- | --- | --- |
+| 0+ | **1** | 1 | **29** |
+| 1-7 | **3** | 3 | **9** |
+| 8-31 | **8** | 8 | **18** |
+| 32-127 | 136 | 136 | 23 |
+| 128-511 | 21 | 21 | 37 |
+| 512+ | 9 | 10 | 13 |
+
+`fit::segments::fit_process` fits `length` as `weighted_empirical((length, fan_in))`, so the median it
+states is the run a typical **arrival** walks. `Corpus::run_length` draws it once per **node**. On
+`qwen_code`'s root band those two medians are **1** and **29**: the splits carrying thousands of
+sessions are the short ones, so the weighting pulls the law short and the walk faithfully draws a
+short law at every node. `exgentic_tau2_airline` confirms it from the other side — band 0's two
+medians agree at 124 and the realised preamble is 124 exactly, while the bands whose medians disagree
+(1-7: 41 against 14; 128-511: 119 against 1) are precisely the ones whose realised lengths are wrong.
+
+**The rule this yields is about the KEY, not the quantity.** The fan-in weighting is right for the
+child-choice law — a walker meets a split in proportion to the sessions arriving at it, and
+`branch_skew` is consumed per arrival — and it was imported wholesale from there to `length` and
+`out_degree`, which are keyed on the node. Every node draws once whatever its fan-in, so the
+population those two must match is the **segments**. `out_degree` carries the same defect more
+dramatically: `qwen_code`'s band 0 states **4739** children where the census's per-node median
+out-degree is **2**.
+
+Not built. It changes the default fit path, so it needs the whole-corpus matrix, and the prediction to
+test it against is that an unweighted `length` moves the realised run lengths toward
+29/9/18/23/37/13 and the segment count from 13671 toward the trace's 9998.
+
 ### The achievable floor — the derivation behind FR-057c, and what it says about the gate
 
 The tolerances of FR-057b were calibrated from the generator against itself across seeds. That is a

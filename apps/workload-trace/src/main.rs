@@ -2244,6 +2244,22 @@ struct BandShape {
     /// `exgentic_tau2_airline`'s trace runs below depth 32 have a median length of exactly 1, and
     /// its zero attrition was read as an invariant. The per-block hazard is the comparable form.
     blocks: u64,
+    /// Nothing below at all — every session walking the run stopped at the same node.
+    ///
+    /// Counted so the three end reasons account for every segment. A band where `fanout + attrition`
+    /// falls short of `segments` is one whose runs are ending because the whole cohort ran out, which
+    /// is a different defect from losing part of it.
+    leaf: u64,
+    /// Median run length among segments ending in a real split.
+    ///
+    /// The discriminator for *why* a realised run is shorter than the fitted one. A run drawn as 136
+    /// blocks can only appear in the plan as far as some session walked it, so a short realised run
+    /// has two possible causes: the drawn length was short, or the walkers truncated it. Splitting
+    /// the median by end reason separates them — if fanout-terminated runs are long and
+    /// attrition-terminated ones are short, the draw is right and the walk is cutting it.
+    len_med_fanout: u64,
+    /// Median run length among segments ending because part of the cohort stopped arriving.
+    len_med_attrition: u64,
 }
 
 /// Summarise a census's rows into the same bands the fit uses.
@@ -2255,6 +2271,13 @@ fn band_shapes(rows: &[workload_model::fit::segments::SegmentRow]) -> Vec<(u32, 
         }
         v.sort_unstable();
         v[v.len() / 2]
+    };
+    let len_where = |rows: &[&workload_model::fit::segments::SegmentRow],
+                     end: workload_model::fit::segments::SegmentEnd| {
+        rows.iter()
+            .filter(|r| r.ends == end)
+            .map(|r| u64::from(r.length))
+            .collect::<Vec<u64>>()
     };
     bands
         .iter()
@@ -2280,10 +2303,128 @@ fn band_shapes(rows: &[workload_model::fit::segments::SegmentRow]) -> Vec<(u32, 
                         .filter(|r| r.ends == workload_model::fit::segments::SegmentEnd::Attrition)
                         .count() as u64,
                     blocks: in_band.iter().map(|r| u64::from(r.length)).sum(),
+                    leaf: in_band
+                        .iter()
+                        .filter(|r| r.ends == workload_model::fit::segments::SegmentEnd::Leaf)
+                        .count() as u64,
+                    len_med_fanout: med(len_where(
+                        &in_band,
+                        workload_model::fit::segments::SegmentEnd::Fanout,
+                    )),
+                    len_med_attrition: med(len_where(
+                        &in_band,
+                        workload_model::fit::segments::SegmentEnd::Attrition,
+                    )),
                 },
             )
         })
         .collect()
+}
+
+/// The median of `(value, weight)` pairs, weighting each value by its weight.
+///
+/// Written out because it is the estimator the run-length fit uses (fan-in weighted) and the
+/// diagnostic below has to reproduce it exactly to show what it costs against the unweighted one.
+/// `0` for an empty input, which is how the report prints an empty band.
+fn weighted_median(pairs: &[(u64, u64)]) -> u64 {
+    let total: u64 = pairs.iter().map(|(_, w)| *w).sum();
+    if total == 0 {
+        return 0;
+    }
+    let mut sorted = pairs.to_vec();
+    sorted.sort_unstable();
+    // The first value at or past half the weight — the same convention as the unweighted medians in
+    // this report, which take the lower of two middles.
+    let half = total / 2;
+    let mut acc = 0u64;
+    for (v, w) in &sorted {
+        acc += *w;
+        if acc > half {
+            return *v;
+        }
+    }
+    sorted.last().map(|(v, _)| *v).unwrap_or(0)
+}
+
+/// What a run-length **draw** yields, against what the band states and what the trace has.
+///
+/// Three medians get confused with each other, and the confusion is a measure mismatch rather than
+/// an arithmetic slip:
+///
+/// * the band's stated `length` is **fan-in weighted** (`fit::segments::fit_process`), so its median
+///   is the run length a typical *arrival* walks — a run carrying 16045 sessions counts 16045 times;
+/// * the walk draws that distribution once **per node** (`Corpus::run_length`), where every node
+///   counts once, whatever its fan-in;
+/// * the census reports the median over **segments**, also unweighted.
+///
+/// So a stated median of 136 against a realised one of 2 is not by itself a defect — the report
+/// already warns the two are meant to differ. This makes the comparison an honest one by drawing the
+/// band's own distribution per node and printing the empirical median beside the trace's unweighted
+/// per-segment median, which is the quantity the walk should be reproducing.
+fn print_run_length_draw(
+    doc: &workload_model::schema::Document,
+    trace_rows: &[workload_model::fit::segments::SegmentRow],
+) {
+    use workload_model::rng::Stream;
+    use workload_model::schema::Branching;
+
+    /// Its own stream tag, so sampling here cannot alias the walk's own run-length stream.
+    const LEN_DRAW_TAG: u64 = 0x6c65_6e5f_6472_6177;
+
+    let Branching::Segments(p) = &doc.corpus.trees.branching else {
+        return;
+    };
+    println!(
+        "\n    run length: what the band SAYS against what a per-node draw YIELDS\n    \
+         the stated quantiles are fan-in weighted (the run a typical ARRIVAL walks); the walk draws\n    \
+         them once per NODE. `trace/seg` is the trace's unweighted per-segment median — the quantity\n    \
+         a per-node draw is reproducing, and the one to compare `drawn` against."
+    );
+    println!(
+        "    {:>8}  {:>9} {:>9}  {:>9}  {:>9}  {:>9}",
+        "depths", "stated~", "drawn~", "drawn mean", "trace/seg", "arrivals~"
+    );
+    for (i, b) in p.by_depth.iter().enumerate() {
+        let hi = p
+            .by_depth
+            .get(i + 1)
+            .map(|n| n.from_depth)
+            .unwrap_or(u32::MAX);
+        // 20k draws, keyed off the band so two bands cannot share a stream and look alike.
+        let mut st = Stream::new(doc.seed ^ LEN_DRAW_TAG, u64::from(b.from_depth));
+        let mut v: Vec<u64> = (0..20_000)
+            .map(|_| b.length.sample_u64(&mut st).max(1))
+            .collect();
+        let mean = v.iter().sum::<u64>() as f64 / v.len() as f64;
+        v.sort_unstable();
+        let drawn = v[v.len() / 2];
+        let stated = b.length.quantile(0.5).unwrap_or(f64::NAN);
+        // The trace's own segments in this band, unweighted and then fan-in weighted, so the two
+        // measures of the same rows can be read against each other.
+        let mut seg: Vec<u64> = trace_rows
+            .iter()
+            .filter(|r| r.start_depth >= b.from_depth && (hi == u32::MAX || r.start_depth < hi))
+            .map(|r| u64::from(r.length))
+            .collect();
+        seg.sort_unstable();
+        let arrivals = weighted_median(
+            &trace_rows
+                .iter()
+                .filter(|r| r.start_depth >= b.from_depth && (hi == u32::MAX || r.start_depth < hi))
+                .map(|r| (u64::from(r.length), u64::from(r.fan_in)))
+                .collect::<Vec<_>>(),
+        );
+        println!(
+            "    {:>8}  {:>9.1} {drawn:>9}  {mean:>10.1}  {:>9}  {arrivals:>9}",
+            format!("{}+", b.from_depth),
+            stated,
+            if seg.is_empty() {
+                0
+            } else {
+                seg[seg.len() / 2]
+            }
+        );
+    }
 }
 
 /// Compare the **structure** of the generated trunk against the source trace's.
@@ -2398,6 +2539,42 @@ fn print_structure_diff(
         t.iter().map(|(_, s)| s.segments).sum(),
         p.iter().map(|(_, s)| s.segments).sum(),
     );
+    print_run_length_draw(doc, trace_rows);
+    // Why a realised run is shorter than the fitted one, which is the sharpest open gap in the
+    // trunk fit: `qwen_code`'s band 32-127 states a run length of 136 blocks and realises 2. A run
+    // drawn as 136 can only appear in the plan as far as some session walked it, so the median split
+    // by end reason separates a short DRAW from a truncated WALK.
+    println!(
+        "\n    run length by why the run ended — a short draw and a truncated walk look the same in\n    \
+         the median above. leaf means the whole cohort stopped at one node, attrition means part of it."
+    );
+    println!(
+        "    {:>8}  {:>9} {:>9}  {:>9} {:>9}  {:>7} {:>7}",
+        "depths", "len fan T", "len fan S", "len att T", "len att S", "leaf T", "leaf S"
+    );
+    for ((lo, ts), (_, ps)) in t.iter().zip(p.iter()) {
+        if ts.segments == 0 && ps.segments == 0 {
+            continue;
+        }
+        // A dash where no segment in the band ended that way, so an empty class cannot read as 0.
+        let cell = |n: u64, count: u64| {
+            if count == 0 {
+                "-".to_string()
+            } else {
+                n.to_string()
+            }
+        };
+        println!(
+            "    {:>8}  {:>9} {:>9}  {:>9} {:>9}  {:>7} {:>7}",
+            format!("{lo}+"),
+            cell(ts.len_med_fanout, ts.fanout),
+            cell(ps.len_med_fanout, ps.fanout),
+            cell(ts.len_med_attrition, ts.attrition),
+            cell(ps.len_med_attrition, ps.attrition),
+            ts.leaf,
+            ps.leaf
+        );
+    }
     let (tb, pb): (u64, u64) = (
         t.iter().map(|(_, s)| s.blocks).sum(),
         p.iter().map(|(_, s)| s.blocks).sum(),
@@ -3117,6 +3294,25 @@ mod tests {
 
         // A single session states neither, and is refused rather than reported as eta^2 = 0.
         assert!(root_anova(&[(1, 10.0)]).is_none());
+    }
+
+    /// Fan-in weighting moves the run-length median, and which way is a property of the trace.
+    ///
+    /// The point of the diagnostic it serves: `length` is fitted **fan-in weighted** but consumed
+    /// **per node**, so the two estimators answer different questions about the same rows. On
+    /// `qwen_code`'s root band the weighted median is 1 where the unweighted one is 29, because the
+    /// splits carrying thousands of sessions are the short ones.
+    #[test]
+    fn a_weighted_median_can_sit_far_from_the_unweighted_one() {
+        // Three long runs walked by one session each, one short run walked by 100.
+        let rows = [(30, 1), (31, 1), (32, 1), (2, 100)];
+        assert_eq!(weighted_median(&rows), 2);
+        let mut plain: Vec<u64> = rows.iter().map(|(v, _)| *v).collect();
+        plain.sort_unstable();
+        assert_eq!(plain[plain.len() / 2], 31);
+        // Equal weights reduce to the ordinary median, so the estimator is not two different rules.
+        assert_eq!(weighted_median(&[(1, 1), (5, 1), (9, 1)]), 5);
+        assert_eq!(weighted_median(&[]), 0);
     }
 
     /// The attrition denominator is the band's shared blocks, so two censuses whose runs are

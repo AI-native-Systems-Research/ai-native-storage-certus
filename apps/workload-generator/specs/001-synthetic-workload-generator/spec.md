@@ -2337,6 +2337,38 @@ report segments statistics into before/after windows around the event.
   trace's departures are not synchronised by reach being a property of the root, and no per-root reach
   law can reproduce a hazard of zero. Stating reach per root is therefore refuted **before** being
   built, and the mechanism that gives a real trace its near-zero hazard is still unidentified.
+- **FR-054m**: A per-band quantity the walk draws **per node** MUST be fitted **unweighted over
+  segments**. `length` and `out_degree` are fan-in weighted today and are consumed per node, which
+  makes the estimator and its consumer answer different questions about the same rows.
+  **The measurement.** Drawing each band's own stated `length` 20000 times reproduces its stated
+  median **exactly** in every band of both traces measured — so the sampler is faithful and the
+  distribution is not the defect. What differs is which median was fitted:
+  | `qwen_code` band | stated (fan-in weighted) | per-node draw yields | trace's per-SEGMENT median |
+  | --- | --- | --- | --- |
+  | 0+ | **1** | 1 | **29** |
+  | 1-7 | **3** | 3 | **9** |
+  | 8-31 | **8** | 8 | **18** |
+  | 32-127 | 136 | 136 | 23 |
+  | 128-511 | 21 | 21 | 37 |
+  | 512+ | 9 | 10 | 13 |
+  On `qwen_code`'s root band the arrival-weighted median is **1** where the per-segment median is
+  **29**, because the splits carrying thousands of sessions are the *short* ones — so the weighting
+  pulls the law **short**, and the walk then faithfully draws a short law once per node. That is why
+  the realised run length collapses; it is not attrition truncating a long draw. Confirmed the other
+  way on `exgentic_tau2_airline`, where band 0's two medians agree at **124** and the realised
+  preamble is **124, exact**, while the bands whose medians disagree (1-7: 41 against 14; 128-511:
+  119 against 1) are the ones whose realised lengths are wrong.
+  **The distinction that decides which estimator is right is the KEY, not the quantity.**
+  `branch_skew`/`coll_wt` is fan-in weighted and MUST stay so: a walker meets a split in proportion
+  to the sessions arriving at it, and it is consumed per arrival. `Corpus::run_length` and
+  `Corpus::out_degree` are keyed on the **node**, so every node draws once whatever its fan-in, and
+  the population they must match is the segments, not the arrivals. The fan-in weighting argument was
+  imported wholesale from the child-choice law to quantities with a different key.
+  **Not yet built, and it changes the default fit path**, so it needs a corpus matrix (FR-055f).
+  The falsifiable prediction: an unweighted `length` moves `qwen_code`'s realised run lengths toward
+  29/9/18/23/37/13 and reduces its 13671 segments toward the trace's 9998. `out_degree` carries the
+  same defect and is more dramatic — `qwen_code` band 0 states **4739** children where the census's
+  per-node median out-degree is **2** — but its effect on cohort division is untested.
 - **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
   measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
   sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first
