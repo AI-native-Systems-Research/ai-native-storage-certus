@@ -40,6 +40,73 @@ struct TransferJob {
 unsafe impl Send for TransferJob {}
 unsafe impl Sync for TransferJob {}
 
+fn submit_store_copies<F>(
+    cache_keys: &[CacheKey],
+    gpu_block_ids: &[u64],
+    gpu_base_ptr: u64,
+    gpu_block_size: u64,
+    stream: GpuStream,
+    mut copy_fn: F,
+) -> bool
+where
+    F: FnMut(CacheKey, &[IpcHandle], GpuStream) -> Result<(), interfaces::DispatcherError>,
+{
+    let mut all_ok = true;
+    for (i, key) in cache_keys.iter().enumerate() {
+        let block_id = gpu_block_ids[i];
+        let gpu_ptr = gpu_base_ptr + block_id * gpu_block_size;
+
+        let handle = IpcHandle {
+            address: gpu_ptr as *mut u8,
+            size: gpu_block_size as u32,
+        };
+
+        // Async DMA from GPU into the DRAM slot reserved by prepare_store.
+        // In-process connector: one coalesced region per block (N==1).
+        match copy_fn(*key, &[handle], stream) {
+            Ok(()) => {}
+            Err(interfaces::DispatcherError::AlreadyExists(_)) => continue,
+            Err(e) => {
+                eprintln!("[certus] store_async copy_gpu_to_memory_async failed key={key} block_id={block_id}: {e:?}");
+                all_ok = false;
+                break;
+            }
+        }
+    }
+    all_ok
+}
+
+#[cfg(test)]
+mod tests {
+    use super::submit_store_copies;
+    use interfaces::{CacheKey, DispatcherError, GpuStream};
+
+    #[test]
+    fn store_async_skips_already_exists_error_and_returns_true() {
+        let cache_keys: Vec<CacheKey> = vec![11, 12];
+        let gpu_block_ids = vec![0, 1];
+        let mut seen = Vec::new();
+
+        let all_ok = submit_store_copies(
+            &cache_keys,
+            &gpu_block_ids,
+            0x1000,
+            256,
+            GpuStream(std::ptr::null_mut()),
+            |key, _handles, _stream| {
+                seen.push(key);
+                if key == 11 {
+                    return Err(DispatcherError::AlreadyExists(key));
+                }
+                Ok(())
+            },
+        );
+
+        assert!(all_ok);
+        assert_eq!(seen, cache_keys);
+    }
+}
+
 // ─── EngineInner ───────────────────────────────────────────────────────────
 
 #[allow(dead_code)]
@@ -519,31 +586,17 @@ impl EngineInner {
 
         let stream = self.store_stream;
 
-        let mut all_ok = true;
-        for (i, key) in cache_keys.iter().enumerate() {
-            let block_id = gpu_block_ids[i];
-            let gpu_ptr = self.gpu_base_ptr + block_id * self.gpu_block_size;
-
-            let handle = IpcHandle {
-                address: gpu_ptr as *mut u8,
-                size: self.gpu_block_size as u32,
-            };
-
-            // Async DMA from GPU into the DRAM slot reserved by prepare_store.
-            // In-process connector: one coalesced region per block (N==1).
-            match self
-                .dispatcher
-                .copy_gpu_to_memory_async(*key, &[handle], stream)
-            {
-                Ok(()) => {}
-                Err(interfaces::DispatcherError::AlreadyExists(_)) => continue,
-                Err(e) => {
-                    eprintln!("[certus] store_async copy_gpu_to_memory_async failed key={key} block_id={block_id}: {e:?}");
-                    all_ok = false;
-                    break;
-                }
-            }
-        }
+        let all_ok = submit_store_copies(
+            &cache_keys,
+            gpu_block_ids,
+            self.gpu_base_ptr,
+            self.gpu_block_size,
+            stream,
+            |key, handles, stream| {
+                self.dispatcher
+                    .copy_gpu_to_memory_async(key, handles, stream)
+            },
+        );
 
         let completed = !all_ok;
         let job = Arc::new(TransferJob {
