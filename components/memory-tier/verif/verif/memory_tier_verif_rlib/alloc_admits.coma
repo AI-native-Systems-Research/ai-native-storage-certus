@@ -1,0 +1,29 @@
+(* #"/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 66 0 66 40 *)
+
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 67 15 67 16
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 68 15 68 20
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 70 4 70 8
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 64 10 64 40
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 65 10 65 38
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let alloc_admits [#"/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 66 0 66 40]
+  (size: UInt64.t) (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_7 <- size = ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_7 = false} (! bb2) | br1 -> {_7} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib'0] false ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- [%#slib'1] true ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & size: UInt64.t = size | & _7: bool = Any.any_l () ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:alloc_admits ensures] ([@stop_split] [@expl:alloc_admits ensures #0] [%#slib'2] UInt64.t'int size
+        = 0 -> result = false)
+    /\ ([@stop_split] [@expl:alloc_admits ensures #1] [%#slib'3] UInt64.t'int size > 0 -> result = true)}
+    (! return {result}) ]

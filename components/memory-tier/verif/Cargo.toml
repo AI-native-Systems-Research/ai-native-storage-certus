@@ -1,0 +1,10 @@
+[package]
+name = "memory-tier-verif"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+creusot-std = { path = "../../../tools/creusot/creusot/creusot-std" }
+
+[workspace]

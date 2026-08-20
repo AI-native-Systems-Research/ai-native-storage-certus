@@ -1,0 +1,61 @@
+(* #"/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 227 0 227 67 *)
+
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 228 18 228 32
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 229 4 229 20
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 222 11 222 30
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 223 11 223 20
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 224 11 224 48
+let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 225 10 225 29
+let%span slib'5 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 226 10 226 28
+let%span slib'6 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 30 11 30 20
+let%span slib'7 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 31 11 31 38
+let%span slib'8 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 32 10 32 29
+let%span slib'9 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 33 10 33 26
+let%span slib'10 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 34 10 34 21
+let%span slib'11 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 35 10 35 32
+
+use creusot.int.UInt64
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let align_up (size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:align_up requires] ([@stop_split] [@expl:align_up requires #0] [%#slib'6] UInt64.t'int size > 0)
+  /\ ([@stop_split] [@expl:align_up requires #1] [%#slib'7] UInt64.t'int size + 4095 <= UInt64.t'int const_MAX)}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:align_up ensures] ([@stop_split] [@expl:align_up ensures #0] [%#slib'8] ComputerDivision.mod (UInt64.t'int result) 4096
+      = 0)
+    /\ ([@stop_split] [@expl:align_up ensures #1] [%#slib'9] UInt64.t'int result >= UInt64.t'int size)
+    /\ ([@stop_split] [@expl:align_up ensures #2] [%#slib'10] UInt64.t'int result > 0)
+    /\ ([@stop_split] [@expl:align_up ensures #3] [%#slib'11] UInt64.t'int result < UInt64.t'int size + 4096)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let leftover_offset_aligned [#"/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 227 0 227 67]
+  (offset: UInt64.t) (size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:leftover_offset_aligned requires] ([@stop_split] [@expl:leftover_offset_aligned requires #0] [%#slib'1] ComputerDivision.mod (UInt64.t'int offset) 4096
+    = 0)
+  /\ ([@stop_split] [@expl:leftover_offset_aligned requires #1] [%#slib'2] UInt64.t'int size > 0)
+  /\ ([@stop_split] [@expl:leftover_offset_aligned requires #2] [%#slib'3] UInt64.t'int offset + UInt64.t'int size
+    + 4096
+  <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = align_up [%#slib] {size} (fun (_x: UInt64.t) -> [ &aligned <- _x ] s1)
+    | s1 = UInt64.add [%#slib'0] {offset} {aligned} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & offset: UInt64.t = offset
+  | & size: UInt64.t = size
+  | & aligned: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:leftover_offset_aligned ensures] ([@stop_split] [@expl:leftover_offset_aligned ensures #0] [%#slib'4] ComputerDivision.mod (UInt64.t'int result) 4096
+      = 0)
+    /\ ([@stop_split] [@expl:leftover_offset_aligned ensures #1] [%#slib'5] UInt64.t'int result >= UInt64.t'int offset)}
+    (! return {result}) ]

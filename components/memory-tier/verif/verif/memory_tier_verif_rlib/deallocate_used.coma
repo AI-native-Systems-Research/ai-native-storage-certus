@@ -1,0 +1,24 @@
+(* #"/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 121 0 121 65 *)
+
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 122 4 122 23
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 119 11 119 33
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 120 10 120 42
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let deallocate_used [#"/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 121 0 121 65]
+  (used: UInt64.t) (aligned_size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:deallocate_used requires] [%#slib'0] UInt64.t'int used >= UInt64.t'int aligned_size}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.sub [%#slib] {used} {aligned_size} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & used: UInt64.t = used | & aligned_size: UInt64.t = aligned_size ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:deallocate_used ensures] [%#slib'1] UInt64.t'int result
+    = UInt64.t'int used - UInt64.t'int aligned_size}
+    (! return {result}) ]

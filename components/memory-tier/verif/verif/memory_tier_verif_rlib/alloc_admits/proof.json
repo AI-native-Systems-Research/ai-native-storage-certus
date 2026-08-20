@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_alloc_admits": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.023 }
+        ]
+      }
+    }
+  }
+}

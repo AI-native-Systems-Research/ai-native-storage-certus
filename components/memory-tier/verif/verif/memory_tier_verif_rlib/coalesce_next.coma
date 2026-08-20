@@ -1,0 +1,31 @@
+(* #"/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 180 0 180 64 *)
+
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 181 4 181 24
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 177 11 177 48
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 178 10 178 43
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 179 10 179 30
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let coalesce_next [#"/home/dwaddington/ai-native-storage-certus/components/memory-tier/verif/src/lib.rs" 180 0 180 64]
+  (new_size: UInt64.t) (next_size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:coalesce_next requires] [%#slib'0] UInt64.t'int new_size + UInt64.t'int next_size
+  <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib] {new_size} {next_size} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & new_size: UInt64.t = new_size | & next_size: UInt64.t = next_size ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:coalesce_next ensures] ([@stop_split] [@expl:coalesce_next ensures #0] [%#slib'1] UInt64.t'int result
+      = UInt64.t'int new_size + UInt64.t'int next_size)
+    /\ ([@stop_split] [@expl:coalesce_next ensures #1] [%#slib'2] UInt64.t'int result >= UInt64.t'int new_size)}
+    (! return {result}) ]
