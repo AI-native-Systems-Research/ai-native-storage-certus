@@ -194,96 +194,109 @@ strong { color: var(--accent); }
 
 <hr>
 
-<h2 id="s1">1. KV Cache Prefill → Large Sequential Writes</h2>
+<h2 id="s1">1. KV Cache Prefill → Load (prefix hit) + Store (new tokens)</h2>
 <div class="pattern-card">
 <h3>Inference Behavior</h3>
-<p>A new request arrives. The model processes the prompt tokens in one forward pass, generating KV cache entries for all prompt tokens simultaneously.</p>
-<h3>Storage Pattern</h3>
+<p>A new request arrives. With prefix caching (RadixAttention), the scheduler checks how much of the prompt's KV already exists in the offload tier.</p>
+<h3>Two sub-cases:</h3>
+<p><strong>1a. No prefix hit (cold prefill) — Pure Store</strong><br>
+Model computes KV for ALL prompt tokens → sequential Store to certus.</p>
+<p><strong>1b. Prefix cache hit (warm prefill) — Load THEN Store</strong><br>
+K prefix blocks <strong>Loaded</strong> from SSD/DRAM → GPU. Model computes only M new tokens → M blocks <strong>Stored</strong>.<br>
+With &gt;60% prefix hit ratios in production, <strong>Loads dominate prefill IO</strong>.</p>
+<h3>Storage Operations</h3>
 <ul>
-<li>Write size: 2–80 MB per offloaded block (model-dependent)</li>
-<li>Access: Sequential within a request — blocks written in monotonically increasing index order</li>
+<li><strong>Load</strong>: K prefix blocks read (sequential, block 0..K) — if prefix was offloaded</li>
+<li><strong>Store</strong>: M new blocks written (sequential, block K..K+M) — only the unique tail</li>
+<li>Semantics: Write-once, content-addressed (same prefix = same hash = skip Store)</li>
 <li>Concurrency: Multiple requests prefilling simultaneously (continuous batching)</li>
-<li>Semantics: Write-once, content-addressed (dedup by hash)</li>
-<li>Burstiness: Prefill generates all blocks at once → burst of writes, then silence</li>
 </ul>
 </div>
 
 <table>
 <tr><th>Parameter</th><th>Typical Range</th><th>Notes</th></tr>
-<tr><td>Write size</td><td>2 MB (Llama-8B) – 80 MB (Llama-70B, factor=16)</td><td>Cross-layer layout</td></tr>
-<tr><td>Writes per prefill</td><td>64–512 blocks</td><td>1K–8K prompt tokens / 16 tokens per block</td></tr>
+<tr><td>Block size</td><td>2 MB (Llama-8B) – 80 MB (Llama-70B, factor=16)</td><td>Cross-layer layout</td></tr>
+<tr><td>Total blocks per prefill</td><td>64–512</td><td>1K–8K prompt tokens / 16 tokens per block</td></tr>
+<tr><td>Prefix hit ratio</td><td>0% (cold) – 90% (warm)</td><td>Determines Load vs Store mix</td></tr>
+<tr><td>Load blocks (K)</td><td>0–460</td><td>hit_ratio × total_blocks</td></tr>
+<tr><td>Store blocks (M)</td><td>50–512</td><td>(1 - hit_ratio) × total_blocks</td></tr>
 <tr><td>Concurrent prefills</td><td>1–8</td><td>Limited by GPU memory</td></tr>
-<tr><td>Inter-arrival</td><td>Poisson or bursty</td><td>Depends on scheduler</td></tr>
 </table>
 
 <hr>
 
-<h2 id="s2">2. Cohort Sharing → Multiple Readers on Same Extent Range</h2>
+<h2 id="s2">2. Cohort Sharing → N × Load of Same Blocks</h2>
 <div class="pattern-card">
 <h3>Inference Behavior</h3>
-<p>Multiple requests share a common system prompt or document prefix. The KV cache for this shared prefix is computed once and reused (prefix caching / RadixAttention).</p>
-<h3>Storage Pattern</h3>
+<p>Multiple requests share a common system prompt or document prefix. The first request computes and <strong>Stores</strong> the prefix. All subsequent requests <strong>Load</strong> it from storage.</p>
+<h3>Storage Operations</h3>
 <ul>
-<li>Read size: Same block size as writes (2–80 MB per block)</li>
-<li>Access: N sessions all read the same set of blocks (the shared prefix)</li>
-<li>After shared prefix: each session diverges into unique blocks</li>
-<li>Sharing ratio: In real deployments, 60–90% of tokens can be shared prefix</li>
+<li><strong>Store</strong>: First request in cohort Stores K prefix blocks (cold prefill)</li>
+<li><strong>Load</strong>: N-1 subsequent requests each Load the same K blocks (prefix cache hit)</li>
+<li>Net: 1 Store + (N-1) × Load of same blocks — <strong>Load-dominated</strong></li>
+<li>Sharing ratio: 60–90% of tokens shared (system prompt + few-shot)</li>
 </ul>
-<p><strong>Key insight</strong>: Shared prefix blocks are hot — read N times but written once. Primary caching opportunity.</p>
+<p><strong>Key insight</strong>: Shared prefix blocks are hot — Loaded N times but Stored once. The DRAM tier should serve repeated Loads without hitting SSD.</p>
 </div>
 
 <table>
 <tr><th>Parameter</th><th>Typical Range</th><th>Notes</th></tr>
-<tr><td>Cohort size</td><td>2–64 sessions</td><td>Same system prompt or document</td></tr>
-<tr><td>Shared blocks</td><td>32–256 (512–4096 tokens)</td><td>System prompts: 1K–4K tokens</td></tr>
-<tr><td>Read concurrency</td><td>Up to cohort_size × blocks</td><td>All members reading simultaneously</td></tr>
-<tr><td>Divergence point</td><td>After shared_blocks</td><td>Fan-out pattern</td></tr>
+<tr><td>Cohort size (N)</td><td>2–64 sessions</td><td>Same system prompt or document</td></tr>
+<tr><td>Shared blocks (K)</td><td>32–256 (512–4096 tokens)</td><td>System prompts: 1K–4K tokens</td></tr>
+<tr><td>Load amplification</td><td>(N-1) × K</td><td>Total shared Loads</td></tr>
+<tr><td>Divergence point</td><td>After K blocks</td><td>Each session Stores unique suffix</td></tr>
 </table>
 
 <hr>
 
-<h2 id="s3">3. Decode Phase → Small Random Reads + Small Appends</h2>
+<h2 id="s3">3. Decode Phase → Load (cache miss) + Store (new block full)</h2>
 <div class="pattern-card">
 <h3>Inference Behavior</h3>
-<p>After prefill, the model generates tokens one at a time. Each new token requires reading all previous KV cache entries and appending one new KV entry.</p>
-<h3>Storage Pattern</h3>
+<p>After prefill, the model generates tokens one at a time. Each token needs ALL previous KV for attention. New KV accumulates until a full block (16 tokens) triggers a Store.</p>
+<h3>Storage Operations</h3>
+<table>
+<tr><th>Operation</th><th>When</th><th>Direction</th><th>Latency</th></tr>
+<tr><td><strong>Load</strong> (cache miss)</td><td>Evicted block needed for attention</td><td>SSD→DRAM→GPU</td><td><strong>Critical path</strong> — blocks generation</td></tr>
+<tr><td><strong>Store</strong> (new block full)</td><td>Every 16 generated tokens</td><td>GPU→DRAM→SSD</td><td>Background (deferred)</td></tr>
+</table>
 <ul>
-<li>Reads: If KV was evicted, reload full blocks on cache miss</li>
-<li>Writes: Accumulated until a full block (16 tokens) triggers a write</li>
-<li>Access: Random across active sessions (scheduler interleaves)</li>
-<li>Latency-critical: Each decode step blocks on KV availability</li>
+<li><strong>Loads</strong>: Only on cache miss. Random across sessions. Latency-critical.</li>
+<li><strong>Stores</strong>: Fixed rate (1 per 16 tokens). Sequential per request. Background.</li>
+<li>Under no memory pressure: <strong>zero storage IO</strong> — everything stays on GPU/DRAM.</li>
 </ul>
-<p><strong>Note</strong>: In well-provisioned systems, decode rarely hits storage. When it does, it's latency-critical.</p>
+<p><strong>Key insight</strong>: Decode Loads are on the <strong>critical path</strong> for TPOT (time per output token). When they happen, they directly impact generation latency.</p>
 </div>
 
 <table>
 <tr><th>Parameter</th><th>Typical Range</th><th>Notes</th></tr>
-<tr><td>Read size per miss</td><td>2–80 MB (full block)</td><td>Whole block must be loaded</td></tr>
-<tr><td>Write accumulation</td><td>16 decode steps → 1 block</td><td>block_size = 16 tokens</td></tr>
+<tr><td>Load size per miss</td><td>2–80 MB (full block)</td><td>Must Load entire block to GPU</td></tr>
+<tr><td>Store accumulation</td><td>16 decode steps → 1 Store</td><td>block_size = 16 tokens</td></tr>
 <tr><td>Active sessions</td><td>32–256 concurrent</td><td>Continuous batching</td></tr>
-<tr><td>IO pattern</td><td>Random read + sequential append</td><td>Mixed read/write</td></tr>
+<tr><td>Load frequency</td><td>0 (no pressure) – every step</td><td>Depends on working set vs capacity</td></tr>
 </table>
 
 <hr>
 
-<h2 id="s4">4. Eviction Pressure → Working Set Exceeding Capacity</h2>
+<h2 id="s4">4. Eviction Pressure → Store (flush) + Load (reload on reaccess)</h2>
 <div class="pattern-card">
 <h3>Inference Behavior</h3>
-<p>GPU HBM and DRAM staging tiers are full. LRU/ARC eviction selects cold blocks to push down the tier hierarchy (GPU → DRAM → SSD).</p>
-<h3>Storage Pattern</h3>
-<ul>
-<li>Writes: Burst of eviction writes (scattered — LRU blocks are spatially random)</li>
-<li>Concurrent with: Hot-path reads (loading prefixes for new requests)</li>
-<li>Contention: Eviction writes compete with prefill reads on same NVMe devices</li>
-</ul>
+<p>GPU HBM and DRAM staging tiers are full. LRU eviction selects cold blocks to flush. When evicted blocks are needed again later, they must be reloaded.</p>
+<h3>Storage Operations</h3>
+<table>
+<tr><th>Operation</th><th>When</th><th>Direction</th><th>Pattern</th></tr>
+<tr><td><strong>Store</strong> (eviction flush)</td><td>DRAM tier exceeds watermark</td><td>DRAM→SSD</td><td>Scattered (LRU blocks are spatially random)</td></tr>
+<tr><td><strong>Load</strong> (reload on miss)</td><td>Evicted block needed by decode/prefill</td><td>SSD→DRAM→GPU</td><td>Random (workload-dependent reaccess)</td></tr>
+</table>
+<p><strong>Key contention</strong>: Eviction Stores and prefix-cache Loads happen <strong>simultaneously</strong> — new requests need to Load prefixes while the tier is full and evicting. This is the bidirectional contention v3 measures.</p>
 </div>
 
 <table>
 <tr><th>Parameter</th><th>Typical Range</th><th>Notes</th></tr>
 <tr><td>Eviction batch size</td><td>1–32 blocks per cycle</td><td>Watermark-based triggering</td></tr>
-<tr><td>Write pattern</td><td>Random (scattered)</td><td>Unlike sequential prefill writes</td></tr>
+<tr><td>Store pattern</td><td>Random (scattered, LRU)</td><td>Unlike sequential prefill Stores</td></tr>
+<tr><td>Load pattern</td><td>Random (reaccessed blocks)</td><td>Triggered by scheduler reschedule</td></tr>
+<tr><td>Contention</td><td>Simultaneous Stores + Loads</td><td>THE key stress scenario</td></tr>
 <tr><td>Capacity ratio</td><td>1.2–5× over-subscription</td><td>working_set / cache_capacity</td></tr>
-<tr><td>Eviction frequency</td><td>Every 1–5ms under pressure</td><td>Per scheduling step</td></tr>
 </table>
 
 <hr>
@@ -291,15 +304,16 @@ strong { color: var(--accent); }
 <h2 id="s5">5. Shared Prefix → Unique Suffix (The Compound Pattern)</h2>
 <div class="pattern-card">
 <h3>Inference Behavior</h3>
-<p>N sessions share a common tool output, document, or system prompt, then each continues with unique conversation. The canonical pattern for multi-user chat, RAG, tool-use, batch processing.</p>
-<h3>Storage Pattern</h3>
+<p>N sessions share a common tool output, document, or system prompt, then each continues with unique conversation. First request Stores the prefix; subsequent requests Load it.</p>
+<h3>Storage Operations</h3>
 <pre><code>Time →
 
-Session 1: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M₁]
-Session 2: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M₂]
-Session 3: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M₃]
+Session 1: [STORE shared blocks 0..K] → [STORE unique blocks K+1..K+M₁]  (first in cohort)
+Session 2: [LOAD shared blocks 0..K]  → [STORE unique blocks K+1..K+M₂]
+Session 3: [LOAD shared blocks 0..K]  → [STORE unique blocks K+1..K+M₃]
 ...
-Session N: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M_N]</code></pre>
+Session N: [LOAD shared blocks 0..K]  → [STORE unique blocks K+1..K+M_N]</code></pre>
+<p>Net: 1 Store of K blocks + (N-1) × Load of K blocks + N × Store of M unique blocks.</p>
 </div>
 
 <table>
@@ -307,8 +321,8 @@ Session N: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M_N]</code>
 <tr><td>N (cohort size)</td><td>4–64</td><td>Sessions sharing prefix</td></tr>
 <tr><td>K (shared blocks)</td><td>32–256</td><td>Shared prefix length</td></tr>
 <tr><td>M (unique blocks/session)</td><td>16–512</td><td>Varies by generation length</td></tr>
-<tr><td>Read amplification</td><td>N × K</td><td>Total shared reads</td></tr>
-<tr><td>Write parallelism</td><td>N independent streams</td><td>After divergence</td></tr>
+<tr><td>Load amplification</td><td>(N-1) × K</td><td>Total shared Loads</td></tr>
+<tr><td>Store parallelism</td><td>N independent streams</td><td>After divergence</td></tr>
 </table>
 
 <hr>
