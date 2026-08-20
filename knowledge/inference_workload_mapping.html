@@ -155,6 +155,24 @@ strong { color: var(--accent); }
 <p>Mapping high-level LLM inference serving behaviors to concrete storage access patterns for certus-api-bench.</p>
 <p><span class="research-badge">8 systems/papers investigated</span> FlexGen, InstInfer, InfiniGen, Mooncake, DistServe/Splitwise, Sarathi-Serve, BurstGPT, SpecInfer — plus vLLM/SGLang/llm-d source code analysis. No existing storage-level KV cache workload generator found in literature.</p>
 
+<h3>Quick Reference: Store vs Load per Pattern</h3>
+<table>
+<tr><th>Pattern</th><th>Store (GPU→DRAM→SSD)</th><th>Load (SSD→DRAM→GPU)</th><th>Dominant</th></tr>
+<tr><td>§1 Prefill</td><td>New unique tokens only</td><td>Prefix-cached blocks (if hit)</td><td class="coverage-full"><strong>Load</strong> (&gt;60% hit)</td></tr>
+<tr><td>§2 Cohort sharing</td><td>First request stores prefix</td><td>N-1 requests Load same blocks</td><td class="coverage-full"><strong>Load</strong></td></tr>
+<tr><td>§3 Decode</td><td>1 block per 16 tokens (background)</td><td>Full block on cache miss (critical path)</td><td class="coverage-partial"><strong>Load</strong> under pressure</td></tr>
+<tr><td>§4 Eviction</td><td>Flush cold blocks (scattered)</td><td>Reload evicted on reaccess</td><td class="coverage-none"><strong>Both</strong> simultaneous</td></tr>
+<tr><td>§5 Shared→Unique</td><td>First stores prefix + all store unique</td><td>N-1 Load K shared blocks</td><td class="coverage-partial">Load + Store</td></tr>
+<tr><td>§6a Chunked prefill</td><td>Chunks of new tokens</td><td>Cached chunks loaded</td><td>Mixed</td></tr>
+<tr><td>§6b Speculative</td><td>3–5× amplification (discarded)</td><td>Shared prefix for verification</td><td class="coverage-none"><strong>Store</strong> amplified</td></tr>
+<tr><td>§6c Beam search</td><td>COW at divergence only</td><td>B × shared blocks per step</td><td class="coverage-full"><strong>Load</strong></td></tr>
+<tr><td>§6d Continuous batch</td><td>Prefill + eviction stores</td><td>Decode + reschedule loads</td><td class="coverage-none"><strong>Both</strong> async</td></tr>
+<tr><td>§6e Multi-turn</td><td>Trickle (new generation)</td><td>Massive ALL prior turns</td><td class="coverage-full"><strong>Load</strong></td></tr>
+<tr><td>§6f Disaggregated</td><td>Bulk (prefill node, GB)</td><td>Bulk (decode node, GB)</td><td class="coverage-none"><strong>Both</strong> sequential</td></tr>
+<tr><td>§6g Sparse retrieval</td><td>Standard (1/16 tokens)</td><td>Sparse subset (10–30%)</td><td class="coverage-full"><strong>Load</strong> reduced</td></tr>
+<tr><td>§6h LRU prefix-aware</td><td>Eviction hits suffix</td><td>Reload hits suffix</td><td class="coverage-none"><strong>Both</strong> suffix-biased</td></tr>
+</table>
+
 <div class="toc">
 <h3>Contents</h3>
 <ul>

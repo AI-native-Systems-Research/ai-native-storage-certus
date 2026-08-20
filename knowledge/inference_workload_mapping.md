@@ -4,6 +4,24 @@ Mapping high-level LLM inference serving behaviors to concrete storage access pa
 
 **Research scope**: 8 systems/papers investigated (FlexGen, InstInfer, InfiniGen, Mooncake, DistServe/Splitwise, Sarathi-Serve, BurstGPT, SpecInfer) plus vLLM/SGLang/llm-d source code analysis. No existing storage-level KV cache workload generator found in literature.
 
+### Quick Reference: Store vs Load per Pattern
+
+| Pattern | Store (GPU→DRAM→SSD) | Load (SSD→DRAM→GPU) | Dominant |
+|---------|---------------------|--------------------:|----------|
+| §1 Prefill | New unique tokens only | Prefix-cached blocks (if hit) | **Load** (>60% hit ratio in production) |
+| §2 Cohort sharing | First request stores prefix | N-1 subsequent requests Load same blocks | **Load** |
+| §3 Decode | 1 block per 16 tokens (background) | Full block on cache miss (critical path) | **Load** under pressure, else 0 IO |
+| §4 Eviction | Flush cold blocks to SSD (scattered) | Reload evicted blocks on reaccess | **Both** simultaneously |
+| §5 Shared→Unique | First session stores K prefix + all store M unique | N-1 sessions Load K shared blocks | **Load** (shared) + **Store** (unique) |
+| §6a Chunked prefill | Chunks of new tokens stored | Cached chunks loaded | Mixed per chunk |
+| §6b Speculative | 3–5× Store amplification (most discarded) | Load shared prefix for verification | **Store** (amplified) |
+| §6c Beam search | COW Store only at divergence | B × Load of shared blocks per step | **Load** dominated |
+| §6d Continuous batch | Prefill stores + eviction stores | Decode loads + reschedule loads | **Both** async |
+| §6e Multi-turn | Trickle stores (new generation) | Massive Load of ALL prior turns at start | **Load** dominated |
+| §6f Disaggregated | Bulk Store (prefill node, GB-scale) | Bulk Load (decode node, GB-scale) | **Both** (sequential) |
+| §6g Sparse retrieval | Standard (1/16 tokens) | Sparse subset Load (10–30% of blocks) | **Load** (reduced) |
+| §6h LRU prefix-aware | Eviction stores hit unique-suffix | Reload loads hit unique-suffix | **Both** (biased to suffix) |
+
 ---
 
 ## 1. KV Cache Prefill → Load (prefix hit) + Store (new tokens)
