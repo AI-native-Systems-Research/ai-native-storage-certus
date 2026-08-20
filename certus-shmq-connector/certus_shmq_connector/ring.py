@@ -16,8 +16,8 @@ start on any other architecture — do not port it to a weakly ordered ISA witho
 adding fences.
 
 The wire framing (opcode + little-endian blob) mirrors, byte-for-byte,
-``components/shmq-dispatcher/src/wire.rs`` and the shared-memory layout mirrors
-``components/shm-queue/src/lib.rs``. Any change to either Rust file must be
+``lib/shmq-dispatcher/src/wire.rs`` and the shared-memory layout mirrors
+``lib/shm-queue/src/lib.rs``. Any change to either Rust file must be
 mirrored here.
 """
 
@@ -35,7 +35,7 @@ import threading
 import time
 from typing import Iterable, Sequence
 
-# ── shm-queue layout constants (mirror components/shm-queue/src/lib.rs) ──────
+# ── shm-queue layout constants (mirror lib/shm-queue/src/lib.rs) ──────
 
 MAGIC_READY = 0x5148_4D53  # "SMHQ"
 ABI_VERSION = 1
@@ -61,7 +61,7 @@ _HDR_SERVER_PID = 36
 # _pad at 40 ; heartbeat (u64) at 48
 _HEADER_SIZE = 56
 
-# ── wire opcodes / status (mirror components/shmq-dispatcher/src/wire.rs) ────
+# ── wire opcodes / status (mirror lib/shmq-dispatcher/src/wire.rs) ────
 
 OP_CHECK = 1
 OP_TOUCH = 2

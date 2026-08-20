@@ -1,7 +1,7 @@
 # component-macros
 
 **Crate**: `component-macros`
-**Path**: `components/component-framework/crates/component-macros/`
+**Path**: `lib/component-framework/crates/component-macros/`
 **Version**: 0.1.0
 
 ## Description

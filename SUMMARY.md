@@ -87,7 +87,7 @@ Generated: 2026-06-18
 | `components/dispatcher/src/lib.rs` | 3,992 |
 | `components/dispatcher-p2p/src/lib.rs` | 3,747 |
 | `components/block-device-spdk-nvme/src/actor.rs` | 1,286 |
-| `components/component-framework/.../actor.rs` | 1,273 |
+| `lib/component-framework/.../actor.rs` | 1,273 |
 | `components/dispatcher-p2p/src/pipeline.rs` | 1,155 |
 | `components/gpu-services/src/lib.rs` | 1,084 |
 
@@ -97,7 +97,7 @@ Generated: 2026-06-18
 |------|-----------|
 | `components/dispatcher/src/lib.rs` | 142 |
 | `components/dispatcher-p2p/src/lib.rs` | 137 |
-| `components/component-framework/.../actor.rs` | 62 |
+| `lib/component-framework/.../actor.rs` | 62 |
 
 ### Deepest Nesting
 

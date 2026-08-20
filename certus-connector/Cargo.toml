@@ -15,8 +15,8 @@ pyo3 = { version = "0.22", features = ["extension-module"] }
 
 # Certus components (relative to certus-connector/)
 interfaces = { path = "../components/interfaces", features = ["spdk"] }
-component-framework = { path = "../components/component-framework/crates/component-framework" }
-component-core = { path = "../components/component-framework/crates/component-core" }
+component-framework = { path = "../lib/component-framework/crates/component-framework" }
+component-core = { path = "../lib/component-framework/crates/component-core" }
 dispatcher = { path = "../components/dispatcher" }
 logger = { path = "../components/logger" }
 dispatch-map = { path = "../components/dispatch-map" }

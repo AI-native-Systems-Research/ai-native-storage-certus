@@ -1,12 +1,12 @@
 [workspace]
 # Paths to sub-projects
 members = [
-    "components/component-framework/crates/component-core",
-    "components/component-framework/crates/component-macros",
-    "components/component-framework/crates/component-framework",
-    "components/component-framework/examples",
+    "lib/component-framework/crates/component-core",
+    "lib/component-framework/crates/component-macros",
+    "lib/component-framework/crates/component-framework",
+    "lib/component-framework/examples",
     "components/example-helloworld",
-    "components/spdk-sys",
+    "lib/spdk-sys",
     "components/interfaces",
     "components/spdk-env",
     "apps/helloworld-mainline",
@@ -41,8 +41,8 @@ members = [
     "apps/remote-lookup-bench",
     "apps/eviction-replay-benchmark",
     "components/zyre",
-    "components/shm-queue",
-    "components/shmq-dispatcher",
+    "lib/shm-queue",
+    "lib/shmq-dispatcher",
     "apps/certus-server"
 ]
 
@@ -59,10 +59,10 @@ members = [
 # SPDK type) as was done for IMemoryTier. See
 # specs/002-remote-lookup-rdma/research.md Decision 10.
 default-members = [
-    "components/component-framework/crates/component-core",
-    "components/component-framework/crates/component-macros",
-    "components/component-framework/crates/component-framework",
-    "components/component-framework/examples",
+    "lib/component-framework/crates/component-core",
+    "lib/component-framework/crates/component-macros",
+    "lib/component-framework/crates/component-framework",
+    "lib/component-framework/examples",
     "components/example-helloworld",
     "components/example-helloworld-dylib",
     "apps/helloworld-mainline",
@@ -72,7 +72,7 @@ default-members = [
     "components/eviction-policy-lru",
     "components/eviction-policy-session-lists",
     "apps/eviction-replay-benchmark",
-    "components/shm-queue"
+    "lib/shm-queue"
 ]
 
 resolver = "2"
@@ -84,12 +84,12 @@ rust-version = "1.75"
 license = "MIT"
 
 [workspace.dependencies]
-component-core = { path = "components/component-framework/crates/component-core" }
-component-macros = { path = "components/component-framework/crates/component-macros" }
-component-framework = { path = "components/component-framework/crates/component-framework" }
+component-core = { path = "lib/component-framework/crates/component-core" }
+component-macros = { path = "lib/component-framework/crates/component-macros" }
+component-framework = { path = "lib/component-framework/crates/component-framework" }
 example-helloworld = { path = "components/example-helloworld" }
 interfaces = { path = "components/interfaces" }
-spdk-sys = { path = "components/spdk-sys" }
+spdk-sys = { path = "lib/spdk-sys" }
 spdk-env = { path = "components/spdk-env" }
 block-device-spdk-nvme = { path = "components/block-device-spdk-nvme" }
 block-device-filesys = { path = "components/block-device-filesys" }
@@ -109,6 +109,6 @@ remote-lookup-rdma-initiator = { path = "components/remote-lookup-rdma-initiator
 remote-lookup-rdma-responder = { path = "components/remote-lookup-rdma-responder" }
 zyre = { path = "components/zyre" }
 certus-connector = { path = "certus-connector" }
-shm-queue = { path = "components/shm-queue" }
-shmq-dispatcher = { path = "components/shmq-dispatcher" }
+shm-queue = { path = "lib/shm-queue" }
+shmq-dispatcher = { path = "lib/shmq-dispatcher" }
 libloading = "0.8"

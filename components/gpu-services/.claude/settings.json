@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Read(components/component-framework)",
+      "Read(lib/component-framework)",
       "Read(components/gpu-services/v0/**)",
       "Read(components/logger/**)",
       "Write(components/interfaces/**)",
@@ -9,7 +9,7 @@
     ],
     "deny": [
       "Read(components/example-helloworld/**)",
-      "Read(components/spdk-sys/**)",
+      "Read(lib/spdk-sys/**)",
       "Read(components/spdk-env/**)",
       "Read(components/block-device-spdk-nvme/**)",
       "Read(components/extent-manager/**)",

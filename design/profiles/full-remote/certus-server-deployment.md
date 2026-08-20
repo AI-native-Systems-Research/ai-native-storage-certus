@@ -219,7 +219,7 @@ the host server opens the container's CUDA IPC handles, and the container sees
 the host `/dev/shm` mailbox. Note this local shmq transport is the *client↔server*
 control path; inter-node peer cooperation uses zyre + RDMA (see below), not shmq.
 
-## shmq Ops (opcode-framed, see `components/shmq-dispatcher/src/wire.rs`)
+## shmq Ops (opcode-framed, see `lib/shmq-dispatcher/src/wire.rs`)
 
 The client↔server transport is a small opcode-based binary framing carried in
 the `/dev/shm` mailbox. Each op maps to an `IDispatcher` method.

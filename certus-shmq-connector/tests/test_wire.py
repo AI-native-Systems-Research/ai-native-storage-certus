@@ -3,7 +3,7 @@
 
 These exercise the pure request-encoders and response-decoders in isolation
 (no shared memory, no server) and assert the exact little-endian framing that
-``components/shmq-dispatcher/src/{wire.rs,translate.rs}`` produce and consume.
+``lib/shmq-dispatcher/src/{wire.rs,translate.rs}`` produce and consume.
 The framing is the fragile seam between the Rust server and this Python client:
 a one-byte offset drift here is silent corruption, so every op that ring.py
 speaks gets a round-trip test whose expected bytes are spelled out by hand
