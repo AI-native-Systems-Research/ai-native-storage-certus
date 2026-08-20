@@ -975,13 +975,17 @@ if want tiered-cpu-fs; then
     elif [[ -z "$t_skip" && ! -d "$SHARED_FS" ]]; then
         t_skip="'$SHARED_FS' not present after reconfigure (see reconfigure-sharedstorage.log)"
     fi
-    # Reuses the CPUOffload image. If CPUOffload ran earlier this invocation with
-    # --rebuild it is already fresh; build here only when it is missing (e.g.
-    # --only tiered-cpu-fs), and only if --rebuild permits a build.
-    if [[ -z "$t_skip" ]] && ! img_exists "$IMG_CPU"; then
-        if [[ "$DO_REBUILD" -eq 1 ]] && ! build_offload "$IMG_CPU"; then
-            t_skip="image ${IMG_CPU} build failed (see build-offload.log)"
-        elif [[ "$DO_REBUILD" -ne 1 ]]; then
+    # Reuses the CPUOffload image. Under --rebuild, force a fresh build the same
+    # way nooffload/cpuoffload do: build_offload is memoized per tag, so if
+    # CPUOffload already built it earlier this invocation this is a no-op reuse,
+    # but --only tiered-cpu-fs (no CPUOffload) still gets a fresh build even when
+    # a stale image already exists. Without --rebuild, run the existing image or
+    # skip if missing.
+    if [[ -z "$t_skip" ]]; then
+        if [[ "$DO_REBUILD" -eq 1 ]]; then
+            build_offload "$IMG_CPU" || \
+                t_skip="image ${IMG_CPU} build failed (see build-offload.log)"
+        elif ! img_exists "$IMG_CPU"; then
             t_skip="image ${IMG_CPU} missing (pass --rebuild to build it)"
         fi
     fi
