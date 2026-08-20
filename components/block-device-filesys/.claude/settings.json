@@ -3,7 +3,7 @@
     "allow": [
       "Bash(bash *)",
       "Read(//home/dwaddington/ai-native-storage-certus/components/block-device-filesys/**)",
-      "Read(//home/dwaddington/ai-native-storage-certus/components/component-framework/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/lib/component-framework/**)",
       "Read(//home/dwaddington/ai-native-storage-certus/components/interfaces/**)",
       "Read(//home/dwaddington/ai-native-storage-certus/components/logger/**)",
       "Bash(cargo build *)",

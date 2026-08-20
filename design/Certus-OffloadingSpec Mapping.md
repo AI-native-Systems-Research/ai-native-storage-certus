@@ -4,7 +4,7 @@
 
 This document maps the vLLM `OffloadingManager` / `OffloadingConnector` interface
 (the KV-cache offloading spec) to the Certus shmq `Dispatcher` ops (the
-opcode-framed shared-memory wire in `components/shmq-dispatcher/src/wire.rs`).
+opcode-framed shared-memory wire in `lib/shmq-dispatcher/src/wire.rs`).
 
 The Python connector package is `certus_shmq_connector` (dir
 `certus-shmq-connector/`). vLLM `OffloadingConnector` is configured with

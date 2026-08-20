@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Read(components/component-framework)",
+      "Read(lib/component-framework)",
       "Read(components/logger/v1/**)",
       "Write(components/interfaces/**)",
       "Write(components/logger/v1/**)"

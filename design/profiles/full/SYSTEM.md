@@ -398,7 +398,7 @@ reach the server by sharing the host IPC namespace and `/dev/shm` (podman
 5. Dispatcher initialization (creates block devices + extent managers)
 6. shmq mailbox creation + poller/worker start
 
-**shmq ops** (opcode-framed binary wire: `components/shmq-dispatcher/src/wire.rs`):
+**shmq ops** (opcode-framed binary wire: `lib/shmq-dispatcher/src/wire.rs`):
 - `Populate` — Batch insert from GPU memory
 - `Lookup` — Batch retrieve to GPU memory
 - `Check` — Batch existence check
