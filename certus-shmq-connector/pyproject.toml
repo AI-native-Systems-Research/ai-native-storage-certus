@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "certus-shmq-connector"
 version = "0.1.0"
-description = "Certus storage connector for vLLM — pure-Python shared-memory-ring client to certus-shmq-server"
+description = "Certus storage connector for vLLM — pure-Python shared-memory-ring client to certus-server"
 # The ring client leans on x86-TSO ordering (Python cannot emit a fence), so it
 # is x86_64-only and asserts platform.machine() at startup.
 requires-python = ">=3.10"

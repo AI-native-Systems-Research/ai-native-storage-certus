@@ -33,15 +33,34 @@ class FakeRing:
     def __init__(self):
         self.calls: list[tuple[str, object]] = []
         self.exists: dict[int, bool] = {}
+        # Optional per-key state override (CHECK_MISS/RESIDENT/PENDING). Keys not
+        # listed fall back to exists -> RESIDENT/MISS, so exists-based tests are
+        # unaffected; set this to exercise the PENDING (HIT_PENDING) path.
+        self.states: dict[int, int] = {}
         self.reserve_fail: set[int] = set()
         self.copy_fail: set[int] = set()
         self.events: list[tuple[int, int]] = []
         self.dropped_count = 0
 
+    def _state_of(self, k):
+        from certus_shmq_connector.ring import CHECK_MISS, CHECK_RESIDENT
+
+        return self.states.get(
+            k, CHECK_RESIDENT if self.exists.get(k, False) else CHECK_MISS
+        )
+
     def check(self, keys):
+        from certus_shmq_connector.ring import CHECK_MISS
+
         keys = list(keys)
         self.calls.append(("check", keys))
-        return [self.exists.get(k, False) for k in keys]
+        # Existence view, matching ring.check == [s != MISS for s in states].
+        return [self._state_of(k) != CHECK_MISS for k in keys]
+
+    def check_states(self, keys):
+        keys = list(keys)
+        self.calls.append(("check_states", keys))
+        return [self._state_of(k) for k in keys]
 
     def touch(self, keys, promote=False):
         keys = list(keys)
@@ -99,10 +118,53 @@ def _calls_of(ring, name):
 # ── key mapping ──
 
 
-def test_key_to_u64_from_bytes_big_endian():
-    assert _key_to_u64((1).to_bytes(8, "big")) == 1
-    assert _key_to_u64((0xDEADBEEF).to_bytes(8, "big")) == 0xDEADBEEF
-    assert _key_to_u64(42) == 42  # ints pass through
+def _offload_key(block_hash: bytes, group_idx: int) -> bytes:
+    """vLLM OffloadKey layout: 32-byte block hash + 4-byte big-endian group."""
+    return block_hash + group_idx.to_bytes(4, "big", signed=False)
+
+
+def K(n: int) -> bytes:
+    """A realistic 36-byte OffloadKey standing in for test block ``n``."""
+    return _offload_key(n.to_bytes(32, "big"), 0)
+
+
+def U(n: int) -> int:
+    """The u64 the manager derives for :func:`K` (``n``) — what the ring sees.
+
+    ``_key_to_u64`` hashes the full key, so the ring no longer observes ``n``
+    itself; tests seed and assert ring state through this mapping instead.
+    """
+    return _key_to_u64(K(n))
+
+
+def test_key_to_u64_ints_pass_through():
+    assert _key_to_u64(42) == 42
+
+
+def test_key_to_u64_is_deterministic_and_fits_u64():
+    key = _offload_key(b"\xab" * 32, 3)
+    v = _key_to_u64(key)
+    assert v == _key_to_u64(key)  # stable
+    assert 0 <= v < 2**64
+
+
+def test_key_to_u64_distinguishes_group_index():
+    # Two blocks with the SAME 32-byte hash but different KV-cache groups must
+    # not collide — the group-index bytes are re-hashed into the key.
+    block_hash = b"\x11" * 32
+    assert _key_to_u64(_offload_key(block_hash, 0)) != _key_to_u64(
+        _offload_key(block_hash, 1)
+    )
+
+
+def test_key_to_u64_covers_full_hash_not_just_prefix():
+    # Keys sharing the first 8 hash bytes but differing later must not collide;
+    # the old key[:8] truncation would have aliased these to the same u64.
+    prefix = b"\x00" * 8
+    a = _offload_key(prefix + b"\x01" + b"\x00" * 23, 0)
+    b = _offload_key(prefix + b"\x02" + b"\x00" * 23, 0)
+    assert a[:8] == b[:8]  # guard: identical prefix
+    assert _key_to_u64(a) != _key_to_u64(b)
 
 
 # ── offset math (KvCacheIpc) ──
@@ -120,20 +182,105 @@ def test_block_offset_includes_base_delta_and_stride():
 
 def test_lookup_maps_to_check():
     ring = FakeRing()
-    ring.exists[7] = True
+    ring.exists[U(7)] = True
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    assert mgr.lookup((7).to_bytes(8, "big")) is True
-    assert mgr.lookup((8).to_bytes(8, "big")) is False
+    assert mgr.lookup(K(7)) is True
+    assert mgr.lookup(K(8)) is False
 
 
 def test_touch_maps_to_touch_no_promote():
     ring = FakeRing()
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    mgr.touch([(1).to_bytes(8, "big"), (2).to_bytes(8, "big")])
+    mgr.touch([K(1), K(2)])
     (args,) = _calls_of(ring, "touch")
     keys, promote = args
-    assert keys == [1, 2]
+    assert keys == [U(1), U(2)]
     assert promote is False
+
+
+def test_touch_batches_check_for_following_per_key_lookups():
+    # Option 1: touch() ships the whole key list, so it fires ONE batched check
+    # and the scheduler's subsequent per-key lookup loop is served from the
+    # memoized bitmap — no per-key check RPC.
+    ring = FakeRing()
+    ring.exists[U(1)] = True
+    ring.exists[U(2)] = True
+    # key 3 absent
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    keys = [K(1), K(2), K(3)]
+
+    mgr.touch(keys)
+    # Exactly one batched (tri-state) check over the full list.
+    checks = _calls_of(ring, "check_states")
+    assert checks == [[U(1), U(2), U(3)]]
+
+    # Per-key lookups answer from the cache, issuing NO further check.
+    assert mgr.lookup(keys[0]) is True
+    assert mgr.lookup(keys[1]) is True
+    assert mgr.lookup(keys[2]) is False
+    assert _calls_of(ring, "check_states") == [[U(1), U(2), U(3)]]  # still just the one
+
+
+def test_lookup_miss_falls_back_to_single_check():
+    # A lookup for a key the current pass never touched must consult the
+    # authoritative single-key check rather than answering absent from a stale
+    # or empty bitmap.
+    ring = FakeRing()
+    ring.exists[U(42)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    mgr.touch([K(1)])  # bitmap covers key 1 only
+    assert mgr.lookup(K(42)) is True
+    # The fallback single-key check happened for the uncached key.
+    assert [U(1)] in _calls_of(ring, "check_states")
+    assert [U(42)] in _calls_of(ring, "check_states")
+
+
+def test_touch_after_lookup_starts_new_pass_and_clears_bitmap():
+    # A touch that follows a lookup opens a new scheduling pass: the prior pass's
+    # positive bit must not survive (the key may since have been evicted), so the
+    # next lookup re-derives from the fresh batched check.
+    ring = FakeRing()
+    ring.exists[U(5)] = True
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+
+    mgr.touch([K(5)])
+    assert mgr.lookup(K(5)) is True
+
+    # Key 5 evicted between passes; new pass's batched check reflects it.
+    ring.exists[U(5)] = False
+    mgr.touch([K(5)])
+    assert mgr.lookup(K(5)) is False
+
+
+def test_lookup_pending_maps_to_none_on_legacy_contract():
+    # A store in flight -> Check PENDING. On the ≤0.24 bool|None contract (the
+    # conftest default), pending is None ("delay + retry"), never True: the block
+    # is coming but not yet loadable. (On 0.26 the shim yields HIT_PENDING.)
+    from certus_shmq_connector.ring import CHECK_PENDING
+
+    ring = FakeRing()
+    ring.states[U(7)] = CHECK_PENDING
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    assert mgr.lookup(K(7)) is None
+
+
+def test_touch_caches_pending_state_for_following_lookups():
+    # The tri-state must survive the touch()-batched cache: a pending key looked
+    # up after touch answers from the cached state (no extra RPC) and still maps
+    # to the pending result, not resident.
+    from certus_shmq_connector.ring import CHECK_PENDING
+
+    ring = FakeRing()
+    ring.exists[U(1)] = True  # resident
+    ring.states[U(2)] = CHECK_PENDING  # store in flight
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    keys = [K(1), K(2)]
+
+    mgr.touch(keys)
+    assert _calls_of(ring, "check_states") == [[U(1), U(2)]]
+    assert mgr.lookup(keys[0]) is True  # resident
+    assert mgr.lookup(keys[1]) is None  # pending -> legacy None, from cache
+    assert _calls_of(ring, "check_states") == [[U(1), U(2)]]  # no further RPC
 
 
 # ── manager: prepare_store ──
@@ -141,25 +288,42 @@ def test_touch_maps_to_touch_no_promote():
 
 def test_prepare_store_filters_existing_and_reserves():
     ring = FakeRing()
-    ring.exists[1] = True  # already cached -> filtered out
+    ring.exists[U(1)] = True  # already cached -> filtered out
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=8192)
-    keys = [(1).to_bytes(8, "big"), (2).to_bytes(8, "big")]
+    keys = [K(1), K(2)]
     out = mgr.prepare_store(keys)
     assert out is not None
     assert out.keys_to_store == [keys[1]]
     (entries,) = _calls_of(ring, "reserve")
-    assert [e[0] for e in entries] == [2]
+    assert [e[0] for e in entries] == [U(2)]
     assert [e[1] for e in entries] == [8192]  # size == block_size_bytes
 
 
 def test_prepare_store_all_existing_is_noop():
     ring = FakeRing()
-    ring.exists[1] = True
+    ring.exists[U(1)] = True
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    out = mgr.prepare_store([(1).to_bytes(8, "big")])
+    out = mgr.prepare_store([K(1)])
     assert out is not None
     assert out.keys_to_store == []
     assert _calls_of(ring, "reserve") == []
+
+
+def test_prepare_store_skips_key_with_store_in_flight():
+    # A pending key is already being written by another in-flight store; store
+    # dedup (via the bool check(), where pending counts as present) must not
+    # re-reserve it — only the genuinely-absent key is offered for storage.
+    from certus_shmq_connector.ring import CHECK_PENDING
+
+    ring = FakeRing()
+    ring.states[U(2)] = CHECK_PENDING  # key 2 store in flight
+    mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
+    keys = [K(2), K(3)]
+    out = mgr.prepare_store(keys)
+    assert out is not None
+    assert out.keys_to_store == [keys[1]]  # only key 3
+    (entries,) = _calls_of(ring, "reserve")
+    assert [e[0] for e in entries] == [U(3)]
 
 
 def test_prepare_store_partial_reserve_keeps_reserved_drops_failed():
@@ -167,14 +331,14 @@ def test_prepare_store_partial_reserve_keeps_reserved_drops_failed():
     # the keys that fit and drops the rest (rather than rejecting the whole
     # request, which triggers a vLLM retry+warning storm).
     ring = FakeRing()
-    ring.reserve_fail = {3}  # key 3 fails to reserve; key 2 succeeds
+    ring.reserve_fail = {U(3)}  # key 3 fails to reserve; key 2 succeeds
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    keys = [(2).to_bytes(8, "big"), (3).to_bytes(8, "big")]
+    keys = [K(2), K(3)]
     out = mgr.prepare_store(keys)
     assert out is not None
     # Only the reserved key is offered for storage, in offload order.
     assert out.keys_to_store == [keys[0]]
-    assert out.store_spec.keys == [2]
+    assert out.store_spec.keys == [U(2)]
     # The reserved key is kept (to be committed later), so no rollback; the
     # failed key allocated nothing, so it needs no abort either.
     assert _calls_of(ring, "abort_store") == []
@@ -184,9 +348,9 @@ def test_prepare_store_all_reserve_fail_returns_empty_not_none():
     # When nothing fits, return an empty (non-None) result so vLLM advances past
     # these tokens quietly instead of retrying and warning every scheduler step.
     ring = FakeRing()
-    ring.reserve_fail = {2, 3}
+    ring.reserve_fail = {U(2), U(3)}
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    keys = [(2).to_bytes(8, "big"), (3).to_bytes(8, "big")]
+    keys = [K(2), K(3)]
     out = mgr.prepare_store(keys)
     assert out is not None
     assert out.keys_to_store == []
@@ -198,12 +362,12 @@ def test_prepare_store_preserves_offload_order_in_partial():
     # store_spec must stay in offload order for the scheduler's positional zip
     # of src GPU block ids with dst keys to line up on a partial subset.
     ring = FakeRing()
-    ring.reserve_fail = {20}  # drop the middle key
+    ring.reserve_fail = {U(20)}  # drop the middle key
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    keys = [(10).to_bytes(8, "big"), (20).to_bytes(8, "big"), (30).to_bytes(8, "big")]
+    keys = [K(10), K(20), K(30)]
     out = mgr.prepare_store(keys)
     assert out.keys_to_store == [keys[0], keys[2]]
-    assert out.store_spec.keys == [10, 30]
+    assert out.store_spec.keys == [U(10), U(30)]
 
 
 # ── manager: complete_store / load ──
@@ -228,18 +392,18 @@ def test_complete_store_failure_aborts():
 def test_prepare_load_pins_no_promote_and_complete_load_unpins():
     ring = FakeRing()
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    spec = mgr.prepare_load([(4).to_bytes(8, "big"), (5).to_bytes(8, "big")])
+    spec = mgr.prepare_load([K(4), K(5)])
     assert isinstance(spec, CertusLoadStoreSpec)
-    assert spec.keys == [4, 5]
+    assert spec.keys == [U(4), U(5)]
     (args,) = _calls_of(ring, "pin")
     keys, promote = args
-    assert keys == [4, 5]
+    assert keys == [U(4), U(5)]
     # promote must be False: Lookup promotes cold entries itself; a Pin-promote
     # would race the Lookup-promote on mt.insert (AlreadyExists -> load crash).
     assert promote is False
-    mgr.complete_load([(4).to_bytes(8, "big"), (5).to_bytes(8, "big")])
+    mgr.complete_load([K(4), K(5)])
     (unpin,) = _calls_of(ring, "unpin")
-    assert unpin == [4, 5]
+    assert unpin == [U(4), U(5)]
 
 
 # ── manager: take_events ──

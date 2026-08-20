@@ -12,7 +12,7 @@ Three techniques, each handling a different kind of change:
 
 1. **Version detection** (``VERSION``) + a **capability matrix** (``FEATURES`` ->
    frozen ``CAPS``). Code branches on named capabilities, never on raw version
-   numbers scattered around. ``python -m certus_grpc_connector.compat`` prints the
+   numbers scattered around. ``python -m certus_shmq_connector.compat`` prints the
    feature x version matrix so the mapping is inspectable / CI-assertable.
 2. **Import ladder** — the ``vllm.v1.kv_offload.*`` imports are wrapped so a
    module *rename* in a future vLLM can be absorbed by adding an alternate path
@@ -198,7 +198,7 @@ CAPS: Caps = caps_for(VERSION)
 # The import is LAZY (deferred until a symbol is first accessed) rather than run
 # at module load, so the pure matrix machinery above (VERSION / FEATURES / CAPS /
 # render_matrix) is usable without a functioning vLLM — e.g.
-# ``python -m certus_grpc_connector.compat`` prints the matrix on a plain laptop,
+# ``python -m certus_shmq_connector.compat`` prints the matrix on a plain laptop,
 # and CI can assert it. The loud import-failure behavior is preserved: it fires
 # on the first real symbol use (``from .compat import OffloadingSpec`` etc.),
 # which is exactly when a moved API path must be surfaced.
@@ -208,7 +208,7 @@ _VLLM_SYMBOLS: dict[str, object] = {}
 
 def _import_error(what: str, exc: Exception) -> ImportError:
     return ImportError(
-        f"certus-grpc-connector: could not import {what} for vLLM {VERSION[0]}.{VERSION[1]} "
+        f"certus-shmq-connector: could not import {what} for vLLM {VERSION[0]}.{VERSION[1]} "
         f"({exc}). The vllm.v1.kv_offload API path may have moved in this version — "
         f"add the new path to the import ladder in compat.py."
     )
@@ -422,7 +422,7 @@ def extract_gpu_ptrs(kv_caches) -> list[tuple[int, int]]:
             (tuple(t.tensor.shape), int(t.page_size_bytes)) for t in tensors
         ]
         print(
-            f"[certus-grpc] CanonicalKVCaches: {len(tensors)} tensor(s); "
+            f"[certus-shmq] CanonicalKVCaches: {len(tensors)} tensor(s); "
             f"(shape, page_size_bytes)={shapes}; "
             f"groups={len(kv_caches.group_data_refs)}",
             flush=True,
@@ -447,7 +447,7 @@ def extract_gpu_ptrs(kv_caches) -> list[tuple[int, int]]:
             (tuple(t.tensor.shape), int(t.page_size_bytes)) for t in tensors
         ]
         print(
-            f"[certus-grpc] KV tensors: {len(tensors)} tensor(s); "
+            f"[certus-shmq] KV tensors: {len(tensors)} tensor(s); "
             f"(shape, page_size_bytes)={shapes}; "
             f"groups={len(kv_caches.group_data_refs)}",
             flush=True,
@@ -459,7 +459,7 @@ def extract_gpu_ptrs(kv_caches) -> list[tuple[int, int]]:
             regions.append((tensor.data_ptr(), stride_bytes))
         return regions
     raise NotImplementedError(
-        f"certus-grpc-connector: KV-cache tensor layout for vLLM {VERSION[0]}.{VERSION[1]} "
+        f"certus-shmq-connector: KV-cache tensor layout for vLLM {VERSION[0]}.{VERSION[1]} "
         f"is not yet mapped in compat.extract_gpu_ptrs. Inspect the object passed to "
         f"OffloadingSpec.get_handlers on this version and add a branch."
     )
@@ -476,7 +476,7 @@ def block_bytes_from_config(kv_cache_config, block_size_factor: int) -> int | No
     """
     if not CAPS.kv_cache_group_attrs:
         raise NotImplementedError(
-            f"certus-grpc-connector: KVCacheConfig group layout for vLLM "
+            f"certus-shmq-connector: KVCacheConfig group layout for vLLM "
             f"{VERSION[0]}.{VERSION[1]} is not yet mapped in "
             f"compat.block_bytes_from_config. Add a branch for this version."
         )
@@ -488,7 +488,7 @@ def block_bytes_from_config(kv_cache_config, block_size_factor: int) -> int | No
         page = int(groups[0].kv_cache_spec.page_size_bytes)
         block_bytes = page * num_layers * block_size_factor
         print(
-            f"[certus-grpc] per-block Reserve size from KV-cache config: "
+            f"[certus-shmq] per-block Reserve size from KV-cache config: "
             f"page_size_bytes={page} * num_layers={num_layers} * "
             f"block_size_factor={block_size_factor} = {block_bytes} bytes",
             flush=True,
@@ -496,7 +496,7 @@ def block_bytes_from_config(kv_cache_config, block_size_factor: int) -> int | No
         return block_bytes
     except Exception as e:  # noqa: BLE001 - fall back to slab_size_bytes
         print(
-            f"[certus-grpc] WARNING: could not derive per-block size from "
+            f"[certus-shmq] WARNING: could not derive per-block size from "
             f"KV-cache config ({e}); falling back to slab_size_bytes. If it is "
             f"smaller than the real block, stores will fail their D2H bounds check.",
             flush=True,
@@ -523,19 +523,55 @@ def new_request_offloading_context():
     return _lazy_base_attr("RequestOffloadingContext")()
 
 
-def lookup_result(exists: bool):
-    """Return the shape ``OffloadingManager.lookup`` must yield for this version.
+def lookup_result(state):
+    """Return the shape ``OffloadingManager.lookup`` must yield for this version,
+    given a certus-server Check state (``ring.CHECK_MISS`` / ``CHECK_RESIDENT`` /
+    ``CHECK_PENDING`` — see ``ring.check_states``).
 
     * **0.26+** (``CAPS.lookup_returns_enum``): a ``LookupResult`` enum —
-      ``HIT`` when the key is present, ``MISS`` otherwise. (The richer
-      ``HIT_PENDING`` / ``RETRY`` states model in-flight/backpressure cases the
-      connector's synchronous certus-server lookup never produces.)
+<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/compat.py
+      ``HIT`` when the key is present, ``MISS`` otherwise.
     * **≤0.24**: a plain ``bool``.
+========
+      ``MISS`` / ``HIT`` / ``HIT_PENDING``. ``HIT_PENDING`` tells the scheduler a
+      store is in flight: the block is coming, so defer the lookup rather than
+      recompute. (``RETRY`` — pure backpressure with no reservation — is never
+      produced; the blocking client absorbs that case.)
+    * **≤0.24** (``bool | None``): ``False`` / ``True`` / ``None``. ``None`` is
+      the legacy "delay this request and retry", the faithful pre-enum
+      equivalent of pending — never ``True``, since a pending key is not yet
+      loadable on versions whose load path does not independently re-check.
+
+    A plain ``bool`` is still accepted for callers not yet threading the tri-state
+    (``True`` → resident, ``False`` → miss).
+>>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/compat.py
+    """
+    from .ring import CHECK_MISS, CHECK_PENDING, CHECK_RESIDENT
+
+    # bool is an int subclass, so normalize it before the int-keyed maps below.
+    if isinstance(state, bool):
+        state = CHECK_RESIDENT if state else CHECK_MISS
+
+    if CAPS.lookup_returns_enum:
+        LookupResult = _lazy_base_attr("LookupResult")
+        return {
+            CHECK_MISS: LookupResult.MISS,
+            CHECK_RESIDENT: LookupResult.HIT,
+            CHECK_PENDING: LookupResult.HIT_PENDING,
+        }[state]
+    return {CHECK_MISS: False, CHECK_RESIDENT: True, CHECK_PENDING: None}[state]
+
+
+def lookup_result_pending():
+    """Return ``HIT_PENDING`` on 0.26+, or ``True`` on ≤0.24.
+
+    Used when a block is in-flight (store submitted but not yet committed).
+    The scheduler defers the request and re-polls on the next step.
     """
     if CAPS.lookup_returns_enum:
         LookupResult = _lazy_base_attr("LookupResult")
-        return LookupResult.HIT if exists else LookupResult.MISS
-    return bool(exists)
+        return LookupResult.HIT_PENDING
+    return True
 
 
 def block_bytes_from_offloading_config(config) -> int:
@@ -550,7 +586,7 @@ def block_bytes_from_offloading_config(config) -> int:
     """
     block_bytes = int(config.worker_kv_bytes_per_block)
     print(
-        f"[certus-grpc] per-block Reserve size from OffloadingConfig: "
+        f"[certus-shmq] per-block Reserve size from OffloadingConfig: "
         f"worker_kv_bytes_per_block = {block_bytes} bytes",
         flush=True,
     )

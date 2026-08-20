@@ -1,0 +1,80 @@
+{
+  "generated": "pending",
+  "project": "component-framework",
+  "summary": {
+    "specs_analyzed": 6,
+    "requirements_checked": 149,
+    "aligned": 149,
+    "drifted": 2,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-com-component-framework",
+      "title": "COM-Style Component Framework",
+      "aligned": 19,
+      "drifted": [],
+      "not_implemented": []
+    },
+    {
+      "id": "002-registry-refcount-binding",
+      "title": "Registry, Reference Counting, and Binding",
+      "aligned": 27,
+      "drifted": [],
+      "not_implemented": []
+    },
+    {
+      "id": "003-actor-channels",
+      "title": "Actor Model with Channel Components",
+      "aligned": 38,
+      "drifted": [
+        {
+          "requirement": "Post-relocation path reference",
+          "spec_text": "Crate relocated to lib/component-framework",
+          "actual": "align-tasks.md references old path components/component-framework/crates/component-core/src/actor.rs",
+          "location": "lib/component-framework/.specify/sync/align-tasks.md:29",
+          "severity": "minor"
+        },
+        {
+          "requirement": "Post-relocation path reference",
+          "spec_text": "Crate relocated to lib/component-framework",
+          "actual": "apply-report.md commit command references old components/component-framework/specs/003-actor-channels path",
+          "location": "lib/component-framework/.specify/sync/apply-report.md:60",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    },
+    {
+      "id": "004-channel-benchmarks",
+      "title": "Channel Backend Benchmarks",
+      "aligned": 24,
+      "drifted": [],
+      "not_implemented": []
+    },
+    {
+      "id": "005-numa-aware-actors",
+      "title": "NUMA-Aware Actor Thread Pinning and Memory Allocation",
+      "aligned": 28,
+      "drifted": [],
+      "not_implemented": []
+    },
+    {
+      "id": "006-log-handler",
+      "title": "Generic Log Handler",
+      "aligned": 13,
+      "drifted": [],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "Additional Criterion benches beyond spec-named suites (actor_latency, binding, component_ref, method_dispatch, query_interface, receptacle, registry)",
+      "location": "lib/component-framework/crates/component-framework/benches/",
+      "lines": "n/a",
+      "suggested_spec": "Covered in spirit by SC-005 (001) and the performance-accountability constitution rule; no dedicated FR names each bench. No action required."
+    }
+  ],
+  "conflicts": []
+}

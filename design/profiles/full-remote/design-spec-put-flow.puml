@@ -4,8 +4,8 @@ skinparam defaultFontSize 11
 
 title Cache Put / Populate Flow (full-remote)
 
-participant "Client\n(Python/gRPC)" as client
-participant "gRPC Service\n(tonic)" as grpc
+participant "Client\n(Python/shmq)" as client
+participant "Shmq Mailbox\n(/dev/shm)" as shmq
 participant "Dispatcher" as disp
 participant "MemoryTier\n(DRAM pool)" as mt
 participant "DispatchMap" as dm
@@ -15,9 +15,9 @@ participant "BlockDevice\n(NVMe SSD)" as ssd
 
 == Synchronous Path (client-visible) ==
 
-client -> grpc: BatchPopulateRequest\n(key, IpcHandle)
-grpc -> grpc: cudaIpcOpenMemHandle\n-> device_ptr
-grpc -> disp: populate(key, IpcHandle)
+client -> shmq: BatchPopulateRequest\n(key, IpcHandle)
+shmq -> shmq: cudaIpcOpenMemHandle\n-> device_ptr
+shmq -> disp: populate(key, IpcHandle)
 
 disp -> mt: evict_lru() if pool full
 note right of mt: LRU entries with\ncompleted write-through\nare eligible
@@ -33,9 +33,9 @@ note right of dm: Entry visible to\ncheck/lookup immediately\n(local AND remote 
 
 disp -> dm: downgrade_reference\n(write -> read)
 
-disp --> grpc: Ok
-grpc -> grpc: cudaIpcCloseMemHandle
-grpc --> client: BatchPopulateResponse\n(success)
+disp --> shmq: Ok
+shmq -> shmq: cudaIpcCloseMemHandle
+shmq --> client: BatchPopulateResponse\n(success)
 
 == Asynchronous Write-Through ==
 

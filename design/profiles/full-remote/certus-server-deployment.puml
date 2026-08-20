@@ -28,7 +28,7 @@ rectangle "**Server Host**" as server_box #FAFAFA {
 
     rectangle "certus-server" as server_proc #White {
 
-        agent "gRPC Service (tonic)\nPopulate | Lookup | Check\nRemove | Touch | Flush" as grpc #F0F0F0
+        agent "Shmq Mailbox\nPopulate | Lookup | Check\nRemove | Touch | Flush" as shmq #F0F0F0
 
         rectangle "**Dispatcher** <<IDispatcher>>" as dispatcher #DBEAFE {
             rectangle "DataDrive [0..N]" as data_drive #FEF3C7 {
@@ -62,10 +62,10 @@ cloud "**Peer Certus Nodes**" as peers #FEE2E2
 ' CONNECTIONS
 ' ============================================================
 
-pyclient -down-> grpc : gRPC
+pyclient -down-> shmq : shmq
 client_gpu .down.> server_gpu : CUDA IPC
 
-grpc -down-> dispatcher
+shmq -down-> dispatcher
 
 dispatcher -down-> dispatch_map
 dispatcher -down-> memory_tier

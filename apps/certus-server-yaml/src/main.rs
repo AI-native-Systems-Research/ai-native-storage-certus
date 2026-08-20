@@ -1,13 +1,18 @@
-//! Certus gRPC Server — YAML-Composed
+//! Certus dispatcher server — YAML-Composed
 //!
-//! Drop-in replacement for certus-server whose component graph is
-//! declared in a YAML profile manifest and assembled at compile time
-//! by build.rs code generation.
+//! Same control-plane transport as `certus-server` (the lock-free `/dev/shm`
+//! mailbox from the `shm-queue` crate, driven by the shared `shmq-dispatcher`
+//! serve loop), but the component graph is declared in a YAML profile manifest
+//! and assembled at compile time by build.rs code generation.
+//!
+//! Unlike the plain server this binary also runs a tokio runtime for the
+//! optional Prometheus metrics endpoint and OpenTelemetry OTLP export; the
+//! blocking shmq serve loop runs on a dedicated worker via `spawn_blocking`
+//! while those async tasks stay live.
 
 mod config;
 mod hooks;
 mod metrics;
-mod service;
 #[cfg(feature = "otel")]
 mod telemetry;
 
@@ -16,18 +21,28 @@ include!(concat!(env!("OUT_DIR"), "/composition.rs"));
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
-use tonic::transport::{Identity, Server, ServerTlsConfig};
+
+use shmq_dispatcher::{serve, ServeConfig, Translator};
 
 use config::StackConfig;
-use service::{DispatcherService, ServiceCounters};
+use metrics::{CountersObserver, ServiceCounters};
 
-/// Certus gRPC server (YAML-composed) exposing the IDispatcher interface.
+/// Set once by the SIGINT/SIGTERM handler; polled by the shmq poller and reaper.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn handle_signal(_sig: libc::c_int) {
+    // async-signal-safe: a single atomic store.
+    SHUTDOWN.store(true, Ordering::SeqCst);
+}
+
+/// Certus dispatcher server (YAML-composed) over a /dev/shm mailbox.
 #[derive(Parser)]
 #[command(
     name = "certus-server-yaml",
-    about = "Certus dispatcher gRPC server — compile-time composed via YAML profiles"
+    about = "Certus dispatcher server over a /dev/shm mailbox — compile-time composed via YAML profiles"
 )]
 struct Cli {
     /// PCI address(es) of NVMe device(s) — may be specified multiple times.
@@ -44,9 +59,30 @@ struct Cli {
     #[arg(long = "drive-count", conflicts_with = "device_pci")]
     drive_count: Option<usize>,
 
-    /// gRPC listen address
-    #[arg(long = "listen", default_value = "0.0.0.0:50051")]
-    listen: String,
+    /// Path to the shared-memory mailbox file (created/truncated on start).
+    #[arg(long = "shm-path", default_value = "/dev/shm/certus-shmq")]
+    shm_path: String,
+
+    /// Number of mailbox channels (= max in-flight requests = worker threads).
+    #[arg(long = "channels", default_value_t = 8)]
+    channels: usize,
+
+    /// Per-channel request capacity in bytes (K/M/G suffixes accepted).
+    #[arg(long = "cap-req", value_parser = parse_size, default_value = "1M")]
+    cap_req: usize,
+
+    /// Per-channel response capacity in bytes (K/M/G suffixes accepted).
+    #[arg(long = "cap-resp", value_parser = parse_size, default_value = "128K")]
+    cap_resp: usize,
+
+    /// Reclaim reservations left uncommitted/unaborted for this many seconds.
+    #[arg(long = "reserve-timeout-secs", default_value_t = 30)]
+    reserve_timeout_secs: u64,
+
+    /// Pin the shm-queue poller thread to this CPU core (optional). Choose a
+    /// core outside the NVMe poller range (see --poller-base-cpu).
+    #[arg(long = "shmq-poller-cpu")]
+    shmq_poller_cpu: Option<usize>,
 
     /// Memory-tier pool size (e.g. 256M, 1G, 512K). Defaults to 2G.
     #[arg(long = "memory-tier-size", value_parser = parse_size)]
@@ -55,14 +91,6 @@ struct Cli {
     /// Format extent managers on startup (destroys existing data).
     #[arg(long = "format")]
     format: bool,
-
-    /// Path to TLS certificate file (enables TLS when provided with --tls-key)
-    #[arg(long = "tls-cert")]
-    tls_cert: Option<String>,
-
-    /// Path to TLS private key file (enables TLS when provided with --tls-cert)
-    #[arg(long = "tls-key")]
-    tls_key: Option<String>,
 
     /// Pin each NVMe poller thread to a dedicated CPU core.
     #[arg(long = "poller-base-cpu")]
@@ -81,7 +109,7 @@ struct Cli {
     #[arg(long = "metrics-port", default_value_t = 0)]
     metrics_port: u16,
 
-    /// OTLP gRPC endpoint for metrics export (e.g. http://localhost:4317).
+    /// OTLP HTTP endpoint for metrics export (e.g. http://localhost:4318).
     /// Requires --features otel. Omit to disable.
     #[arg(long = "otel-endpoint")]
     otel_endpoint: Option<String>,
@@ -168,7 +196,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build the component stack from the YAML-generated composition
     let stack = build_stack(&stack_config)?;
 
-    let logger = &stack.logger;
+    let logger = Arc::clone(&stack.logger);
     logger.info(&format!(
         "certus-server-yaml: composed from profile, devices={:?}",
         cli.device_pci
@@ -177,6 +205,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "certus-server-yaml: memory-tier-size={} MiB",
         stack_config.memory_tier_size / (1024 * 1024)
     ));
+    if cli.format {
+        logger.info("certus-server-yaml: --format specified, extent managers will be reformatted");
+    }
 
     let counters = ServiceCounters::new();
 
@@ -223,41 +254,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // directly by this binary. It maintains its own outbound RDMA connections and
     // needs no listener here.
 
-    let svc = DispatcherService::new(
+    // Build the opcode→IDispatcher translator, wiring the metrics observer so
+    // the Prometheus/OTel counters survive the transport switch.
+    let translator = Translator::new(
         Arc::clone(&stack.dispatcher),
         stack.eviction_rx.clone(),
         Arc::clone(&stack.eviction_dropped),
-        counters,
-    );
-    let addr = cli.listen.parse()?;
+    )
+    .with_observer(Arc::new(CountersObserver::new(counters)));
 
-    // Build server with optional TLS
-    let mut server = Server::builder();
-    if let (Some(cert_path), Some(key_path)) = (&cli.tls_cert, &cli.tls_key) {
-        let cert = tokio::fs::read(cert_path).await?;
-        let key = tokio::fs::read(key_path).await?;
-        let identity = Identity::from_pem(cert, key);
-        server = server.tls_config(ServerTlsConfig::new().identity(identity))?;
-        logger.info("certus-server-yaml: TLS enabled");
+    // Create the shared-memory mailbox.
+    let server = Arc::new(shm_queue::Server::create(
+        &cli.shm_path,
+        cli.channels,
+        cli.cap_req,
+        cli.cap_resp,
+    )?);
+    logger.info(&format!(
+        "certus-server-yaml: shared-memory IPC path {} channels={} cap_req={} cap_resp={}",
+        cli.shm_path,
+        server.channel_count(),
+        server.cap_req(),
+        server.cap_resp()
+    ));
+
+    // Install SIGINT/SIGTERM handlers → flip SHUTDOWN. This replaces tokio's
+    // signal handling; the blocking serve loop polls SHUTDOWN directly.
+    // SAFETY: handle_signal is async-signal-safe (single atomic store).
+    unsafe {
+        libc::signal(libc::SIGINT, handle_signal as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, handle_signal as libc::sighandler_t);
     }
 
-    logger.info(&format!("certus-server-yaml: listening on {addr}"));
-
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
-    let flag_clone = Arc::clone(&shutdown_flag);
-
-    server
-        .add_service(service::dispatcher_server(svc))
-        .serve_with_shutdown(addr, async move {
-            use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM");
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {},
-                _ = sigterm.recv() => {},
-            }
-            flag_clone.store(true, Ordering::Release);
-        })
-        .await?;
+    // Run the shared poller + worker-pool + reaper loop; blocks until SHUTDOWN.
+    // Offloaded to a blocking thread so the tokio runtime keeps driving the
+    // metrics HTTP endpoint and OTel export.
+    let serve_logger = Arc::clone(&logger);
+    let serve_config = ServeConfig {
+        channels: cli.channels,
+        reserve_timeout: Duration::from_secs(cli.reserve_timeout_secs),
+        poller_cpu: cli.shmq_poller_cpu,
+    };
+    tokio::task::spawn_blocking(move || {
+        serve(server, translator, serve_config, &SHUTDOWN, serve_logger)
+    })
+    .await
+    .map_err(|e| format!("serve task join error: {e}"))??;
 
     // Mask signals during shutdown to prevent a second Ctrl+C from killing the
     // process mid-teardown (which would segfault as SPDK memory is freed while
@@ -269,7 +311,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _ = stack.dispatcher.shutdown();
     stack.spdk_env.fini();
-    stack.logger.info("certus-server-yaml: shutdown complete");
+    logger.info("certus-server-yaml: shutdown complete");
 
     // Exit immediately rather than waiting on the tokio runtime / SPDK teardown.
     std::process::exit(0);

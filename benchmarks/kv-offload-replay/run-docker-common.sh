@@ -39,6 +39,12 @@ COMMON_RUN_ARGS=(
   -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}"
   -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}"
   -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}"
+  # enforce_eager MUST be identical across every backend or the comparison is a
+  # confound (eager disables CUDA graphs + torch.compile). All drivers read this
+  # env with the same "0" default; forward it here so it applies uniformly to
+  # every containerized backend (podman does NOT inherit host env — only -e vars
+  # reach the container).
+  -e "ENFORCE_EAGER=${ENFORCE_EAGER:-0}"
   -e "HF_HUB_OFFLINE=0"
   -v "${HF_CACHE}:/root/.cache/huggingface:z"
 )

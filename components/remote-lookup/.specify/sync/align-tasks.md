@@ -61,6 +61,7 @@ matching shipped code — see apply-report.md).
   to keep source churn scoped to the drafted HIGH fixes elsewhere in the sweep.
 - **Files**: `components/remote-lookup/src/actor.rs:330`.
 - **Owner**: remote-lookup maintainer.
+- **Superseded by the 2026-08-20 task below** (widened to cover the malformed-decode arm too).
 
 ## Task 4 — (resolved this pass) stale lib.rs docstrings (002 FR-001, Medium)
 
@@ -72,3 +73,40 @@ matching shipped code — see apply-report.md).
   `Ok(())` ⇒ resident in local memory tier; the uninitialized-no-actor path still returns
   `NotFound`, which is what the existing doctest exercises). `cargo build -p remote-lookup` clean.
   Logged here for the audit trail; no further action required.
+
+---
+
+# 2026-08-20 Sweep (Phase B — current pending drift report)
+
+One ALIGN item against the design-of-record spec 002. Five spec-001 items were
+BACKFILLED (superseded-placeholder annotations) and three unspecced behaviors
+were BACKFILLED into spec 002 (FR-006, FR-014, FR-018) and applied — see
+`apply-report.md`. No source was modified.
+
+## Task: Align 002-remote-lookup-rdma/FR-018 (log unknown AND malformed wire frames)
+
+- **Severity**: low
+- **Spec Requirement**: FR-018 — unknown message types and malformed/truncated frames MUST be
+  **logged and ignored** (the ignore half is met; the logged half is not). This 2026-08-20 pass
+  widened FR-018's text (and this task) to cover **both** the unknown-`msg_type` arm and the
+  malformed-decode arm; it supersedes the narrower 2026-08-07 Task 3 (unknown arm only).
+- **Current Code** (`components/remote-lookup/src/actor.rs`, `on_wire`):
+  - `Err(_) => return,` at `:314` — malformed/truncated frame dropped silently (no log).
+  - `WireMessage::Unknown { .. } => {}` at `:330` — unknown `msg_type` dropped silently (no log).
+- **Required Change**: emit a `logger` line (debug or warn, via the actor's `ILogger`) on **both**
+  arms before dropping the frame — e.g. log the peer id and byte length on the malformed arm, and
+  the peer id plus the unknown tag/version on the `Unknown` arm. Ignore behavior is unchanged; only
+  a log call is added. Do not abort the poll loop.
+- **Files to Modify**: `components/remote-lookup/src/actor.rs:314,330` (plus a possible unit test in
+  `src/` / `tests/` asserting a log is emitted for an unknown-tag and a truncated frame).
+- **Estimated Effort**: trivial (~2 log lines + optional test); low-risk.
+
+### Acceptance Criteria
+
+- [ ] An inbound frame with an unrecognized `msg_type` produces a log line and is dropped; the poll
+      loop continues.
+- [ ] A malformed/truncated frame that fails `WireMessage::decode` produces a log line and is
+      dropped; the poll loop continues.
+- [ ] No behavioral change beyond logging (frames are still ignored; no `op_id` processing; no panic).
+- [ ] `cargo build -p remote-lookup` and existing tests remain green.
+- **Owner**: remote-lookup maintainer (source/test change — out of scope for this Markdown-only spec-sync pass).

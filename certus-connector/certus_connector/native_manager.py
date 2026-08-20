@@ -9,6 +9,7 @@ PrepareStoreOutput that vLLM expects.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 
 from vllm.v1.kv_offload.abstract import (
@@ -28,10 +29,19 @@ except ImportError:
 
 
 def _key_to_u64(key: OffloadKey) -> int:
-    """Convert an OffloadKey (bytes) to a u64 for the Rust engine."""
+    """Convert an OffloadKey (bytes) to a u64 for the Rust engine.
+
+    The OffloadKey is vLLM's ``block_hash + group_idx`` (36 bytes for the
+    default SHA-256 block hash: 32-byte digest + 4-byte big-endian group
+    index). All bytes are folded into the u64 with a stable hash (BLAKE2b,
+    first 8 bytes big-endian) so the derived key reflects the full block
+    identity and the KV-cache group. Truncating to ``key[:8]`` would drop 24
+    hash bytes and ignore the group index entirely, aliasing distinct blocks.
+    """
     if isinstance(key, int):
         return key
-    return int.from_bytes(key[:8], "big")
+    digest = hashlib.blake2b(bytes(key), digest_size=8).digest()
+    return int.from_bytes(digest, "big")
 
 
 def _keys_to_u64s(keys: Iterable[OffloadKey]) -> list[int]:

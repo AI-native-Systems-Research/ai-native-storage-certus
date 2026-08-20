@@ -1,23 +1,58 @@
 {
-  "applied": "2026-07-21",
-  "component": "dispatcher-p2p",
+  "project": "dispatcher-p2p",
   "spec": "001-gpudirect-cold-path",
-  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
-  "backup": ".specify/sync/backups/spec.md.bak",
-  "actions": [
-    "Backed up spec.md to .specify/sync/backups/spec.md.bak",
-    "Added FR-015 to spec.md after FR-014 (IGpuServices receptacle exposes set_device/device_of_ptr; interface keep-up, production cold path does not yet route by device)",
-    "Set proposals.json proposal 1 approved=true"
-  ],
-  "results": [
+  "applied": "2026-08-20",
+  "source": ".specify/sync/drift-report.json",
+  "backups": [
     {
-      "proposal": 1,
-      "requirement": "FR-015",
-      "direction": "BACKFILL",
-      "status": "applied",
-      "spec_modified": true
+      "spec": "specs/001-gpudirect-cold-path/spec.md",
+      "backup": ".specify/sync/backups/specs/001-gpudirect-cold-path/spec.md.bak"
     }
   ],
-  "conflicts": [],
-  "spec_fr_range_after": "FR-001..FR-015"
+  "specs_updated": [
+    { "requirement": "SC-006", "change_type": "BACKFILL_REWORD" },
+    { "requirement": "FR-018", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
+    { "requirement": "FR-019", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
+    { "requirement": "FR-020", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
+    { "requirement": "FR-021", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
+    { "requirement": "FR-022", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
+    { "requirement": "FR-023", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
+    { "requirement": "Key Entities", "change_type": "BACKFILL_UNSPECCED_ADD" },
+    { "requirement": "User Story 5", "change_type": "BACKFILL_UNSPECCED_ADD_SCENARIOS" },
+    { "requirement": "metadata:Last-Synced", "change_type": "METADATA" }
+  ],
+  "align_tasks_generated": [
+    {
+      "requirement": "FR-017",
+      "severity": "moderate",
+      "summary": "Increment eviction_dropped at all live eviction publish sites so eviction_dropped_count() reflects reality; thread shared counter into background evictors.",
+      "files_to_modify": [
+        "components/dispatcher-p2p/src/lib.rs",
+        "components/dispatcher-p2p/src/background.rs"
+      ]
+    }
+  ],
+  "unspecced_backfilled": [
+    { "feature": "ParallelBackgroundWriter", "location": "src/background.rs:154-219", "requirement": "FR-018" },
+    { "feature": "BackgroundEvictor", "location": "src/background.rs:303-488", "requirement": "FR-019" },
+    { "feature": "MemoryTierEvictor", "location": "src/background.rs:490-654", "requirement": "FR-020" },
+    { "feature": "clear_memory_tier()", "location": "src/lib.rs:2606-2637", "requirement": "FR-021" },
+    { "feature": "lookup_async()", "location": "src/lib.rs:2044-2110", "requirement": "FR-022" },
+    { "feature": "pins::PinnedKeys", "location": "src/pins.rs:26-57", "requirement": "FR-023" }
+  ],
+  "resolved": [],
+  "human_decision": [
+    {
+      "item": "cold_staging_slots / cold_staging_buf_bytes",
+      "location": "components/interfaces/src/idispatcher.rs:81-87",
+      "reason": "Unreferenced anywhere in dispatcher-p2p/src/ (grep-verified). Dead config on this component's surface; 64-slot ring governed by FR-003. Not backfilled to avoid inventing behavior. Human to wire in or remove."
+    }
+  ],
+  "counts": {
+    "backfill_applied": 1,
+    "align_tasks": 1,
+    "unspecced_backfilled": 6,
+    "resolved": 0,
+    "human_decision": 1
+  }
 }

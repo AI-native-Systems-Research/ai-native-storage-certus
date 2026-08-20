@@ -1,0 +1,45 @@
+{
+  "generated": "pending",
+  "project": "spdk-sys",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 18,
+    "aligned": 18,
+    "drifted": 2,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-spdk-sys",
+      "title": "spdk-sys FFI bindings",
+      "aligned": 18,
+      "drifted": [
+        {
+          "requirement": "Post-relocation path reference",
+          "spec_text": "Crate relocated to lib/spdk-sys",
+          "actual": "align-tasks.md references old components/spdk-sys spec, drift-report, and tasks paths",
+          "location": "lib/spdk-sys/.specify/sync/align-tasks.md:11,14,29",
+          "severity": "minor"
+        },
+        {
+          "requirement": "Post-relocation path reference",
+          "spec_text": "Crate relocated to lib/spdk-sys",
+          "actual": "apply-report.md references old components/spdk-sys drift-report/spec/scope/backups paths",
+          "location": "lib/spdk-sys/.specify/sync/apply-report.md:4-7,11",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "spdk_nvme_ctrlr_cmd_abort_ext and spdk_nvme_ctrlr_get_max_xfer_size bindings",
+      "location": "lib/spdk-sys/build.rs",
+      "lines": "197, 220",
+      "suggested_spec": "Plausibly covered by FR-4 controller/admin ops but not named; consider an explicit FR for abort-in-flight and MDTS-derived max-transfer-size bindings used by the block-device actor."
+    }
+  ],
+  "conflicts": []
+}

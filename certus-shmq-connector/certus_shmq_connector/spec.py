@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """CertusShmqOffloadingSpec — vLLM OffloadingSpec talking to a remote
-certus-shmq-server over a shared-memory ring (drop-in for the gRPC spec).
+certus-server over a shared-memory ring (drop-in for the gRPC spec).
 
 Plugs into vLLM's OffloadingConnector via kv_connector_extra_config:
 {
@@ -10,11 +10,9 @@ Plugs into vLLM's OffloadingConnector via kv_connector_extra_config:
     "slab_size_bytes": 131072
 }
 
-Identical role/lifecycle logic to ``CertusGrpcOffloadingSpec``; the only
-transport change is that the process-level singleton is a ``Ring`` attached to
-the ``/dev/shm`` mailbox (keyed by ``shm_path``) instead of a gRPC channel/stub.
-The server owns the hardware; this process only mmaps the ring and shares CUDA
-IPC handles for its KV-cache blocks.
+The process-level singleton is a ``Ring`` attached to the ``/dev/shm`` mailbox
+(keyed by ``shm_path``). The server owns the hardware; this process only mmaps
+the ring and shares CUDA IPC handles for its KV-cache blocks.
 """
 
 from __future__ import annotations
@@ -38,11 +36,18 @@ from .manager import ShmqCertusOffloadingManager
 from .mediums import CertusLoadStoreSpec
 from .ring import Ring
 
+<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/spec.py
+# Process-level singletons: one channel/stub per worker process, shared across
+# manager + handlers.
+_CHANNEL_SINGLETON = None
+_STUB_SINGLETON = None
+========
 # Process-level singleton: one attached Ring per worker process, keyed by shm
 # path, shared across manager + handlers. Attaching spins on the header READY
 # flag, so the first spec instance blocks until the server is up.
 _RING_LOCK = threading.Lock()
 _RING_SINGLETONS: dict[str, Ring] = {}
+>>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/spec.py
 
 
 def _get_or_create_ring(shm_path: str) -> Ring:
@@ -55,7 +60,7 @@ def _get_or_create_ring(shm_path: str) -> Ring:
 
 
 class CertusShmqOffloadingSpec(OffloadingSpec):
-    """OffloadingSpec backed by a remote certus-shmq-server over shared memory."""
+    """OffloadingSpec backed by a remote certus-server over shared memory."""
 
     def __init__(self, *args):
         # The base ctor signature changed with the 0.26 API rewrite:
@@ -174,8 +179,20 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             f"per-region strides={[r.stride_bytes for r in kv_regions]}",
             flush=True,
         )
+<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/spec.py
+        store_executor = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="certus-grpc-store"
+        )
+        load_executor = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="certus-grpc-load"
+        )
+        self._worker = worker_class()(
+            stub, kv_regions, block_bytes, store_executor, load_executor
+        )
+========
         executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="certus-shmq")
         self._worker = worker_class()(ring, kv_regions, block_bytes, executor)
+>>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/spec.py
         return self._worker
 
     def get_worker(self, kv_caches):

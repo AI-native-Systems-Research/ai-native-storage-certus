@@ -93,3 +93,30 @@ follow-up decision, or are informational notes. Source: `.specify/sync/drift-rep
   which remains inconsistent with FR-015's own caveat and the code. Left
   unedited pending a decision on whether to implement the skip logic or
   soften the Acceptance Scenario/Edge Case wording to match FR-015.
+
+---
+
+# 2026-08-20 Spec-Sync Phase B run
+
+Source: `components/spdk-env/.specify/sync/drift-report.json` (aligned 24,
+drifted 1, not_implemented 1, unspecced 0). Policy:
+`.specify/sync/PHASE_B_POLICY.md`.
+
+**No new ALIGN tasks generated this run.** The two items in the current drift
+report were resolved as:
+
+- **`stale-crate-paths`** (drift, minor) → **BACKFILL** (spec-lag; the workspace
+  moved `spdk-sys` to `lib/spdk-sys` and `component-framework` to
+  `lib/component-framework`, and the docs were behind). Applied to
+  `specs/002-spdk-env-vfio-init/tasks.md` and `spec.md`. Not an ALIGN — no code
+  change required or requested.
+- **`FR-015`** (not_implemented) → **LEAVE + NOTE** (genuinely intended future
+  work, already self-flagged in the spec; per policy "leave and note, don't
+  invent"). Not converted into an ALIGN/code task — the code does not violate an
+  agreed requirement. The pre-existing informational note above (**Task 4**)
+  already tracks the residual present-tense wording of User Story 1 Acceptance
+  Scenario 4 / its Edge Case.
+
+Tasks 1–4 above are from prior sync runs and are **not** surfaced by the current
+drift report (those requirements now read as aligned); they are retained here for
+history and remain open where noted.

@@ -3,19 +3,20 @@
 # launch-servers.sh - Launch N certus-server instances, one per NVMe SSD, each
 #                     in its own tmux window.
 #
-# Each instance binds a distinct gRPC port (BASE_PORT + i) and pins its NVMe
-# poller to a dedicated physical core located in the SSD's NUMA zone. When
+# Each instance serves a distinct shmq mailbox (${BASE_SHM_PATH}-i) and pins its
+# NVMe poller to a dedicated physical core located in the SSD's NUMA zone. When
 # numactl is available the whole server is bound (cpu + memory) to that node.
 #
 # Usage:
-#   ./launch-servers.sh [-n NUM] [-d DPI] [-p BASE_PORT] [-s SESSION] [--format]
-#                       [--mem SIZE] [--no-numactl] [BDF ...]
+#   ./launch-servers.sh [-n NUM] [-d DPI] [-p BASE_SHM_PATH] [-s SESSION]
+#                       [--format] [--mem SIZE] [--no-numactl] [BDF ...]
 #
 # Options:
 #   -n NUM         Number of total SSDs to use (default: all discovered).
 #   -d DPI         Drives per instance (default: 1). With -d 2 and 8 SSDs you
 #                  get 4 server instances each handling 2 drives.
-#   -p BASE_PORT   First gRPC port; instance i uses BASE_PORT+i (default 50051).
+#   -p PATH        Base shmq mailbox path; instance i serves PATH-i
+#                  (default /dev/shm/certus-shmq).
 #   -s SESSION     tmux session name (default "certus").
 #   --format       Pass --format to each server (DESTROYS existing data).
 #   --mem SIZE     Per-instance memory-tier size (e.g. 2G, 512M).
@@ -37,7 +38,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -n) NUM="$2"; shift 2 ;;
         -d) DRIVES_PER_INSTANCE="$2"; shift 2 ;;
-        -p) BASE_PORT="$2"; shift 2 ;;
+        -p) BASE_SHM_PATH="$2"; shift 2 ;;
         -s) SESSION="$2"; shift 2 ;;
         --format) FORMAT_FLAG="--format"; shift ;;
         --mem) MEMORY_TIER_SIZE="$2"; shift 2 ;;
@@ -66,16 +67,17 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 # Orphaned servers from a prior run (no session, but processes still alive) hold
-# hugepages and ports, which makes fresh instances fail to start -- surfacing as
-# all-zero benchmark results. Warn loudly so the user can clean up first.
+# hugepages and their mailbox files, which makes fresh instances fail to start
+# -- surfacing as all-zero benchmark results. Warn loudly so the user can clean
+# up first.
 existing="$(server_pids || true)"
 if [[ -n "$existing" ]]; then
     warn "found existing certus-server process(es) not managed by this session:"
     while read -r epid; do
         [[ -n "$epid" ]] || continue
-        warn "  pid $epid $(tr '\0' ' ' < "/proc/$epid/cmdline" 2>/dev/null | grep -oE '\--listen [0-9.]+:[0-9]+')"
+        warn "  pid $epid $(tr '\0' ' ' < "/proc/$epid/cmdline" 2>/dev/null | grep -oE '\--shm-path [^ ]+')"
     done <<< "$existing"
-    warn "  they may hold hugepages/ports and cause new instances to fail; run ./stop-servers.sh if unexpected"
+    warn "  they may hold hugepages/mailboxes and cause new instances to fail; run ./stop-servers.sh if unexpected"
 fi
 
 # --- Select devices ----------------------------------------------------------
@@ -110,9 +112,8 @@ declare -A NODE_CURSOR=()
 declare -A NODE_CORES=()
 
 log "Planning $NUM_INSTANCES instance(s) ($DRIVES_PER_INSTANCE drive(s) each):"
-printf '  %-3s %-30s %-5s %-6s %s\n' "IDX" "BDF(s)" "NUMA" "PORT" "POLLER_CPU" >&2
+printf '  %-3s %-30s %-5s %-26s %s\n' "IDX" "BDF(s)" "NUMA" "SHM_PATH" "POLLER_CPU" >&2
 
-port_candidate=$BASE_PORT
 for (( i = 0; i < NUM_INSTANCES; i++ )); do
     # Collect the BDFs assigned to this instance.
     start=$(( i * DRIVES_PER_INSTANCE ))
@@ -122,12 +123,9 @@ for (( i = 0; i < NUM_INSTANCES; i++ )); do
     # Use the first drive's NUMA node for pinning decisions.
     node="$(numa_of_bdf "${instance_bdfs[0]}")"
 
-    # Pick the next free TCP port.
-    port="$(next_free_port "$port_candidate")"
-    if [[ "$port" -ne "$port_candidate" ]]; then
-        warn "port $port_candidate in use; instance $i will use $port instead"
-    fi
-    port_candidate=$((port + 1))
+    # Each instance gets a distinct mailbox path -- no shared resource to
+    # collide on.
+    shm_path="${BASE_SHM_PATH}-${i}"
 
     # Cache the node's ordered core list once.
     if [[ -z "${NODE_CORES[$node]:-}" ]]; then
@@ -140,16 +138,20 @@ for (( i = 0; i < NUM_INSTANCES; i++ )); do
     core=${cores[$idx]}
     NODE_CURSOR[$node]=$((idx + 1))
 
-    printf '  %-3s %-30s %-5s %-6s %s\n' "$i" "$bdf_list" "$node" "$port" "$core" >&2
-    printf '%s\t%s\t%s\t%s\t%s\n' "$i" "$bdf_list" "$node" "$port" "$core" >> "$INSTANCES_TSV"
+    printf '  %-3s %-30s %-5s %-26s %s\n' "$i" "$bdf_list" "$node" "$shm_path" "$core" >&2
+    printf '%s\t%s\t%s\t%s\t%s\n' "$i" "$bdf_list" "$node" "$shm_path" "$core" >> "$INSTANCES_TSV"
 done
 
 # --- Launch tmux windows -----------------------------------------------------
 log "Launching servers in tmux session '$SESSION' (logs in $RUN_DIR)"
 [[ -n "$FORMAT_FLAG" ]] && warn "--format set: existing on-disk data will be DESTROYED"
 
-while IFS=$'\t' read -r i bdf_list node port core; do
+while IFS=$'\t' read -r i bdf_list node shm_path core; do
     logfile="$RUN_DIR/srv-$i.log"
+
+    # Remove any stale mailbox left by a prior run so the readiness check below
+    # (file exists) only ever sees a mailbox this instance actually published.
+    rm -f "$shm_path"
 
     # Assemble --device-pci flags (one per BDF in this instance's group).
     device_flags=""
@@ -159,7 +161,7 @@ while IFS=$'\t' read -r i bdf_list node port core; do
     done
 
     # Assemble the server command.
-    cmd="'$SERVER_BIN'$device_flags --listen '0.0.0.0:$port' --poller-base-cpu $core"
+    cmd="'$SERVER_BIN'$device_flags --shm-path '$shm_path' --channels $CHANNELS --poller-base-cpu $core"
     [[ -n "$MEMORY_TIER_SIZE" ]] && cmd="$cmd --memory-tier-size '$MEMORY_TIER_SIZE'"
     [[ -n "$FORMAT_FLAG" ]] && cmd="$cmd $FORMAT_FLAG"
     if [[ "$USE_NUMACTL" == 1 ]]; then
@@ -168,7 +170,7 @@ while IFS=$'\t' read -r i bdf_list node port core; do
     # tee to a logfile; keep the pane alive after exit for inspection.
     full="$cmd 2>&1 | tee '$logfile'; printf '\\n[srv$i exited rc=%s]\\n' \${PIPESTATUS[0]}; exec bash"
 
-    win="srv$i:$port"
+    win="srv$i"
     if [[ "$i" -eq 0 ]]; then
         tmux new-session -d -s "$SESSION" -n "$win" "$full"
     else
@@ -180,20 +182,20 @@ done < "$INSTANCES_TSV"
 log "Waiting for servers to come up..."
 TIMEOUT="${CERTUS_READY_TIMEOUT:-60}"
 all_ready=1
-while IFS=$'\t' read -r i bdf_list node port core; do
+while IFS=$'\t' read -r i bdf_list node shm_path core; do
     logfile="$RUN_DIR/srv-$i.log"
     deadline=$((SECONDS + TIMEOUT))
     ready=0
     while [[ $SECONDS -lt $deadline ]]; do
-        if port_listening "$port"; then ready=1; break; fi
-        if grep -qE "panicked|^Error:|[Ii]nit failed|AddrInUse|Address already in use" "$logfile" 2>/dev/null; then break; fi
+        if mailbox_ready "$shm_path"; then ready=1; break; fi
+        if grep -qE "panicked|^Error:|[Ii]nit failed" "$logfile" 2>/dev/null; then break; fi
         sleep 0.5
     done
     if [[ $ready -eq 1 ]]; then
-        log "  srv$i (port $port, $bdf_list) ready"
+        log "  srv$i ($shm_path, $bdf_list) ready"
     else
         all_ready=0
-        warn "  srv$i (port $port, $bdf_list) NOT ready -- check: tail -f $logfile"
+        warn "  srv$i ($shm_path, $bdf_list) NOT ready -- check: tail -f $logfile"
     fi
 done < "$INSTANCES_TSV"
 

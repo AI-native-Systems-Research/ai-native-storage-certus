@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Per-node gRPC driver for the multi-node remote-lookup RDMA cluster test.
+"""Per-node shmq driver for the multi-node remote-lookup RDMA cluster test.
 
-This runs *on a single node*, against that node's own ``localhost`` gRPC
-endpoint, and is orchestrated across machines by
+This runs *on a single node*, against that node's own ``/dev/shm`` shmq
+mailbox, and is orchestrated across machines by
 ``scripts/test-full-remote-multinode.sh`` over SSH. It is deliberately NOT a
 ``cargo test`` / pytest target: it needs real RDMA NICs, GPUs, and named lab
 machines.
@@ -10,10 +10,10 @@ machines.
 Two subcommands:
 
   populate   Store a batch of keys (each filled with a deterministic per-key
-             pattern) into this node's cache via the gRPC Populate RPC. Run on
+             pattern) into this node's cache via the shmq populate op. Run on
              the holder node.
 
-  lookup     Look up a batch of keys via the gRPC Lookup RPC and *prove the hit
+  lookup     Look up a batch of keys via the shmq lookup op and *prove the hit
              came from a remote peer over RDMA* rather than from this node.
              Run on the requester node (which never populated the keys).
 
@@ -43,13 +43,11 @@ import os
 import random
 import sys
 
-# The generated gRPC stubs live next to this script; when scp'd to a bare node
-# the driver and stubs are copied together, so add our own directory to the path.
+# The shmq helper module lives next to this script; when scp'd to a bare node
+# the driver and helper are copied together, so add our own directory to the path.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc  # noqa: E402
-import dispatcher_pb2  # noqa: E402
-import dispatcher_pb2_grpc  # noqa: E402
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -159,11 +157,6 @@ def parse_keys(spec):
     return keys
 
 
-def make_stub(server):
-    channel = grpc.insecure_channel(server)
-    return dispatcher_pb2_grpc.DispatcherStub(channel)
-
-
 # --------------------------------------------------------------------------
 # populate
 # --------------------------------------------------------------------------
@@ -171,24 +164,16 @@ def cmd_populate(args):
     keys = parse_keys(args.keys)
     size = args.object_size
     _cuda_set_device(args.gpu_device)
-    stub = make_stub(args.server)
+    ring = connect(args.shm_path)
 
     dev_ptr, handle = _cuda_alloc(size)
-    ipc = dispatcher_pb2.IpcHandle(
-        cuda_ipc_handle=handle, size=size, gpu_device_id=args.gpu_device
-    )
     failures = []
     try:
         for key in keys:
             _gpu_write(dev_ptr, _make_pattern(key, size))
-            resp = stub.Populate(
-                dispatcher_pb2.BatchPopulateRequest(
-                    entries=[dispatcher_pb2.PopulateEntry(key=key, ipc_handle=ipc)]
-                )
-            )
-            r = resp.results[0]
-            if not r.success:
-                failures.append((key, r.error_message))
+            oks = ring.populate([(key, [single_region(handle, args.gpu_device, size)])])
+            if not oks[0]:
+                failures.append((key, f"key {key} failed"))
     finally:
         _cuda_free(dev_ptr)
 
@@ -201,7 +186,7 @@ def cmd_populate(args):
             file=sys.stderr,
         )
         return 1
-    print(f"populate: {len(keys)}/{len(keys)} keys stored on {args.server} "
+    print(f"populate: {len(keys)}/{len(keys)} keys stored on {args.shm_path} "
           f"({size} bytes each)")
     return 0
 
@@ -213,31 +198,23 @@ def cmd_lookup(args):
     keys = parse_keys(args.keys)
     size = args.object_size
     _cuda_set_device(args.gpu_device)
-    stub = make_stub(args.server)
+    ring = connect(args.shm_path)
 
     # 1. Keys must be absent locally before the lookup.
-    check = stub.Check(dispatcher_pb2.BatchCheckRequest(keys=keys))
-    present_before = [r.key for r in check.results if r.exists]
+    check = ring.check(keys)
+    present_before = [k for k, exists in zip(keys, check) if exists]
 
     # 2. Snapshot local SSD read counters.
-    io_before = stub.GetIoStats(dispatcher_pb2.GetIoStatsRequest())
+    io_before = ring.get_io_stats()
 
     # 3. Look up each key, DMA'ing the value into a local GPU landing buffer.
     dev_ptr, handle = _cuda_alloc(size)
-    ipc = dispatcher_pb2.IpcHandle(
-        cuda_ipc_handle=handle, size=size, gpu_device_id=args.gpu_device
-    )
     satisfied, missing, verify_failures = [], [], []
     try:
         for key in keys:
-            resp = stub.Lookup(
-                dispatcher_pb2.BatchLookupRequest(
-                    entries=[dispatcher_pb2.LookupEntry(key=key, ipc_handle=ipc)]
-                )
-            )
-            r = resp.results[0]
-            if not r.success:
-                missing.append((key, r.error_message))
+            oks = ring.lookup([(key, [single_region(handle, args.gpu_device, size)])])
+            if not oks[0]:
+                missing.append((key, f"key {key} failed"))
                 continue
             satisfied.append(key)
             if args.verify:
@@ -248,9 +225,9 @@ def cmd_lookup(args):
         _cuda_free(dev_ptr)
 
     # 4. Local SSD reads must not have moved (value came over RDMA into DRAM).
-    io_after = stub.GetIoStats(dispatcher_pb2.GetIoStatsRequest())
-    read_ops_delta = io_after.read_ops - io_before.read_ops
-    read_bytes_delta = io_after.read_bytes - io_before.read_bytes
+    io_after = ring.get_io_stats()
+    read_ops_delta = io_after["read_ops"] - io_before["read_ops"]
+    read_bytes_delta = io_after["read_bytes"] - io_before["read_bytes"]
 
     remote_confirmed = (
         len(satisfied) == len(keys)
@@ -261,7 +238,7 @@ def cmd_lookup(args):
     )
 
     verdict = {
-        "server": args.server,
+        "server": args.shm_path,
         "total": len(keys),
         "satisfied": len(satisfied),
         "missing": len(missing),
@@ -298,8 +275,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def add_common(sp):
-        sp.add_argument("--server", default="localhost:50051",
-                        help="gRPC endpoint (default localhost:50051)")
+        add_shm_arg(sp)
         sp.add_argument("--keys", required=True,
                         help="key spec: 'A-B' inclusive range or comma list")
         sp.add_argument("--object-size", type=parse_size, default=parse_size("4M"),
@@ -320,8 +296,8 @@ def main():
     args = p.parse_args()
     try:
         sys.exit(args.func(args))
-    except grpc.RpcError as e:
-        print(f"gRPC error against {args.server}: {e.code()}: {e.details()}",
+    except RingError as e:
+        print(f"shmq error against {args.shm_path}: {str(e)}",
               file=sys.stderr)
         sys.exit(2)
 

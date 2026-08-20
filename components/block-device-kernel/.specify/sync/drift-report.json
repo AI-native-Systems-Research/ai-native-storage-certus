@@ -1,59 +1,54 @@
 {
-  "generated": "2026-08-07T15:31:02Z",
+  "generated": "pending",
   "project": "block-device-kernel",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 34,
-    "aligned": 32,
+    "requirements_checked": 43,
+    "aligned": 41,
     "drifted": 2,
     "not_implemented": 0,
-    "unspecced_features": 3
+    "unspecced_features": 1
   },
   "specs": [
     {
-      "spec": "001-block-device-kernel",
-      "requirements": [
-        {"id": "FR-001", "status": "aligned", "severity": null, "location": "src/lib.rs:216,198", "note": "IBlockDevice + IBlockDeviceAdmin"},
-        {"id": "FR-002", "status": "aligned", "severity": null, "location": "src/lib.rs:59,117,172,229;src/actor.rs:852", "note": "logger receptacle; info init, debug connect/disconnect; no warn per 2026-07-22 amendment"},
-        {"id": "FR-003", "status": "aligned", "severity": null, "location": "src/lib.rs:55-70", "note": "define_component! provides+receptacles"},
-        {"id": "FR-004", "status": "aligned", "severity": null, "location": "src/config.rs:168", "note": "O_DIRECT | O_DSYNC"},
-        {"id": "FR-005", "status": "aligned", "severity": null, "location": "src/actor.rs", "note": "io_uring sole IO mechanism, no pread/pwrite"},
-        {"id": "FR-006", "status": "aligned", "severity": null, "location": "src/config.rs:104,163", "note": "S_IFBLK check rejects regular files"},
-        {"id": "FR-007", "status": "aligned", "severity": null, "location": "src/config.rs:34-50,116", "note": "min-512 power-of-2; BLKGETSIZE64 auto-detect"},
-        {"id": "FR-008", "status": "aligned", "severity": null, "location": "src/actor.rs:306,367", "note": "sync via SQE + submit_and_wait(1)"},
-        {"id": "FR-009", "status": "aligned", "severity": null, "location": "src/actor.rs:383,463,448", "note": "async with timeout + inflight map"},
-        {"id": "FR-010", "status": "aligned", "severity": null, "location": "src/actor.rs:556,577,605", "note": "WriteZeros posix_memalign + io_uring write + free"},
-        {"id": "FR-011", "status": "aligned", "severity": null, "location": "src/actor.rs:221-225", "note": "BatchSubmit recursive"},
-        {"id": "FR-012", "status": "aligned", "severity": null, "location": "src/actor.rs:619", "note": "AbortOp AsyncCancel + AbortAck"},
-        {"id": "FR-013", "status": "aligned", "severity": null, "location": "src/actor.rs:632", "note": "NsProbe single NamespaceInfo"},
-        {"id": "FR-014", "status": "aligned", "severity": null, "location": "src/actor.rs:232-245", "note": "NotSupported for NVMe admin ops"},
-        {"id": "FR-015", "status": "aligned", "severity": null, "location": "src/actor.rs:847,868", "note": "actor model handle() + on_idle()"},
-        {"id": "FR-016", "status": "aligned", "severity": null, "location": "src/lib.rs:50,232,237", "note": "per-client SPSC channels capacity 64"},
-        {"id": "FR-017", "status": "aligned", "severity": null, "location": "src/actor.rs:166-182", "note": "LBA bounds with checked_add"},
-        {"id": "FR-018", "status": "aligned", "severity": null, "location": "src/lib.rs:259,268;src/actor.rs:167", "note": "ns_id==1 validation"},
-        {"id": "FR-019", "status": "aligned", "severity": null, "location": "src/config.rs:189", "note": "posix_fadvise DONTNEED on init"},
-        {"id": "FR-020", "status": "aligned", "severity": null, "location": "src/config.rs:176-184", "note": "fcntl F_GETFL O_DIRECT verification"},
-        {"id": "FR-021", "status": "drifted", "severity": "moderate", "location": "src/actor.rs:312,373,609,689,747;src/telemetry.rs:35", "note": "record_op always passes latency 0, so min/max/mean latency are always 0; not documented as a defect (contrast filesys FR-019). ops/bytes/throughput correct."},
-        {"id": "FR-022", "status": "aligned", "severity": null, "location": "benches/latency.rs;benches/throughput.rs", "note": "Criterion benches present"},
-        {"id": "FR-023", "status": "aligned", "severity": null, "location": "src/lib.rs:199,201,207,213", "note": "admin methods no-ops"},
-        {"id": "FR-024", "status": "aligned", "severity": null, "location": "src/actor.rs:862,869", "note": "Shutdown -> on_idle false"},
-        {"id": "FR-025", "status": "aligned", "severity": null, "location": "src/actor.rs:38,59,69,815,826", "note": "non-blocking delivery, unbounded per-client FIFO backlog, flush oldest-first"},
-        {"id": "SC-001", "status": "aligned", "severity": null, "location": "src/actor.rs:367;tests/integration.rs", "note": "read-after-write, O_DSYNC durability"},
-        {"id": "SC-002", "status": "aligned", "severity": null, "location": "src/config.rs:116", "note": "BLKGETSIZE64 auto-detect"},
-        {"id": "SC-003", "status": "aligned", "severity": null, "location": "src/config.rs:104;src/actor.rs:175", "note": "rejects bad paths/sizes/out-of-range LBAs"},
-        {"id": "SC-004", "status": "aligned", "severity": null, "location": "src/actor.rs:830", "note": "multi-client actor-serialized loop"},
-        {"id": "SC-005", "status": "aligned", "severity": null, "location": "src/actor.rs:793", "note": "async timeout -> Completion::Timeout"},
-        {"id": "SC-006", "status": "drifted", "severity": "moderate", "location": "src/telemetry.rs:68", "note": "telemetry snapshot latency fields inaccurate (always 0) due to FR-021 defect"},
-        {"id": "SC-007", "status": "aligned", "severity": null, "location": "benches/latency.rs;benches/throughput.rs", "note": "Criterion benches present"},
-        {"id": "SC-008", "status": "aligned", "severity": null, "location": "src/lib.rs:198,216", "note": "full IBlockDevice/IBlockDeviceAdmin surface"},
-        {"id": "SC-009", "status": "aligned", "severity": null, "location": "src/lib.rs:337;tests/integration.rs:55", "note": "unit tests mocked paths; hardware integration tests #[ignore]"}
-      ]
+      "id": "001-block-device-kernel",
+      "title": "Block Device Kernel Component",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-022",
+        "FR-023", "FR-024", "FR-025", "FR-026",
+        "NFR-001", "NFR-002", "NFR-003", "NFR-004", "NFR-005", "NFR-006",
+        "NFR-007", "NFR-008",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-007", "SC-008",
+        "SC-009"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-021",
+          "spec_text": "Feature-gated telemetry tracks min/max/mean latency; the Last-Synced note asserts the hardcoded-0 latency defect was fixed in code (per-op start captured, elapsed ns recorded).",
+          "actual": "Fix present in sync paths and wait_for_cqe, but the primary async-completion path harvest_completions() still calls record_op(0, op.bytes) with hardcoded 0 latency, despite InflightOp carrying a populated start timestamp. Async ReadAsync/WriteAsync ops record 0ns latency, driving min_latency_ns to 0 and skewing mean.",
+          "location": "src/actor.rs:776",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "SC-006",
+          "spec_text": "Feature-gated telemetry produces accurate TelemetrySnapshot values when enabled.",
+          "actual": "Latency values inaccurate for async operations because harvest_completions records 0ns latency; snapshot min/mean latency wrong when async IO dominates. Same root cause as FR-021.",
+          "location": "src/actor.rs:776",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": []
     }
   ],
   "unspecced": [
-    {"item": "async tag parameter ignored; completions always tag:0", "location": "src/actor.rs:390,470,319,380,697,703", "note": "ReadAsync/WriteAsync carry a tag but it is dropped; spec never mentions tag; sibling filesys propagates it"},
-    {"item": "read_write_stats() returns zeroed ReadWriteStats", "location": "src/lib.rs:332", "note": "IBlockDevice method not mentioned by spec"},
-    {"item": "numa_node()/nvme_version() device-info methods", "location": "src/lib.rs:292,296", "note": "not enumerated in US2 device-info scenario"}
+    {
+      "feature": "Command::FlushSync handler returning FlushDone{Ok} as a validated no-op (O_DIRECT|O_DSYNC leaves no volatile write cache); ns_id!=1 -> InvalidNamespace. Kernel spec never mentions FlushSync.",
+      "location": "src/actor.rs",
+      "lines": "233-247",
+      "suggested_spec": "Backfill an FR (parallel to filesys FR-022) documenting FlushSync as a validated no-op justified by O_DSYNC durability."
+    }
   ],
   "conflicts": []
 }

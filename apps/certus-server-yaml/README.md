@@ -1,6 +1,6 @@
 # certus-server-yaml
 
-YAML-composed Certus gRPC server. The component graph (block devices, extent
+YAML-composed Certus shmq server. The component graph (block devices, extent
 managers, memory tier, GPU services) is declared in a YAML profile and
 assembled at compile time via `build.rs` code generation. Different profiles
 select different storage backends without changing Rust source code.
@@ -71,10 +71,9 @@ CERTUS_PROFILE=full-fs-block cargo build -p certus-server-yaml \
 | `--device-pci ADDR` | Explicit PCI address (repeatable, mutually exclusive with `--drive-count`) |
 | `--memory-tier-size SIZE` | DRAM cache pool size (e.g. `256M`, `2G`). Default: 2G |
 | `--format` | Format extent managers on startup (destroys existing data) |
-| `--listen ADDR` | gRPC listen address. Default: `0.0.0.0:50051` |
+| `--shm-path PATH` | Shared-memory queue (shmq) mailbox path. Default: `/dev/shm/certus-shmq` |
+| `--channels N` | Number of shmq client channels. Default: 32 |
 | `--poller-base-cpu N` | Pin NVMe poller threads starting at CPU N |
-| `--tls-cert FILE` | TLS certificate (enables TLS with `--tls-key`) |
-| `--tls-key FILE` | TLS private key |
 
 ## Architecture
 
@@ -93,7 +92,7 @@ profiles/full-fs-block.yaml ─┘             │
                     └──────────────────────┼──────────────────────┘
                                            ▼
                                       Dispatcher
-                                    (IDispatcher gRPC)
+                                   (IDispatcher shmq)
 ```
 
 The `kind: factory` mechanism in the YAML allows the dispatcher to create
@@ -103,8 +102,18 @@ crate itself.
 
 ## Benchmarking
 
+The server and benchmark client share the same host IPC namespace and
+`/dev/shm`; the shmq mailbox path is the endpoint (there is no host:port to
+configure).
+
 ```bash
+# Launch the server with a shmq mailbox and 32 channels
+./target/release/certus-server-yaml \
+    --drive-count 4 --format --memory-tier-size 2G \
+    --shm-path /dev/shm/certus-shmq --channels 32
+
+# Point the benchmark at the same mailbox
 python3 apps/python/certus-api-bench.py \
-    --server localhost:50051 \
+    --shm-path /dev/shm/certus-shmq \
     --clients 1 --num-objects 32 --iterations 10 --block-size 4M
 ```

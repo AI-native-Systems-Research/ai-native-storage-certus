@@ -3,11 +3,18 @@
 ## Overview
 
 This document maps the vLLM `OffloadingManager` / `OffloadingConnector` interface
-(the KV-cache offloading spec) to the Certus gRPC `Dispatcher` service RPCs.
+(the KV-cache offloading spec) to the Certus shmq `Dispatcher` ops (the
+opcode-framed shared-memory wire in `lib/shmq-dispatcher/src/wire.rs`).
+
+The Python connector package is `certus_shmq_connector` (dir
+`certus-shmq-connector/`). vLLM `OffloadingConnector` is configured with
+`spec_name=CertusShmqOffloadingSpec`, `spec_module_path=certus_shmq_connector.spec`,
+and `shm_path=/dev/shm/certus-shmq` — the connector opens the `/dev/shm` mailbox
+(shared via `--ipc=host`) instead of dialing a server address.
 
 ## Mapping Table
 
-| OffloadingSpec Method | Direction | Certus gRPC RPC | Notes |
+| OffloadingSpec Method | Direction | Certus shmq op | Notes |
 |---|---|---|---|
 | `prepare_store(keys)` | Scheduler → Store | `Reserve` | Allocates DRAM slots; entries invisible until committed |
 | `transfer_async` (store) | Worker → Store | `CopyToStore` | DMA from GPU into reserved DRAM slot via IPC handle |
@@ -20,9 +27,9 @@ This document maps the vLLM `OffloadingManager` / `OffloadingConnector` interfac
 | `touch(keys)` | Scheduler | `Touch` | Updates eviction timestamp (LRU refresh) |
 | `take_events()` | Scheduler | `TakeEvents` | Drains eviction notifications since last poll |
 
-## Auxiliary RPCs (no direct OffloadingSpec equivalent)
+## Auxiliary ops (no direct OffloadingSpec equivalent)
 
-| Certus gRPC RPC | Purpose |
+| Certus shmq op | Purpose |
 |---|---|
 | `Populate` | Single-phase store (Reserve+Copy+Commit atomically) — used by benchmarks |
 | `Remove` | Explicit entry deletion (not triggered by OffloadingSpec; used by connector shutdown) |

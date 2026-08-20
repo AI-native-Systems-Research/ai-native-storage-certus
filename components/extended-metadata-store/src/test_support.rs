@@ -1,7 +1,7 @@
 //! Test infrastructure: MockBlockDevice, heap_dma_alloc, fault injection.
 
 use interfaces::iblock_device::{
-    ClientChannels, Command, Completion, IBlockDevice, NvmeBlockError, OpHandle,
+    ClientChannels, Command, Completion, IBlockDevice, NvmeBlockError, OpHandle, ReadWriteStats,
     TelemetrySnapshot,
 };
 use interfaces::{DmaAllocFn, DmaBuffer};
@@ -218,6 +218,10 @@ impl IBlockDevice for MockBlockDevice {
             mean_throughput_mbps: 0.0,
             elapsed_secs: 0.0,
         })
+    }
+
+    fn read_write_stats(&self) -> ReadWriteStats {
+        ReadWriteStats::default()
     }
 }
 

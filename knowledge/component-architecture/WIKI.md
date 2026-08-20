@@ -141,7 +141,7 @@ Our component framework directly implements many of Szyperski's principles:
 
 ## Component Framework
 
-The component framework is a Rust workspace under `components/component-framework/`
+The component framework is a Rust workspace under `lib/component-framework/`
 comprising three crates:
 
 - **`component-core`** — all types, traits, and runtime machinery

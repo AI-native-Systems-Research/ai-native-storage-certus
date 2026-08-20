@@ -9,7 +9,7 @@ the batch contains keys from different tiers:
     the IRemoteLookup path → KeyNotFound (placeholder returns NotFound)
 
 Usage:
-    python test-tier-batch.py --server localhost:50051
+    python test-tier-batch.py --shm-path /dev/shm/certus-shmq
 """
 
 import argparse
@@ -21,9 +21,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
 
 # --- CUDA helpers ---
 
@@ -41,9 +39,6 @@ _libcudart.cudaMemcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_siz
 _libcudart.cudaDeviceSynchronize.restype = ctypes.c_int
 _CUDA_MEMCPY_H2D = 1
 _CUDA_MEMCPY_D2H = 2
-
-ERROR_CODE_KEY_NOT_FOUND = 2
-ERROR_CODE_IO_ERROR = 5
 
 
 def cuda_alloc(size):
@@ -92,7 +87,7 @@ def parse_size(s):
 def main():
     parser = argparse.ArgumentParser(
         description="Integration test: partial batch lookup across all tiers")
-    parser.add_argument("--server", default="localhost:50051")
+    add_shm_arg(parser)
     parser.add_argument("--block-size", type=parse_size, default=2 * 1024 * 1024,
                         help="Object size (default: 2M)")
     parser.add_argument("--num-per-tier", type=int, default=4,
@@ -118,7 +113,7 @@ def main():
     print("=" * 60)
     print("Partial Batch Lookup — Multi-Tier Integration Test")
     print("=" * 60)
-    print(f"  Server:       {args.server}")
+    print(f"  Server:       {args.shm_path}")
     print(f"  Block size:   {block_size // 1024} KiB")
     print(f"  Per tier:     {n} objects")
     print(f"  Tiers:        hot (memory), cold (SSD), remote (non-existent)")
@@ -148,14 +143,7 @@ def main():
         gpu_write(pop_ptrs[i], pattern)
 
     # --- Connect ---
-    channel = grpc.insecure_channel(
-        args.server,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+    ring = connect(args.shm_path)
 
     passed = 0
     failed = 0
@@ -165,71 +153,52 @@ def main():
         # === Phase 1: Populate cold keys first (they'll be evicted later) ===
         print("  Phase 1: Populating cold-tier keys...")
         cold_entries = [
-            dispatcher_pb2.PopulateEntry(
-                key=cold_keys[i],
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=pop_handles[n + i],
-                    size=block_size,
-                ),
-            )
+            (cold_keys[i], [single_region(pop_handles[n + i], args.gpu, block_size)])
             for i in range(n)
         ]
-        resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=cold_entries))
-        pop_failed = sum(1 for r in resp.results if not r.success)
+        oks = ring.populate(cold_entries)
+        pop_failed = sum(1 for ok in oks if not ok)
         if pop_failed:
             errors.append(f"cold populate: {pop_failed}/{n} failures")
-            for r in resp.results:
-                if not r.success:
-                    errors.append(f"  key={r.key}: {r.error_message}")
+            for i, ok in enumerate(oks):
+                if not ok:
+                    errors.append(f"  key {cold_keys[i]} failed")
 
         # Flush cold keys to SSD and wait
         print(f"  Flushing to SSD and waiting {args.settle}s...")
-        stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+        ring.flush_to_ssd()
         time.sleep(args.settle)
 
         # Clear memory tier — cold keys now only on SSD
         print("  Clearing memory tier (cold keys now SSD-only)...")
-        stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
+        ring.clear_memory_tier()
 
         # === Phase 2: Populate hot keys (stay in memory-tier) ===
         print("  Phase 2: Populating hot-tier keys...")
         hot_entries = [
-            dispatcher_pb2.PopulateEntry(
-                key=hot_keys[i],
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=pop_handles[i],
-                    size=block_size,
-                ),
-            )
+            (hot_keys[i], [single_region(pop_handles[i], args.gpu, block_size)])
             for i in range(n)
         ]
-        resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=hot_entries))
-        pop_failed = sum(1 for r in resp.results if not r.success)
+        oks = ring.populate(hot_entries)
+        pop_failed = sum(1 for ok in oks if not ok)
         if pop_failed:
             errors.append(f"hot populate: {pop_failed}/{n} failures")
-            for r in resp.results:
-                if not r.success:
-                    errors.append(f"  key={r.key}: {r.error_message}")
+            for i, ok in enumerate(oks):
+                if not ok:
+                    errors.append(f"  key {hot_keys[i]} failed")
 
         # === Phase 3: Mixed batch lookup ===
         # Order: [hot_0..hot_n, cold_0..cold_n, remote_0..remote_n]
         print("  Phase 3: Sending mixed BatchLookup (hot + cold + remote)...")
         batch_keys = hot_keys + cold_keys + remote_keys
         lookup_entries = [
-            dispatcher_pb2.LookupEntry(
-                key=batch_keys[i],
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=lookup_handles[i],
-                    size=block_size,
-                ),
-            )
+            (batch_keys[i], [single_region(lookup_handles[i], args.gpu, block_size)])
             for i in range(total_batch)
         ]
-        req = dispatcher_pb2.BatchLookupRequest(entries=lookup_entries)
-        resp = stub.Lookup(req)
+        oks = ring.lookup(lookup_entries)
         _libcudart.cudaDeviceSynchronize()
 
-        results = list(resp.results)
+        results = list(oks)
 
         # === Phase 4: Validate results ===
         print()
@@ -246,9 +215,9 @@ def main():
         print("  [HOT TIER - Memory]")
         hot_results = results[:n]
         hot_pass = 0
-        for i, r in enumerate(hot_results):
+        for i, ok in enumerate(hot_results):
             key = hot_keys[i]
-            if r.success:
+            if ok:
                 actual = gpu_read(lookup_ptrs[i], block_size)
                 expected = make_pattern(key, block_size)
                 if actual == expected:
@@ -256,9 +225,7 @@ def main():
                 else:
                     errors.append(f"hot key={key}: data integrity mismatch")
             else:
-                errors.append(
-                    f"hot key={key}: expected success, got error_code={r.error_code} "
-                    f"({r.error_message})")
+                errors.append(f"hot key={key}: expected success, got failure")
         print(f"    Success + integrity: {hot_pass}/{n}")
         passed += hot_pass
         failed += (n - hot_pass)
@@ -268,9 +235,9 @@ def main():
         print("  [COLD TIER - SSD]")
         cold_results = results[n:2*n]
         cold_pass = 0
-        for i, r in enumerate(cold_results):
+        for i, ok in enumerate(cold_results):
             key = cold_keys[i]
-            if r.success:
+            if ok:
                 actual = gpu_read(lookup_ptrs[n + i], block_size)
                 expected = make_pattern(key, block_size)
                 if actual == expected:
@@ -278,9 +245,7 @@ def main():
                 else:
                     errors.append(f"cold key={key}: data integrity mismatch")
             else:
-                errors.append(
-                    f"cold key={key}: expected success, got error_code={r.error_code} "
-                    f"({r.error_message})")
+                errors.append(f"cold key={key}: expected success, got failure")
         print(f"    Success + integrity: {cold_pass}/{n}")
         passed += cold_pass
         failed += (n - cold_pass)
@@ -288,50 +253,40 @@ def main():
         # --- Validate remote tier (last n entries) ---
         # These keys were never populated. The dispatcher forwards them to
         # IRemoteLookup::batch_lookup, which (being a placeholder) returns
-        # NotFound. The dispatcher wraps this as IoError("remote lookup: key
-        # not found"), so the gRPC layer reports ERROR_CODE_IO_ERROR with a
-        # message containing "remote lookup".
+        # NotFound. Either way the shmq Ring reports the entry as a failed
+        # lookup (ok=False), so any non-success here counts as the expected
+        # "not found via remote path" outcome.
         print()
         print("  [REMOTE TIER - IRemoteLookup path]")
         remote_results = results[2*n:]
         remote_pass = 0
-        for i, r in enumerate(remote_results):
+        for i, ok in enumerate(remote_results):
             key = remote_keys[i]
-            if not r.success and (
-                r.error_code == ERROR_CODE_IO_ERROR
-                and "remote lookup" in r.error_message
-            ):
+            if not ok:
                 remote_pass += 1
-            elif not r.success and r.error_code == ERROR_CODE_KEY_NOT_FOUND:
-                # Also accept direct KeyNotFound (if remote_lookup not bound)
-                remote_pass += 1
-            elif r.success:
+            else:
                 errors.append(
                     f"remote key={key}: expected failure, got success "
                     f"(remote placeholder should not resolve)")
-            else:
-                errors.append(
-                    f"remote key={key}: unexpected error_code={r.error_code} "
-                    f"({r.error_message})")
         print(f"    Not found (remote path): {remote_pass}/{n}")
         passed += remote_pass
         failed += (n - remote_pass)
 
-    except grpc.RpcError as e:
-        errors.append(f"gRPC error: {e.code()} - {e.details()}")
+    except RingError as e:
+        errors.append(f"shmq error: {str(e)}")
     finally:
         # === Cleanup ===
         print()
         print("  Cleaning up...")
         try:
-            stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=all_populated_keys))
-        except grpc.RpcError:
+            ring.remove(all_populated_keys)
+        except RingError:
             pass
         for ptr in pop_ptrs:
             cuda_free(ptr)
         for ptr in lookup_ptrs:
             cuda_free(ptr)
-        channel.close()
+        ring.close()
 
     # === Summary ===
     print()

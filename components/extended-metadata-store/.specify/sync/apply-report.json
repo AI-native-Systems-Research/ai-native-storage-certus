@@ -1,0 +1,56 @@
+{
+  "applied": "2026-08-20",
+  "component": "extended-metadata-store",
+  "phase": "B",
+  "source": ".specify/sync/drift-report.json",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "backups": [
+    ".specify/sync/backups/specs/001-extended-metadata-store/spec.md.bak",
+    ".specify/sync/backups/specs/002-ssd-integration-test/spec.md.bak"
+  ],
+  "counts": {
+    "backfill_applied": 1,
+    "unspecced_backfilled": 3,
+    "align_tasks": 2,
+    "resolved": 2,
+    "human_decision": 0,
+    "not_implemented": 0
+  },
+  "specs_updated": [
+    {
+      "spec": "001-extended-metadata-store",
+      "changes": [
+        {"requirement": "FR-05", "change_type": "BACKFILL", "detail": "drafted -> Implemented; trigger mechanism described (src/lib.rs:201-215)"},
+        {"requirement": "FR-18", "change_type": "BACKFILL-UNSPECCED", "detail": "new FR: Superblock::region_capacity_bytes() (src/on_disk.rs:142)"},
+        {"requirement": "NFR-11", "change_type": "BACKFILL-UNSPECCED", "detail": "new NFR: create_test_component_from_state() (src/test_support.rs:272)"},
+        {"requirement": "Known Gaps FR-05", "change_type": "BACKFILL", "detail": "rewritten to RESOLVED; both verification blockers closed"},
+        {"requirement": "Known Gaps CapacityExhausted", "change_type": "BACKFILL-UNSPECCED", "detail": "defined-but-unconstructed variant documented; construction tracked by ALIGN-EMS-002"},
+        {"requirement": "US6 note / Feature-Gating note / SC note", "change_type": "BACKFILL/RESOLVED", "detail": "stale no-op / deferred / non-member language updated to current reality"}
+      ]
+    },
+    {
+      "spec": "002-ssd-integration-test",
+      "changes": [
+        {"requirement": "FR-007", "change_type": "ALIGN-note", "detail": "persistence still via internal flush; tracked by ALIGN-EMS-001; requirement stands"},
+        {"requirement": "FR-011", "change_type": "ALIGN-note", "detail": "creation/durability via inherent APIs; code-side gap tracked by ALIGN-EMS-001; no relaxation"},
+        {"requirement": "Capacity note / US5-2 / US3 notes", "change_type": "ALIGN-note", "detail": "reversed prior acceptance of flush-time-only behavior; option a target via ALIGN-EMS-002"},
+        {"requirement": "header", "change_type": "metadata", "detail": "2026-08-20 Phase B Last-Synced note"}
+      ]
+    }
+  ],
+  "align_tasks_generated": [
+    {"id": "ALIGN-EMS-001", "spec": "002-ssd-integration-test", "requirement": "FR-011", "severity": "moderate", "files": ["components/extended-metadata-store/tests/integration_ssd.rs"]},
+    {"id": "ALIGN-EMS-002", "spec": "002-ssd-integration-test", "requirement": "FR-007", "severity": "moderate", "files": ["components/extended-metadata-store/src/lib.rs", "components/extended-metadata-store/src/flush.rs"]}
+  ],
+  "unspecced_backfilled": [
+    {"feature": "Superblock::region_capacity_bytes()", "location": "src/on_disk.rs:142", "backfilled_as": "001 FR-18"},
+    {"feature": "create_test_component_from_state()", "location": "src/test_support.rs:272", "backfilled_as": "001 NFR-11"},
+    {"feature": "ExtendedMetadataStoreError::CapacityExhausted never constructed", "location": "../interfaces/src/iextended_metadata_store.rs:12", "backfilled_as": "001 Known Gaps note; construction tracked by ALIGN-EMS-002"}
+  ],
+  "resolved": [
+    {"requirement": "NFR-07", "location": "src/test_support.rs:223", "verification": "read_write_stats() -> ReadWriteStats::default() present"},
+    {"requirement": "SC-1/2/3/6/7", "location": "Cargo.toml:23,105", "verification": "crate in [workspace] members and [workspace.dependencies]"}
+  ],
+  "source_modified": false,
+  "cargo_run": false
+}
