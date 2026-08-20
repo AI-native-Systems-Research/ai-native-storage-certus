@@ -146,7 +146,7 @@ strong { color: var(--accent); }
 </tr>
 </tbody>
 </table>
-<p><strong>Key principle</strong>: Store happens unconditionally (new KV must be persisted for durability/sharing). Load happens ONLY when a block that was Stored is not currently on GPU and is needed again. Which tier serves the Load determines latency.</p>
+<p><strong>Key principle</strong>: Store is policy-dependent (not unconditional). The connector's <code>prepare_store</code> filters by: dedup (Check — skip if block already exists), admission policy (prompt-only, reuse-threshold), and capacity (Reserve may reject if DRAM tier is saturated). Load happens ONLY when a block that was Stored is not currently on GPU and is needed again. Which tier serves the Load determines latency.</p>
 <h3>Three-Tier Data Path (Certus Architecture)</h3>
 <pre><code>GPU HBM  ←──────→  DRAM (memory-tier, 32 GiB)  ←──────→  SSD (NVMe × 4)
          cudaMemcpy                              SPDK NVMe R/W
@@ -381,36 +381,38 @@ Session N: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M_N]
 <h3>6b. Speculative Decoding / Tree Verification (SpecInfer)</h3>
 <ul>
 <li>Multiple candidate branches generated speculatively (branching factor 3–5)</li>
-<li><strong>Stores</strong>: All branches Store their KV blocks (3–5× Store amplification)</li>
-<li><strong>Loads</strong>: Verification Loads the shared prefix once, then divergent branches in parallel</li>
-<li>Most branches rejected → their Stored blocks become dead (wasted Store bandwidth)</li>
-<li>Pattern: <strong>High Store + high discard, Load of shared prefix for verification</strong></li>
-<li>Key metric: Store:useful-retain ratio (3–5× wasted Stores)</li>
+<li><strong>Normally NO extra certus IO</strong>: speculative KV stays on GPU during verification. Rejected branches are freed from GPU without ever being Stored (they never became committed full blocks)</li>
+<li><strong>Certus IO only if</strong>: the connector eagerly offloads uncommitted branches (not default behavior) OR GPU pressure evicts speculative blocks before verification</li>
+<li><strong>If offloaded</strong>: 3–5× Store amplification (most discarded immediately after verification rejects them)</li>
+<li>Pattern in practice: <strong>Mostly GPU-local; certus sees only committed blocks post-verification</strong></li>
 </ul>
 <h3>6c. Beam Search / Parallel Sampling</h3>
 <ul>
 <li>B beams share prefix KV, then diverge at each step</li>
-<li><strong>Loads</strong>: All B beams Load the same shared prefix blocks each step (read amplification)</li>
-<li><strong>Stores</strong>: Only at divergence points (copy-on-write — Store only when a beam modifies)</li>
-<li>Pattern: B × Load of shared blocks per step, occasional Store at divergence</li>
-<li>Net: Load-dominated (shared prefix read B times per step, Stores are rare COW events)</li>
+<li><strong>Normally GPU-local</strong>: beams share GPU block-table references to prefix blocks (no certus Load per beam)</li>
+<li><strong>Certus IO only if</strong>: prefix was evicted from GPU (then Cold Load to restore it) OR new beam-divergence blocks are offloaded</li>
+<li><strong>Stores</strong>: New suffix blocks at divergence points (committed blocks, not COW at storage level)</li>
+<li>Pattern in practice: <strong>Suffix Stores only; shared prefix stays GPU-resident unless evicted</strong></li>
+<li>NOT "B × Load per step" — that would be the GPU attention access pattern, not certus IO</li>
 </ul>
 <h3>6d. Continuous Batching Steady-State</h3>
 <ul>
 <li>No global prefill/decode phases — individual requests in different phases simultaneously</li>
-<li>Simultaneous: some requests doing prefill <strong>Stores</strong> + some doing decode <strong>Loads</strong> (cache miss) + some doing eviction <strong>Stores</strong></li>
+<li>Simultaneous: some requests doing prefill <strong>Stores</strong> + some doing reschedule <strong>Loads</strong> (preempted requests restored)</li>
 <li>KV blocks allocated/freed <strong>asynchronously</strong> (not synchronized across requests)</li>
-<li>Arrival bursts (per BurstGPT traces: 10–100× variation) → memory pressure varies → eviction Store/Load bursts</li>
+<li>Arrival bursts (per BurstGPT traces: 10–100× variation) → memory pressure varies → preemption rate varies</li>
 <li>Pattern: <strong>Mixed async Store+Load, no synchronized phases</strong> — this IS the steady-state the server sees</li>
+<li><strong>Priority preemption cascades</strong>: high-priority requests displace many low-priority → correlated burst of Loads when low-priority reschedules (thrashing pattern)</li>
 </ul>
 <h3>6e. Multi-Turn Conversation Reuse</h3>
 <ul>
 <li>KV cache from prior turns persisted to storage</li>
-<li><strong>Load</strong> (turn start): ALL prior turns' KV blocks loaded from storage back to GPU (the entire conversation history)</li>
-<li><strong>Store</strong> (during generation): New blocks from this turn's generation stored (every 16 tokens → 1 Store)</li>
-<li>Growing Load set: turn 1 = 0 Loads, turn 5 = Load of turns 1–4's KV, turn 12 = Load of turns 1–11's KV</li>
-<li>Temporal: <strong>massive Load burst at turn-start</strong>, then steady trickle of Stores during generation</li>
+<li><strong>Load</strong> (turn start): Only the <strong>absent</strong> prior-turn blocks are Loaded (blocks still in GPU/DRAM are hit locally — not "ALL prior turns")</li>
+<li><strong>Store</strong> (during generation): Only NEW blocks from this turn stored (prefix-hit blocks are NOT re-stored, dedup via Check)</li>
+<li>Growing Load set: depends on what was evicted between turns. If all prior turns evicted → massive Load. If still resident → 0 Load.</li>
+<li>Temporal: <strong>Load burst at turn-start</strong> (size depends on eviction between turns), then trickle of Stores</li>
 <li>This is BENCH_TARGET's primary pattern</li>
+<li>In BENCH_TARGET (256 convs, 64 MAX_NUM_SEQS, 32 GiB tier): by late turns, most prior-turn blocks HAVE been evicted → Loads are large</li>
 </ul>
 <h3>6f. Disaggregated Prefill-Decode Architecture (DistServe, Splitwise, Mooncake)</h3>
 <ul>
@@ -425,24 +427,55 @@ Session N: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M_N]
 <h3>6g. Selective/Sparse KV Retrieval (InfiniGen, Attention Sink)</h3>
 <ul>
 <li>Not all prior KV entries equally important — systems retrieve only predicted-important subset</li>
-<li>InfiniGen (OSDI 2024): speculative prefetch of important tokens, one layer ahead</li>
-<li><strong>Loads</strong>: Sparse random Loads of 10–30% of full KV blocks (not all prior blocks)</li>
-<li><strong>Stores</strong>: Same as standard decode (1 Store per 16 new tokens)</li>
-<li>Fundamentally different from §3 where a cache miss Loads the FULL block — here, some blocks are never Loaded because they're predicted unimportant</li>
-<li>Pattern: <strong>Sparse random Loads (subset selection) + standard Stores</strong></li>
+<li>InfiniGen (OSDI 2024): selects important <strong>tokens/layers</strong>, not blocks</li>
+<li><strong>Out of scope for certus as-is</strong>: Certus transfers fixed cross-layer blocks (2 MB). Cannot Load 10% of a block — it's all-or-nothing per block. Sparse retrieval would require a sub-block selection/packing mechanism not currently implemented.</li>
+<li><strong>What IS representable</strong>: If important tokens cluster into a subset of blocks, then fewer blocks need Loading. But this depends on token→block mapping (clustering), and may be zero savings if important tokens are scattered across all blocks.</li>
+<li><strong>Attention sinks</strong> (different from InfiniGen): fixed "hot head" blocks (first few tokens) + sliding tail. Creates bimodal access: head blocks are always Hot (never evicted), tail blocks cycle through DRAM. Not sparse retrieval — it's just LRU naturally keeping head blocks hot.</li>
 </ul>
 <h3>6h. LRU Eviction with Prefix Awareness (vLLM)</h3>
 <ul>
 <li>vLLM evicts from free-queue head (LRU)</li>
 <li>Freed blocks added in <strong>reverse order</strong>: last block (most unique) evicted first</li>
-<li><strong>Stores</strong> (eviction): unique-suffix blocks get evicted (Stored to SSD) first, shared-prefix blocks stay in DRAM longer</li>
-<li><strong>Loads</strong> (reload): when evicted unique-suffix blocks are needed again → Load from SSD</li>
-<li>Net effect: Stores and Loads disproportionately hit <strong>unique-suffix blocks</strong>, shared-prefix blocks rarely touch SSD</li>
-<li>Implication for bench: eviction IO is concentrated on the "tail" of each session, not the shared head</li>
+<li><strong>DRAM eviction</strong> (no IO): unique-suffix blocks lose their DRAM slot first, shared-prefix blocks stay longer</li>
+<li><strong>Cold Loads</strong> (reload): when evicted unique-suffix blocks are needed again → Cold Load from SSD</li>
+<li>Net effect: Cold Loads disproportionately hit <strong>unique-suffix blocks</strong>, shared-prefix blocks rarely need Cold Loads</li>
+<li>Implication for bench: Cold Load IO is concentrated on the "tail" of each session, not the shared head</li>
+<li>Per Xinnor eviction study (30 traces, 8M IO events): LRU is near-optimal for hit ratio; TinyLFU+SLRU has 10× lower write amplification but 33 percentage points worse hit ratio</li>
+</ul>
+<h3>6i. Prefix Invalidation / Hash Chain Break</h3>
+<ul>
+<li>Changed system prompt, tool schema, model adapter, or tokenizer → prefix block hashes change</li>
+<li>All hash-chained suffix blocks also invalidated (Merkle chain broken)</li>
+<li><strong>Result</strong>: Previously-stored prefix becomes orphaned on SSD (dead data, needs GC). New Stores for the changed prefix + all suffix blocks (full recompute)</li>
+<li>Pattern: <strong>Burst of new Stores (entire invalidated chain) + lost Load hits + SSD garbage accumulation</strong></li>
+<li>Frequency: Every system prompt update, adapter swap, or tool schema change</li>
+</ul>
+<h3>6j. Context Overflow / Left Truncation</h3>
+<ul>
+<li>Request exceeds MAX_MODEL_LEN → leftmost tokens truncated</li>
+<li>Truncation creates new block hashes (different token content at position 0) → existing stored blocks no longer match</li>
+<li>Pattern: <strong>Store churn</strong> — new blocks stored for the shifted content, old blocks become garbage</li>
+<li>Similar to §6i but triggered by request length rather than config change</li>
+</ul>
+<h3>6k. Sliding Window Attention</h3>
+<ul>
+<li>Model uses fixed attention window (e.g., 4096 tokens) — only last W tokens' KV needed for attention</li>
+<li>Blocks older than window expire sequentially as new tokens generate</li>
+<li>Pattern: <strong>Sequential block expiry</strong> — oldest blocks become dead at fixed rate. DRAM slots freed in order.</li>
+<li>On certus: expired blocks are never Cold-Loaded again (they'll never be needed). Reduces useful working set.</li>
+<li>Creates moving-tail residency: only the W most recent tokens' blocks are "live"</li>
+</ul>
+<h3>6l. SSD Capacity Eviction / GC</h3>
+<ul>
+<li>Unlike DRAM eviction (pointer free, data stays on SSD), <strong>SSD full</strong> = true data loss</li>
+<li>If SSD is full and a new block needs to be written, certus must either: reject the Store, or delete old SSD extents</li>
+<li>After SSD deletion: future Load for that block = <strong>miss</strong> → recomputation required (no data anywhere)</li>
+<li>Pattern: <strong>True miss → recompute → Store</strong> (unlike DRAM eviction which is just Cold Load)</li>
+<li>Not modeled in current bench (SSD is assumed infinite relative to working set)</li>
 </ul>
 <hr />
 <h2>7. Realistic Parameter Summary</h2>
-<p>From kv_IO_pattern.md and vLLM source analysis:</p>
+<p>From kv_IO_pattern.md, vLLM source analysis, and Xinnor MLPerf Storage 3.0 measurements:</p>
 <table>
 <thead>
 <tr>
@@ -502,8 +535,88 @@ Session N: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M_N]
 <td>32–256</td>
 <td>GPU memory dependent</td>
 </tr>
+<tr>
+<td>Agent context growth</td>
+<td>10K–200K+ tokens</td>
+<td>Xinnor blog (complex agents)</td>
+</tr>
 </tbody>
 </table>
+<h3>Measured IO Characteristics (Xinnor MLPerf Storage 3.0)</h3>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Prefill Phase</th>
+<th>Decode Phase</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>IO size (avg)</td>
+<td>140–328 MB</td>
+<td>11–18 MB</td>
+<td>Xinnor traces</td>
+</tr>
+<tr>
+<td>IO size (peak)</td>
+<td>~1 GB</td>
+<td>23 MB</td>
+<td>Xinnor traces</td>
+</tr>
+<tr>
+<td>Bandwidth (sustained)</td>
+<td>8.7–9.5 GB/s write</td>
+<td>13–27 GB/s read</td>
+<td>Xinnor MLPerf</td>
+</tr>
+<tr>
+<td>Bandwidth (peak)</td>
+<td>25 GB/s write</td>
+<td>up to 200 GiB/s (model-dependent)</td>
+<td>Xinnor blog</td>
+</tr>
+<tr>
+<td>Queue depth (peak)</td>
+<td>44–75</td>
+<td>44–75</td>
+<td>Xinnor traces</td>
+</tr>
+<tr>
+<td>Read/write ratio</td>
+<td>Near-zero reads</td>
+<td>Strongly read-dominant</td>
+<td>Xinnor blog</td>
+</tr>
+</tbody>
+</table>
+<h3>Eviction Policy Findings (Xinnor, 30 traces, 8M IO events, 281 GB working set)</h3>
+<table>
+<thead>
+<tr>
+<th>Policy</th>
+<th>Hit Ratio</th>
+<th style="text-align: right;">Write Amplification</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ARC, LRU, 2Q</td>
+<td>Highest (within ~1 pp)</td>
+<td style="text-align: right;">Higher (~0.35)</td>
+<td>LRU wins by simplicity</td>
+</tr>
+<tr>
+<td>TinyLFU+SLRU</td>
+<td>33 pp below top</td>
+<td style="text-align: right;">~0.035 (10× lower)</td>
+<td>Filters single-use data</td>
+</tr>
+</tbody>
+</table>
+<p>LRU is near-optimal for hit ratio. TinyLFU trades hit ratio for much lower write amplification (relevant for SSD endurance).</p>
 <hr />
 <h2>8. Mapping to certus-api-bench Workload Modes</h2>
 <p>Proposed bench scenarios (v4):</p>
@@ -620,8 +733,21 @@ Session N: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M_N]
 <td>2024</td>
 <td>Tree-based speculative decoding, branching factor IO impact</td>
 </tr>
+<tr>
+<td>Xinnor/MLPerf Storage 3.0</td>
+<td>2025</td>
+<td>Measured IO sizes, bandwidth, queue depth, eviction policy comparison</td>
+</tr>
 </tbody>
 </table>
+<h3>Explicitly Out of Scope (not KV cache storage IO)</h3>
+<p>These affect inference performance but do NOT produce different certus Store/Load patterns:
+- <strong>MoE expert weight reads</strong> — weight loading, not KV cache; may contend on NVMe bandwidth
+- <strong>Model/adapter switching</strong> — weight warm-up, namespace turnover; not KV IO
+- <strong>Structured generation</strong> (constrained decoding) — changes token count/latency, not IO direction
+- <strong>KV cache quantization</strong> (FP8/INT4) — reduces block size (2× or 4× smaller), but same Store/Load pattern
+- <strong>GQA/MQA</strong> — changes block size calculation (fewer KV heads), but same Store/Load pattern
+- <strong>Multimodal vision tokens</strong> — large prefill burst (many tokens from image), but same Store/Load pattern as text prefill</p>
 <hr />
 <h2>10. BENCH_TARGET (vLLM Multi-Turn ShareGPT Replay) → Pattern Mapping</h2>
 <p><strong>What it is</strong>: Real vLLM inference via the Certus gRPC connector, replaying 450 ShareGPT conversations × 12 turns. This is NOT a synthetic bench — it's actual model inference with real KV cache offloading through the full stack (vLLM → Python connector → gRPC → Rust server → SPDK NVMe).</p>
@@ -1195,7 +1321,7 @@ Steady state with 256 conversations, MAX_NUM_SEQS=64:
 </ul>
 <hr>
 <p style="text-align: center; color: #64748b; font-size: 0.85em; margin-top: 3rem;">
-Generated from <code>knowledge/inference_workload_mapping.md</code> · 8 papers investigated · 13 patterns cataloged
+Generated from <code>knowledge/inference_workload_mapping.md</code> · 9 sources investigated · 17 patterns cataloged
 </p>
 </body>
 </html>
