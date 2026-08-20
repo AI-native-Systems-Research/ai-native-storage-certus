@@ -1,173 +1,69 @@
-Generated: 2026-08-07T15:31:25Z
-
 # Drift Report: extended-metadata-store
 
-Spec-vs-implementation drift analysis covering **two** specs:
-
-- `001-extended-metadata-store/spec.md` — component behavior (backfilled from code)
-- `002-ssd-integration-test/spec.md` — hardware integration test
-
-Implementation analyzed: `src/{lib,flush,on_disk,recovery,block_io,test_support}.rs`,
-`tests/{persistence,integration_ssd}.rs`, interface at
-`components/interfaces/src/iextended_metadata_store.rs`, `Cargo.toml`.
+**Generated**: pending
+**Project**: extended-metadata-store
 
 ## Summary
 
-| Status | 001 | 002 | Total |
-|--------|-----|-----|-------|
-| Aligned | 28 | 16 | 44 |
-| Drifted | 6 | 2 | 8 |
-| Not Implemented | 0 | 0 | 0 |
-| **Tracked requirements** | 34 | 18 | 52 |
-| Unspecced code items | — | — | 3 |
-| Conflicts / spec-reference issues | — | — | 4 |
+| Metric | Count |
+|--------|-------|
+| Specs Analyzed | 2 |
+| Requirements Checked | 52 |
+| Aligned | 41 |
+| Drifted | 5 |
+| Not Implemented | 0 |
+| Unspecced Features | 3 |
 
-001 tracked = FR-01..17 (17) + NFR-01..10 (10) + SC1..7 (7).
-002 tracked = FR-001..012 (12) + SC-001..006 (6).
-
-## Per-Requirement Table
-
-| ID | Spec | Status | Location | Notes |
-|----|------|--------|----------|-------|
-| 001-FR-01 | 001 | Aligned | src/lib.rs:134-146 | put stores 0-128KiB by key; MAX_VALUE_SIZE=lib.rs:56 |
-| 001-FR-02 | 001 | Aligned | src/lib.rs:148-156 | get clones value or NotFound |
-| 001-FR-03 | 001 | Aligned | src/lib.rs:158-167 | delete removes; idempotent (HashMap::remove) |
-| 001-FR-04 | 001 | Aligned | src/lib.rs:169-175 | iterate_all snapshot under read lock |
-| 001-FR-05 | 001 | **Drifted (High)** | src/lib.rs:177-184 | force_flush is an unconditional no-op in ALL configs; never calls flush_to_disk/trigger_flush |
-| 001-FR-06 | 001 | Aligned | src/lib.rs:135-137 | ValueTooLarge above 128KiB |
-| 001-FR-07 | 001 | Aligned | src/flush.rs:20-53 | dual-region ping-pong; superblock is commit point |
-| 001-FR-08 | 001 | Aligned | src/recovery.rs:23-53 | reads superblock, loads active region |
-| 001-FR-09 | 001 | Aligned | src/recovery.rs:63-78 | falls back to inactive region on corruption |
-| 001-FR-10 | 001 | Aligned | src/recovery.rs:27-33,82-103; src/lib.rs:106-113 | fresh partition detect + format |
-| 001-FR-11 | 001 | Aligned | src/flush.rs:99-208 | FlushManager timer + dirty threshold |
-| 001-FR-12 | 001 | Aligned | src/flush.rs:142-165 | coalescing at FlushManager level (not via interface force_flush — see FR-05) |
-| 001-FR-13 | 001 | Aligned | src/flush.rs:239-253,187-190 | final flush on Drop |
-| 001-FR-14 | 001 | Aligned | src/lib.rs:60-62,144,165 | AtomicU64 dirty count |
-| 001-FR-15 | 001 | Aligned | src/lib.rs:40-53 | define_component! provides IExtendedMetadataStore |
-| 001-FR-16 | 001 | Aligned | src/lib.rs:44-46 | optional ILogger receptacle, used throughout |
-| 001-FR-17 | 001 | Aligned | src/lib.rs:60-130 | wiring API: initialize_from_client/snapshot_entries/mark_flushed/load_entries/dirty_count/flush_seq |
-| 001-NFR-01 | 001 | Aligned | src/lib.rs:48 | RwLock<HashMap> |
-| 001-NFR-02 | 001 | Aligned | src/on_disk.rs:357-370 | CRC32 on superblock/region/entry |
-| 001-NFR-03 | 001 | Aligned | src/on_disk.rs:346-351 | sector-aligned pad_to_sector |
-| 001-NFR-04 | 001 | Aligned | src/flush.rs:20-53; tests/persistence.rs:675 | crash consistency (ping-pong + fault-injection test) |
-| 001-NFR-05 | 001 | Aligned | src/lib.rs:26-38 | block_io/flush/recovery/test_support gated; on_disk always compiled |
-| 001-NFR-06 | 001 | Aligned | src/lib.rs default build | in-memory mode w/o SPDK |
-| 001-NFR-07 | 001 | Aligned | src/test_support.rs:17-169 | MockBlockDevice + FaultConfig |
-| 001-NFR-08 | 001 | Aligned | src/block_io.rs; src/test_support.rs:240-256 | DmaAllocFn abstraction |
-| 001-NFR-09 | 001 | Aligned | src/on_disk.rs:372-403 | little-endian to_le_bytes/from_le_bytes |
-| 001-NFR-10 | 001 | Aligned | src/on_disk.rs:6 | magic 0x4345525454454D5441 "CERTMETA" |
-| 001-SC1 | 001 | **Drifted (High)** | src/lib.rs:187-304 | 9 unit tests exist & count matches, but crate is NOT in root Cargo.toml [workspace] members → not exercised by cargo test --all / CI |
-| 001-SC2 | 001 | **Drifted (High)** | tests/persistence.rs | tests exist (--features testing) but unrunnable via workspace (not a member) |
-| 001-SC3 | 001 | **Drifted (High)** | tests/integration_ssd.rs | tests exist (--features spdk) but unrunnable via workspace (not a member) |
-| 001-SC4 | 001 | Aligned | tests/persistence.rs:675 | crash_mid_flush_recovers_previous_state |
-| 001-SC5 | 001 | Aligned | tests/persistence.rs:417 | concurrent_stress_8_threads (8×1000) |
-| 001-SC6 | 001 | **Drifted (High)** | — | clippy clean not verifiable via workspace (not a member) |
-| 001-SC7 | 001 | **Drifted (High)** | — | cargo doc not verifiable via workspace (not a member) |
-| 002-FR-001 | 002 | Aligned | tests/integration_ssd.rs:65-66 | real BlockDeviceSpdkNvmeComponent |
-| 002-FR-002 | 002 | Aligned | tests/integration_ssd.rs:144-145 | PARTITION_INDEX=1 from DiskPartitionManager table |
-| 002-FR-003 | 002 | Aligned | tests/integration_ssd.rs:227-267 | put validated |
-| 002-FR-004 | 002 | Aligned | tests/integration_ssd.rs:238,252,266 | byte-for-byte compare |
-| 002-FR-005 | 002 | Aligned | tests/integration_ssd.rs:307-351 | delete validated |
-| 002-FR-006 | 002 | Aligned | tests/integration_ssd.rs:424-469 | iterate_all validated |
-| 002-FR-007 | 002 | **Drifted (Medium)** | tests/integration_ssd.rs:198-213,357-387 | "persistence after force_flush": test uses internal flush_to_disk (flush_store helper), NOT force_flush (which is a no-op) |
-| 002-FR-008 | 002 | Aligned | tests/integration_ssd.rs:227-267 | small/medium/max 128KiB sizes |
-| 002-FR-009 | 002 | Aligned | tests/integration_ssd.rs:281-301 | overwrite replaces completely |
-| 002-FR-010 | 002 | Aligned | tests/integration_ssd.rs:475-511 | bulk 500 entries |
-| 002-FR-011 | 002 | **Drifted (High)** | tests/integration_ssd.rs:177-213,432,462 | "use standard interface, NOT internal APIs" violated: setup/persistence use initialize_from_client, snapshot_entries, mark_flushed, load_entries, flush::flush_to_disk |
-| 002-FR-012 | 002 | Aligned | tests/integration_ssd.rs (asserts + eprintln) | per-test pass/fail + integrity eprintln |
-| 002-SC-001 | 002 | Aligned | tests/integration_ssd.rs:227-301 | byte-for-byte round-trip |
-| 002-SC-002 | 002 | Aligned | tests/integration_ssd.rs:357-387 | flushed entries survive restart (via internal flush) |
-| 002-SC-003 | 002 | Aligned | tests/integration_ssd.rs:475-547 | no corruption asserted |
-| 002-SC-004 | 002 | Aligned | tests/integration_ssd.rs:307-351 | delete non-retrievable + non-iterable |
-| 002-SC-005 | 002 | Aligned | tests/integration_ssd.rs:475-511 | 500-entry bulk integrity |
-| 002-SC-006 | 002 | Aligned | tests/integration_ssd.rs:235,249,263 | 3 distinct sizes (1B/4KiB/128KiB) |
+Specs: `001-extended-metadata-store` (17 FR + 10 NFR + 7 SC), `002-ssd-integration-test` (12 FR + 6 SC). Both specs were self-synced on 2026-08-07 and honestly document most of the divergences below; they are still reported here because the underlying spec-intent vs working-code gaps persist.
 
 ## Detailed Findings
 
-### 001-FR-05 — `force_flush()` is a no-op (High) [self-documented in spec Known Gaps]
-`IExtendedMetadataStore::force_flush()` (`src/lib.rs:177-184`) logs and returns `Ok(())`
-in every build configuration (default, `testing`, `spdk`). It never invokes
-`flush::flush_to_disk` or `FlushManager::trigger_flush`. The interface doc comment
-(`components/interfaces/src/iextended_metadata_store.rs:44`) states "Returns when all
-data is durable" — a contract the implementation does not meet under `testing`/`spdk`.
-A caller holding only the interface receives silent data loss on "flush". The spec's
-own Known Gaps section (spec.md:175-177) and `.specify/sync/align-tasks.md` (ALIGN-002)
-acknowledge this as a code defect to fix (not a spec change). Every persistence/SSD
-test achieves durability by calling `flush::flush_to_disk`/`FlushManager::trigger_flush`
-directly instead.
+### Spec 001-extended-metadata-store — Extended Metadata Store
 
-### 001-SC1/2/3/6/7 — crate absent from workspace (High) [self-documented]
-Confirmed: `extended-metadata-store` appears nowhere in the root `Cargo.toml`
-`[workspace] members` array. Consequently the 9 unit tests, persistence tests, SSD
-tests, `cargo clippy -D warnings`, and `cargo doc --no-deps` cannot be exercised by
-`cargo build` / `cargo test --all` / CI. The spec note (spec.md:251) and ALIGN-001
-document this as a build-wiring defect. All the referenced tests do exist in the tree
-and unit-test names/count (9) match the spec.
+**Aligned ✓**
+- FR-01 `put(key,value)` 0–128 KiB — `src/lib.rs:158`
+- FR-02 `get(key)` returns clone / `NotFound` — `src/lib.rs:172`
+- FR-03 `delete(key)` idempotent — `src/lib.rs:182`
+- FR-04 `iterate_all()` snapshot — `src/lib.rs:193`
+- FR-06 128 KiB `ValueTooLarge` enforcement — `src/lib.rs:159`, `MAX_VALUE_SIZE` `src/lib.rs:63`
+- FR-07..FR-14 dual-region ping-pong flush, recovery, fresh-format, FlushManager, dirty count — `src/flush.rs`, `src/recovery.rs`, `src/on_disk.rs` (all `testing`-gated; present, not runtime-verified here)
+- FR-15 `define_component!` provides `IExtendedMetadataStore` — `src/lib.rs:40`
+- FR-16 optional `ILogger` receptacle — `src/lib.rs:44`
+- FR-17 persistence-wiring API (`initialize_from_client`, `snapshot_entries`, `mark_flushed`, `load_entries`, `dirty_count`, `flush_seq`) — `src/lib.rs:70-155`
+- NFR-01 `RwLock` store; NFR-05 `on_disk` always compiled, I/O modules `testing`-gated (`src/lib.rs:26-38`); NFR-06 in-memory default build; NFR-09/NFR-10 format constants — aligned
 
-### 002-FR-011 — integration test relies on internal APIs (High)
-FR-011 mandates the test use only the standard `IExtendedMetadataStore` interface.
-put/get/delete/iterate_all do go through the interface, but store creation and all
-persistence go through inherent/internal APIs: `initialize_from_client`
-(integration_ssd.rs:188), `snapshot_entries`/`mark_flushed`/`flush::flush_to_disk`
-(flush_store, 198-213), and `load_entries` (432,462). This is a direct consequence of
-FR-05: since `force_flush()` does nothing, the test cannot obtain durability through
-the interface and must bypass it.
+**Drifted ⚠️**
+- FR-05 `force_flush()` durability — **minor**
+  - Spec: FR-05 table row states the fix is "Fix drafted (branch `sync/spec-drift-sweep-20260807`)".
+  - Actual: the trigger-based fix is already present in the working tree — `force_flush()` invokes an installed `FlushTrigger` and blocks (`src/lib.rs:201-215`), with `attach_flush_trigger` at `src/lib.rs:111`. Spec text is stale relative to the code. The substantive gap remains: interface-level durability is a no-op unless a trigger is wired, and it is unverified under `testing`/`spdk` (see next item).
+- NFR-07 / test build — **major**
+  - Spec: `MockBlockDevice` provides fault-injection for deterministic testing; SC-002/SC-003 (001) and all 002 SCs rely on it.
+  - Actual: `MockBlockDevice`'s `impl IBlockDevice` (`src/test_support.rs:171`) does **not** implement `read_write_stats` (only `telemetry` at `:212`). The current `IBlockDevice` trait requires `read_write_stats` (`../interfaces/src/iblock_device.rs:589`), so the `testing`/`spdk` test build does not compile — 001 persistence tests and all 002 SSD tests cannot run. Documented in the 001 Known Gaps (ALIGN-001).
+- Workspace membership — **moderate**
+  - Spec: SC 1/2/3/6/7 (001) and SC-001..006 (002) presuppose `cargo test`/CI can build the crate.
+  - Actual: `extended-metadata-store` is absent from the root `Cargo.toml` `members`/`default-members` (only `logger` present at `Cargo.toml:23,70`). CI never exercises the crate. Documented (ALIGN-001).
+- 002 FR-011 interface-only usage — **moderate**
+  - Spec: test MUST use the standard `IExtendedMetadataStore` interface, not internal APIs.
+  - Actual: store creation and durability go through inherent/internal APIs (`initialize_from_client`, `snapshot_entries`, `mark_flushed`, `load_entries`, `flush::flush_to_disk`), a direct consequence of the FR-05 no-op history. `put/get/delete/iterate_all` do use the interface. Documented in the sync note.
+- 002 capacity scenario (US5 / FR/edge) — **moderate**
+  - Spec/test: `test_capacity_exhaustion` expects a `put()`-level capacity error.
+  - Actual: `put()` enforces only `ValueTooLarge`; capacity is enforced solely at flush time inside `flush::flush_to_disk` as a `String` error and is never mapped to `CapacityExhausted` on any interface method, so the test passes trivially without reaching the exhaustion branch. Documented in the 002 capacity note.
 
-### 002-FR-007 — persistence validated without force_flush (Medium)
-US3 acceptance ("After force_flush()... re-initialize... entries retrievable") is
-validated by `test_persistence_after_flush` (357-387), which calls `flush_store`
-(internal `flush_to_disk`) rather than `force_flush()`. Correct data survives, but the
-scenario as written (force_flush) is not the code path actually exercised.
+**Not Implemented ✗**
+- None. (FR-05 durability under `testing`/`spdk` is unverified rather than absent — code exists.)
 
-### Capacity handling — `CapacityExhausted` never produced (Medium) [see conflicts]
-`store.put()` never returns `ExtendedMetadataStoreError::CapacityExhausted`; it only
-enforces `ValueTooLarge`. Capacity is enforced solely in `flush::flush_to_disk`
-(`src/flush.rs:33-38`) as a `String` error ("exceeds region capacity"). Grep confirms
-`CapacityExhausted` and `StorageError` are never constructed anywhere in `src/`. The
-SSD test `test_capacity_exhaustion` (integration_ssd.rs:513-547) loops expecting
-`put()` to return `CapacityExhausted`; that branch is unreachable, so the test passes
-trivially without ever exercising capacity exhaustion (US5 scenario 2 / the "partition
-too small" edge case are effectively unvalidated).
+## Unspecced Features
 
-## Unspecced Code
+| Feature | Location | Lines | Suggested Spec |
+|---------|----------|-------|----------------|
+| `Superblock::region_capacity_bytes()` never-called public accessor | `src/on_disk.rs` | 142 | Document as public format API or remove |
+| `create_test_component_from_state()` unused public test helper (`testing`) | `src/test_support.rs` | 268 | Document as test surface or remove |
+| `ExtendedMetadataStoreError::CapacityExhausted` variant never constructed | `../interfaces/src/iextended_metadata_store.rs` | 12 | Either surface via an interface method or drop the variant |
 
-| Item | Location | Notes |
-|------|----------|-------|
-| `Superblock::region_capacity_bytes()` | src/on_disk.rs:142-144 | public method, never called anywhere in src/ or tests/ (dead public API) |
-| `create_test_component_from_state()` | src/test_support.rs:268-274 | public test helper, unused by any test |
-| `ExtendedMetadataStoreError::{CapacityExhausted, StorageError}` | interfaces/src/iextended_metadata_store.rs:10-12 | public error variants provided by this component's interface but never returned by any code path in src/ |
-
-## Conflicts / Spec-Reference Issues
-
-1. **plan.md references nonexistent receptacles.** `002/plan.md` (line ~68) and
-   `tasks.md` T007 state the store is wired via "IBlockDevice and IPartitionTable
-   receptacles" and a `create_store_instance()` helper. The actual
-   `ExtendedMetadataStoreComponent` declares only an `ILogger` receptacle
-   (`src/lib.rs:44-46`); the test wires a manually-constructed `BlockDeviceClient`
-   (`make_client`, integration_ssd.rs:164-173) and the helper is named `create_store`,
-   not `create_store_instance`.
-2. **CapacityExhausted contract mismatch** (see finding above): 002 US5 scenario 2 /
-   edge cases and `test_capacity_exhaustion` assume the interface surfaces capacity
-   exhaustion; the implementation surfaces it only as a `String` error inside
-   `flush_to_disk`.
-3. **Dev-dependency name mismatch.** `002/plan.md` and `tasks.md` T001 call for
-   `console-logger`; `Cargo.toml:20` declares `logger` (and the test uses
-   `logger::LoggerComponent`). Cosmetic.
-4. **force_flush doc contract** (`interfaces/src/iextended_metadata_store.rs:44`)
-   promises durability the no-op implementation does not deliver (mirror of FR-05).
+(All three are already acknowledged in the 001 spec "Dead public API surface" note.)
 
 ## Recommendations
-
-1. **Fix `force_flush()` (ALIGN-002)** — wire it to `flush_to_disk`/`FlushManager` when
-   a `BlockDeviceClient` has been provided, or explicitly redefine the interface
-   contract as hint-only. This unblocks 002-FR-007 and 002-FR-011.
-2. **Add the crate to root `Cargo.toml` members (ALIGN-001)** so the 9 unit tests,
-   persistence tests, clippy, and doc checks run in CI (unblocks 001-SC1/2/3/6/7).
-3. **Enforce capacity via the interface** — have `put()` (or an interface-level flush)
-   return `CapacityExhausted` so `test_capacity_exhaustion` and US5 are actually
-   exercised, or update 002 spec to describe flush-time `String` capacity errors.
-4. **Reconcile 002 plan/tasks** with reality: remove references to IBlockDevice/
-   IPartitionTable receptacles and `create_store_instance`; fix `console-logger` →
-   `logger`.
-5. **Remove or wire up** the dead public `region_capacity_bytes()` and
-   `create_test_component_from_state()`.
+1. Fix `MockBlockDevice` to implement `read_write_stats` so the `testing`/`spdk` test build compiles (ALIGN-001) — this is the highest-value unblock; without it FR-05 verification and every persistence/SSD SC stay unexercised.
+2. Add `extended-metadata-store` to the workspace `members`/`default-members` once the mock compiles, so SC 1/2/3/6/7 and 002 run in CI.
+3. Update the FR-05 table row: the trigger fix is in-tree, not a branch draft. Then verify `force_flush()` durability under `testing` and re-point 002 FR-007/FR-011 at the interface.
+4. Resolve the capacity story: either map region-capacity exhaustion to `CapacityExhausted` on an interface method, or rewrite `test_capacity_exhaustion` to assert a flush-time error against an undersized region.

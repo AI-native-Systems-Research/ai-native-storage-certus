@@ -20,6 +20,7 @@ members = [
     "components/block-device-kernel",
     "components/disk-partition-manager",
     "components/extent-manager",
+    "components/extended-metadata-store",
     "components/logger",
     "components/dispatch-map",
     "components/memory-tier",
@@ -101,6 +102,7 @@ dispatcher = { path = "components/dispatcher", default-features = false }
 dispatcher-p2p = { path = "components/dispatcher-p2p", default-features = false }
 disk-partition-manager = { path = "components/disk-partition-manager" }
 extent-manager = { path = "components/extent-manager" }
+extended-metadata-store = { path = "components/extended-metadata-store" }
 gpu-services = { path = "components/gpu-services" }
 eviction-policy-lru = { path = "components/eviction-policy-lru" }
 eviction-policy-session-lists = { path = "components/eviction-policy-session-lists" }

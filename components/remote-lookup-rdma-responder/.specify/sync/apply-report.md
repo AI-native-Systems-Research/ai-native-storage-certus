@@ -161,3 +161,72 @@ under option (A) — they are now implemented, not merely queued.
 2. Implement queued align-tasks 5 (FR-010) and 6 (FR-008) at maintainer discretion.
 3. Fix the stale `set_bind_ip` interface doc (July task 4) — shared crate.
 4. Commit on the branch only — never to `unstable`.
+
+---
+
+# 2026-08-20 Phase B
+
+**Mode**: Spec-Sync Phase B (shared `PHASE_B_POLICY.md`; no per-component note —
+each drift item classified by reading its `location` code).
+**Applied**: 2026-08-20
+**Source**: `.specify/sync/drift-report.{json,md}` (regenerated 2026-08-20)
+**Proposals gate**: `.specify/sync/proposals.{md,json}` (this run)
+**Backups**: `.specify/sync/backups/specs/001-rdma-lookup-responder/{spec.md,data-model.md}.bak`
+**Scope guard**: only Markdown under `specs/**` and `.specify/sync/**` edited; no
+`.rs` source touched; no cargo run.
+
+Drift headline: **23/24 aligned, 1 drifted (FR-014, Low), 0 not_implemented, 2
+unspecced, 0 conflicts.** The regenerated report reflects the 2026-08-07 sweep's
+FR-016 wire-up and FR-008/FR-010 backfills as resolved/aligned; the only remaining
+drift is the FR-014 `eprintln!`-vs-`ILogger` gap.
+
+## Changes Made
+
+### Specs Updated
+
+| Spec | Section | Requirement | Change Type | Reason |
+|------|---------|-------------|-------------|--------|
+| 001-rdma-lookup-responder/spec.md | Functional Requirements → FR-004 | Unspecced (command-bridge) | BACKFILL-UNSPECCED (added note) | Documents the `rdma-responder-cmd-bridge` SPSC→eventfd bridge thread (`src/rdma.rs:358-373`) that makes the fd-less SPSC command inbox pollable by the accept loop's `epoll`. Realizes FR-004's "command inbox" wait arm; no new externally visible behavior. |
+| 001-rdma-lookup-responder/data-model.md | Internal entities (after CM seam) | Unspecced (command-bridge) | BACKFILL-UNSPECCED (new subsection) | Adds a "Command-inbox bridge thread" internal entity (role / lifecycle / real-vs-mock), per the drift-report suggestion to note the FR-004 bridge in plan.md/data-model. |
+
+### Align Tasks Generated
+
+| Task | Requirement | Severity | Status | Files (follow-up code PR) |
+|------|-------------|----------|--------|---------------------------|
+| Align FR-014 — route async-event diagnostics through `ILogger` | FR-014 | Low | Queued (Markdown-only pass; no source edited) | `src/rdma.rs` (`drain_async_events`, seam logger handle), `src/lib.rs` (`initialize_inner` closure capture) |
+
+### Unspecced Backfilled
+
+| Feature | Location | Resolution |
+|---------|----------|------------|
+| Device async-event instrumentation (`TAG_ASYNC`, `drain_async_events`, `async_event_name`, FFI shims) | `src/rdma.rs:41,47-70,351-356,440-466`; `src/ffi.rs:297-302`; `src/wrapper.c` | **Already backfilled** (spec.md Known Limitations, 2026-08-07). Verified present and faithful this run; no FR promotion (best-effort, not load-bearing). The `eprintln!` gap it documents is carried as the FR-014 ALIGN task above. |
+| Command-bridge thread `rdma-responder-cmd-bridge` (SPSC→eventfd) | `src/rdma.rs:358-373` | **Backfilled this run** — FR-004 implementation note in spec.md + "Command-inbox bridge thread" entity in data-model.md. |
+
+### Resolved
+
+None. (The 2026-08-07 sweep's FR-016/FR-008/FR-010 items are already reflected as
+aligned/resolved in the regenerated drift report and are not re-listed as drift.)
+
+### Not Applied / Deferred
+
+| Item | Reason |
+|------|--------|
+| Routing `drain_async_events` through `ILogger` (the FR-014 code fix) | Source `.rs` change — out of scope for this Markdown-only Phase-B pass; filed as the FR-014 align-task. |
+| Promoting async-event instrumentation to an FR | Best-effort operator diagnostic, not load-bearing (drift-report `suggested_spec`); kept in Known Limitations. |
+
+## Backups
+
+- `.specify/sync/backups/specs/001-rdma-lookup-responder/spec.md.bak`
+- `.specify/sync/backups/specs/001-rdma-lookup-responder/data-model.md.bak`
+
+(Both taken immediately before the 2026-08-20 edits, per policy
+`backups/<same-relative-path>.bak` convention. Earlier July/August backups remain
+under `backups/20260722T232111Z/`.)
+
+## Next Steps
+
+1. Review the FR-004 bridge-note (spec.md) and the new data-model entity.
+2. Implement the FR-014 align-task in a follow-up code PR (route
+   `drain_async_events` through `ILogger`; pairs with July Task 6 / FR-008 `Drop`
+   logging — both want the same accept-loop logger handle).
+3. Commit spec/sync Markdown on a feature branch only — never to `unstable`.

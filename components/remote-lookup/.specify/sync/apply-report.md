@@ -124,3 +124,80 @@ is queued as a low-severity align-task.
 1. Implement Task 3 (FR-018 unknown-frame log) at the maintainer's discretion.
 2. Review the FR-030…FR-034 backfills for wording precision against the code.
 3. Commit on the branch only — never to `unstable`.
+
+---
+
+# 2026-08-20 Sweep (Phase B)
+
+Applied: 2026-08-20
+Mode: Phase B shared-policy resolution (`.specify/sync/PHASE_B_POLICY.md`, "all other components"
+default — no special per-component note).
+Source: `.specify/sync/drift-report.{json,md}` (current pending report: 6 drifted, 3 unspecced).
+
+Drift headline: 5 of the 6 drift items are on the **superseded** spec 001 (intentional divergence
+from the placeholder → BACKFILL as inline superseded-by-002 annotations); the 1 remaining drift is
+spec 002 FR-018 logging (spec correct, code silent → ALIGN task). All 3 unspecced behaviors were
+BACKFILLED into spec 002. No `.rs` source modified; no cargo run.
+
+## Backups
+
+Pre-edit copies saved under `.specify/sync/backups/` preserving the component-relative path
+(per policy `backups/<same-relative-path>.bak`):
+
+- `backups/specs/001-remote-lookup-placeholder/spec.md.bak`
+- `backups/specs/002-remote-lookup-rdma/spec.md.bak`
+
+(Earlier flat-named backups `001-spec.md.2026-07-22.bak`, `002-spec.md.2026-07-22.bak`,
+`spec.md.2026-06-19.bak` from prior passes were left as-is.)
+
+## Specs Updated
+
+| Spec | Requirement | Change Type | Resolution |
+|------|-------------|-------------|------------|
+| 001-remote-lookup-placeholder | Status header | Modified | Added `re-swept 2026-08-20` note explaining the per-requirement supersession annotations below. |
+| 001-remote-lookup-placeholder | FR-001 | BACKFILL (annotate) | Inline *Superseded by 002 FR-001*: shipped `&[(CacheKey, u32)]`, `IpcHandle` dropped, `Ok(())` ⇒ resident. |
+| 001-remote-lookup-placeholder | FR-003 | BACKFILL (annotate) | Inline *Superseded by 002*: real KEY_QUERY→RDMA protocol, no per-entry placeholder log. |
+| 001-remote-lookup-placeholder | FR-004 | BACKFILL (annotate) | Inline *Superseded by 002 FR-005..FR-012*: real zyre + RDMA I/O; `Ok(())` when resident, `NotFound` only on deadline. |
+| 001-remote-lookup-placeholder | FR-008 | BACKFILL (annotate) | Inline *Superseded by 002 FR-029*: intentional out-of-interface hooks `peers_seen`/`signal_shutdown`/`shutdown`. |
+| 001-remote-lookup-placeholder | SC-002 | BACKFILL (annotate) | Inline *Superseded by 002 FR-001*: compiles with `(CacheKey, u32)`; type-equality goal removed. |
+| 002-remote-lookup-rdma | Status header | Modified | Added 2026-08-20 note listing the three FR backfills and the widened FR-018 ALIGN task. |
+| 002-remote-lookup-rdma | FR-006 | BACKFILL-UNSPECCED | Added `AlreadyExists` size-collision guard: success only at matching size; differing size discards the private slot and never evicts the resident entry (`src/actor.rs:576-591`). |
+| 002-remote-lookup-rdma | FR-014 | BACKFILL-UNSPECCED | Documented the fixed 500 ms `DISCONNECT_ACK_TIMEOUT` ack-handshake bound (`src/actor.rs:37`), deliberately not a `LookupConfig` knob; distinct from FR-031's `connection_teardown_timeout`. |
+| 002-remote-lookup-rdma | FR-018 | BACKFILL-UNSPECCED | Named the malformed/truncated-frame ignore class (b) alongside unknown `msg_type` (a); both MUST be logged. Logging code work → ALIGN task. |
+| 002-remote-lookup-rdma | Edge Cases | Added | Two scenarios: unknown/malformed frame logged+dropped (FR-018); `AlreadyExists` publish race size check (FR-006). |
+
+## Align Tasks Generated
+
+Appended to `.specify/sync/align-tasks.md` (2026-08-20 section):
+
+- **Align 002/FR-018** (Low): log both the unknown-`msg_type` arm (`src/actor.rs:330`) and the
+  malformed-decode arm (`src/actor.rs:314`) before dropping. Supersedes the narrower 2026-08-07
+  Task 3 (unknown arm only). Source/test work — out of scope for this Markdown-only pass.
+
+## Unspecced Backfilled
+
+| Feature | Location | Backfilled into |
+|---------|----------|-----------------|
+| DISCONNECT_ACK_TIMEOUT (fixed 500 ms DisconnectAck wait) | `src/actor.rs:37,1020-1033` | FR-014 |
+| Malformed/truncated wire frame ignore | `src/actor.rs:314` | FR-018 (logging folded into ALIGN task) |
+| publish_success AlreadyExists size-collision guard | `src/actor.rs:576-591` | FR-006 |
+
+## Resolved
+
+None (no drift item was pre-fixed on the main thread for this component).
+
+## Human Decision
+
+None (all items were unambiguous after reading the cited code).
+
+## Files Touched
+
+- `specs/001-remote-lookup-placeholder/spec.md` (status + 5 requirement annotations)
+- `specs/002-remote-lookup-rdma/spec.md` (status + FR-006/FR-014/FR-018 + 2 edge-case scenarios)
+- `.specify/sync/proposals.md`, `.specify/sync/proposals.json` (rewritten for this pass)
+- `.specify/sync/align-tasks.md` (2026-08-20 section appended)
+- `.specify/sync/apply-report.md` (this section), `.specify/sync/apply-report.json`
+- `.specify/sync/backups/specs/001-remote-lookup-placeholder/spec.md.bak`,
+  `.specify/sync/backups/specs/002-remote-lookup-rdma/spec.md.bak` (created)
+
+No `.rs` source or any non-Markdown file was modified; cargo was not run.

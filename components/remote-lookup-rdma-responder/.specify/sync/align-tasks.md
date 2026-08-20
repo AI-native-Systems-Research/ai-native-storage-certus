@@ -233,3 +233,62 @@ remain open.
 - [ ] A nonzero `rdma_destroy_qp`/`rdma_disconnect` return in `Drop` produces a log line.
 - [ ] The QP→ERROR-before-ack ordering (SC-002 / FR-008) is unchanged.
 - [ ] `Drop` remains infallible and idempotent for an unknown/already-torn-down node.
+
+---
+
+# 2026-08-20 Phase B (drift-report regenerated 2026-08-20)
+
+The regenerated drift report simplified to **23/24 aligned, 1 drifted (FR-014,
+Low), 0 not_implemented, 2 unspecced, 0 conflicts** — the FR-016 wire-up and the
+FR-008/FR-010 backfills from the 2026-08-07 sweep are reflected as resolved/aligned
+in the current report. The single remaining drift is FR-014, classified **ALIGN**
+(correct spec + non-compliant code — the `eprintln!` async-event path). The two
+unspecced items were handled as BACKFILL-UNSPECCED (see `proposals.md` /
+`apply-report.md`); neither yields an align-task. This re-affirms and supersedes the
+still-open July FR-014 logger task (Task 3 above) with the current line references.
+
+## Task: Align 001-rdma-lookup-responder/FR-014 — route async-event diagnostics through `ILogger`
+
+**Spec Requirement**: FR-014 — "Diagnostics MUST route through an optional `ILogger`
+receptacle; a missing logger MUST NOT turn any operation into an error." The spec's
+Known Limitations bullet ("Device async-event instrumentation") explicitly tracks
+this gap.
+
+**Current Code**: The primary diagnostics route through `ILogger` correctly —
+`log_debug` (`src/lib.rs:116-120`) guards on a bound receptacle and no-ops when
+absent, satisfying the "missing logger is never an error" half. But
+`RealCmSeam::drain_async_events` (`src/rdma.rs:448-466`) emits its per-event
+diagnostic via `eprintln!` (`src/rdma.rs:459-464`):
+
+```
+eprintln!(
+    "remote-lookup-rdma-responder: async event {} ({}) qp_num={}",
+    etype, async_event_name(etype), qp_num
+);
+```
+
+This bypasses the `ILogger` receptacle entirely, so async QP faults (QP_FATAL,
+QP_REQ_ERR, QP_ACCESS_ERR, device errors) are visible only on stderr, not through
+the operator's configured logging sink. `src/rdma.rs` holds no `ILogger` reference —
+the accept-loop closure spawned in `initialize_inner` captures none.
+
+**Required Change**: Give the accept-loop / `RealCmSeam` seam a handle to the
+`logger` receptacle (e.g. a cloned `Option<Arc<dyn ILogger>>` captured at spawn,
+mirroring how `self.logger` is read in `initialize()`/`shutdown()`), and replace the
+`eprintln!` in `drain_async_events` with a `log_warn`/`log_debug` call through that
+handle. A missing logger MUST remain a silent no-op (never an error), preserving the
+FR-014 tolerance guarantee. This is Markdown-only Phase B, so **no source is edited
+here** — this task drives a follow-up code PR. (Pairs with July Task 6 / FR-008
+best-effort `Drop` logging, which also wants the same accept-loop logger handle.)
+
+**Files to Modify**: `src/rdma.rs` (`RealCmSeam` / `drain_async_events`, and a
+logger handle on the seam or its constructor), `src/lib.rs` (`initialize_inner`
+closure capture to thread the logger into the seam).
+
+**Estimated Effort**: Small
+
+### Acceptance Criteria
+- [ ] `drain_async_events` emits its diagnostic through the `ILogger` receptacle, not `eprintln!`.
+- [ ] With no logger bound, `drain_async_events` is a silent no-op and never turns an async event into an error (FR-014 tolerance preserved).
+- [ ] The accept-loop / seam has access to a logger handle when one is bound.
+- [ ] The spec's Known-Limitations note on the `eprintln!` gap can be dropped once this lands (or kept as an accepted, documented deviation if the maintainer declines the change).

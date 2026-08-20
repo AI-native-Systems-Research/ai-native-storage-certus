@@ -1,89 +1,93 @@
 {
-  "generated": "2026-08-07T15:31:15Z",
+  "generated": "pending",
   "project": "remote-lookup",
   "summary": {
-    "aligned": 46,
+    "specs_analyzed": 2,
+    "requirements_checked": 60,
+    "aligned": 54,
     "drifted": 6,
-    "not_implemented": 3,
-    "unspecced": 5
+    "not_implemented": 0,
+    "unspecced_features": 3
   },
   "specs": [
     {
-      "spec": "specs/001-remote-lookup-placeholder/spec.md",
-      "status": "superseded",
-      "requirements": [
-        {"id": "FR-001", "status": "drifted", "severity": "low", "location": "components/interfaces/src/iremote_lookup.rs:163", "note": "Signature is &[(CacheKey,u32)], not &[(CacheKey,IpcHandle)]; intentional per 002 Clarifications Q1 (superseded)."},
-        {"id": "FR-002", "status": "aligned", "severity": null, "location": "src/operation.rs:149", "note": "One positional Result per entry, caller order preserved."},
-        {"id": "FR-003", "status": "not_implemented", "severity": "low", "location": "src/actor.rs", "note": "Placeholder per-entry logging removed; component now does real network I/O (superseded)."},
-        {"id": "FR-004", "status": "drifted", "severity": "low", "location": "src/actor.rs:280", "note": "No longer returns NotFound-for-all with no I/O; real KEY_QUERY->RDMA runs (superseded)."},
-        {"id": "FR-005", "status": "aligned", "severity": null, "location": "src/lib.rs:271", "note": "Callable any time; returns NotFound when uninitialized."},
-        {"id": "FR-006", "status": "aligned", "severity": null, "location": "src/lib.rs:272", "note": "Empty slice returns empty Vec."},
-        {"id": "FR-007", "status": "aligned", "severity": null, "location": "components/interfaces/src/iremote_lookup.rs:120", "note": "Interface resides at the required path."},
-        {"id": "FR-008", "status": "drifted", "severity": "low", "location": "src/lib.rs:335", "note": "pub fns exist outside IRemoteLookup; authorized by 002 FR-029 (superseded)."},
-        {"id": "FR-009", "status": "not_implemented", "severity": "low", "location": "src/lib.rs:314", "note": "join_cluster no longer just logs+Ok; routes to actor, errors if uninitialized (superseded)."},
-        {"id": "FR-010", "status": "not_implemented", "severity": "low", "location": "src/lib.rs:323", "note": "leave_cluster no longer just logs+Ok; routes to actor, errors if uninitialized (superseded)."},
-        {"id": "SC-001", "status": "aligned", "severity": null, "location": "src/lib.rs:372", "note": "Unit tests present."},
-        {"id": "SC-002", "status": "drifted", "severity": "low", "location": "components/interfaces/src/iremote_lookup.rs:163", "note": "Interface no longer uses (CacheKey,IpcHandle); IpcHandle dropped (superseded)."},
-        {"id": "SC-003", "status": "aligned", "severity": null, "location": "components/interfaces/src/iremote_lookup.rs:130", "note": "Runnable doctests on interface methods."},
-        {"id": "SC-004", "status": "aligned", "severity": null, "location": null, "note": "Assumed clippy-clean; not run in this pass."},
-        {"id": "SC-005", "status": "aligned", "severity": null, "location": null, "note": "Assumed doc-clean; not run in this pass."}
-      ]
+      "id": "002-remote-lookup-rdma",
+      "title": "Remote Lookup over Zyre + RDMA (design-of-record)",
+      "aligned": 44,
+      "drifted": [
+        {
+          "requirement": "FR-018",
+          "spec_text": "All wire messages MUST use a [version][msg_type] header + op_id; unknown message types MUST be logged and ignored; servers MUST echo op_id.",
+          "actual": "Framing and op_id echo are correct and unknown/malformed frames are ignored, but neither the WireMessage::Unknown arm nor the malformed-decode (Err) arm emits a log line, so the 'logged' half of the requirement is unmet.",
+          "location": "src/actor.rs:314,330",
+          "severity": "Low"
+        }
+      ],
+      "not_implemented": []
     },
     {
-      "spec": "specs/002-remote-lookup-rdma/spec.md",
-      "status": "design-of-record",
-      "requirements": [
-        {"id": "FR-001", "status": "drifted", "severity": "medium", "location": "src/lib.rs:5-8,251-253", "note": "Interface/signature aligned, but lib.rs module + batch_lookup docstrings falsely state protocol is unbuilt / returns all-NotFound. Stale doc contradicts implemented actor.rs and 002 Synced status."},
-        {"id": "FR-002", "status": "aligned", "severity": null, "location": "src/actor.rs:174", "note": "Actor on dedicated OS thread owns IZyreNode and polls."},
-        {"id": "FR-003", "status": "aligned", "severity": null, "location": "src/lib.rs:189", "note": "Joins configured group (default remote_lookup), leaves on shutdown."},
-        {"id": "FR-004", "status": "aligned", "severity": null, "location": "src/server.rs:138", "note": "(key,size) wire identity; size mismatch -> not available."},
-        {"id": "FR-005", "status": "aligned", "severity": null, "location": "src/actor.rs:280", "note": "SHOUT KEY_QUERY split by max_keys_per_query; per-op state init."},
-        {"id": "FR-006", "status": "aligned", "severity": null, "location": "src/actor.rs:444", "note": "Private slot insert; publish-on-success; discard on failure."},
-        {"id": "FR-006a", "status": "aligned", "severity": null, "location": "src/actor.rs:405", "note": "Greedy per-KEY_RESPONSE memory-hit dispatch; caches full reply."},
-        {"id": "FR-007", "status": "aligned", "severity": null, "location": "src/actor.rs:478", "note": "RDMA_REQUEST carries endpoint + RemoteRegion{addr,rkey,length}; rkey cached at startup."},
-        {"id": "FR-008", "status": "aligned", "severity": null, "location": "src/actor.rs:515", "note": "On Success publish + mark satisfied."},
-        {"id": "FR-009", "status": "aligned", "severity": null, "location": "src/actor.rs:519", "note": "On failure reclaim slot immediately (peer live), return to Unsatisfied."},
-        {"id": "FR-010", "status": "aligned", "severity": null, "location": "src/actor.rs:733", "note": "Phase-2 re-scans cached replies (no new SHOUT) for disk holders."},
-        {"id": "FR-011", "status": "aligned", "severity": null, "location": "src/actor.rs:599", "note": "Bounded max_retry_rounds; memory-then-disk; never re-targets failed peer."},
-        {"id": "FR-012", "status": "aligned", "severity": null, "location": "src/actor.rs:682", "note": "Completion at all-satisfied/no-holder/retry-cap/deadline."},
-        {"id": "FR-013", "status": "aligned", "severity": null, "location": "src/actor.rs:950", "note": "On Exit drop cached reply, return in-progress keys, re-evaluate."},
-        {"id": "FR-014", "status": "aligned", "severity": null, "location": "src/actor.rs:1015", "note": "Disconnect -> block for DisconnectAck before reclaim."},
-        {"id": "FR-015", "status": "aligned", "severity": null, "location": "src/server.rs:131", "note": "KEY_QUERY classification memory/disk/none with size check."},
-        {"id": "FR-016", "status": "aligned", "severity": null, "location": "src/server.rs:198", "note": "Batched promote_to_memory_tier, re-lookup, pin, push_async, mapped RDMA_STATUS."},
-        {"id": "FR-016a", "status": "aligned", "severity": null, "location": "src/server.rs:47", "note": "PinnedBatch/ServeReport own pins; released on callback run or drop."},
-        {"id": "FR-016b", "status": "aligned", "severity": null, "location": "src/server.rs:111", "note": "ServeReport::drop reports UnableToConnect; exactly one status per request."},
-        {"id": "FR-017", "status": "aligned", "severity": null, "location": "src/server.rs:249", "note": "Post-promotion non-resident key -> KeyNoLongerAvailable."},
-        {"id": "FR-018", "status": "drifted", "severity": "low", "location": "src/actor.rs:330", "note": "Framing/echo correct and Unknown ignored, but spec says unknown types MUST be logged; no log emitted (WireMessage::Unknown => {})."},
-        {"id": "FR-019", "status": "aligned", "severity": null, "location": "src/actor.rs:412", "note": "Stale op_id discarded without error."},
-        {"id": "FR-020", "status": "aligned", "severity": null, "location": "src/actor.rs:161", "note": "Multiple concurrent ops keyed by op_id; interleaved."},
-        {"id": "FR-021", "status": "aligned", "severity": null, "location": "src/actor.rs:337", "note": "Self-SHOUT filtered in handle_key_query (only SHOUT type)."},
-        {"id": "FR-022", "status": "aligned", "severity": null, "location": "components/interfaces/src/iremote_lookup.rs:28", "note": "LookupConfig public, derives Default; all FR-022 knobs present with defaults."},
-        {"id": "FR-023", "status": "aligned", "severity": null, "location": "src/lib.rs:42", "note": "All 8 receptacles declared."},
-        {"id": "FR-024", "status": "aligned", "severity": null, "location": "src/server.rs:1", "note": "No RDMA transport in-crate; delegates to initiator/responder."},
-        {"id": "FR-025", "status": "aligned", "severity": null, "location": "src/lib.rs:140", "note": "responder_admin init, reads endpoint + rkey, opens control channel."},
-        {"id": "FR-026", "status": "aligned", "severity": null, "location": "src/actor.rs:102", "note": "Per-key in_flight index coalesces same-key fetches."},
-        {"id": "FR-027", "status": "aligned", "severity": null, "location": "src/lib.rs:175", "note": "Advertises responder endpoint header; warms via initiator.connect on Enter."},
-        {"id": "FR-028", "status": "aligned", "severity": null, "location": "src/worker.rs:71", "note": "Warm + serve run off-loop; poll loop never blocks on RDMA."},
-        {"id": "FR-029", "status": "aligned", "severity": null, "location": "src/lib.rs:335", "note": "peers_seen, signal_shutdown, shutdown present as out-of-interface pub fns."},
-        {"id": "SC-001", "status": "aligned", "severity": null, "location": "tests/mesh.rs:229", "note": "memory_hit_is_fetched_from_peer; latency not measured."},
-        {"id": "SC-002", "status": "aligned", "severity": null, "location": "tests/mesh.rs:578", "note": "Total miss -> NotFound within deadline, no slot left."},
-        {"id": "SC-003", "status": "aligned", "severity": null, "location": "src/actor.rs:477", "note": "RDMA_REQUEST whispered on same event as satisfying KEY_RESPONSE."},
-        {"id": "SC-004", "status": "aligned", "severity": null, "location": "tests/mesh.rs:338", "note": "Retry-to-alternate present/tested; >=95% is statistical, not asserted."},
-        {"id": "SC-005", "status": "aligned", "severity": null, "location": "src/actor.rs:889", "note": "Orphan/teardown gates reclaim; pins guarded; write_ref held only briefly."},
-        {"id": "SC-006", "status": "aligned", "severity": null, "location": "src/actor.rs:1009", "note": "Peer departure re-evaluates completion immediately."},
-        {"id": "SC-007", "status": "aligned", "severity": null, "location": "src/server.rs:217", "note": "Size-mismatch -> not available; never a partial write."},
-        {"id": "SC-008", "status": "aligned", "severity": null, "location": "tests/mesh.rs:253", "note": "concurrent_same_key_lookups_issue_one_rdma; single-flight verified."}
-      ]
+      "id": "001-remote-lookup-placeholder",
+      "title": "Remote Lookup Batch Interface (SUPERSEDED by 002)",
+      "aligned": 10,
+      "drifted": [
+        {
+          "requirement": "FR-001",
+          "spec_text": "batch_lookup signature MUST be fn(&self, &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>.",
+          "actual": "Superseded by 002: signature is &[(CacheKey, u32 /*size*/)]; IpcHandle dropped because remote-lookup is CPU/DRAM-only. Intentional, non-actionable.",
+          "location": "components/interfaces/src/iremote_lookup.rs:163-166",
+          "severity": "Low"
+        },
+        {
+          "requirement": "FR-003",
+          "spec_text": "Each entry MUST produce a log message (placeholder behavior).",
+          "actual": "Superseded by 002: real KEY_QUERY->RDMA protocol, no per-entry placeholder log. Non-actionable.",
+          "location": "src/actor.rs",
+          "severity": "Low"
+        },
+        {
+          "requirement": "FR-004",
+          "spec_text": "The placeholder MUST return Err(NotFound) for each entry (no network I/O).",
+          "actual": "Superseded by 002: performs real zyre + one-sided RDMA I/O; Ok(()) when resident. Non-actionable.",
+          "location": "src/actor.rs, src/server.rs",
+          "severity": "Low"
+        },
+        {
+          "requirement": "FR-008",
+          "spec_text": "The component MUST expose functionality only through IRemoteLookup - no public functions outside the interface.",
+          "actual": "Superseded by 002 FR-029: peers_seen/signal_shutdown/shutdown are intentional out-of-interface teardown/test hooks. Non-actionable.",
+          "location": "src/lib.rs:336-367",
+          "severity": "Low"
+        },
+        {
+          "requirement": "SC-002",
+          "spec_text": "The interface compiles with the same (CacheKey, IpcHandle) parameter types as IDispatcher::batch_lookup.",
+          "actual": "Superseded by 002: compiles with (CacheKey, u32). Non-actionable.",
+          "location": "components/interfaces/src/iremote_lookup.rs:163-166",
+          "severity": "Low"
+        }
+      ],
+      "not_implemented": []
     }
   ],
   "unspecced": [
-    {"item": "LookupConfig.caller_wait + background-continue batch_lookup", "location": "src/lib.rs:304-309; components/interfaces/src/iremote_lookup.rs:44-50", "note": "Decouples caller blocking from op_deadline; op keeps running after caller returns. Beyond FR-020. Tested tests/mesh.rs:600. Low."},
-    {"item": "LookupConfig.connection_teardown_timeout + tick_orphans force-reclaim backstop", "location": "src/actor.rs:849-885; components/interfaces/src/iremote_lookup.rs:51-57", "note": "Timer-driven force-teardown for a peer that neither reports a late status nor exits; FR-014 covers only the departure path. Tested tests/mesh.rs:650. Low."},
-    {"item": "Orphan-reuse guard (skip re-reserving a key with an orphaned slot)", "location": "src/actor.rs:441-443,630-632,772-774", "note": "Memory-safety detail preventing buffer aliasing; not in any FR. Low."},
-    {"item": "Extra LookupConfig fields not enumerated by FR-022 (actor_cpu, discovery, node_endpoint)", "location": "components/interfaces/src/iremote_lookup.rs:64-78", "note": "FR-022 lists only quorum/phase1/deadline/retry-cap/max-keys. These support NUMA pinning + gossip discovery. Low."},
-    {"item": "integrity-check cargo feature", "location": "Cargo.toml:8-14", "note": "Forwards interfaces/integrity-check for checksum accessors; build plumbing, no spec mention. Info/Low."}
+    {
+      "feature": "DISCONNECT_ACK_TIMEOUT (fixed 500ms bounded wait for DisconnectAck)",
+      "location": "src/actor.rs",
+      "lines": "37,1020-1033",
+      "suggested_spec": "Note the hardcoded ack-handshake bound in FR-014/FR-031, distinct from the configurable connection_teardown_timeout orphan grace."
+    },
+    {
+      "feature": "Malformed/truncated wire frame silent drop",
+      "location": "src/actor.rs",
+      "lines": "312-315",
+      "suggested_spec": "Extend FR-018 to require logging of malformed (WireError) frames, not only unknown message types; fold into the FR-018 logging ALIGN task."
+    },
+    {
+      "feature": "publish_success AlreadyExists size-collision guard",
+      "location": "src/actor.rs",
+      "lines": "576-591",
+      "suggested_spec": "Document in FR-006 that a racing AlreadyExists counts as success only at matching size; a differing size is reclaimed (never evicted). Already in knowledge/size-mismatch-handling.md."
+    }
   ],
-  "conflicts": [
-    {"note": "lib.rs docstrings claim the KEY_QUERY->RDMA protocol is unbuilt and batch_lookup returns all-NotFound, contradicting the fully-implemented actor.rs and spec 002 Status: Synced. Doc-vs-code drift.", "location": "src/lib.rs:5-8,251-253"}
-  ]
+  "conflicts": []
 }

@@ -1,151 +1,79 @@
 {
-  "generated": "2026-08-07T15:27:06Z",
+  "generated": "pending",
   "project": "component-framework",
   "summary": {
-    "specs": 6,
-    "requirements": 149,
-    "aligned": 148,
-    "drifted": 1,
+    "specs_analyzed": 6,
+    "requirements_checked": 149,
+    "aligned": 149,
+    "drifted": 2,
     "not_implemented": 0,
-    "unspecced": 10,
-    "conflicts": 0
+    "unspecced_features": 1
   },
   "specs": [
     {
       "id": "001-com-component-framework",
-      "title": "COM-style component framework",
-      "requirements": 19,
+      "title": "COM-Style Component Framework",
       "aligned": 19,
-      "drifted": 0,
-      "not_implemented": 0,
-      "unspecced": 2,
-      "status": "clean",
-      "findings": []
+      "drifted": [],
+      "not_implemented": []
     },
     {
       "id": "002-registry-refcount-binding",
-      "title": "Registry, refcount, binding",
-      "requirements": 27,
+      "title": "Registry, Reference Counting, and Binding",
       "aligned": 27,
-      "drifted": 0,
-      "not_implemented": 0,
-      "unspecced": 1,
-      "status": "clean",
-      "findings": []
+      "drifted": [],
+      "not_implemented": []
     },
     {
       "id": "003-actor-channels",
-      "title": "Actor model with channel components",
-      "requirements": 38,
+      "title": "Actor Model with Channel Components",
       "aligned": 38,
-      "drifted": 0,
-      "not_implemented": 0,
-      "unspecced": 3,
-      "status": "clean",
-      "findings": []
+      "drifted": [
+        {
+          "requirement": "Post-relocation path reference",
+          "spec_text": "Crate relocated to lib/component-framework",
+          "actual": "align-tasks.md references old path components/component-framework/crates/component-core/src/actor.rs",
+          "location": "lib/component-framework/.specify/sync/align-tasks.md:29",
+          "severity": "minor"
+        },
+        {
+          "requirement": "Post-relocation path reference",
+          "spec_text": "Crate relocated to lib/component-framework",
+          "actual": "apply-report.md commit command references old components/component-framework/specs/003-actor-channels path",
+          "location": "lib/component-framework/.specify/sync/apply-report.md:60",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
     },
     {
       "id": "004-channel-benchmarks",
-      "title": "Channel backend benchmarks",
-      "requirements": 24,
-      "aligned": 23,
-      "drifted": 1,
-      "not_implemented": 0,
-      "unspecced": 1,
-      "status": "drifted",
-      "findings": [
-        {
-          "requirement": "FR-016",
-          "classification": "drifted",
-          "severity": "minor",
-          "location": "crates/component-framework/benches/channel_spsc_benchmark.rs:64-70",
-          "description": "Benchmark group-ID naming diverges from spec example. Spec states pattern {topology}_throughput_{type}/{backend}/{capacity} with example spsc_throughput_u64/built_in/capacity_1024; code emits BenchmarkId::new(\"builtin\", capacity) producing spsc_throughput_u64/builtin/1024 (token 'builtin' not 'built_in'; bare capacity number, no 'capacity_' prefix). Analogous IDs in channel_mpsc_benchmark.rs. Cosmetic; results remain self-describing and comparable."
-        }
-      ]
+      "title": "Channel Backend Benchmarks",
+      "aligned": 24,
+      "drifted": [],
+      "not_implemented": []
     },
     {
       "id": "005-numa-aware-actors",
-      "title": "NUMA-aware actor thread pinning and memory allocation",
-      "requirements": 28,
+      "title": "NUMA-Aware Actor Thread Pinning and Memory Allocation",
       "aligned": 28,
-      "drifted": 0,
-      "not_implemented": 0,
-      "unspecced": 3,
-      "status": "clean",
-      "findings": []
+      "drifted": [],
+      "not_implemented": []
     },
     {
       "id": "006-log-handler",
-      "title": "Generic log handler",
-      "requirements": 13,
+      "title": "Generic Log Handler",
       "aligned": 13,
-      "drifted": 0,
-      "not_implemented": 0,
-      "unspecced": 0,
-      "status": "clean",
-      "findings": []
+      "drifted": [],
+      "not_implemented": []
     }
   ],
   "unspecced": [
     {
-      "item": "ReceptacleInfo.interface_name field",
-      "location": "crates/component-macros/src/define_component.rs:243",
-      "spec": "001",
-      "note": "Extra introspection metadata beyond FR-003; used by bind(). Benign."
-    },
-    {
-      "item": "ComponentRef::ref_count()",
-      "location": "crates/component-core/src/component_ref.rs:72",
-      "spec": "002",
-      "note": "Public testing/debug helper not called out in any FR."
-    },
-    {
-      "item": "ActorHandler::on_start / on_stop lifecycle hooks",
-      "location": "crates/component-core/src/actor.rs:76-81",
-      "spec": "003",
-      "note": "Public hooks; only on_idle (FR-028) and handle are specced in 003. on_stop is depended on by 006 FR-006 but not defined in 003."
-    },
-    {
-      "item": "Actor::with_capacity()",
-      "location": "crates/component-core/src/actor.rs:453",
-      "spec": "003",
-      "note": "Explicit-capacity ctor variant; capacity config is FR-020 but this ctor is unnamed in the spec."
-    },
-    {
-      "item": "SpscChannel::with_default_capacity()",
-      "location": "crates/component-core/src/channel/spsc.rs:119",
-      "spec": "003",
-      "note": "Convenience ctor not specced."
-    },
-    {
-      "item": "Channel park/unpark backoff (escalate, SPIN/YIELD/PARK limits, force_closed)",
-      "location": "crates/component-core/src/channel/mod.rs:33-70,183",
-      "spec": "003",
-      "note": "Internal blocking strategy; reasonable impl detail not surfaced in spec."
-    },
-    {
-      "item": "NumaTopology::node_for_cpu(), nodes()",
-      "location": "crates/component-core/src/numa/topology.rs:194,211",
-      "spec": "005",
-      "note": "Extra topology introspection beyond FR-007/008."
-    },
-    {
-      "item": "parse_range_list() (pub)",
-      "location": "crates/component-core/src/numa/mod.rs:35 (re-export)",
-      "spec": "005",
-      "note": "Public sysfs range-parser helper, not specced."
-    },
-    {
-      "item": "get_thread_affinity()",
-      "location": "crates/component-core/src/numa/cpuset.rs:333",
-      "spec": "005",
-      "note": "Public affinity read-back not required by any FR."
-    },
-    {
-      "item": "NumaAllocator exposed but not wired into channels/handlers",
-      "location": "crates/component-core/src/numa/allocator.rs",
-      "spec": "005",
-      "note": "Satisfies FR-015 but not used by first-touch paths (FR-016/017); standalone public API."
+      "feature": "Additional Criterion benches beyond spec-named suites (actor_latency, binding, component_ref, method_dispatch, query_interface, receptacle, registry)",
+      "location": "lib/component-framework/crates/component-framework/benches/",
+      "lines": "n/a",
+      "suggested_spec": "Covered in spirit by SC-005 (001) and the performance-accountability constitution rule; no dedicated FR names each bench. No action required."
     }
   ],
   "conflicts": []

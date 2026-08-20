@@ -4,7 +4,7 @@
 
 **Created**: 2026-06-19
 
-**Status**: Superseded (2026-07-22) — see [Supersession Notice](#supersession-notice)
+**Status**: Superseded (2026-07-22; re-swept 2026-08-20) — see [Supersession Notice](#supersession-notice). The 2026-08-20 spec-sync pass annotated the five requirements that diverge from the shipped code (FR-001, FR-003, FR-004, FR-008, SC-002) inline as superseded-by-002, so each stale placeholder requirement is now explicit at the requirement level and not only in the banner.
 
 ## Supersession Notice
 
@@ -63,14 +63,14 @@ The `batch_lookup` method on `IRemoteLookup` MUST accept the same parameter type
 
 ### Functional Requirements
 
-- **FR-001**: The `IRemoteLookup` interface MUST expose a `batch_lookup` method with signature `fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>`.
+- **FR-001**: The `IRemoteLookup` interface MUST expose a `batch_lookup` method with signature `fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>`. *(**Superseded by 002 FR-001**: the shipped signature is `&[(CacheKey, u32 /* size */)]`; `IpcHandle` is intentionally dropped because remote-lookup is CPU/DRAM-only — see 002 Clarifications Q1. `Ok(())` now means the key is resident in the local memory tier. Retained here for history; not a defect to fix.)*
 - **FR-002**: The `batch_lookup` method MUST return one `Result` per input entry, preserving positional order.
-- **FR-003**: Each entry in `batch_lookup` MUST produce a log message via the `ILogger` receptacle (placeholder behavior). If the ILogger receptacle is not bound, logging is silently skipped.
-- **FR-004**: When connected, the placeholder implementation MUST return `Err(RemoteLookupError::NotFound)` for each entry (no actual network I/O).
+- **FR-003**: Each entry in `batch_lookup` MUST produce a log message via the `ILogger` receptacle (placeholder behavior). If the ILogger receptacle is not bound, logging is silently skipped. *(**Superseded by 002**: the shipped component runs the real KEY_QUERY→RDMA protocol (002 FR-005/FR-006a/FR-007) and emits no per-entry placeholder log. Retained for history.)*
+- **FR-004**: When connected, the placeholder implementation MUST return `Err(RemoteLookupError::NotFound)` for each entry (no actual network I/O). *(**Superseded by 002 FR-005..FR-012**: the shipped component performs real zyre discovery plus one-sided RDMA I/O and returns `Ok(())` for a key that becomes resident; `Err(NotFound)` is returned only when no peer resolves the key within the deadline. Retained for history.)*
 - **FR-005**: The `batch_lookup` method MUST be callable at any time after component instantiation. No connection precondition is required.
 - **FR-006**: When called with an empty slice, `batch_lookup` MUST return an empty `Vec`.
 - **FR-007**: The interface definition MUST reside in `components/interfaces/src/iremote_lookup.rs`.
-- **FR-008**: The component MUST expose functionality only through the `IRemoteLookup` interface — no public functions outside the interface.
+- **FR-008**: The component MUST expose functionality only through the `IRemoteLookup` interface — no public functions outside the interface. *(**Superseded by 002 FR-029**: the shipped component intentionally exposes a small set of out-of-interface `pub fn`s — `peers_seen()`, `signal_shutdown()`, `shutdown()` — for multi-actor zyre/czmq teardown ordering and test coordination that the interface cannot express. These are implementation-facing, not part of the `IRemoteLookup` contract. Retained for history.)*
 - **FR-009**: The `IRemoteLookup` interface MUST expose a `join_cluster` method with signature `fn join_cluster(&self, endpoint: &str) -> Result<(), RemoteLookupError>`. The placeholder implementation MUST log the endpoint and return `Ok(())`.
 - **FR-010**: The `IRemoteLookup` interface MUST expose a `leave_cluster` method with signature `fn leave_cluster(&self) -> Result<(), RemoteLookupError>`. The placeholder implementation MUST log the call and return `Ok(())`.
 
@@ -85,7 +85,7 @@ The `batch_lookup` method on `IRemoteLookup` MUST accept the same parameter type
 ### Measurable Outcomes
 
 - **SC-001**: All unit tests for `batch_lookup` pass with `cargo test -p remote-lookup`.
-- **SC-002**: The interface compiles with the same `(CacheKey, IpcHandle)` parameter types as `IDispatcher::batch_lookup`.
+- **SC-002**: The interface compiles with the same `(CacheKey, IpcHandle)` parameter types as `IDispatcher::batch_lookup`. *(**Superseded by 002 FR-001**: the shipped interface compiles with `(CacheKey, u32)`; the deliberate `IpcHandle` drop removes the type-equality goal with `IDispatcher::batch_lookup`. Retained for history.)*
 - **SC-003**: Documentation tests for `batch_lookup` compile and pass under `cargo test --doc -p remote-lookup`.
 - **SC-004**: `cargo clippy -- -D warnings` reports zero warnings for the component.
 - **SC-005**: `cargo doc --no-deps` produces warning-free documentation for the public API.

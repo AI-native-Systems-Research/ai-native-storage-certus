@@ -1,75 +1,99 @@
-Generated: 2026-08-07T15:28:11Z
-
+Generated: pending
 # Spec-vs-Implementation Drift Report — remote-lookup-rdma-responder
-
-Spec analyzed: `specs/001-rdma-lookup-responder/spec.md`
-Implementation: `src/{lib.rs,connection.rs,rdma.rs,ffi.rs,telemetry.rs,loopback_test.rs}`, `benches/connection_telemetry.rs`
-Interface: `components/interfaces/src/iremote_lookup_rdma_responder.rs`
 
 ## Summary
 
-| Spec | Requirements | Aligned | Drifted | Not Implemented |
-|------|-------------:|--------:|--------:|----------------:|
-| 001-rdma-lookup-responder | 23 (17 FR + 6 SC) | 19 | 4 | 0 |
+| Metric | Count |
+|--------|-------|
+| Specs Analyzed | 1 |
+| Requirements Checked | 24 |
+| Aligned | 23 |
+| Drifted | 1 |
+| Not Implemented | 0 |
+| Unspecced | 2 |
 
-Unspecced code items: 2. Conflicts: 1 (stale interface doc).
+Requirements = 18 functional (FR-001..FR-016 incl. FR-002a, FR-011a) + 6 success
+criteria (SC-001..SC-006).
 
-## Detailed Findings
+Spec status: **Draft** (with clarifications resolved through 2026-07-10 and
+access-flag / async-event notes backfilled 2026-08-07). No requirement is marked
+deferred or out-of-scope, so all are analyzed.
 
-### Functional Requirements
+Note on relocated crates: the spec/plan reference `component-framework`,
+`component-core`, `component-macros` by **crate name only** (never by a
+`components/…` path), and `components/interfaces` has not moved. No stale-path
+drift from the components/→lib/ relocation was found.
 
-| ID | Status | Severity | Evidence | Note |
-|----|--------|----------|----------|------|
-| FR-001 | Aligned | — | `src/lib.rs:312-323` | Dedicated `rdma-responder-accept` thread runs `run_accept_loop`. |
-| FR-002 | Aligned | — | `src/rdma.rs:239-268` | Binds `htons(0)` (ephemeral), `rdma_listen`, reads back `rdma_get_src_port`; `AlreadyInitialized` guarded at `src/lib.rs:268`. |
-| FR-002a | Aligned | — | `src/lib.rs:278-283`, `src/rdma.rs:215-219,76-129` | Explicit `set_bind_ip` else `first_active_rdma_ipv4()` auto-detect. (`CERTUS_RDMA_BIND_IP` wiring is in the `certus-server-yaml` mainline, out of this crate.) |
-| FR-003 | Aligned | — | `src/lib.rs:382-386` | Returns bound `{ip,port}`; `NotInitialized` before init. |
-| FR-004 | Aligned | — | `src/rdma.rs:507-554,342-344` | `epoll` over `{cm fd, cmd eventfd, stop eventfd}`; SPSC command inbox bridged to `cmd_eventfd`. Mock uses event-driven `recv`. |
-| FR-005 | Aligned | — | `src/rdma.rs:410-424`, `src/connection.rs:127-162`, `src/lib.rs:150-153` | Reads `private_data`, keys table by `PeerId`, accepts, emits `ConnectionEstablished{Some}`. |
-| FR-006 | Aligned | — | `src/connection.rs:152-160,227-236` | Absent/malformed → unidentified side-list, `Established(None)`; only `teardown_all`/`shutdown` reclaims. |
-| FR-007 | Aligned | — | `src/connection.rs:74-82,134-140` | `Active→Draining→Dead`; connect refused while `Draining`. (Draining is transient within the single-threaded loop; the refusal path is exercised via `force_state` in tests.) |
-| FR-008 | Drifted | Low | `src/rdma.rs:144-169` | QP→ERROR ordered before ack and asserted (`src/connection.rs:172-186`, `src/rdma.rs:145-151`); idempotent for unknown node. **Drift:** spec says best-effort `rdma_destroy_qp` failure "MUST be logged"; `Drop` ignores `rdma_disconnect`/`rdma_destroy_qp` return values and logs nothing. |
-| FR-009 | Aligned | — | (whole crate) | No data path anywhere; responder is registrar/connection-manager only. |
-| FR-010 | Drifted | Medium | `src/lib.rs:183-204`, `src/rdma.rs:300-314,557-575` | Registers whole pool once, exposes `local_region`, deregisters MR before PD free. **Drift:** FR-010 says `ibv_reg_mr` failure MUST return `Registration`, but `RealCmSeam::bind` returns `Err(String)` mapped via `.map_err(RemoteLookupRdmaResponderError::Bind)` (`src/lib.rs:195-196`), so a registration failure surfaces as `Bind`, not `Registration`. (Unbound receptacle / uninitialized pool are correctly mapped to `Registration`.) |
-| FR-011 | Aligned | — | `src/lib.rs:365-380` | Single-client channel; second `open_control_channel` → `ChannelClosed`. |
-| FR-011a | Aligned | — | `src/lib.rs:129-132,533-572` | `send_event` uses blocking `tx.send` (backpressure, never drop); lossless-under-backpressure test present. |
-| FR-012 | Aligned | — | `src/lib.rs:170-172,310-321` | `set_actor_cpu` stored pre-init; thread pins via `set_thread_affinity` (best-effort). |
-| FR-013 | Aligned | — | `src/lib.rs:214-247,166` | `signal_stop` exits without join; `shutdown` stops+joins, `teardown_all` tears down connections, idempotent via `state.take()`. |
-| FR-014 | Drifted | Low | `src/lib.rs:116-120`, `src/rdma.rs:455-461` | Diagnostics route through optional `ILogger`; missing logger is not an error. **Drift:** the async-event diagnostic path logs via `eprintln!` directly, bypassing the `ILogger` receptacle. |
-| FR-015 | Aligned | — | `src/lib.rs:395-590`, `src/connection.rs:296-486` | Unit tests cover lifecycle, `NotInitialized`/`AlreadyInitialized`/`ChannelClosed`, and the state machine. |
-| FR-016 | Drifted | Low | `src/telemetry.rs`, `src/connection.rs:148-158,184` | Feature-gated ZST no-op telemetry with the required metrics is present and wired for accepted/identified/unidentified/teardowns. **Drift:** the "accept-loop errors" metric (`record_accept_loop_error`) is never called and `ResponderEvent::Error` is never emitted anywhere, so that metric is defined but never recorded. |
+---
 
-### Success Criteria
+## Spec: 001-rdma-lookup-responder — RDMA Lookup Responder
 
-| ID | Status | Severity | Evidence | Note |
-|----|--------|----------|----------|------|
-| SC-001 | Aligned | — | `src/lib.rs:402-409,431-445`, `src/loopback_test.rs:304-315` | `NotInitialized` before init tested; non-placeholder ephemeral port asserted only in the `#[ignore]` hardware loopback test (mock uses port 0). |
-| SC-002 | Aligned | — | `src/connection.rs:377-394` | Exactly one ack; QP→ERROR ordered strictly before ack. |
-| SC-003 | Aligned | — | `src/connection.rs:438-457` | Structural: command serviced on event-driven wake with no pending connect, no poll cycle. |
-| SC-004 | Aligned | — | `src/loopback_test.rs:317-332`, `src/lib.rs:574-589` | Distinct-ephemeral-port distinctness validated in `#[ignore]` hardware test; mock test only asserts independent IPs (both port 0). |
-| SC-005 | Aligned | — | `src/connection.rs:330-356`, `src/loopback_test.rs:334-386` | Known UUID → `Some(peer)`; empty `private_data` → `None`. |
-| SC-006 | Aligned | — | `benches/connection_telemetry.rs` | Criterion benchmark drives accept/disconnect over the seam; two-baseline on/off workflow documented. Actual <5% is a runtime measurement, not asserted in code. |
+### Aligned ✓
+
+| Requirement | Location |
+|-------------|----------|
+| FR-001 actor owns dedicated `rdma_cm` accept-loop thread | `src/lib.rs:319-330` (spawn `rdma-responder-accept` → `run_accept_loop`) |
+| FR-002 bind ephemeral port 0 on effective IP, `rdma_listen`, read port via `rdma_get_src_port`, not by name, `Bind` on failure, twice→`AlreadyInitialized` | `src/rdma.rs:239-268`; `src/lib.rs:275-278` |
+| FR-002a bind-IP precedence (explicit `set_bind_ip` else auto-detect first active device) | `src/lib.rs:285-290`; `src/rdma.rs:214-219,76-129` |
+| FR-003 `local_endpoint()` returns bound `{ip,port}` after init, `NotInitialized` before | `src/lib.rs:389-393` |
+| FR-004 accept loop epolls `{cm fd, command eventfd, stop eventfd}` together | `src/rdma.rs:511-558` (TAG_CM/TAG_CMD/TAG_STOP); command bridge `src/rdma.rs:358-373` |
+| FR-005 read UUID from `private_data`, key by `PeerId`, accept, emit `ConnectionEstablished{Some}` | `src/connection.rs:136-160`; `src/rdma.rs:410-428,634-641` |
+| FR-006 absent/malformed `private_data` accepted as `node:None`, reclaimable only via shutdown | `src/connection.rs:161-169,246-255` |
+| FR-007 `Active→Draining→Dead` state machine; new connects refused while Draining | `src/connection.rs:82-91,143-149` |
+| FR-008 QP→ERROR (asserted, fail-stop) before ack, destroy QP best-effort, idempotent unknown | `src/connection.rs:181-195`; `src/rdma.rs:144-169` |
+| FR-009 never reads/copies value bytes (control traffic only) | design-wide; no data-path code (`src/connection.rs`, `src/rdma.rs`) |
+| FR-010 register whole pool once (`ibv_reg_mr`), expose via `local_region()`, dereg before PD freed, `Registration` on failure | `src/rdma.rs:293-314,570-573`; `src/lib.rs:186-211,395-399` |
+| FR-011 single-client control channel; 2nd open→`ChannelClosed` | `src/lib.rs:372-387` |
+| FR-011a lossless event delivery via backpressure (blocking send) | `src/lib.rs:129-132`; test `src/lib.rs:539-579` |
+| FR-012 `set_actor_cpu` pins accept thread | `src/lib.rs:317,324-328` |
+| FR-013 `signal_stop` no-join; `shutdown` stops+joins+tears-down, idempotent | `src/lib.rs:221-254` |
+| FR-015 unit tests: lifecycle, error paths, state machine | `src/lib.rs:402-643`; `src/connection.rs:320-511` |
+| FR-016 telemetry behind feature, ZST no-op when off, metric set matches | `src/telemetry.rs`; `Cargo.toml:10` |
+| SC-001 endpoint non-placeholder port + `NotInitialized` before, unit-tested | `src/rdma.rs:263-268`; tests `src/lib.rs:409-452` |
+| SC-002 exactly one `DisconnectAck`, QP→ERROR ordered before ack | test `src/connection.rs:401-418` |
+| SC-003 idle loop services command event-driven (no poll cycle) | `src/connection.rs:301-318`; test `src/connection.rs:462-481` |
+| SC-004 co-resident instances bind distinct ephemeral ports (port-0 mechanism; hw-gated) | `src/rdma.rs:241-268`; mock sanity test `src/lib.rs:628-643`; hw `src/loopback_test.rs` |
+| SC-005 known UUID→`Some(peer)`, empty→`None` | tests `src/connection.rs:354-380` |
+| SC-006 telemetry <5% overhead via Criterion two-run | `benches/connection_telemetry.rs` |
+
+### Drifted ⚠️
+
+| Requirement | Spec text | Actual | Location | Severity |
+|-------------|-----------|--------|----------|----------|
+| FR-014 | "Diagnostics MUST route through an optional `ILogger` receptacle; a missing logger MUST NOT turn any operation into an error." | Primary diagnostics route through `ILogger` via `log_debug` and tolerate a missing logger (aligned), **but** the async-event instrumentation prints via `eprintln!`, bypassing `ILogger`. Spec's Known Limitations flags this and tracks an align-task. | `src/lib.rs:116-120` (aligned path); `src/rdma.rs:459-464` (`eprintln!` bypass) | Low |
+
+### Not Implemented ✗
+
+None.
+
+---
 
 ## Unspecced Code
 
-| Item | Location | Note |
-|------|----------|------|
-| Device async-event instrumentation | `src/rdma.rs:44-70,351-356,437-462`; `src/ffi.rs:296-302`; `src/wrapper.c` | `TAG_ASYNC` epoll wiring + `drain_async_events`/`async_event_name` + `responder_async_fd`/`responder_drain_async_event` shims log QP_FATAL/QP_REQ_ERR/etc. No FR mentions async-event diagnostics. |
-| MR access widened beyond `REMOTE_WRITE` | `src/rdma.rs:297-299` | `ibv_reg_mr` uses `LOCAL_WRITE | REMOTE_WRITE | REMOTE_READ`; FR-010 specifies only `REMOTE_WRITE`. `REMOTE_READ` grants peers one-sided read of the pool, which no requirement calls for. |
+| Feature | Location | Lines | Note |
+|---------|----------|-------|------|
+| Device async-event instrumentation (TAG_ASYNC epoll fd, `drain_async_events`, `async_event_name`, FFI `responder_async_fd`/`responder_drain_async_event`) | `src/rdma.rs`, `src/ffi.rs`, `src/wrapper.c` | rdma.rs:44-70,351-356,440-466; ffi.rs:296-302 | No FR mandates it — best-effort operator diagnostics. Already documented in spec Known Limitations (backfilled 2026-08-07); no new spec needed. Emits via `eprintln!` (see FR-014 drift). |
+| Command-bridge thread (`rdma-responder-cmd-bridge`) draining the SPSC command inbox onto the command eventfd | `src/rdma.rs` | 358-373 | Implementation mechanism enabling FR-004 (SPSC channel has no pollable fd). Behavior is implied by FR-004; the bridge itself is an undocumented internal detail. |
 
-## Conflicts / Stale References
+---
 
-| Note | Location |
-|------|----------|
-| Interface trait doc contradicts the current spec. `set_bind_ip`'s doc states "The responder never auto-detects the address" and that `initialize` fails with `Bind` if no IP was supplied — the pre-clarification behavior. The current spec (FR-002a) mandates auto-detect of the first active RDMA device, which the implementation actually follows. The interface doc is stale. | `components/interfaces/src/iremote_lookup_rdma_responder.rs:253-263` |
+## Conflicts
 
-No spec references to nonexistent files/dirs/proofs were found (`benches/` exists; the backup spec under `.specify/sync/backups/` was excluded as instructed).
+None.
+
+---
 
 ## Recommendations
 
-1. **FR-010 (Medium):** Map `ibv_reg_mr` failure to `RemoteLookupRdmaResponderError::Registration` rather than `Bind`. Either split `RealCmSeam::bind`'s error type or have it signal registration failures distinctly so `src/lib.rs:195-196` can route them to `Registration`.
-2. **FR-010 / Unspecced (Low–Medium):** Either narrow the MR access flags to `REMOTE_WRITE` (drop `REMOTE_READ`) to match the spec, or add a requirement documenting why remote read access is needed.
-3. **FR-008 (Low):** Log `rdma_disconnect`/`rdma_destroy_qp` failures in `RealCmConn::drop` (best-effort), as the spec requires.
-4. **FR-014 (Low):** Route the async-event diagnostics through the `ILogger` receptacle instead of `eprintln!`, or document the async instrumentation in the spec as an explicit stderr diagnostic.
-5. **FR-016 (Low):** Either wire `record_accept_loop_error` / emit `ResponderEvent::Error` on non-fatal accept-loop errors (e.g. the `accept_child` reject path at `src/rdma.rs:421-423`), or drop the unused metric/variant.
-6. **Conflict:** Update the `set_bind_ip` interface doc to reflect FR-002a auto-detection so the trait documentation stops contradicting the spec and the code.
+1. **FR-014 (Low):** Route the async-event diagnostics in `drain_async_events`
+   (`src/rdma.rs:459-464`) through the `ILogger` receptacle instead of
+   `eprintln!`, to fully satisfy FR-014. This is already tracked as an align-task
+   (`.specify/sync/align-tasks.md`, FR-014 accept-loop diagnostics); close it or
+   keep it as an accepted, documented deviation.
+2. **Unspecced async instrumentation:** No action required — it is best-effort and
+   already captured in the spec's Known Limitations. If it becomes load-bearing
+   for operators, promote it to an FR.
+3. **Command-bridge thread:** Consider a one-line mention in plan.md / data-model
+   so the FR-004 mechanism (SPSC→eventfd bridge) is not an undocumented surprise.
+4. No spec/implementation conflicts and no stale relocated-crate paths — the
+   component is otherwise fully synchronized with spec 001-rdma-lookup-responder.

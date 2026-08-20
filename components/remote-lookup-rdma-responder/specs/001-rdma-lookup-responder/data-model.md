@@ -117,6 +117,23 @@ Accept-side analog of the initiator's `RdmaTransport`/`RdmaConn`:
 `Command(ResponderCommand)` · `Stop`. This is what makes SC-003/SC-005 and the
 state machine unit-testable and the SC-006 benchmark hardware-free.
 
+### Command-inbox bridge thread  *(real seam only; backfilled 2026-08-20)*
+The `command inbox` in FR-004 is a lock-free SPSC channel, which has **no pollable
+fd**, so the real `epoll`-based accept loop cannot wait on it directly. `RealCmSeam`
+therefore spawns a dedicated bridge thread `rdma-responder-cmd-bridge`
+(`src/rdma.rs:358-373`) that blocks on the SPSC receiver and, for each dequeued
+`ResponderCommand`, pushes it onto an internal `Mutex<VecDeque<..>>` and signals the
+command `eventfd` (`TAG_CMD`) that the accept loop's `epoll` set watches. The accept
+loop then drains that queue when the eventfd fires.
+
+- **Role**: SPSC→eventfd adapter realizing FR-004's "command inbox" wait arm; adds no
+  externally visible behavior and preserves prompt, event-driven command servicing
+  (FR-004, SC-003).
+- **Lifecycle**: owned by `RealCmSeam` (`bridge: Some(JoinHandle)`); ends when the
+  command channel closes on shutdown.
+- **Mock seam**: has no bridge thread — `MockCmSeam` delivers injected commands
+  directly — so this entity exists only on the real (`rdma`-feature) path.
+
 ### TelemetryCollector  *(feature-gated)*
 ZST no-op when `telemetry` is off (compile-away methods); atomic counters when on
 (FR-016). Metrics:

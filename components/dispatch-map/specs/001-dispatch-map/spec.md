@@ -3,7 +3,7 @@
 **Feature Branch**: `dispatch-map`  
 **Created**: 2026-04-27  
 **Status**: Complete  
-**Last Synced**: 2026-08-07 — backfilled User Story 12 + FR-027/FR-028 (`integrity-check` feature: `set_checksum`/`get_checksum`), reworded FR-014 (info/debug logging only) and SC-004 (compile-time enum sizing), and marked US2/AS4 deferred, per `.specify/sync/drift-report.md`. Code-side aligns (FR-012 panic→error, US1/AS3 null-pointer check, `reuse_count` removal, Creusot comment) tracked in `.specify/sync/align-tasks.md`. Previously (2026-07-22) backfilled User Story 10/11, FR-025, FR-026.  
+**Last Synced**: 2026-08-20 — backfilled FR-029 + Key Entities (`reuse_count` per-entry read-hit counter, previously unspecced) and added the corresponding acceptance scenarios to User Stories 2 and 4, per `.specify/sync/drift-report.md` (Phase B). The two remaining drift items are code-side aligns: FR-012 (unbound `IEvictionPolicy` panics instead of returning `NotInitialized`) and FR-003/US1-AS3 (missing null-pointer check in `create_memory_tier_entry`) — both tracked in `.specify/sync/align-tasks.md`, no spec change. Previously (2026-08-07) backfilled User Story 12 + FR-027/FR-028 (`integrity-check` feature), reworded FR-014 (info/debug logging only) and SC-004 (compile-time enum sizing), and marked US2/AS4 deferred; (2026-07-22) backfilled User Story 10/11, FR-025, FR-026.  
 **Input**: User description: "FUNCTIONAL-DESIGN.md — dispatch map component for the Certus storage system"
 
 ## User Scenarios & Testing *(mandatory)*
@@ -39,6 +39,7 @@ A caller needs to read extent data. It looks up an extent key in the dispatch ma
 3. **Given** key 99 does not exist, **When** `lookup(key=99)` is called, **Then** `NotExist` is returned.
 4. *(Deferred for v0)* **Given** key 42 is looked up with size mismatch, **When** the caller expects a different size than recorded, **Then** `ErrorMismatchSize` is returned. — `lookup(key)` currently takes no expected-size argument, so this path is unreachable. The `MismatchSize` variant is reserved for a future size-checked lookup variant; see FR-004.
 5. **Given** key 42 currently has an active write reference, **When** `lookup(key=42)` is called, **Then** the call blocks until write_ref reaches 0, then returns the data location with read_ref incremented.
+6. **Given** key 42 exists in the map, **When** `lookup(key=42)` succeeds, **Then** the entry's internal `reuse_count` is incremented by 1 (see FR-029). This counter is internal instrumentation, observable only via the `DispatchEntry` `Debug` representation and not exposed through any `IDispatchMap` method.
 
 ---
 
@@ -77,6 +78,7 @@ Multiple callers access the same extent concurrently. The dispatch map enforces 
 6. **Given** key 42 has write_ref=1, **When** `release_write(key=42)` is called, **Then** write_ref becomes 0 and any blocked readers or writers are unblocked.
 7. **Given** key 42 has write_ref=1 that is never released, **When** `take_read(key=42, timeout=100ms)` is called, **Then** a timeout error is returned after 100ms.
 8. **Given** key 42 has read_ref=1 that is never released, **When** `take_write(key=42, timeout=100ms)` is called, **Then** a timeout error is returned after 100ms.
+9. **Given** key 42 exists in the map, **When** `take_read(key=42)` or `downgrade_reference(key=42)` succeeds (each acquiring a read reference), **Then** the entry's internal `reuse_count` is incremented by 1 (see FR-029). `take_write`, `release_read`, and `release_write` do not modify `reuse_count`.
 
 ---
 
@@ -261,10 +263,12 @@ When the component is built with the `integrity-check` Cargo feature, a caller c
 - **FR-027**: When compiled with the `integrity-check` Cargo feature, the system MUST provide `set_checksum(key, checksum)` — which records a CRC-32 on the entry (returning `KeyNotFound` if the key is absent) — and `get_checksum(key) -> Option<u32>` — which returns `Some(checksum)` for a key with a recorded non-zero checksum, and `None` if the key is absent or no checksum has been recorded (a stored value of `0` is treated as "not set"). The recorded checksum travels with the entry across demote/promote transitions.
 - **FR-028**: The `integrity-check` feature MUST be off by default. When it is disabled, the `set_checksum`/`get_checksum` methods MUST be absent from the `IDispatchMap` trait and the `DispatchEntry` MUST carry no `checksum` field (the 4-byte field and both methods are compiled only under the feature gate), leaving the default trait surface and struct layout unchanged.
 
+- **FR-029**: Each `DispatchEntry` MUST carry a per-entry `reuse_count` (`AtomicU32`), initialized to `0` when the entry is created (via `create_memory_tier_entry`, `recover_extent`, or the recovery walk in `initialize`) and incremented by 1 (relaxed atomic ordering) on each operation that acquires a read reference on the entry: `lookup`, `take_read`, and `downgrade_reference`. Operations that do not acquire a read reference (`take_write`, `release_read`, `release_write`, `convert_to_storage`, and the tier-transition methods) MUST NOT modify it. The counter is internal read-hit instrumentation: it is surfaced only through the `DispatchEntry` `Debug` representation and MUST NOT be exposed through any `IDispatchMap` method. It does not participate in eviction ordering (delegated to `IEvictionPolicy`) or in reference-count semantics.
+
 ### Key Entities
 
 - **CacheKey**: A `u64` value uniquely identifying an extent in the dispatch map.
-- **Dispatch Entry**: Holds the location (`Location` enum), size in 4KiB blocks, read reference count (`u32`), write reference count (`u32`), and an `EvictionHandle` (opaque handle into the `IEvictionPolicy` component for LRU ordering). Protected by `Mutex`/`Condvar`. Under the `integrity-check` feature it additionally carries a 4-byte CRC-32 `checksum` field (see FR-027/FR-028).
+- **Dispatch Entry**: Holds the location (`Location` enum), size in 4KiB blocks, read reference count (`u32`), write reference count (`u32`), an `EvictionHandle` (opaque handle into the `IEvictionPolicy` component for LRU ordering), and a `reuse_count` (`AtomicU32`) internal read-hit counter (see FR-029). Protected by `Mutex`/`Condvar` (the `reuse_count` is an independent relaxed atomic). Under the `integrity-check` feature it additionally carries a 4-byte CRC-32 `checksum` field (see FR-027/FR-028).
 - **Location**: An enum with two variants: `BlockDevice { offset: u64 }` for committed data on SSD, and `MemoryTier { pointer: *mut u8, size: u32, ssd_offset: Option<u64> }` for DRAM-cached entries. Note: `size_blocks` is stored on the `DispatchEntry`, not within the `Location` variant.
 
 ## Success Criteria *(mandatory)*

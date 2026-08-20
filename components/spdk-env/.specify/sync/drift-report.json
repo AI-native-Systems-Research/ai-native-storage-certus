@@ -1,61 +1,40 @@
 {
-  "generated": "2026-08-07T15:31:01Z",
+  "generated": "pending",
   "project": "spdk-env",
   "summary": {
     "specs_analyzed": 2,
-    "aligned": 25,
+    "requirements_checked": 26,
+    "aligned": 24,
     "drifted": 1,
     "not_implemented": 1,
-    "unspecced": 0,
-    "notes": "002-spdk-env-vfio-init substantially aligned; 001-spdk-vfio-env is a superseded unfilled template."
+    "unspecced_features": 0
   },
   "specs": [
     {
       "id": "001-spdk-vfio-env",
-      "path": "specs/001-spdk-vfio-env/spec.md",
-      "status": "superseded",
-      "note": "Raw spec-template.md scaffold, self-marked SUPERSEDED by 002. Placeholder FR/SC only; nothing to evaluate.",
-      "requirements": []
+      "title": "SUPERSEDED (unfilled spec-template scaffold)",
+      "aligned": 0,
+      "drifted": [],
+      "not_implemented": []
     },
     {
       "id": "002-spdk-env-vfio-init",
-      "path": "specs/002-spdk-env-vfio-init/spec.md",
-      "status": "draft",
-      "requirements": [
-        {"id": "FR-001", "status": "aligned", "location": "src/lib.rs:34,58"},
-        {"id": "FR-002", "status": "aligned", "location": "src/lib.rs:34-56"},
-        {"id": "FR-003", "status": "aligned", "location": "src/lib.rs:70-72; src/env.rs:17"},
-        {"id": "FR-004", "status": "aligned", "location": "src/checks.rs:16-38"},
-        {"id": "FR-005", "status": "aligned", "location": "src/checks.rs:44-149"},
-        {"id": "FR-006", "status": "aligned", "location": "src/env.rs:115-185"},
-        {"id": "FR-007", "status": "aligned", "location": "src/env.rs:43,48,53; src/lib.rs:58-67"},
-        {"id": "FR-008", "status": "aligned", "location": "src/checks.rs:77-149"},
-        {"id": "FR-009", "status": "aligned", "location": "src/env.rs:115-185"},
-        {"id": "FR-010", "status": "aligned", "location": "examples/spdk-env-example.rs"},
-        {"id": "FR-011", "status": "aligned", "location": "src/lib.rs:58-67"},
-        {"id": "FR-012", "status": "aligned", "location": "src/lib.rs:100-107"},
-        {"id": "FR-013", "status": "aligned", "location": "src/checks.rs:154-175"},
-        {"id": "FR-014", "status": "aligned", "location": "src/env.rs:11,19-33,199"},
-        {"id": "FR-015", "status": "not_implemented", "severity": "low", "location": "src/env.rs:115-185", "note": "Spec-acknowledged future item; devices are not skipped/warned individually when in use."},
-        {"id": "FR-016", "status": "aligned", "location": "src/lib.rs:54,95-97"},
-        {"id": "FR-017", "status": "aligned", "location": "src/lib.rs:51,88-93"},
-        {"id": "FR-018", "status": "aligned", "location": "src/lib.rs:34; components/interfaces/src/ispdk_env.rs"},
-        {"id": "FR-019", "status": "aligned", "location": "src/lib.rs:44,74-79; src/env.rs:188-200"},
-        {"id": "FR-020", "status": "aligned", "location": "src/dma.rs:6; components/interfaces/src/spdk_types.rs:190,208,213,293"},
-        {"id": "FR-021", "status": "aligned", "location": "scripts/"},
-        {"id": "SC-001", "status": "aligned", "location": "src/env.rs:164-181"},
-        {"id": "SC-002", "status": "drifted", "severity": "low", "location": "specs/002-spdk-env-vfio-init/spec.md:175", "note": "Stale 'missing logger' misconfiguration wording; component has no logger receptacle."},
-        {"id": "SC-003", "status": "aligned", "location": "examples/spdk-env-example.rs"},
-        {"id": "SC-004", "status": "aligned", "location": "src/lib.rs; src/env.rs"},
-        {"id": "SC-005", "status": "aligned", "location": "src/env.rs:43,48,53,173,176"}
+      "title": "SPDK/DPDK Environment Component with VFIO Device Iteration",
+      "aligned": 24,
+      "drifted": [
+        {
+          "requirement": "stale-crate-paths",
+          "spec_text": "tasks.md references components/spdk-sys/...; spec.md Input/Assumptions reference ../component-framework.",
+          "actual": "spdk-sys moved to lib/spdk-sys and component-framework to lib/component-framework; supporting spec docs still cite the old components/ paths.",
+          "location": "components/spdk-env/specs/002-spdk-env-vfio-init/tasks.md:22,24,34,35,36; spec.md:6,99,188",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": [
+        "FR-015: skip in-use devices with per-device warning, return only successfully probed devices (spec-acknowledged 'Future: not yet implemented'; all matching devices are currently claimed)"
       ]
     }
   ],
-  "unspecced": [
-    {"item": "check_*_at testable path variants", "location": "src/checks.rs:21,49,162", "assessment": "internal test seams; acceptable"},
-    {"item": "SpdkEnvError variant set", "location": "components/interfaces/src/spdk_types.rs", "assessment": "implied by FR-002/004/005/013/014; no drift"}
-  ],
-  "conflicts": [
-    {"id": "SC-002", "type": "stale-wording", "severity": "low", "description": "SC-002 references a logger that does not exist (contradicts FR-007 and removed US2 scenario 4)."}
-  ]
+  "unspecced": [],
+  "conflicts": []
 }

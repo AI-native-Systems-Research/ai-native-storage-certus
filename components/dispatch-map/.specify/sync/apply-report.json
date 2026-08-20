@@ -1,24 +1,73 @@
 {
-  "applied_at": "2026-08-07T14:55:33Z",
-  "based_on": "proposals from 2026-08-06T23:27:50Z",
-  "backups": ".specify/sync/backups/20260807T145533Z/",
+  "generated": "2026-08-20",
+  "phase": "B",
+  "based_on": "components/dispatch-map/.specify/sync/drift-report.json",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "backups": [
+    ".specify/sync/backups/specs/001-dispatch-map/spec.md.bak"
+  ],
   "specs_updated": [
-    { "spec": "001-dispatch-map", "requirement": "FR-014", "change": "modified", "direction": "BACKFILL" },
-    { "spec": "001-dispatch-map", "requirement": "SC-004", "change": "modified", "direction": "BACKFILL" },
-    { "spec": "001-dispatch-map", "requirement": "US2-AS4", "change": "modified", "direction": "BACKFILL" },
-    { "spec": "001-dispatch-map", "requirement": "US12", "change": "added", "direction": "BACKFILL" },
-    { "spec": "001-dispatch-map", "requirement": "FR-027", "change": "added", "direction": "BACKFILL" },
-    { "spec": "001-dispatch-map", "requirement": "FR-028", "change": "added", "direction": "BACKFILL" },
-    { "spec": "001-dispatch-map", "requirement": "contracts/idispatch_map.md", "change": "added", "direction": "BACKFILL" }
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "FR-029",
+      "change_type": "added",
+      "detail": "BACKFILL-UNSPECCED: per-entry reuse_count (AtomicU32) read-hit counter described as built (init 0; +1 relaxed on lookup/take_read/downgrade_reference; internal Debug-only, no IDispatchMap accessor)."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "Key Entities / Dispatch Entry",
+      "change_type": "modified",
+      "detail": "Added the reuse_count (AtomicU32) field to the entry layout description."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "US2/AS6",
+      "change_type": "added",
+      "detail": "lookup success increments reuse_count (internal, Debug-observable)."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "US4/AS9",
+      "change_type": "added",
+      "detail": "take_read/downgrade_reference increment reuse_count; take_write/release_read/release_write do not."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "header/Last Synced",
+      "change_type": "modified",
+      "detail": "Updated Last Synced to 2026-08-20 (Phase B)."
+    }
   ],
-  "new_specs": [],
-  "align_tasks": [
-    { "requirement": "FR-012", "summary": "initialize() must return Err(NotInitialized) instead of panicking on unbound IEvictionPolicy", "effort": "small" },
-    { "requirement": "US1-AS3", "summary": "Add null-pointer guard + DispatchMapError::NullPointer to create_memory_tier_entry", "effort": "small" },
-    { "requirement": "reuse_count", "summary": "Remove dead hot-path reuse_count field and fetch_add sites", "effort": "small" },
-    { "requirement": "creusot-verification-claims", "summary": "Correct/soften P1-P10 comment referencing non-existent verif/ directory", "effort": "small-medium" }
+  "align_tasks_generated": [
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "FR-012",
+      "location": "src/lib.rs:55",
+      "summary": "initialize() must return Err(NotInitialized) instead of panicking (eviction_policy.get().unwrap()) when IEvictionPolicy is unbound."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "FR-003/US1-AS3",
+      "location": "src/lib.rs:381",
+      "summary": "Add a null-pointer guard to create_memory_tier_entry (new DispatchMapError::NullPointer variant); reject nulls before recording an entry."
+    }
   ],
-  "not_applied": [],
-  "tasks_file": ".specify/sync/align-tasks.md",
-  "report_file": ".specify/sync/apply-report.md"
+  "unspecced_backfilled": [
+    {
+      "feature": "reuse_count: AtomicU32 per-entry read-hit counter",
+      "location": "src/entry.rs:37; src/lib.rs:142-143, 220-222, 313-315",
+      "resolution": "Backfilled as FR-029 + Key Entities update + US2/AS6 & US4/AS9 acceptance scenarios."
+    }
+  ],
+  "resolved": [],
+  "human_decision": [],
+  "counts": {
+    "backfill_applied": 0,
+    "backfill_unspecced_applied": 1,
+    "align_tasks": 2,
+    "resolved": 0,
+    "human_decision": 0,
+    "spec_md_files_edited": 1,
+    "spec_md_files_backed_up": 1
+  }
 }

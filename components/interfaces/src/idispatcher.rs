@@ -182,32 +182,6 @@ impl fmt::Display for DispatcherError {
 
 impl std::error::Error for DispatcherError {}
 
-// # Design Invariants (informal — NOT machine-checked)
-//
-// The properties below (P1–P10) are the intended safety/liveness invariants of
-// the dispatcher implementation. They are documented as design intent and are
-// exercised by the unit/integration tests; they are NOT formally proved. An
-// earlier revision of this comment claimed a Creusot proof tree at
-// `components/dispatcher/verif/` with "24 verification conditions discharged by
-// SMT solvers" — no such proofs or directory exist. The claim has been removed
-// to stop the interface docs asserting verification that was never present.
-// (Sync 2026-08-07, branch `sync/spec-drift-sweep-20260807`.) Re-introducing
-// real Creusot proofs remains possible future work; if done, restore the
-// verified-status wording and point it at the actual proof artifacts.
-//
-// - P1 (drive-index-bounded): drive_index(key, N) always returns a value < N
-// - P2 (eviction-terminates): evict_for_space loop exits after at most max_attempts iterations
-// - P3 (size-validation): populate rejects size == 0
-// - P4 (init-guard): all operations return NotInitialized before initialize() succeeds
-// - P5 (populate-lifecycle): successful populate yields MemoryTier entry with read_ref=1, no write_ref
-// - P6 (drive-index-deterministic): same key always maps to same drive
-// - P7 (eviction-progress): each successful eviction strictly decreases memory used
-// - P8 (reserve-complete-lifecycle): reserve→copy→complete yields MemoryTier entry with read_ref=1
-// - P9 (eviction-progress): flush→clear leaves no resident dirty entry for the flushed key
-// - P10 (reserve-complete-lifecycle): reserve→copy→complete is atomic w.r.t. concurrent lookup
-//
-// Total: 10 documented design invariants (informal; no SMT verification conditions).
-
 #[cfg(feature = "spdk")]
 component_macros::define_interface! {
     pub IDispatcher {
@@ -222,14 +196,6 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::NotInitialized`] if required receptacles
         /// (dispatch_map, memory_tier) are not bound.
         /// Returns [`DispatcherError::InvalidParameter`] if `data_pci_addrs` is empty.
-        ///
-        /// # Design invariants (informal, not machine-checked):P3 (size-validation), P4 (init-guard)
-        /// Rejects empty `data_pci_addrs` (InvalidParameter). After success,
-        /// sets initialized=true enabling all other operations.
-        ///
-        /// # Unchecked: Concurrent initialization safety
-        /// Two threads calling initialize() simultaneously could race on the
-        /// AtomicBool store. Suggested technique: Spin model or Loom testing.
         ///
         /// # Examples
         ///
@@ -257,18 +223,6 @@ component_macros::define_interface! {
         /// Blocks until all pending memory-tier-to-SSD writes finish, then shuts down
         /// all managed block devices and extent managers.
         ///
-        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
-        /// After shutdown completes, initialized=false and all subsequent
-        /// operations return NotInitialized.
-        ///
-        /// # Unchecked: Background writer drain completeness
-        /// Claims all pending writes complete before returning. Cannot be
-        /// modeled sequentially. Suggested technique: Spin model or integration test.
-        ///
-        /// # Unchecked: Two-phase block device shutdown ordering
-        /// Signal-all-then-join ordering prevents use-after-free on SPDK
-        /// transport memory. Suggested technique: Loom concurrency testing.
-        ///
         /// # Examples
         ///
         /// ```no_run
@@ -292,15 +246,6 @@ component_macros::define_interface! {
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         /// Returns [`DispatcherError::NotInitialized`] if called before [`initialize`].
-        ///
-        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P4 (init-guard)
-        /// Drive selection for cold-path reads is always within [0, num_drives).
-        /// Returns NotInitialized if called before initialize().
-        ///
-        /// # Unchecked: Blocks until writer completes
-        /// Doc claims lookup blocks if a writer is active. This is a concurrency
-        /// property delegated to dispatch-map's reference protocol.
-        /// Suggested technique: Spin model of reader/writer interaction.
         ///
         /// # Examples
         ///
@@ -331,13 +276,6 @@ component_macros::define_interface! {
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
-        ///
-        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P4 (init-guard)
-        /// Cold-path drive selection bounded. Rejects uninitialized.
-        ///
-        /// # Unchecked: Caller must synchronize returned stream before memory access
-        /// Caller protocol — if violated, GPU destination contains partial data.
-        /// Suggested technique: debug assertion in wrapper layer.
         ///
         /// # Examples
         ///
@@ -372,13 +310,6 @@ component_macros::define_interface! {
         ///
         /// Returns one `Result` per input entry, in the same order.
         ///
-        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P2 (eviction-terminates), P4 (init-guard)
-        /// Cold-path drive selection is bounded. Eviction during promotion
-        /// terminates. Rejects calls before initialization.
-        ///
-        /// # Unchecked: Result ordering matches input ordering
-        /// The implementation uses thread::scope with per-drive parallelism;
-        /// results are assembled by index. Suggested technique: property-based testing.
         /// Each entry carries one or more GPU destination regions. A block that
         /// the client exports as a single coalesced allocation (vLLM <=0.22,
         /// `populate`) has exactly one region; a block split into N per-layer
@@ -394,9 +325,6 @@ component_macros::define_interface! {
         ///
         /// Returns `true` if the key is present in the cache (any tier),
         /// `false` otherwise.
-        ///
-        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
-        /// Returns NotInitialized before initialize().
         ///
         /// # Examples
         ///
@@ -423,14 +351,6 @@ component_macros::define_interface! {
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         ///
-        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P4 (init-guard)
-        /// Drive index for extent removal is bounded. Rejects uninitialized.
-        ///
-        /// # Unchecked: Blocks until background write completes
-        /// Doc claims remove blocks if a writer is active. This depends on
-        /// dispatch-map reference semantics (lookup acquires read ref).
-        /// Suggested technique: Spin model or Loom test.
-        ///
         /// # Examples
         ///
         /// ```no_run
@@ -456,16 +376,6 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::InvalidParameter`] if `ipc_handle.size` is 0.
         /// Returns [`DispatcherError::AlreadyExists`] if the key is already cached.
         /// Returns [`DispatcherError::AllocationFailed`] if the memory-tier pool is full.
-        ///
-        /// # Design invariants (informal, not machine-checked):P3 (size-validation), P4 (init-guard), P5 (populate-lifecycle), P2 (eviction-terminates)
-        /// Rejects zero-size. Rejects uninitialized. On success, entry is
-        /// registered in MemoryTier with read_ref=1 (held by background writer)
-        /// and no write_ref. Eviction terminates within max_attempts.
-        ///
-        /// # Unchecked: Background write-through eventually persists to SSD
-        /// The enqueued write job executes asynchronously; completion is not
-        /// guaranteed before `flush_to_ssd` is called.
-        /// Suggested technique: integration test with flush barrier.
         ///
         /// # Examples
         ///
@@ -497,15 +407,6 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::AlreadyExists`] if the key already has a slot.
         /// Returns [`DispatcherError::AllocationFailed`] if the pool is full after eviction.
         ///
-        /// # Design invariants (informal, not machine-checked):P2 (eviction-terminates), P3 (size-validation), P4 (init-guard), P10 (reserve-complete-lifecycle)
-        /// Eviction terminates. Rejects zero-size. Rejects uninitialized.
-        /// Part of the reserve→copy→complete lifecycle.
-        ///
-        /// # Unchecked: Returned pointer validity
-        /// The pointer is valid pinned DRAM co-registered with CUDA and SPDK.
-        /// Correctness depends on memory-tier pool lifetime.
-        /// Suggested technique: Miri or ASAN integration test.
-        ///
         /// `session_id` is an opaque per-request identifier (0 = unset) supplied
         /// by the client (e.g. a hash of vLLM's `session_id`). It carries no
         /// allocation semantics today and is used only for observability.
@@ -526,14 +427,6 @@ component_macros::define_interface! {
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if no reserved slot exists for `key`.
         /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
-        ///
-        /// # Design invariants (informal, not machine-checked):P4 (init-guard), P10 (reserve-complete-lifecycle)
-        /// Rejects uninitialized. Part of the reserve→copy→complete lifecycle.
-        ///
-        /// # Unchecked: Stream must be synchronized before copy_gpu_to_memory_completed
-        /// Caller protocol — no in-process enforcement. If violated, GPU DMA
-        /// may not have completed and memory-tier slot contains partial data.
-        /// Suggested technique: debug-mode runtime assertion via stream query.
         fn copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream) -> Result<(), DispatcherError>;
 
         /// Finalize a populated memory-tier slot: register in the dispatch-map
@@ -544,19 +437,12 @@ component_macros::define_interface! {
         /// # Errors
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key is not in memory-tier.
-        ///
-        /// # Design invariants (informal, not machine-checked):P4 (init-guard), P5 (populate-lifecycle), P10 (reserve-complete-lifecycle)
-        /// Rejects uninitialized. Produces entry with read_ref=1 (for background
-        /// writer) via downgrade_reference. Enqueues write job.
         fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
 
         /// Release a reserved memory-tier slot without populating it.
         ///
         /// Used on the cancellation path (e.g., `complete_store(success=false)`).
         /// Idempotent — returns Ok if the key has no slot.
-        ///
-        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
-        /// Rejects uninitialized.
         fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
         /// Acquire an eviction-protection read reference on a cache entry.
@@ -591,9 +477,6 @@ component_macros::define_interface! {
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         ///
-        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
-        /// Rejects uninitialized.
-        ///
         /// # Examples
         ///
         /// ```no_run
@@ -616,14 +499,6 @@ component_macros::define_interface! {
         /// This is a best-effort, fire-and-forget operation intended to be called
         /// from a background task. Errors on individual keys are logged but not
         /// propagated.
-        ///
-        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P2 (eviction-terminates), P4 (init-guard)
-        /// Drive selection bounded. Eviction terminates. Rejects uninitialized.
-        ///
-        /// # Unchecked: Per-drive parallelism correctness
-        /// Multiple threads read from the same physical drive concurrently.
-        /// Correctness depends on SPDK queue-pair isolation.
-        /// Suggested technique: stress test with concurrent promote + lookup.
         fn promote_to_memory_tier(&self, keys: &[CacheKey]);
 
         /// Evict all entries from the memory-tier, demoting them to block-device-backed.
@@ -631,14 +506,6 @@ component_macros::define_interface! {
         /// Entries whose write-through has completed are converted to block-device
         /// state in the dispatch map. Entries still being written are removed entirely.
         /// Returns the number of entries cleared.
-        ///
-        /// # Design invariants (informal, not machine-checked):P4 (init-guard), P9 (eviction-progress)
-        /// Rejects uninitialized. Each eviction decreases memory used.
-        ///
-        /// # Unchecked: Entries still being written are removed without data loss
-        /// Entries without ssd_offset are fully removed (data lost). This is
-        /// intentional but callers must call flush_to_ssd first to avoid loss.
-        /// Suggested technique: integration test verifying flush→clear sequence.
         ///
         /// # Examples
         ///
@@ -660,14 +527,6 @@ component_macros::define_interface! {
         /// dropping them.
         ///
         /// Returns the number of entries that now have a valid SSD offset.
-        ///
-        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
-        /// Rejects uninitialized.
-        ///
-        /// # Unchecked: All populated entries persisted after return
-        /// Guarantees total persistence of all entries populated before the call.
-        /// This is a liveness property on the background writer channel drain.
-        /// Suggested technique: integration test with populate→flush→verify sequence.
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
 
         /// Return cumulative per-direction SSD read/write byte, op, and latency

@@ -1,50 +1,65 @@
-# Spec-Sync Apply Report — eviction-policy-session-lists
+# Spec-Sync Phase B — Apply Report: eviction-policy-session-lists
 
-**Mode**: sweep (analyze → propose --interactive → apply)
-**Applied**: 2026-08-07
-**Branch**: `sync/spec-drift-sweep-20260807`
-**Source**: `.specify/sync/drift-report.{json,md}` (generated 2026-08-07T08:32Z)
+**Applied**: 2026-08-20
+**Policy**: `.specify/sync/PHASE_B_POLICY.md`
+**Source**: `.specify/sync/drift-report.{json,md}` (2026-08-20; 23 aligned, 1 drifted, 0 not_implemented, 0 unspecced)
+**Proposals**: `.specify/sync/proposals.{md,json}`
 
-This is the first apply pass for this component — previously only a
-drift-report existed. Pacing: auto-apply safe BACKFILL/doc items on-branch;
-stop-and-ask on genuine forks. One fork arose (SC-001) and was resolved by
-the maintainer.
+Component is effectively CLEAN. The single drift (SC-001) is a
+spec-acknowledged, downgraded design goal — not an implementation divergence.
+Classified as **BACKFILL** (spec-lag / aspirational goal), not ALIGN: the
+eviction code is correct and intentional; only the benchmark scope (hot-path
+throughput, no comparative hit-rate harness) fails to verify the ≥15% target.
 
-## Drift summary
+## Specs Updated
 
-22 requirements aligned, 0 drifted. Two findings drove this pass:
-- **SC-001 Not-Implemented / unverified** — claims a ≥15% prefix-reload
-  reduction vs. basic LRU, but no comparative trace-replay harness exists in
-  the repo (`benches/session_list_benchmark.rs` measures only this component's
-  hot-path throughput, not a hit-rate comparison). → **fork**.
-- **Unspecced startup-announcement log** — a one-time informational log line
-  on first selection as active policy (`announced` flag; `src/lib.rs:83-87,107-120`)
-  via the optional `ILogger`, not covered by any FR. → **safe BACKFILL**.
+| Spec | Requirement | Change type |
+|------|-------------|-------------|
+| 001-session-list-eviction | SC-001 | BACKFILL — re-verified against `benches/session_list_benchmark.rs`; sharpened to name the four Criterion benches (`track`, `touch`, `batch_touch`, `identify_next_to_evict`), state SC-001 is explicitly not a measured outcome, and point to align-tasks.md Task 1 as the tracked follow-up. |
+| 001-session-list-eviction | (metadata) | BACKFILL — added `**Last-Synced**: 2026-08-20` line under `Status`. |
 
-## Changes applied (spec Markdown only)
+## Align Tasks Generated
 
-| Spec | Item | Change |
-|------|------|--------|
-| 001-session-list-eviction | Observability (new section) | Added a `## Observability *(non-normative, backfilled 2026-08-07)*` section at end of `spec.md` documenting the one-time startup-announcement log via the optional `ILogger` receptacle. Explicitly non-normative: a missing logger turns no operation into an error, consistent with the shared component logging convention. |
-| 001-session-list-eviction | SC-001 | **Fork resolution** — maintainer chose **"Downgrade to design goal (backfill)"**. SC-001 relabelled *(design goal — not yet verified; downgraded 2026-08-07)*; the ≥15% figure is now stated as an aspirational target pending a comparative session-lists-vs-`eviction-policy-lru` trace-replay harness, not a measured outcome. |
+| Task | Status |
+|------|--------|
+| (none new this pass) | — |
 
-## Fork resolved
+No new ALIGN task. The pre-existing `align-tasks.md` Task 1 (build the
+comparative session-lists-vs-`eviction-policy-lru` prefix-reload trace-replay
+harness to eventually verify/retire the ≥15% target) remains valid and is
+carried forward unchanged. It is a verification follow-up, not a behavioral-bug
+alignment.
 
-| Fork | Options presented | Maintainer decision |
-|------|-------------------|---------------------|
-| SC-001 ≥15% prefix-reload reduction is unverified (no comparative harness) | (a) downgrade SC-001 to a design goal / target; (b) build the comparative trace-replay harness and measure | **(a) Downgrade to design goal (backfill)** — recorded here and in `proposals-20260807.json`. Building the harness is queued as an open align-task (non-blocking). |
+## Unspecced Backfilled
 
-## Queued to align-tasks.md
+| Feature | Status |
+|---------|--------|
+| (none) | — |
 
-- **Build comparative prefix-reload trace-replay harness** (to eventually
-  verify or retire the SC-001 ≥15% target). Non-HIGH; queued, not drafted.
+The startup-announcement log was already backfilled into the spec's
+`Observability` section on 2026-08-07; still present, no action.
 
-## Not changed / no action
+## Resolved
 
-- FR-001…FR-018, SC-002…SC-006 all aligned; no edits.
-- No `NEW_SPEC`, no `SUPERSEDE`.
-- No source code touched.
+| Item | Status |
+|------|--------|
+| (none) | — |
+
+## Backups
+
+- `specs/001-session-list-eviction/spec.md` → `.specify/sync/backups/specs/001-session-list-eviction/spec.md.bak`
 
 ## Verification
-- All edits confined to `specs/001-session-list-eviction/spec.md`. No `.rs` source modified.
-- Artifacts created this pass: this `apply-report.md`, `proposals-20260807.json`, `align-tasks.md`.
+
+- All edits confined to `specs/001-session-list-eviction/spec.md` and files
+  under `.specify/sync/`. No `.rs` source modified. No cargo run.
+
+## History
+
+- **2026-08-07** (`apply-report` superseded by this file; see
+  `proposals-20260807.json`): first apply pass. SC-001 fork resolved by
+  maintainer → "Downgrade to design goal (backfill)"; startup-announcement log
+  backfilled as a non-normative `Observability` section; harness queued as
+  align-tasks.md Task 1.
+- **2026-08-20** (this pass): re-sync re-verified SC-001 against current code;
+  reaffirmed and sharpened the BACKFILL; added Last-Synced metadata.
