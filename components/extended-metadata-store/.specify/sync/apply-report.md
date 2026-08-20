@@ -1,86 +1,78 @@
-# Spec-Sync Apply Report: extended-metadata-store
+# Spec-Sync Apply Report (Phase B): extended-metadata-store
 
-**Applied**: 2026-08-07
-**Branch**: `sync/spec-drift-sweep-20260807` (all changes; nothing committed to `unstable`)
-**Source**: `.specify/sync/drift-report.{json,md}` (generated 2026-08-07T15:31:25Z)
-**Backups**: `.specify/sync/backups/20260807T160256Z/{spec-001.md, spec-002.md}`
-(prior AUTO-BACKFILL pass backups remain at `.../20260722T232035Z/`)
+**Applied**: 2026-08-20
+**Source**: `.specify/sync/drift-report.{json,md}`
+**Policy**: `.specify/sync/PHASE_B_POLICY.md`
+**Backups**: `.specify/sync/backups/specs/001-extended-metadata-store/spec.md.bak`,
+`.specify/sync/backups/specs/002-ssd-integration-test/spec.md.bak`
+(prior timestamped backups remain under `.specify/sync/backups/2026*`)
 
-## User Decisions Driving This Pass
+## Summary counts
 
-- **P1 (workspace membership / ALIGN-001)** = **Keep deferred** — no code change; documented.
-- **P2 (`force_flush` / ALIGN-002)** = **Draft code fix** — drafted on branch.
-- **P3 (capacity + persistence/interface tests)** = **Backfill 002 spec.**
-- **P4 (plan/tasks docs + dead code)** = **Reconcile docs + add spec note.**
+| Outcome | Count |
+|---------|-------|
+| BACKFILL applied | 1 (FR-05) |
+| UNSPECCED backfilled | 3 (FR-18, NFR-11, `CapacityExhausted` Known-Gaps note) |
+| ALIGN tasks generated | 2 (ALIGN-EMS-001, ALIGN-EMS-002) |
+| RESOLVED | 2 (NFR-07, SC-1/2/3/6/7) |
+| HUMAN_DECISION | 0 |
+| not_implemented | 0 |
 
-## Changes Made
+## Specs Updated
 
-### Code Drafted on Branch (ALIGN — see `align-tasks.md`)
+### 001-extended-metadata-store/spec.md
 
-| Item | Direction | Status | Files |
-|------|-----------|--------|-------|
-| FR-05 `force_flush` durability (ALIGN-002) | ALIGN (HIGH) | **Drafted** — compiles in default build; unit-test verification blocked (see below) | `components/extended-metadata-store/src/lib.rs` (`FlushTrigger` alias, `flush_trigger` field, `attach_flush_trigger`, rewritten `force_flush`) |
-| Workspace membership + stale mock (ALIGN-001) | ALIGN (MAJOR) | **Deferred** by user decision — task kept open, documented | (none drafted) |
+| Requirement | Change type | Change |
+|-------------|-------------|--------|
+| FR-05 | BACKFILL | Status "Fix drafted (branch …)" -> **Implemented**; requirement text now describes the `attach_flush_trigger` / `FlushTrigger` mechanism (`src/lib.rs:201-215`). |
+| FR-18 | BACKFILL-UNSPECCED | New FR documenting `Superblock::region_capacity_bytes()` (`src/on_disk.rs:142`). |
+| NFR-11 | BACKFILL-UNSPECCED | New NFR documenting `create_test_component_from_state()` (`src/test_support.rs:272`). |
+| Known Gaps (FR-05) | BACKFILL | Rewritten to **RESOLVED** — fix present; both former verification blockers (NFR-07 mock, workspace membership) closed. |
+| Known Gaps (`CapacityExhausted`) | BACKFILL-UNSPECCED | New entry: variant defined but never constructed; construction tracked by ALIGN-EMS-002. |
+| Known Gaps (retained API) | BACKFILL | "dead public API" note reframed: `region_capacity_bytes` -> FR-18, helper -> NFR-11, `StorageError` now constructed by FR-05. |
+| US6 note | BACKFILL | Updated: `force_flush()` contract now met when a trigger is installed. |
+| Feature-Gating note | BACKFILL | Removed "unconditional no-op under testing/spdk" claim; describes trigger-based durable flush. |
+| Success Criteria note | RESOLVED | Workspace-membership note updated to RESOLVED (crate now a workspace member; mock compiles). |
+| Header / Last-Synced | metadata | New 2026-08-20 Phase B sync note; prior note retained inline. |
 
-### Specs Updated (BACKFILL / reconcile — applied directly)
+### 002-ssd-integration-test/spec.md
 
-**001-extended-metadata-store/spec.md**
-| Location | Change |
-|----------|--------|
-| Header | Added "Last Synced 2026-08-07" note summarizing this sweep. |
-| FR-05 status | "Partially Implemented" → "Fix drafted (branch …)" — `force_flush` now delegates to an installed flush trigger. |
-| Known Gaps | Rewrote FR-05 gap to describe the drafted trigger mechanism, and the two independent reasons verification is deferred (crate outside workspace; pre-existing `MockBlockDevice` missing `read_write_stats`). |
-| Known Gaps | Added a "Dead public API surface" note documenting `region_capacity_bytes()`, `create_test_component_from_state()`, and the `CapacityExhausted`/`StorageError` variants (StorageError now produced by the drafted `force_flush`). |
+| Requirement | Change type | Change |
+|-------------|-------------|--------|
+| FR-007 (persistence) | ALIGN note | Annotated: FR-05 implemented; test still uses internal flush path; move-to-interface tracked by ALIGN-EMS-001. Requirement stands. |
+| FR-011 | ALIGN note | Annotated: interface-only for ops; creation/durability still inherent; **code-side gap** tracked by ALIGN-EMS-001 (no spec relaxation). |
+| Capacity note | ALIGN note | Reversed prior "documents option b (flush-time) as actual behavior"; now option a (surface `CapacityExhausted`) is the target via ALIGN-EMS-002. |
+| US3 scenario note | ALIGN note | FR-05 implemented; test still drives internal wiring; re-point via ALIGN-EMS-001. |
+| US5 scenario 2 note | ALIGN note | Capacity gap reframed as code-side ALIGN-EMS-002, not accepted behavior. |
+| Header / Last-Synced | metadata | New 2026-08-20 Phase B sync note; prior note retained inline. |
 
-**002-ssd-integration-test/spec.md**
-| Location | Change |
-|----------|--------|
-| Header | Added "Last Synced 2026-08-07" note. |
-| US3 scenario 1/2 | Reworded to "made durable"; added a sync note that durability is currently via the internal `flush_to_disk` path, to move to `force_flush()` once the FR-05 fix is verified. |
-| US5 scenario 2 + Edge Cases | Reworded to describe capacity exhaustion as a **flush-time** error, with a sync note explaining `test_capacity_exhaustion` never reaches the exhaustion branch. |
-| FR-007 | Annotated: durability currently via internal wiring path (consequence of FR-05 no-op); re-point at interface once fix verified. |
-| FR-011 | Annotated: interface-only usage holds for put/get/delete/iterate_all; creation/durability use inherent APIs as a direct consequence of the FR-05 no-op. |
-| Functional Requirements | Added a "Capacity note" documenting flush-time-only enforcement and the two resolution options; this spec documents actual behavior (option b). |
+> No requirement text in 002 was relaxed to match buggy code; the ALIGN items keep
+> the spec as the correct target and file tasks instead.
 
-**002-ssd-integration-test/plan.md**
-| Location | Change |
-|----------|--------|
-| Phase 1 Prerequisites | "IBlockDevice and IPartitionTable receptacles" → `ILogger` receptacle only; block I/O wired via `BlockDeviceClient`; partitions via `DiskPartitionManager`. Added a sync note. |
-| Phase 2 step 1 | Dev-dependency `console-logger` → `logger`. |
+## Align Tasks Generated
 
-**002-ssd-integration-test/tasks.md**
-| Location | Change |
-|----------|--------|
-| T001 | `console-logger` → `logger` (+ sync note). |
-| T007 | `create_store_instance()` → `create_store`; "wires IBlockDevice and IPartitionTable receptacles" → `ILogger` receptacle + manually-constructed `BlockDeviceClient` (+ sync note). |
-| External Dependencies | Reconciled receptacle wording to `ILogger` + `BlockDeviceClient`/`DiskPartitionManager`. |
-| Notes | `create_store_instance(ctx)` → `create_store(ctx)`. |
+| Task | Spec / Req | Severity | Files to modify (by implementer) |
+|------|------------|----------|----------------------------------|
+| ALIGN-EMS-001 | 002 / FR-011 (+FR-007 persistence, US3) | moderate | `tests/integration_ssd.rs` |
+| ALIGN-EMS-002 | 002 / FR-007 (capacity, US5-2, capacity note) | moderate | `src/lib.rs` (and/or `src/flush.rs`) |
 
-## Verification
+## Unspecced Backfilled
 
-- `cargo build -p extended-metadata-store` (default, in-memory) — **clean**;
-  header doc-test passes. (Confirmed via throwaway workspace wiring since the
-  crate is not a normal member; the throwaway wiring — a temporary
-  `interfaces` re-export and a temporary `Cargo.toml` member entry — was
-  reverted with `git checkout` per the "Keep deferred" decision, so the branch
-  does NOT include workspace/interface changes.)
-- `cargo test -p extended-metadata-store --features testing` — **not run**:
-  blocked by a pre-existing, unrelated defect (`MockBlockDevice` missing
-  `read_write_stats` at `src/test_support.rs`) and by the crate being outside
-  the workspace. Both tracked under ALIGN-001.
+| Feature | Location | Backfilled as |
+|---------|----------|---------------|
+| `Superblock::region_capacity_bytes()` | `src/on_disk.rs:142` | 001 spec FR-18 |
+| `create_test_component_from_state()` | `src/test_support.rs:272` | 001 spec NFR-11 |
+| `ExtendedMetadataStoreError::CapacityExhausted` (never constructed) | `../interfaces/src/iextended_metadata_store.rs:12` | 001 spec Known Gaps note; construction tracked by ALIGN-EMS-002 |
 
-## Not Applied / Deferred
+## Resolved (already fixed on the main thread — verified present)
 
-| Item | Reason |
-|------|--------|
-| ALIGN-001 (workspace membership) | User chose "Keep deferred" this sweep. |
-| Mock refresh (`read_write_stats`) | Bundled with ALIGN-001; pre-existing defect, out of this sweep's approved scope. |
-| Surfacing `CapacityExhausted` via the interface | User chose to backfill the 002 spec to flush-time behavior instead of a code change. |
+| Item | Verification | Location |
+|------|--------------|----------|
+| NFR-07: `MockBlockDevice::read_write_stats` | `fn read_write_stats(&self) -> ReadWriteStats { ReadWriteStats::default() }` present | `src/test_support.rs:223` |
+| SC-1/2/3/6/7: workspace membership | crate in `[workspace] members` and `[workspace.dependencies]` | root `Cargo.toml:23,105` |
 
-## Next Steps
+## Not modified
 
-1. Review the drafted `force_flush` change and the spec/plan/tasks edits on the branch.
-2. When ALIGN-001 is un-deferred: add the crate to the workspace, refresh the
-   mock, re-run `speckit.sync.analyze`, and verify the `force_flush` fix under
-   `--features testing`.
-3. Commit on `sync/spec-drift-sweep-20260807` (do NOT commit to `unstable`).
+- No `.rs` source was edited; `cargo` was not run (per policy).
+- Only files under `components/extended-metadata-store/.specify/sync/` and
+  `components/extended-metadata-store/specs/*/spec.md` were changed.

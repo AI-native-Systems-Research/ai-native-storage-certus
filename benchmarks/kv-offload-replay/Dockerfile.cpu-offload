@@ -1,10 +1,10 @@
 # vLLM workload-driver image for the CPU-offload KV backend.
 #
-# Unlike the Certus gRPC image (certus-grpc-connector/Dockerfile), this backend
+# Unlike the Certus shmq image (certus-shmq-connector/Dockerfile), this backend
 # is SELF-CONTAINED: a single vLLM process whose KV-offload tier lives in host
 # RAM (a CUDA pinned buffer) via the in-process TracingCPUOffloadingSpec. There
-# is NO separate server, NO gRPC, and NO CUDA IPC — so no --ipc=host and no
-# CERTUS_SERVER. It runs the same 450-conversation / 12-turn ShareGPT workload
+# is NO separate server, NO shmq mailbox, and NO CUDA IPC — so no --ipc=host and
+# no SHM_PATH. It runs the same 450-conversation / 12-turn ShareGPT workload
 # as the other backends, for head-to-head comparison.
 #
 # Build (context = repo root — needs benchmarks/kv-offload-replay/ + the dataset):
@@ -42,7 +42,7 @@ WORKDIR /workspace
 COPY benchmarks/kv-offload-replay/run_multiturn_offloading.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/tracing_offloading_connector.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/tracing_offloading_manager.py /workspace/bench/
-COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
+COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 COPY benchmarks/kv-offload-replay/docker-entrypoint-cpu-offload.sh /usr/local/bin/cpu-offload-entrypoint
 RUN chmod +x /usr/local/bin/cpu-offload-entrypoint
@@ -55,7 +55,7 @@ RUN chmod +x /usr/local/bin/cpu-offload-entrypoint
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/workspace/bench \
     MODEL=NousResearch/Meta-Llama-3-8B \
-    DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
+    DATASET_PATH=/workspace/data/sharegpt_12turn_450.json \
     NUM_CONVS=450 \
     MAX_MODEL_LEN=8192 \
     OUTPUT_TOKENS=150 \

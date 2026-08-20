@@ -1,0 +1,47 @@
+{
+  "applied": "2026-08-20T00:00:00Z",
+  "mode": "phase-b-resolution",
+  "project": "spdk-env",
+  "source": "components/spdk-env/.specify/sync/drift-report.json",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "backups_dir": "components/spdk-env/.specify/sync/backups/specs/002-spdk-env-vfio-init/",
+  "backups": [
+    "specs/002-spdk-env-vfio-init/spec.md.bak",
+    "specs/002-spdk-env-vfio-init/tasks.md.bak"
+  ],
+  "counts": {
+    "backfill_applied": 1,
+    "align_tasks": 0,
+    "unspecced_backfilled": 0,
+    "resolved": 0,
+    "human_decision": 0,
+    "not_implemented_handled": 1
+  },
+  "specs_updated": [
+    {
+      "file": "specs/002-spdk-env-vfio-init/tasks.md",
+      "requirement": "stale-crate-paths",
+      "change_type": "path-correction",
+      "detail": "T001/T003/T004/T005/T006: components/spdk-sys/... -> lib/spdk-sys/...; added dated backfill note. components/spdk-env retained (crate did not move)."
+    },
+    {
+      "file": "specs/002-spdk-env-vfio-init/spec.md",
+      "requirement": "stale-crate-paths",
+      "change_type": "path-clarification",
+      "detail": "Line 6 historical Input: preserved ../component-framework quote, appended bracketed note that crate moved to ../../lib/component-framework (name unchanged). Lines 99/188 (crate-name refs) left valid/unchanged."
+    }
+  ],
+  "align_tasks_generated": [],
+  "unspecced_backfilled": [],
+  "resolved": [],
+  "not_implemented_handled": [
+    {
+      "requirement": "FR-015",
+      "handling": "leave-and-note",
+      "reason": "Genuinely intended future behavior (Clarifications 2026-04-07); spec already self-flags 'Future: not yet implemented'; enumeration uses non-attach callback (FR-006) so no probe/claim step to skip. Not obsolete, not a code bug, not invented, no ALIGN task.",
+      "carried_note": "User Story 1 Acceptance Scenario 4 / Edge Case still present-tense; tracked as align-tasks.md Task 4."
+    }
+  ],
+  "source_touched": false,
+  "cargo_run": false
+}

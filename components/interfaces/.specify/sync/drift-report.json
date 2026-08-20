@@ -1,90 +1,46 @@
 {
-  "generated": "2026-08-07T15:29:55Z",
+  "generated": "pending",
   "project": "interfaces",
   "summary": {
     "specs_analyzed": 1,
-    "aligned": 37,
-    "drifted": 3,
-    "not_implemented": 1,
-    "unspecced": 4,
-    "conflicts": 2
+    "requirements_checked": 47,
+    "aligned": 45,
+    "drifted": 2,
+    "not_implemented": 0,
+    "unspecced_features": 0
   },
   "specs": [
     {
       "id": "001-interfaces",
       "title": "Shared Interface Trait Definitions",
-      "spec_path": "components/interfaces/specs/001-interfaces/spec.md",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-007", "FR-008",
-        "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-015", "FR-016",
-        "FR-017", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023", "FR-024",
-        "FR-026", "FR-027", "FR-028", "FR-029", "FR-030", "FR-031", "FR-032",
-        "FR-033", "FR-034", "NFR-001", "NFR-002", "NFR-003", "NFR-004",
-        "NFR-005", "NFR-006", "SC-all"
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-015",
+        "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022",
+        "FR-023", "FR-024", "FR-026", "FR-027", "FR-028", "FR-029", "FR-030",
+        "FR-031", "FR-032", "FR-033", "FR-034",
+        "NFR-001", "NFR-002", "NFR-003", "NFR-004", "NFR-005", "NFR-006",
+        "SC-1", "SC-2", "SC-3", "SC-4", "SC-5", "SC-6", "SC-7"
       ],
       "drifted": [
         {
-          "requirement": "FR-006",
-          "spec_text": "track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>",
-          "actual": "track(&self, pool: PoolId, key: CacheKey, semantics: BlockSemantics) -> Result<EvictionHandle, EvictionPolicyError>; extra BlockSemantics parameter not in spec",
-          "location": "components/interfaces/src/ieviction_policy.rs:87",
-          "severity": "medium"
+          "requirement": "FR-014",
+          "spec_text": "IExtendedMetadataStore trait (put/get/delete/iterate_all/force_flush) is part of the interfaces crate.",
+          "actual": "Trait is defined in src/iextended_metadata_store.rs but the module is never declared (mod) or re-exported (pub use) in src/lib.rs, so it is not part of the compiled crate. Consumer extended-metadata-store imports it and would fail to build; masked only because that crate is out-of-workspace.",
+          "location": "src/lib.rs (missing mod/pub use); definition at src/iextended_metadata_store.rs:30",
+          "severity": "major"
         },
         {
-          "requirement": "FR-018",
-          "spec_text": "LookupResult: 3-variant enum (NotExist, MismatchSize, BlockDevice, MemoryTier)",
-          "actual": "4 variants present (NotExist, MismatchSize, BlockDevice{..}, MemoryTier{..}); spec label '3-variant' is internally inconsistent",
-          "location": "components/interfaces/src/idispatch_map.rs:11-22",
-          "severity": "low"
-        },
-        {
-          "requirement": "FR-014/FR-025",
-          "spec_text": "IExtendedMetadataStore interface and ExtendedMetadataStoreError are exported from the interfaces crate",
-          "actual": "Defined in src/iextended_metadata_store.rs but module is NOT declared in lib.rs; orphaned/dead code, not compiled or reachable via public API",
-          "location": "components/interfaces/src/iextended_metadata_store.rs:6,30-45 vs src/lib.rs (absent)",
-          "severity": "high"
+          "requirement": "FR-025",
+          "spec_text": "ExtendedMetadataStoreError 4-variant enum (NotFound, StorageError, CapacityExhausted, ValueTooLarge) exported from interfaces.",
+          "actual": "Enum exists with exactly those 4 variants but lives in the undeclared iextended_metadata_store module, so it is not exported from the crate. Same orphaned-module root cause as FR-014.",
+          "location": "src/iextended_metadata_store.rs:5",
+          "severity": "major"
         }
       ],
-      "not_implemented": [
-        {
-          "requirement": "FR-014",
-          "spec_text": "IExtendedMetadataStore interface (put/get/delete/iterate_all/force_flush) available from interfaces crate",
-          "reason": "Module never wired into lib.rs; no reachable public API",
-          "location": "components/interfaces/src/lib.rs"
-        }
-      ]
+      "not_implemented": []
     }
   ],
-  "unspecced": [
-    {
-      "item": "BlockSemantics struct (with session_id field)",
-      "location": "components/interfaces/src/ieviction_policy.rs:43",
-      "notes": "Not listed under FR-020 supporting types; used as extra track() argument"
-    },
-    {
-      "item": "SessionId type alias (u64)",
-      "location": "components/interfaces/src/ieviction_policy.rs:33",
-      "notes": "Exported at lib.rs:38; not in spec"
-    },
-    {
-      "item": "integrity-check Cargo feature + set_checksum/get_checksum methods",
-      "location": "components/interfaces/Cargo.toml:507; components/interfaces/src/idispatch_map.rs:287,295",
-      "notes": "Overview lists only spdk/gpu features; FR-007 omits these CRC-32 methods"
-    },
-    {
-      "item": "push_async method + PushCompletion type",
-      "location": "components/interfaces/src/iremote_lookup_rdma_initiator.rs:158,198; lib.rs:53",
-      "notes": "FR-030 does not list push_async; FR-033 omits PushCompletion"
-    }
-  ],
-  "conflicts": [
-    {
-      "description": "FR-014/FR-025 assert IExtendedMetadataStore/ExtendedMetadataStoreError are part of the interfaces crate, but the module is not wired into lib.rs",
-      "location": "components/interfaces/src/lib.rs vs specs/001-interfaces/spec.md"
-    },
-    {
-      "description": "Implementation Notes reference formally verified property comments (10 props each for IDispatchMap/IDispatcher/IExtentManager/IGpuServices/IMemoryTier) not independently verified in this pass",
-      "location": "specs/001-interfaces/spec.md Implementation Notes"
-    }
-  ]
+  "unspecced": [],
+  "conflicts": []
 }

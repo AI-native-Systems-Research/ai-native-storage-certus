@@ -12,7 +12,7 @@ retrievals (post-promote, from memory tier) are checked to ensure the
 data matches the original pattern byte-for-byte.
 
 Usage:
-    python test-promote.py --server localhost:50051 --block-size 2M --num-objects 10
+    python test-promote.py --shm-path /dev/shm/certus-shmq --block-size 2M --num-objects 10
 """
 
 import argparse
@@ -25,9 +25,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import add_shm_arg, connect, single_region
 
 # --- CUDA helpers ---
 
@@ -95,7 +93,7 @@ def parse_size(s):
 def main():
     parser = argparse.ArgumentParser(
         description="Hardware integration test for Touch(promote=true)")
-    parser.add_argument("--server", default="localhost:50051")
+    add_shm_arg(parser)
     parser.add_argument("--block-size", type=parse_size, default=2 * 1024 * 1024,
                         help="Object size (default: 2M)")
     parser.add_argument("--num-objects", type=int, default=10,
@@ -121,7 +119,7 @@ def main():
     print("=" * 60)
     print("Touch(promote=true) Hardware Integration Test")
     print("=" * 60)
-    print(f"  Server:       {args.server}")
+    print(f"  Server:       {args.shm_path}")
     print(f"  Block size:   {block_size // 1024} KiB")
     print(f"  Objects:      {num_objects}")
     print(f"  Iterations:   {args.iterations}")
@@ -150,44 +148,31 @@ def main():
         gpu_write(ptr, pattern)
 
     # Connect
-    channel = grpc.insecure_channel(
-        args.server,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+    ring = connect(args.shm_path)
 
     # --- Phase 1: Populate ---
     print("  Populating objects...")
     entries = [
-        dispatcher_pb2.PopulateEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=pop_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(pop_handles[i], args.gpu, block_size)])
         for i, k in enumerate(keys)
     ]
-    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
-    failed = sum(1 for r in resp.results if not r.success)
+    oks = ring.populate(entries)
+    failed = sum(1 for ok in oks if not ok)
     if failed:
         print(f"  ERROR: {failed}/{num_objects} populate failures")
-        for r in resp.results:
-            if not r.success:
-                print(f"    key={r.key}: {r.error_message}")
+        for k, ok in zip(keys, oks):
+            if not ok:
+                print(f"    key {k} failed")
         sys.exit(1)
 
     # --- Phase 2: Flush to SSD and wait ---
     print(f"  Flushing to SSD and waiting {args.settle}s...")
-    stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+    ring.flush_to_ssd()
     time.sleep(args.settle)
 
     # --- Phase 3: Clear memory tier (entries become cold) ---
     print("  Clearing memory tier...")
-    stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
+    ring.clear_memory_tier()
 
     # --- Phase 4: Measure cold lookup latency + integrity ---
     # Each cold lookup also promotes the entry, so clear before each iteration.
@@ -198,23 +183,16 @@ def main():
     for it in range(args.iterations):
         # Clear before each cold measurement to ensure entries are on SSD
         if it > 0:
-            stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
+            ring.clear_memory_tier()
         lookup_entries = [
-            dispatcher_pb2.LookupEntry(
-                key=k,
-                ipc_handle=dispatcher_pb2.IpcHandle(
-                    cuda_ipc_handle=lookup_handles[i],
-                    size=block_size,
-                ),
-            )
+            (k, [single_region(lookup_handles[i], args.gpu, block_size)])
             for i, k in enumerate(keys)
         ]
-        req = dispatcher_pb2.BatchLookupRequest(entries=lookup_entries)
         t0 = time.perf_counter()
-        resp = stub.Lookup(req)
+        oks = ring.lookup(lookup_entries)
         _libcudart.cudaDeviceSynchronize()
         t1 = time.perf_counter()
-        failed = sum(1 for r in resp.results if not r.success)
+        failed = sum(1 for ok in oks if not ok)
         if failed == 0:
             cold_latencies.append((t1 - t0) * 1e6)
 
@@ -249,16 +227,15 @@ def main():
 
     # --- Phase 5: Clear memory tier again (re-cold for promote test) ---
     print("  Clearing memory tier again...")
-    stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
+    ring.clear_memory_tier()
 
     # --- Phase 6: Touch with promote=true ---
     print("  Sending Touch(promote=true)...")
-    touch_req = dispatcher_pb2.BatchTouchRequest(keys=keys, promote=True)
     t0 = time.perf_counter()
-    touch_resp = stub.Touch(touch_req)
+    touch_oks = ring.touch(keys, promote=True)
     t1 = time.perf_counter()
     touch_latency = (t1 - t0) * 1e6
-    touch_failed = sum(1 for r in touch_resp.results if not r.success)
+    touch_failed = sum(1 for ok in touch_oks if not ok)
     print(f"    Touch RPC latency: {touch_latency:.0f} us (fire-and-forget)")
     if touch_failed:
         print(f"    WARNING: {touch_failed} keys failed touch")
@@ -271,29 +248,22 @@ def main():
     # Do a warmup lookup first (first access after promote may have GPU init overhead)
     print("  Measuring warm lookup latency (post-promote)...")
     lookup_entries = [
-        dispatcher_pb2.LookupEntry(
-            key=k,
-            ipc_handle=dispatcher_pb2.IpcHandle(
-                cuda_ipc_handle=lookup_handles[i],
-                size=block_size,
-            ),
-        )
+        (k, [single_region(lookup_handles[i], args.gpu, block_size)])
         for i, k in enumerate(keys)
     ]
     # Warmup (discard first measurement — GPU DMA path warmup)
-    stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lookup_entries))
+    ring.lookup(lookup_entries)
     _libcudart.cudaDeviceSynchronize()
 
     warm_latencies = []
     warm_integrity_pass = 0
     warm_integrity_fail = 0
     for it in range(args.iterations):
-        req = dispatcher_pb2.BatchLookupRequest(entries=lookup_entries)
         t0 = time.perf_counter()
-        resp = stub.Lookup(req)
+        oks = ring.lookup(lookup_entries)
         _libcudart.cudaDeviceSynchronize()
         t1 = time.perf_counter()
-        failed = sum(1 for r in resp.results if not r.success)
+        failed = sum(1 for ok in oks if not ok)
         if failed == 0:
             warm_latencies.append((t1 - t0) * 1e6)
 
@@ -346,13 +316,12 @@ def main():
 
     # --- Phase 10: Cleanup ---
     print("  Cleaning up...")
-    remove_req = dispatcher_pb2.BatchRemoveRequest(keys=keys)
-    stub.Remove(remove_req)
+    ring.remove(keys)
     for ptr in pop_ptrs:
         cuda_free(ptr)
     for ptr in lookup_ptrs:
         cuda_free(ptr)
-    channel.close()
+    ring.close()
 
     # --- Verdict ---
     if not integrity_ok:

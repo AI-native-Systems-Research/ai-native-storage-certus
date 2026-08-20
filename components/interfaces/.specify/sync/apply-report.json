@@ -1,38 +1,37 @@
 {
-  "applied": "2026-07-22",
+  "generated": "2026-08-20",
+  "phase": "B",
+  "project": "interfaces",
   "spec": "components/interfaces/specs/001-interfaces/spec.md",
-  "head": "bb9569dde029cc7cd98306e88f7904b8cd4cdbee",
-  "backup": "components/interfaces/.specify/sync/backups/spec.md.20260722T232124Z.bak",
-  "direction": "AUTO-BACKFILL",
-  "supersedes": "apply-report (2026-07-21)",
-  "changes": [
-    { "fr": "FR-004", "action": "amended", "detail": "Added read_write_stats(&self) -> ReadWriteStats to IBlockDevice." },
-    { "fr": "FR-007", "action": "amended", "detail": "Added promote_block_to_memory_tier and try_evict_to_block to IDispatchMap." },
-    { "fr": "FR-008", "action": "amended", "detail": "Added pin, unpin, read_write_stats to IDispatcher." },
-    { "fr": "FR-009", "action": "amended", "detail": "Added telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot to IMemoryTier." },
-    { "fr": "FR-012", "action": "amended", "detail": "batch_lookup signature IpcHandle -> u32; added initialize(config: LookupConfig); noted 002 rewrite." },
-    { "fr": "FR-013", "action": "superseded", "detail": "IRemoteRequestHandler removed from code; replaced with pointer to FR-030/FR-031." },
-    { "fr": "FR-014", "action": "not_modified", "detail": "Code defect (module not wired into lib.rs); routed to align-tasks.md instead of backfilled." },
-    { "fr": "FR-017", "action": "amended", "detail": "Command 11->12 variants, Completion 10->11 variants, listed; added ReadWriteStats type." },
-    { "fr": "FR-018", "action": "amended", "detail": "DispatcherConfig field count 16->18; all fields enumerated." },
-    { "fr": "FR-019", "action": "amended", "detail": "Added MemoryTierTelemetrySnapshot type." },
-    { "fr": "FR-023", "action": "amended", "detail": "Removed LookupRef/RemoteRequestHandlerError (superseded); added LookupConfig type." },
-    { "fr": "FR-025", "action": "not_modified", "detail": "Code defect (same module-wiring issue as FR-014); routed to align-tasks.md." },
-    { "fr": "FR-029", "action": "added", "detail": "New FR: IZyre / IZyreNode Interfaces (Peer Discovery and Messaging)." },
-    { "fr": "FR-030", "action": "added", "detail": "New FR: IRemoteLookupRdmaInitiator Interface (Outbound RDMA Push)." },
-    { "fr": "FR-031", "action": "added", "detail": "New FR: IRemoteLookupRdmaResponder / IRemoteLookupRdmaResponderAdmin Interfaces (Inbound RDMA Accept)." },
-    { "fr": "FR-032", "action": "added", "detail": "New FR: Supporting Types - Zyre." },
-    { "fr": "FR-033", "action": "added", "detail": "New FR: Supporting Types - Remote Lookup RDMA Initiator." },
-    { "fr": "FR-034", "action": "added", "detail": "New FR: Supporting Types - Remote Lookup RDMA Responder." },
-    { "fr": "NFR-003", "action": "amended", "detail": "Removed LookupRef from Send+Sync list; added IZyreNode Send-not-Sync note." },
-    { "fr": "user_story_5", "action": "amended", "detail": "Rewritten for RDMA initiator/responder split and IRemoteLookup::initialize." },
-    { "fr": "user_story_7", "action": "added", "detail": "New: Peer Discovery and Messaging (IZyre/IZyreNode)." },
-    { "fr": "key_entities", "action": "amended", "detail": "Removed LookupRef; added PeerId, RemoteRegion/LocalRegion." }
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "summary": {
+    "backfill_applied": 0,
+    "align_tasks": 0,
+    "unspecced_backfilled": 0,
+    "resolved": 2,
+    "human_decision": 0
+  },
+  "specs_updated": [],
+  "align_tasks_generated": [],
+  "unspecced_backfilled": [],
+  "resolved": [
+    {
+      "requirement": "FR-014",
+      "spec_id": "001-interfaces",
+      "title": "IExtendedMetadataStore Interface",
+      "fix_location": "src/lib.rs:77 (mod iextended_metadata_store;), src/lib.rs:99 (pub use ...IExtendedMetadataStore)",
+      "verified": true,
+      "note": "Module now declared and re-exported (ungated); trait defined at src/iextended_metadata_store.rs:30. Spec unchanged."
+    },
+    {
+      "requirement": "FR-025",
+      "spec_id": "001-interfaces",
+      "title": "Supporting Types - ExtendedMetadataStoreError",
+      "fix_location": "src/iextended_metadata_store.rs:5-15 (enum), src/lib.rs:99 (pub use ExtendedMetadataStoreError)",
+      "verified": true,
+      "note": "4-variant enum (NotFound, StorageError, CapacityExhausted, ValueTooLarge) now exported. Spec unchanged."
+    }
   ],
-  "align_tasks_routed": [
-    { "severity": "MAJOR", "spec_id": "001-interfaces/FR-014", "summary": "src/lib.rs never declares mod iextended_metadata_store; trait not compiled into crate." },
-    { "severity": "MAJOR", "spec_id": "001-interfaces/FR-014", "summary": "components/extended-metadata-store absent from root Cargo.toml workspace members." }
-  ],
-  "source_code_modified": false,
-  "fr_range_after": "FR-001..FR-034"
+  "spec_backups": [],
+  "specs_edited": []
 }

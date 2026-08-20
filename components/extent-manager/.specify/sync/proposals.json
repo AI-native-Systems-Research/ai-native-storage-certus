@@ -1,69 +1,37 @@
 {
-  "generated": "2026-08-07T16:02:56Z",
-  "based_on": "drift-report 2026-08-07T15:31:39Z",
+  "generated": "2026-08-20T00:00:00Z",
+  "based_on": "drift-report 2026-08-20 (extent-manager, 2 drifted)",
   "component": "extent-manager",
-  "summary": { "backfill": 3, "align": 1, "human_decision": 1, "new_specs": 0, "remove_from_spec": 0 },
+  "phase": "B",
+  "summary": { "backfill": 2, "align": 0, "unspecced_backfill": 0, "resolved": 0, "human_decision": 0, "new_specs": 0, "remove_from_spec": 0 },
   "proposals": [
     {
       "id": "P1",
       "requirement": "FR-030",
-      "direction": "HUMAN_DECISION",
-      "severity": "HIGH",
-      "spec_text": "volatile_write_cache: 'When enabled, flush calls in checkpoint and format paths are conditionally compiled OUT, improving performance...'",
-      "actual": "Code compiles flush IN only when the feature is enabled (lib.rs:309-310, checkpoint.rs:102-103) — inverse of spec. AND the feature is non-functional/non-compiling: BlockDeviceClient has no flush() method, and Command::FlushSync / Completion::FlushDone do not exist in the interfaces crate (only the extent-manager mock references them, under the same gate). Enabling --features volatile_write_cache fails to compile in three places across two crates. Cargo.toml + README confirm code INTENT is 'enabled = issue flush'.",
-      "options": {
-        "a_backfill_and_draft": "Backfill FR-030 to the real intended semantics (enabled = issue an explicit metadata-device flush after checkpoint/format writes) AND draft the cross-crate compile fix on the branch: add Command::FlushSync + Completion::FlushDone to interfaces/iblock_device.rs, add BlockDeviceClient::flush() (sends FlushSync, awaits FlushDone), and add an actor handler in block-device-spdk-nvme. Flag the actor's NVMe flush opcode for hardware review. Also queue a CI job building with the feature. RECOMMENDED.",
-        "b_queue_only": "Backfill FR-030 semantics but only queue an align-task for the code work (no drafted code this sweep) — safest given it touches the SPDK hardware actor.",
-        "c_invert_cfg": "Treat spec's 'compiled out when enabled' wording as authoritative and invert the #[cfg] gates. WARNING: this makes the DEFAULT build (feature off) call the still-nonexistent flush() -> breaks default build. Not advised.",
-        "d_defer": "Defer; leave the non-functional feature and inverted wording as-is."
-      },
-      "recommendation": "a_backfill_and_draft",
+      "direction": "BACKFILL",
+      "severity": "moderate",
+      "spec_text": "FR-030 parenthetical + top Sync note claimed: 'Implementation status 2026-08-07: this feature does not yet compile' — BlockDeviceClient::flush() missing, Command::FlushSync/Completion::FlushDone absent from interfaces; a fix drafted on a branch, an align-task queued, add a CI job.",
+      "actual": "The cross-crate fix has LANDED on the current code. BlockDeviceClient::flush() exists and is gated on volatile_write_cache (block_io.rs:168), sending Command::FlushSync and awaiting Completion::FlushDone. The interfaces crate defines FlushSync (iblock_device.rs:411) and FlushDone (iblock_device.rs:501). checkpoint path calls metadata_client.flush() under the feature gate (lib.rs:308-310). Feature compiles and is functional; the 'does not yet compile / drafted / queued' status is stale.",
+      "location": "components/extent-manager/src/block_io.rs:168; components/extent-manager/src/lib.rs:308-310; components/interfaces/src/iblock_device.rs:411,501",
+      "before": "(Implementation status 2026-08-07: this feature does not yet compile — see the Sync note at the top of this spec and `.specify/sync/align-tasks.md`.)",
+      "after": "(Implementation status 2026-08-20: implemented and building. `BlockDeviceClient::flush()` (`block_io.rs:168`) sends `Command::FlushSync` and awaits `Completion::FlushDone` — both defined in the interfaces crate (`iblock_device.rs:411,501`) — and is called from the checkpoint path (`lib.rs:308-310`). Enable with `--features volatile_write_cache`.)",
+      "rationale": "Spec-lag: the code caught up to (and satisfies) the intended FR-030 semantics; the stale 'does not compile' status is the only drift. BACKFILL removes the stale status text. Also refreshes the top Sync note that carried the same stale claim.",
       "confidence": "HIGH",
-      "approved": null
+      "approved": true
     },
     {
       "id": "P2",
-      "requirement": "FR-016",
-      "direction": "ALIGN",
-      "severity": "Low",
-      "spec_text": "FR-016 already documents that iextent_manager.rs:244 and README.md:13 wrongly say 'five minutes' and instructs they be corrected to the true 30-second default.",
-      "actual": "Code default is correctly 30s (lib.rs:112); the two doc strings remain stale ('five minutes' / 'default 5 minutes').",
-      "proposed": "ALIGN (docs): update iextent_manager.rs:244 and README.md:13 from five-minutes wording to 30 seconds, satisfying FR-016's own remediation clause. Drafted on the feature branch.",
-      "confidence": "HIGH",
-      "approved": null
-    },
-    {
-      "id": "P3",
-      "requirement": "FR-032",
+      "requirement": "plan.md-layout-refs",
       "direction": "BACKFILL",
-      "severity": "Low",
-      "spec_text": "capacity_bytes() 'returns the total data device capacity in bytes as configured during format()'.",
-      "actual": "Returns buddy total_usable_size (= data_disk_size - data_start_offset). Equals total in separate-device mode; under-reports by the reserved metadata area when metadata_region_size>0 (shared-device mode). lib.rs:710-715.",
-      "proposed": "Backfill FR-032 to state it returns the USABLE data capacity (data device size minus any reserved in-device metadata region), matching the implementation and the interfaces-crate wording.",
+      "severity": "minor",
+      "spec_text": "plan.md references a `block_device` receptacle (Technical Context 'Storage' block; Component Structure receptacle list) and a `components/extent-manager/v2/` source path (Project Structure tree).",
+      "actual": "The shipped component has only `metadata_device` + `logger` receptacles (spec FR-001) and a flat `src/` layout; there is no `v2/` path. The data path is caller-owned (dispatcher/dispatcher-p2p, FR-036) — the component performs no data-device I/O.",
+      "location": "components/extent-manager/specs/001-extent-manager-v2/plan.md:25,39,213",
+      "before": "Storage lists two IBlockDevice receptacles (`block_device` data device + `metadata_device`); Component Structure lists `block_device: IBlockDevice (data device)` receptacle; source tree rooted at `components/extent-manager/v2/`.",
+      "after": "Storage lists one `metadata_device` receptacle and notes the data device is caller-owned (not a receptacle); Component Structure drops the `block_device` receptacle with a note pointing to FR-036; source tree rooted at `components/extent-manager/`. A Last-Synced 2026-08-20 note records the refresh.",
+      "rationale": "Spec-lag in the planning doc: code/spec.md already agree on the metadata_device+logger receptacle model and flat src/. Backfill the plan to reality.",
       "confidence": "HIGH",
-      "approved": null
-    },
-    {
-      "id": "P4",
-      "requirement": "FR-036",
-      "direction": "BACKFILL",
-      "severity": "Low",
-      "spec_text": "'data_base_lba shifts all data-device I/O similarly.'",
-      "actual": "data_base_lba is stored (lib.rs:98,721) and returned (lib.rs:725) but never applied — this component performs NO data-device I/O; the caller (dispatcher) owns the data path and consumes the offset. metadata_base_lba IS applied.",
-      "proposed": "Backfill FR-036 to clarify data_base_lba is a caller-consumed configuration value: the component stores/returns it for the dispatcher to apply to the data path, and performs no internal data-device I/O itself. metadata_base_lba wording unchanged.",
-      "confidence": "HIGH",
-      "approved": null
-    },
-    {
-      "id": "P5",
-      "requirement": "Unspecced (4 benign helpers)",
-      "direction": "BACKFILL",
-      "severity": "Info",
-      "spec_text": "No FR/SC covers: checkpoint telemetry log line; WriteHandle key()/extent_offset()/extent_size() accessors; MockBlockDevice reboot/fault helpers beyond FaultConfig; BuddyAllocator::mark_allocated.",
-      "actual": "lib.rs:288,323-363; iextent_manager.rs:120-130; test_support.rs:55-78; buddy.rs:117-157.",
-      "proposed": "Add short additive notes to the spec documenting these as intentional support surface (telemetry logging under Observability; WriteHandle read-only accessors under FR-033; extended mock helpers under FR-034; mark_allocated as a recovery helper implied by FR-018). Purely additive documentation.",
-      "confidence": "MEDIUM",
-      "approved": null
+      "approved": true
     }
   ]
 }

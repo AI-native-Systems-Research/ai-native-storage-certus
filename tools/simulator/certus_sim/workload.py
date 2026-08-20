@@ -16,7 +16,7 @@ from typing import Iterator
 import simpy
 
 from certus_sim.config import SimConfig
-from certus_sim.grpc_server import GrpcServer
+from certus_sim.server import Server
 
 
 @dataclass
@@ -104,12 +104,12 @@ def generate_synthetic(
 
 
 class WorkloadDriver:
-    """Drives a workload (trace or synthetic) against the gRPC server model."""
+    """Drives a workload (trace or synthetic) against the control-plane server model."""
 
     def __init__(
         self,
         env: simpy.Environment,
-        server: GrpcServer,
+        server: Server,
         config: SimConfig,
     ):
         self.env = env

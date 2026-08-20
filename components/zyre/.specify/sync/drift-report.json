@@ -1,42 +1,23 @@
 {
-  "generated": "2026-08-07T15:31:01Z",
+  "generated": "pending",
   "project": "zyre",
   "summary": {
     "specs_analyzed": 1,
+    "requirements_checked": 17,
     "aligned": 17,
     "drifted": 0,
     "not_implemented": 0,
-    "unspecced": 0,
-    "notes": "Clean. Bindings match spec and all 2026-07-09 clarifications. SC-005 (Miri/valgrind) not statically verifiable."
+    "unspecced_features": 0
   },
   "specs": [
     {
       "id": "001-zyre-bindings",
-      "path": "specs/001-zyre-bindings/spec.md",
-      "status": "draft",
-      "requirements": [
-        {"id": "FR-001", "status": "aligned", "location": "src/node.rs; tests/api_safety.rs:29"},
-        {"id": "FR-002", "status": "aligned", "location": "src/node.rs:354-359"},
-        {"id": "FR-003", "status": "aligned", "location": "components/interfaces/src/izyre.rs:112-155; src/node.rs:422-488"},
-        {"id": "FR-004", "status": "aligned", "location": "src/node.rs:176-205"},
-        {"id": "FR-005", "status": "aligned", "location": "components/interfaces/src/izyre.rs:268-269,313; src/node.rs:47"},
-        {"id": "FR-006", "status": "aligned", "location": "src/node.rs:105-125; components/interfaces/src/izyre.rs:313-340"},
-        {"id": "FR-007", "status": "aligned", "location": "src/node.rs:278-351"},
-        {"id": "FR-008", "status": "aligned", "location": "src/node.rs:13-18,146-155,208-258"},
-        {"id": "FR-009", "status": "aligned", "location": "deps/build_zyre.sh; build.rs:5-18"},
-        {"id": "FR-010", "status": "aligned", "location": "build.rs:24-73"},
-        {"id": "FR-011", "status": "aligned", "location": "src/node.rs:39; components/interfaces/src/izyre.rs:362; tests/api_safety.rs:11,21"},
-        {"id": "FR-012", "status": "aligned", "location": "components/interfaces/src/izyre.rs:16-31"},
-        {"id": "SC-001", "status": "aligned", "location": "tests/integration.rs:54,108"},
-        {"id": "SC-002", "status": "aligned", "location": "tests/api_safety.rs:29"},
-        {"id": "SC-003", "status": "aligned", "location": "deps/build_zyre.sh", "note": "build-perf, not statically verified"},
-        {"id": "SC-004", "status": "aligned", "location": "components/interfaces/src/izyre.rs:112-155"},
-        {"id": "SC-005", "status": "aligned", "location": "src/node.rs:222,251,283,294", "note": "Miri/valgrind not run here; no leak/UB found in review"}
-      ]
+      "title": "Safe Rust Zyre Bindings",
+      "aligned": 17,
+      "drifted": [],
+      "not_implemented": []
     }
   ],
-  "unspecced": [
-    {"item": "uuid()/name() self-introspection accessors", "location": "src/node.rs:261-275", "assessment": "adjacent to FR-007; no drift"}
-  ],
+  "unspecced": [],
   "conflicts": []
 }

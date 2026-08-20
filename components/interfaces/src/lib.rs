@@ -74,6 +74,7 @@ mod ispdk_env;
 
 #[cfg(feature = "spdk")]
 pub mod iblock_device;
+mod iextended_metadata_store;
 mod iextent_manager;
 
 #[cfg(feature = "spdk")]
@@ -89,12 +90,13 @@ pub use ispdk_env::ISPDKEnv;
 #[cfg(feature = "spdk")]
 pub use iblock_device::{
     ClientChannels, Command, Completion, IBlockDevice, NamespaceInfo, NvmeBlockError, OpHandle,
-    ReadWriteStats, TelemetrySnapshot,
+    ReadWriteStats, TelemetrySnapshot, IO_SIZE_BUCKETS,
 };
 
 #[cfg(feature = "spdk")]
 pub use iblock_device::IBlockDeviceAdmin;
 
+pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};
 pub use iextent_manager::Extent;
 pub use iextent_manager::ExtentKey;
 pub use iextent_manager::ExtentManagerError;

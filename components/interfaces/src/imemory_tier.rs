@@ -50,23 +50,6 @@ impl fmt::Display for MemoryTierError {
 
 impl std::error::Error for MemoryTierError {}
 
-// # Verified Properties (see `components/memory-tier/verif/`)
-//
-// The following invariants are formally proved with Creusot:
-//
-// - P1 (size-nonzero): insert rejects size == 0
-// - P2 (init-guard): insert/remove/get fail when pool not initialized
-// - P3 (no-duplicates): insert rejects key that already has a slot
-// - P4 (shard-bounded): shard_for_key always returns index < 16
-// - P5 (shard-deterministic): same key always maps to same shard
-// - P6 (capacity-accounting): insert increases used by size; remove decreases by size
-// - P7 (used-within-capacity): used() never exceeds capacity()
-// - P8 (pool-full): insert returns PoolFull when used + size > capacity
-// - P9 (remove-key-not-found): remove on absent key returns KeyNotFound
-// - P10 (evict-round-robin): evict_next cycles through all 16 shards
-//
-// Total: 10 properties, 21 verification conditions discharged by SMT solvers.
-
 component_macros::define_interface! {
     pub IMemoryTier {
         /// Initialize the memory-tier pool with the given size in bytes.
@@ -75,38 +58,18 @@ component_macros::define_interface! {
         /// that NUMA node via `mbind(MPOL_BIND)`. If binding fails, the pool is
         /// still usable with default memory policy (FR-019 fallback).
         /// Pass `None` to use the kernel's default placement.
-        ///
-        /// # Verified: P2 (init-guard)
-        /// All operations check initialized flag; this sets it.
-        ///
-        /// # Unchecked: Double-initialization returns error
-        /// Calling initialize() twice returns AllocationFailed("already initialized").
-        /// Sequential model doesn't test re-initialization race.
-        /// Suggested technique: Loom test for concurrent init.
         fn initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError>;
 
         /// Allocate a slot for `key` of `size` bytes and return a pointer to it.
         ///
         /// The returned pointer is valid until the slot is evicted or removed.
         /// Returns `PoolFull` if insufficient contiguous space is available.
-        ///
-        /// # Verified: P1 (size-nonzero), P2 (init-guard), P3 (no-duplicates), P6 (capacity-accounting), P7 (used-within-capacity), P8 (pool-full)
-        /// Rejects zero size. Rejects uninitialized. Rejects existing key.
-        /// Increases used. Maintains used <= capacity. Returns PoolFull
-        /// when allocator cannot satisfy request.
-        ///
-        /// # Unchecked: Returned pointer validity and lifetime
-        /// Pointer is into mmap/SPDK-allocated pool. Valid until evict or remove.
-        /// Suggested technique: ASAN integration test.
         fn insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError>;
 
         /// Get the pointer and size for an existing slot, refreshing its
         /// eviction-order position (via the bound `IEvictionPolicy`).
         ///
         /// Returns `None` if the key is not present.
-        ///
-        /// # Verified: P2 (init-guard), P4 (shard-bounded)
-        /// Returns None when uninitialized. Shard lookup is in-bounds.
         fn get(&self, key: CacheKey) -> Option<(*mut u8, u32)>;
 
         /// Get the pointer and size for an existing slot without updating its
@@ -114,76 +77,39 @@ component_macros::define_interface! {
         ///
         /// Use this for background operations (e.g., write-through) that should
         /// not prevent eviction of the entry.
-        ///
-        /// # Verified: P2 (init-guard), P4 (shard-bounded)
-        /// Returns None when uninitialized. Shard lookup is in-bounds.
         fn peek(&self, key: CacheKey) -> Option<(*mut u8, u32)>;
 
         /// Evict the entry selected by the bound eviction policy, freeing its slot.
         ///
         /// Returns the evicted key, or `None` if the pool is empty.
-        ///
-        /// # Verified: P6 (capacity-accounting), P10 (evict-round-robin)
-        /// Frees the evicted slot (used decreases). Cycles through shards
-        /// starting from evict_counter % 16.
-        ///
-        /// # Unchecked: Eviction selects the policy's intended victim
-        /// Depends on IEvictionPolicy::identify_next_to_evict correctness.
-        /// Suggested technique: property-based test with known insertion order.
         fn evict_next(&self) -> Option<CacheKey>;
 
         /// Evict the eviction policy's next victim from the same shard as `key`.
         ///
         /// This ensures the freed space is allocatable by a subsequent `insert(key, ...)`.
         /// Returns the evicted key, or `None` if the target shard is empty.
-        ///
-        /// # Verified: P4 (shard-bounded), P5 (shard-deterministic), P6 (capacity-accounting)
-        /// Targets the correct shard deterministically. Frees evicted slot.
         fn evict_next_for_key(&self, key: CacheKey) -> Option<CacheKey>;
 
         /// Peek at the N oldest keys without removing them.
-        ///
-        /// # Unchecked: Returns keys in oldest-first order
-        /// Ordering depends on eviction policy implementation.
-        /// Suggested technique: property-based test.
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
 
         /// Remove a specific entry, freeing its slot.
-        ///
-        /// # Verified: P2 (init-guard), P6 (capacity-accounting), P9 (remove-key-not-found)
-        /// Rejects uninitialized. Frees the slot (used decreases).
-        /// Returns KeyNotFound if key absent.
         fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError>;
 
         /// Update the eviction-order position for `key` without returning data.
-        ///
-        /// # Verified: P4 (shard-bounded)
-        /// Shard lookup is in-bounds.
         fn touch(&self, key: CacheKey);
 
         /// Update eviction-order positions for multiple keys in a single batched operation.
         /// Amortizes lock acquisition over the batch for hot-path throughput.
-        ///
-        /// # Verified: P4 (shard-bounded)
-        /// Each key's shard lookup is in-bounds.
         fn batch_touch(&self, keys: &[CacheKey]);
 
         /// Check whether a slot exists for `key`.
-        ///
-        /// # Verified: P2 (init-guard), P4 (shard-bounded)
-        /// Returns false when uninitialized. Shard lookup in-bounds.
         fn contains(&self, key: CacheKey) -> bool;
 
         /// Return the total pool capacity in bytes.
-        ///
-        /// # Verified: P7 (used-within-capacity)
-        /// Capacity is the upper bound for used().
         fn capacity(&self) -> usize;
 
         /// Return the number of bytes currently allocated.
-        ///
-        /// # Verified: P6 (capacity-accounting), P7 (used-within-capacity)
-        /// Monotonically tracks allocations. Never exceeds capacity.
         fn used(&self) -> usize;
 
         /// Return the base pointer and size of the pool for CUDA host registration.
@@ -196,9 +122,6 @@ component_macros::define_interface! {
         /// Remove all entries from the pool, freeing all slots.
         ///
         /// Returns the number of entries that were cleared.
-        ///
-        /// # Verified: P2 (init-guard)
-        /// Rejects uninitialized.
         fn clear(&self) -> Result<usize, MemoryTierError>;
 
         /// Return a snapshot of telemetry counters.

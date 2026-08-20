@@ -1,128 +1,47 @@
 {
-  "generated": "2026-08-06T23:27:50Z",
-  "based_on": "drift-report from 2026-08-06T23:27:50Z",
+  "generated": "2026-08-20",
+  "phase": "B",
+  "based_on": "components/dispatch-map/.specify/sync/drift-report.json",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
   "summary": {
-    "backfill": 3,
+    "backfill": 0,
+    "backfill_unspecced": 1,
     "align": 2,
-    "human_decision": 3,
-    "new_specs": 0,
-    "remove_from_spec": 0
+    "resolved": 0,
+    "human_decision": 0,
+    "new_specs": 0
   },
   "proposals": [
     {
       "id": "P1",
       "spec": "001-dispatch-map",
-      "requirement": "FR-014",
-      "direction": "HUMAN_DECISION",
-      "recommended": "BACKFILL",
-      "spec_text": "System MUST use the ILogger receptacle for info, debug, and error logging throughout the component.",
-      "actual": "Only logger.info/logger.debug are called; logger.error is never invoked.",
-      "options": {
-        "backfill": "Narrow FR-014 to info+debug; errors are returned as typed DispatchMapError, not logged.",
-        "align": "Add logger.error at ~13 error-return sites."
-      },
-      "confidence": "MEDIUM",
-      "status": "approved",
-      "decision": "BACKFILL"
+      "requirement": "FR-012",
+      "direction": "ALIGN",
+      "location": "src/lib.rs:55 (also :68, :392, :573)",
+      "rationale": "The spec/contract requirement is correct and agreed: initialize() MUST return an error (NotInitialized) when the mandatory IEvictionPolicy receptacle is unbound. The code violates it: initialize() calls get_pool_id() first (src/lib.rs:68), and get_pool_id does self.eviction_policy.get().unwrap() (src/lib.rs:55), which panics on an unbound receptacle before the graceful map_err(NotInitialized) guard at :69-71 is ever reached. The same unwrap-on-unbound pattern recurs in create_memory_tier_entry (:392), recover_extent (:573), and via get_pool_id in oldest_keys (:373). Correct spec + buggy code => ALIGN task, no code edit and no spec change.",
+      "before": null,
+      "after": null
     },
     {
       "id": "P2",
       "spec": "001-dispatch-map",
-      "requirement": "FR-012",
+      "requirement": "FR-003",
+      "related": "US1 Acceptance Scenario 3; Edge Cases bullet 1",
       "direction": "ALIGN",
-      "recommended": "ALIGN",
-      "spec_text": "initialize() returns an error if IEvictionPolicy is unbound.",
-      "actual": "get_pool_id() does eviction_policy.get().unwrap(), panicking on unbound; map_err guard unreachable.",
-      "resolution": "Make get_pool_id fallible or reorder initialize to return NotInitialized before pool creation; add unbound-case test.",
-      "confidence": "HIGH",
-      "status": "approved",
-      "decision": "ALIGN"
+      "location": "src/lib.rs:381 (create_memory_tier_entry, :381-424)",
+      "rationale": "The spec is correct and agreed: create_memory_tier_entry with a null pointer MUST return an error and record no entry (US1/AS3 + Edge Cases). The code validates only size == 0 (InvalidSize, src/lib.rs:387-389); there is no null-pointer guard, so a null *mut u8 is accepted and an entry is recorded. No null-pointer error variant exists on DispatchMapError. Correct spec + buggy code => ALIGN task, no code edit and no spec change.",
+      "before": null,
+      "after": null
     },
     {
       "id": "P3",
       "spec": "001-dispatch-map",
-      "requirement": "SC-004",
-      "direction": "BACKFILL",
-      "recommended": "BACKFILL",
-      "spec_text": "The DispatchEntry struct size varies by Location variant.",
-      "actual": "Rust enum sized to largest variant at compile time; fixed constant.",
-      "resolution": "Reword SC-004 to describe compile-time largest-variant sizing; entry_size() exposes size_of.",
-      "confidence": "HIGH",
-      "status": "approved",
-      "decision": "BACKFILL"
-    },
-    {
-      "id": "P4",
-      "spec": "001-dispatch-map",
-      "requirement": "US1-AS3",
-      "direction": "HUMAN_DECISION",
-      "recommended": "ALIGN",
-      "spec_text": "create_memory_tier_entry with a null pointer returns an error; no entry recorded.",
-      "actual": "No null check; null *mut u8 accepted and stored. No null-pointer error variant.",
-      "options": {
-        "align": "Add pointer.is_null() guard + DispatchMapError::NullPointer(key) + test.",
-        "backfill": "Drop AS3; document non-null as unsafe caller contract."
-      },
-      "confidence": "MEDIUM",
-      "status": "approved",
-      "decision": "ALIGN"
-    },
-    {
-      "id": "P5",
-      "spec": "001-dispatch-map",
-      "requirement": "US2-AS4",
-      "direction": "BACKFILL",
-      "recommended": "BACKFILL",
-      "spec_text": "size mismatch -> ErrorMismatchSize.",
-      "actual": "lookup takes no expected-size param; MismatchSize unreachable. FR-004 already notes it is not triggered.",
-      "resolution": "Mark US2-AS4 deferred/obsolete for v0, consistent with FR-004.",
-      "confidence": "HIGH",
-      "status": "approved",
-      "decision": "BACKFILL"
-    },
-    {
-      "id": "P6",
-      "spec": "001-dispatch-map",
-      "requirement": "integrity-check-feature",
-      "direction": "BACKFILL",
-      "recommended": "BACKFILL",
-      "feature": "Optional per-entry CRC-32 checksum (set_checksum/get_checksum, checksum field, integrity-check feature).",
-      "location": "Cargo.toml:8-11; src/entry.rs:41-42; src/lib.rs:594-615; components/interfaces/src/idispatch_map.rs",
-      "resolution": "Backfill User Story 12 + FR-027 (set_checksum/get_checksum semantics) + FR-028 (feature off by default, no surface change when off) into 001-dispatch-map.",
-      "confidence": "MEDIUM",
-      "status": "approved",
-      "decision": "BACKFILL"
-    },
-    {
-      "id": "P7",
-      "spec": "001-dispatch-map",
-      "requirement": "reuse_count",
-      "direction": "HUMAN_DECISION",
-      "recommended": "ALIGN",
-      "actual": "reuse_count AtomicU32 incremented on lookup/take_read/downgrade_reference, never read or exposed.",
-      "options": {
-        "align": "Remove field + fetch_add sites (dead hot-path instrumentation).",
-        "backfill": "Add FR + reuse_count(key) telemetry method if the metric is planned."
-      },
-      "confidence": "MEDIUM",
-      "status": "approved",
-      "decision": "ALIGN"
-    },
-    {
-      "id": "P8",
-      "spec": "001-dispatch-map",
-      "requirement": "creusot-verification-claims",
-      "direction": "HUMAN_DECISION",
-      "recommended": "ALIGN",
-      "location": "components/interfaces/src/idispatch_map.rs:84-99",
-      "actual": "Comment claims P1-P10 proved with Creusot in components/dispatch-map/verif/, which does not exist.",
-      "options": {
-        "align": "Remove/soften the verification claims and # Verified: tags, or restore verif/ proofs.",
-        "backfill": "Add a Formal Verification section to spec.md as future work; mark comment 'planned'."
-      },
-      "confidence": "MEDIUM",
-      "status": "approved",
-      "decision": "ALIGN"
+      "requirement": "reuse_count (unspecced feature)",
+      "direction": "BACKFILL-UNSPECCED",
+      "location": "src/entry.rs:37; src/lib.rs:142-143, 220-222, 313-315",
+      "rationale": "reuse_count is a real, working, intentional per-entry field on DispatchEntry (AtomicU32) that is incremented on every read-reference acquisition (lookup, take_read, downgrade_reference) and read only in the Debug impl. It is unspecced. Per Phase B policy for dispatch-map (1 unspecced => BACKFILL), the spec is brought up to reality by adding FR-029 describing the counter as built (internal instrumentation, no IDispatchMap accessor), updating the Dispatch Entry key entity, and adding acceptance scenarios to User Stories 2 and 4. The field is already part of the documented 56-byte DispatchEntry layout (FR-028), so SC-004 is unaffected.",
+      "before": "spec.md had no requirement covering reuse_count. Key Entities > Dispatch Entry: \"Holds the location (Location enum), size in 4KiB blocks, read reference count (u32), write reference count (u32), and an EvictionHandle ... Protected by Mutex/Condvar. Under the integrity-check feature it additionally carries a 4-byte CRC-32 checksum field ...\" (no reuse_count).",
+      "after": "Added FR-029: \"Each DispatchEntry MUST carry a per-entry reuse_count (AtomicU32), initialized to 0 when the entry is created (via create_memory_tier_entry, recover_extent, or the recovery walk in initialize) and incremented by 1 (relaxed atomic ordering) on each operation that acquires a read reference on the entry: lookup, take_read, and downgrade_reference. Operations that do not acquire a read reference (take_write, release_read, release_write, convert_to_storage, and the tier-transition methods) MUST NOT modify it. The counter is internal read-hit instrumentation: it is surfaced only through the DispatchEntry Debug representation and MUST NOT be exposed through any IDispatchMap method. It does not participate in eviction ordering (delegated to IEvictionPolicy) or in reference-count semantics.\" Updated Dispatch Entry key entity to list the reuse_count (AtomicU32) field. Added US2/AS6 and US4/AS9 acceptance scenarios covering the increment behavior."
     }
   ]
 }

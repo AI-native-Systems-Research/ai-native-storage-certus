@@ -1,115 +1,62 @@
-# Spec-Sync Apply Report — spdk-env
+# Spec-Sync Phase B Apply Report — spdk-env
 
-**Mode**: AUTO-BACKFILL
-**Applied**: 2026-07-22
-**Source**: `.specify/sync/drift-report.{json,md}` (generated 2026-07-22T22:33:36Z)
-**Backups**: `.specify/sync/backups/20260722T232033Z/` (pre-edit copies of all
-Markdown files touched below)
+**Mode**: Phase B resolution (BACKFILL + not_implemented handling)
+**Applied**: 2026-08-20
+**Source**: `components/spdk-env/.specify/sync/drift-report.{json,md}`
+**Policy**: `.specify/sync/PHASE_B_POLICY.md` (no special per-component note for spdk-env)
+**Backups**: `components/spdk-env/.specify/sync/backups/specs/002-spdk-env-vfio-init/`
+(`spec.md.bak`, `tasks.md.bak` — pre-edit copies of every spec Markdown file touched)
 
 ## Scope
 
 Only Markdown under `components/spdk-env/specs/**` and
-`components/spdk-env/.specify/sync/**` was edited. No source code was
-touched.
+`components/spdk-env/.specify/sync/**` was edited. No `.rs` source was touched;
+no cargo was run.
 
-## Actions taken
+## Drift-report items and their resolution
 
-### 1. SUPERSEDE — `specs/001-spdk-vfio-env/spec.md`
+| Item | Type in report | Direction | Outcome |
+|------|----------------|-----------|---------|
+| `stale-crate-paths` | drifted (minor) | BACKFILL | Applied to tasks.md + spec.md |
+| `FR-015` | not_implemented | LEAVE + NOTE | No edit; noted (already self-flagged in spec) |
 
-Added a `SUPERSEDED` banner and status change pointing to
-`002-spdk-env-vfio-init`. The spec was the raw, never-filled-in
-`spec-template.md` scaffold; the feature area it targeted (SPDK/DPDK env
-init + VFIO device iteration) is fully specified in `002-spdk-env-vfio-init`.
+## Specs Updated (BACKFILL)
 
-### 2. BACKFILL — `specs/002-spdk-env-vfio-init/spec.md`
+| File | Requirement | Change type | Change |
+|------|-------------|-------------|--------|
+| `specs/002-spdk-env-vfio-init/tasks.md` | stale-crate-paths | Path correction | T001, T003, T004, T005, T006: `components/spdk-sys/...` → `lib/spdk-sys/...`; added a dated backfill note under the Organization line. `components/spdk-env` retained in T002/T003 (that crate did not move). |
+| `specs/002-spdk-env-vfio-init/spec.md` | stale-crate-paths | Path clarification | Line 6 (historical Input): preserved the verbatim `../component-framework` quote and appended a bracketed note that the crate moved to `../../lib/component-framework` (name unchanged, still resolves). |
 
-- **SC-005**: Corrected from "structured log messages through the
-  framework's logging system" to describe actual `eprintln!`-based
-  diagnostics, explicitly noting there is no logger receptacle (matches
-  FR-007 and `src/env.rs`). Resolves the internal SC-005/FR-007
-  contradiction flagged as high severity in the drift report.
-- **FR-019** (new): Documents the explicit `fini(&self)` method on
-  `ISPDKEnv` (teardown precondition: controllers detached / DmaBuffers
-  freed; idempotent; relationship to Drop-based cleanup in FR-012).
-- **FR-020** (new): Documents the `DmaBuffer` API (`new()`, `unsafe
-  from_raw()`, `Deref`/`DerefMut`, Drop-time SPDK deallocation gated by the
-  `interfaces::set_spdk_env_active`/`is_spdk_env_active` coordination flag).
-- **FR-021** (new): Documents the five operator shell scripts
-  (`bind_vfio.sh`, `add_kernel_options.sh`, `cfg_user_spdk.sh`,
-  `show_spdk_devices.sh`, `fix_dnf_cache.sh`) as sanctioned setup tooling.
-- **Key Entities**: Added a `DmaBuffer` entry; updated the `ISPDKEnv`
-  description to mention `fini()`.
-- **Assumptions**: Cross-referenced `scripts/bind_vfio.sh`,
-  `add_kernel_options.sh`, and `cfg_user_spdk.sh`/`show_spdk_devices.sh` by
-  name in the two assumptions that previously said configuration was
-  "performed externally" with no named tooling.
+Not edited (intentionally): `spec.md:99` (FR-001) and `spec.md:188` (Assumptions)
+reference the crate **name** "component-framework", which is unchanged and still
+resolves as a workspace dependency — not a stale filesystem path, so no edit.
 
-### 3. BACKFILL — stale ILogger references
+## Align Tasks Generated
 
-- **`specs/002-spdk-env-vfio-init/contracts/ispdk-env.md`**: Removed the
-  `logger: ILogger` receptacle from the Component Declaration, removed
-  `LoggerNotConnected` from `init()`'s preconditions/errors, removed the
-  `comp.logger.connect(logger_arc)` step from the Usage Contract, and added
-  a `fini()` method section and a `fini()` step in the Usage Contract.
-- **`specs/002-spdk-env-vfio-init/data-model.md`**: Removed the
-  `LoggerNotConnected` variant from the `SpdkEnvError` table and the
-  `SPDKEnvComponent --receptacle--> ILogger` relationship line; added a
-  `DmaAllocationFailed` variant, a `DmaBuffer` entity section, and
-  `fini()`-related relationships/state-transition edges (replacing the
-  `Constructed -> LoggerWired -> Initialized` chain with
-  `Constructed -> Initialized -> Finalized` via `init()`/`fini()`/`drop()`).
+None. The single drift was spec-lag (BACKFILL); FR-015 is deferred future work,
+not a behavioral bug. See `align-tasks.md` (2026-08-20 section) for the rationale;
+prior-run tasks are retained there for history.
 
-### 4. ALIGN/DEFECT/NOTE tasks — `.specify/sync/align-tasks.md` (new file)
+## Unspecced Backfilled
 
-Four tasks appended (details in that file):
+None (drift report lists 0 unspecced features).
 
-1. **Task 1** (medium, ALIGN) — NVMe-only enumeration (`env.rs`
-   `enumerate_devices()`) vs. SC-001/User Story 1/Clarifications' "all VFIO
-   device types" claim. Left as a decision point (extend enumeration vs.
-   re-scope the spec) rather than resolved in this Markdown-only pass.
-2. **Task 2** (low, DEFER) — SC-002's stale "missing logger" misconfiguration
-   clause; not explicitly in scope for this pass, left for a follow-up
-   trivial backfill.
-3. **Task 3** (medium, DEFECT) — `do_init()`'s error path never calls
-   `spdk_env_fini()` to unwind a successful `init_spdk_env()`; currently
-   latent because `enumerate_devices()` never returns `Err`. Requires a code
-   change, out of scope here.
-4. **Task 4** (informational, NOTE) — FR-015 already self-flags as future
-   work; left as-is per instructions. Noted that User Story 1 Acceptance
-   Scenario 4 / its Edge Case still describe the skip-and-warn behavior as
-   working today, which remains inconsistent with FR-015's caveat.
+## Resolved (already fixed on main thread)
 
-## Not changed
+None applicable this run.
 
-- `specs/002-spdk-env-vfio-init/plan.md`, `research.md`, `tasks.md`,
-  `checklists/requirements.md` — out of scope for this resolution set; no
-  drift findings named them directly.
-- No `NEW_SPEC` was created — none of the unspecced features (DmaBuffer,
-  `fini()`, operator scripts) warranted a standalone spec; all were folded
-  into `002-spdk-env-vfio-init` as new FRs.
-- No source code under `components/spdk-env/src/` or `scripts/` was modified.
+## not_implemented Handled
 
----
-
-# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
-
-Mode: sweep re-analysis. Pacing: auto-apply safe BACKFILL on-branch; ask on
-forks (none arose for spdk-env). Regenerated drift report: spec-001 remains a
-superseded template (no action); spec-002 has 25 aligned FRs, one low-severity
-drift (SC-002 stale "missing logger" case), and FR-015 remains a
-spec-acknowledged future item.
-
-## Safe BACKFILL applied (spec Markdown only)
-
-| Spec | Item | Change |
-|------|------|--------|
-| 002-spdk-env-vfio-init | SC-002 | Dropped the stale "missing logger" misconfiguration case — the component has no logger receptacle per FR-007; the same correction was already applied to SC-005 in the 2026-07-22 run. Annotated *(Backfilled 2026-08-07)*. **Resolves 2026-07-22 align-task Task 2 (SC-002 stale logger clause).** |
-
-## No action (unchanged from prior analysis)
-
-- **spec-001-spdk-vfio-env** — already SUPERSEDED by 002 (2026-07-22 banner); no re-edit.
-- **FR-015** (skip-and-warn on in-use devices) — spec already self-flags as "Future: not yet implemented." Left as-is; no drift to apply. The prior-run note that User Story 1 Acceptance Scenario 4 / its Edge Case still read as present-tense working behavior remains an open align-task (Task 4), not resolved this sweep.
-- **Task 1** (NVMe-only enumeration vs. "all VFIO device types", Medium ALIGN) and **Task 3** (`do_init()` error path never unwinds `spdk_env_fini()`, Medium DEFECT) — both remain open align-tasks; neither is a HIGH code bug and neither was drafted per sweep pacing.
+| Requirement | Handling | Notes |
+|-------------|----------|-------|
+| FR-015 (skip in-use devices, warn per skipped device, return only probed devices) | LEAVE + NOTE | Genuinely intended future behavior from Clarifications (Session 2026-04-07); spec already annotates "(Future: not yet implemented)". Enumeration uses a non-attach callback (FR-006) so no probe/claim step exists to skip. Not invented, not removed, no ALIGN task. Residual present-tense wording in User Story 1 Acceptance Scenario 4 / Edge Case remains tracked as align-tasks.md Task 4. |
 
 ## Verification
-- Single additive edit confined to `specs/002-spdk-env-vfio-init/spec.md` SC-002. No `.rs`/`scripts/` touched.
+
+- Backups exist for both edited spec Markdown files under
+  `.specify/sync/backups/specs/002-spdk-env-vfio-init/`.
+- Workspace layout confirmed prior to backfill: `lib/spdk-sys` and
+  `lib/component-framework` present; `components/spdk-sys` and
+  `components/component-framework` absent; `components/spdk-env` present with
+  `src/` and a `Cargo.toml` wiring both crates via `.workspace = true`.
+- No `.rs` files modified; no cargo invoked.

@@ -7,16 +7,18 @@
 #   scripts/bench-remote-lookup-multinode.sh       (performance test)
 #
 # Both need the same five things: start a `certus-server-yaml` on every node in
-# one shared zyre group, wait for each gRPC endpoint, let the UDP beacon settle,
-# dump a node's log on failure, and tear the cluster down without touching
-# another tester's servers. This file owns that and nothing else — key
+# one shared zyre group, wait for each node's shmq mailbox, let the UDP beacon
+# settle, dump a node's log on failure, and tear the cluster down without
+# touching another tester's servers. This file owns that and nothing else — key
 # populating, measurement and verdicts belong to the callers.
 #
 # Contract for the caller, all set *before* sourcing or before the first call:
 #   NODES            array of node names; NODES[0] is conventionally the holder
 #   GROUP            shared zyre group (must be unique per tester)
 #   SERVER_BIN       certus-server-yaml path, same on every node
-#   GRPC_PORT        gRPC listen port on every node
+#   SHM_PATH         /dev/shm mailbox path each server serves (same on every node)
+#   CHANNELS         mailbox channels per server; must be >= the largest
+#                    workers*inflight any client will drive against it
 #   SERVER_ARGS      device-selection args passed to every server
 #   REMOTE_ENV       `VAR=val ...` string prefixed to the remote launch
 #   SSH_OPTS         array of ssh options
@@ -42,23 +44,28 @@ cluster_launch() {
     local node pid
     for node in "${NODES[@]}"; do
         log "Launching server on $node ..."
+        # rm the stale mailbox first so cluster_wait_ready's file-existence probe
+        # can only pass on the file THIS server creates, not a prior crash's.
         pid=$(ssh "${SSH_OPTS[@]}" "$node" \
-            "nohup env $REMOTE_ENV '$SERVER_BIN' --rl-group '$GROUP' \
-                 --listen 0.0.0.0:$GRPC_PORT $SERVER_ARGS \
+            "rm -f '$SHM_PATH'; \
+             nohup env $REMOTE_ENV '$SERVER_BIN' --rl-group '$GROUP' \
+                 --shm-path '$SHM_PATH' --channels $CHANNELS $SERVER_ARGS \
                  > '$(remote_log "$node")' 2>&1 </dev/null & echo \$!")
         CLUSTER_PIDS["$node"]="${pid//[^0-9]/}"
     done
 }
 
-# Block until every node's gRPC port accepts a connection, then allow the zyre
-# beacon time to form the mesh. Returns non-zero (after dumping that node's log)
-# if a server never came up.
+# Block until every node's shmq mailbox file exists, then allow the zyre beacon
+# time to form the mesh. shmq has no TCP port; the mailbox appears once
+# Server::create has run, and a client's attach() then spins for the ready magic,
+# so a client racing create by a few ms simply waits. Returns non-zero (after
+# dumping that node's log) if a server never came up.
 cluster_wait_ready() {
     local node
     for node in "${NODES[@]}"; do
-        log "Waiting for gRPC on $node:$GRPC_PORT ..."
+        log "Waiting for shmq mailbox on $node:$SHM_PATH ..."
         if ! ssh "${SSH_OPTS[@]}" "$node" \
-            "for _ in \$(seq 1 120); do (exec 3<>/dev/tcp/127.0.0.1/$GRPC_PORT) 2>/dev/null && exit 0; sleep 0.5; done; exit 1"
+            "for _ in \$(seq 1 120); do [ -e '$SHM_PATH' ] && exit 0; sleep 0.5; done; exit 1"
         then
             echo "error: server on $node did not become ready" >&2
             cluster_dump_log "$node"

@@ -1,30 +1,120 @@
-//! Certus gRPC Server
+//! Certus dispatcher server.
 //!
-//! Exposes the IDispatcher interface to Python clients via gRPC.
-//! Auto-initializes the Certus component stack on startup using
-//! CLI-provided PCI addresses.
+//! The control-plane transport is the lock-free `/dev/shm` mailbox from the
+//! `shm-queue` crate; the poller/worker/reaper serve loop and the
+//! opcode→`IDispatcher` translation live in the shared `shmq-dispatcher` crate.
+//! The KV bytes move GPU↔DRAM↔SSD out of band via CUDA/SPDK DMA — only the
+//! small control messages travel the mailbox.
+//!
+//! This binary owns the process-level concerns: CLI parsing, building the
+//! component stack, installing signal handlers, the optional SSD-telemetry
+//! thread, and driving [`shmq_dispatcher::serve`] until shutdown.
 
-mod service;
-#[cfg(feature = "otel")]
-mod telemetry;
-
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
+#[cfg(feature = "rw-telemetry")]
+use std::thread;
 
 use clap::Parser;
-use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use component_core::query_interface;
 use interfaces::{
-    DispatcherConfig, IDispatchMap, IDispatcher, IEvictionPolicy,
-    IGpuServices, ILogger, IMemoryTier, IRemoteLookup, PciAddress,
+    DispatcherConfig, IDispatchMap, IDispatcher, IEvictionPolicy, IGpuServices, ILogger,
+    IMemoryTier, IRemoteLookup, PciAddress,
 };
 
-use service::DispatcherService;
+use shmq_dispatcher::{serve, ServeConfig, Translator};
 
-/// Certus gRPC server exposing the IDispatcher interface.
+/// Set once by the SIGINT/SIGTERM handler; polled by the poller and reaper.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn handle_signal(_sig: libc::c_int) {
+    // async-signal-safe: a single relaxed atomic store.
+    SHUTDOWN.store(true, Ordering::SeqCst);
+}
+
+/// How often the telemetry thread logs cumulative SSD I/O stats (rw-telemetry
+/// builds only).
+#[cfg(feature = "rw-telemetry")]
+const TELEMETRY_INTERVAL_SECS: u64 = 10;
+
+/// Render a byte count as a compact human-readable size (`4KiB`, `128KiB`,
+/// `2MiB`, ...). Used to label transfer-size histogram buckets.
+#[cfg(feature = "rw-telemetry")]
+fn human_size(bytes: u64) -> String {
+    const UNITS: [(&str, u64); 4] = [
+        ("GiB", 1 << 30),
+        ("MiB", 1 << 20),
+        ("KiB", 1 << 10),
+        ("B", 1),
+    ];
+    for (name, scale) in UNITS {
+        if bytes >= scale {
+            return format!("{}{}", bytes / scale, name);
+        }
+    }
+    "0B".to_string()
+}
+
+/// Render one direction's transfer-size histogram as `lo-hi:count` bins over the
+/// non-empty buckets (e.g. `[4KiB,8KiB):12 [128KiB,256KiB):340 >=8MiB:1024`).
+/// The final bucket is open-ended (sizes are clamped into it).
+#[cfg(feature = "rw-telemetry")]
+fn format_size_hist(buckets: &[u64; interfaces::IO_SIZE_BUCKETS]) -> String {
+    use interfaces::{ReadWriteStats, IO_SIZE_BUCKETS};
+    let mut parts = Vec::new();
+    for (idx, &count) in buckets.iter().enumerate() {
+        if count == 0 {
+            continue;
+        }
+        let lo = ReadWriteStats::bucket_lower_bound(idx);
+        let label = if idx == IO_SIZE_BUCKETS - 1 {
+            format!(">={}", human_size(lo))
+        } else {
+            format!("[{},{})", human_size(lo), human_size(1u64 << idx))
+        };
+        parts.push(format!("{label}:{count}"));
+    }
+    if parts.is_empty() {
+        "(none)".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
+/// Format a cumulative SSD read/write telemetry snapshot for the server log:
+/// op counts, GiB moved, mean transfer size (bytes/op = the effective on-device
+/// I/O block size), mean per-op latency, and the full per-direction transfer-size
+/// distribution. Only compiled with `rw-telemetry`; without that feature
+/// `read_write_stats()` returns all-zero counters.
+#[cfg(feature = "rw-telemetry")]
+fn format_io_stats(s: &interfaces::ReadWriteStats) -> String {
+    let gib = |b: u64| b as f64 / (1u64 << 30) as f64;
+    let per = |num: u64, den: u64| if den > 0 { num / den } else { 0 };
+    format!(
+        "reads[{ro} ops, {rg:.3} GiB, {rbs} B/op, {rl} us/op]  \
+         writes[{wo} ops, {wg:.3} GiB, {wbs} B/op, {wl} us/op]\n    \
+         read-sizes:  {rh}\n    write-sizes: {wh}",
+        ro = s.read_ops,
+        rg = gib(s.read_bytes),
+        rbs = per(s.read_bytes, s.read_ops),
+        rl = per(s.read_latency_ns_sum / 1000, s.read_ops),
+        wo = s.write_ops,
+        wg = gib(s.write_bytes),
+        wbs = per(s.write_bytes, s.write_ops),
+        wl = per(s.write_latency_ns_sum / 1000, s.write_ops),
+        rh = format_size_hist(&s.read_size_buckets),
+        wh = format_size_hist(&s.write_size_buckets),
+    )
+}
+
+/// Certus shared-memory-queue server exposing the IDispatcher control plane.
 #[derive(Parser)]
-#[command(name = "certus-server", about = "Certus dispatcher gRPC server")]
+#[command(
+    name = "certus-server",
+    about = "Certus dispatcher server over a /dev/shm mailbox"
+)]
 struct Cli {
     /// PCI address(es) of NVMe device(s) — may be specified multiple times.
     /// Mutually exclusive with --drive-count.
@@ -32,35 +122,43 @@ struct Cli {
     device_pci: Vec<String>,
 
     /// Use the first N discovered NVMe drives (alternative to --device-pci).
-    /// Requires SPDK to enumerate available devices at startup.
     #[arg(long = "drive-count", conflicts_with = "device_pci")]
     drive_count: Option<usize>,
 
-    /// gRPC listen address
-    #[arg(long = "listen", default_value = "0.0.0.0:50051")]
-    listen: String,
+    /// Path to the shared-memory mailbox file (created/truncated on start).
+    #[arg(long = "shm-path", default_value = "/dev/shm/certus-shmq")]
+    shm_path: String,
 
-    /// Memory-tier pool size (e.g. 256M, 1G, 512K). Defaults to 256M.
+    /// Number of mailbox channels (= max in-flight requests = worker threads).
+    #[arg(long = "channels", default_value_t = 8)]
+    channels: usize,
+
+    /// Per-channel request capacity in bytes (K/M/G suffixes accepted).
+    #[arg(long = "cap-req", value_parser = parse_size, default_value = "1M")]
+    cap_req: usize,
+
+    /// Per-channel response capacity in bytes (K/M/G suffixes accepted).
+    #[arg(long = "cap-resp", value_parser = parse_size, default_value = "128K")]
+    cap_resp: usize,
+
+    /// Reclaim reservations left uncommitted/unaborted for this many seconds.
+    #[arg(long = "reserve-timeout-secs", default_value_t = 30)]
+    reserve_timeout_secs: u64,
+
+    /// Pin the shm-queue poller thread to this CPU core (optional). Choose a
+    /// core outside the NVMe poller range (see --poller-base-cpu).
+    #[arg(long = "shmq-poller-cpu")]
+    shmq_poller_cpu: Option<usize>,
+
+    /// Memory-tier pool size (e.g. 256M, 1G, 512K). Defaults to 2G.
     #[arg(long = "memory-tier-size", value_parser = parse_size)]
     memory_tier_size: Option<usize>,
 
     /// Format extent managers on startup (destroys existing data).
-    /// Without this flag, the server recovers previously stored extents.
     #[arg(long = "format")]
     format: bool,
 
-    /// Path to TLS certificate file (enables TLS when provided with --tls-key)
-    #[arg(long = "tls-cert")]
-    tls_cert: Option<String>,
-
-    /// Path to TLS private key file (enables TLS when provided with --tls-cert)
-    #[arg(long = "tls-key")]
-    tls_key: Option<String>,
-
-    /// Pin each NVMe poller thread to a dedicated CPU core.
-    /// Drive N is pinned to core (poller-base-cpu + N).
-    /// Recommended: pick cores in the same NUMA zone as the drives
-    /// (e.g. --poller-base-cpu 2 for drives on NUMA 0 with 4 drives → cores 2,3,4,5).
+    /// Pin each NVMe poller thread to a dedicated CPU core (drive N → base+N).
     #[arg(long = "poller-base-cpu")]
     poller_base_cpu: Option<usize>,
 
@@ -69,18 +167,8 @@ struct Cli {
     max_eviction_attempts: usize,
 
     /// Memory-tier utilization threshold (0.0–1.0) for background DRAM→SSD demotion.
-    /// Disabled by default (0.0). Set to e.g. 0.8 to start demoting at 80% full.
     #[arg(long = "memory-tier-eviction-threshold", default_value_t = 0.0)]
     memory_tier_eviction_threshold: f64,
-
-    /// OpenTelemetry OTLP endpoint (e.g. "http://localhost:4317").
-    /// Enables metrics export when set. Requires --features otel.
-    #[arg(long = "otel-endpoint")]
-    otel_endpoint: Option<String>,
-
-    /// Service name reported in OpenTelemetry metrics.
-    #[arg(long = "otel-service-name", default_value = "certus-server")]
-    otel_service_name: String,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -109,12 +197,14 @@ fn validate_pci_address(addr: &str) -> Result<(), String> {
 fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
     let parts: Vec<&str> = addr.split(':').collect();
     if parts.len() != 3 {
-        return Err(format!("invalid PCI address format '{addr}': expected DDDD:BB:DD.F"));
+        return Err(format!(
+            "invalid PCI address format '{addr}': expected DDDD:BB:DD.F"
+        ));
     }
-    let domain = u32::from_str_radix(parts[0], 16)
-        .map_err(|_| format!("invalid PCI domain in '{addr}'"))?;
-    let bus = u8::from_str_radix(parts[1], 16)
-        .map_err(|_| format!("invalid PCI bus in '{addr}'"))?;
+    let domain =
+        u32::from_str_radix(parts[0], 16).map_err(|_| format!("invalid PCI domain in '{addr}'"))?;
+    let bus =
+        u8::from_str_radix(parts[1], 16).map_err(|_| format!("invalid PCI bus in '{addr}'"))?;
     let dev_func: Vec<&str> = parts[2].split('.').collect();
     if dev_func.len() != 2 {
         return Err(format!("invalid PCI dev.func in '{addr}': expected DD.F"));
@@ -123,9 +213,30 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
         .map_err(|_| format!("invalid PCI device in '{addr}'"))?;
     let func = u8::from_str_radix(dev_func[1], 16)
         .map_err(|_| format!("invalid PCI function in '{addr}'"))?;
-    Ok(PciAddress { domain, bus, dev, func })
+    Ok(PciAddress {
+        domain,
+        bus,
+        dev,
+        func,
+    })
 }
 
+fn resolve_device_addresses(cli: &Cli) -> Result<Vec<String>, String> {
+    if !cli.device_pci.is_empty() {
+        for addr in &cli.device_pci {
+            validate_pci_address(addr)?;
+        }
+        Ok(cli.device_pci.clone())
+    } else if cli.drive_count.is_some() {
+        Ok(Vec::new()) // resolved after SPDK init
+    } else {
+        Err("either --device-pci or --drive-count must be specified".into())
+    }
+}
+
+/// Builds the full component stack and returns the dispatcher facade plus the
+/// dispatcher component (for the eviction channel).
+#[allow(clippy::type_complexity)]
 fn initialize_component_stack(
     device_pci_addrs: &[String],
     drive_count: Option<usize>,
@@ -134,16 +245,25 @@ fn initialize_component_stack(
     poller_base_cpu: Option<usize>,
     max_eviction_attempts: usize,
     memory_tier_eviction_threshold: f64,
-) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>, Arc<dispatcher::DispatcherComponent>), String> {
+) -> Result<
+    (
+        Arc<dyn IDispatcher + Send + Sync>,
+        Arc<dyn ILogger + Send + Sync>,
+        Vec<String>,
+        Arc<dispatcher::DispatcherComponent>,
+    ),
+    String,
+> {
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
 
     logger.info("certus-server: initializing SPDK environment...");
     let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
-    let spdk_iface = query_interface!(spdk_comp, spdk_env::ISPDKEnv)
-        .ok_or("failed to query ISPDKEnv")?;
-    spdk_iface.init().map_err(|e| format!("SPDK init failed: {e}"))?;
+    let spdk_iface =
+        query_interface!(spdk_comp, spdk_env::ISPDKEnv).ok_or("failed to query ISPDKEnv")?;
+    spdk_iface
+        .init()
+        .map_err(|e| format!("SPDK init failed: {e}"))?;
 
-    // Resolve device addresses: use explicit list or auto-select from discovered devices.
     // NVMe PCI class code: 0x010802 (Mass Storage Controller, NVM Express).
     const NVME_CLASS_CODE: u32 = 0x010802;
     let device_pci_addrs = if device_pci_addrs.is_empty() {
@@ -153,7 +273,6 @@ fn initialize_component_stack(
             .iter()
             .filter(|d| d.id.class_id == NVME_CLASS_CODE)
             .collect();
-        // Prioritize NUMA node 0 devices first.
         nvme_devices.sort_by_key(|d| if d.numa_node == 0 { 0 } else { 1 });
         if nvme_devices.len() < count {
             return Err(format!(
@@ -166,8 +285,7 @@ fn initialize_component_stack(
             .map(|d| d.address.to_string())
             .collect();
         logger.info(&format!(
-            "certus-server: auto-selected {} drive(s): {:?}",
-            count, addrs
+            "certus-server: auto-selected {count} drive(s): {addrs:?}"
         ));
         addrs
     } else {
@@ -182,23 +300,20 @@ fn initialize_component_stack(
         .map_err(|e| format!("gpu logger bind: {e}"))?;
     let gpu: Arc<dyn IGpuServices + Send + Sync> =
         query_interface!(gpu_comp, IGpuServices).ok_or("failed to query IGpuServices")?;
-    gpu.initialize().map_err(|e| format!("GPU init failed: {e}"))?;
+    gpu.initialize()
+        .map_err(|e| format!("GPU init failed: {e}"))?;
 
-    // --- Create eviction policy ---
     let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
     ep_comp
         .logger
         .connect(Arc::clone(&logger))
         .map_err(|e| format!("eviction-policy logger bind: {e}"))?;
     let eviction_policy: Arc<dyn IEvictionPolicy + Send + Sync> =
-        query_interface!(ep_comp, IEvictionPolicy)
-            .ok_or("failed to query IEvictionPolicy")?;
+        query_interface!(ep_comp, IEvictionPolicy).ok_or("failed to query IEvictionPolicy")?;
 
-    // --- Create dispatch map ---
     logger.info("certus-server: initializing dispatch map...");
-    let dm_comp = dispatch_map::DispatchMapComponent::new(
-        dispatch_map::DispatchMapState::default(),
-    );
+    let dm_comp =
+        dispatch_map::DispatchMapComponent::new(dispatch_map::DispatchMapState::default());
     dm_comp
         .logger
         .connect(Arc::clone(&logger))
@@ -207,13 +322,11 @@ fn initialize_component_stack(
         .eviction_policy
         .connect(Arc::clone(&eviction_policy))
         .map_err(|e| format!("dispatch map eviction_policy bind: {e}"))?;
-
     let dm: Arc<dyn IDispatchMap + Send + Sync> =
         query_interface!(dm_comp, IDispatchMap).ok_or("failed to query IDispatchMap")?;
     dm.initialize()
         .map_err(|e| format!("DispatchMap init failed: {e}"))?;
 
-    // --- Create memory-tier ---
     logger.info("certus-server: initializing memory-tier...");
     let mt_comp = memory_tier::MemoryTierComponent::new_default();
     mt_comp
@@ -227,7 +340,6 @@ fn initialize_component_stack(
     let mt: Arc<dyn IMemoryTier + Send + Sync> =
         query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
 
-    // Bind memory-tier pool to the NUMA node of the first selected drive.
     let mt_numa_node: Option<i32> = device_pci_addrs.first().and_then(|first_addr| {
         spdk_iface
             .devices()
@@ -238,7 +350,6 @@ fn initialize_component_stack(
     mt.initialize(memory_tier_size, mt_numa_node)
         .map_err(|e| format!("MemoryTier init failed: {e}"))?;
 
-    // Register the memory-tier pool with CUDA for pinned DMA transfers.
     if let Some((pool_ptr, pool_size)) = mt.pool_info() {
         let err = unsafe {
             gpu_services::cuda_ffi::cudaHostRegister(
@@ -260,7 +371,6 @@ fn initialize_component_stack(
         }
     }
 
-    // --- Create remote lookup ---
     let rl_comp = remote_lookup::RemoteLookupComponent::new_default();
     rl_comp
         .logger
@@ -269,7 +379,6 @@ fn initialize_component_stack(
     let remote_lookup: Arc<dyn IRemoteLookup + Send + Sync> =
         query_interface!(rl_comp, IRemoteLookup).ok_or("failed to query IRemoteLookup")?;
 
-    // --- Create dispatcher ---
     logger.info("certus-server: initializing dispatcher...");
     let disp_comp = dispatcher::DispatcherComponent::new_default();
     disp_comp
@@ -315,35 +424,24 @@ fn initialize_component_stack(
     Ok((dispatcher, logger, device_pci_addrs, disp_comp))
 }
 
-fn resolve_device_addresses(cli: &Cli) -> Result<Vec<String>, String> {
-    if !cli.device_pci.is_empty() {
-        for addr in &cli.device_pci {
-            validate_pci_address(addr)?;
-        }
-        Ok(cli.device_pci.clone())
-    } else if cli.drive_count.is_some() {
-        // Deferred — resolved after SPDK init in initialize_component_stack.
-        Ok(Vec::new())
-    } else {
-        Err("either --device-pci or --drive-count must be specified".into())
-    }
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    let device_pci = resolve_device_addresses(&cli)
-        .map_err(Box::<dyn std::error::Error>::from)?;
+    let device_pci = resolve_device_addresses(&cli).map_err(Box::<dyn std::error::Error>::from)?;
 
     const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
     let pool_size = cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE);
     let (dispatcher, logger, device_pci, disp_comp) = initialize_component_stack(
-        &device_pci, cli.drive_count, pool_size, cli.format, cli.poller_base_cpu,
-        cli.max_eviction_attempts, cli.memory_tier_eviction_threshold,
+        &device_pci,
+        cli.drive_count,
+        pool_size,
+        cli.format,
+        cli.poller_base_cpu,
+        cli.max_eviction_attempts,
+        cli.memory_tier_eviction_threshold,
     )?;
 
-    logger.info(&format!("certus-server: devices={:?}", device_pci));
+    logger.info(&format!("certus-server: devices={device_pci:?}"));
     logger.info(&format!(
         "certus-server: memory-tier-size={} MiB",
         pool_size / (1024 * 1024)
@@ -351,79 +449,97 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cli.format {
         logger.info("certus-server: --format specified, extent managers will be reformatted");
     } else {
-        logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
-    }
-
-    let eviction_rx = disp_comp.create_eviction_channel(16384);
-    let eviction_dropped = Arc::new(std::sync::atomic::AtomicU64::new(0));
-
-    #[cfg(feature = "otel")]
-    let svc = {
-        let svc = DispatcherService::new(
-            Arc::clone(&dispatcher),
-            eviction_rx,
-            Arc::clone(&eviction_dropped),
+        logger.info(
+            "certus-server: recovering extents from disk (use --format for clean slate)",
         );
-        if let Some(ref endpoint) = cli.otel_endpoint {
-            let metrics = telemetry::Metrics::init(endpoint, &cli.otel_service_name)?;
-            logger.info(&format!("certus-server: OTel metrics exporting to {endpoint}"));
-            disp_comp.set_pipeline_metrics(Arc::new(metrics.pipeline.clone()));
-            svc.with_metrics(metrics)
-        } else {
-            svc
-        }
-    };
-
-    #[cfg(not(feature = "otel"))]
-    let svc = {
-        if cli.otel_endpoint.is_some() {
-            logger.warn(
-                "certus-server: --otel-endpoint specified but binary not compiled with --features otel"
-            );
-        }
-        let _ = &disp_comp;
-        DispatcherService::new(
-            Arc::clone(&dispatcher),
-            eviction_rx,
-            Arc::clone(&eviction_dropped),
-        )
-    };
-
-    let addr = cli.listen.parse()?;
-
-    // Build server with optional TLS
-    let mut server = Server::builder();
-    if let (Some(cert_path), Some(key_path)) = (&cli.tls_cert, &cli.tls_key) {
-        let cert = tokio::fs::read(cert_path).await?;
-        let key = tokio::fs::read(key_path).await?;
-        let identity = Identity::from_pem(cert, key);
-        server = server.tls_config(ServerTlsConfig::new().identity(identity))?;
-        logger.info("certus-server: TLS enabled");
     }
 
-    logger.info(&format!("certus-server: listening on {addr}"));
+    // Eviction event channel drained by the TakeEvents op.
+    let eviction_rx = disp_comp.create_eviction_channel(16384);
+    let eviction_dropped = Arc::new(AtomicU64::new(0));
 
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
-    let flag_clone = Arc::clone(&shutdown_flag);
-    let shutdown_logger = Arc::clone(&logger);
+    let translator = Translator::new(
+        Arc::clone(&dispatcher),
+        eviction_rx,
+        Arc::clone(&eviction_dropped),
+    );
 
-    server
-        .add_service(service::dispatcher_server(svc))
-        .serve_with_shutdown(addr, async move {
-            use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM");
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {},
-                _ = sigterm.recv() => {},
-            }
-            flag_clone.store(true, Ordering::Release);
-            shutdown_logger.info("certus-server: shutting down...");
-        })
-        .await?;
+    // Create the shared-memory mailbox.
+    let server = Arc::new(shm_queue::Server::create(
+        &cli.shm_path,
+        cli.channels,
+        cli.cap_req,
+        cli.cap_resp,
+    )?);
+    logger.info(&format!(
+        "certus-server: shared-memory IPC path {} channels={} cap_req={} cap_resp={}",
+        cli.shm_path,
+        server.channel_count(),
+        server.cap_req(),
+        server.cap_resp()
+    ));
 
-    // Shutdown dispatcher
+    // Install SIGINT/SIGTERM handlers → flip SHUTDOWN.
+    // SAFETY: handle_signal is async-signal-safe (single atomic store).
+    unsafe {
+        libc::signal(libc::SIGINT, handle_signal as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, handle_signal as libc::sighandler_t);
+    }
+
+    // Telemetry logger (rw-telemetry builds only): periodically log cumulative
+    // SSD read/write stats + derived mean I/O block size, so a run's disk
+    // behaviour is visible directly in the server log without a client polling
+    // GetIoStats. Spawned before the blocking serve() loop and joined after it
+    // returns.
+    #[cfg(feature = "rw-telemetry")]
+    let telemetry = {
+        let dispatcher = Arc::clone(&dispatcher);
+        let logger = Arc::clone(&logger);
+        thread::Builder::new()
+            .name("shmq-telemetry".into())
+            .spawn(move || {
+                let tick = Duration::from_millis(500);
+                let mut elapsed = Duration::ZERO;
+                while !SHUTDOWN.load(Ordering::Relaxed) {
+                    thread::sleep(tick);
+                    elapsed += tick;
+                    if elapsed >= Duration::from_secs(TELEMETRY_INTERVAL_SECS) {
+                        elapsed = Duration::ZERO;
+                        logger.info(&format!(
+                            "certus-server: io-stats {}",
+                            format_io_stats(&dispatcher.read_write_stats())
+                        ));
+                    }
+                }
+            })
+            .expect("spawn telemetry")
+    };
+
+    // Run the shared poller + worker-pool + reaper loop; blocks until SHUTDOWN.
+    serve(
+        server,
+        translator,
+        ServeConfig {
+            channels: cli.channels,
+            reserve_timeout: Duration::from_secs(cli.reserve_timeout_secs),
+            poller_cpu: cli.shmq_poller_cpu,
+        },
+        &SHUTDOWN,
+        Arc::clone(&logger),
+    )?;
+
+    // Read the final cumulative stats BEFORE shutdown tears down the block
+    // devices (which is when the telemetry counters go away).
+    #[cfg(feature = "rw-telemetry")]
+    {
+        let _ = telemetry.join();
+        logger.info(&format!(
+            "certus-server: FINAL io-stats {}",
+            format_io_stats(&dispatcher.read_write_stats())
+        ));
+    }
+
     let _ = dispatcher.shutdown();
     logger.info("certus-server: shutdown complete");
-
     Ok(())
 }

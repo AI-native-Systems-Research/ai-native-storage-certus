@@ -71,3 +71,45 @@ Task 1 (missing automated dylib-loading integration test, Low) from the
 
 ## Verification
 - No files edited under `specs/**` this sweep (spec already aligned). Only `.specify/sync/align-tasks.md` appended (Task 2). No `.rs` source modified.
+
+---
+
+# 2026-08-20 Phase B (per `.specify/sync/PHASE_B_POLICY.md`)
+
+**Mode**: Phase B resolution (single component, 1 drift).
+**Based on**: `.specify/sync/drift-report.{json,md}` (2026-08-20T09:24 regeneration) — 7 checked, 6 aligned, 1 drifted (FR-4, moderate), 0 not-implemented, 0 unspecced.
+
+## Specs Updated
+
+| Requirement | Change Type |
+|-------------|-------------|
+| (none) | — |
+
+No `spec.md` was edited: FR-4 / Overview are already correct (static-rlib-embedding mechanism; no shared `.so`), so no BACKFILL was warranted.
+
+## Align Tasks Generated
+
+| Spec | Requirement | Task | Severity | Status |
+|------|-------------|------|----------|--------|
+| 001-example-helloworld-dylib | FR-4 / Overview | `align-tasks.md` Task 2 — correct stale module doc comment `src/lib.rs:4-7` | Moderate | Open (pre-existing; covers FR-4 exactly, re-confirmed this phase) |
+
+FR-4 is spec→code drift: the spec is correct and behavior satisfies it, but the source doc comment still claims "dynamically link the same shared libraries". Classified ALIGN (not spec-lag). Per policy the `.rs` source is not edited; the doc fix is queued.
+
+## Unspecced Backfilled
+
+| Feature | Change |
+|---------|--------|
+| (none) | — |
+
+## Resolved
+
+| Item | Note |
+|------|------|
+| (none) | — |
+
+## Backups
+
+- **Spec `.md` files edited this phase: 0 ⇒ no new backups required.** Pre-existing backups from the 2026-07-22 backfill remain intact: `backups/spec.md.bak`, `backups/plan.md.bak`, `backups/tasks.md.bak`.
+
+## Verification
+- Edits confined to `.specify/sync/` (`proposals.md`, `proposals.json`, `apply-report.md`, `apply-report.json`, `align-tasks.md` note). No `specs/**` files changed (spec already correct). No `.rs` source modified; no cargo run.

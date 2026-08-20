@@ -7,6 +7,8 @@
 
 **Organization**: Tasks grouped by user story. Two crates: `spdk-sys` (FFI bindings) and `spdk-env` (safe wrapper + component).
 
+> _Spec-sync backfill (2026-08-20): `spdk-sys` now lives at `lib/spdk-sys/` (it was moved out of `components/`); `spdk-env` remains at `components/spdk-env/`. The task paths below have been updated accordingly._
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
@@ -19,9 +21,9 @@
 
 **Purpose**: Create both crate structures and integrate into workspace
 
-- [X] T001 Create `components/spdk-sys/` crate directory with `Cargo.toml` (links = "spdk", build deps: bindgen, pkg-config), `wrapper.h`, `build.rs` skeleton, and `src/lib.rs`
+- [X] T001 Create `lib/spdk-sys/` crate directory with `Cargo.toml` (links = "spdk", build deps: bindgen, pkg-config), `wrapper.h`, `build.rs` skeleton, and `src/lib.rs`
 - [X] T002 [P] Create `components/spdk-env/` crate directory with `Cargo.toml` (deps: spdk-sys, component-framework), `src/lib.rs`, `src/error.rs`, `src/device.rs`, `src/checks.rs`, `src/env.rs`
-- [X] T003 Add `components/spdk-sys` and `components/spdk-env` to workspace members and `[workspace.dependencies]` in `Cargo.toml` (workspace root)
+- [X] T003 Add `lib/spdk-sys` and `components/spdk-env` to workspace members and `[workspace.dependencies]` in `Cargo.toml` (workspace root)
 
 ---
 
@@ -31,9 +33,9 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete
 
-- [X] T004 Implement `components/spdk-sys/build.rs` — use pkg-config to find `spdk_env_dpdk` and DPDK libs from `deps/spdk-build/lib/pkgconfig/`, run bindgen on `wrapper.h` with `deps/spdk-build/include/` include path, emit link directives
-- [X] T005 Implement `components/spdk-sys/wrapper.h` — include `spdk/env.h` and `spdk/env_dpdk.h` headers needed for env init, PCI enumeration, and device accessors
-- [X] T006 Implement `components/spdk-sys/src/lib.rs` — re-export bindgen-generated bindings with `#![allow(non_upper_case_globals, non_camel_case_types, non_snake_case)]`
+- [X] T004 Implement `lib/spdk-sys/build.rs` — use pkg-config to find `spdk_env_dpdk` and DPDK libs from `deps/spdk-build/lib/pkgconfig/`, run bindgen on `wrapper.h` with `deps/spdk-build/include/` include path, emit link directives
+- [X] T005 Implement `lib/spdk-sys/wrapper.h` — include `spdk/env.h` and `spdk/env_dpdk.h` headers needed for env init, PCI enumeration, and device accessors
+- [X] T006 Implement `lib/spdk-sys/src/lib.rs` — re-export bindgen-generated bindings with `#![allow(non_upper_case_globals, non_camel_case_types, non_snake_case)]`
 - [X] T007 [P] Define `SpdkEnvError` enum (VfioNotAvailable, PermissionDenied, HugepagesNotConfigured, LoggerNotConnected, AlreadyInitialized, InitFailed, DeviceProbeFailed) with `Display` and `std::error::Error` impls in `components/spdk-env/src/error.rs`
 - [X] T008 [P] Define `PciAddress` (with `Display` as `DDDD:BB:DD.F`), `PciId`, `VfioDevice` structs with doc comments in `components/spdk-env/src/device.rs`
 - [X] T009 Define `ISPDKEnv` interface via `define_interface!` with methods: `init(&self) -> Result<(), SpdkEnvError>`, `devices(&self) -> Vec<VfioDevice>`, `device_count(&self) -> usize`, `is_initialized(&self) -> bool` in `components/spdk-env/src/lib.rs`

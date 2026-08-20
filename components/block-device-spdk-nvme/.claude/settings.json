@@ -3,9 +3,9 @@
     "allow": [
       "Bash(bash *)",
       "Read(//home/dwaddington/ai-native-storage-certus/components/block-device-spdk-nvme/v2/**)",
-      "Read(//home/dwaddington/ai-native-storage-certus/components/component-framework/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/lib/component-framework/**)",
       "Read(//home/dwaddington/ai-native-storage-certus/components/interfaces/**)",
-      "Read(//home/dwaddington/ai-native-storage-certus/components/spdk-sys/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/lib/spdk-sys/**)",
       "Read(//home/dwaddington/ai-native-storage-certus/components/spdk-env/**)",
       "Read(//home/dwaddington/ai-native-storage-certus/components/logger/**)",
       "Bash(cargo build *)",

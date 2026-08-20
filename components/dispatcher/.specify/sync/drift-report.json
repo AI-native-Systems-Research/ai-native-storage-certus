@@ -1,68 +1,52 @@
 {
-  "generated": "2026-08-07T15:31:21Z",
+  "generated": "pending",
   "project": "dispatcher",
-  "spec": "specs/001-dispatcher-cache-interface/spec.md",
   "summary": {
     "specs_analyzed": 1,
-    "functional_requirements_active": 50,
-    "success_criteria_active": 14,
-    "aligned": 61,
+    "requirements_checked": 65,
+    "aligned": 65,
     "drifted": 3,
     "not_implemented": 0,
-    "unspecced": 6
+    "unspecced_features": 1
   },
   "specs": [
     {
-      "spec": "specs/001-dispatcher-cache-interface/spec.md",
-      "findings": [
+      "id": "001-dispatcher-cache-interface",
+      "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
+      "aligned": 65,
+      "drifted": [
         {
-          "id": "FR-001",
-          "status": "drifted",
-          "severity": "moderate",
-          "spec": "IDispatcher methods = initialize, shutdown, lookup, lookup_async, batch_lookup, check, remove, populate, touch, promote_to_memory_tier",
-          "code": "interface also defines reserve_memory, copy_gpu_to_memory_async, copy_gpu_to_memory_completed, release_memory, pin, unpin, flush_to_ssd, read_write_stats (clear_memory_tier covered by FR-038)",
-          "location": "components/interfaces/src/idispatcher.rs:200-668; impl components/dispatcher/src/lib.rs:2817-3266"
+          "requirement": "US-011 / FR-039",
+          "spec_text": "User Story 11 narrative: 'Each thread uses a reduced NVMe pipeline depth (16 / num_queues)...'; scenario 3: 'each processed by a separate thread with max_queue_depth = 8 (16/2), keeping total per-drive NVMe commands at <=16.'",
+          "actual": "batch_lookup sets `let queue_depth = 128;` per queue thread and passes it into pipelined_multi_object_zero_copy. This is deliberate and matches FR-039 step (5) and FR-019 ('max_queue_depth = 128 per thread'). The US-11 acceptance/narrative text (16/num_queues, <=16 per drive) is stale and contradicts FR-039/FR-019 within the same spec. Code and the FRs are aligned; the user-story text is not.",
+          "location": "components/dispatcher/src/lib.rs:2217",
+          "severity": "moderate"
         },
         {
-          "id": "FR-039",
-          "status": "drifted",
-          "severity": "moderate",
-          "spec": "batch_lookup(entries: &[(CacheKey, IpcHandle)])",
-          "code": "batch_lookup(entries: &[(CacheKey, Vec<IpcHandle>)]) - multi-region scatter for vLLM 0.23+",
-          "location": "components/interfaces/src/idispatcher.rs:377-380; impl components/dispatcher/src/lib.rs:2009-2012"
+          "requirement": "CLAUDE.md (stale crate path)",
+          "spec_text": "CLAUDE.md: 'component-framework, component-core, component-macros — at ../../component-framework/crates/'",
+          "actual": "component-framework now lives at lib/component-framework (verified present; components/component-framework absent). Cargo.toml uses workspace deps so build is unaffected, but the doc path is stale after the components/->lib/ move.",
+          "location": "components/dispatcher/CLAUDE.md:40",
+          "severity": "minor"
         },
         {
-          "id": "FR-042",
-          "status": "drifted",
-          "severity": "minor",
-          "spec": "create_eviction_channel() -> Receiver<EvictionEvent> (no argument)",
-          "code": "create_eviction_channel(&self, capacity: usize) -> Receiver<EvictionEvent>",
-          "location": "components/dispatcher/src/lib.rs:378-385"
+          "requirement": "CLAUDE.md (stale crate names)",
+          "spec_text": "CLAUDE.md references block-device-spdk-nvme-v2 and extent-manager-v2.",
+          "actual": "The actual dependency crate is block-device-spdk-nvme (Cargo.toml:15); there is no -v2 suffix in the current workspace. Documentation-only drift.",
+          "location": "components/dispatcher/CLAUDE.md:43-44,53",
+          "severity": "minor"
         }
       ],
-      "aligned": [
-        "FR-002","FR-003","FR-004","FR-005","FR-006","FR-007","FR-008","FR-009","FR-010",
-        "FR-011","FR-012","FR-013","FR-014","FR-015","FR-016","FR-017","FR-018","FR-019",
-        "FR-023","FR-024","FR-025","FR-028","FR-029","FR-030","FR-031","FR-032","FR-033",
-        "FR-034","FR-035","FR-036","FR-037","FR-038","FR-040","FR-041","FR-043","FR-044",
-        "FR-045","FR-046","FR-047","FR-048","FR-049","FR-050","FR-051","FR-052","FR-053",
-        "FR-054","FR-055",
-        "SC-001","SC-002","SC-003","SC-004","SC-005","SC-006","SC-007","SC-009","SC-010",
-        "SC-011","SC-012","SC-013","SC-014","SC-015"
-      ],
-      "removed": ["FR-020","FR-021","FR-022","FR-026","FR-027","SC-008"],
       "not_implemented": []
     }
   ],
   "unspecced": [
-    {"item": "reserve_memory / copy_gpu_to_memory_async / copy_gpu_to_memory_completed / release_memory (reserve->copy->complete primitives + session_id)", "location": "components/interfaces/src/idispatcher.rs:501-549; impl components/dispatcher/src/lib.rs:2817-2995"},
-    {"item": "pin / unpin eviction-protection reference API", "location": "components/interfaces/src/idispatcher.rs:561,572; impl components/dispatcher/src/lib.rs:3010,3027"},
-    {"item": "flush_to_ssd / read_write_stats", "location": "components/interfaces/src/idispatcher.rs:660,667; impl components/dispatcher/src/lib.rs:3241,3256"},
-    {"item": "DispatcherConfig.metadata_partition_size / extended_metadata_partition_size", "location": "components/interfaces/src/idispatcher.rs:62-67; used components/dispatcher/src/lib.rs:1500,1505"},
-    {"item": "DispatcherConfig.backfill_delay_ms (p2p-only field in shared config, unused by standard dispatcher)", "location": "components/interfaces/src/idispatcher.rs:57-61"},
-    {"item": "set_block_device_factory / set_extent_manager_factory / set_pipeline_metrics (DI/test hooks)", "location": "components/dispatcher/src/lib.rs:360-372"}
+    {
+      "feature": "Dependency-injection / test hooks: set_block_device_factory, set_extent_manager_factory, set_pipeline_metrics",
+      "location": "components/dispatcher/src/lib.rs",
+      "lines": "360-372",
+      "suggested_spec": "Public inherent methods on DispatcherComponent for injecting mock block-device/extent-manager factories and a PipelineMetrics impl. Not referenced by any FR (FR-043 covers the metrics trait but not the injection setter). Add a 'test/DI surface' note or gate them behind #[cfg(test)]."
+    }
   ],
-  "conflicts": [
-    {"type": "spec-references-nonexistent", "detail": "idispatcher.rs:185-198 documents Creusot 'Verified Properties (see components/dispatcher/verif/)' with P1-P10 and 24 verification conditions, plus per-method '# Verified: Pn' tags, but components/dispatcher/verif/ does not exist.", "location": "components/interfaces/src/idispatcher.rs:185-198"}
-  ]
+  "conflicts": []
 }

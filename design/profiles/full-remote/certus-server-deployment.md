@@ -10,18 +10,18 @@
 │  │ Python Test Client                       │       ┌───────────────────┐    │
 │  │  • PyTorch GPU allocation                │──────▶│ GPU Memory        │    │
 │  │  • cudaIpcGetMemHandle (64-byte handle)  │       │ (client context)  │    │
-│  │  • Batch gRPC requests                   │       └─────────┬─────────┘    │
+│  │  • Batch shmq requests                   │       └─────────┬─────────┘    │
 │  └──────────────────┬───────────────────────┘                 │              │
 │                     │                                         │ CUDA IPC     │
 └─────────────────────┼─────────────────────────────────────────┼──────────────┘
-                      │ gRPC (protobuf/TCP, optional TLS)       │
+                      │ shmq (/dev/shm mailbox, shared IPC)     │
                       ▼                                         ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ certus-server Process (full-remote profile)                                  │
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ gRPC Service Layer (tonic)                                             │  │
-│  │  • Populate / Lookup / Check / Remove / Touch / ClearMemoryTier RPCs   │  │
+│  │ shmq translate/serve layer (shmq-dispatcher)                           │  │
+│  │  • Populate / Lookup / Check / Remove / Touch / ClearMemoryTier ops    │  │
 │  │  • cudaIpcOpenMemHandle / cudaIpcCloseMemHandle (cached per batch)     │  │
 │  │  • Batch→singular mapping, duplicate-key rejection                     │  │
 │  └────────────────────────────────┬───────────────────────────────────────┘  │
@@ -199,7 +199,8 @@ certus-server-yaml \
     --device-pci DDDD:BB:DD.F [--device-pci ...] \
     --memory-tier-size 4G \
     --format \
-    --listen 0.0.0.0:50051
+    --shm-path /dev/shm/certus-shmq \
+    --channels 32
 ```
 
 | Flag | Description |
@@ -208,20 +209,31 @@ certus-server-yaml \
 | `--device-path` | Filesystem device path (alternative to PCI, e.g., `/dev/null` for testing) |
 | `--memory-tier-size` | DRAM pool size (e.g., `256M`, `1G`, `4G`) |
 | `--format` | Format SSD extents on startup |
-| `--listen` | gRPC bind address (default `0.0.0.0:50051`) |
-| `--tls-cert` / `--tls-key` | Enable TLS for gRPC transport |
+| `--shm-path` | Path to the shared-memory mailbox file (default `/dev/shm/certus-shmq`) |
+| `--channels` | Number of mailbox channels (= max in-flight requests = worker threads) |
 
-## gRPC API (certus.dispatcher.v1)
+A client reaches the server by sharing the host IPC namespace and `/dev/shm`
+(podman `--ipc=host`, or k8s `hostIPC: true` with a shared `/dev/shm`). The
+shared `/dev/shm` mailbox path *is* the endpoint. `--ipc=host` does double duty:
+the host server opens the container's CUDA IPC handles, and the container sees
+the host `/dev/shm` mailbox. Note this local shmq transport is the *client↔server*
+control path; inter-node peer cooperation uses zyre + RDMA (see below), not shmq.
 
-| RPC | Request | Response | Description |
+## shmq Ops (opcode-framed, see `lib/shmq-dispatcher/src/wire.rs`)
+
+The client↔server transport is a small opcode-based binary framing carried in
+the `/dev/shm` mailbox. Each op maps to an `IDispatcher` method.
+
+| Op | Request | Response | Description |
 |-----|---------|----------|-------------|
-| Populate | BatchPopulateRequest | BatchPopulateResponse | GPU→DRAM→SSD cache insertion |
-| Lookup | BatchLookupRequest | BatchLookupResponse | Serve from DRAM, SSD, or remote peer |
-| Check | BatchCheckRequest | BatchCheckResponse | Existence check (no data transfer) |
-| Remove | BatchRemoveRequest | BatchRemoveResponse | Evict from DRAM + SSD, free extents |
-| Touch | BatchTouchRequest | BatchTouchResponse | Refresh LRU timestamp without DMA |
-| ClearMemoryTier | ClearMemoryTierRequest | ClearMemoryTierResponse | Evict all DRAM entries |
-| FlushToSsd | FlushToSsdRequest | FlushToSsdResponse | Force pending write-through to complete |
+| Populate | HandleBatch | per-op status | GPU→DRAM→SSD cache insertion |
+| Lookup | HandleBatch | per-op status | Serve from DRAM, SSD, or remote peer |
+| Check | key list | per-key existence | Existence check (no data transfer) |
+| Remove | key list | per-key status | Evict from DRAM + SSD, free extents |
+| Touch | key list | per-key status | Refresh LRU timestamp without DMA |
+| ClearMemoryTier | (empty) | entries_cleared | Evict all DRAM entries |
+| FlushToSsd | (empty) | jobs_flushed | Force pending write-through to complete |
+| GetIoStats | (empty) | I/O counters | Read/write op, byte, and latency totals |
 
 ## Notes
 

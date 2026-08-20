@@ -11,6 +11,10 @@ The 2026-08-07 sweep backfilled five previously-unspecced, load-bearing behavior
 tasks (not applied): the stale `src/lib.rs` module/`batch_lookup` docstrings that still claim the
 protocol is unbuilt (FR-001 doc-drift, Medium), and the missing log on unknown wire frames
 (FR-018, Low). See `.specify/sync/align-tasks.md` and `apply-report.md`.
+The 2026-08-20 sweep backfilled three previously-unspecced, load-bearing behaviors into the text
+below (FR-006 `AlreadyExists` size-collision guard, FR-014 fixed `DISCONNECT_ACK_TIMEOUT`
+handshake bound, and FR-018 malformed/truncated-frame handling) and re-queued the FR-018 logging
+ALIGN task (now covering both the unknown-type and malformed-decode arms).
 **Supersedes**: `001-remote-lookup-placeholder` (placeholder implementation)
 **Input**: Refresh of the remote-lookup design against the two now-built RDMA components
 (`remote-lookup-rdma-initiator`, `remote-lookup-rdma-responder`). The remote-lookup
@@ -285,6 +289,12 @@ one-sided write into a reclaimed slot).
 - Placeholder allocation fails (memory-tier pool full / cannot evict) → that key is finalized
   `Err(NotFound)` (cannot receive the value).
 - RDMA_REQUEST arrives for a key this node no longer holds (evicted) → RDMA_STATUS(KeyNoLongerAvailable).
+- An inbound frame with an unrecognized `msg_type`, or a malformed/truncated frame that fails to
+  decode → logged and dropped; the poll loop continues (FR-018).
+- On RDMA_STATUS(Success), publishing the landing slot races a concurrent publisher and
+  `create_memory_tier_entry` returns `AlreadyExists` → success only if the resident entry's size
+  matches the slot length; a size mismatch discards the private slot and leaves the resident entry
+  untouched (never evicted) (FR-006).
 
 ## Requirements *(mandatory)*
 
@@ -314,10 +324,15 @@ one-sided write into a reclaimed slot).
   reserve a **private** local landing slot (`memory_tier.insert`) whose DRAM address lies within
   the responder's pre-registered pool. The slot MUST NOT be published to dispatch-map while the
   fill is in flight. On RDMA success the actor MUST publish it via
-  `create_memory_tier_entry(key, addr, len)` then `release_write(key)` (a racing `AlreadyExists`
-  counts as success); on failure/peer-exit it MUST discard the slot with `memory_tier.remove(key)`
-  and MUST NOT create a dispatch-map entry. (No dispatch-map write-reference is held across the
-  transfer; dependency D1 is dropped.)
+  `create_memory_tier_entry(key, addr, len)` then `release_write(key)`; on failure/peer-exit it
+  MUST discard the slot with `memory_tier.remove(key)` and MUST NOT create a dispatch-map entry.
+  (No dispatch-map write-reference is held across the transfer; dependency D1 is dropped.) A racing
+  `create_memory_tier_entry` that returns `AlreadyExists` counts as success **only when the
+  existing entry's size equals the landing slot's length** (`entry_size(key) == len`); if the
+  resident entry has a **different** size the collision is treated as unsatisfied — the actor MUST
+  discard its private slot (`memory_tier.remove(key)`) and MUST NOT evict or overwrite the resident
+  entry (never-evict-on-collision). *(Backfilled 2026-08-20 — documents the shipped
+  `publish_success` size-check, `src/actor.rs:576-591`; see `knowledge/size-mismatch-handling.md`.)*
 - **FR-006a** (client, greedy request): On each KEY_RESPONSE, the actor MUST, for that peer's
   reported **memory** hits that are unsatisfied and not in-progress, mark them in-progress and
   whisper an RDMA_REQUEST to that peer with the landing region(s); it MUST also record the peer's
@@ -355,6 +370,13 @@ one-sided write into a reclaimed slot).
   `ResponderCommand::Disconnect { node }` and block for `ResponderEvent::DisconnectAck`. Late
   one-sided writes MUST NOT be able to land into a reclaimed slot. Completing the same-key waiters
   with a not-found result MAY happen immediately; only the physical slot reclaim waits on the ack.
+  The block for `DisconnectAck` MUST be **bounded** by a fixed `DISCONNECT_ACK_TIMEOUT` (a hardcoded
+  500 ms constant, `src/actor.rs:37`); if the ack is lost the actor gives up the wait rather than
+  hanging its poll loop. This ack-handshake bound is a fixed constant, deliberately **not** a
+  `LookupConfig` knob, and is distinct from the configurable `connection_teardown_timeout` orphan
+  grace of FR-031 (that timer decides *when* an orphan is force-torn-down; this bound caps *how
+  long* the resulting ack handshake may block). *(Backfilled 2026-08-20 — documents the shipped
+  `DISCONNECT_ACK_TIMEOUT` bound, `src/actor.rs:37,1020-1033`.)*
 - **FR-015** (server, availability): On a KEY_QUERY SHOUT from another peer, the actor MUST, for
   each `(key, size)`, consult the dispatch-map: a memory-tier match with equal size ⇒ memory; a
   block/disk match with equal size ⇒ disk; otherwise not available. It MUST whisper a KEY_RESPONSE
@@ -381,8 +403,16 @@ one-sided write into a reclaimed slot).
   does not propagate per-key errors), the actor MUST report that key as `KeyNoLongerAvailable`
   rather than attempting the push.
 - **FR-018** (framing): All wire messages MUST use a `[version: u8][msg_type: u8]` header followed
-  by an `op_id: u64` for forward compatibility and correlation. Unknown message types MUST be
-  logged and ignored. Servers MUST echo `op_id` in KEY_RESPONSE and RDMA_STATUS.
+  by an `op_id: u64` for forward compatibility and correlation. Two classes of non-actionable
+  inbound frame MUST be **ignored** (dropped without processing and without aborting the poll
+  loop): (a) frames whose `msg_type` is not recognized (decoded as `WireMessage::Unknown`), and
+  (b) malformed/truncated frames that fail to decode (`WireMessage::decode` returns `Err`, e.g.
+  a short buffer, bad tag, or bad UTF-8). Both classes MUST be **logged** before being dropped so a
+  version/framing mismatch is diagnosable. Servers MUST echo `op_id` in KEY_RESPONSE and
+  RDMA_STATUS. *(Backfilled 2026-08-20 — the malformed/truncated-frame ignore class (b) was
+  previously unspecced; `src/actor.rs:314`. The **logging** half of this requirement is not yet met
+  for either arm (`Unknown => {}` at `src/actor.rs:330` and `Err(_) => return` at `src/actor.rs:314`
+  are both silent) and is tracked as an ALIGN task; the ignore half is aligned.)*
 - **FR-019** (stale responses): A KEY_RESPONSE or RDMA_STATUS whose `op_id` is not in the
   active-operation map MUST be discarded without error.
 - **FR-020** (concurrency): The actor MUST support multiple concurrent in-flight operations, each

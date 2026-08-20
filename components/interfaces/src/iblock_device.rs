@@ -130,6 +130,14 @@ pub struct TelemetrySnapshot {
 ///
 /// The `total_*` accessors return the read+write sum, matching the aggregate
 /// semantics of [`TelemetrySnapshot`].
+/// Number of power-of-two size buckets in [`ReadWriteStats`] IO-size histograms.
+///
+/// Bucket `b` (for `b >= 1`) counts operations whose transfer size falls in
+/// `[2^(b-1), 2^b)` bytes; bucket `0` counts zero-byte operations. Sizes at or
+/// above `2^(IO_SIZE_BUCKETS-1)` are clamped into the final bucket. Kept `<= 32`
+/// so `[u64; IO_SIZE_BUCKETS]` still derives `Default`.
+pub const IO_SIZE_BUCKETS: usize = 25;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ReadWriteStats {
     /// Number of completed read operations.
@@ -144,9 +152,82 @@ pub struct ReadWriteStats {
     pub write_bytes: u64,
     /// Cumulative latency of all write operations, in nanoseconds.
     pub write_latency_ns_sum: u64,
+    /// Per-transfer-size histogram of reads (see [`IO_SIZE_BUCKETS`]).
+    ///
+    /// `read_size_buckets[ReadWriteStats::size_bucket(n)]` is incremented for a
+    /// read of `n` bytes. All-zero unless built with the telemetry feature.
+    pub read_size_buckets: [u64; IO_SIZE_BUCKETS],
+    /// Per-transfer-size histogram of writes (see [`IO_SIZE_BUCKETS`]).
+    pub write_size_buckets: [u64; IO_SIZE_BUCKETS],
 }
 
 impl ReadWriteStats {
+    /// Map a transfer size in bytes to its [`IO_SIZE_BUCKETS`] histogram index.
+    ///
+    /// Bucket `b >= 1` covers `[2^(b-1), 2^b)`; bucket `0` is zero bytes; sizes
+    /// at or above `2^(IO_SIZE_BUCKETS-1)` clamp into the last bucket.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use interfaces::ReadWriteStats;
+    /// assert_eq!(ReadWriteStats::size_bucket(0), 0);
+    /// assert_eq!(ReadWriteStats::size_bucket(4096), 13); // [4KiB, 8KiB)
+    /// ```
+    pub fn size_bucket(bytes: u64) -> usize {
+        if bytes == 0 {
+            return 0;
+        }
+        ((u64::BITS - bytes.leading_zeros()) as usize).min(IO_SIZE_BUCKETS - 1)
+    }
+
+    /// Inclusive lower bound (in bytes) of histogram bucket `idx`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use interfaces::ReadWriteStats;
+    /// assert_eq!(ReadWriteStats::bucket_lower_bound(0), 0);
+    /// assert_eq!(ReadWriteStats::bucket_lower_bound(13), 4096);
+    /// ```
+    pub fn bucket_lower_bound(idx: usize) -> u64 {
+        if idx == 0 {
+            0
+        } else {
+            1u64 << (idx - 1)
+        }
+    }
+
+    /// Accumulate another snapshot into this one, summing every counter and
+    /// both size histograms. Used to aggregate per-drive stats into a
+    /// dispatcher-wide total.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use interfaces::ReadWriteStats;
+    /// let mut agg = ReadWriteStats::default();
+    /// let mut one = ReadWriteStats::default();
+    /// one.read_ops = 2;
+    /// one.read_size_buckets[13] = 2;
+    /// agg.merge_from(&one);
+    /// agg.merge_from(&one);
+    /// assert_eq!(agg.read_ops, 4);
+    /// assert_eq!(agg.read_size_buckets[13], 4);
+    /// ```
+    pub fn merge_from(&mut self, other: &ReadWriteStats) {
+        self.read_ops += other.read_ops;
+        self.read_bytes += other.read_bytes;
+        self.read_latency_ns_sum += other.read_latency_ns_sum;
+        self.write_ops += other.write_ops;
+        self.write_bytes += other.write_bytes;
+        self.write_latency_ns_sum += other.write_latency_ns_sum;
+        for i in 0..IO_SIZE_BUCKETS {
+            self.read_size_buckets[i] += other.read_size_buckets[i];
+            self.write_size_buckets[i] += other.write_size_buckets[i];
+        }
+    }
+
     /// Total operations (reads + writes).
     pub fn total_ops(&self) -> u64 {
         self.read_ops + self.write_ops

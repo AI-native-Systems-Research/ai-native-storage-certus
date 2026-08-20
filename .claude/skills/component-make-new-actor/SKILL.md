@@ -20,7 +20,7 @@ Building the skeleton for component named $0 involves the following steps:
 
 7. Add recepticals for other interface names specified by other arguments, $1, $2 and so forth.  The receptable must have a corresponding interface defined in src/interfaces.
 
-8. Add a permissions file .claude/settings.json, in the newly created sub-directory, that allows access to the component itself, components/component-framework and any other directories corresponding to components that are listed as receptacles.  We want to avoid giving access to other components that are not directly used.
+8. Add a permissions file .claude/settings.json, in the newly created sub-directory, that allows access to the component itself, lib/component-framework and any other directories corresponding to components that are listed as receptacles.  We want to avoid giving access to other components that are not directly used.
 
 9. Copy into the new component directory's `.claude/skills` only the skills whose names match an `include` pattern in `.claude/component-local-skills.json` (patterns support a trailing `*` wildcard; other entries match exactly). This allowlist is the single source of truth for which skills are component-local — do not hard-code the list here. Skip any skill that does not match.
 

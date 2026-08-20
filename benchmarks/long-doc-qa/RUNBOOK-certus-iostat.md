@@ -1,4 +1,4 @@
-# Runbook: long_doc_qa over Certus gRPC offload, with SSD I/O captured
+# Runbook: long_doc_qa over Certus shmq offload, with SSD I/O captured
 
 Reproduces the 51-doc tier-exercising run and captures SPDK NVMe (SSD/extent
 tier) I/O via `Dispatcher.GetIoStats`. `run_bench.sh` drives the workload;
@@ -28,13 +28,13 @@ LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64 \
   target/release/certus-server \
   --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
   --device-pci 0000:63:00.0 --device-pci 0000:64:00.0 \
-  --memory-tier-size 12G --listen 0.0.0.0:50051 --format   # drop --format for a warm run
+  --memory-tier-size 12G --shm-path /dev/shm/certus-shmq --channels 32 --format   # drop --format for a warm run
 ```
 
 ## 2. Start the I/O sampler (before the workload)
 
 ```bash
-python3 tools/certus-iostat-poll.py localhost:50051 1.0 \
+python3 tools/certus-iostat-poll.py /dev/shm/certus-shmq 1.0 \
   > results/certus-51docs-iostat/iostat_samples.csv &
 IOSTAT_PID=$!
 ```
@@ -49,10 +49,11 @@ cd benchmarks/long-doc-qa
 CONNECTOR=certus MODEL=Qwen/Qwen2.5-7B-Instruct ./run_bench.sh
 ```
 
-`CONNECTOR=certus` uses the `certus-grpc-bench` image, resets its ENTRYPOINT to
+`CONNECTOR=certus` uses the `certus-shmq-bench` image, resets its ENTRYPOINT to
 `vllm serve`, and adds `--ipc=host` + a `--kv-transfer-config`
-(OffloadingConnector / kv_both / CertusGrpcOffloadingSpec, server localhost:50051
-via `--network host`, slab_size_bytes=2097152) + `--enforce-eager`.
+(OffloadingConnector / kv_both / CertusShmqOffloadingSpec, shm_path
+/dev/shm/certus-shmq, slab_size_bytes=2097152) + `--enforce-eager`. There is no
+network transport — `--ipc=host` gives the container the host /dev/shm mailbox.
 
 ## 4. Stop the sampler and summarize
 

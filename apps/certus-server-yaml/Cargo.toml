@@ -26,9 +26,9 @@ remote-lookup.workspace = true
 remote-lookup-rdma-initiator = { workspace = true, optional = true }
 remote-lookup-rdma-responder = { workspace = true, optional = true }
 zyre = { workspace = true, optional = true }
+shm-queue.workspace = true
+shmq-dispatcher.workspace = true
 
-tonic = { version = "0.12", features = ["tls"] }
-prost = "0.13"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive", "env"] }
 libc = "0.2"
@@ -37,7 +37,7 @@ crossbeam-channel = "0.5"
 # OpenTelemetry (optional, enabled via --features otel)
 opentelemetry = { version = "0.27", optional = true }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "metrics"], optional = true }
-opentelemetry-otlp = { version = "0.27", features = ["metrics", "grpc-tonic"], optional = true }
+opentelemetry-otlp = { version = "0.27", default-features = false, features = ["metrics", "http-proto", "reqwest-client"], optional = true }
 
 [features]
 default = ["spdk"]
@@ -56,4 +56,3 @@ rw-telemetry = ["dispatcher/rw-telemetry"]
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-tonic-build = "0.12"

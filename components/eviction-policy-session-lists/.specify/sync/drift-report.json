@@ -1,51 +1,36 @@
 {
-  "generated": "2026-08-07T15:28:26Z",
+  "generated": "pending",
   "project": "eviction-policy-session-lists",
   "summary": {
-    "aligned": 22,
-    "drifted": 0,
-    "not_implemented": 1,
-    "unspecced": 1,
-    "result": "mostly-aligned"
+    "specs_analyzed": 1,
+    "requirements_checked": 24,
+    "aligned": 23,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced_features": 0
   },
   "specs": [
-    { "spec": "specs/001-session-list-eviction/spec.md", "status": "Draft",
-      "requirements": [
-        { "id": "FR-001", "status": "aligned", "location": "src/lib.rs:123-141; src/session_list.rs:90-119" },
-        { "id": "FR-002", "status": "aligned", "location": "src/session_list.rs:96-115" },
-        { "id": "FR-003", "status": "aligned", "location": "src/session_list.rs:49,97,114" },
-        { "id": "FR-004", "status": "aligned", "location": "src/session_list.rs:123-137" },
-        { "id": "FR-005", "status": "aligned", "location": "src/lib.rs:157-184" },
-        { "id": "FR-006", "status": "aligned", "location": "src/session_list.rs:190-193" },
-        { "id": "FR-007", "status": "aligned", "location": "src/session_list.rs:51,110,161-174" },
-        { "id": "FR-008", "status": "aligned", "location": "src/session_list.rs:190-193; src/lib.rs:200-205" },
-        { "id": "FR-009", "status": "aligned", "location": "src/session_list.rs:161-174" },
-        { "id": "FR-010", "status": "aligned", "location": "src/session_list.rs:196-202" },
-        { "id": "FR-011", "status": "aligned", "location": "src/session_list.rs:144-185,206-212" },
-        { "id": "FR-012", "status": "aligned", "location": "src/session_list.rs:60-65" },
-        { "id": "FR-013", "status": "aligned", "location": "src/session_list.rs:215-217" },
-        { "id": "FR-014", "status": "aligned", "location": "src/session_list.rs:220-228" },
-        { "id": "FR-015", "status": "aligned", "location": "src/lib.rs:143-155,186-198" },
-        { "id": "FR-016", "status": "aligned", "location": "src/lib.rs:102-229" },
-        { "id": "FR-017", "status": "aligned", "location": "src/session_list.rs:91-94" },
-        { "id": "FR-018", "status": "aligned", "location": "src/session_list.rs:30-36,110-114" },
-        { "id": "SC-001", "status": "not_implemented", "location": "no comparative-trace benchmark vs eviction-policy-lru",
-          "detail": "15% reload-reduction claim is not demonstrated by any test or bench; session_list_benchmark.rs measures own throughput only." },
-        { "id": "SC-002", "status": "aligned", "location": "benches/session_list_benchmark.rs (bench_track/bench_touch/bench_batch_touch)" },
-        { "id": "SC-003", "status": "aligned", "location": "src/session_list.rs:190-193; bench_identify_next_to_evict" },
-        { "id": "SC-004", "status": "aligned", "location": "tests/lineage_properties.rs; src/session_list.rs unit tests" },
-        { "id": "SC-005", "status": "aligned", "location": "benches/session_list_benchmark.rs (bench_batch_touch)" },
-        { "id": "SC-006", "status": "aligned", "location": "src/session_list.rs:233-314,514-564; tests/lineage_properties.rs" }
-      ]
+    {
+      "id": "001-session-list-eviction",
+      "title": "Session-Lineage Eviction Policy",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-015", "FR-016", "FR-017", "FR-018",
+        "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
+      ],
+      "drifted": [
+        {
+          "requirement": "SC-001",
+          "spec_text": "On multi-turn traces, retain session-prefix blocks longer than LRU, reducing reloads by >=15%.",
+          "actual": "No comparative trace-replay harness exists; benches/session_list_benchmark.rs measures only hot-path throughput. Spec itself downgrades this to an unverified design goal (spec.md:114).",
+          "location": "components/eviction-policy-session-lists/specs/001-session-list-eviction/spec.md:114",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
     }
   ],
-  "unspecced": [
-    { "item": "one-time startup info-log ('selected as active eviction policy') + EvictionState.announced flag",
-      "location": "src/lib.rs:83-87,107-120", "severity": "low" }
-  ],
-  "conflicts": [
-    { "type": "cross-component-integration",
-      "detail": "memory-tier passes BlockSemantics::default() (session_id=0) for every block (components/memory-tier/src/lib.rs:365-367); binding this policy under memory-tier collapses all blocks into one session chain (degenerate lineage). Not a spec drift of this component.",
-      "severity": "medium" }
-  ]
+  "unspecced": [],
+  "conflicts": []
 }

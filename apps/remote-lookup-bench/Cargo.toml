@@ -15,13 +15,12 @@ publish = false
 # SPDK methods are `#[cfg(feature = "spdk")]` in `interfaces`. Any cargo
 # invocation that also builds a crate enabling `interfaces/spdk` (e.g.
 # `remote-lookup`) would unify features and leave `gpu-services` an incomplete
-# impl. This bench is a pure gRPC client and needs six CUDA symbols, not a
-# component — so it declares them itself, as apps/baseline-generalized-fs does.
+# impl. This bench needs six CUDA symbols, not a component — so it declares
+# them itself, as the deleted apps/baseline-generalized-fs did.
 [dependencies]
-tonic = "0.12"
-prost = "0.13"
-tokio = { version = "1", features = ["full"] }
+# Control transport: the /dev/shm shmq mailbox. `shm-queue` provides the
+# blocking `Client`; `shmq-dispatcher` provides the wire framing (opcodes +
+# little-endian encoders) so this bench speaks exactly what the server serves.
+shm-queue.workspace = true
+shmq-dispatcher.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
-
-[build-dependencies]
-tonic-build = "0.12"

@@ -19,8 +19,8 @@ Prerequisites:
   - GPU available for IPC DMA
 
 Usage:
-    python test-memory-tier-eviction.py --server localhost:50051
-    python test-memory-tier-eviction.py --server localhost:50051 --block-size 2M --num-entries 40
+    python test-memory-tier-eviction.py --shm-path /dev/shm/certus-shmq
+    python test-memory-tier-eviction.py --shm-path /dev/shm/certus-shmq --block-size 2M --num-entries 40
 """
 
 import argparse
@@ -32,9 +32,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import grpc
-import dispatcher_pb2
-import dispatcher_pb2_grpc
+from certus_shmq_helpers import RingError, add_shm_arg, connect, single_region
+from certus_shmq_connector.ring import REASON_DEMOTED, REASON_REMOVED
 
 # --- CUDA helpers ---
 
@@ -52,9 +51,6 @@ _libcudart.cudaMemcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_siz
 _libcudart.cudaDeviceSynchronize.restype = ctypes.c_int
 _CUDA_MEMCPY_H2D = 1
 _CUDA_MEMCPY_D2H = 2
-
-EVICTION_REASON_DEMOTED = 1
-EVICTION_REASON_REMOVED = 2
 
 
 def cuda_alloc(size):
@@ -103,7 +99,7 @@ def parse_size(s):
 def main():
     parser = argparse.ArgumentParser(
         description="Integration test: background memory-tier threshold eviction")
-    parser.add_argument("--server", default="localhost:50051")
+    add_shm_arg(parser)
     parser.add_argument("--block-size", type=parse_size, default=2 * 1024 * 1024,
                         help="Object size (default: 2M)")
     parser.add_argument("--num-entries", type=int, default=40,
@@ -123,7 +119,7 @@ def main():
     print("=" * 60)
     print("Memory-Tier Threshold Eviction — Integration Test")
     print("=" * 60)
-    print(f"  Server:       {args.server}")
+    print(f"  Server:       {args.shm_path}")
     print(f"  Block size:   {block_size // 1024} KiB")
     print(f"  Entries:      {n}")
     print(f"  Total data:   {n * block_size // (1024 * 1024)} MiB")
@@ -145,21 +141,14 @@ def main():
         gpu_write(pop_ptrs[i], pattern)
 
     # --- Connect ---
-    channel = grpc.insecure_channel(
-        args.server,
-        options=[
-            ("grpc.max_send_message_length", 256 * 1024 * 1024),
-            ("grpc.max_receive_message_length", 256 * 1024 * 1024),
-        ],
-    )
-    stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+    ring = connect(args.shm_path)
 
     errors = []
 
     try:
         # === Phase 1: Drain any pre-existing eviction events ===
         print("  Phase 1: Draining stale eviction events...")
-        stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+        ring.take_events(0)
 
         # === Phase 2: Populate entries to exceed threshold ===
         print(f"  Phase 2: Populating {n} entries ({n * block_size // (1024*1024)} MiB)...")
@@ -167,22 +156,17 @@ def main():
         populated = 0
         for batch_start in range(0, n, batch_size):
             batch_end = min(batch_start + batch_size, n)
+            batch_keys = [keys[i] for i in range(batch_start, batch_end)]
             entries = [
-                dispatcher_pb2.PopulateEntry(
-                    key=keys[i],
-                    ipc_handle=dispatcher_pb2.IpcHandle(
-                        cuda_ipc_handle=pop_handles[i],
-                        size=block_size,
-                    ),
-                )
+                (keys[i], [single_region(pop_handles[i], args.gpu, block_size)])
                 for i in range(batch_start, batch_end)
             ]
-            resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
-            for r in resp.results:
-                if r.success:
+            oks = ring.populate(entries)
+            for key, ok in zip(batch_keys, oks):
+                if ok:
                     populated += 1
                 else:
-                    errors.append(f"populate key={r.key}: {r.error_code} {r.error_message}")
+                    errors.append(f"populate key {key} failed")
             print(f"    Populated {populated}/{n}", end="\r")
         print(f"    Populated {populated}/{n} entries successfully")
 
@@ -195,27 +179,26 @@ def main():
         # FlushToSsd ensures write-through completes, then we wait for the
         # evictor's periodic check to fire.
         print("  Phase 3: Flushing write-through to SSD...")
-        stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+        ring.flush_to_ssd()
 
         print(f"  Phase 3: Waiting {args.wait_secs}s for background evictor...")
         time.sleep(args.wait_secs)
 
         # === Phase 4: Drain eviction events ===
         print("  Phase 4: Draining eviction events...")
-        resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
-        events = list(resp.events)
+        events, dropped = ring.take_events(0)
         demoted_keys = set()
         removed_keys = set()
-        for evt in events:
-            if evt.reason == EVICTION_REASON_DEMOTED:
-                demoted_keys.add(evt.key)
-            elif evt.reason == EVICTION_REASON_REMOVED:
-                removed_keys.add(evt.key)
+        for key, reason in events:
+            if reason == REASON_DEMOTED:
+                demoted_keys.add(key)
+            elif reason == REASON_REMOVED:
+                removed_keys.add(key)
 
         print(f"    Events received:  {len(events)}")
         print(f"    Demoted (DRAM→SSD): {len(demoted_keys)}")
         print(f"    Removed:            {len(removed_keys)}")
-        print(f"    Dropped count:      {resp.dropped_count}")
+        print(f"    Dropped count:      {dropped}")
 
         if len(demoted_keys) == 0:
             errors.append(
@@ -236,22 +219,16 @@ def main():
                 lookup_handles.append(handle)
 
             lookup_entries = [
-                dispatcher_pb2.LookupEntry(
-                    key=k,
-                    ipc_handle=dispatcher_pb2.IpcHandle(
-                        cuda_ipc_handle=lookup_handles[i],
-                        size=block_size,
-                    ),
-                )
+                (k, [single_region(lookup_handles[i], args.gpu, block_size)])
                 for i, k in enumerate(verify_keys)
             ]
-            resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lookup_entries))
+            oks = ring.lookup(lookup_entries)
             _libcudart.cudaDeviceSynchronize()
 
             verified = 0
-            for i, r in enumerate(resp.results):
+            for i, ok in enumerate(oks):
                 key = verify_keys[i]
-                if r.success:
+                if ok:
                     actual = gpu_read(lookup_ptrs[i], block_size)
                     expected = make_pattern(key, block_size)
                     if actual == expected:
@@ -259,9 +236,7 @@ def main():
                     else:
                         errors.append(f"demoted key={key}: data integrity mismatch after cold read")
                 else:
-                    errors.append(
-                        f"demoted key={key}: lookup failed with "
-                        f"error_code={r.error_code} ({r.error_message})")
+                    errors.append(f"demoted key={key}: lookup failed")
 
             print(f"    Cold-path verified: {verified}/{len(verify_keys)}")
 
@@ -270,8 +245,8 @@ def main():
         else:
             print("  Phase 5: Skipped (no demoted keys to verify)")
 
-    except grpc.RpcError as e:
-        errors.append(f"gRPC error: {e.code()} - {e.details()}")
+    except RingError as e:
+        errors.append(f"shmq error: {e}")
     except SystemExit:
         pass
     finally:
@@ -279,12 +254,12 @@ def main():
         print()
         print("  Cleaning up...")
         try:
-            stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
-        except grpc.RpcError:
+            ring.remove(keys)
+        except RingError:
             pass
         for ptr in pop_ptrs:
             cuda_free(ptr)
-        channel.close()
+        ring.close()
 
     # === Summary ===
     print()

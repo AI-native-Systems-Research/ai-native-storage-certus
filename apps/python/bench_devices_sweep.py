@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Sweep number of NVMe devices (1..8) with fixed 16 clients and plot throughput.
 
-Launches certus-server with increasing device counts, runs certus-api-bench.py
-for each configuration, parses aggregate throughput, and produces a plot.
+Launches certus-server (shmq /dev/shm mailbox transport, no TCP), runs
+certus-api-bench.py against it for each device count, parses aggregate
+throughput, and produces a plot.
 
 Usage:
     python bench_devices_sweep.py [--server-bin PATH] [--iterations 10]
@@ -39,14 +40,28 @@ ALL_DEVICES = [
 
 BENCH_SCRIPT = os.path.join(SCRIPT_DIR, "certus-api-bench.py")
 PYTHON = "python3.12"
-LISTEN_ADDR = "0.0.0.0:50051"
-SERVER_ADDR = "localhost:50051"
 NUM_CLIENTS = 16
+# shmq mailbox path served by certus-server (replaces the old gRPC host:port).
+SHM_PATH = "/dev/shm/certus-shmq"
+# Each bench client thread claims its own shmq channel; extra channels give
+# headroom for any per-client pipelining. Keep this >= the concurrency the
+# bench drives: 2x NUM_CLIENTS, floored at 32.
+CHANNELS = max(32, NUM_CLIENTS * 2)
 
 
 def start_server(server_bin, devices):
-    """Start certus-server with the given device list. Returns Popen."""
-    cmd = [server_bin, "--listen", LISTEN_ADDR]
+    """Start certus-server (shmq) with the given device list. Returns Popen.
+
+    Waits for the shmq mailbox file to appear at SHM_PATH; the bench's own
+    attach() then spins for the ready magic, so file-existence is a
+    sufficient readiness gate (shmq has no TCP port to poll).
+    """
+    # Remove any stale mailbox so readiness detection can't pass on a prior run.
+    try:
+        os.remove(SHM_PATH)
+    except FileNotFoundError:
+        pass
+    cmd = [server_bin, "--shm-path", SHM_PATH, "--channels", str(CHANNELS)]
     for dev in devices:
         cmd.extend(["--device-pci", dev])
     print(f"  Starting server with {len(devices)} device(s): {' '.join(devices)}")
@@ -56,11 +71,17 @@ def start_server(server_bin, devices):
         stderr=subprocess.STDOUT,
         preexec_fn=os.setsid,
     )
-    time.sleep(5)
-    if proc.poll() is not None:
-        out = proc.stdout.read().decode(errors="replace")
-        raise RuntimeError(f"Server exited early (rc={proc.returncode}):\n{out}")
-    return proc
+    # Wait for the mailbox file to exist (up to 30s), failing fast if the
+    # server exits early.
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            out = proc.stdout.read().decode(errors="replace")
+            raise RuntimeError(f"Server exited early (rc={proc.returncode}):\n{out}")
+        if os.path.exists(SHM_PATH):
+            return proc
+        time.sleep(0.1)
+    raise RuntimeError(f"Server did not create shmq mailbox at {SHM_PATH} within 30s")
 
 
 def stop_server(proc):
@@ -79,7 +100,7 @@ def run_benchmark(iterations, num_objects):
     cmd = [
         PYTHON,
         BENCH_SCRIPT,
-        "--server", SERVER_ADDR,
+        "--shm-path", SHM_PATH,
         "--clients", str(NUM_CLIENTS),
         "--iterations", str(iterations),
         "--num-objects", str(num_objects),

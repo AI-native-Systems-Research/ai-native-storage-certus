@@ -280,3 +280,64 @@ client-side latency stats against `telemetry()` output.
 - **002/FR-022** — sync QD1 realized by actor-side serialization, not a strict
   worker submit-one-wait loop.
 - **002/FR-024** — per-sub-op latency timing (not aggregate-per-batch).
+
+---
+
+# 2026-08-20 Sweep (Spec-Sync Phase B)
+
+Drift source: `.specify/sync/drift-report.{json,md}` (generated 2026-08-20):
+3 drifted requirements (all spec-lag → BACKFILL) + 8 unspecced features (all
+BACKFILL-UNSPECCED). Classification per `.specify/sync/PHASE_B_POLICY.md`. No
+`.rs` source was modified in this pass. One genuine (cosmetic) code defect was
+uncovered inside unspecced feature #3 and is filed as an ALIGN task below.
+
+## Task BD-4 (OPEN, Low) — per-device summary format string defect (spec 002 FR-026)
+
+**Severity**: Low (cosmetic output defect)
+
+**Spec Requirement**: FR-026 (backfilled this sweep) — when more than one device
+is benchmarked, the final output includes a `=== Per-Device Summary ===` block
+printing per-device IOPS and throughput.
+
+**Current Code**: The per-device summary `println!` at
+`apps/iops-benchmark/src/main.rs:423` has an unbalanced parenthesis in its
+format string: `"\nDevice {} ({}: {:.0} IOPS, {:.1} MB/s"` — the `(` opened
+after the PCI address is never closed, so each per-device line renders as e.g.
+`Device 0 (0000:03:00.0: 120000 IOPS, 469.0 MB/s` with a dangling `(`. Purely
+cosmetic; the numbers are correct.
+
+**Required Change**: Fix the format string so the parenthesis is balanced, e.g.
+`"\nDevice {} ({}): {:.0} IOPS, {:.1} MB/s"`. No behavioral change.
+
+**Files to Modify**: `apps/iops-benchmark/src/main.rs:423`
+
+### Acceptance Criteria
+
+- [ ] The per-device summary line renders with balanced parentheses (PCI address
+      wrapped in `( )`).
+- [ ] No change to the reported IOPS / throughput values.
+- [ ] `cargo build -p iops-benchmark` remains clean.
+
+## Status update to prior tasks
+
+- **Task BD-1 (FR-005 abort use-after-free)** — ✅ RESOLVED. The drafted
+  defer-until-completion abort contract is now fully present in mainline
+  (`src/actor.rs:972-1020` abort dispatch keeping the `PendingOp`+buffer and
+  issuing `spdk_nvme_ctrlr_cmd_abort_ext`; `src/actor.rs:528-537` deferring
+  `AbortAck` to the real completion). FR-005 spec text re-synced from "drafted on
+  branch / needs hardware validation" to "implemented." (The related undrafted
+  `check_timeouts` UAF-shape follow-up noted under BD-1 is not part of the
+  current drift report and remains a separate concern.)
+- **Task BD-2 (real device NUMA / identify data)** — STILL OPEN, but now narrower:
+  `max_transfer_size` is in fact MDTS-derived in the shipped code
+  (`src/controller.rs:169-177`), so FR-010/SC-005 were re-synced to drop it from
+  the "fixed constants" list. BD-2 now covers only `nvme_version` (1.0.0) and the
+  hardcoded NUMA node 0 (`src/lib.rs:333-334`).
+- **Task BD-3 (iops-benchmark telemetry cross-check, SC-006)** — unchanged, STILL OPEN.
+
+## Summary Table (2026-08-20)
+
+| Spec-ID/ID | Severity | Classification |
+|---|---|---|
+| 002/FR-026 (BD-4) | Low | ALIGN (cosmetic format-string defect, `main.rs:423`) |
+| 001/FR-005 (BD-1) | — | RESOLVED (abort contract implemented in mainline) |

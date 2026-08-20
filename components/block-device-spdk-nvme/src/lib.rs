@@ -180,6 +180,15 @@ impl BlockDeviceSpdkNvmeComponent {
                 snapshot.num_io_queues,
                 snapshot.numa_node,
             ));
+            // Surface the auto-detected MDTS: this is the transfer size the I/O
+            // segmenter fragments to, so it directly determines on-device block
+            // sizes. Log at info level for benchmark/telemetry visibility.
+            log.info(&format!(
+                "detected max transfer size (MDTS) = {} bytes ({} KiB) — used as I/O \
+                 fragmentation basis",
+                snapshot.max_transfer_size,
+                snapshot.max_transfer_size / 1024,
+            ));
         }
 
         // Create the actor handler.

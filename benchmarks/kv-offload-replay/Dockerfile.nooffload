@@ -3,8 +3,8 @@
 # This is the reference point against the Certus / CPU / SharedStorage offload
 # backends: a single vLLM process with NO kv_transfer_config at all. Evicted KV
 # is recomputed on the GPU rather than fetched from an offload tier. Like the
-# CPU-offload image it is SELF-CONTAINED — no separate server, no gRPC, no CUDA
-# IPC — but it is even simpler: no offload tier, so no CPU_BYTES and no pinned
+# CPU-offload image it is SELF-CONTAINED — no separate server, no shmq mailbox,
+# no CUDA IPC — but it is even simpler: no offload tier, so no CPU_BYTES and no pinned
 # host-RAM buffer. It runs the same 450-conversation / 12-turn ShareGPT workload
 # as the other backends, for head-to-head comparison.
 #
@@ -40,7 +40,7 @@ WORKDIR /workspace
 # repo-root build context). torch/numpy/vllm come from the base image; this
 # baseline needs no extra pip deps and no connector modules.
 COPY benchmarks/kv-offload-replay/run_multiturn_nooffload.py /workspace/bench/
-COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
+COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 COPY benchmarks/kv-offload-replay/docker-entrypoint-nooffload.sh /usr/local/bin/nooffload-entrypoint
 RUN chmod +x /usr/local/bin/nooffload-entrypoint
@@ -51,7 +51,7 @@ RUN chmod +x /usr/local/bin/nooffload-entrypoint
 # no CPU_BYTES.
 ENV PYTHONUNBUFFERED=1 \
     MODEL=NousResearch/Meta-Llama-3-8B \
-    DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
+    DATASET_PATH=/workspace/data/sharegpt_12turn_450.json \
     NUM_CONVS=450 \
     MAX_MODEL_LEN=8192 \
     OUTPUT_TOKENS=150 \
