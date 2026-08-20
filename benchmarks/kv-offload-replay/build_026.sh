@@ -25,8 +25,8 @@ build cpuoffload \
 build sharedstorage \
   podman build "${BA[@]}" -f benchmarks/kv-offload-replay/Dockerfile.sharedstorage -t certus-sharedstorage-bench .
 
-build grpc \
+build shmq \
   podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
-    build "${BA[@]}" -f certus-grpc-connector/Dockerfile -t certus-grpc-bench .
+    build "${BA[@]}" -f certus-shmq-connector/Dockerfile -t certus-shmq-bench .
 
 echo "[build] ALL DONE $(date +%H:%M:%S)"

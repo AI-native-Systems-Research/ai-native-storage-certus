@@ -104,7 +104,7 @@ cargo test -p block-device-spdk-nvme
 ### Running Benchmarks
 
 Benchmarks use [Criterion](https://github.com/bheisler/criterion.rs) and live in
-`components/component-framework/crates/component-framework/benches/`.
+`lib/component-framework/crates/component-framework/benches/`.
 
 ```bash
 # Run all benchmarks
@@ -121,7 +121,7 @@ cargo bench --bench numa_throughput_benchmark
 After a run, open the Criterion HTML report:
 
 ```bash
-firefox --no-remote components/component-framework/crates/component-framework/target/criterion/report/index.html
+firefox --no-remote lib/component-framework/crates/component-framework/target/criterion/report/index.html
 ```
 
 ### Running Examples
@@ -188,7 +188,7 @@ lock-free channels, and NUMA-aware execution.
 - **Channels** include built-in SPSC and MPSC lock-free implementations, plus adapters for crossbeam, kanal, rtrb, and tokio.
 - **NUMA** support provides topology discovery, thread pinning, and NUMA-local memory allocation.
 
-For full API documentation, see [components/component-framework/README.md](components/component-framework/README.md).
+For full API documentation, see [lib/component-framework/README.md](lib/component-framework/README.md).
 
 ### Building
 
@@ -200,7 +200,7 @@ cargo doc --no-deps   # Build documentation
 
 ### Running Examples
 
-Examples live in `components/component-framework/examples/` and cover the major framework features:
+Examples live in `lib/component-framework/examples/` and cover the major framework features:
 
 ```bash
 # Basic component definition and interface querying
@@ -234,7 +234,7 @@ cargo run --example numa_pinning
 ### Running Benchmarks
 
 Benchmarks use [Criterion](https://github.com/bheisler/criterion.rs) and live in
-`components/component-framework/crates/component-framework/benches/`.
+`lib/component-framework/crates/component-framework/benches/`.
 
 ```bash
 # Run all benchmarks
@@ -270,14 +270,14 @@ After running benchmarks, Criterion generates an HTML report with distribution p
 
 ```bash
 # Open the Criterion report (after running cargo bench)
-firefox --no-remote components/component-framework/crates/component-framework/target/criterion/report/index.html
+firefox --no-remote lib/component-framework/crates/component-framework/target/criterion/report/index.html
 ```
 
 Each benchmark suite has its own sub-report with detailed plots including PDF distribution, iteration times, and comparison against previous runs. Navigate from the index page or access individual reports directly:
 
 ```bash
 # Example: open the SPSC channel benchmark report
-firefox --no-remote ./components/component-framework/crates/component-framework/target/criterion/spsc_throughput_u64/report/index.html
+firefox --no-remote ./lib/component-framework/crates/component-framework/target/criterion/spsc_throughput_u64/report/index.html
 ```
 
 If you are using a remote connection in VS Code, you can use the Live Preview extension to open the remote report files.

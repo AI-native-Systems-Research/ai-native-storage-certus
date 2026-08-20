@@ -1,7 +1,7 @@
 # spdk-sys
 
 **Crate**: `spdk-sys`
-**Path**: `components/spdk-sys/`
+**Path**: `lib/spdk-sys/`
 **Version**: 0.1.0
 
 ## Description

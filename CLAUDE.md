@@ -63,11 +63,11 @@ Requires kernel boot params for IOMMU and hugepages, and `memlock` set to unlimi
 
 ### Workspace Layout
 
-- **`components/component-framework/`** — Core framework: `component-core` (traits, actor, channels, NUMA), `component-macros` (proc macros for `define_interface!`/`define_component!`), `component-framework` (facade re-export). Has its own CLAUDE.md.
+- **`lib/component-framework/`** — Core framework: `component-core` (traits, actor, channels, NUMA), `component-macros` (proc macros for `define_interface!`/`define_component!`), `component-framework` (facade re-export). Has its own CLAUDE.md.
 - **`components/interfaces/`** — Shared interface trait definitions (`IBlockDevice`, `IExtentManager`, `ILogger`, `IGreeter`, `ISPDKEnv`, `IEvictionPolicy`, `IRemoteLookup`). SPDK-dependent interfaces gated behind `features = ["spdk"]`.
 - **`components/block-device-spdk-nvme/`** — NVMe block device driver via SPDK userspace. Actor-per-controller model with shared-memory client channels. Has its own CLAUDE.md.
 - **`components/extent-manager/`** — Fixed-size extent allocator with crash-consistent on-disk layout (superblock + bitmap + records, 4KiB atomic writes). Has its own CLAUDE.md.
-- **`components/spdk-sys/`** — Raw FFI bindings to SPDK C libraries (bindgen-generated).
+- **`lib/spdk-sys/`** — Raw FFI bindings to SPDK C libraries (bindgen-generated).
 - **`components/spdk-env/`** — Safe Rust wrapper around SPDK environment init. Has its own CLAUDE.md.
 - **`components/eviction-policy-lru/`** — LRU eviction policy with multi-pool support. Used by memory-tier and dispatch-map for cache eviction decisions.
 - **`components/remote-lookup/`** — Placeholder for remote cache lookups to other Certus nodes. Dispatcher forwards local misses here. Has its own CLAUDE.md.

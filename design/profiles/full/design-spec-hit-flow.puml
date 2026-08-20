@@ -4,8 +4,8 @@ skinparam defaultFontSize 11
 
 title Cache Get / Lookup Flow (full)
 
-participant "Client\n(Python/gRPC)" as client
-participant "gRPC Service\n(tonic)" as grpc
+participant "Client\n(Python/shmq)" as client
+participant "Shmq Mailbox\n(/dev/shm)" as shmq
 participant "Dispatcher" as disp
 participant "MemoryTier\n(DRAM pool)" as mt
 participant "DispatchMap" as dm
@@ -14,9 +14,9 @@ participant "BlockDevice\n(NVMe SSD)" as ssd
 
 == Warm Path (MemoryTier -> GPU) ==
 
-client -> grpc: BatchLookupRequest\n(key, IpcHandle)
-grpc -> grpc: cudaIpcOpenMemHandle\n-> device_ptr
-grpc -> disp: lookup(key, IpcHandle)
+client -> shmq: BatchLookupRequest\n(key, IpcHandle)
+shmq -> shmq: cudaIpcOpenMemHandle\n-> device_ptr
+shmq -> disp: lookup(key, IpcHandle)
 
 disp -> dm: lookup(key) + take_read
 dm --> disp: MemoryTier { ptr, size }
@@ -28,14 +28,14 @@ disp -> dm: release_read(key)
 disp -> mt: touch(key)
 note right of mt: Refresh LRU timestamp
 
-disp --> grpc: Ok(stream_handle)
-grpc -> grpc: cudaIpcCloseMemHandle
-grpc --> client: BatchLookupResponse\n(success)
+disp --> shmq: Ok(stream_handle)
+shmq -> shmq: cudaIpcCloseMemHandle
+shmq --> client: BatchLookupResponse\n(success)
 
 == Cold Path (BlockDevice -> MemoryTier -> GPU) ==
 
-client -> grpc: BatchLookupRequest\n(key, IpcHandle)
-grpc -> disp: lookup(key, IpcHandle)
+client -> shmq: BatchLookupRequest\n(key, IpcHandle)
+shmq -> disp: lookup(key, IpcHandle)
 
 disp -> dm: lookup(key) + take_read
 dm --> disp: BlockDevice { offset }
@@ -54,18 +54,18 @@ pr -> disp: cudaMemcpyAsync H2D\n(overlapped with I/O)
 disp -> dm: create_memory_tier_entry\n(key, new_ptr, size)
 note right of dm: Promoted: BlockDevice -> MemoryTier\nssd_offset preserved
 
-disp --> grpc: Ok(stream_handle)
-grpc --> client: BatchLookupResponse\n(success)
+disp --> shmq: Ok(stream_handle)
+shmq --> client: BatchLookupResponse\n(success)
 
 == Cache Miss ==
 
-client -> grpc: BatchLookupRequest\n(key, IpcHandle)
-grpc -> disp: lookup(key, IpcHandle)
+client -> shmq: BatchLookupRequest\n(key, IpcHandle)
+shmq -> disp: lookup(key, IpcHandle)
 
 disp -> dm: lookup(key)
 dm --> disp: NotExist
 
-disp --> grpc: KeyNotFound
-grpc --> client: BatchLookupResponse\n(key_not_found)
+disp --> shmq: KeyNotFound
+shmq --> client: BatchLookupResponse\n(key_not_found)
 
 @enduml

@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as FmtWrite;
 use std::path::PathBuf;
-use std::process::Command;
 use std::{env, fs};
 
 use serde::Deserialize;
@@ -424,66 +423,6 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     code
 }
 
-// --- Protoc helpers (from certus-server) ---
-
-const PROTOC_VERSION: &str = "25.1";
-
-fn find_protoc() -> Option<PathBuf> {
-    if let Ok(p) = env::var("PROTOC") {
-        let path = PathBuf::from(&p);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    if let Ok(output) = Command::new("which").arg("protoc").output() {
-        if output.status.success() {
-            let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-            if path.exists() {
-                return Some(path);
-            }
-        }
-    }
-    None
-}
-
-fn download_protoc() -> PathBuf {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let protoc_dir = out_dir.join("protoc");
-    let protoc_bin = protoc_dir.join("bin").join("protoc");
-
-    if protoc_bin.exists() {
-        return protoc_bin;
-    }
-
-    let url = format!(
-        "https://github.com/protocolbuffers/protobuf/releases/download/v{}/protoc-{}-linux-x86_64.zip",
-        PROTOC_VERSION, PROTOC_VERSION
-    );
-
-    let zip_path = out_dir.join("protoc.zip");
-
-    let status = Command::new("curl")
-        .args(["-sL", "-o"])
-        .arg(&zip_path)
-        .arg(&url)
-        .status()
-        .expect("failed to run curl");
-    assert!(status.success(), "failed to download protoc from {url}");
-
-    fs::create_dir_all(&protoc_dir).unwrap();
-    let status = Command::new("unzip")
-        .args(["-q", "-o"])
-        .arg(&zip_path)
-        .arg("-d")
-        .arg(&protoc_dir)
-        .status()
-        .expect("failed to run unzip");
-    assert!(status.success(), "failed to unzip protoc");
-
-    fs::remove_file(&zip_path).ok();
-    protoc_bin
-}
-
 // --- Main ---
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -493,7 +432,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("cargo:rerun-if-changed={manifest_path}");
     println!("cargo:rerun-if-env-changed=CERTUS_PROFILE");
-    println!("cargo:rerun-if-changed=proto/dispatcher.proto");
 
     // 2. Parse and validate manifest
     let yaml_content = fs::read_to_string(&manifest_path)
@@ -537,14 +475,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let composition_code = generate_composition(&manifest);
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     fs::write(out_dir.join("composition.rs"), &composition_code)?;
-
-    // 4. Compile protobuf
-    let protoc = find_protoc().unwrap_or_else(|| {
-        eprintln!("cargo:warning=protoc not found, downloading v{PROTOC_VERSION}...");
-        download_protoc()
-    });
-    env::set_var("PROTOC", &protoc);
-    tonic_build::compile_protos("proto/dispatcher.proto")?;
 
     Ok(())
 }

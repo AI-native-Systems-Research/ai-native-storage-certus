@@ -4,7 +4,7 @@
 #
 # Variants (run in this order):
 #   NoOffload      GPU-only baseline                 (image certus-nooffload-bench)
-#   Certus-SPDK    gRPC client + certus-server-yaml  (image certus-grpc-bench + host server)
+#   Certus-SPDK    shmq client + certus-server-yaml  (image certus-shmq-bench + host server)
 #   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-cpu-offload-bench)
 #   SharedStorage  llmd_fs_backend on RAID0/XFS      (image certus-sharedstorage-bench)
 #                  vLLM <= 0.23 path (native tiering not yet available)
@@ -52,6 +52,8 @@ MAX_MODEL_LEN=8192
 MAX_NUM_SEQS=64
 GPU_MEM_UTIL=0.90
 GPU="all"
+SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # Certus-SPDK shmq mailbox (host <-> client)
+CHANNELS="${CHANNELS:-32}"                      # server worker threads / max in-flight requests
 # The DRAM tier is a single contiguous spdk_zmalloc from the reserved 1G hugepage
 # pool (CERTUS_HUGEPAGES, default 16 — configure-bench.sh sizes the pool to leave
 # node-0 RAM for vLLM). It cannot exceed the pool: DPDK's heap plus SPDK's
@@ -72,15 +74,6 @@ CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
 SLAB_SIZE_BYTES=2097152
 TENSOR_PARALLEL_SIZE=1
-# Certus-SPDK client→server transport. "host" (default): share the host net
-# namespace (--network=host) and dial localhost:50051 — loopback, no proxy. This
-# is ~10% faster: the rootless-podman bridge otherwise routes every gRPC control
-# RPC through the slirp4netns/pasta userspace proxy (measured +125.8 s / +10.6%
-# on the 450×12 v0.20 run). "bridge": the vLLM container reaches the host server
-# via host.containers.internal over that userspace proxy — kept for hosts where
-# --network=host is unavailable or the port would collide. Only affects
-# Certus-SPDK; NoOffload/CPUOffload/SharedStorage don't use the gRPC socket.
-CLIENT_NET="host"
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server port
 DO_BUILD=0
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
@@ -94,13 +87,9 @@ LOGDIR=""
 IMG_NOOFFLOAD="${IMG_NOOFFLOAD:-certus-nooffload-bench}"
 IMG_CPU="${IMG_CPU:-certus-cpu-offload-bench}"
 IMG_SHARED="${IMG_SHARED:-certus-sharedstorage-bench}"
-IMG_GRPC="${IMG_GRPC:-localhost/certus-grpc-bench}"
+IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-bench}"
 
-# Host copy of the replay dataset, used only for the preflight existence warn
-# (container runs bake their own copy). It lives in certus-connector/ but older
-# layouts kept it beside this script — accept either.
-DATASET_HOST="${SCRIPT_DIR}/sharegpt_12turn_450.json"
-[[ -f "$DATASET_HOST" ]] || DATASET_HOST="${REPO_ROOT}/certus-connector/sharegpt_12turn_450.json"
+DATASET_HOST="${SCRIPT_DIR}/../../data/sharegpt_12turn_450.json"
 SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
 # llmd_fs_backend repo (for --build of the SharedStorage image). Empty = auto:
 # resolved after --model-fs is parsed, preferring <model-fs>/llm-d-kv-cache/...
@@ -118,7 +107,7 @@ Flags (all optional; defaults shown):
                                 group between the two phases via tools/configure-bench.sh, so
                                 the storage backends compare on identical devices.
                                 [default 0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0]
-  --model-fs <dir>              Filesystem for HF cache + gRPC podman store. [/mnt/certus1]
+  --model-fs <dir>              Filesystem for HF cache + shmq podman store. [/mnt/certus1]
   --model <hf-id>               Model applied to all four variants.
                                 [NousResearch/Meta-Llama-3-8B]
   --num-convs <n>               Conversations to replay. [450]
@@ -136,9 +125,6 @@ Flags (all optional; defaults shown):
                                overhead (${DPDK_HUGEPAGE_OVERHEAD_GIB}G), clamped to the reserved 1G pool
                                (CERTUS_HUGEPAGES − ${DPDK_HUGEPAGE_OVERHEAD_GIB}G). Ignored if --memory-tier-size set.
   --evict-threshold <f>        Certus-SPDK DRAM->SSD demotion threshold. [0.6]
-  --client-network <mode>      Certus-SPDK client transport: host (--network=host +
-                               localhost, loopback, no proxy) or bridge (host.containers
-                               .internal, rootless slirp4netns/pasta proxy). [host]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -181,7 +167,6 @@ while [[ $# -gt 0 ]]; do
         --dram)             DRAM="$2"; shift 2;;
         --build)            DO_BUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
-        --client-network)   CLIENT_NET="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
         --logdir)           LOGDIR="$2"; shift 2;;
@@ -227,7 +212,7 @@ if [[ -n "$VLLM_VERSION" ]]; then
     [[ "$IMG_NOOFFLOAD" != *:* ]] && IMG_NOOFFLOAD+="$_tag"
     [[ "$IMG_CPU"       != *:* ]] && IMG_CPU+="$_tag"
     [[ "$IMG_SHARED"    != *:* ]] && IMG_SHARED+="$_tag"
-    [[ "$IMG_GRPC"      != *:* ]] && IMG_GRPC+="$_tag"
+    [[ "$IMG_SHMQ"      != *:* ]] && IMG_SHMQ+="$_tag"
 fi
 
 [[ -z "$LOGDIR" ]] && LOGDIR="${MODEL_FS}/kvprofile-${VER_LABEL}${RUNID}"
@@ -518,13 +503,13 @@ fi
 # check below so that check only flags usage we did not just clear.
 reap() {
     local names ids
-    names="$(command podman ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-(nooffload|cpu-offload|sharedstorage|grpc)-bench' | awk '{print $1}')"
+    names="$(command podman ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-(nooffload|cpu-offload|sharedstorage|shmq)-bench' | awk '{print $1}')"
     if [[ -n "$names" ]]; then
         warn "reaping stale bench containers: $(echo "$names" | tr '\n' ' ')"
         echo "$names" | xargs -r command podman rm -f >/dev/null 2>&1
     fi
-    # Same for the gRPC store.
-    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-grpc-bench|grpc-bench' | awk '{print $1}')"
+    # Same for the shmq store.
+    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-shmq-bench|shmq-bench' | awk '{print $1}')"
     [[ -n "$ids" ]] && echo "$ids" | xargs -r command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" rm -f >/dev/null 2>&1
 }
 reap
@@ -637,7 +622,7 @@ start_gpu_sampler
 trap 'stop_gpu_sampler; unlock_gpu_clocks' EXIT
 
 img_exists()      { command podman image exists "$1" >/dev/null 2>&1; }
-img_exists_grpc() { command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" image exists "$1" >/dev/null 2>&1; }
+img_exists_shmq() { command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" image exists "$1" >/dev/null 2>&1; }
 
 # Build a self-contained image (default store) from one of our Dockerfiles,
 # honoring any --vllm-version build-arg. Returns build rc.
@@ -715,17 +700,17 @@ if want certus-spdk; then
     elif [[ ! -x "$SERVER_BIN" ]]; then
         cs_skip="server binary not built at ${SERVER_BIN} (cargo build --release -p certus-server-yaml --features rw-telemetry)"
     fi
-    if [[ -z "$cs_skip" ]] && ! img_exists_grpc "$IMG_GRPC"; then
+    if [[ -z "$cs_skip" ]] && ! img_exists_shmq "$IMG_SHMQ"; then
         if [[ "$DO_BUILD" -eq 1 ]]; then
-            log "building ${IMG_GRPC} into ${PODMAN_STORE}"
+            log "building ${IMG_SHMQ} into ${PODMAN_STORE}"
             command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" build \
                 "${BUILD_ARGS[@]}" \
-                -f "${REPO_ROOT}/certus-grpc-connector/Dockerfile" \
-                -t "${IMG_GRPC#localhost/}" "$REPO_ROOT" \
-                > "${LOGDIR}/build-grpc.log" 2>&1 \
-                || cs_skip="gRPC image build failed (see build-grpc.log)"
+                -f "${REPO_ROOT}/certus-shmq-connector/Dockerfile" \
+                -t "${IMG_SHMQ#localhost/}" "$REPO_ROOT" \
+                > "${LOGDIR}/build-shmq.log" 2>&1 \
+                || cs_skip="shmq image build failed (see build-shmq.log)"
         else
-            cs_skip="image ${IMG_GRPC} missing (pass --build)"
+            cs_skip="image ${IMG_SHMQ} missing (pass --build)"
         fi
     fi
 
@@ -764,41 +749,42 @@ if want certus-spdk; then
         if command -v numactl >/dev/null 2>&1; then
             numa_prefix=(numactl "--cpunodebind=${HUGEPAGES_1G_NODE}" "--membind=${HUGEPAGES_1G_NODE}")
         fi
-        log "starting Certus-SPDK server: ${dev_flags[*]} --memory-tier-size ${MEM_TIER_SIZE} (numa node ${HUGEPAGES_1G_NODE})"
+        # Start from a clean mailbox so a stale file from a crashed prior run
+        # can't fool the client preflight (the server recreates it anyway).
+        rm -f "$SHM_PATH"
+        log "starting Certus-SPDK server: ${dev_flags[*]} --memory-tier-size ${MEM_TIER_SIZE} shm=${SHM_PATH} channels=${CHANNELS} (numa node ${HUGEPAGES_1G_NODE})"
         "${numa_prefix[@]}" "$SERVER_BIN" "${dev_flags[@]}" \
             --memory-tier-size "$MEM_TIER_SIZE" \
             --memory-tier-eviction-threshold "$EVICT_THRESH" \
-            --listen 0.0.0.0:50051 \
+            --shm-path "$SHM_PATH" \
+            --channels "$CHANNELS" \
             --format \
             > "${LOGDIR}/server.log" 2>&1 &
         SERVER_PID=$!
 
-        # Poll for the listen port.
+        # Readiness: no TCP port. The server builds the whole stack, then
+        # publishes the mailbox at SHM_PATH last — so its presence means the
+        # server is serving and the client container can attach via --ipc=host.
         up=0
         for _ in $(seq 1 "$SERVER_WAIT"); do
             if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
-            if (exec 3<>/dev/tcp/127.0.0.1/50051) 2>/dev/null; then exec 3>&- 3<&-; up=1; break; fi
+            if [[ -e "$SHM_PATH" ]]; then up=1; break; fi
             sleep 1
         done
 
         if [[ "$up" -ne 1 ]]; then
-            record "Certus-SPDK" "SKIPPED" "" "" "" "" "" "server :50051 did not come up within ${SERVER_WAIT}s (see server.log)" "${LOGDIR}/server.log"
+            record "Certus-SPDK" "SKIPPED" "" "" "" "" "" "server mailbox ${SHM_PATH} did not appear within ${SERVER_WAIT}s (see server.log)" "${LOGDIR}/server.log"
             warn "Certus-SPDK SKIPPED: server did not come up"
             stop_server
         else
-            # Select client transport (see CLIENT_NET above).
-            if [[ "$CLIENT_NET" == "host" ]]; then
-                cs_server="localhost:50051"; cs_podman_net="host"
-            else
-                cs_server="host.containers.internal:50051"; cs_podman_net=""
-            fi
-            log "server up on :50051 — launching gRPC client (network=${CLIENT_NET}, server=${cs_server})"
+            log "server serving, mailbox ${SHM_PATH} — launching shmq client"
             f="${LOGDIR}/certus-spdk.log"
             gpu_mark start "Certus-SPDK"
-            IMAGE="$IMG_GRPC" \
+            # No CERTUS_SERVER: the shared /dev/shm mailbox at SHM_PATH is the
+            # endpoint (run-bench.sh shares it into the container via --ipc=host).
+            IMAGE="$IMG_SHMQ" \
             GPU="$GPU" \
-            CERTUS_SERVER="$cs_server" \
-            PODMAN_NETWORK="$cs_podman_net" \
+            SHM_PATH="$SHM_PATH" \
             NUM_CONVS="$NUM_CONVS" \
             MAX_ROUNDS="$MAX_ROUNDS" \
             MODEL="$MODEL" \
@@ -807,7 +793,7 @@ if want certus-spdk; then
             HF_CACHE="$HF_CACHE" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \
-                bash "${REPO_ROOT}/certus-grpc-connector/run-bench.sh" 2>&1 | tee "$f"
+                bash "${REPO_ROOT}/certus-shmq-connector/run-bench.sh" 2>&1 | tee "$f"
             rc="${PIPESTATUS[0]}"
             finish_variant "Certus-SPDK" "$rc" "$f"
             stop_server

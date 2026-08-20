@@ -5,7 +5,7 @@ chat workload.
 
 By default this uses vLLM's built-in OffloadingConnector + CPUOffloadingSpec
 (host-RAM offload tier, no tracing) — the clean baseline for comparing against
-the Certus gRPC backend, which also uses the plain OffloadingConnector. Set
+the Certus shmq backend, which also uses the plain OffloadingConnector. Set
 TRACE_OFFLOAD=1 to swap in the local Tracing* wrappers, which additionally
 record per-op offload traces (offloading_mgr_<pid>.jsonl etc.) at some overhead.
 
@@ -17,7 +17,7 @@ vLLM's own output is what makes prefix tokens match exactly turn-to-turn so
 the offload cache sees real read-path traffic), and the k'th human turn.
 
 Defaults to the 450-conversation / 12-turn ShareGPT dataset shared with the
-gRPC connector (../../certus-connector/sharegpt_12turn_450.json).
+Certus connector (../../data/sharegpt_12turn_450.json).
 
 Configurable via env vars:
     DATASET_PATH   override ShareGPT-format json       (default 450x12 dataset)
@@ -51,10 +51,10 @@ if __name__ == "__main__":
         sys.path.insert(0, _here)
 
     # Default to the 450-conversation / 12-turn ShareGPT workload shared with
-    # the gRPC connector (certus-connector/sharegpt_12turn_450.json). Override
+    # the Certus connector (data/sharegpt_12turn_450.json). Override
     # with DATASET_PATH to point at a different ShareGPT-format json.
     DEFAULT_DATASET = os.path.join(
-        _here, "..", "..", "certus-connector", "sharegpt_12turn_450.json"
+        _here, "..", "..", "data", "sharegpt_12turn_450.json"
     )
     SUBSET_PATH = os.environ.get("DATASET_PATH", DEFAULT_DATASET)
     if not os.path.exists(SUBSET_PATH):
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     # ── Init vLLM with the CPU-offload connector ──────────────────────────
     # Default is vLLM's built-in OffloadingConnector + CPUOffloadingSpec (no
     # tracing) — this is the clean baseline for comparing against the Certus
-    # gRPC backend, which also uses the plain OffloadingConnector. Set
+    # shmq backend, which also uses the plain OffloadingConnector. Set
     # TRACE_OFFLOAD=1 to instead use the local Tracing* wrappers, which record
     # per-op offload traces (offloading_mgr_<pid>.jsonl etc.) at some overhead.
     if DISK_DIR:
@@ -252,6 +252,18 @@ if __name__ == "__main__":
         gpu_memory_utilization=GPU_MEM_UTIL,
         dtype="float16",
         enable_prefix_caching=True,
+        # ENFORCE_EAGER=0 (default) keeps CUDA graphs on (vLLM default) for a fair
+        # comparison; =1 forces eager.
+        enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
+        # async_scheduling MUST be off for the OffloadingConnector: it serializes
+        # KV transfers per request, and the async batch-queue scheduler path
+        # (step_with_batch_queue) trips a KeyError in the native tiering manager's
+        # prepare_store (self._req_state[req_id]) — EngineDeadError at round 1.
+        # This is ORTHOGONAL to cudagraph: disabling it keeps the fair cudagraph
+        # config while taking the synchronous, connector-correct scheduling path
+        # (mirrors run_multiturn_shmq_certus.py's needs_disable_async_scheduling).
+        # Override with ASYNC_SCHED=1 to reproduce the crash.
+        async_scheduling=(os.environ.get("ASYNC_SCHED", "0") != "0"),
         kv_transfer_config=KV_CONFIG,
         # LOG_STATS=1 keeps vLLM's stats logging on so its PrometheusStatLogger
         # registers metrics (incl. the tiering/kv_offload counters). Default off

@@ -56,9 +56,11 @@
 #                               Aim for >= 3x --memory-tier-size.
 #   --keys SPEC       total keyspace: `N` (means 1-N) or `LO-HI` (default 200000)
 #   --object-size SZ  per-key size, e.g. 64K/1M (default 64K)
-#   --batch-size N    keys per gRPC request (default 64)
-#   --workers N       gRPC connections per node (default 4)
-#   --inflight N      concurrent requests per connection (default 4)
+#   --batch-size N    keys per shmq request (default 64)
+#   --workers N       parallelism groups per node (default 4)
+#   --inflight N      concurrent requests per group (default 4). Each lane is one
+#                     shmq channel; the launched servers get --channels sized to
+#                     the largest workers*inflight across the run.
 #   --iterations N    passes over each requester's key list (default 1)
 #   --sweep SPECS     run the lookup phase once per config instead of once, all
 #                     against a SINGLE cluster bring-up and a single populate.
@@ -102,7 +104,8 @@
 #                            (build: cargo build -p remote-lookup-bench --release)
 #   CERTUS_LD_LIBRARY_PATH   dirs holding libzyre/libczmq/libzmq
 #   CERTUS_TEST_GROUP        shared zyre group (default clusterbench_<uid>_<pid>)
-#   CERTUS_TEST_GRPC_PORT    gRPC port on every node (default 50051)
+#   CERTUS_TEST_SHM_PATH     shmq mailbox path on every node
+#                            (default /dev/shm/certus-shmq)
 #   CERTUS_RDMA_BIND_IP      RoCE IPv4 the responder binds (default auto-detect)
 #   CERTUS_RL_OP_DEADLINE_MS overall op deadline (default 5000)
 #   CERTUS_RL_PHASE1_MS      Phase-1 memory-quorum timeout (default 500)
@@ -142,7 +145,7 @@ SERVER_BIN="${CERTUS_SERVER_BIN:-$REPO_ROOT/target/release/certus-server-yaml}"
 BENCH_BIN="${CERTUS_BENCH_BIN:-$REPO_ROOT/target/release/remote-lookup-bench}"
 LIB_PATH="${CERTUS_LD_LIBRARY_PATH:-$REPO_ROOT/deps/zyre-build/lib:$REPO_ROOT/deps/zyre-build/lib64}"
 GROUP="${CERTUS_TEST_GROUP:-clusterbench_${UID:-$(id -u)}_$$}"
-GRPC_PORT="${CERTUS_TEST_GRPC_PORT:-50051}"
+SHM_PATH="${CERTUS_TEST_SHM_PATH:-/dev/shm/certus-shmq}"
 RDMA_BIND_IP="${CERTUS_RDMA_BIND_IP:-}"
 OP_DEADLINE_MS="${CERTUS_RL_OP_DEADLINE_MS:-5000}"
 PHASE1_MS="${CERTUS_RL_PHASE1_MS:-500}"
@@ -295,7 +298,7 @@ trap cleanup EXIT
 # Everything a bench invocation needs that a sweep never varies. The populate and
 # the no-sweep lookup add the baseline batch/workers/inflight on top; a sweep
 # round substitutes its own.
-BENCH_BASE="--server http://127.0.0.1:$GRPC_PORT --keys $KEY_RANGE \
+BENCH_BASE="--shm-path $SHM_PATH --keys $KEY_RANGE \
 --object-size $OBJECT_SIZE"
 BENCH_COMMON="$BENCH_BASE --batch-size $BATCH_SIZE --workers $WORKERS \
 --inflight $INFLIGHT"
@@ -407,6 +410,23 @@ REMOTE_ENV="RUST_LOG=${CERTUS_TEST_RUST_LOG:-warn} LD_LIBRARY_PATH=\"$LIB_PATH:\
 [[ -n "$RDMA_BIND_IP" ]] && REMOTE_ENV="$REMOTE_ENV CERTUS_RDMA_BIND_IP=$RDMA_BIND_IP"
 [[ -n "${CERTUS_TEST_EXTRA_ENV:-}" ]] && REMOTE_ENV="$REMOTE_ENV $CERTUS_TEST_EXTRA_ENV"
 
+# Size each server's mailbox to the most concurrent lanes any round will drive.
+# A shmq lane is one channel held by one OS thread, so --channels must be >= the
+# largest workers*inflight; the bench rejects a round otherwise. Mirrors the SPECS
+# parse below (which runs after launch), so the max is computed here up front.
+CHANNELS=$(( WORKERS * INFLIGHT ))
+if [[ -n "$SWEEP" ]]; then
+    IFS=';' read -r -a _chan_specs <<< "$SWEEP"
+    for s in "${_chan_specs[@]}"; do
+        [[ -n "$s" ]] || continue
+        rest="${s#*:}"; w="${rest%%:*}"; f="${rest##*:}"
+        w="${w:-$WORKERS}"; f="${f:-$INFLIGHT}"
+        slots=$(( w * f ))
+        (( slots > CHANNELS )) && CHANNELS=$slots
+    done
+fi
+log "Mailbox:     $SHM_PATH   channels: $CHANNELS (max lanes across the run)"
+
 cluster_launch
 CLUSTER_UP=1
 cluster_wait_ready || exit 1
@@ -453,7 +473,7 @@ if [[ "$TIER" == "disk" ]]; then
     for ((i = 0; i < N; i++)); do
         [[ -n "${HOLD_ARGS[i]}" ]] || continue
         run_bench "${NODES[i]}" "demote-$i.json" \
-            demote --server "http://127.0.0.1:$GRPC_PORT" \
+            demote --shm-path "$SHM_PATH" \
             --keys "$KEY_RANGE" ${HOLD_ARGS[i]} &
         pids+=("$!")
     done
