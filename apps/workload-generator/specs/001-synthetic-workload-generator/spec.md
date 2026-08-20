@@ -2421,6 +2421,76 @@ report segments statistics into before/after windows around the event.
   competitive with the per-depth profile.
   `request_length` is bit-identical on all 8 traces, which is the check that this is a trunk-shape
   change and not a path-length term.
+- **FR-054n** *(REFUTED — recorded so it is not rebuilt)*: The singleton escape MUST be drawn **per
+  arrival at each split**, not once per session. A per-session draw was built and measured, and it
+  fails three ways.
+  **The proposal.** FR-054m's own predecessor note argued that the escape magnitude is right at the
+  first split and wrong as a per-split hazard, so the trace's quantity must be a **per-session**
+  property — a session either lands on the shared spine or it does not. Implemented as one uniform per
+  session compared against every band's share, which is the **comonotone coupling** of exactly the same
+  marginals: the per-split probability stays `q(b)`, and cumulative escape by depth `D` becomes
+  `max q(b)` over the bands crossed instead of `1 − Π(1 − q(b))`. Nothing is retuned.
+  **1. Measured worse on both traces** (arm `CERTUS_EXP_SINGLETON_ESCAPE=1` +
+  `CERTUS_EXP_COHORT_BOUNDARY=1`, `--branching-segments`, seed 4242; `request_length` identical
+  throughout, confirming the change is confined to trunk shape):
+  | trace | arm | reuse | `sharing_depth` | `unique_keys` |
+  | --- | --- | --- | --- | --- |
+  | `qwen_code` | no escape | 0.17838 | 0.58669 | 0.62832 |
+  | `qwen_code` | **per-split, retained** | **0.09968** | **0.51519** | **0.17343** |
+  | `qwen_code` | per-session | 0.12900 | 0.51836 | 0.35290 |
+  | `tau2_airline` | no escape | **0.02848** | **0.34610** | **0.45528** |
+  | `tau2_airline` | per-split, retained | 0.02931 | 0.38476 | 0.48613 |
+  | `tau2_airline` | per-session | 0.02918 | 0.39190 | 0.48369 |
+  **2. It contradicts FR-054m, one requirement after it was established.** `singleton_share` is fitted
+  over **arrivals at a split**, so by that rule — weight or compose a law by what its draw is keyed on —
+  an independent draw per arrival is the faithful composition, and a per-session key is the wrong key.
+  **3. The bimodality argument it rested on is false, and its failure names the real defect.** No
+  coupling of this draw can produce the trace's atom at one block, because the model's first split sits
+  **27 blocks** down (band 0's fitted run length), making 27 blocks a floor on what any session can
+  share: synthetic `F(≤1)` is **0.0139** against the trace's **0.2479**, and `F(≤7)` is 0.0540 against
+  **0.5723**. Bimodality is a property of **where the splits are**. See FR-054o.
+  **Also corrected here: `singleton_share` does NOT measure early departure.** It measures where the
+  trunk terminates. The 0.2216-against-24.8% agreement that motivated the escape holds only because
+  `qwen_code`'s splits are near its root; `tau2_airline` fits escapes of **0.3567 / 0.2364 / 0.3896 /
+  0.4555 / 0.8551 / 0.8125** while **0.137%** of its requests share one block or less and its realised
+  sharing p50 is **288 blocks** — consistent, because an escape at a deep split still leaves the
+  session having shared everything above it. It MUST NOT be used as an early-departure knob.
+  **Retained from the attempt:** two tests, since the escape had none —
+  `the_singleton_escape_is_drawn_per_arrival_at_each_split` asserts both the per-split marginal and
+  that it compounds past the spine, so rebuilding FR-054n fails it; and an inertness test. The
+  reverted walk is verified **byte-identical** to the previous commit's output on both traces.
+- **FR-054o**: A per-band run length MUST be fitted and drawn **conditioned on the node's own fan-in**,
+  because the two are correlated in every trace measured and the model draws them independently. This
+  is the seventh instance of an independent draw standing in for a correlated structure.
+  **The measurement**, from `fit --explain`'s run-length table, where the last column is the same
+  segments fan-in weighted, i.e. the run a typical **arrival** walks:
+  | band | stated~ = drawn~ | `qwen_code` per SEGMENT | `qwen_code` per ARRIVAL | `tau2_airline` per SEGMENT | `tau2_airline` per ARRIVAL |
+  | --- | --- | --- | --- | --- | --- |
+  | 0+ | 27 / 124 | 29 | **1** | 124 | 124 |
+  | 1+ | 9 / 14 | 9 | 3 | 14 | 41 |
+  | 8+ | 18 / 11 | 18 | 8 | 11 | 6 |
+  | 32+ | 23 / 1 | 23 | **136** | 1 | 1 |
+  | 128+ | 36 / 1 | 37 | 21 | 1 | **119** |
+  | 512+ | 14 / 1 | 13 | 9 | 1 | 1 |
+  **FR-054m is a complete success on its own terms and still wrong for the walker**: the stated law now
+  matches the per-segment median in all six bands of both traces, yet `qwen_code`'s arrivals in band 0
+  walk a **1-block** run where the model makes every arrival walk **27**. Both medians are facts about
+  one trace, and they can only both hold if run length is correlated with fan-in — high-traffic
+  near-root nodes carry short runs, long runs sit on low-traffic nodes — while the model gives the
+  near-root nodes, which carry every session, the long runs.
+  **The dependence MUST be fitted, not assumed: its sign varies by band and by trace.** Negative on
+  `qwen_code` band 0 (1 against 29), **positive** at band 32+ (136 against 23); exactly equal on
+  `tau2_airline` band 0 (124 against 124) and strongly positive at its band 128+ (119 against 1).
+  Implementing this as "shorter runs near the root" is therefore forbidden.
+  **It reconciles FR-054m rather than reversing it.** `length` MUST stay keyed on the node — a run
+  length varying by arrival makes the trie inconsistent, which is why FR-054m fitted it unweighted.
+  Conditioning that per-node draw on the node's own cohort keeps the key and supplies the joint; the
+  walk already carries `cohort`, and the census already records `fan_in` per segment, so both sides
+  exist. **NOT YET BUILT**, and as a mechanism it requires the FR-055f corpus matrix before adoption.
+  **Do not argue this from the generated trunk's realised length** (1-4 blocks against a drawn 27): in
+  that arm the synthetic also carries 98.8 attritions per 1000 shared blocks against the trace's 0.0,
+  so realised length conflates the draw with mid-run truncation. The per-arrival against per-segment
+  gap is trace-side only and is the clean measurement.
 - **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
   measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
   sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first

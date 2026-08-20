@@ -651,6 +651,16 @@ child no other session takes, `(Σc − Σc·[c≥2])/Σc` — was fitted per ba
 escape probability. **The measurement is right**: on `qwen_code` band 0 it comes out **0.2216**
 against the trace's 24.8% at or below one block, which is close agreement from an independent route.
 
+**That agreement is a coincidence, and reading it as one has since cost a cycle.** The share is a
+property of a **split**, not of a departure depth: it says what fraction of the arrivals *at that
+split* take a child nobody else takes, and a session escaping at a split 300 blocks down has still
+shared 300 blocks. The two numbers agree on `qwen_code` only because its splits sit near the root.
+`exgentic_tau2_airline` separates them decisively — its fitted escapes are **0.3567 / 0.2364 /
+0.3896 / 0.4555 / 0.8551 / 0.8125** by band, while **0.137%** of its requests share one block or less
+and its realised sharing p50 is **288 blocks**. An 86% escape share and near-universal deep sharing
+are perfectly consistent. **`singleton_share` measures where the trunk TERMINATES, not how early
+sessions leave it, and it must not be used as an early-departure knob.**
+
 **The composition is what fails.** Applied at every split a walker meets, over a path of ~700 blocks
 with 0.01-0.07 splits per block, the escape compounds until almost every session has left early:
 
@@ -663,17 +673,86 @@ It buys `sharing_depth` and pays 5x on reuse distance and 5x on `unique_keys`, w
 two of three. `tau2_airline` loses on all three. So the escape is fitted only under
 `CERTUS_EXP_SINGLETON_ESCAPE=1` and no fitted document carries it by default.
 
-**What this narrows the next step to.** The escape magnitude is right at the first split and wrong as
-a per-split hazard, which says the quantity the trace has is closer to a **per-session** escape — a
-session either lands in the shared spine or it does not — than to an independent coin at every split.
-That is the same class of error as the one this whole step exists to fix: an independent draw standing
-in for a correlated structure. Do not tune the per-split value; change what the draw is per.
+**The per-session escape this seemed to narrow the next step to was BUILT AND REFUTED (FR-054n).**
+The argument was that the escape magnitude is right at the first split and wrong as a per-split
+hazard, so the trace's quantity must be closer to a **per-session** escape — a session either lands in
+the shared spine or it does not. Built as one uniform per session compared against every band's share
+(the comonotone coupling of the same marginals, so the per-split marginal is untouched and cumulative
+escape becomes `max q` instead of `1 − Π(1 − q)`), it is **worse on both traces**:
+
+| arm, `--branching-segments` + cohort boundary | reuse | `sharing_depth` | `unique_keys` |
+| --- | --- | --- | --- |
+| `qwen_code`, no escape | 0.17838 | 0.58669 | 0.62832 |
+| `qwen_code`, **per-split (retained)** | **0.09968** | **0.51519** | **0.17343** |
+| `qwen_code`, per-session | 0.12900 | 0.51836 | 0.35290 |
+| `tau2_airline`, no escape | **0.02848** | **0.34610** | **0.45528** |
+| `tau2_airline`, per-split (retained) | 0.02931 | 0.38476 | 0.48613 |
+| `tau2_airline`, per-session | 0.02918 | 0.39190 | 0.48369 |
+
+**It is also wrong by FR-054m's own rule, which is the stronger objection.** The share is fitted over
+**arrivals at a split**, so the draw is keyed on the arrival, and an independent draw per arrival is
+the faithful composition. A per-session key breaks the rule established one requirement earlier.
+
+**And the bimodality argument was simply mistaken, in a way that names the real defect.** No coupling
+of this draw can reach the trace's atom at one block, because the model's first split sits **27 blocks
+down** — band 0's fitted run length — so 27 blocks of sharing is a floor on what any session can have.
+Measured, the synthetic puts **0.0139** of requests at or below one block against the trace's
+**0.2479**, and 0.0540 by depth seven against **0.5723**. The bimodality is a property of **where the
+splits are**, not of how the escape is coupled. See *Run length is correlated with fan-in* below.
 
 **Not adopted.** Cohort exhaustion makes one gated statistic substantially worse on one trace, and by
 the same rule now enforced on the fit's own iteration loop, a trade between two gated statistics is not
 an improvement. The next step is calibrating the division rate so that realised sharing lands right, with
 `sharing_depth` as the readout — not another marginal fix, since the mechanism is now doing the work
 and only its rate is wrong. Reproduce with `CERTUS_EXP_COHORT_BOUNDARY=1` and `--branching-segments`.
+
+#### Run length is correlated with fan-in, and the model draws it independently (FR-054o)
+
+This came out of asking why no coupling of the singleton escape can reach the trace's atom at one
+block, and it is the more valuable half of that investigation. It also identifies what FR-054m cost,
+which its corpus matrix saw as a wash — 14 cells better, 6 worse — without explaining.
+
+`fit --explain`'s run-length table on `qwen_code`, where `arrivals~` is the same segments fan-in
+weighted, i.e. the run a typical **arrival** walks:
+
+| band | stated~ | drawn~ | trace, per SEGMENT | trace, per ARRIVAL |
+| --- | --- | --- | --- | --- |
+| 0+ | 27.0 | 27 | 29 | **1** |
+| 1+ | 9.0 | 9 | 9 | 3 |
+| 8+ | 18.0 | 18 | 18 | 8 |
+| 32+ | 23.0 | 23 | 23 | **136** |
+| 128+ | 36.4 | 36 | 37 | 21 |
+| 512+ | 13.0 | 14 | 13 | 9 |
+
+**FR-054m is a complete success on its own terms and still wrong for the walker.** `stated~`, `drawn~`
+and the per-segment median agree in all six bands — the estimator now answers the question its
+consumer asks. But the trace's *arrivals* in band 0 walk a **1-block** run where the model makes every
+arrival walk **27**.
+
+Both medians are facts about the same trace, and they can only both hold if **run length is correlated
+with fan-in**: the trace's high-traffic near-root nodes carry short runs, and its long runs sit on
+low-traffic nodes. The model draws `length` per node with no reference to that node's own cohort, so
+the near-root nodes — which carry every session — receive the long runs. This is the seventh instance
+of an independent draw standing in for a correlated structure.
+
+**The dependence is not monotone and its sign varies by band and by trace, so it must be fitted rather
+than assumed.** Band 0 is 1 against 29 (strongly negative), band 32+ is **136 against 23** (positive),
+band 128+ is 21 against 37. On `exgentic_tau2_airline` band 0's two medians **agree exactly** at 124,
+while band 1+ reads 41 against 14 and band 128+ reads **119 against 1**. "Shorter runs near the root"
+is therefore the wrong implementation of this.
+
+**Why it is a reconciliation of FR-054m rather than a reversal.** `length` must stay keyed on the node —
+a run length that varied by arrival would make the trie inconsistent, which is the whole reason
+FR-054m fitted it unweighted. Conditioning that per-node draw on the node's **own cohort** keeps the
+key and adds the joint: the walk already carries `cohort` down (`plan/generate.rs`), and the census
+already records `fan_in` per segment, so the conditional law is fittable from what exists and drawable
+where it is consumed.
+
+**Caveat when quoting this.** The realised length of the generated trunk (`len S`, 1-4 blocks against
+a drawn 27) is *not* evidence for it: in that arm the synthetic also suffers heavy attrition —
+98.8 per 1000 shared blocks against the trace's 0.0 — so realised length conflates the draw with
+mid-run truncation. The clean measurement is the per-arrival against per-segment gap, which is
+trace-side only.
 
 ### The structural gate — profiling the GENERATED trunk, and what it immediately found
 

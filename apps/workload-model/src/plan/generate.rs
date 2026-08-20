@@ -131,6 +131,10 @@ const TAG_NODE: u64 = 0x0D0D_E101;
 ///
 /// Its own stream so that a document stating a `singleton_share` does not shift the child-choice
 /// draws of one that does not — the escape is an addition to the walk, not a reordering of it.
+///
+/// Keyed on `(session, depth)`, which makes it an independent draw per arrival at a split. A
+/// per-session key was tried and refuted (FR-054n); see the escape block in
+/// [`Generator::trunk_path`].
 const TAG_ESCAPE: u64 = 0x0E5C_4BE0;
 /// Domain for the "did anyone follow me?" draw at a split.
 const TAG_COMPANION: u64 = 0xC011_4A10;
@@ -948,11 +952,33 @@ impl Generator {
                         .corpus
                         .trunk_step_stateful(cur, d, &mut split, &mut walk, gen);
                     // A split, and the band states how many arrivals land on a child no other
-                    // session takes: draw whether this one did. That is where privacy comes from
+                    // session takes: decide whether this one did. That is where privacy comes from
                     // in a real trace — a split with 4739 children of which 483 are shared — and
                     // it is not derivable from the child law's rank curve, whose fit deliberately
                     // ignores the tail. Measured, `qwen_code` has 24.8% of requests sharing one
                     // block or less against 1.3% under a Zipf matching the head exactly.
+                    //
+                    // PER ARRIVAL AT THE SPLIT, and a per-SESSION draw was built and REFUTED
+                    // (FR-054n) — do not rebuild it. The share is measured over arrivals at a
+                    // split, so by FR-054m's own rule (weight a law by what its draw is keyed on)
+                    // an independent draw at each split a walker meets is the faithful
+                    // composition. The alternative — one uniform per session, compared against
+                    // every band, i.e. the comonotone coupling of the same marginals — was
+                    // measured worse on both traces: `qwen_code` reuse 0.0997 -> 0.1290 and
+                    // `unique_keys` 0.1734 -> 0.3529, `tau2_airline` sharing 0.3848 -> 0.3919.
+                    //
+                    // The argument it was built on was that a per-split coin compounds over a
+                    // ~700-block path until nearly everything has left the trunk, and that the
+                    // trace's bimodal sharing (atoms at 1 and 7 blocks) needs a correlated escape
+                    // to produce. Both halves are wrong, and the second is the instructive one:
+                    // the model cannot reach the trace's atom at <=1 block by ANY coupling of this
+                    // draw, because its first split sits 27 blocks down (band 0's fitted run
+                    // length), so 27 blocks is a floor on what any session can share. Measured,
+                    // synthetic `F(<=1)` is 0.0139 against the trace's 0.2479. The bimodality is a
+                    // property of where the SPLITS are, not of how the escape is coupled — see
+                    // research.md § Cohort exhaustion, and `fit --explain`'s `arrivals~` column,
+                    // which shows run length is correlated with fan-in where the model draws it
+                    // independently.
                     //
                     // Only at a real split (`p < 1.0`): inside a run there is one child and no
                     // choice to escape through. A band stating no share draws nothing, which is
@@ -1210,6 +1236,139 @@ run:
         assert!(
             short_max.unwrap_or(0) < 100,
             "within-root spread leaked the between-root one"
+        );
+    }
+
+    /// One root, a 200-block trunk, and a split every 4 blocks — so a walker meets ~49 splits,
+    /// which is what makes the composition rule observable. `skew: 5.0` over 2 children puts
+    /// `p(top) ~ 0.97`, so the expected cohort decays only to ~0.22 of its start over the whole
+    /// trunk and [`COHORT_FLOOR`] never binds: any privacy in the realised plan is therefore the
+    /// escape and not cohort exhaustion, which is the confound this fixture exists to remove.
+    fn escape_doc(share: &str) -> String {
+        format!(
+            r#"
+requests: 4000
+version: 1
+seed: 0xC0FFEE
+corpus:
+  block_bytes: 131072
+  trees:
+    roots: {{count: 1, popularity: {{dist: zipf, s: 0.9}}}}
+    shared_depth: {{dist: const, value: 200}}
+    branching:
+      by_depth:
+        - from_depth: 0
+          length: {{dist: const, value: 4}}
+          out_degree: {{dist: const, value: 2}}
+          skew: 5.0
+{share}
+workload:
+  arrival: {{model: open_loop, rate: 4000/s}}
+  sessions:
+    turns: {{dist: const, value: 1}}
+    think_time: {{dist: const, value: 0.5}}
+    private_depth: {{dist: const, value: 3}}
+    turn1_path_length: {{dist: const, value: 240}}
+    growth_per_turn: {{dist: const, value: 2}}
+run:
+  mode: hardware
+  wss_window: 240000
+"#
+        )
+    }
+
+    /// How many of each session's turn-1 blocks another session also touched.
+    ///
+    /// The observable that separates an escaper from a walker still on the spine: a session that
+    /// left at its first split shares only the blocks above that split, one still on the trunk
+    /// shares the whole trunk.
+    fn shared_blocks_per_session(ev: &[PlanEvent]) -> Vec<usize> {
+        let mut fan: std::collections::HashMap<CacheKey, std::collections::BTreeSet<u32>> =
+            std::collections::HashMap::new();
+        for e in ev {
+            fan.entry(e.key).or_default().insert(e.session_id.0);
+        }
+        let mut per: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+        for e in ev {
+            let entry = per.entry(e.session_id.0).or_insert(0);
+            if fan.get(&e.key).is_some_and(|s| s.len() > 1) {
+                *entry += 1;
+            }
+        }
+        per.into_values().collect()
+    }
+
+    /// `(left at the first split, still on the spine at 100+ blocks)` as fractions of the
+    /// population, for a document stating `share`.
+    ///
+    /// A run is 4 blocks, so a session that escaped at the first split shares exactly those 4
+    /// blocks. Sessions in between the two modes are **cohort-floor** exits — a walker that took
+    /// the rare second child divides its cohort by ~0.03 and is alone at once — which is a
+    /// pre-existing mechanism and the reason this reads two modes rather than asserting there are
+    /// only two.
+    fn escape_modes(share: &str) -> (f64, f64) {
+        let d = Document::from_yaml(escape_doc(share).trim_start()).expect("fixture must parse");
+        let mut g = Generator::new(&d).unwrap();
+        let shared = shared_blocks_per_session(&drain(&mut g));
+        assert!(shared.len() > 1000, "too few sessions: {}", shared.len());
+        let n = shared.len() as f64;
+        let first = shared.iter().filter(|b| **b == 4).count() as f64 / n;
+        let spine = shared.iter().filter(|b| **b >= 100).count() as f64 / n;
+        (first, spine)
+    }
+
+    #[test]
+    fn the_singleton_escape_is_drawn_per_arrival_at_each_split() {
+        // The share is measured over ARRIVALS at a split, so by FR-054m's rule the draw is keyed
+        // on the arrival and an independent coin at each split is the faithful composition. Both
+        // halves of that are asserted here, because the second one has already been "fixed" once:
+        //
+        //  * the per-split MARGINAL is the stated share, and
+        //  * it therefore COMPOUNDS along a path — this fixture's walkers cross ~49 splits, so
+        //    `0.75^49` of them stay on the trunk, i.e. essentially none.
+        //
+        // The compounding is a consequence of the key and not an oversight. FR-054n replaced it
+        // with one uniform per session (the comonotone coupling of the same marginals) on the
+        // argument that it must be what produces the trace's bimodal sharing, and that was
+        // measured WORSE on both traces — `qwen_code` reuse 0.0997 -> 0.1290 and `unique_keys`
+        // 0.1734 -> 0.3529. If this test starts failing on the spine assertion, that change has
+        // been made again.
+        let (first_off, spine_off) = escape_modes("");
+        let (first_on, spine_on) = escape_modes("          singleton_share: 0.25");
+        assert!(
+            spine_on < 0.05,
+            "{spine_on:.4} of sessions still share at depth 100+ — a per-arrival escape at ~49 \
+             splits must compound past all of them; a per-session draw was refuted (FR-054n)"
+        );
+        // The marginal is the stated share, measured as what it ADDS at the first split over the
+        // same fixture without it. Differenced rather than read raw because the cohort floor
+        // retires sessions there too.
+        let added = first_on - first_off;
+        assert!(
+            (0.15..0.40).contains(&added),
+            "the share added {added:.3} of sessions at the first split, not the stated 0.25 \
+             (without it {first_off:.3}, with it {first_on:.3})"
+        );
+        assert!(
+            spine_off > spine_on,
+            "the escape moved no session off the spine: {spine_off:.3} -> {spine_on:.3}"
+        );
+    }
+
+    #[test]
+    fn a_document_stating_no_escape_share_leaves_the_trunk_alone() {
+        // The escape must be inert unless asked for: every document fitted before FR-054n omits
+        // `singleton_share`, and the per-session uniform is drawn from its own stream so that
+        // adding it cannot reorder the child-choice draws. Same fixture, share removed — so the
+        // near-zero here is the escape's absence and not a quiet fixture.
+        let (first_off, spine_off) = escape_modes("");
+        assert!(
+            first_off < 0.05,
+            "{first_off:.3} of sessions left at the first split with no share stated"
+        );
+        assert!(
+            spine_off > 0.85,
+            "only {spine_off:.3} of sessions reach depth 100 before any escape exists"
         );
     }
 
