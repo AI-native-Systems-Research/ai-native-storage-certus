@@ -50,8 +50,12 @@ RUN python3 -m pip install --no-cache-dir msgpack \
     && python3 -c "import llmd_fs_backend.spec; print('llmd_fs_backend import OK')" \
     && rm -rf /tmp/wheels
 
-# Driver + shared dataset (torch/vllm come from the base image).
+# Driver + the shared workload modules it imports + shared dataset (torch/vllm
+# come from the base image). multiturn_workload backs the batched path (imported
+# at top); multiturn_async backs WORKLOAD_MODE=async — both must be present.
 COPY benchmarks/kv-offload-replay/run_fs_bench_450.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/multiturn_workload.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/multiturn_async.py /workspace/bench/
 COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 COPY benchmarks/kv-offload-replay/docker-entrypoint-sharedstorage.sh /usr/local/bin/ss-entrypoint
