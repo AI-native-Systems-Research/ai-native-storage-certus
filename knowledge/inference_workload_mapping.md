@@ -88,33 +88,38 @@ Mapping high-level LLM inference serving behaviors to concrete storage access pa
 
 ---
 
-## 3. Decode Phase → Load (cache miss) + Store (new block full)
+## 3. Decode Phase → Store (new block) + Load (only on preemption reschedule)
 
-**Inference behavior**: After prefill, the model generates tokens one at a time. Each new token requires ALL previous KV cache entries for attention. New KV entries accumulate until a full block (16 tokens) is complete.
+**Inference behavior**: After prefill, the model generates tokens one at a time. Attention reads ALL previous KV — but this happens **entirely on GPU** (attention kernel reads GPU HBM directly). No certus IO is needed for the attention read itself.
 
-**Storage operations:**
+**When does certus IO actually happen during decode?**
 
-| Operation | When | Direction | Size | Latency |
-|-----------|------|-----------|------|---------|
-| **Load** (cache miss) | Evicted block needed for attention | SSD→DRAM→GPU | 1 full block (2 MB) | **Critical path** — blocks generation |
-| **Store** (new block full) | Every 16 generated tokens | GPU→DRAM→SSD | 1 full block (2 MB) | Background (deferred to next step) |
+| Operation | Trigger | Why | Latency |
+|-----------|---------|-----|---------|
+| **Store** (new block full) | Every 16 generated tokens complete a block | Offloading manager calls `prepare_store` for durability/sharing | Background (deferred, not on critical path) |
+| **Load** (preemption reschedule) | Scheduler preempted this request, freed its GPU blocks, then rescheduled it | Request's KV was evicted → must be reloaded before decode can resume | **Critical path** — decode BLOCKED until Load completes |
+
+**The decode attention itself does NOT read from certus.** It reads from GPU block memory. A Load only happens because:
+1. Scheduler **preempts** the request (frees GPU blocks to make room for another request)
+2. Freed blocks get Stored to certus (eviction)
+3. Later, scheduler **reschedules** the request
+4. Its KV blocks must be **Loaded** back from certus → GPU before decode can resume
 
 **Storage pattern**:
-- **Loads**: Only on cache miss (block was evicted, then needed again). Random access across active sessions. Latency-critical — each decode step BLOCKS until all needed KV is on GPU.
-- **Stores**: Every 16 decode steps, 1 new block is complete → enqueued for background write. Sequential within a request (block index monotonically increasing).
-- **Access pattern**: Random loads (which session gets evicted is LRU-dependent) + sequential stores (per-request append)
-- **Ratio**: Under memory pressure, loads can be frequent (every scheduling step for preempted requests). Stores are fixed at 1 per 16 tokens regardless of pressure.
+- **Stores**: Fixed rate — 1 Store per 16 new tokens, unconditional. Sequential per request.
+- **Loads**: Only on preemption reschedule. NOT every decode step. Frequency depends on how often the scheduler preempts and reschedules (driven by MAX_NUM_SEQS vs active requests).
+- **Zero IO case**: If request is never preempted, decode does Stores only (background). No Loads.
 
 **Bench parameters**:
 | Parameter | Typical range | Notes |
 |-----------|--------------|-------|
-| Load size per miss | 2–80 MB (full block) | Whole block must be loaded to GPU |
-| Store accumulation | 16 decode steps → 1 block store | block_size = 16 tokens |
-| Active sessions | 32–256 concurrent | Continuous batching |
-| Load frequency | 0 (no pressure) – every step (heavy eviction) | Depends on working set vs capacity |
-| Store frequency | 1 store per request per 16 tokens | Fixed, independent of pressure |
+| Store frequency | 1 block per request per 16 tokens | Fixed, unconditional |
+| Load trigger | Preemption + reschedule | NOT every decode step |
+| Load size | All of request's KV blocks | Full reload of evicted context |
+| Preemption rate | 0 (enough GPU slots) – frequent (MAX_NUM_SEQS << active requests) | Depends on over-subscription |
+| Load latency | Critical path | Decode blocked until complete |
 
-**Key insight**: In well-provisioned systems (working set < cache), decode does ZERO storage IO — everything stays on GPU/DRAM. Storage IO during decode only happens under eviction pressure or when preempted requests are rescheduled. But when it does happen, the Load is on the **critical path** for token generation latency (TPOT).
+**Key insight**: Decode's relationship to certus is asymmetric. Stores happen unconditionally (trickle, background). Loads happen only on preemption — but when they do, they're on the **critical path** for TPOT because decode cannot resume until the request's full KV is back on GPU.
 
 ---
 
