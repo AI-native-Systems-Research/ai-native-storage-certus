@@ -6,21 +6,25 @@ Mapping high-level LLM inference serving behaviors to concrete storage access pa
 
 ### Quick Reference: Store vs Load per Pattern
 
-| Pattern | Store (GPU→DRAM→SSD) | Load (SSD→DRAM→GPU) | Dominant |
+**Important**: Loads from certus only happen when blocks were previously **Stored AND then evicted** from GPU/DRAM. If blocks are still in GPU cache (prefix hit + not evicted), there is ZERO certus IO. The patterns below assume the system is in the **spilling regime** (working set > GPU+DRAM capacity), which is when certus matters.
+
+| Pattern | Store (GPU→DRAM→SSD) | Load (SSD→DRAM→GPU) | Dominant (in spilling regime) |
 |---------|---------------------|--------------------:|----------|
-| §1 Prefill | New unique tokens only | Prefix-cached blocks (if hit) | **Load** (>60% hit ratio in production) |
-| §2 Cohort sharing | First request stores prefix | N-1 subsequent requests Load same blocks | **Load** |
-| §3 Decode | 1 block per 16 tokens (background) | Full block on cache miss (critical path) | **Load** under pressure, else 0 IO |
+| §1 Prefill | New unique tokens only | Prefix blocks that were evicted | **Load** if prefix was evicted; else pure **Store** |
+| §2 Cohort sharing | First request stores prefix | N-1 requests Load if prefix evicted | **Load** (only when eviction happened between requests) |
+| §3 Decode | 1 block per 16 tokens (background) | Full block on cache miss (critical path) | **Load** under pressure, else **0 IO** |
 | §4 Eviction | Flush cold blocks to SSD (scattered) | Reload evicted blocks on reaccess | **Both** simultaneously |
-| §5 Shared→Unique | First session stores K prefix + all store M unique | N-1 sessions Load K shared blocks | **Load** (shared) + **Store** (unique) |
-| §6a Chunked prefill | Chunks of new tokens stored | Cached chunks loaded | Mixed per chunk |
+| §5 Shared→Unique | First stores prefix + all store M unique | N-1 Load K shared (if evicted) | **Store** always + **Load** if evicted |
+| §6a Chunked prefill | Chunks of new tokens stored | Cached chunks loaded (if evicted) | Mixed per chunk |
 | §6b Speculative | 3–5× Store amplification (most discarded) | Load shared prefix for verification | **Store** (amplified) |
 | §6c Beam search | COW Store only at divergence | B × Load of shared blocks per step | **Load** dominated |
 | §6d Continuous batch | Prefill stores + eviction stores | Decode loads + reschedule loads | **Both** async |
-| §6e Multi-turn | Trickle stores (new generation) | Massive Load of ALL prior turns at start | **Load** dominated |
-| §6f Disaggregated | Bulk Store (prefill node, GB-scale) | Bulk Load (decode node, GB-scale) | **Both** (sequential) |
+| §6e Multi-turn | Trickle stores (new generation) | Prior turns' KV (if evicted between turns) | **Load** if evicted; else 0 |
+| §6f Disaggregated | Bulk Store (prefill node, GB-scale) | Bulk Load (decode node, GB-scale) | **Both** (always — different nodes) |
 | §6g Sparse retrieval | Standard (1/16 tokens) | Sparse subset Load (10–30% of blocks) | **Load** (reduced) |
 | §6h LRU prefix-aware | Eviction stores hit unique-suffix | Reload loads hit unique-suffix | **Both** (biased to suffix) |
+
+**Key principle**: Store happens unconditionally (new KV must be persisted for durability/sharing). Load happens ONLY when a block that was Stored is not currently in GPU/DRAM and is needed again. The certus DRAM tier (32 GiB in BENCH_TARGET) is the buffer — if it holds the working set, Loads come from DRAM (fast) not SSD (slow).
 
 ---
 
