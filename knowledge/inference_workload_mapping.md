@@ -24,7 +24,38 @@ Mapping high-level LLM inference serving behaviors to concrete storage access pa
 | §6g Sparse retrieval | Standard (1/16 tokens) | Sparse subset Load (10–30% of blocks) | **Load** (reduced) |
 | §6h LRU prefix-aware | Eviction stores hit unique-suffix | Reload loads hit unique-suffix | **Both** (biased to suffix) |
 
-**Key principle**: Store happens unconditionally (new KV must be persisted for durability/sharing). Load happens ONLY when a block that was Stored is not currently in GPU/DRAM and is needed again. The certus DRAM tier (32 GiB in BENCH_TARGET) is the buffer — if it holds the working set, Loads come from DRAM (fast) not SSD (slow).
+**Key principle**: Store happens unconditionally (new KV must be persisted for durability/sharing). Load happens ONLY when a block that was Stored is not currently on GPU and is needed again. Which tier serves the Load determines latency.
+
+### Three-Tier Data Path (Certus Architecture)
+
+```
+GPU HBM  ←──────→  DRAM (memory-tier, 32 GiB)  ←──────→  SSD (NVMe × 4)
+         cudaMemcpy                              SPDK NVMe R/W
+         D2H: ~12 GB/s                           read: ~14 GB/s (4 drives)
+         H2D: ~12 GB/s                           write: ~10 GB/s (4 drives)
+```
+
+**Store (Populate)** is always two hops:
+1. GPU → DRAM: `cudaMemcpy D2H` into memory-tier slot (immediate, on critical path of populate)
+2. DRAM → SSD: Background writer flushes asynchronously (NOT on critical path)
+
+**Load (Lookup)** depends on which tier holds the block:
+
+| Path | Hops | Latency | When |
+|------|------|---------|------|
+| **Hot Load** | DRAM → GPU | ~330 µs per 4 MB block | Block still in memory-tier (not evicted from DRAM) |
+| **Cold Load** | SSD → DRAM → GPU | ~1–3 ms per 4 MB block | Block was evicted from DRAM, must read from NVMe first |
+
+**Eviction** moves blocks between DRAM tiers:
+- Memory-tier full → LRU block's DRAM slot freed (block still on SSD from background write)
+- This is NOT an IO operation — just a pointer removal from the dispatch map
+- The block remains on SSD; a future Load becomes a Cold Load instead of Hot Load
+
+**Why this matters for bench design**:
+- certus-api-bench v2 `hot lookup` = **Hot Load** (DRAM → GPU only, measures cudaMemcpy throughput)
+- certus-api-bench v2 `cold lookup` = **Cold Load** (SSD → DRAM → GPU, measures NVMe + DMA pipeline)
+- Real inference mixes both: recently-stored blocks are Hot (still in DRAM), older evicted blocks are Cold
+- The DRAM tier size (32 GiB) determines what fraction of Loads are Hot vs Cold
 
 ---
 
