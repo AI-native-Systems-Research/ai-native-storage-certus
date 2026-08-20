@@ -43,16 +43,16 @@ Mapping high-level LLM inference serving behaviors to concrete storage access pa
 
 ---
 
-## 2. Cohort Sharing → Multiple Readers on Same Extent Range
+## 2. Cohort Sharing → N × Load of Same Blocks
 
-**Inference behavior**: Multiple requests share a common system prompt or document prefix. The KV cache for this shared prefix is computed once and reused (prefix caching / RadixAttention).
+**Inference behavior**: Multiple requests share a common system prompt or document prefix. The KV cache for this shared prefix is computed once (by the first request) and reused by subsequent requests via prefix caching (RadixAttention).
 
-**Storage pattern**:
-- Read size: Same block size as writes (2–80 MB per block)
-- Access: N sessions all read the same set of blocks (the shared prefix)
-- Temporal: Reads may be simultaneous (batch of requests arrives) or staggered
-- After shared prefix: each session diverges into unique blocks
-- Sharing ratio: In real deployments, 60–90% of tokens can be shared prefix (system prompt + few-shot examples)
+**Storage operations**:
+- First request in cohort: **Stores** the shared prefix blocks (cold prefill, §1a)
+- All subsequent requests: **Load** the same K blocks from storage (prefix cache hit)
+- Net: 1 Store + (N-1) Loads of the same K blocks — **Load-dominated**
+- Temporal: Loads may be simultaneous (batch arrival) or staggered
+- Sharing ratio: 60–90% of tokens shared (system prompt + few-shot examples)
 
 **Bench parameters**:
 | Parameter | Typical range | Notes |
@@ -169,56 +169,66 @@ Session N: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M_N]
 
 ### 6a. Chunked Prefill (Sarathi-Serve)
 - Long prompts split into fixed chunks (512–2048 tokens), processed across multiple scheduler steps
-- Pattern: **Periodic medium write bursts interleaved with decode reads** — not one huge burst
-- Each chunk writes ~4 MB KV then yields to decode steps
-- Temporal: write-burst → read-dominated → write-burst within a single request lifecycle
-- More gradual write pressure than monolithic prefill; better represents production with chunked prefill enabled
+- **Per chunk**: may Load prefix-cached blocks (if chunk overlaps with cached prefix) + Stores newly computed blocks
+- Without prefix hit: each chunk = pure **Store** of ~32 blocks, then yields to decode steps
+- With prefix hit: first chunks may be pure **Load** (prefix), later chunks = **Store** (new)
+- Temporal: interleaved Load/Store bursts within a single request lifecycle
+- More gradual IO pressure than monolithic prefill
 
 ### 6b. Speculative Decoding / Tree Verification (SpecInfer)
 - Multiple candidate branches generated speculatively (branching factor 3–5)
-- Most branches rejected → write amplification (3–5× writes that become dead immediately)
-- Verification reads shared prefix once, then divergent branches in parallel
-- Pattern: **High write + high discard (rollback), tree-structured reads**
-- Key metric: write:useful-retain ratio
+- **Stores**: All branches Store their KV blocks (3–5× Store amplification)
+- **Loads**: Verification Loads the shared prefix once, then divergent branches in parallel
+- Most branches rejected → their Stored blocks become dead (wasted Store bandwidth)
+- Pattern: **High Store + high discard, Load of shared prefix for verification**
+- Key metric: Store:useful-retain ratio (3–5× wasted Stores)
 
 ### 6c. Beam Search / Parallel Sampling
 - B beams share prefix KV, then diverge at each step
-- **Copy-on-write semantics**: physical blocks shared via refcount until a beam modifies
-- Pattern: N×read of shared blocks per step, COW write only at divergence points
-- Tree-structured sharing (not just flat prefix)
+- **Loads**: All B beams Load the same shared prefix blocks each step (read amplification)
+- **Stores**: Only at divergence points (copy-on-write — Store only when a beam modifies)
+- Pattern: B × Load of shared blocks per step, occasional Store at divergence
+- Net: Load-dominated (shared prefix read B times per step, Stores are rare COW events)
 
 ### 6d. Continuous Batching Steady-State
 - No global prefill/decode phases — individual requests in different phases simultaneously
-- KV blocks allocated/freed **asynchronously** across requests (not synchronized)
-- Steady-state: some requests in prefill burst (writes) + many in decode (reads)
-- Arrival bursts (per BurstGPT traces: 10–100× variation across hours) → memory pressure varies proportionally
-- Pattern: **Mixed async alloc/free, no synchronized phases**
+- Simultaneous: some requests doing prefill **Stores** + some doing decode **Loads** (cache miss) + some doing eviction **Stores**
+- KV blocks allocated/freed **asynchronously** (not synchronized across requests)
+- Arrival bursts (per BurstGPT traces: 10–100× variation) → memory pressure varies → eviction Store/Load bursts
+- Pattern: **Mixed async Store+Load, no synchronized phases** — this IS the steady-state the server sees
 
 ### 6e. Multi-Turn Conversation Reuse
-- KV cache from prior turns persisted to storage (not just shared prefix within a turn)
-- Pattern: **Large read burst at turn-start** (reload prior conversation) → small appends during new generation
-- Growing read set over conversation lifetime (each turn adds to history)
-- Temporal: bursty read at turn-start, then steady small writes
+- KV cache from prior turns persisted to storage
+- **Load** (turn start): ALL prior turns' KV blocks loaded from storage back to GPU (the entire conversation history)
+- **Store** (during generation): New blocks from this turn's generation stored (every 16 tokens → 1 Store)
+- Growing Load set: turn 1 = 0 Loads, turn 5 = Load of turns 1–4's KV, turn 12 = Load of turns 1–11's KV
+- Temporal: **massive Load burst at turn-start**, then steady trickle of Stores during generation
+- This is BENCH_TARGET's primary pattern
 
 ### 6f. Disaggregated Prefill-Decode Architecture (DistServe, Splitwise, Mooncake)
-- After prefill completes, entire KV cache transferred to a decode node via shared storage
-- Storage becomes the communication channel between nodes
-- Pattern: **One-shot bulk write (prefill node) → one-shot bulk read (decode node)**
+- Prefill node computes KV for entire prompt → **Stores** all blocks to shared storage
+- Decode node receives the request → **Loads** ALL those blocks from storage before it can start generating
+- Storage = communication channel between nodes
+- Pattern: **Bulk Store (prefill node) → Bulk Load (decode node)** — one-shot, GB-scale
 - Size: Llama-70B at 4K tokens ≈ 2.5–5 GB per request
-- Latency-critical: decode node blocks until prefill writes are visible on storage
-- Bandwidth-sensitive: placement optimized for interconnect
+- Latency-critical: decode node **blocks** until all Loads complete (cannot generate until full KV is on GPU)
+- Bandwidth-sensitive: end-to-end latency = Store time + propagation + Load time
 
 ### 6g. Selective/Sparse KV Retrieval (InfiniGen, Attention Sink)
-- Not all prior KV entries equally important — systems increasingly retrieve only predicted-important subset
+- Not all prior KV entries equally important — systems retrieve only predicted-important subset
 - InfiniGen (OSDI 2024): speculative prefetch of important tokens, one layer ahead
-- Pattern: **Sparse random reads** (10–30% of full KV), not sequential scan of all prior blocks
-- Fundamentally different from full-prefix read assumed in §3
+- **Loads**: Sparse random Loads of 10–30% of full KV blocks (not all prior blocks)
+- **Stores**: Same as standard decode (1 Store per 16 new tokens)
+- Fundamentally different from §3 where a cache miss Loads the FULL block — here, some blocks are never Loaded because they're predicted unimportant
+- Pattern: **Sparse random Loads (subset selection) + standard Stores**
 
 ### 6h. LRU Eviction with Prefix Awareness (vLLM)
 - vLLM evicts from free-queue head (LRU)
 - Freed blocks added in **reverse order**: last block (most unique) evicted first
-- Pattern: eviction preferentially removes unique-suffix blocks, preserving shared-prefix blocks longer
-- Implication: cold reads disproportionately hit unique-suffix blocks (shared prefix stays hot)
+- **Stores** (eviction): unique-suffix blocks get evicted (Stored to SSD) first, shared-prefix blocks stay in DRAM longer
+- **Loads** (reload): when evicted unique-suffix blocks are needed again → Load from SSD
+- Net effect: Stores and Loads disproportionately hit **unique-suffix blocks**, shared-prefix blocks rarely touch SSD
+- Implication for bench: eviction IO is concentrated on the "tail" of each session, not the shared head
 
 ---
 
