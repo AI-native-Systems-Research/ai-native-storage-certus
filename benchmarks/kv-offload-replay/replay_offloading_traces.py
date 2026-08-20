@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import importlib
 import json
 import sys
@@ -1032,7 +1033,10 @@ def _make_certus_shared_targets(extra_config: dict | None = None,
         return bytes.fromhex(hex_str)
 
     def _key_to_u64(key_bytes):
-        return int.from_bytes(key_bytes[:8], "big")
+        # Fold the full OffloadKey (block_hash + 4-byte group index, 36 bytes
+        # for default SHA-256) into a u64 via BLAKE2b, matching the connectors.
+        digest = hashlib.blake2b(bytes(key_bytes), digest_size=8).digest()
+        return int.from_bytes(digest, "big")
 
     # Manager target wrapper
     class _MgrW:
