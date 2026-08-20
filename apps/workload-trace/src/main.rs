@@ -2323,8 +2323,9 @@ fn band_shapes(rows: &[workload_model::fit::segments::SegmentRow]) -> Vec<(u32, 
 
 /// The median of `(value, weight)` pairs, weighting each value by its weight.
 ///
-/// Written out because it is the estimator the run-length fit uses (fan-in weighted) and the
-/// diagnostic below has to reproduce it exactly to show what it costs against the unweighted one.
+/// Written out because it is the estimator the **child law** is fitted with, and because the
+/// diagnostic below has to reproduce it exactly to keep printing what fan-in weighting costs a law
+/// that is consumed per node — the gap FR-054m removed from `length`.
 /// `0` for an empty input, which is how the report prints an empty band.
 fn weighted_median(pairs: &[(u64, u64)]) -> u64 {
     let total: u64 = pairs.iter().map(|(_, w)| *w).sum();
@@ -2348,19 +2349,21 @@ fn weighted_median(pairs: &[(u64, u64)]) -> u64 {
 
 /// What a run-length **draw** yields, against what the band states and what the trace has.
 ///
-/// Three medians get confused with each other, and the confusion is a measure mismatch rather than
-/// an arithmetic slip:
+/// This table is what found FR-054m, and it is worth keeping now that the defect is fixed, because
+/// it is the only place three easily-confused medians are printed side by side:
 ///
-/// * the band's stated `length` is **fan-in weighted** (`fit::segments::fit_process`), so its median
-///   is the run length a typical *arrival* walks — a run carrying 16045 sessions counts 16045 times;
-/// * the walk draws that distribution once **per node** (`Corpus::run_length`), where every node
-///   counts once, whatever its fan-in;
-/// * the census reports the median over **segments**, also unweighted.
+/// * the band's stated `length`, drawn once **per node** (`Corpus::run_length`), where a node
+///   carrying 16045 sessions counts exactly once;
+/// * the census's median over **segments**, unweighted — the population the stated law is fitted
+///   over since FR-054m, so `stated~` and `trace/seg` are now the SAME quantity and a gap between
+///   them is a defect, not a measure mismatch;
+/// * `arrivals~`, the same rows weighted by fan-in — the run a typical *arrival* walks. Printed
+///   because the gap between it and `trace/seg` is the size of the error FR-054m removed
+///   (`qwen_code`'s root band: 1 against 29), and because the child law is still fitted this way
+///   and legitimately so.
 ///
-/// So a stated median of 136 against a realised one of 2 is not by itself a defect — the report
-/// already warns the two are meant to differ. This makes the comparison an honest one by drawing the
-/// band's own distribution per node and printing the empirical median beside the trace's unweighted
-/// per-segment median, which is the quantity the walk should be reproducing.
+/// A residual `stated~`-vs-`trace/seg` gap of one step is the ≤64-step coarsening of the emitted
+/// empirical plus the even-sample median convention, not a return of the weighting.
 fn print_run_length_draw(
     doc: &workload_model::schema::Document,
     trace_rows: &[workload_model::fit::segments::SegmentRow],
@@ -2376,9 +2379,10 @@ fn print_run_length_draw(
     };
     println!(
         "\n    run length: what the band SAYS against what a per-node draw YIELDS\n    \
-         the stated quantiles are fan-in weighted (the run a typical ARRIVAL walks); the walk draws\n    \
-         them once per NODE. `trace/seg` is the trace's unweighted per-segment median — the quantity\n    \
-         a per-node draw is reproducing, and the one to compare `drawn` against."
+         `length` is drawn once per NODE and since FR-054m is fitted over SEGMENTS, so `stated~`,\n    \
+         `drawn~` and `trace/seg` are all the same quantity and should agree — a gap is a defect.\n    \
+         `arrivals~` is the same rows fan-in weighted, i.e. the run a typical ARRIVAL walks: what\n    \
+         `length` used to be fitted to, kept here because the child law is still weighted that way."
     );
     println!(
         "    {:>8}  {:>9} {:>9}  {:>9}  {:>9}  {:>9}",
@@ -2880,9 +2884,9 @@ fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
         "\n  fitted trunk process — the node-level law the document states, per band\n  \
          a walker draws a run length from `len`, walks it, then splits `deg` ways and picks a \
          child\n  under `skew`. splits/blk is off the MEAN length; decay/band = \
-         coll^(span/mean len);\n  cum is the product down the trunk. Compare len/deg against the \
-         census above: the fit\n  weights both by fan-in, so they are meant to differ from its \
-         per-segment medians."
+         coll^(span/mean len);\n  cum is the product down the trunk. Compare against the census \
+         above: `len` is fitted\n  over SEGMENTS and should MATCH its per-segment median (FR-054m), \
+         while `deg` is still fan-in\n  weighted and is meant to differ from it."
     );
     println!(
         "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>7}  {:>10}  {:>9}  {:>9}",
@@ -3298,10 +3302,12 @@ mod tests {
 
     /// Fan-in weighting moves the run-length median, and which way is a property of the trace.
     ///
-    /// The point of the diagnostic it serves: `length` is fitted **fan-in weighted** but consumed
-    /// **per node**, so the two estimators answer different questions about the same rows. On
-    /// `qwen_code`'s root band the weighted median is 1 where the unweighted one is 29, because the
-    /// splits carrying thousands of sessions are the short ones.
+    /// The point of the diagnostic it serves: `length` **was** fitted fan-in weighted while being
+    /// consumed **per node**, so the two estimators answer different questions about the same rows.
+    /// On `qwen_code`'s root band the weighted median is 1 where the unweighted one is 29, because
+    /// the splits carrying thousands of sessions are the short ones. FR-054m unweighted the fit; the
+    /// gap is still printed, both as the size of the error removed and because the child law is
+    /// legitimately weighted this way.
     #[test]
     fn a_weighted_median_can_sit_far_from_the_unweighted_one() {
         // Three long runs walked by one session each, one short run walked by 100.

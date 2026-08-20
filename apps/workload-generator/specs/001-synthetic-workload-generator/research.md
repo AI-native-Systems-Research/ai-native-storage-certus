@@ -946,9 +946,86 @@ population those two must match is the **segments**. `out_degree` carries the sa
 dramatically: `qwen_code`'s band 0 states **4739** children where the census's per-node median
 out-degree is **2**.
 
-Not built. It changes the default fit path, so it needs the whole-corpus matrix, and the prediction to
-test it against is that an unweighted `length` moves the realised run lengths toward
-29/9/18/23/37/13 and the segment count from 13671 toward the trace's 9998.
+##### Built for `length`, and what the prediction returned
+
+`length` is now fitted unweighted; `out_degree` is deliberately left weighted, because FR-055j fits it
+as a pair with `skew` and moving one without re-fitting the other breaks the pairing.
+
+**A claim in the paragraph above was wrong and is corrected rather than deleted: this is not the
+default fit path.** `length` exists only in the node-level `branching: {by_depth: [...]}` spelling,
+which `fit` emits only under `--branching-segments`. The default per-depth profile has no run-length
+law, so the fix cannot regress the shipped default — the corpus matrix here decides whether the
+node-level spelling becomes worth adopting, not whether the default changed.
+
+The stated law now reproduces the trace's per-segment median in **all six bands of both traces**
+(`qwen_code` 27/9/18/23/36/14 against 29/9/18/23/37/13; `tau2_airline` exact in all six). The residual
+one-step gaps are the ≤64-step coarsening of the emitted empirical plus the even-sample median
+convention, not a residue of the weighting.
+
+The segment-count half of the prediction **depends on the arm, and the two arms disagree — which is
+the finding**:
+
+| arm | trace | reuse | `sharing_depth` | `unique_keys` | segments (trace) |
+| --- | --- | --- | --- | --- | --- |
+| `--branching-segments` | `qwen_code` | 0.1062 → **0.0264** | 0.1072 → **0.0894** | 0.4786 → **0.2656** | 5475 → 3946 (9998) |
+| `--branching-segments` | `tau2_airline` | 0.0310 → 0.0307 | 0.3764 → 0.4051 | 0.5560 → 0.5512 | 389 → 393 (158) |
+| `--branching-segments` | `exgentic_swebench` | 0.0923 → 0.0926 | 0.5662 → **0.4600** | 0.2812 → **0.2661** | 284 → 270 (85) |
+| + cohort toggles | `qwen_code` | 0.0292 → 0.1958 | 0.3998 → 0.6082 | **0.0534 → 0.8618** | 13671 → **9157** (9998) |
+| + cohort toggles | `tau2_airline` | 0.0221 → 0.0221 | 0.2984 → **0.2965** | 0.5083 → **0.4841** | 498 → 500 (158) |
+
+`request_length` is unchanged to five decimals in all five cases — the check that the run-length law is
+a property of the trunk's shape and not a path-length term in disguise.
+
+**In the cohort arm — the arm the 13671 figure was measured in — the prediction is confirmed exactly**:
+13671 → 9157 against 9998, from 1.37x too many segments to 0.92x. **And in the same arm every marginal
+collapses**, including the only `qwen_code` cell that has ever been inside tolerance (`unique_keys`
+0.0534 → 0.8618).
+
+That is compensation being uncovered, and it is worth stating as a mechanism rather than a
+disappointment. Under the arrival-weighted law the cohort arm reached a split at nearly every block;
+over-splitting decayed cohorts fast, and fast decay produced roughly the right `unique_keys` for the
+wrong reason. With runs at their measured length the cohort survives, and what becomes visible is the
+already-recorded fact that **the fitted per-split division rate is too slow** (collision 0.39-0.81 per
+split). Two defects were cancelling. Removing one is what makes the other measurable, and the division
+rate — not the run length — is where the next work belongs.
+
+This is the third recorded case of a structural fix worsening marginals calibrated against a model with
+compensating errors. The standing rule applies: **expect it, and do not let a marginal veto a
+structural correction whose estimator is provably the wrong one.**
+
+##### The corpus matrix, and why a 4-to-1 worst-ratio tally did not decide it
+
+Both arms `--branching-segments`, 24 traces, binary md5 identical before and after the run.
+
+| judged on | result |
+| --- | --- |
+| coverage | **8 of 24 in both arms, identical verdict distribution** — nothing gained, nothing lost |
+| cells | **14 better, 6 worse, 12 unchanged** of 32 |
+| Pareto | **4 wins** (`swebench`, `qwen_code`, `qwen_reasoning`, `wildchat`), **2 losses** (`browsecompplus`, `tau2_retail`), 2 trades |
+| cells inside tolerance | **0 of 32 in both arms** — no passing verdict was traded away |
+| worst ratio | old code better on 4, new on 1, tie 3 |
+
+Every loss is `sharing_depth`, apart from `tau2_retail`'s reuse at +4.7%, and `sharing_depth` splits by
+**family** rather than by direction: −18.8% on `swebench`, −16.6% on `qwen_code`, −4.5% on
+`qwen_reasoning`, against +7.6/+30.7/+8.5% on the three `tau2` domains and +3.7% on `browsecompplus`.
+
+**The worst-ratio tally is where care is needed, and it is the one metric that favours the old code.**
+Three of its four wins are `tau2_airline`, `tau2_retail` and `tau2_telecom` — three task domains of one
+benchmark harness with one agent scaffold, which this file's own corpus section and
+`corpus_matrix.py`'s docstring both call near-siblings rather than independent workloads. Counted by
+family the tally is 3 families to 2 the other way. **Reading it as 4-to-1 would be the FR-054g
+over-generalisation again, in the instrument built to prevent it.**
+
+The naive mechanism — longer runs keep a cohort together, so sharing must deepen — **does not predict
+the observed signs** and is not asserted here: `tau2_airline` under-shares and got worse, `qwen_code`
+over-shares and got better. Run length also sets how many splits a path meets, so the two effects have
+opposite signs and their balance is not derivable from the run length alone. What the corpus does
+establish is that the change is not a `tau2`-shaped artefact in either direction.
+
+Adopted on the estimator argument plus coverage and Pareto, not on the marginals: fitting a per-node law
+over arrivals is measuring the wrong population whatever any marginal says, and with 0 of 32 cells
+inside tolerance in either arm there is no passing verdict to lose. `--branching-segments` **stays off**
+— this makes that arm right about run length without making it competitive with the per-depth profile.
 
 ### The achievable floor — the derivation behind FR-057c, and what it says about the gate
 

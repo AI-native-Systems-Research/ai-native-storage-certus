@@ -371,16 +371,33 @@ pub const BANDS: [u32; 6] = [0, 1, 8, 32, 128, 512];
 /// the step encoding gets the same care that a readability budget standing in for an
 /// accuracy one previously cost us twice.
 ///
-/// # Weighted by fan-in, deliberately
+/// # Weight a law by what its draw is KEYED ON, not by what consumes it (FR-054m)
 ///
-/// A walker draws a run length *at a split it has arrived at*, and a split holding 5000
-/// sessions is arrived at by 5000 sessions while one holding 2 is arrived at by 2. So the
-/// distribution a session experiences is the fan-in-weighted one, not the per-segment one.
-/// This matters here more than it usually would: measured, the shared region is numerically
-/// dominated by tiny short-lived cohorts (fan-in median 2-3 in the deep bands) while the
-/// reference mass sits in a handful of big segments, so the unweighted and weighted
-/// distributions are very different objects. Weight the fit the way the statistic is
-/// weighted, or `unique_keys` and reuse distance pull in opposite directions.
+/// The rule is about the key, and it splits this function's laws in two:
+///
+/// - **`length` is keyed on the NODE.** [`crate::corpus::ResolvedSegments::run_length`] draws
+///   it once per node, from that node's own stream, precisely so every walker arriving there
+///   agrees where the run ends — a run length that varied by arrival would make the trie
+///   inconsistent. So the population it must reproduce is the population of **segments**, one
+///   observation each, and it is fitted unweighted.
+/// - **`skew` (and the escape share below) are keyed on the ARRIVAL.** A walker meets a split
+///   in proportion to the sessions arriving at it and consumes the child law once per arrival,
+///   so those stay fan-in weighted.
+///
+/// Fan-in weighting was originally applied to all of them, on the argument that a walker
+/// *experiences* the weighted distribution. That argument is right about experience and wrong
+/// about construction, and the error is measurable: on `qwen_code`'s root band the fan-in
+/// weighted median run length is **1** where the per-segment median is **29**, because the
+/// splits carrying thousands of sessions are the short ones — so the weighting pulled the law
+/// short and the walk faithfully drew it short at every node. `tau2_airline` confirms it from
+/// the other side: its root band's two medians agree at 124 and its realised preamble is 124
+/// exactly, while the bands whose medians disagree are exactly the ones whose realised lengths
+/// were wrong. See research.md § The child-choice law.
+///
+/// `out_degree` has the same defect (`qwen_code` band 0 states 4739 children against a
+/// per-node median of 2) and is deliberately **left weighted here**: it is fitted as a pair
+/// with `skew` under FR-055j, and moving one without re-fitting the other would break that
+/// pairing.
 pub fn fit_process(rows: &[SegmentRow]) -> Option<ProcessFit> {
     use crate::schema::{SegmentBand, SegmentProcess};
 
@@ -398,8 +415,9 @@ pub fn fit_process(rows: &[SegmentRow]) -> Option<ProcessFit> {
             rows.iter()
                 .filter(move |r| r.start_depth >= *lo && (hi == u32::MAX || r.start_depth < hi))
         };
-        let length =
-            weighted_empirical(in_band().map(|r| (u64::from(r.length), u64::from(r.fan_in))));
+        // Unweighted — one observation per segment, because the draw is keyed on the node.
+        // See the FR-054m section above; this is not an oversight beside the weighted laws.
+        let length = weighted_empirical(in_band().map(|r| (u64::from(r.length), 1)));
         // Out-degree is only defined where a split ended the segment; a leaf has none, and
         // an attrition boundary is a cohort shrinking rather than dividing.
         let out_degree = weighted_empirical(
@@ -632,10 +650,11 @@ pub struct BandSkew {
 /// Fit one band's child-choice law from its splits.
 ///
 /// The target is the **fan-in-weighted mean collision probability** over the band's splits
-/// (see [`SegmentRow::collision`]), weighted by fan-in for the same reason the run length and
-/// out-degree are: a walker experiences a split in proportion to the sessions arriving at it,
-/// and measured, the shared region is numerically dominated by tiny cohorts while the
-/// reference mass sits in a handful of large segments.
+/// (see [`SegmentRow::collision`]). Weighted because this law is **keyed on the arrival**: the
+/// generator spends it once per session descending the split, so the population to reproduce is
+/// arrivals, not splits. That is the opposite key from `length`, which is drawn once per node
+/// and is therefore fitted unweighted — see [`fit_process`] and FR-054m for why the distinction
+/// is the whole rule and not a stylistic difference.
 ///
 /// A single exponent per band, not per split. Within a band the collision probability varies
 /// and one `s` cannot match every split; what it matches is the mean, which is exactly the
@@ -1099,30 +1118,68 @@ mod tests {
         assert!((d - 2.0).abs() < 0.5, "median out-degree came out {d}");
     }
 
+    /// FR-054m: `length` is drawn once per NODE, so it is fitted over SEGMENTS, unweighted.
+    ///
+    /// The construction is the one that exposed the defect on `qwen_code`: a single wide
+    /// short run and many narrow long ones. Fan-in weighted the median comes out at the wide
+    /// run's length; per segment it comes out at the narrow ones', and the narrow ones are
+    /// what a per-node draw is asked for at almost every node it visits.
     #[test]
-    fn the_fit_is_weighted_by_fan_in_because_that_is_what_a_session_experiences() {
-        // A walker draws a run length at a split it has ARRIVED at, so a split holding many
-        // sessions is arrived at by many. Here one segment of length 2 carries 10 sessions
-        // and twenty segments of length 50 carry 2 each: unweighted the median length is 50,
-        // fan-in weighted it is 2, and the sessions overwhelmingly experience 2.
-        //
-        // This is not a nicety — measured, the shared region is numerically tiny cohorts
-        // while the reference mass is a few big segments, so the two weightings are
-        // different objects.
+    fn run_length_is_fitted_per_segment_because_it_is_drawn_per_node() {
         let mut reqs: Vec<(u32, Vec<u64>)> = Vec::new();
-        for s in 0..10u32 {
-            // Ten sessions share a 2-block root run, then each pair goes its own way.
-            reqs.push((s, vec![1, 2, 100 + u64::from(s) / 2]));
+        // One root run of 2 blocks walked by 40 sessions, then twenty pairs each walking a
+        // private 6-block run before splitting again. Weighted, the 40-session run dominates.
+        for s in 0..40u32 {
+            let pair = u64::from(s) / 2;
+            let mut path = vec![1, 2];
+            for b in 0..6u64 {
+                path.push(1000 + pair * 100 + b);
+            }
+            path.push(1000 + pair * 100 + 90 + u64::from(s % 2));
+            reqs.push((s, path));
         }
         let rows = census_of(&reqs).finish(2);
         let root = rows.iter().find(|r| r.start_depth == 0).expect("root");
         assert_eq!(root.length, 2);
-        assert_eq!(root.fan_in, 10);
+        assert_eq!(root.fan_in, 40);
+        // Band 0 holds the root (length 2, fan-in 40) and the twenty pair runs that start at
+        // depth 2 (length 6, fan-in 2). Per segment the median is 6; fan-in weighted it is 2.
+        let in_band_0: Vec<&SegmentRow> = rows.iter().filter(|r| r.start_depth < 1).collect();
+        assert_eq!(in_band_0.len(), 1, "only the root starts in band 0");
         let p = fit_process(&rows).expect("a process").process;
-        let l = p.by_depth[0].length.quantile(0.5).expect("median");
+        let band = p
+            .by_depth
+            .iter()
+            .find(|b| b.from_depth == 1)
+            .expect("the 1-7 band holds the pair runs");
+        let l = band.length.quantile(0.5).expect("median");
         assert!(
-            (l - 2.0).abs() < 0.6,
-            "the 10-session run must dominate the median, got {l}"
+            (l - 6.0).abs() < 0.6,
+            "the twenty 6-block segments must set the median, got {l}"
+        );
+    }
+
+    /// The other half of the FR-054m rule: `skew` stays fan-in weighted.
+    ///
+    /// It is consumed once per arrival, so the population it must reproduce is arrivals. A
+    /// blanket de-weighting would have taken this with it, which is why the rule is stated
+    /// about the key rather than about the function.
+    #[test]
+    fn the_child_law_stays_weighted_by_fan_in_because_it_is_consumed_per_arrival() {
+        // Two splits in one band with very different fan-in and very different concentration:
+        // a 40-session split whose children are lopsided, and a 2-session even one. The
+        // fitted collision probability must sit near the wide split's, not midway.
+        let wide = split_row(&[38, 2]);
+        let narrow = split_row(&[1, 1]);
+        let rows = vec![wide, narrow];
+        let fit = fit_process(&rows).expect("a process");
+        let target = fit.skews[0].target;
+        // Weighted: 40 of 42 arrivals meet the lopsided split, whose collision probability is
+        // (38²+2²)/40² = 0.9025, against the even split's 0.5. Unweighted the two would
+        // average to ~0.70.
+        assert!(
+            target > 0.85,
+            "the 40-session split must dominate the child law, got {target}"
         );
     }
 

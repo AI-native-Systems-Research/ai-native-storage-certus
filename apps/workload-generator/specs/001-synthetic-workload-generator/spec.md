@@ -2364,11 +2364,63 @@ report segments statistics into before/after windows around the event.
   `Corpus::out_degree` are keyed on the **node**, so every node draws once whatever its fan-in, and
   the population they must match is the segments, not the arrivals. The fan-in weighting argument was
   imported wholesale from the child-choice law to quantities with a different key.
-  **Not yet built, and it changes the default fit path**, so it needs a corpus matrix (FR-055f).
-  The falsifiable prediction: an unweighted `length` moves `qwen_code`'s realised run lengths toward
-  29/9/18/23/37/13 and reduces its 13671 segments toward the trace's 9998. `out_degree` carries the
-  same defect and is more dramatic — `qwen_code` band 0 states **4739** children where the census's
-  per-node median out-degree is **2** — but its effect on cohort division is untested.
+  **BUILT for `length` only.** `out_degree` carries the same defect and more dramatically —
+  `qwen_code` band 0 states **4739** children where the census's per-node median out-degree is **2** —
+  but it is fitted as a **pair** with `skew` under FR-055j, and moving it without re-fitting the child
+  law to the new out-degree distribution would break that pairing. It stays weighted, deliberately.
+  **The claim that this changes the default fit path was WRONG and is corrected here**: `length` exists
+  only in the node-level `branching: {by_depth: [...]}` spelling, which `fit` emits only under
+  `--branching-segments`; the default per-depth profile has no run-length law at all. So this fixes an
+  arm that is off by default and cannot regress the shipped default. It is still measured on the corpus,
+  because the question it decides — whether `--branching-segments` is worth adopting — is a corpus one.
+  **THE PREDICTION IS HALF CONFIRMED AND HALF REFUTED, and the refuted half is the informative one.**
+  The stated law now matches the trace's per-segment median in **every band of both traces**:
+  | band | `qwen_code` before | after | trace/seg | `tau2_airline` before | after | trace/seg |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | 0+ | 1 | **27** | 29 | 124 | 124 | 124 |
+  | 1-7 | 3 | **9** | 9 | 41 | **14** | 14 |
+  | 8-31 | 8 | **18** | 18 | 6 | **11** | 11 |
+  | 32-127 | 136 | **23** | 23 | 1 | 1 | 1 |
+  | 128-511 | 21 | **36** | 37 | 119 | **1** | 1 |
+  | 512+ | 10 | **14** | 13 | 1 | 1 | 1 |
+  The segment-count half depends on the arm, and the two disagree:
+  | arm | trace | reuse | `sharing_depth` | `request_length` | `unique_keys` | segments (trace) |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | `--branching-segments` | `qwen_code` | 0.1062 → **0.0264** | 0.1072 → **0.0894** | 0.1308 = | 0.4786 → **0.2656** | 5475 → 3946 (9998) |
+  | `--branching-segments` | `tau2_airline` | 0.0310 → 0.0307 | 0.3764 → 0.4051 | 0.0258 = | 0.5560 → 0.5512 | 389 → 393 (158) |
+  | `--branching-segments` | `swebench` | 0.0923 → 0.0926 | 0.5662 → **0.4600** | 0.0242 = | 0.2812 → **0.2661** | 284 → 270 (85) |
+  | + cohort toggles | `qwen_code` | 0.0292 → 0.1958 | 0.3998 → 0.6082 | 0.0950 = | **0.0534 → 0.8618** | 13671 → **9157** (9998) |
+  | + cohort toggles | `tau2_airline` | 0.0221 → 0.0221 | 0.2984 → **0.2965** | 0.0355 = | 0.5083 → **0.4841** | 498 → 500 (158) |
+  `request_length` is **unchanged to five decimal places in all five cases**, which is the check that
+  the change is confined to the trunk's shape: the run-length law is not a path-length term.
+  **The cohort arm is where the segment prediction was made and it is CONFIRMED there** — 13671 → 9157
+  against the trace's 9998, from 1.37x too many to 0.92x — **and the marginals collapse in the same
+  breath** (`unique_keys` 0.0534, the one cell that was ever inside tolerance on `qwen_code`, → 0.8618).
+  That is not an argument against the fix; it is the compensation being uncovered. Under the
+  arrival-weighted law the cohort arm split at nearly every block, and over-splitting decayed cohorts
+  fast enough to land `unique_keys` for the wrong reason. With runs at their true length the cohort
+  survives, and what is exposed is the **already-recorded finding that the fitted per-split division
+  rate is too slow**. Two defects were cancelling; removing one is what makes the other measurable.
+  **This is the third recorded instance of a structural fix worsening marginals that were calibrated
+  against a model with compensating errors, and it must not be allowed to veto the structural fix.**
+  **THE CORPUS MATRIX (FR-055f), 24 traces, both arms `--branching-segments`, binary md5 identical
+  before and after.** Coverage **unchanged at 8 of 24 with an identical verdict distribution** — no
+  trace gained or lost, so nothing is bought by loosening coverage. Over the 8 traces that fit: **14
+  cells better, 6 worse, 12 unchanged; 4 Pareto wins** (`swebench`, `qwen_code`, `qwen_reasoning`,
+  `wildchat`), **2 Pareto losses** (`browsecompplus`, `tau2_retail`), 2 trades. **Every loss is
+  `sharing_depth`** except `tau2_retail`'s reuse (+4.7%), and `sharing_depth` splits by family rather
+  than by direction: better on `swebench` (−18.8%), `qwen_code` (−16.6%) and `qwen_reasoning` (−4.5%),
+  worse on all three `tau2` domains (+7.6/+30.7/+8.5%) and `browsecompplus` (+3.7%).
+  **On worst-ratio the old code wins 4 to 1 — and that tally must be read by FAMILY.** Three of its
+  four wins are `tau2_airline`/`retail`/`telecom`, which `corpus_matrix.py`'s own docstring calls
+  near-siblings of one harness. Counted by family it is 3 families to 2 the other way, and this is the
+  same over-generalisation trap FR-054g records. **The fix is adopted on that reading plus the
+  estimator argument**: fitting a per-node law over arrivals is wrong independently of what any
+  marginal says, and no cell was inside tolerance in either arm (0 of 32), so no passing verdict was
+  traded away. `--branching-segments` **stays OFF** — the fix improves that arm without making it
+  competitive with the per-depth profile.
+  `request_length` is bit-identical on all 8 traces, which is the check that this is a trunk-shape
+  change and not a path-length term.
 - **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
   measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
   sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first
