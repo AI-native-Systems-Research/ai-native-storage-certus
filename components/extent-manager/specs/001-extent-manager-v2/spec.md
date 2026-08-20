@@ -2,24 +2,31 @@
 
 **Feature Branch**: `001-extent-manager-v2`
 **Created**: 2026-04-23
-**Updated**: 2026-07-22
+**Updated**: 2026-08-20
 **Status**: Active
 **Source**: Generated from implementation, updated for index-free key-vector design
 
+> **Last Synced 2026-08-20** (spec-sync Phase B):
+> - FR-030 backfilled — the cross-crate `volatile_write_cache` compile fix has
+>   **landed**: `Command::FlushSync` and `Completion::FlushDone` are defined in the
+>   interfaces crate (`iblock_device.rs:411,501`), and `BlockDeviceClient::flush()`
+>   exists (`block_io.rs:168`) and is invoked from the checkpoint path under the
+>   feature gate (`lib.rs:308-310`). The feature now compiles and is functional; the
+>   stale "does not yet compile / fix drafted on branch / add a CI job" status has
+>   been removed from FR-030.
+> - `plan.md` refreshed to match the shipped component: it documented a
+>   `block_device` data-device receptacle and a `components/extent-manager/v2/`
+>   source tree. The component actually exposes only `metadata_device` + `logger`
+>   receptacles (FR-001) over a flat `src/`; the data path is owned by the caller
+>   (`dispatcher`/`dispatcher-p2p`, see FR-036). Corrected.
+>
 > **Last Synced 2026-08-07** (spec-drift-sweep, branch `sync/spec-drift-sweep-20260807`):
 > - FR-030 corrected — the `volatile_write_cache` feature now reads "enabled = issue
->   flush" (was inverted: "compiled out when enabled"). As shipped the feature does not
->   compile (`BlockDeviceClient::flush()` missing; `Command::FlushSync`/`Completion::FlushDone`
->   absent from the interfaces crate). A cross-crate compile fix is drafted on the branch and
->   an align-task is queued in `.specify/sync/align-tasks.md`; add a CI job building
->   `--features volatile_write_cache`.
+>   flush" (was inverted: "compiled out when enabled").
 > - FR-032 corrected to "usable data capacity" (matches code + interfaces-crate wording).
 > - FR-036 clarified — `data_base_lba` is caller-consumed; the component does no data-device I/O.
 > - FR-016 remediation applied in code (stale "five minutes" doc strings → 30 seconds).
 > - Four benign unspecced helpers documented (see "Additional Support Surface").
-> - Informational (not fixed here): `plan.md`/`tasks.md`/`README.md` still reference a
->   `block_device` receptacle, a `v2/` source path, and CERTUSV5/v5 — spec.md and code
->   agree on CERTUSV4 / FORMAT_VERSION 6. Refresh those planning docs separately.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -435,9 +442,12 @@ again to verify the old slot is now reusable.
   volatile and where durability must be guaranteed once `checkpoint()`
   returns. When **disabled** (the default), no explicit flush is issued,
   improving performance where the caller accepts the associated
-  durability risk. (Implementation status 2026-08-07: this feature does
-  not yet compile — see the Sync note at the top of this spec and
-  `.specify/sync/align-tasks.md`.)
+  durability risk. (Implementation status 2026-08-20: implemented and
+  building. `BlockDeviceClient::flush()` (`block_io.rs:168`) sends
+  `Command::FlushSync` and awaits `Completion::FlushDone` — both defined in
+  the interfaces crate (`iblock_device.rs:411,501`) — and is called from the
+  checkpoint path (`lib.rs:308-310`). Enable with
+  `--features volatile_write_cache`.)
 - **FR-036**: The component MUST provide
   `set_metadata_base_lba(base_lba: u64)`, `set_data_base_lba(base_lba:
   u64)`, and `data_base_lba() -> u64` methods on `IExtentManager` for

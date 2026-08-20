@@ -4,7 +4,8 @@
 **Created**: 2026-07-08
 **Status**: Backfilled
 **Source**: Generated from existing implementation
-**Last Synced**: 2026-08-07 — drift sweep on branch `sync/spec-drift-sweep-20260807`. FR-05 (`force_flush`) fix drafted on branch (delegates to an installed flush trigger); dead public APIs documented; capacity-at-flush behavior clarified in the 002 spec. Workspace-membership defect (SC 1/2/3/6/7) intentionally left deferred — see the note under Success Criteria and `.specify/sync/align-tasks.md` (ALIGN-001).
+**Last Synced**: 2026-08-20 — drift sweep (Phase B). The previously-drafted FR-05 (`force_flush`) durable-flush-trigger fix is now **present and merged** in the working tree, so FR-05 is backfilled to **Implemented**. The two blockers the prior sweep recorded are **RESOLVED**: `MockBlockDevice` now implements `read_write_stats` (NFR-07), and the crate is now a member of the root `Cargo.toml` `[workspace] members`/`[workspace.dependencies]` (SC-1/2/3/6/7), so CI builds and tests it. Three previously-undocumented public items (`Superblock::region_capacity_bytes()`, `create_test_component_from_state()`, and the `CapacityExhausted` interface variant) are backfilled below. Interface-only test usage (002-FR-011) and surfacing capacity to the caller (002-FR-007) remain code-side gaps tracked as ALIGN tasks in `.specify/sync/align-tasks.md`.
+> _Prior sync (2026-08-07, branch `sync/spec-drift-sweep-20260807`): FR-05 fix drafted on branch; dead public APIs documented; capacity-at-flush behavior clarified in the 002 spec; workspace-membership defect (SC 1/2/3/6/7) left deferred._
 
 ## Backfill Notice
 > This spec was generated from existing code via `speckit.sync.backfill`.
@@ -147,7 +148,7 @@ Key design properties:
 - `flush_manager_no_dirty_no_op` (persistence): no-op when clean
 - `force_flush_succeeds` (unit): in-memory mode no-op
 
-> **Note**: The first acceptance criterion above ("`force_flush()` triggers an immediate flush and blocks until durable") describes the intended contract of `IExtendedMetadataStore::force_flush()`. The method does not currently meet this contract in any build configuration — see FR-05 Known Gaps and `.specify/sync/align-tasks.md` (Task ALIGN-002).
+> **Note**: The first acceptance criterion above ("`force_flush()` triggers an immediate flush and blocks until durable") describes the contract of `IExtendedMetadataStore::force_flush()`, which is now **met** when the wiring layer installs a flush trigger via `attach_flush_trigger` (see FR-05 and its Known Gaps entry). In pure in-memory mode (no trigger installed) `force_flush()` is a correct no-op. The `flush_manager_*` tests listed below still drive `FlushManager::trigger_flush()` directly; a follow-up test that installs a trigger and asserts durability through `force_flush()` is noted under 002-FR-007's ALIGN task.
 
 ## Requirements
 
@@ -159,7 +160,7 @@ Key design properties:
 | FR-02 | `get(key)` returns a clone of the stored value or `NotFound` error | Implemented |
 | FR-03 | `delete(key)` removes entry from store; idempotent for missing keys | Implemented |
 | FR-04 | `iterate_all()` returns a consistent snapshot of all entries | Implemented |
-| FR-05 | `force_flush()` ensures all mutations are durable on disk | **Fix drafted (branch `sync/spec-drift-sweep-20260807`)** — `force_flush()` now delegates to a durable-flush trigger installed by the wiring layer via `attach_flush_trigger`; see Known Gaps below and `.specify/sync/align-tasks.md` (Task ALIGN-002) |
+| FR-05 | `force_flush()` ensures all mutations are durable on disk: it invokes a durable-flush trigger installed by the wiring layer via `attach_flush_trigger` and blocks until it returns, mapping trigger errors to `StorageError`; in pure in-memory mode (no trigger installed) it is a correct no-op | Implemented (`src/lib.rs:201-215`; trigger install `attach_flush_trigger` at `src/lib.rs:111`, `FlushTrigger` alias at `src/lib.rs:68`) |
 | FR-06 | Value size limit of 128 KiB enforced with `ValueTooLarge` error | Implemented |
 | FR-07 | Dual-region ping-pong flush: writes to inactive region, then flips superblock | Implemented |
 | FR-08 | Recovery reads superblock, loads active region entries into memory | Implemented |
@@ -172,12 +173,15 @@ Key design properties:
 | FR-15 | Component uses `define_component!` macro with `IExtendedMetadataStore` interface | Implemented |
 | FR-16 | Optional `ILogger` receptacle for debug logging of operations | Implemented |
 | FR-17 | External persistence-wiring API (`initialize_from_client`, `snapshot_entries`, `mark_flushed`, `load_entries`, `dirty_count()`, `flush_seq()` on `ExtendedMetadataStoreComponent`) provides the startup-recovery and flush-on-demand mechanism for persistent-mode deployments; a caller/dispatcher wires a `BlockDeviceClient` and drives these methods (directly or via `FlushManager`) to obtain durability | Implemented |
+| FR-18 | `Superblock::region_capacity_bytes()` (`src/on_disk.rs`) is a public on-disk-format accessor returning the usable per-region byte capacity (`region_a_size * sector_size`), so callers/tests can compute capacity headroom without reconstructing the geometry. Part of the always-compiled on-disk-format API (see NFR-05) | Implemented |
 
 ### Known Gaps
 
-- **FR-05 / `force_flush()` durability — fix drafted, verification deferred.** Previously `force_flush()` was an unconditional no-op in every build configuration (default, `testing`, `spdk`): it never called `flush::flush_to_disk` or `FlushManager::trigger_flush`, so a caller holding only the `IExtendedMetadataStore` interface got no durability guarantee. The drift-sweep on branch `sync/spec-drift-sweep-20260807` **drafts a fix** (`src/lib.rs`): the component now carries an optional type-erased `FlushTrigger`, installed by the wiring layer through `attach_flush_trigger` (typically `move || flush_manager.trigger_flush()`). `force_flush()` invokes the trigger and blocks until it returns, mapping any error to `ExtendedMetadataStoreError::StorageError`; in pure in-memory mode (no trigger installed) it remains a correct no-op. The draft compiles clean in the default build. It is **not yet verified under `testing`/`spdk`** for two independent reasons: (1) the crate is intentionally still outside the workspace `[workspace] members` (ALIGN-001 kept deferred), so `cargo test --all`/CI do not exercise it; and (2) a pre-existing, unrelated defect — `MockBlockDevice` in `src/test_support.rs` no longer implements the current `IBlockDevice` trait (missing `read_write_stats`), so the `testing`-feature test build does not compile. Both are tracked in `.specify/sync/align-tasks.md` (ALIGN-002 for the fix, ALIGN-001 for workspace membership + the mock). Until then, persistent-mode durability continues to be obtained by driving the FR-17 wiring API directly, as every persistence/SSD test in this repository does.
+- **FR-05 / `force_flush()` durability — RESOLVED (implemented).** Historically `force_flush()` was an unconditional no-op in every build configuration; the fix drafted on branch `sync/spec-drift-sweep-20260807` is now **present and merged** in the working tree (`src/lib.rs:201-215`). The component carries an optional type-erased `FlushTrigger` (`pub type FlushTrigger = Box<dyn Fn() -> Result<(), String> + Send + Sync>`, `src/lib.rs:68`), installed by the wiring layer through `attach_flush_trigger` (`src/lib.rs:111`, typically `move || flush_manager.trigger_flush()`). `force_flush()` invokes the trigger and blocks until it returns, mapping any error to `ExtendedMetadataStoreError::StorageError`; in pure in-memory mode (no trigger installed) it remains a correct no-op. The two verification blockers the prior sweep recorded are also **RESOLVED**: `MockBlockDevice` now implements `read_write_stats` (`src/test_support.rs:223`), so the `testing`-feature test build compiles, and the crate is now a member of the root workspace, so CI exercises it. Wiring callers may still drive the FR-17 API directly; both paths now yield durability.
 
-- **Dead public API surface** (unspecced code, documented not removed): three public items exist that no `src/` or `tests/` code path exercised at sweep time. `Superblock::region_capacity_bytes()` (`src/on_disk.rs`) is a never-called public accessor. `create_test_component_from_state()` (`src/test_support.rs`, `testing`-gated) is an unused public test helper. Of the `ExtendedMetadataStoreError` variants provided by this component's interface, `CapacityExhausted` is never constructed anywhere (capacity is enforced at flush time as a `String` error — see the 002 spec's capacity note), and `StorageError` was unconstructed until the drafted FR-05 fix, which now produces it from `force_flush()` trigger failures. These are retained deliberately (part of the public interface / test surface); no removal is proposed by this sweep.
+- **`CapacityExhausted` not surfaced to the caller (open — tracked as ALIGN).** The interface defines `ExtendedMetadataStoreError::CapacityExhausted` (`../interfaces/src/iextended_metadata_store.rs:12`) but no code path constructs it: `put()` enforces only the 128 KiB per-value `ValueTooLarge` limit (`src/lib.rs:159`), while region/partition capacity is enforced at flush time inside `flush::flush_to_disk` as a `String` error ("exceeds region capacity", `src/flush.rs:32-38`). Consequently the 002 SSD test `test_capacity_exhaustion` never reaches the `CapacityExhausted` branch. Surfacing capacity to the caller is a code-side change tracked in `.specify/sync/align-tasks.md` (Task ALIGN-EMS-002 for 002-FR-007); until then the variant remains a defined-but-unconstructed part of the public interface contract.
+
+- **Retained public API surface** (previously flagged as dead; now backfilled as documented requirements). `Superblock::region_capacity_bytes()` (`src/on_disk.rs:142`) is documented by FR-18. `create_test_component_from_state()` (`src/test_support.rs:272`, `testing`-gated) is documented by NFR-11. `StorageError` is now constructed by `force_flush()` trigger failures (FR-05). `CapacityExhausted` is covered by the ALIGN note above.
 
 ### Non-Functional Requirements
 
@@ -193,6 +197,7 @@ Key design properties:
 | NFR-08 | DMA memory allocation abstracted via `DmaAllocFn` for portability between test (heap) and production (hugepages) | Implemented |
 | NFR-09 | Little-endian byte order for all on-disk integer fields | Implemented |
 | NFR-10 | Superblock magic number `0x4345_5254_4D45_5441` ("CERTMETA") for format identification | Implemented |
+| NFR-11 | Test infrastructure provides `create_test_component_from_state()` (`src/test_support.rs`, `testing`-gated): it reconstructs an `ExtendedMetadataStoreComponent` over a reboot-preserved `MockState` (via `MockBlockDevice::reboot_from`), so persistence tests can simulate a process restart against the same virtual disk contents | Implemented |
 
 ## Key Entities
 
@@ -251,7 +256,7 @@ Key design properties:
 6. `cargo clippy -- -D warnings` passes clean
 7. All public items have doc comments; `cargo doc --no-deps` is warning-free
 
-> **Note**: Success Criteria 1, 2, 3, 6, and 7 cannot currently be exercised by `cargo build`/`cargo test --all` or by CI, because the crate is not a member of the workspace `[workspace] members` array in the root `Cargo.toml`. This is a build-wiring defect, not a documentation issue; see `.specify/sync/align-tasks.md` (Task ALIGN-001).
+> **Note (RESOLVED 2026-08-20)**: Success Criteria 1, 2, 3, 6, and 7 are now exercisable by the standard build/test/CI path. The crate is a member of the root `Cargo.toml` `[workspace] members` (and `[workspace.dependencies]`), and `MockBlockDevice` implements the current `IBlockDevice` trait (including `read_write_stats`), so the default and `testing`-feature builds compile and CI runs them. The prior build-wiring defect (previously tracked as ALIGN-001) is closed.
 
 ## Implementation Notes
 
@@ -299,5 +304,5 @@ This ensures that a crash at any point leaves either the old or new data intact:
 
 - `testing` feature: enables `block_io`, `flush`, `recovery`, `test_support` modules and activates `interfaces/spdk`
 - `spdk` feature: implies `testing`, adds runtime dependencies (`block-device-spdk-nvme`, `disk-partition-manager`, `spdk-env`, `logger`)
-- Default (no features): pure in-memory store with `force_flush()` as no-op (intended and correct in this mode — there is no disk to flush to)
-- **Currently, `IExtendedMetadataStore::force_flush()` is also an unconditional no-op under `testing` and `spdk`**, where it is not intended to be a no-op (see FR-05 Known Gaps). Durability under `testing`/`spdk` today requires calling the FR-17 wiring API (`flush::flush_to_disk()` / `FlushManager::trigger_flush()`) directly rather than `force_flush()`.
+- Default (no features): pure in-memory store with `force_flush()` as a no-op (intended and correct in this mode — no trigger is installed and there is no disk to flush to)
+- Under `testing`/`spdk`: `IExtendedMetadataStore::force_flush()` performs a durable flush when the wiring layer has installed a `FlushTrigger` via `attach_flush_trigger` (typically `move || flush_manager.trigger_flush()`), blocking until it completes and mapping errors to `StorageError` (see FR-05). Callers may equivalently drive the FR-17 wiring API (`flush::flush_to_disk()` / `FlushManager::trigger_flush()`) directly; both paths obtain durability.

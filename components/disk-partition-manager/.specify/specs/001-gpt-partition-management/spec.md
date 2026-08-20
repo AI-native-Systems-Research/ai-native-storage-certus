@@ -4,7 +4,7 @@
 **Created**: 2026-07-01
 **Status**: Backfilled
 **Source**: Generated from existing implementation
-**Last Synced**: 2026-08-07 — drift sweep on branch `sync/spec-drift-sweep-20260807`. FR-003 backup-fallback fix drafted on branch (backup now attempted on a damaged primary *signature*, not just a CRC mismatch). PR-002 backfilled to the actual per-sector read behavior. Read-path LBA-2 assumption, GUID zero-fallback, and any-sector-size behavior documented in Implementation Notes.
+**Last Synced**: 2026-08-20 — Phase B spec-sync. FR-003 re-classified from ALIGN (2026-08-07) to **BACKFILL**: the backup-fallback-on-signature-corruption fix is now present in `read_gpt` (`src/gpt.rs:66-96`), so the requirement is resolved by describing the implemented behavior rather than a pending code task. PR-002 remains backfilled to the actual per-sector read behavior. Read-path LBA-2 assumption, GUID zero-fallback, and any-sector-size behavior documented in Implementation Notes. (Supersedes the 2026-08-07 drift sweep on branch `sync/spec-drift-sweep-20260807`.)
 
 ## Backfill Notice
 
@@ -42,6 +42,8 @@ As a Certus dispatcher, I want to read an existing GPT partition table from a pr
 
 3. **Given** a drive with both primary and backup GPT corrupt, **When** `initialize()` is called, **Then** a `NoPartitionTable` error is returned.
 
+4. **Given** a drive whose primary GPT header *signature* is damaged or zeroed (e.g. a torn/partial write) but whose backup GPT is valid, **When** `initialize()` is called, **Then** the backup GPT is used, the partition table is returned successfully, and the disk is NOT reformatted.
+
 ### User Story 3 - Initialize-or-Format (Priority: P1)
 
 As a Certus dispatcher, I want to automatically format a drive only when no valid GPT exists so that existing data is preserved across restarts.
@@ -62,7 +64,7 @@ As a Certus dispatcher, I want to automatically format a drive only when no vali
 
 - **FR-002**: System MUST validate GPT header integrity via CRC32 (IEEE) on both the header and partition entry array.
 
-- **FR-003**: System MUST support primary/backup GPT redundancy — if the primary header is corrupt, the backup header at the last LBA MUST be attempted. "Corrupt" includes **both** a header/entry-array CRC mismatch **and** a damaged or zeroed primary header *signature* (a torn write can damage either). *(Sync 2026-08-07: previously the backup was attempted only on a CRC mismatch; a bad signature returned `NoPartitionTable` directly, which `initialize_or_format` then treated as "unformatted" and destructively reformatted a disk whose backup was still intact. A fix routing signature failures through the backup path is drafted on branch `sync/spec-drift-sweep-20260807` — see `.specify/sync/align-tasks.md`.)*
+- **FR-003**: System MUST support primary/backup GPT redundancy — if the primary header is corrupt, the backup header at the last LBA MUST be attempted. "Corrupt" includes **both** a header/entry-array CRC mismatch **and** a damaged or zeroed primary header *signature* (a torn write can damage either). *(Sync 2026-08-20 — implemented and backfilled to reality: `read_gpt` (`src/gpt.rs:66-96`) falls through to the backup-header attempt on **both** `CorruptTable` (CRC mismatch) and `NoPartitionTable` (signature damage from `parse_header`). A genuinely unformatted disk still returns `NoPartitionTable` — "neither primary nor backup GPT header is valid" — after both reads fail, so `initialize_or_format`'s reformat path for truly-blank disks is preserved; only the damaged-primary/valid-backup case is affected, and it now recovers instead of being destructively reformatted. This supersedes the 2026-08-07 sweep, which had tracked the fix as "drafted on branch" via an ALIGN task; the fix is present in the current code, so FR-003 is resolved by spec backfill and no longer carries an ALIGN task.)*
 
 - **FR-004**: System MUST support a "rest of disk" partition (indicated by `size_bytes=0`) that consumes all remaining usable LBAs after fixed-size partitions are allocated.
 

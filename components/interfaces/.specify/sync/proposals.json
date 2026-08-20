@@ -1,60 +1,36 @@
 {
-  "generated": "2026-08-07T15:54:25Z",
-  "based_on": "drift-report 2026-08-07T15:29:55Z",
-  "component": "interfaces",
-  "summary": { "backfill": 4, "align": 1, "human_decision": 0, "new_specs": 0, "remove_from_spec": 0 },
+  "generated": "2026-08-20",
+  "phase": "B",
+  "project": "interfaces",
+  "spec": "components/interfaces/specs/001-interfaces/spec.md",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "summary": {
+    "backfill": 0,
+    "align": 0,
+    "resolved": 2,
+    "backfill_unspecced": 0,
+    "human_decision": 0
+  },
   "proposals": [
     {
-      "id": "P1",
-      "requirement": "FR-006",
-      "direction": "BACKFILL",
-      "spec_text": "track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>",
-      "actual": "track(&self, pool: PoolId, key: CacheKey, semantics: BlockSemantics) -> Result<...> (src/ieviction_policy.rs:87)",
-      "proposed": "Update FR-006 to the 3-arg signature including `semantics: BlockSemantics`; document `BlockSemantics { session_id }` and the `SessionId` alias under FR-020 (Eviction Policy supporting types).",
-      "confidence": "HIGH",
-      "approved": null
+      "requirement": "FR-014",
+      "spec_id": "001-interfaces",
+      "title": "IExtendedMetadataStore Interface",
+      "direction": "RESOLVED",
+      "rationale": "Reported as a major defect: the IExtendedMetadataStore trait was defined in src/iextended_metadata_store.rs but the module was never declared or re-exported in src/lib.rs, so it was not part of the compiled crate. Per Phase B policy this defect was ALREADY FIXED on the main development thread. Verified in current source: src/lib.rs:77 declares `mod iextended_metadata_store;` (ungated) and src/lib.rs:99 has `pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};` (ungated). The trait (put/get/delete/iterate_all/force_flush) is defined at src/iextended_metadata_store.rs:30 and is now exported. Spec FR-014 text already correctly describes the implemented trait, so no spec change is required.",
+      "location": "src/lib.rs:77 (mod), src/lib.rs:99 (pub use); definition src/iextended_metadata_store.rs:30",
+      "before": null,
+      "after": null
     },
     {
-      "id": "P2",
-      "requirement": "FR-018",
-      "direction": "BACKFILL",
-      "spec_text": "\"3-variant enum (NotExist, MismatchSize, BlockDevice, MemoryTier)\" — label says 3, lists 4",
-      "actual": "4 variants (src/idispatch_map.rs:11-22)",
-      "proposed": "Fix the internal-inconsistency typo: \"3-variant\" -> \"4-variant\".",
-      "confidence": "HIGH",
-      "approved": true,
-      "note": "Trivial internal-inconsistency typo fix; auto-applied."
-    },
-    {
-      "id": "P3",
-      "requirement": "FR-007 / Overview features",
-      "direction": "BACKFILL",
-      "spec_text": "Overview lists only spdk/gpu features; FR-007 omits CRC-32 methods.",
-      "actual": "integrity-check Cargo feature + set_checksum/get_checksum (Cargo.toml, src/idispatch_map.rs:287,295)",
-      "proposed": "Add the `integrity-check` feature to the Overview features list and add `set_checksum`/`get_checksum` (feature-gated) to FR-007. Consistent with the dispatch-map backfill already applied.",
-      "confidence": "HIGH",
-      "approved": null
-    },
-    {
-      "id": "P4",
-      "requirement": "FR-030 / FR-033",
-      "direction": "BACKFILL",
-      "spec_text": "FR-030 lists push/connect/disconnect/disconnect_all/set_local_peer_id; FR-033 supporting types omit PushCompletion.",
-      "actual": "push_async method + PushCompletion type (src/iremote_lookup_rdma_initiator.rs:158,198; exported lib.rs:53)",
-      "proposed": "Add `push_async` to FR-030 and `PushCompletion` to FR-033 supporting types.",
-      "confidence": "HIGH",
-      "approved": null
-    },
-    {
-      "id": "P5",
-      "requirement": "FR-014 / FR-025",
-      "direction": "ALIGN",
-      "severity": "HIGH",
-      "spec_text": "IExtendedMetadataStore + ExtendedMetadataStoreError are crate interfaces (FR-014/FR-025).",
-      "actual": "src/iextended_metadata_store.rs exists but lib.rs never declares `mod iextended_metadata_store` nor re-exports it — orphaned/uncompiled. The extended-metadata-store component `use interfaces::IExtendedMetadataStore` and impls it, so it would fail to build (masked only because that crate is excluded from the workspace).",
-      "proposed": "ALIGN (code): add `mod iextended_metadata_store;` + `pub use iextended_metadata_store::{IExtendedMetadataStore, ExtendedMetadataStoreError};` to interfaces/src/lib.rs. Queue an align-task and draft the fix on the feature branch. Paired with adding extended-metadata-store to the root workspace members (handled under that component).",
-      "confidence": "HIGH",
-      "approved": null
+      "requirement": "FR-025",
+      "spec_id": "001-interfaces",
+      "title": "Supporting Types - Extended Metadata Store (ExtendedMetadataStoreError)",
+      "direction": "RESOLVED",
+      "rationale": "Same orphaned-module root cause as FR-014: the 4-variant ExtendedMetadataStoreError enum (NotFound, StorageError, CapacityExhausted, ValueTooLarge) existed but was not exported because its module was undeclared. Per Phase B policy this was ALREADY FIXED on the main thread. Verified: the enum with exactly those 4 variants is defined at src/iextended_metadata_store.rs:5-15 and is re-exported by the ungated `pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};` at src/lib.rs:99. Spec FR-025 text already matches the implementation, so no spec change is required.",
+      "location": "src/iextended_metadata_store.rs:5 (enum); src/lib.rs:99 (pub use)",
+      "before": null,
+      "after": null
     }
   ]
 }

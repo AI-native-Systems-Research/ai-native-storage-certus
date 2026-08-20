@@ -1,22 +1,29 @@
 {
-  "generated": "2026-08-07T15:29:55Z",
-  "project": "example-helloworld",
+  "generated": "pending",
+  "project": "Certus — components/example-helloworld",
   "summary": {
     "specs_analyzed": 1,
+    "requirements_checked": 10,
     "aligned": 10,
     "drifted": 0,
     "not_implemented": 0,
-    "unspecced": 0,
-    "conflicts": 0
+    "unspecced_features": 0
   },
   "specs": [
     {
       "id": "001-example-helloworld",
       "title": "Example Hello World Component",
-      "spec_path": "components/example-helloworld/specs/001-example-helloworld/spec.md",
       "aligned": [
-        "FR-1", "FR-2", "FR-3", "FR-4", "FR-5", "FR-6", "FR-7",
-        "NFR-1", "NFR-2", "NFR-3"
+        "FR-1: IGreeter with greeting_prefix (src/lib.rs:25-29)",
+        "FR-2: HelloWorldComponent provides IGreeter returns 'Hello' (src/lib.rs:32-46)",
+        "FR-3: ILogger receptacle declared (src/lib.rs:36-38)",
+        "FR-4: GreetRequest has name: String (src/lib.rs:49-52)",
+        "FR-5: GreeterHandler ActorHandler with lifecycle hooks (src/lib.rs:84-109)",
+        "FR-6: handle() increments counter, prints numbered greeting (src/lib.rs:92-98)",
+        "FR-7: optional ILogger logs start/greeting/stop (src/lib.rs:85-108)",
+        "NFR-1: module doc with runnable Quick start example (src/lib.rs:1-17)",
+        "NFR-2: Default delegates to new(); no lint issues (src/lib.rs:78-82)",
+        "NFR-3: no unsafe code (grep clean)"
       ],
       "drifted": [],
       "not_implemented": []

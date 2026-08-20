@@ -1,68 +1,87 @@
-# Drift Report — `spdk-sys`
+# Drift Report: spdk-sys
 
-Generated: 2026-08-07T15:31:01Z
-
-Component: `components/spdk-sys`
-Spec analyzed: `specs/001-spdk-sys/spec.md` (Backfilled)
+**Generated**: pending
+**Component**: `lib/spdk-sys` (relocated from `components/spdk-sys`)
+**Scope**: `specs/001-spdk-sys/spec.md` (+ plan/tasks skim) vs implementation
+`build.rs`, `src/lib.rs`, `tests/bindings_sanity.rs`. READ-ONLY analysis.
 
 ## Summary
 
-| Category | Aligned | Drifted | Not Implemented | Unspecced |
-|----------|---------|---------|-----------------|-----------|
-| FR (1-9) | 9 | 0 | 0 | — |
-| NFR (1-5) | 5 | 0 | 0 | — |
-| Success Criteria | 4 | 0 | 0 | — |
+| Metric | Count |
+|--------|-------|
+| Specs Analyzed | 1 |
+| Requirements Checked (FR + NFR + Success Criteria) | 18 |
+| Aligned | 18 |
+| Drifted | 2 (doc-only, stale path refs) |
+| Not Implemented | 0 |
+| Unspecced Features | 1 |
 
-Result: **clean**. This is a backfilled spec that documents existing bindgen FFI; implementation and spec are fully consistent, including the "30 DPDK `rte_*` libraries" note (exact count verified).
+The bindgen allowlist and linker directives in `build.rs` match every FR/NFR.
+The only drift is stale `components/spdk-sys` path references in prior
+spec-sync artifact files left from the crate relocation to `lib/`.
+
+---
 
 ## Detailed Findings
 
-### Functional Requirements
+### Spec 001-spdk-sys — spdk-sys FFI bindings
 
-| ID | Status | Evidence |
-|----|--------|----------|
-| FR-1 (env API) | Aligned | `spdk_env_opts_init`/`spdk_env_init`/`spdk_env_fini` allowlisted — `build.rs:165-167` |
-| FR-2 (PCI enum + accessors) | Aligned | `spdk_pci_enumerate`, `spdk_pci_get_driver`, `spdk_pci_device_get_*` — `build.rs:168-182` |
-| FR-3 (NVMe probe/attach/detach) | Aligned | `spdk_nvme_probe`, `spdk_nvme_detach` (attach via probe callback) — `build.rs:184-185` |
-| FR-4 (controller ops) | Aligned | ns mgmt / qpair alloc / admin cmd functions — `build.rs:187-202` |
-| FR-5 (NVMe I/O) | Aligned | `spdk_nvme_ns_cmd_{read,write,write_zeroes,flush}`, `spdk_nvme_qpair_process_completions` — `build.rs:210-214` |
-| FR-6 (DMA alloc) | Aligned | `spdk_dma_zmalloc`/`spdk_dma_free`/`spdk_zmalloc`/`spdk_free` — `build.rs:216-219` |
-| FR-7 (linker directives) | Aligned | SPDK/DPDK/system link libs — `build.rs:58-138` |
-| FR-8 (conditional ISA-L) | Aligned | Detects `SPDK_CONFIG_ISAL` and links `isal` conditionally — `build.rs:40-42,123-125` |
-| FR-9 (constants) | Aligned | `allowlist_var("SPDK_PCI_.*")`, `allowlist_var("SPDK_NVME_TRANSPORT_.*")` — `build.rs:239-240` |
+**Functional Requirements — all Aligned:**
 
-### Non-Functional Requirements
+- FR-1 (env API: `spdk_env_opts_init`, `spdk_env_init`, `spdk_env_fini`) ✓ `build.rs:165-167`
+- FR-2 (PCI enumeration + accessors `spdk_pci_*`) ✓ `build.rs:168-182`
+- FR-3 (NVMe probe/attach/detach lifecycle) ✓ `build.rs:184-185` (`spdk_nvme_probe`, `spdk_nvme_detach`; attach is handled via the probe attach callback, not a separate allowlisted fn)
+- FR-4 (controller ops: ns mgmt, qpair alloc, admin cmds) ✓ `build.rs:187-205` (get_num_ns/get_ns/alloc_io_qpair/free_io_qpair/process_admin_completions/get_default_ctrlr_opts/reset/get_data/cmd_admin_raw/create_ns/attach_ns/delete_ns/format/get_id)
+- FR-5 (I/O ops: read/write/write_zeroes/flush/completion) ✓ `build.rs:213-221`
+- FR-6 (DMA alloc: `spdk_dma_zmalloc`/`spdk_dma_free`/`spdk_zmalloc`/`spdk_free`) ✓ `build.rs:223-226`
+- FR-7 (export SPDK/DPDK/system linker directives) ✓ `build.rs:45-138`
+- FR-8 (conditional ISA-L linkage) ✓ `build.rs:40-42,123-125`
+- FR-9 (constants `SPDK_PCI_*`, `SPDK_NVME_TRANSPORT_*` via `allowlist_var`) ✓ `build.rs:246-247`
 
-| ID | Status | Evidence |
-|----|--------|----------|
-| NFR-1 (clear error if SPDK missing) | Aligned | `panic!` messages for missing src/build/config — `build.rs:13-39` |
-| NFR-2 (regen on header/lib change) | Aligned | `rerun-if-changed=wrapper.h` + lib dir — `build.rs:256-260` |
-| NFR-3 (layout tests disabled) | Aligned | `.layout_tests(false)` — `build.rs:246` |
-| NFR-4 (whole-archive) | Aligned | `static:+whole-archive=` on all SPDK + DPDK libs — `build.rs:58-118` |
-| NFR-5 (GCC internal include detection) | Aligned | `gcc -print-file-name=include` — `build.rs:142-153` |
+**Non-Functional Requirements — all Aligned:**
 
-### Success Criteria
+- NFR-1 (clear error if SPDK source/build missing) ✓ `build.rs:13-19,22-28,33-39`
+- NFR-2 (regenerate on `wrapper.h`/lib dir change) ✓ `build.rs:263-267`
+- NFR-3 (layout tests disabled) ✓ `build.rs:253`
+- NFR-4 (all SPDK libs `+whole-archive`) ✓ `build.rs:58-76`
+- NFR-5 (GCC internal include path detected) ✓ `build.rs:142-153`
 
-| ID | Status | Evidence |
-|----|--------|----------|
-| Build succeeds w/ prebuilt SPDK | Aligned | build.rs resolves `deps/spdk-build/` |
-| Sanity tests pass | Aligned | `tests/bindings_sanity.rs` (type sizes, field access, fn-ptr existence) |
-| Higher-level crates consume bindings | Aligned | consumed by `spdk-env` (`src/env.rs`) and `interfaces/spdk_types.rs` |
-| `links = "spdk"` prevents duplicate linkage | Aligned | `Cargo.toml:7` |
+**Success Criteria — Aligned:**
 
-### Implementation Notes verification
+- Sanity tests present (type sizes, field access, fn-pointer existence) ✓ `tests/bindings_sanity.rs`
+- `links = "spdk"` metadata (dedup linkage) ✓ per spec Implementation Notes / Cargo.toml
+- Key Entities: all listed types are on the allowlist incl. `spdk_nvme_ctrlr_list` ✓ `build.rs:228-245`; `spdk_nvme_ctrlr_data` marked opaque ✓ `build.rs:235`
 
-- `links = "spdk"` — present (`Cargo.toml:7`). Aligned.
-- `spdk_nvme_ctrlr_data` opaque — `build.rs:227-228`. Aligned.
-- "30 DPDK `rte_*` libraries with +whole-archive" — `dpdk_libs` array has exactly 30 entries (`build.rs:83-114`). Aligned.
-- `wrapper.h` includes `spdk/env.h`, `spdk/env_dpdk.h`, `spdk/nvme.h` — verified (`wrapper.h`). Aligned.
+---
 
-All Key Entities in the spec table are covered by `allowlist_type` calls (`build.rs:221-238`).
+## Drifted Items ⚠️
 
-## Unspecced Code
+| # | Requirement | Spec vs Actual | Location | Severity |
+|---|-------------|----------------|----------|----------|
+| 1 | Post-relocation path references | Doc references old `components/spdk-sys/specs/...` and `.specify/sync/...` paths after crate moved to `lib/spdk-sys/` | `.specify/sync/align-tasks.md:11,14,29` | minor |
+| 2 | Post-relocation path references | Apply-report references old `components/spdk-sys/...` paths (drift report path, spec path, scope, backups) | `.specify/sync/apply-report.md:4-7,11` | minor |
 
-None material. `build.rs` allowlists additional accessor functions (e.g. `spdk_pci_device_get_domain/bus/dev/func`, `spdk_pci_device_get_serial_number`) beyond those named in the spec examples, but all fall within FR-2's "PCI enumeration and device accessor functions" umbrella. No undocumented behavior.
+The prior `.specify/sync/drift-report.md:5` also carried `components/spdk-sys`,
+but that file is overwritten by this report. No spec.md, plan.md, tasks.md,
+README.md, or `Cargo.toml` retains the old path. Severity minor — historical
+commands/paths, no active build breakage.
+
+---
+
+## Unspecced Features
+
+| Feature | Location | Lines | Suggested Spec |
+|---------|----------|-------|----------------|
+| `spdk_nvme_ctrlr_cmd_abort_ext` and `spdk_nvme_ctrlr_get_max_xfer_size` allowlisted | `build.rs` | 197, 220 | Plausibly covered by FR-4 ("admin commands" / controller ops), but not named. Consider adding an explicit FR line noting abort-in-flight and MDTS-derived max-transfer bindings used by the block-device actor. |
+
+---
 
 ## Recommendations
 
-None. Spec and implementation are consistent. If the DPDK library list changes in future, keep the "30 libraries" note in the spec in sync with the `dpdk_libs` array.
+1. Update the stale `components/spdk-sys` references in
+   `.specify/sync/align-tasks.md` (lines 11, 14, 29) and
+   `.specify/sync/apply-report.md` (lines 4-7, 11) to `lib/spdk-sys/...`, or
+   annotate as historical. Minor.
+2. Optionally extend FR-4 to explicitly name the abort (`spdk_nvme_ctrlr_cmd_abort_ext`)
+   and max-transfer-size (`spdk_nvme_ctrlr_get_max_xfer_size`) bindings.
+3. No source/build changes required — bindings fully satisfy the spec.

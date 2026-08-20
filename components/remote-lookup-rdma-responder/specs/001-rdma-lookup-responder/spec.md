@@ -309,6 +309,17 @@ cycles over the loopback/mock CM seam, and read the recorded metrics.
 - **FR-004**: The accept loop MUST wait on `{rdma_cm channel fd, command inbox, stop
   signal}` together (e.g. `epoll`) so that `Disconnect` commands and stop are serviced
   promptly and never block behind a pending accept.
+  > **Command-inbox bridge note (backfilled 2026-08-20).** The command inbox is a
+  > lock-free SPSC channel with no pollable file descriptor, so `epoll` cannot wait on
+  > it directly. Under the `rdma` feature the accept loop is therefore fed by a
+  > dedicated bridge thread (`rdma-responder-cmd-bridge`, `src/rdma.rs:358-373`) that
+  > blocks on the SPSC receiver and, for each dequeued `ResponderCommand`, pushes it
+  > onto an internal queue and signals the command `eventfd` (`TAG_CMD`) that the
+  > accept loop's `epoll` set does watch. This SPSC→eventfd bridge is the mechanism
+  > that realizes FR-004's "command inbox" wait arm; it adds no externally visible
+  > behavior and preserves the prompt, event-driven command servicing FR-004 and
+  > SC-003 require. The mock CM seam has no such thread — it delivers injected commands
+  > directly — so the bridge exists only on the real (`rdma`-feature) path.
 - **FR-005**: On `CONNECT_REQUEST` the responder MUST read the zyre UUID from the
   connect `private_data`, key its per-node connection table by that `PeerId`, accept
   the connection, and emit `ConnectionEstablished { node: Some(peer) }`.

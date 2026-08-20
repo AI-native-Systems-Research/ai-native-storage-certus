@@ -1,0 +1,59 @@
+{
+  "applied": "2026-08-20",
+  "mode": "phase-b-shared-policy",
+  "project": "remote-lookup",
+  "source": ".specify/sync/drift-report.{json,md}",
+  "no_source_modified": true,
+  "cargo_run": false,
+  "summary": {
+    "backfill_applied": 5,
+    "align_tasks": 1,
+    "unspecced_backfilled": 3,
+    "resolved": 0,
+    "human_decision": 0
+  },
+  "backups": [
+    ".specify/sync/backups/specs/001-remote-lookup-placeholder/spec.md.bak",
+    ".specify/sync/backups/specs/002-remote-lookup-rdma/spec.md.bak"
+  ],
+  "specs_updated": [
+    { "spec": "001-remote-lookup-placeholder", "requirement": "Status header", "change_type": "modified" },
+    { "spec": "001-remote-lookup-placeholder", "requirement": "FR-001", "change_type": "backfill", "note": "superseded-by-002 annotation" },
+    { "spec": "001-remote-lookup-placeholder", "requirement": "FR-003", "change_type": "backfill", "note": "superseded-by-002 annotation" },
+    { "spec": "001-remote-lookup-placeholder", "requirement": "FR-004", "change_type": "backfill", "note": "superseded-by-002 annotation" },
+    { "spec": "001-remote-lookup-placeholder", "requirement": "FR-008", "change_type": "backfill", "note": "superseded-by-002 annotation" },
+    { "spec": "001-remote-lookup-placeholder", "requirement": "SC-002", "change_type": "backfill", "note": "superseded-by-002 annotation" },
+    { "spec": "002-remote-lookup-rdma", "requirement": "Status header", "change_type": "modified" },
+    { "spec": "002-remote-lookup-rdma", "requirement": "FR-006", "change_type": "backfill-unspecced", "note": "AlreadyExists size-collision guard (src/actor.rs:576-591)" },
+    { "spec": "002-remote-lookup-rdma", "requirement": "FR-014", "change_type": "backfill-unspecced", "note": "fixed 500ms DISCONNECT_ACK_TIMEOUT (src/actor.rs:37,1020-1033)" },
+    { "spec": "002-remote-lookup-rdma", "requirement": "FR-018", "change_type": "backfill-unspecced", "note": "malformed/truncated-frame ignore class; logging folded into ALIGN task (src/actor.rs:314,330)" },
+    { "spec": "002-remote-lookup-rdma", "requirement": "Edge Cases", "change_type": "scenarios-added", "note": "FR-018 frame-drop + FR-006 size-collision" }
+  ],
+  "align_tasks_generated": [
+    {
+      "spec": "002-remote-lookup-rdma",
+      "requirement": "FR-018",
+      "severity": "low",
+      "summary": "Log both the unknown-msg_type arm (src/actor.rs:330) and the malformed-decode arm (src/actor.rs:314) before dropping. Supersedes 2026-08-07 Task 3.",
+      "files": ["components/remote-lookup/src/actor.rs:314", "components/remote-lookup/src/actor.rs:330"]
+    }
+  ],
+  "unspecced_backfilled": [
+    { "feature": "DISCONNECT_ACK_TIMEOUT (fixed 500ms DisconnectAck wait)", "location": "src/actor.rs:37,1020-1033", "into": "FR-014" },
+    { "feature": "Malformed/truncated wire frame ignore", "location": "src/actor.rs:314", "into": "FR-018" },
+    { "feature": "publish_success AlreadyExists size-collision guard", "location": "src/actor.rs:576-591", "into": "FR-006" }
+  ],
+  "resolved": [],
+  "human_decision": [],
+  "files_touched": [
+    "specs/001-remote-lookup-placeholder/spec.md",
+    "specs/002-remote-lookup-rdma/spec.md",
+    ".specify/sync/proposals.md",
+    ".specify/sync/proposals.json",
+    ".specify/sync/align-tasks.md",
+    ".specify/sync/apply-report.md",
+    ".specify/sync/apply-report.json",
+    ".specify/sync/backups/specs/001-remote-lookup-placeholder/spec.md.bak",
+    ".specify/sync/backups/specs/002-remote-lookup-rdma/spec.md.bak"
+  ]
+}

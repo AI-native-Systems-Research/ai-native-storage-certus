@@ -74,6 +74,7 @@ mod ispdk_env;
 
 #[cfg(feature = "spdk")]
 pub mod iblock_device;
+mod iextended_metadata_store;
 mod iextent_manager;
 
 #[cfg(feature = "spdk")]
@@ -95,6 +96,7 @@ pub use iblock_device::{
 #[cfg(feature = "spdk")]
 pub use iblock_device::IBlockDeviceAdmin;
 
+pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};
 pub use iextent_manager::Extent;
 pub use iextent_manager::ExtentKey;
 pub use iextent_manager::ExtentManagerError;

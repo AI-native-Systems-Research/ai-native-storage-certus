@@ -3,6 +3,7 @@
 **Feature Branch**: `logger`
 **Created**: 2026-04-17
 **Status**: Draft
+**Last-Synced**: 2026-08-20 (Phase B spec-sync: FR-006 backfilled to match implemented warn color)
 **Input**: User description: "Build a logging component that provides logging
 to the console or file with configurable log levels, timestamp formatting,
 and colorized console output."
@@ -38,6 +39,10 @@ with correct format and filtering based on RUST_LOG.
    "ERROR", and "disk failure" in red colorization.
 4. **Given** RUST_LOG is not set, **When** the developer calls any log
    method, **Then** a reasonable default level is applied (info or above).
+5. **Given** a LoggerComponent with color enabled and RUST_LOG=warn,
+   **When** the developer calls `warn("high latency")`, **Then** stderr
+   shows the line prefixed with the orange 256-color escape
+   `\x1b[38;5;208m` and terminated with the reset code `\x1b[0m`.
 
 ---
 
@@ -128,8 +133,9 @@ methods through the receptacle and verify output.
 - **FR-005**: Console output MUST be the default logging destination,
   writing to stderr.
 - **FR-006**: Console output MUST include ANSI color codes to
-  distinguish log levels (e.g., red for error, yellow for warn, green
-  for info, blue/cyan for debug).
+  distinguish log levels: red (`\x1b[31m`) for error, orange
+  (256-color `\x1b[38;5;208m`) for warn, green (`\x1b[32m`) for info,
+  and cyan (`\x1b[36m`) for debug.
 - **FR-007**: The component MUST support an alternative file output
   mode where log messages are written to a specified file path.
 - **FR-008**: File output MUST NOT contain ANSI color codes.

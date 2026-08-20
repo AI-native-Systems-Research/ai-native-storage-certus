@@ -2,8 +2,9 @@
 
 **Feature Branch**: `001-memory-tier`
 **Created**: 2026-07-08
-**Status**: Backfilled
+**Status**: Backfilled — aligned to implementation
 **Source**: Generated from existing implementation
+**Last-Synced**: 2026-08-20 (spec-sync Phase B: backfilled to the single-`RwLock<Pool>` reality; see "Spec-Sync Notes" at end)
 
 ## Backfill Notice
 > This spec was generated from existing code via `speckit.sync.backfill`.
@@ -14,7 +15,7 @@
 
 The `memory-tier` component provides a high-performance DRAM-resident cache pool for the Certus storage system. It serves as a fast staging area between higher-level dispatch logic and persistent NVMe storage, enabling low-latency reads for cached objects and write-staging for objects destined for disk.
 
-The pool is internally sharded into 16 independent partitions to minimize lock contention under concurrent access from multiple dispatcher threads. Each shard maintains its own free-list allocator and slot map. Eviction decisions are delegated to an external `IEvictionPolicy` component via a receptacle binding, providing pluggable eviction strategies (currently LRU).
+The pool is held as a single, unsharded structure guarded by one `RwLock<Pool>`: a single first-fit free-list allocator and a single `HashMap<CacheKey, Slot>` slot map. Read operations (`get`, `peek`, `contains`, `batch_touch`, `capacity`, `used`) take a shared read lock; mutations (`insert`, `remove`, `evict`, `clear`) take an exclusive write lock. Eviction decisions are delegated to an external `IEvictionPolicy` component via a receptacle binding, which provides pluggable eviction strategies (currently LRU) and its own internal synchronization; eviction-order touches are performed after releasing the pool lock.
 
 Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB hugepage backing) or SPDK DMA-capable hugepages when the SPDK environment is active. All internal allocations are 4 KiB-aligned, making returned pointers directly usable for NVMe DMA transfers without additional alignment or pinning.
 
@@ -46,8 +47,8 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 **so that** space is freed for new insertions without requiring external coordination.
 
 **Acceptance Criteria:**
-- `evict_next()` removes the eviction policy's next victim across shards (round-robin)
-- `evict_next_for_key(key)` evicts the policy's next victim from the same shard as the target key
+- `evict_next()` removes the eviction policy's next victim (chosen by the bound `IEvictionPolicy` via `identify_next_to_evict`) from the single global pool
+- `evict_next_for_key(key)` is equivalent to `evict_next()`; because the pool is not sharded, the `key` argument does not constrain which victim is chosen (any freed space is globally allocatable)
 - Eviction correctly frees the allocation and removes the slot from the index
 - After eviction, the freed space is available for new allocations
 - `oldest_keys(n)` returns up to N keys in oldest-first order without removing them
@@ -55,7 +56,7 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 **Test Coverage:**
 - `evict_next_returns_some` - verifies eviction returns a key
 - `touch_updates_eviction_order` - verifies touch updates the entry's eviction-order position
-- `pool_full_returns_error` - verifies PoolFull when shard capacity exhausted
+- `pool_full_returns_error` - verifies PoolFull when pool capacity is exhausted
 
 ### User Story 3 - Pool Initialization with NUMA and DMA Awareness (Priority: P1)
 
@@ -85,7 +86,7 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 **Acceptance Criteria:**
 - `remove(key)` frees the slot and returns Ok
 - `remove(absent_key)` returns `KeyNotFound`
-- `clear()` removes all entries from all shards and returns the count
+- `clear()` removes all entries from the pool and returns the count
 - After clear, `used()` returns 0 and previous keys are no longer contained
 
 **Test Coverage:**
@@ -99,7 +100,7 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 **so that** I can track memory pressure and trigger proactive eviction.
 
 **Acceptance Criteria:**
-- `capacity()` returns the total pool size across all shards
+- `capacity()` returns the total pool size
 - `used()` returns the sum of all currently-allocated bytes (4 KiB-aligned)
 - `pool_info()` returns the base pointer and total pool size for CUDA host registration
 
@@ -150,25 +151,25 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | FR-002 | Hugepage backing (MAP_HUGETLB) is preferred with automatic fallback | Implementation |
 | FR-003 | When SPDK env is active, pool uses spdk_zmalloc for DMA-capable memory | Implementation |
 | FR-004 | All allocations are 4 KiB-aligned for NVMe DMA compatibility | Unit test |
-| FR-005 | Pool is divided into 16 independent shards | Implementation |
-| FR-006 | Shard selection uses key modulo 16 | Creusot P4, P5 |
-| FR-007 | Each shard has its own Mutex-protected allocator and slot map | Implementation |
-| FR-008 | insert() rejects zero size with InvalidSize | Creusot P1, unit test |
-| FR-009 | insert() rejects duplicate keys with AlreadyExists | Creusot P3, unit test |
-| FR-010 | insert() returns PoolFull when shard allocator cannot satisfy request | Creusot P8, unit test |
+| FR-005 | Pool state (allocator + slot map) is held as a single, unsharded structure behind one `RwLock<Pool>` (no shards) | Implementation |
+| FR-006 | Concurrency uses one reader-writer lock: read operations (`get`, `peek`, `contains`, `batch_touch`, `capacity`, `used`) take a shared read lock; mutations (`insert`, `remove`, `evict`, `clear`) take an exclusive write lock | Implementation |
+| FR-007 | A single first-fit `FreeList` allocator and a single `HashMap<CacheKey, Slot>` slot map serve the whole pool | Implementation |
+| FR-008 | insert() rejects zero size with InvalidSize | Unit test |
+| FR-009 | insert() rejects duplicate keys with AlreadyExists | Unit test |
+| FR-010 | insert() returns PoolFull when the allocator cannot satisfy the request | Unit test |
 | FR-011 | get() returns pointer and size, and updates eviction order via eviction policy | Unit test |
 | FR-012 | peek() returns pointer and size without eviction-order update | Unit test |
-| FR-013 | evict_next() cycles through shards via atomic counter (round-robin) | Creusot P10 |
-| FR-014 | evict_next_for_key() evicts from the same shard as the target key | Creusot P4, P5 |
-| FR-015 | remove() frees the slot and returns KeyNotFound for absent keys | Creusot P9, unit test |
+| FR-013 | evict_next() delegates victim selection to the eviction policy (`identify_next_to_evict(pool_id)`), then removes that slot and frees its allocation; there is no shard round-robin counter | Implementation |
+| FR-014 | evict_next_for_key(key) is an alias for evict_next(); the `key` argument is ignored because the pool is not sharded | Implementation |
+| FR-015 | remove() frees the slot and returns KeyNotFound for absent keys | Unit test |
 | FR-016 | touch() updates the entry's eviction-order position without returning data | Unit test |
 | FR-017 | batch_touch() amortizes lock acquisition for multiple keys | Implementation |
 | FR-018 | clear() removes all entries, resets allocators, returns count | Unit test |
 | FR-019 | NUMA binding via mbind with graceful fallback on failure | Implementation |
 | FR-020 | is_dma_capable() returns true only for SPDK-allocated pools | Implementation |
-| FR-021 | oldest_keys(n) peeks at N oldest keys across shards | Implementation |
+| FR-021 | oldest_keys(n) returns up to N oldest keys via a single `IEvictionPolicy::get_eviction_candidates(pool_id, n)` call (no per-shard sampling) | Implementation |
 | FR-022 | pool_info() returns base pointer and size for CUDA host registration | Implementation |
-| FR-023 | All operations check initialized flag before proceeding | Creusot P2 |
+| FR-023 | All operations check initialized flag before proceeding | Implementation |
 | FR-024 | Eviction policy is an external receptacle (IEvictionPolicy) | Implementation |
 | FR-025 | Logger is an optional receptacle (ILogger) | Implementation |
 | FR-026 | Free-list allocator coalesces adjacent free regions on deallocation | Unit test |
@@ -181,7 +182,7 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | ID | Requirement | Verified |
 |----|-------------|----------|
 | NFR-001 | O(1) LRU operations (touch, evict) via eviction policy delegation | Architecture |
-| NFR-002 | Per-shard locking minimizes contention (16-way parallelism) | Architecture |
+| NFR-002 | A single `RwLock<Pool>` serializes mutations while allowing concurrent readers; data-path touches are applied outside the pool lock via the eviction policy's own synchronization | Architecture |
 | NFR-003 | No system calls on the data path after initialization | Architecture |
 | NFR-004 | Memory pool is thread-safe (Send + Sync) | Compile-time |
 | NFR-005 | Allocator uses BTreeMap for O(log n) first-fit search | Implementation |
@@ -197,13 +198,13 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | Entity | Type | Description |
 |--------|------|-------------|
 | `MemoryTierComponent` | Component | Main component struct, defined via `define_component!` macro |
-| `MemoryTierState` | Internal struct | Holds pool pointer, shard vector, initialization flag |
-| `Shard` | Internal struct | Per-partition allocator + slot map (16 total) |
+| `MemoryTierState` | Internal struct | Holds pool pointer, pool size, pool id, the `RwLock<Pool>`, initialization flag, and (feature-gated) telemetry |
+| `Pool` | Internal struct | The single unsharded allocator + slot map: one `FreeList` and one `HashMap<CacheKey, Slot>`, guarded by `RwLock<Pool>` |
 | `Slot` | Internal struct | Maps a CacheKey to an offset, size, and eviction handle |
 | `FreeList` | Internal struct | BTreeMap-based first-fit allocator with coalescing |
 | `CacheKey` | Type alias (u64) | Unique identifier for cached objects |
 | `EvictionHandle` | Type alias | Opaque handle for the eviction policy tracker |
-| `PoolId` | Type alias (u32) | Identifies a shard within the eviction policy |
+| `PoolId` | Type alias (u32) | Identifies the pool within the eviction policy |
 | `MemoryTierError` | Enum | Error type covering all failure modes |
 | `IMemoryTier` | Interface trait | Public API exposed to other components |
 | `IEvictionPolicy` | Receptacle | External eviction strategy (required) |
@@ -232,23 +233,47 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 5. Eviction correctly frees space and allows re-insertion
 6. NUMA binding succeeds on multi-socket systems (or gracefully falls back)
 7. SPDK path produces DMA-capable pointers when SPDK env is active
-8. 10 formal properties verified with Creusot (21 verification conditions)
 
 ## Implementation Notes
 
-- The component uses `RwLock<MemoryTierState>` at the top level, but after initialization the state fields (`pool_ptr`, `pool_size`, `shard_size`) are effectively immutable. The RwLock is taken as a read-lock on all data-path operations, with per-shard Mutex providing fine-grained write access.
-- `unsafe impl Send/Sync` is justified because the pool pointer references mmap'd/SPDK memory accessible from any thread, and all mutable access is serialized through Mutex.
-- The `evict_counter` atomic provides round-robin shard selection for global eviction, preventing starvation of any single shard.
+- The component uses `RwLock<MemoryTierState>` at the top level. After initialization the immutable state fields (`pool_ptr`, `pool_size`, `pool_id`) do not change; the inner `RwLock<Pool>` guards the allocator and slot map. Data-path reads take the inner read lock; mutations take the inner write lock. When the `telemetry` feature is enabled, a failed `try_read`/`try_write` first attempt bumps the corresponding lock-contention counter before blocking.
+- `unsafe impl Send/Sync` is justified because the pool pointer references mmap'd/SPDK memory accessible from any thread, and all mutable access is serialized through the `RwLock<Pool>`.
+- Global eviction (`evict_next`) delegates victim choice entirely to the bound `IEvictionPolicy`; there is no internal round-robin counter or shard-selection state.
 - When SPDK has already shut down at Drop time, the pool is intentionally leaked (same pattern as DmaBuffer) to avoid use-after-free in the SPDK allocator.
 - The allocator rounds all sizes up to 4 KiB, which means small objects waste up to 4095 bytes. This is acceptable because the primary use case is large extent-sized allocations (typically 4 KiB or multiples thereof).
-- `oldest_keys()` samples per-shard with `(n / NUM_SHARDS).max(1)` which may return fewer than N keys if shards are unevenly populated.
+- `oldest_keys()` delegates to `IEvictionPolicy::get_eviction_candidates(pool_id, n)` in a single call; it may return fewer than N keys if the policy tracks fewer live entries.
 - `DEFAULT_POOL_SIZE` (256 MiB) is declared as a public constant but is currently unused by any call site — `initialize()` always requires an explicit `pool_size` argument. It is reserved for a future default-constructor path (same reserved-for-future status as the `NotEvictable` error variant below). *(backfilled 2026-07-22)*
 
-## Spec-Sync Notes (2026-07-22)
+## Spec-Sync Notes (2026-08-20 — backfilled to reality)
 
-> The following items are known drift between this spec and the current implementation. They are **intentionally left unresolved** in this document pending a design decision — see `.specify/sync/align-tasks.md` for the deferred alignment tasks and options. This spec continues to describe the originally-intended 16-way sharded architecture; it has **not** been rewritten to match the current single-pool implementation, because it is unclear whether sharding was deliberately dropped or is unfinished work.
+> Phase B decision: **backfill this spec to match the working implementation.** The
+> previously-deferred "16-way sharded pool + Creusot-verified properties" drift (tracked in
+> `.specify/sync/align-tasks.md` since 2026-07-22) has now been resolved by rewriting the spec
+> to describe the code as built. The implementation is the intended, working reality; the
+> sharded/formally-verified design described in earlier revisions was never built.
 >
-> - FR-005, FR-006, FR-007, NFR-002 (16-way sharding), FR-013 (round-robin eviction counter), FR-021 (per-shard `oldest_keys` sampling), and SC-3 (16-thread concurrency via shard locks) describe a sharded pool that does not exist in `src/lib.rs` (single `RwLock<Pool>`, no shards). See align-task "sharding-not-implemented".
-> - FR-014 (`evict_next_for_key` targets the key's shard) does not hold: the `key` parameter is ignored in the current implementation, making it a pure alias for `evict_next()`. See align-task "evict-lru-for-key-ignores-key".
-> - SC-8 (10 Creusot-verified formal properties, 21 verification conditions) has no corresponding proof artifacts anywhere under `components/memory-tier/`. The `IMemoryTier` interface doc comments (`components/interfaces/src/imemory_tier.rs`) also assert "Verified: P4/P5/P10" claims that are stale. See align-task "creusot-proofs-absent".
-> - NFR-008 (component version `0.2.0`) does not match either `Cargo.toml` (`0.1.0`) or the `define_component!` macro's `version:` field (`0.3.0`). See align-task "version-mismatch".
+> Resolved by BACKFILL:
+> - FR-005/FR-006/FR-007 and NFR-002: rewritten to describe the single `RwLock<Pool>` design
+>   (one `FreeList` allocator + one `HashMap<CacheKey, Slot>` slot map, one reader-writer lock).
+>   No shards, no `NUM_SHARDS`, no `shard_for_key()`.
+> - FR-013: `evict_next()` delegates victim choice to the eviction policy; there is no
+>   round-robin shard counter.
+> - FR-014: `evict_next_for_key(key)` is an alias for `evict_next()` — the `key` argument is
+>   ignored (single global pool).
+> - FR-021: `oldest_keys(n)` is a single `get_eviction_candidates(pool_id, n)` call, not
+>   per-shard sampling.
+> - SC-8 and the "Creusot P#/Verified" annotations on FR-006/008/009/010/013/014/015/023:
+>   removed. No Creusot proof artifacts exist under `components/memory-tier/verif/`, and the
+>   "formally proved / N shards" overclaiming was removed from the `IMemoryTier` interface docs.
+>   These claims are intentionally **not** re-added.
+>
+> Still open (HUMAN_DECISION):
+> - **NFR-008 (component version).** Three values disagree — `Cargo.toml` = `0.1.0`,
+>   `define_component!` macro = `0.3.0`, this spec = `0.2.0`. No single value is authoritative,
+>   so the spec text is left unchanged pending a maintainer decision to reconcile all three
+>   (see `.specify/sync/align-tasks.md`). This is the only item not resolved by backfill; it
+>   requires editing `Cargo.toml` and `src/lib.rs`, which are out of scope for this pass.
+>
+> Note: a residual "same shard as `key`" phrase remains in the `evict_next_for_key` doc comment
+> in `components/interfaces/src/imemory_tier.rs` (outside this component's edit scope). The
+> Creusot/`P4/P5/P10` "Verified" overclaiming was already removed from that interface file.

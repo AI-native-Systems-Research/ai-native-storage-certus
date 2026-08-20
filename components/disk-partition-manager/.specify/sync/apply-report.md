@@ -1,51 +1,57 @@
-# Sync Apply Report — disk-partition-manager
+# Spec-Sync Phase B — Apply Report: disk-partition-manager
 
-**Applied**: 2026-08-07
-**Branch**: `sync/spec-drift-sweep-20260807` (all changes; nothing committed to `unstable`)
-**Source**: `.specify/sync/drift-report.{json,md}` (generated 2026-08-07T15:30:30Z)
-**Backups**: `.specify/sync/backups/20260807T160256Z/{spec.md, gpt.rs}` (pre-edit, from git HEAD)
+**Generated**: 2026-08-20 (Phase B)
+**Spec**: `001-gpt-partition-management`
+**Policy**: `.specify/sync/PHASE_B_POLICY.md`
+**Based on drift report**: `drift-report.json` (2026-08-07T15:30:30Z)
+**Supersedes**: 2026-08-07 sync run (branch `sync/spec-drift-sweep-20260807`)
 
-## User Decisions Driving This Pass (fully-interactive)
+## Counts
 
-- **FR-003** = **Draft fix (ALIGN, HIGH)**.
-- **PR-002** = **Backfill spec to reality**.
-- **Low/unspecced (LBA-2 read, GUID zero-fallback, sector-size validation)** = **Document all in spec**.
+| Category | Count |
+|----------|-------|
+| BACKFILL applied | 2 (FR-003, PR-002) |
+| BACKFILL-UNSPECCED | 2 |
+| ALIGN tasks | 0 |
+| RESOLVED | 0 |
+| HUMAN_DECISION | 0 |
+| New specs | 0 |
 
-## Changes Made
+## Specs Updated
 
-### Code Drafted on Branch (ALIGN — see `align-tasks.md`)
+| Requirement | Change type | Summary |
+|-------------|-------------|---------|
+| FR-003 | BACKFILL | Rewrote the note from "fix drafted on branch / see align-tasks.md" to "implemented in `read_gpt` (`src/gpt.rs:66-96`) — backup attempted on both `CorruptTable` and `NoPartitionTable`". Added US2 acceptance scenario 4 (signature-damaged primary + valid backup recovers, no reformat). |
+| PR-002 | BACKFILL (no-op) | Current spec text already describes the actual per-sector read (~33 round-trips, O(1) in device size); no edit needed this run. |
+| Metadata (Last Synced) | metadata | Updated to 2026-08-20; recorded FR-003 re-classification ALIGN → BACKFILL. |
 
-| Requirement | Direction | Status | Files |
-|-------------|-----------|--------|-------|
-| FR-003 backup fallback on signature corruption | ALIGN (HIGH) | **Drafted** — builds clean | `components/disk-partition-manager/src/gpt.rs` (`read_gpt`: fall through to backup on `NoPartitionTable` as well as `CorruptTable`) |
+## Align Tasks Generated
 
-### Specs Updated (BACKFILL — applied directly)
+None. FR-003's 2026-08-07 drafted code fix is now present in `src/gpt.rs`, so it is
+resolved by BACKFILL, not ALIGN. See `align-tasks.md` for the historical (superseded)
+note and the residual test-coverage gap.
 
-| Location | Change |
-|----------|--------|
-| Header | Added "Last Synced 2026-08-07" note. |
-| FR-003 | Clarified "corrupt" covers CRC mismatch **and** signature damage; noted the drafted fix and the prior destructive-reformat consequence. |
-| PR-002 | Backfilled to actual per-sector read (~33 round-trips @512B); reframed as O(1)-in-device-size; noted batching as a future perf task. |
-| Implementation Notes | Documented: read path hardcodes LBA 2 vs parsed `partition_entry_lba`; `generate_guid` zero-fallback vs FR-008; no explicit sector-size validation (any size accepted). |
+## Unspecced Backfilled
 
-## Verification
+| Item | Change type | Status |
+|------|-------------|--------|
+| Hardcoded primary entry LBA on read (`src/gpt.rs:68`) | BACKFILL-UNSPECCED (Implementation Notes) | already reflected in `spec.md` |
+| `generate_guid` zero-fallback on `/dev/urandom` failure (`src/gpt.rs:564-574`) | BACKFILL-UNSPECCED (Implementation Notes) | already reflected in `spec.md` |
 
-- `cargo build -p disk-partition-manager` — **clean** (interfaces + component compiled).
-- No unit tests exist for this component (confirmed by drift report and `tasks.md`),
-  so the FR-003 fix could not be exercised by an automated test. A signature-corruption
-  backup-recovery test is queued in `align-tasks.md` (Task 1 remaining criteria).
+## Resolved
 
-## Not Applied / Deferred
+None.
 
-| Item | Reason |
-|------|--------|
-| Batch entry-array read (PR-002 code fix) | User chose to backfill the spec; batching left as a future perf task. |
-| Honor `partition_entry_lba` on read | Documented only (user: "Document all in spec"). |
-| Error on `/dev/urandom` failure | Documented only. |
-| Explicit sector-size validation | Documented only. |
+## Backups
 
-## Next Steps
+| Edited spec | Backup |
+|-------------|--------|
+| `.specify/specs/001-gpt-partition-management/spec.md` | `.specify/sync/backups/.specify/specs/001-gpt-partition-management/spec.md.bak` |
 
-1. Review the drafted `read_gpt` change and the spec edits on the branch.
-2. Add the queued backup-signature-recovery unit test (align-tasks.md Task 1).
-3. Commit on `sync/spec-drift-sweep-20260807` (do NOT commit to `unstable`).
+## Notes
+
+- No `.rs` source was modified; `cargo` was not run.
+- **Known coverage gap** (not an ALIGN item): SC-001/SC-002/SC-003 and the FR-003
+  signature-recovery scenario have no automated tests; `[dev-dependencies]` is empty
+  (see `drift-report.json` `conflicts` and `tasks.md`). Track as a normal test-authoring
+  task.

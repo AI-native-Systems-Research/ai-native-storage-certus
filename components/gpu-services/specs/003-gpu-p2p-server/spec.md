@@ -3,6 +3,7 @@
 **Feature Branch**: `003-gpu-p2p-server`
 **Created**: 2026-07-22
 **Status**: Draft (backfilled — needs human review)
+**Last-Synced**: 2026-08-20 (spec-sync: FR-012 softened to match code — the MDTS ceiling is an operator responsibility documented via CLI help, not a runtime-validated constraint)
 **Input**: Backfilled from unspecced production code during spec-sync
 (drift-report 2026-07-22). Source: `components/gpu-services/src/bin/p2p_server.rs`
 (678 lines, `p2p` feature).
@@ -58,6 +59,11 @@ each, and confirm all three report `OK <size> bytes (<mode>, <n> chunks)`.
    client connects, **Then** the server performs GDRCopy pin/map and unpin
    per request (no amortized setup) and responds
    `OK <size> bytes (p2p-cold, <n> chunks)`.
+4. **Given** a requested transfer larger than `--chunk-size`, **When** a
+   client connects in any mode, **Then** the server splits the NVMe read
+   into `ceil(size / chunk-size)` chunk-sized async reads (one `ReadAsync`
+   per chunk, submitted together via `BatchSubmit`) and reports the chunk
+   count `<n>` in its `OK <size> bytes (<mode>, <n> chunks)` response.
 
 ---
 
@@ -185,7 +191,17 @@ teardown.
   every iteration and, when set, break out, drop any GPU staging pool
   (releasing GDRCopy/SPDK resources), remove the socket file, and exit.
 - **FR-012**: All transfer handlers MUST perform NVMe reads in
-  `--chunk-size` increments (not exceeding the NVMe controller's MDTS).
+  `--chunk-size` increments — `do_chunked_read` issues one async
+  `ReadAsync` per chunk (`sectors_per_chunk = chunk_size / sector_size`,
+  successive LBAs) and submits them together via `BatchSubmit`, awaiting all
+  completions. Keeping `--chunk-size` at or below the NVMe controller's
+  Maximum Data Transfer Size (MDTS) is an **operator responsibility**,
+  communicated via the `--chunk-size` CLI help text ("must not exceed MDTS,
+  typically 128KB") and the 131072-byte default; the server does NOT query
+  the controller's MDTS or validate/clamp `--chunk-size` against it at
+  runtime. A `--chunk-size` larger than the device MDTS surfaces as an NVMe
+  read error through the block-device layer (returned to the client as
+  `ERROR: <message>`), not as silent corruption.
 
 ### Key Entities
 
@@ -232,6 +248,10 @@ teardown.
   and the `nvidia_peermem`/`gdrdrv` kernel modules being present on the host.
 - Exactly one NVMe controller and one GPU are exercised per server
   instance; multi-device fan-out is out of scope.
+- The operator is responsible for choosing a `--chunk-size` at or below the
+  target NVMe controller's MDTS; the server does not discover or enforce
+  MDTS at runtime and relies on the documented 128KB default and CLI help
+  guidance (see FR-012).
 - This spec documents behavior as implemented at backfill time
   (2026-07-22); it has not been reviewed against original design intent by
   a human author.

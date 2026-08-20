@@ -1,53 +1,56 @@
-# Sync Apply Report — extent-manager
+# Sync Apply Report — extent-manager (Phase B)
 
-**Date**: 2026-08-07T16:02:56Z
-Based on: proposals 2026-08-07T16:02:56Z (drift-report 2026-08-07T15:31:39Z)
-Backups: `.specify/sync/backups/20260807T160256Z/` (spec.md)
-Branch: `sync/spec-drift-sweep-20260807` (all changes; nothing committed to `unstable`)
+**Date**: 2026-08-20
+**Based on**: `proposals.json` (Phase B) / `drift-report.json` (2 drifted)
+**Backups**: `.specify/sync/backups/specs/001-extent-manager-v2/spec.md.bak`,
+`.specify/sync/backups/specs/001-extent-manager-v2/plan.md.bak`
+**Scope**: spec docs only — no `.rs` source modified, no cargo run.
 
-## Changes Made
+## Outcome
 
-### Specs Updated (BACKFILL — applied directly)
+| Category | Count |
+|----------|-------|
+| BACKFILL applied | 2 |
+| ALIGN tasks generated | 0 |
+| UNSPECCED backfilled | 0 |
+| RESOLVED | 0 |
+| HUMAN_DECISION | 0 |
 
-| Requirement | Change | Detail |
-|-------------|--------|--------|
-| Header | Added | "Last Synced 2026-08-07" note summarizing this sweep. |
-| FR-030 | Modified | Corrected inverted wording → "enabled = issue an explicit metadata flush after checkpoint/format writes". |
-| FR-032 | Modified | `capacity_bytes()` now documented as **usable** data capacity (excludes reserved in-device metadata region). |
-| FR-036 | Modified | Clarified `data_base_lba` is caller-consumed config; component performs no data-device I/O. |
-| Additional Support Surface | Added | Documented 4 previously-unspecced helpers (checkpoint telemetry, WriteHandle accessors, extended mock helpers, `BuddyAllocator::mark_allocated`). |
+## Specs Updated (BACKFILL — applied directly)
 
-### Code Drafted/Applied on Branch (ALIGN — see `align-tasks.md`)
+| Requirement | File | Change type | Detail |
+|-------------|------|-------------|--------|
+| Header | spec.md | Modified | `**Updated**` date → 2026-08-20. |
+| Top Sync note | spec.md | Modified | Added a "Last Synced 2026-08-20" block; removed the stale FR-030 "does not compile / drafted / queued / add CI job" text and the "Informational: plan.md still references block_device/v2" bullet (now resolved). |
+| FR-030 | spec.md | Modified | Parenthetical status changed from "does not yet compile" to "implemented and building", citing `flush()`/`FlushSync`/`FlushDone` and their locations. |
+| plan.md-layout-refs | plan.md | Modified | Dropped the `block_device` data-device receptacle from the "Storage" block and Component Structure list (noted data device is caller-owned per FR-036); re-rooted the source tree from `components/extent-manager/v2/` to `components/extent-manager/`; added a Last-Synced 2026-08-20 note to the plan header. |
 
-| Requirement | Direction | Status | Files |
-|-------------|-----------|--------|-------|
-| FR-030 | ALIGN (HIGH) | **Drafted + verified** | `interfaces/src/iblock_device.rs` (FlushSync/FlushDone), `extent-manager/src/block_io.rs` (`flush()`), `block-device-spdk-nvme/src/actor.rs` (`do_sync_flush` + dispatch arm) |
-| FR-016 | ALIGN (Low) | **Applied** | `interfaces/src/iextent_manager.rs:244`, `extent-manager/README.md:13` (→ 30 seconds) |
+## Align Tasks Generated
 
-### Verification
+None — no ALIGN items this phase. (The existing `align-tasks.md` from the 2026-08-07
+sweep is historical and left untouched; the FR-030 fix it drafted has since landed,
+which is exactly what P1 backfills.)
 
-- `cargo build -p interfaces` — clean.
-- `cargo build` (default members) — clean.
-- `cargo build -p block-device-spdk-nvme` — clean.
-- `cargo build -p extent-manager --features volatile_write_cache` — clean
-  (**was a compile error before this sweep**).
-- `cargo test -p extent-manager --features volatile_write_cache` — 16 passed.
+## Unspecced Backfilled
 
-### Not Applied
+None.
 
-| Proposal | Reason |
-|----------|--------|
-| (none) | All five proposals approved and applied. |
+## Resolved
 
-## Remaining Follow-ups (queued, not done here)
+None.
 
-1. Add a CI job building `--features volatile_write_cache` (needs an SPDK-capable
-   runner). See `align-tasks.md` Task 1.
-2. Hardware review of `do_sync_flush` (real `spdk_nvme_ns_cmd_flush`).
-3. Refresh stale `plan.md`/`tasks.md`/`README.md` planning docs (block_device
-   receptacle, v2/ path, CERTUSV5/v5) — separate docs pass.
+## Verification
 
-## Next Steps
+- No `.rs` files modified; no cargo invoked (per task constraints).
+- `grep` confirms no remaining stale `block_device` receptacle or `extent-manager/v2/`
+  references in plan.md (only the interface filename `iblock_device.rs` and the
+  descriptive sync note remain).
+- `grep` confirms FR-030 no longer carries a "does not compile / drafted on branch"
+  status.
 
-1. Review the updated spec and the drafted code changes on the branch.
-2. Commit on `sync/spec-drift-sweep-20260807` (do NOT commit to `unstable`).
+## Notes / Out of Scope
+
+The 2026-08-07 informational list also flagged `AtomicU64` checkpoint-interval wording
+and `CERTUSV5`/`v5` strings in plan.md/tasks.md/README.md. These are **not** in the
+2026-08-20 drift report's two items and were left unchanged to keep this backfill
+surgical; a future docs pass can address them.

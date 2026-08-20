@@ -1,42 +1,44 @@
 {
-  "generated": "2026-05-05T00:00:00Z",
-  "based_on": "drift-report from 2026-05-05",
+  "generated": "2026-08-20T00:00:00Z",
+  "based_on": "components/spdk-env/.specify/sync/drift-report.json",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
   "summary": {
-    "backfill": 0,
-    "align": 1,
-    "human_decision": 1,
-    "new_specs": 0,
-    "remove_from_spec": 0
+    "backfill": 1,
+    "align": 0,
+    "backfill_unspecced": 0,
+    "resolved": 0,
+    "human_decision": 0,
+    "not_implemented_handled": 1
   },
   "proposals": [
     {
       "id": 1,
       "spec_id": "002-spdk-env-vfio-init",
-      "requirement": "FR-007",
-      "direction": "HUMAN_DECISION",
-      "severity": "high",
-      "spec_text": "MUST use framework logging actor via receptacle; init() MUST fail if not connected",
-      "actual_behavior": "No logger receptacle; uses eprintln! for all diagnostics",
-      "proposed_change": "Add optional logger receptacle; use if connected, fall back to eprintln!. Remove MUST-fail requirement.",
-      "location": "src/lib.rs",
-      "rationale": "SPDK/DPDK C output goes to stderr regardless; optional logger captures Rust-side messages when available",
-      "confidence": "HIGH",
-      "status": "pending"
+      "requirement": "stale-crate-paths",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "rationale": "Spec-lag, not a behavioral bug. Verified layout: spdk-sys is at lib/spdk-sys and component-framework at lib/component-framework; old components/ paths do not exist; spdk-env remains at components/spdk-env. Code/layout is intended reality, supporting docs are stale.",
+      "location": "components/spdk-env/specs/002-spdk-env-vfio-init/tasks.md:22,24,34,35,36; spec.md:6 (spec.md:99,188 are crate-name refs, still valid, no edit)",
+      "before": "tasks.md T001/T003/T004/T005/T006 cite components/spdk-sys/...; spec.md:6 Input quote cites ../component-framework",
+      "after": "tasks.md now cites lib/spdk-sys/... (components/spdk-env retained); spec.md:6 historical quote preserved with bracketed note that component-framework moved to ../../lib/component-framework (crate name unchanged); spec.md:99/188 unchanged.",
+      "files_edited": [
+        "specs/002-spdk-env-vfio-init/tasks.md",
+        "specs/002-spdk-env-vfio-init/spec.md"
+      ],
+      "status": "applied"
     },
     {
       "id": 2,
       "spec_id": "002-spdk-env-vfio-init",
-      "requirement": "FR-010",
-      "direction": "ALIGN",
-      "severity": "low",
-      "spec_text": "Test example must wire logger before calling init()",
-      "actual_behavior": "Example has no logger to wire",
-      "proposed_change": "After logger receptacle added, update example to wire ConsoleLogger",
-      "location": "examples/spdk-env-example.rs",
-      "rationale": "Blocked by Proposal 1 resolution",
-      "confidence": "HIGH",
-      "status": "pending",
-      "blocked_by": 1
+      "requirement": "FR-015",
+      "direction": "NOT_IMPLEMENTED_LEAVE_NOTE",
+      "severity": "n/a",
+      "rationale": "Genuinely intended future behavior from a recorded clarification decision; spec already self-flags '(Future: not yet implemented)'. Not obsolete (not never-built mandated structure) and not a code bug (enumeration uses a non-attach callback per FR-006, so no probe/claim step exists to skip). Per policy: leave and note, do not invent, no ALIGN task.",
+      "location": "components/spdk-env/src/env.rs (enumerate_devices has no skip/warn path); spec.md FR-015 and User Story 1 Acceptance Scenario 4 / Edge Case",
+      "before": null,
+      "after": null,
+      "note": "Carried-forward inconsistency (not resolved here): User Story 1 AS4 and its Edge Case still describe skip-and-warn in present tense vs FR-015's future caveat; previously tracked as align-tasks.md Task 4.",
+      "status": "noted"
     }
   ]
 }
