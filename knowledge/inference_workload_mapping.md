@@ -6,24 +6,40 @@ Mapping high-level LLM inference serving behaviors to concrete storage access pa
 
 ---
 
-## 1. KV Cache Prefill → Large Sequential Writes
+## 1. KV Cache Prefill → Load (prefix hit) + Store (new tokens)
 
-**Inference behavior**: A new request arrives. The model processes the prompt tokens in one forward pass, generating KV cache entries for all prompt tokens simultaneously.
+**Inference behavior**: A new request arrives. With prefix caching enabled (RadixAttention), the scheduler checks how much of the prompt's KV already exists in the offload tier.
 
-**Storage pattern**:
-- Write size: 2–80 MB per offloaded block (model-dependent, see kv_IO_pattern.md)
-- Access: Sequential within a request — blocks written in monotonically increasing index order
+**Two sub-cases:**
+
+### 1a. No prefix hit (cold prefill) — Pure Store
+- Model computes KV for ALL prompt tokens from scratch
+- All blocks are new → sequential Store to certus
+- This is the simple case (first request with unique content)
+
+### 1b. Prefix cache hit (warm prefill) — Load THEN Store
+- Scheduler finds K prefix blocks already offloaded (from a prior request with same prefix)
+- **LOAD**: K blocks loaded from SSD/DRAM back to GPU (the shared prefix)
+- Model computes KV ONLY for the M tokens after the prefix hit point
+- **STORE**: M new blocks written to certus (the unique suffix)
+- Net IO: K reads + M writes (where K + M = total prompt blocks)
+
+**Storage pattern** (combined):
+- Load phase: K blocks read (prefix), sequential from block 0..K
+- Store phase: M blocks written (suffix), sequential from block K..K+M
+- With high prefix hit ratios (>60% in production), LOADS DOMINATE prefill IO
 - Concurrency: Multiple requests prefilling simultaneously (continuous batching)
-- Semantics: Write-once, content-addressed (dedup by hash)
-- Burstiness: Prefill generates all blocks at once → burst of writes, then silence until next prefill
+- Semantics: Write-once, content-addressed (dedup by hash — same prefix = same blocks, skip store)
 
 **Bench parameters**:
 | Parameter | Typical range | Notes |
 |-----------|--------------|-------|
-| Write size | 2 MB (Llama-8B) – 80 MB (Llama-70B, factor=16) | Cross-layer layout |
-| Writes per prefill | prompt_tokens / block_size = 64–512 blocks | 1K–8K prompt tokens / 16 tokens per block |
-| Concurrent prefills | 1–8 | Limited by GPU memory for KV + activations |
-| Inter-arrival | Poisson or bursty (queue draining) | Depends on scheduler |
+| Block size | 2 MB (Llama-8B) – 80 MB (Llama-70B, factor=16) | Cross-layer layout |
+| Total blocks per prefill | 64–512 | 1K–8K prompt tokens / 16 tokens per block |
+| Prefix hit ratio | 0% (cold) – 90% (warm, shared system prompt) | Determines Load vs Store mix |
+| Load blocks (K) | 0–460 | hit_ratio × total_blocks |
+| Store blocks (M) | 50–512 | (1 - hit_ratio) × total_blocks |
+| Concurrent prefills | 1–8 | Limited by GPU memory |
 
 ---
 
@@ -50,46 +66,61 @@ Mapping high-level LLM inference serving behaviors to concrete storage access pa
 
 ---
 
-## 3. Decode Phase → Small Random Reads + Small Appends
+## 3. Decode Phase → Load (cache miss) + Store (new block full)
 
-**Inference behavior**: After prefill, the model generates tokens one at a time. Each new token requires reading all previous KV cache entries (attention over full context) and appending one new KV entry.
+**Inference behavior**: After prefill, the model generates tokens one at a time. Each new token requires ALL previous KV cache entries for attention. New KV entries accumulate until a full block (16 tokens) is complete.
+
+**Storage operations:**
+
+| Operation | When | Direction | Size | Latency |
+|-----------|------|-----------|------|---------|
+| **Load** (cache miss) | Evicted block needed for attention | SSD→DRAM→GPU | 1 full block (2 MB) | **Critical path** — blocks generation |
+| **Store** (new block full) | Every 16 generated tokens | GPU→DRAM→SSD | 1 full block (2 MB) | Background (deferred to next step) |
 
 **Storage pattern**:
-- Reads: If KV was evicted to storage, reload full blocks on cache miss
-- Writes: Small appends — one token's KV per step, accumulated until a full block (16 tokens) triggers a write
-- Access: Random across active sessions (scheduler interleaves decode steps across requests)
-- Latency-critical: Each decode step blocks on KV availability
+- **Loads**: Only on cache miss (block was evicted, then needed again). Random access across active sessions. Latency-critical — each decode step BLOCKS until all needed KV is on GPU.
+- **Stores**: Every 16 decode steps, 1 new block is complete → enqueued for background write. Sequential within a request (block index monotonically increasing).
+- **Access pattern**: Random loads (which session gets evicted is LRU-dependent) + sequential stores (per-request append)
+- **Ratio**: Under memory pressure, loads can be frequent (every scheduling step for preempted requests). Stores are fixed at 1 per 16 tokens regardless of pressure.
 
 **Bench parameters**:
 | Parameter | Typical range | Notes |
 |-----------|--------------|-------|
-| Read size per miss | 2–80 MB (full block reload) | Whole block must be loaded |
-| Write accumulation | 16 decode steps → 1 block write | block_size = 16 tokens |
+| Load size per miss | 2–80 MB (full block) | Whole block must be loaded to GPU |
+| Store accumulation | 16 decode steps → 1 block store | block_size = 16 tokens |
 | Active sessions | 32–256 concurrent | Continuous batching |
-| IO pattern | Random read (cache miss) + sequential append | Mixed read/write |
-| Read frequency | Low if working set fits in GPU/DRAM | Only on eviction + reload |
+| Load frequency | 0 (no pressure) – every step (heavy eviction) | Depends on working set vs capacity |
+| Store frequency | 1 store per request per 16 tokens | Fixed, independent of pressure |
 
-**Note**: In well-provisioned systems, decode rarely hits storage — the hot set stays in GPU/DRAM. Storage reads during decode are pathological (eviction pressure). But when they happen, they're latency-critical.
+**Key insight**: In well-provisioned systems (working set < cache), decode does ZERO storage IO — everything stays on GPU/DRAM. Storage IO during decode only happens under eviction pressure or when preempted requests are rescheduled. But when it does happen, the Load is on the **critical path** for token generation latency (TPOT).
 
 ---
 
-## 4. Eviction Pressure → Working Set Exceeding Capacity
+## 4. Eviction Pressure → Store (flush) + Load (reload on reaccess)
 
-**Inference behavior**: GPU HBM and DRAM staging tiers are full. New requests arrive, requiring space. LRU/ARC eviction selects cold blocks to push down the tier hierarchy (GPU → DRAM → SSD).
+**Inference behavior**: GPU HBM and DRAM staging tiers are full. New requests arrive, requiring space. LRU/ARC eviction selects cold blocks to push down the tier hierarchy (GPU → DRAM → SSD). When an evicted block is needed again later, it must be reloaded.
+
+**Storage operations:**
+
+| Operation | When | Direction | Pattern |
+|-----------|------|-----------|---------|
+| **Store** (eviction flush) | DRAM tier exceeds watermark | DRAM→SSD | Scattered (LRU blocks are spatially random) |
+| **Load** (reload on miss) | Evicted block needed by decode/prefill | SSD→DRAM→GPU | Random (which block gets reaccessed is workload-dependent) |
+
+**The key contention**: Eviction Stores and prefix-cache Loads happen **simultaneously** — new requests need to Load prefixes while the tier is full and evicting. This is the bidirectional contention v3 measures.
 
 **Storage pattern**:
-- Writes: Burst of eviction writes (cold blocks flushed to SSD)
-- Size: Same block size (2–80 MB each)
-- Pattern: Scattered — evicted blocks are the *least* recently used, so spatially random
-- Concurrent with: Hot-path reads (loading prefixes for new requests)
-- Contention: Eviction writes compete with prefill reads on the same NVMe devices
+- Stores: Burst of eviction writes when watermark triggers. Blocks are LRU-cold → spatially scattered on SSD.
+- Loads: Demand-driven when evicted block is reaccessed. Random timing (depends on scheduler rescheduling the preempted request).
+- Contention: Store (eviction) and Load (prefix/reload) compete for same NVMe bandwidth + DRAM staging buffers.
 
 **Bench parameters**:
 | Parameter | Typical range | Notes |
 |-----------|--------------|-------|
 | Eviction batch size | 1–32 blocks per cycle | Watermark-based triggering |
-| Write pattern | Random (evicted blocks are spatially scattered) | Unlike sequential prefill writes |
-| Read/write contention | Simultaneous: eviction writes + prefix reads | Key stress scenario |
+| Store pattern | Random (scattered, LRU) | Unlike sequential prefill stores |
+| Load pattern | Random (reaccessed blocks) | Triggered by scheduler reschedule |
+| Contention | Simultaneous stores + loads | THE key stress scenario |
 | Capacity ratio | working_set / cache_capacity = 1.2–5× | Over-subscription ratio |
 | Eviction frequency | Per scheduling step if under pressure | Could be every 1–5ms |
 
@@ -103,20 +134,24 @@ Mapping high-level LLM inference serving behaviors to concrete storage access pa
 - Tool-use where multiple agents share the same tool output
 - Batch processing of similar requests
 
-**Storage pattern**:
+**Storage operations:**
+
 ```
 Time →
 
-Session 1: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M₁]
-Session 2: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M₂]
-Session 3: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M₃]
+Session 1: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M₁]
+Session 2: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M₂]
+Session 3: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M₃]
 ...
-Session N: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M_N]
+Session N: [LOAD shared blocks 0..K] → [STORE unique blocks K+1..K+M_N]
 ```
 
-- Phase 1 (shared): High read amplification — same blocks read N times
-- Phase 2 (unique): Each session writes to its own extent range — parallel sequential writes
+- Phase 1 (shared): **N × Loads** — same K blocks loaded N times (high read amplification)
+- Phase 2 (unique): **N × Stores** — each session writes its own unique blocks (parallel sequential stores)
+- First session in cohort: no Load (it computes and Stores the prefix). Subsequent sessions Load it.
 - Transition: Sharp boundary at divergence point
+
+**Note**: The first request that establishes the shared prefix does a pure Store (§1a cold prefill). All subsequent cohort members do Load (shared) + Store (unique). So the overall pattern is: 1 Store of K blocks + (N-1) × Load of K blocks + N × Store of M blocks.
 
 **Bench parameters**:
 | Parameter | Typical range | Notes |
@@ -125,8 +160,8 @@ Session N: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M_N]
 | K (shared blocks) | 32–256 | Shared prefix length |
 | M (unique blocks per session) | 16–512 | Varies by generation length |
 | Arrival stagger | 0–5s between sessions | Simultaneous vs staggered |
-| Read amplification | N × K | Total shared reads |
-| Write parallelism | N independent streams | After divergence |
+| Load amplification | (N-1) × K | Total shared loads |
+| Store parallelism | N independent streams | After divergence |
 
 ---
 
