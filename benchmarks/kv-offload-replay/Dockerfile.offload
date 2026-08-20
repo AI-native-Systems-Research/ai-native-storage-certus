@@ -69,7 +69,7 @@ COPY benchmarks/kv-offload-replay/run_multiturn_sync_batched.py /workspace/bench
 COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/tracing_offloading_connector.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/tracing_offloading_manager.py /workspace/bench/
-COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
+COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 COPY benchmarks/kv-offload-replay/docker-entrypoint-offload.sh /usr/local/bin/offload-entrypoint
 RUN chmod +x /usr/local/bin/offload-entrypoint
@@ -84,7 +84,7 @@ RUN chmod +x /usr/local/bin/offload-entrypoint
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/workspace/bench \
     MODEL=NousResearch/Meta-Llama-3-8B \
-    DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
+    DATASET_PATH=/workspace/data/sharegpt_12turn_450.json \
     NUM_CONVS=450 \
     MAX_MODEL_LEN=8192 \
     OUTPUT_TOKENS=150 \
