@@ -778,9 +778,56 @@ independently mixes sessions with 11-block requests into a root whose preamble i
 sharing at 11 for a reason the trace does not contain.
 
 `qwen_code`'s 0.58 says the effect is weaker on production traffic with 153 roots and short
-conversations, so the mechanism wants a **fitted** between-root share rather than a hard "path length
-is the root's". The obvious form is a two-level draw: a per-root level from the root's own stream, a
-per-session value around it, with the mixing weight fitted to reproduce the measured `eta²`.
+conversations, so the mechanism must reproduce the correlation at either end without assuming "path
+length is the root's". The obvious form is a two-level draw: a per-root level from the root's own
+stream, a per-session value around it, with the mixing weight fitted to reproduce the measured `eta²`.
+
+**That obvious form was built, and it is wrong — the damage is not the averaging, it is resampling
+the root levels at all.** Two measurements, in order.
+
+First, in isolation on each trace's own path-length distribution with no generator involved, the
+variance-matched mixture is a **convolution**: averaging a root draw and a session draw from one
+marginal thins the tails and fills the centre, and the variance rescale then stretches an
+already-wrong shape. Every path gate is a KS statistic, so a shape error is exactly what it sees.
+
+| trace | fitted share | weight `w` | KS injected by the mixture alone | two-sample control | observed regression |
+| --- | --- | --- | --- | --- | --- |
+| `qwen_code` | 0.579 | 0.540 | **0.062** | 0.004 | +0.095 |
+| `exgentic_tau2_airline` | 0.987 | 0.897 | 0.026 | 0.012 | +0.037 |
+
+The injury is worst at intermediate weight, which is why `exgentic_tau2_airline` barely moved and
+`qwen_code` broke — and why the regression went unnoticed: it was adopted on airline evidence.
+
+Second, against ground truth with a known root structure — 8 replicates, independent RNG streams per
+arm, median KS versus the pooled marginal:
+
+| construction | 153 roots, `eta²` 0.58 | 27 roots, `eta²` 0.99 | 18 roots, `eta²` 0.99 |
+| --- | --- | --- | --- |
+| variance-matched mixture (as shipped) | 0.0668 | 0.0959 | 0.1991 |
+| Gaussian copula | 0.0266 | 0.1215 | 0.1550 |
+| additive decomposition, levels redrawn | 0.0281 | 0.1259 | 0.1905 |
+| **level per root, MEASURED, residual drawn** | **0.0073** | **0.0036** | **0.0029** |
+| control: resample the pooled marginal | 0.0045 | 0.0046 | 0.0035 |
+
+**The copula fixes the shape and is no better at high `eta²` — refuted, do not build it.** The reason
+is structural rather than numerical: when `eta²` → 1, path length *is* the root's identity, so
+redrawing which levels exist redraws the marginal. With a corpus-typical 18-27 roots that alone costs
+0.15-0.20 KS, 40-60x the sampling control, and no amount of shape correction touches it.
+
+Stating the measured levels sits at or below the sampling control in all three cases and reproduces
+`eta²` to within 0.007 **with no mixing weight, no variance rescale, and no `eta²` parameter** —
+`eta²` becomes a diagnostic that the mechanism reproduces rather than a target it fits. Ranges do not
+overlap between it and any resampling arm. It is also a *simplification*: `popularity` is already an
+empirical per-rank table, so the level is one more column beside it, and the fit already built
+`by_root → (count, sum)` and discarded the per-root mean.
+
+One caveat this test could not see, so it was checked separately on the real traces: the ground truth
+is additive-lognormal, where a pooled residual is exactly right. Measured per root, the standard
+deviation is strongly heterogeneous (IQR 2.43x its median on `qwen_code`, 12.94x on airline) and
+**negatively** correlated with the level (−0.66, −0.36, −0.20) — long-running task families are the
+*most* consistent, so spread is neither pooled nor multiplicative. Hence a per-root `spread` with the
+residual standardised per root before pooling; with the measured heterogeneity simulated, a pooled
+residual degrades 3-9x while the per-root form holds (0.0716 against 0.0073 at 153 roots).
 
 *Caveat on the companion figure* printed beside it: the count of depth-0 segments longer than the
 shortest observed turn-1 path is an **upper bound** on real violations, and a loose one precisely when

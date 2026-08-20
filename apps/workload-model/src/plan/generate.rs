@@ -262,8 +262,10 @@ struct Live {
     /// Derived as the `1/(k+1)` quantile — the expected minimum of `k` draws — with `k` the root's
     /// expected session count. See [`Generator::run_cap_for`].
     run_cap: Option<u32>,
-    /// This root's own path level, kept so the walk can re-cap as the cohort subdivides.
-    root_path_level: Option<u32>,
+    /// This root's own path level and spread, kept so the walk can re-cap as the cohort
+    /// subdivides. Resolved once at birth from `roots.turn1_path`, because the rank a level
+    /// belongs to is known there and a level without its spread cannot state a quantile.
+    root_path_level: Option<(u32, f64)>,
     /// A **ceiling** on how much of this session's path is shared trunk, drawn at birth.
     ///
     /// FR-012a always called the drawn value an upper bound on the realised one; since
@@ -362,13 +364,17 @@ pub struct Generator {
     /// Expected live sessions per occupancy window, the cohort estimate's numerator.
     sessions_per_window: f64,
     shared_depth: Dist,
-    /// The measured turn-1 total path length, and how much of it belongs to the root.
+    /// The measured turn-1 total path length, as a population marginal.
     ///
-    /// Held here rather than taken from `SessionParams` alone because the **root-level** half of
-    /// the draw has to come from the root's own stream, and the root is bound in `birth` — after
-    /// `draw_params` has run.
+    /// Held here rather than taken from `SessionParams` alone because it is also the fallback for
+    /// a document that states no per-root table, and because the run-length cap reads its
+    /// quantiles.
     turn1_path_length: Option<Dist>,
-    turn1_path_root_share: f64,
+    /// Each root's own turn-1 level and spread, indexed by rank − 1 (FR-054j).
+    ///
+    /// The root is bound in `birth`, after `draw_params` has run, so the per-root half of a
+    /// session's path length is applied there.
+    root_turn1: Option<crate::schema::RootTurn1>,
     seed: u64,
     nodes: u16,
     placement: Placement,
@@ -475,7 +481,7 @@ impl Generator {
             ),
             shared_depth: d.corpus.trees.shared_depth.clone(),
             turn1_path_length: d.workload.sessions.turn1_path_length.clone(),
-            turn1_path_root_share: d.workload.sessions.turn1_path_root_share.unwrap_or(0.0),
+            root_turn1: d.corpus.trees.roots.turn1_path.clone(),
             // Carried so a session's cohort estimate starts from the population it is
             // actually competing for sharing with, over the window every occupancy
             // quantity in this model is defined over (FR-009h).
@@ -657,22 +663,22 @@ impl Generator {
     /// bound is far weaker. Using the root's count everywhere was measured and capped the trunk
     /// before depth 512, where the trace has 35 shared segments.
     ///
-    /// Mixed with the root's own level so the cap inherits FR-054j's between-root correlation rather
-    /// than coming from the population marginal.
-    fn run_cap_for(&self, root_path_level: Option<u32>, cohort: f64) -> Option<u32> {
-        let (d, level) = (self.turn1_path_length.as_ref()?, root_path_level?);
+    /// Taken against the root's OWN distribution where the document states one, so the cap is the
+    /// low quantile of the paths that will actually walk this run rather than of the population's.
+    /// With a per-root level and spread that is `level + z(q)·spread`, one step and no mixing.
+    fn run_cap_for(&self, root_path_level: Option<(u32, f64)>, cohort: f64) -> Option<u32> {
+        let (level, spread) = root_path_level?;
         let q = 1.0 / (cohort.max(1.0) + 1.0);
-        let low = d.quantile(q).unwrap_or(0.0).clamp(0.0, f64::from(u32::MAX)) as u32;
-        Some(crate::session::mix_root_share(
-            level,
-            low,
-            d.mean().unwrap_or(f64::from(low)),
-            self.turn1_path_root_share,
-        ))
+        if let Some(t) = &self.root_turn1 {
+            let z = t.shape.quantile(q).unwrap_or(0.0);
+            return Some(crate::session::turn1_about_root(level, spread, z));
+        }
+        let d = self.turn1_path_length.as_ref()?;
+        Some(d.quantile(q).unwrap_or(0.0).clamp(0.0, f64::from(u32::MAX)) as u32)
     }
 
     /// [`Self::run_cap_for`] against the walk's current cohort, when FR-054k is in force.
-    fn run_cap_at(&self, root_path_level: Option<u32>, cohort: f64) -> Option<u32> {
+    fn run_cap_at(&self, root_path_level: Option<(u32, f64)>, cohort: f64) -> Option<u32> {
         if !run_completion() {
             return None;
         }
@@ -721,37 +727,56 @@ impl Generator {
             // Drawn per request instead; the field below is then unused.
             Placement::PerRequest => 0,
         };
-        // Turn-1 path length as a TWO-LEVEL draw (FR-054j). `params.turn1_path_length` is the
-        // session-level half; the root-level half comes from the root's own stream, which is why it
-        // is drawn here and not in `draw_params` — the root is bound above. Measured, `eta²` is
-        // 0.99 on the agentic traces: request length is very nearly a property of the root, and
-        // drawing it independently is what let an 11-block request land on a root with a 124-block
-        // preamble and fragment it.
-        // The ROOT's own path level, drawn from the root's stream — a per-root quantity, which is
-        // what lets it cap run lengths without making the trie disagree between walkers.
-        let root_path_level = self.turn1_path_length.as_ref().map(|d| {
-            let mut rs = Stream::new(
-                self.seed ^ TAG_ROOT_PATH,
-                u64::from(root_index) ^ (u64::from(roots) << 32),
-            );
-            d.sample_u64(&mut rs).min(u64::from(u32::MAX)) as u32
-        });
-        let turn1 = match (
-            &self.turn1_path_length,
-            params.turn1_path_length,
-            root_path_level,
-        ) {
-            (Some(d), Some(session_level), Some(root_level))
-                if self.turn1_path_root_share > 0.0 =>
-            {
-                Some(crate::session::mix_root_share(
-                    root_level,
-                    session_level,
-                    d.mean().unwrap_or(f64::from(session_level)),
-                    self.turn1_path_root_share,
+        // Turn-1 path length as a property of the ROOT (FR-054j). Measured, `eta²` is 0.99 on the
+        // agentic traces: request length is very nearly a property of the root, and drawing it
+        // independently is what let an 11-block request land on a root with a 124-block preamble
+        // and fragment it. `rank` indexes the table `roots.popularity` ordered, and `root_index` is
+        // already 0-based.
+        // The ROOT's own path level. STATED by the document where it has a per-root table, and
+        // only otherwise drawn from the population marginal.
+        //
+        // Stating it is the whole of FR-054j's correction. Drawing it here — a fresh draw from the
+        // pooled distribution, per root — reproduces the between-root *correlation* while
+        // redrawing *which levels exist*, and at the corpus's 18-27 roots that alone costs a KS
+        // distance of 0.15-0.20 against a 0.004 sampling floor. Measured against ground truth with
+        // a known root structure, no construction that resamples levels avoids it, and none is
+        // needed: `popularity` already ranks the roots, so the level is data at a rank.
+        // This root's level and the spread of its sessions about it, by rank. A rank past the end
+        // of the table falls through to the marginal rather than to zero: the generator clamps a
+        // drawn rank to `roots.count`, so it is unreachable on a document whose table spans its
+        // own count, and a silent zero would be a path length of nothing.
+        let rank = root_index as usize;
+        let root_path_level = match (&self.root_turn1, &self.turn1_path_length) {
+            (Some(t), _) if rank < t.level.len() => Some((
+                t.level[rank].round().clamp(0.0, f64::from(u32::MAX)) as u32,
+                t.spread.get(rank).copied().unwrap_or(0.0),
+            )),
+            (_, Some(d)) => {
+                let mut rs = Stream::new(
+                    self.seed ^ TAG_ROOT_PATH,
+                    u64::from(root_index) ^ (u64::from(roots) << 32),
+                );
+                Some((d.sample_u64(&mut rs).min(u64::from(u32::MAX)) as u32, 0.0))
+            }
+            (_, None) => None,
+        };
+        let turn1 = match (&self.root_turn1, root_path_level) {
+            // The session's own path length about its root's level: the standardised residual
+            // scaled by that root's own spread. Both halves are measured, so nothing is fitted
+            // here and eta² is reproduced rather than targeted.
+            //
+            // Drawn on the SESSION's stream, so two sessions on one root differ while the level
+            // they differ about does not.
+            (Some(t), Some((level, spread))) => {
+                let mut zs = Stream::new(self.seed ^ TAG_ROOT_PATH, u64::from(id.0));
+                Some(crate::session::turn1_about_root(
+                    level,
+                    spread,
+                    t.shape.sample(&mut zs),
                 ))
             }
-            (_, other, _) => other,
+            // No per-root table: the population marginal `draw_params` already drew.
+            _ => params.turn1_path_length,
         };
         let mut growth = Stream::new(self.seed ^ TAG_GROWTH, u64::from(id.0));
         let depth = crate::session::depth_at_turn(
@@ -1077,6 +1102,133 @@ run:
             all.extend_from_slice(&buf);
         }
         all
+    }
+
+    /// Turn-1 path length per session, from a drained plan: the length of each session's
+    /// lowest-numbered request, which is the quantity `fit` measures on the trace side.
+    fn turn1_lengths(ev: &[PlanEvent]) -> std::collections::BTreeMap<u32, u32> {
+        let mut first: std::collections::BTreeMap<u32, (u32, u32)> =
+            std::collections::BTreeMap::new();
+        let mut len: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+        for e in ev {
+            *len.entry(e.request_id).or_insert(0) += 1;
+            let slot = first
+                .entry(e.session_id.0)
+                .or_insert((e.request_id, e.request_id));
+            if e.request_id < slot.0 {
+                *slot = (e.request_id, e.request_id);
+            }
+        }
+        first
+            .into_iter()
+            .map(|(s, (rid, _))| (s, len.get(&rid).copied().unwrap_or(0)))
+            .collect()
+    }
+
+    /// Two roots of equal popularity, one turn each, and a population `turn1_path_length` of a
+    /// flat 220 blocks — a value that is neither root's level, so a realised path length says
+    /// unambiguously which of the two mechanisms produced it. With `table`, each root states its
+    /// own level (40 and 400) and a spread of 1.
+    fn two_root_doc(table: bool) -> String {
+        let turn1_path = if table {
+            "      turn1_path:
+        level: [40, 400]
+        spread: [1.0, 1.0]
+        shape: {dist: empirical, points: [[-1.0, 0.5], [1.0, 1.0]]}
+"
+        } else {
+            ""
+        };
+        format!(
+            r#"
+requests: 300
+version: 1
+seed: 0xC0FFEE
+corpus:
+  block_bytes: 131072
+  trees:
+    roots:
+      count: 2
+      popularity: {{dist: empirical, points: [[1, 0.5], [2, 0.5], [2, 1.0]]}}
+{turn1_path}    shared_depth: {{dist: const, value: 6}}
+    branching: 1.02
+workload:
+  arrival: {{model: open_loop, rate: 4000/s}}
+  sessions:
+    turns: {{dist: const, value: 1}}
+    think_time: {{dist: const, value: 0.5}}
+    private_depth: {{dist: const, value: 3}}
+    turn1_path_length: {{dist: const, value: 220}}
+    growth_per_turn: {{dist: const, value: 2}}
+run:
+  mode: hardware
+  wss_window: 240000
+"#
+        )
+    }
+
+    #[test]
+    fn a_stated_per_root_level_makes_path_length_a_property_of_the_root() {
+        // FR-054j. Two roots with levels 40 and 400 and almost no spread: every session must
+        // land near its own root's level, so the population splits into two clusters rather
+        // than spreading over one marginal. That is `eta²` near 1 by construction, and it is
+        // what a fresh draw per root cannot deliver — it reproduces the correlation while
+        // redrawing which levels exist.
+        let d = Document::from_yaml(two_root_doc(true).trim_start()).expect("fixture must parse");
+        let mut g = Generator::new(&d).unwrap();
+        let lengths: Vec<u32> = turn1_lengths(&drain(&mut g)).into_values().collect();
+        assert!(
+            lengths.len() > 50,
+            "too few sessions to judge: {}",
+            lengths.len()
+        );
+        // Every session sits within a block or two of one of the two stated levels, and none
+        // sits at the population marginal of 220 that `turn1_path_length` states.
+        for l in &lengths {
+            let near_a = l.abs_diff(40) <= 2;
+            let near_b = l.abs_diff(400) <= 2;
+            assert!(
+                near_a || near_b,
+                "path length {l} is at neither root's level"
+            );
+        }
+        assert!(
+            lengths.iter().any(|l| l.abs_diff(40) <= 2),
+            "no session on the short root"
+        );
+        assert!(
+            lengths.iter().any(|l| l.abs_diff(400) <= 2),
+            "no session on the long root"
+        );
+        // And the spread within a root is the stated one, not the gap between roots: the
+        // short root's sessions must not reach anywhere near the long root's level.
+        let short_max = lengths
+            .iter()
+            .filter(|l| l.abs_diff(40) <= 2)
+            .max()
+            .copied();
+        assert!(
+            short_max.unwrap_or(0) < 100,
+            "within-root spread leaked the between-root one"
+        );
+    }
+
+    #[test]
+    fn a_document_without_a_per_root_table_draws_the_population_marginal() {
+        // The table is optional, and every document written before FR-054j lacks it. Absent, the
+        // population marginal must be what is realised — the SAME fixture with the table removed,
+        // so the only difference is the mechanism under test. Comparing a table-less document
+        // against itself would only restate determinism, which
+        // `the_same_seed_gives_the_identical_stream_and_a_new_seed_does_not` already covers.
+        let d = Document::from_yaml(two_root_doc(false).trim_start()).expect("fixture must parse");
+        let mut g = Generator::new(&d).unwrap();
+        let lengths: Vec<u32> = turn1_lengths(&drain(&mut g)).into_values().collect();
+        assert!(lengths.len() > 50, "too few sessions: {}", lengths.len());
+        // 220 is the stated marginal and belongs to neither root, so this distinguishes the two
+        // mechanisms rather than merely observing that something was drawn.
+        for l in &lengths {
+            assert_eq!(*l, 220, "path length {l} is not the population marginal");
+        }
     }
 
     #[test]

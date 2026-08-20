@@ -656,6 +656,7 @@ mod tests {
             roots: Roots {
                 count: 12,
                 popularity: Dist::Shaped(crate::dist::Shape::Zipf { s: 0.9, n: None }),
+                turn1_path: None,
             },
             shared_depth: Dist::Scalar(18.0),
             branching,

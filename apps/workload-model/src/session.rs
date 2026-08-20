@@ -308,6 +308,37 @@ fn pick_mix<'a>(mix: &'a [MixEntry], st: &mut Stream) -> (u8, Option<&'a MixEntr
     (last.min(u8::MAX as usize) as u8, Some(&mix[last]))
 }
 
+/// A session's turn-1 path length about its root's own level (FR-054j).
+///
+/// `z` is a standardised residual from `roots.turn1_path.shape` and `spread` is that root's own
+/// standard deviation, so the result is `level + z·spread` — the session varies about its root by
+/// as much as that root's sessions were measured to vary, and by the shape they were measured to
+/// have.
+///
+/// # Why this replaced a variance-matched mix
+///
+/// The previous construction averaged a root-level and a session-level draw from the **population**
+/// marginal and rescaled the deviation to restore the variance. That matches the mean and the
+/// variance and changes the **shape**, because averaging two draws is a convolution: it thins the
+/// tails and fills the centre, and the rescale then stretches a distribution that is already the
+/// wrong one. Every gated path-length statistic is a KS distance, which sees shape and not moments,
+/// and measured against each trace's own path-length distribution the mix alone injected a KS of
+/// 0.062 on `qwen_code` against a 0.004 two-sample control — worst at intermediate weights, which
+/// is why the trace with `eta²` 0.58 broke while the one at 0.99 barely moved.
+///
+/// Both halves here are stated by the document instead, so there is no weight to fit, no variance
+/// to restore, and `eta²` is reproduced rather than targeted.
+///
+/// Floored at 1: a session's turn-1 request reads at least its root.
+pub fn turn1_about_root(level: u32, spread: f64, z: f64) -> u32 {
+    let v = f64::from(level) + z * spread.max(0.0);
+    if v < 1.0 {
+        1
+    } else {
+        v.round().min(f64::from(u32::MAX)) as u32
+    }
+}
+
 /// Path depth at turn `n`, stated exactly once.
 ///
 /// `shared_depth + private_depth + Σ growth_per_turn(i)` for i in 2..=n. Turn n's
@@ -339,42 +370,6 @@ fn pick_mix<'a>(mix: &'a [MixEntry], st: &mut Stream) -> (u8, Option<&'a MixEntr
 /// position is unchanged — a session that hits its cap draws the same numbers it would
 /// have and simply does not use them. That keeps a capped run's keys comparable with an
 /// uncapped one's rather than shifting every subsequent draw.
-/// Combine a root-level and a session-level draw so that the **between-root share** of the
-/// resulting variance is `share` (FR-054j).
-///
-/// # The construction, and why it is rescaled
-///
-/// Both inputs are draws from the same distribution, so a weighted sum `w·root + (1−w)·session` has
-/// the right mean and a between-root variance share of `w² / (w² + (1−w)²)`. Setting that equal to
-/// the target and solving gives
-///
-/// ```text
-/// w = √share / (√share + √(1 − share))
-/// ```
-///
-/// which is monotone on `[0, 1]` and hits both ends exactly: `share = 1` takes the root's draw
-/// alone, `share = 0` the session's.
-///
-/// The sum's *total* variance is `(w² + (1−w)²)·Var(X)`, which is below `Var(X)` for every interior
-/// weight — at `share = 0.99` it is 83% of it. Left alone that would quietly narrow the emitted
-/// path-length distribution while fixing its correlation, trading one defect for another, so the
-/// deviation from the mean is divided by `√(w² + (1−w)²)` to restore the variance exactly. The
-/// result is a two-level draw with the measured correlation **and** the measured spread.
-pub fn mix_root_share(root_level: u32, session_level: u32, mean: f64, share: f64) -> u32 {
-    let share = share.clamp(0.0, 1.0);
-    if share <= 0.0 {
-        return session_level;
-    }
-    if share >= 1.0 {
-        return root_level;
-    }
-    let w = share.sqrt() / (share.sqrt() + (1.0 - share).sqrt());
-    let mixed = w * f64::from(root_level) + (1.0 - w) * f64::from(session_level);
-    let shrink = (w * w + (1.0 - w) * (1.0 - w)).sqrt();
-    let restored = mean + (mixed - mean) / shrink.max(f64::MIN_POSITIVE);
-    restored.max(0.0).min(f64::from(u32::MAX)) as u32
-}
-
 pub fn depth_at_turn(
     shared_depth: u32,
     private_depth: u32,
@@ -436,6 +431,30 @@ mod tests {
     use crate::dist::Shape;
     use crate::schema::Arrival;
 
+    #[test]
+    fn a_session_varies_about_its_root_by_that_roots_own_spread() {
+        // The construction is `level + z·spread`, so the same standardised residual moves a
+        // tight root a little and a loose one a lot — which is the whole reason `spread` is per
+        // root: measured, the per-root sd spans an IQR of 2.4-12.9x its median.
+        assert_eq!(turn1_about_root(400, 4.0, 1.5), 406);
+        assert_eq!(turn1_about_root(400, 80.0, 1.5), 520);
+        // A root whose sessions did not vary states no spread, and then every session on it
+        // takes its level exactly, whatever the residual says.
+        assert_eq!(turn1_about_root(400, 0.0, -3.0), 400);
+        assert_eq!(turn1_about_root(400, 0.0, 3.0), 400);
+    }
+
+    #[test]
+    fn a_path_length_is_never_below_one_block() {
+        // A turn-1 request reads at least its root, so a residual far into the left tail floors
+        // rather than wrapping — `level + z·spread` is signed arithmetic on a u32 quantity.
+        assert_eq!(turn1_about_root(10, 50.0, -4.0), 1);
+        assert_eq!(turn1_about_root(0, 0.0, 0.0), 1);
+        // A negative spread cannot arise from a fitted document, and is not a licence to
+        // invert the residual if one appears.
+        assert_eq!(turn1_about_root(100, -20.0, 2.0), 100);
+    }
+
     fn workload(turns_mean: f64, think: f64) -> Workload {
         Workload {
             arrival: Arrival {
@@ -445,7 +464,6 @@ mod tests {
                 concurrency: None,
             },
             sessions: Sessions {
-                turn1_path_root_share: None,
                 turn1_path_length: None,
                 max_depth: None,
                 turns: Dist::Shaped(Shape::Geometric { mean: turns_mean }),

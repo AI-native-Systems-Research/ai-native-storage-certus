@@ -469,6 +469,7 @@ nonparametric branching process with no closed-form fit:
 | --- | --- |
 | `roots.count` | distinct keys at the **root boundary**, which is not always depth 0 — see below |
 | `roots.popularity` | histogram of sessions per root |
+| `roots.turn1_path` | per root, the **mean and standard deviation** of its sessions' turn-1 path length, in `popularity`'s rank order, plus the residual `(path − level)/spread` **standardised per root and then pooled**. Measured over the same population and the same rank order as `popularity`, from each session's lowest-numbered turn, and retained only for roots holding ≥ 2 sessions. The levels are **stated, not fitted**: resampling them resamples the marginal itself when `eta²` → 1 — see FR-054j |
 | `shared_depth` | longest common prefix *within one `wss_window`* of each session's **turn-1 request only** — the space the parameter is drawn in, not the space it is validated in; see below |
 | `branching` | the **width-by-depth profile** `w(d) = distinct keys at depth d that **two or more sessions** reached`, segmented per `research.md` § The branching segmentation rule; each segment's fanout is the geometric mean of the ratios inside it |
 | `branch_skew` | the exponent whose **collision probability** `H_n(2s)/H_n(s)²` matches the fan-in-weighted mean of `Σ c²/(Σ c)²` measured over each split's children, per segment — **not** a fit to the rank curve, which does not transfer across the corpus; see FR-055j |
@@ -996,6 +997,14 @@ The generator rejects, rather than silently accepting:
    `roots.popularity` whose support does not span `1..=roots.count` — an `empirical` whose top rank
    falls short leaves every rank above it unreachable, so the realised root layer is narrower than
    the document declares, and it is silent because a draw inside a narrow support records no clamp.
+   Rejected for the same reason, and a worse failure mode: a `roots.turn1_path` whose `level` or
+   `spread` does not span `roots.count`. A short table is not a narrower root layer but a **silent
+   fallback** — ranks inside it draw path length about their own root's level, ranks outside it draw
+   the population marginal, which is precisely the independent draw the field exists to replace — and
+   neither case records a clamp, so the output cannot be distinguished from the unfixed model. Also
+   rejected: a non-finite or negative `level` or `spread` (a negative standard deviation would invert
+   the residual; the generator clamps it rather than inverting, and a document should not be able to
+   ask).
 9. A corpus that mints no keys below the trunk — `sessions.private_depth` const 0 with
    `roots.count` and `shared_depth` also fixed makes the key space finite, so no eviction is
    ever exercised and the run is meaningless. Also rejected: `empirical` `shared_depth` or

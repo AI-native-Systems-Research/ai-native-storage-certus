@@ -166,6 +166,66 @@ pub struct Roots {
     pub count: u32,
     /// Which root a session binds to; drawn once per session and then sticky.
     pub popularity: Dist,
+    /// Turn-1 path length as a property of the root (FR-054j).
+    ///
+    /// Optional: absent, a session's turn-1 depth comes from a population marginal, which is
+    /// what every document written before FR-054j carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn1_path: Option<RootTurn1>,
+}
+
+/// Each root's own turn-1 path length, in `Roots::popularity`'s rank order.
+///
+/// # Why the levels are stated rather than drawn
+///
+/// `eta²` — the between-root share of the variance in turn-1 path length — is **0.9941 on
+/// `exgentic_swebench` and 0.9869 on `exgentic_tau2_airline`**: one root is one task family, and
+/// root identity explains essentially all of how long its sessions' requests are. `qwen_code`,
+/// production traffic over 153 roots with short conversations, reads **0.5791**, so this is a
+/// correlation the corpus varies in rather than an invariant — which is why the levels are
+/// measured per root instead of path length being equated with the root's identity.
+///
+/// Drawing root and path length independently — which is what a bare
+/// [`Sessions::turn1_path_length`] does — mixes an 11-block request into a root whose shared
+/// preamble is 124 blocks. That session stops part-way along the preamble, which the trie reads as
+/// **attrition**: measured, 42% of the generated trunk's shared runs ended that way against 2.5%
+/// in the trace, where a preamble is walked to its end by every session on the root and they
+/// split together. It also caps that session's realised sharing for a reason the trace does not
+/// contain.
+///
+/// A model that draws each root's level
+/// from the population marginal reproduces that correlation and still gets the distribution
+/// wrong, because it redraws *which levels exist*: with a corpus-typical 18-27 roots that alone
+/// costs a KS distance of 0.15-0.20 against a sampling floor of 0.004, some 40-60x. Measured over
+/// eight replicates against ground truth with a known root structure, every construction that
+/// resamples levels — a variance-matched mix of two draws, a Gaussian copula, a redrawn additive
+/// decomposition — pays that cost, and stating the measured levels does not.
+///
+/// So the level is data, not a parameter: `popularity` is already an empirical table with a step
+/// at every rank, and this is one column beside it. It also carries the joint between a root's
+/// popularity and its path length, which nothing else in the model expresses.
+///
+/// # Why the spread is per root too
+///
+/// A single pooled residual assumes every root's sessions vary by the same number of blocks.
+/// Measured, they do not: the per-root standard deviation spans an inter-quartile range of
+/// 2.4-12.9x its median on `qwen_code` and `tau2_airline`, and it is **negatively** correlated
+/// with the level (-0.66, -0.36, -0.20 across three traces) — long-running task families are the
+/// *most* consistent, so a pooled residual is too wide for them and too narrow for short roots.
+/// `spread` is therefore stated per root, and `shape` supplies only the standardised form.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RootTurn1 {
+    /// Mean turn-1 path length of the sessions on each root, most-popular root first.
+    pub level: Vec<f64>,
+    /// Standard deviation of those sessions about their root's level, same order.
+    pub spread: Vec<f64>,
+    /// The standardised residual `(path − level) / spread`, pooled over every root.
+    ///
+    /// Standardised **per root** before pooling, so the shape is not a mixture of
+    /// differently-scaled residuals — which measures better than pooling the raw residuals and
+    /// rescaling them (KS 0.0044 against 0.0094 at 27 roots, at a sampling floor of 0.0045).
+    pub shape: Dist,
 }
 
 /// How the trunk widens with depth.
@@ -389,26 +449,6 @@ pub struct Sessions {
     /// byte-identical, since with `None` nothing is drawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn1_path_length: Option<Dist>,
-    /// How much of `turn1_path_length` is a property of the **root**, in `[0, 1]` (FR-054j).
-    ///
-    /// Measured as `eta²` — the between-root share of the variance in turn-1 path length — and it
-    /// is not a small correction: **0.9941 on `exgentic_swebench` and 0.9869 on
-    /// `exgentic_tau2_airline`**, so on an agentic trace root identity explains 99% of how long a
-    /// session's requests are. One root is one task family. `qwen_code`, production traffic over
-    /// 153 roots with short conversations, reads **0.5791**, which is why this is fitted rather
-    /// than assumed to be 1.
-    ///
-    /// Drawing the two independently — which is what a bare `turn1_path_length` does — mixes an
-    /// 11-block request into a root whose shared preamble is 124 blocks. That session then stops
-    /// part-way along the preamble, which the trie reads as **attrition**: measured, 42% of the
-    /// generated trunk's shared runs ended that way against **2.5%** in the trace. It also caps
-    /// that session's realised sharing for a reason the trace does not contain, which is the
-    /// standing `sharing_depth` failure.
-    ///
-    /// `0` is the old independent draw and absent means `0`, so a document without it is
-    /// unchanged.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn1_path_root_share: Option<f64>,
     /// Blocks added by each turn after the first. Drawn per turn.
     ///
     /// Either one distribution, or one **per session-length band** — see [`Growth`].

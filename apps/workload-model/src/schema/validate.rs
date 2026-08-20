@@ -308,6 +308,55 @@ pub fn validate(d: &Document) -> Report {
         }
         _ => {}
     }
+    // `turn1_path`'s tables are indexed by the same rank `roots.popularity` draws, so they must
+    // span `roots.count` for the same reason its support must — and for a worse failure mode.
+    // A short table is not a narrower root layer, it is a **silent fallback**: the generator
+    // reads the per-root level when the rank is in range and the population marginal when it is
+    // not, so a document that declares the correlation gets it on some roots and not others,
+    // with no clamp recorded and no error. That is indistinguishable in the output from the
+    // independent draw this field exists to replace, which is exactly what rule 8's support
+    // check exists to prevent.
+    if let Some(t) = &d.corpus.trees.roots.turn1_path {
+        let count = d.corpus.trees.roots.count as usize;
+        if t.level.len() != count || t.spread.len() != count {
+            r.reject(
+                "8",
+                format!(
+                    "roots.turn1_path states {} levels and {} spreads, but roots.count is \
+                     {count}: a rank outside the table falls back to the population marginal, so \
+                     the roots it does not cover would silently draw path length independently of \
+                     the root — the very thing this field states it does not do",
+                    t.level.len(),
+                    t.spread.len()
+                ),
+            );
+        }
+        if let Some((i, v)) = t
+            .level
+            .iter()
+            .enumerate()
+            .find(|(_, v)| !v.is_finite() || **v < 0.0)
+        {
+            r.reject(
+                "8",
+                format!("roots.turn1_path.level[{i}] is {v}; a path length is finite and >= 0"),
+            );
+        }
+        if let Some((i, v)) = t
+            .spread
+            .iter()
+            .enumerate()
+            .find(|(_, v)| !v.is_finite() || **v < 0.0)
+        {
+            r.reject(
+                "8",
+                format!(
+                    "roots.turn1_path.spread[{i}] is {v}; a standard deviation is finite and \
+                     >= 0, and a negative one is not a licence to invert the residual"
+                ),
+            );
+        }
+    }
     match &d.corpus.trees.branching {
         Branching::Uniform(f) if *f < 1.0 => r.reject(
             "8",
@@ -955,6 +1004,84 @@ run:
             !validate(&d).rejections().any(|f| f.rule == "8"),
             "a support spanning roots.count must pass"
         );
+    }
+
+    /// A `RootTurn1` with `n` levels/spreads, all finite and positive.
+    fn turn1(level: Vec<f64>, spread: Vec<f64>) -> crate::schema::RootTurn1 {
+        crate::schema::RootTurn1 {
+            level,
+            spread,
+            shape: crate::dist::Dist::Shaped(Shape::Const { value: 0.0 }),
+        }
+    }
+
+    fn rule_8_msg(d: &Document) -> String {
+        validate(d)
+            .rejections()
+            .filter(|f| f.rule == "8")
+            .map(|f| f.message.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_turn1_path_table_shorter_than_roots_count_is_rejected() {
+        // The failure mode is a SILENT FALLBACK, not a narrower layer: ranks inside the table
+        // draw path length about their root's own level, ranks outside it draw the population
+        // marginal, and the second is precisely the independent draw this field replaces. No
+        // clamp is recorded either way, so the output cannot be told from the unfixed model.
+        let mut d = doc("");
+        d.corpus.trees.roots.count = 4;
+        d.corpus.trees.roots.turn1_path = Some(turn1(vec![100.0, 90.0], vec![4.0, 3.0]));
+        let msg = rule_8_msg(&d);
+        assert!(msg.contains("states 2 levels and 2 spreads"), "{msg}");
+        assert!(msg.contains("roots.count is 4"), "{msg}");
+        assert!(
+            msg.contains("falls back to the population marginal"),
+            "{msg}"
+        );
+
+        // Spanning the count is accepted, so the rule is on the span and not on the field.
+        d.corpus.trees.roots.turn1_path = Some(turn1(
+            vec![100.0, 90.0, 80.0, 70.0],
+            vec![4.0, 3.0, 2.0, 1.0],
+        ));
+        assert_eq!(rule_8_msg(&d), "");
+
+        // A level table that spans while its spread table does not is the same defect: both
+        // are indexed by the drawn rank.
+        d.corpus.trees.roots.turn1_path =
+            Some(turn1(vec![100.0, 90.0, 80.0, 70.0], vec![4.0, 3.0]));
+        assert!(
+            rule_8_msg(&d).contains("states 4 levels and 2 spreads"),
+            "a short spread table must be rejected too"
+        );
+    }
+
+    #[test]
+    fn a_turn1_path_table_with_an_impossible_value_is_rejected() {
+        let mut d = doc("");
+        d.corpus.trees.roots.count = 2;
+
+        // A negative standard deviation would invert the residual — `turn1_about_root` clamps it
+        // rather than inverting, and a document should not be able to ask for it at all.
+        d.corpus.trees.roots.turn1_path = Some(turn1(vec![10.0, 10.0], vec![1.0, -1.0]));
+        let msg = rule_8_msg(&d);
+        assert!(msg.contains("spread[1] is -1"), "{msg}");
+
+        // NaN reaches the generator as arithmetic that silently floors to a 1-block path.
+        d.corpus.trees.roots.turn1_path = Some(turn1(vec![10.0, f64::NAN], vec![1.0, 1.0]));
+        assert!(
+            rule_8_msg(&d).contains("level[1] is NaN"),
+            "NaN must reject"
+        );
+
+        d.corpus.trees.roots.turn1_path = Some(turn1(vec![10.0, -3.0], vec![1.0, 1.0]));
+        assert!(rule_8_msg(&d).contains("level[1] is -3"), "negative level");
+
+        // Zero spread is legitimate — a root whose sessions did not vary states no spread, and
+        // every session on it then takes its level exactly.
+        d.corpus.trees.roots.turn1_path = Some(turn1(vec![10.0, 10.0], vec![0.0, 0.0]));
+        assert_eq!(rule_8_msg(&d), "");
     }
 
     #[test]

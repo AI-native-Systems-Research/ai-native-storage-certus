@@ -546,7 +546,9 @@ fn cmd_fit(
             continue;
         }
         if let Some(root) = inv.blocks.first() {
-            roots.observe(inv.session.0, *root);
+            // The path length rides along so the per-root turn-1 table (FR-054j) is measured over
+            // `roots.popularity`'s own population, at its own ranks, in one pass.
+            roots.observe(inv.session.0, inv.turn, *root, inv.blocks.len() as u64);
         }
         let refs: Vec<Ref> = inv
             .blocks
@@ -609,9 +611,6 @@ fn cmd_fit(
         rate_per_s: rate.or(measured_rate),
         wss_window_requests: wss_window,
         seed,
-        // Measured here because `SessionShapes` does not observe root identity; see
-        // `root_path_eta2`. One computation feeds both the emitted parameter and the diagnostic.
-        turn1_path_root_share: root_path_eta2(&trace.invocations).map(|m| m.eta2),
     };
     // The segment census, and the node-level trunk process fitted from it. Built once:
     // it is the only description that can state per-root preamble lengths and the TOTAL
@@ -1812,13 +1811,29 @@ fn print_path_budget(
 }
 
 /// What [`root_path_eta2`] measured.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct RootPathShare {
     /// Between-root share of the variance in turn-1 path length.
     eta2: f64,
     sessions: u64,
     roots: usize,
     mean_turn1_path: f64,
+    /// Per root: sessions, mean turn-1 path length, and the within-root standard deviation.
+    ///
+    /// `eta²` is one number over this table, and one number cannot say whether a two-level draw
+    /// can reproduce it: that needs the **level** of each root and the **spread** around it, and
+    /// whether that spread is a constant number of blocks or a constant fraction of the level.
+    /// The table is already built to compute `eta²` and was previously discarded.
+    by_root: Vec<RootLevel>,
+}
+
+/// One root's turn-1 path-length level and the spread of its sessions around it.
+#[derive(Debug, Clone, Copy)]
+struct RootLevel {
+    sessions: u64,
+    mean: f64,
+    /// Sample standard deviation, `0.0` for a root with a single session.
+    sd: f64,
 }
 
 /// The between-root share of the variance in turn-1 path length — `eta²` (FR-054j).
@@ -1850,26 +1865,50 @@ fn root_path_eta2(invocations: &[read::NormalisedInvocation]) -> Option<RootPath
     if first.len() < 2 {
         return None;
     }
-    let mut by_root: FastMap<u64, (u64, f64)> = FastMap::default();
+    // (count, sum, sum of squares) per root: the squares cost nothing here and are what turn the
+    // between-root decomposition into the per-root level and spread a two-level draw needs.
+    let mut by_root: FastMap<u64, (u64, f64, f64)> = FastMap::default();
     let mut n = 0u64;
     let mut sum = 0.0f64;
     for (_, root, len) in first.values() {
         let l = *len as f64;
-        let e = by_root.entry(root.0).or_insert((0, 0.0));
+        let e = by_root.entry(root.0).or_insert((0, 0.0, 0.0));
         e.0 += 1;
         e.1 += l;
+        e.2 += l * l;
         n += 1;
         sum += l;
     }
     let grand = sum / n as f64;
     let between: f64 = by_root
         .values()
-        .map(|(c, s)| *c as f64 * (s / *c as f64 - grand).powi(2))
+        .map(|(c, s, _)| *c as f64 * (s / *c as f64 - grand).powi(2))
         .sum();
     let total: f64 = first
         .values()
         .map(|(_, _, len)| (*len as f64 - grand).powi(2))
         .sum();
+    let mut levels: Vec<RootLevel> = by_root
+        .values()
+        .map(|(c, s, sq)| {
+            let mean = s / *c as f64;
+            // Sample variance from the running sums, floored at zero: the algebraic form can go
+            // very slightly negative on a root whose sessions all share one length.
+            let var = if *c > 1 {
+                (sq - s * mean).max(0.0) / (*c - 1) as f64
+            } else {
+                0.0
+            };
+            RootLevel {
+                sessions: *c,
+                mean,
+                sd: var.sqrt(),
+            }
+        })
+        .collect();
+    // Descending by population: the roots that carry the sessions are the ones a reader needs, and
+    // a stable order makes two runs of the report comparable.
+    levels.sort_by(|a, b| b.sessions.cmp(&a.sessions).then(b.mean.total_cmp(&a.mean)));
     Some(RootPathShare {
         eta2: if total > 0.0 {
             (between / total).clamp(0.0, 1.0)
@@ -1879,6 +1918,7 @@ fn root_path_eta2(invocations: &[read::NormalisedInvocation]) -> Option<RootPath
         sessions: n,
         roots: by_root.len(),
         mean_turn1_path: grand,
+        by_root: levels,
     })
 }
 
@@ -1932,6 +1972,108 @@ fn print_root_path_correlation(
          sessions",
         root_preamble.len()
     );
+    print_within_root_spread(&m);
+}
+
+/// Is the spread of turn-1 path length **within** a root a constant number of blocks, or a constant
+/// fraction of that root's level?
+///
+/// A two-level draw needs both halves of the variance decomposition, and the second half is not a
+/// free choice. Drawing one pooled residual and adding it to a root's level assumes the spread is
+/// **additive** — the same number of blocks whether the root's requests run 40 blocks or 4000. If
+/// instead it is **multiplicative**, a pooled residual is too wide for short roots and too narrow
+/// for long ones, and no correlation parameter repairs that: the marginal comes out right on
+/// average and wrong per root.
+///
+/// The two are discriminated by which quantity is the tighter across roots — the standard deviation
+/// itself, or the coefficient of variation. Whichever varies less is the one that behaves like a
+/// constant, and the correlation between a root's level and its spread says the same thing a second
+/// way. Both are reported, along with the weight of evidence behind them, because a corpus trace
+/// can have very few roots with more than one session.
+fn print_within_root_spread(m: &RootPathShare) {
+    // A root with one session states no spread, and including it as `sd = 0` would bias every
+    // summary below toward "additive, and tiny".
+    let multi: Vec<&RootLevel> = m.by_root.iter().filter(|r| r.sessions > 1).collect();
+    let covered: u64 = multi.iter().map(|r| r.sessions).sum();
+    println!(
+        "\n  within-root spread — ADDITIVE (constant blocks) or MULTIPLICATIVE (constant fraction)?\n  \
+         the second half of a two-level draw: a pooled residual added to a root's level assumes\n  \
+         additive, and is too wide for short roots and too narrow for long ones if it is not."
+    );
+    if multi.len() < 3 {
+        println!(
+            "    only {} of {} roots hold more than one session — not enough to say",
+            multi.len(),
+            m.roots
+        );
+        return;
+    }
+    // Degrees of freedom, so a root observed 400 times counts for more than one observed twice.
+    let w: Vec<f64> = multi.iter().map(|r| (r.sessions - 1) as f64).collect();
+    let wsum: f64 = w.iter().sum();
+    let wmean = |v: &[f64]| v.iter().zip(&w).map(|(x, wi)| x * wi).sum::<f64>() / wsum;
+    let means: Vec<f64> = multi.iter().map(|r| r.mean).collect();
+    let sds: Vec<f64> = multi.iter().map(|r| r.sd).collect();
+    let cvs: Vec<f64> = multi
+        .iter()
+        .map(|r| if r.mean > 0.0 { r.sd / r.mean } else { 0.0 })
+        .collect();
+    let (mbar, sbar) = (wmean(&means), wmean(&sds));
+    let cov: f64 = means
+        .iter()
+        .zip(&sds)
+        .zip(&w)
+        .map(|((x, y), wi)| wi * (x - mbar) * (y - sbar))
+        .sum::<f64>()
+        / wsum;
+    let var = |v: &[f64], bar: f64| {
+        v.iter()
+            .zip(&w)
+            .map(|(x, wi)| wi * (x - bar).powi(2))
+            .sum::<f64>()
+            / wsum
+    };
+    let (vm, vs) = (var(&means, mbar), var(&sds, sbar));
+    let r = if vm > 0.0 && vs > 0.0 {
+        cov / (vm.sqrt() * vs.sqrt())
+    } else {
+        0.0
+    };
+    // Relative dispersion of each candidate invariant. Quartiles rather than a standard deviation,
+    // because both quantities are bounded below by zero and are visibly right-skewed.
+    let quart = |v: &mut Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        let at = |q: f64| v[((v.len() - 1) as f64 * q).round() as usize];
+        (at(0.25), at(0.5), at(0.75))
+    };
+    let (sq1, sq2, sq3) = quart(&mut sds.clone());
+    let (cq1, cq2, cq3) = quart(&mut cvs.clone());
+    let spread_of = |q1: f64, q2: f64, q3: f64| if q2 > 0.0 { (q3 - q1) / q2 } else { f64::NAN };
+    let (disp_sd, disp_cv) = (spread_of(sq1, sq2, sq3), spread_of(cq1, cq2, cq3));
+    println!(
+        "    {} of {} roots hold >1 session, covering {covered} of {} sessions",
+        multi.len(),
+        m.roots,
+        m.sessions
+    );
+    println!("      sd    per root, blocks    p25 {sq1:>9.1}  p50 {sq2:>9.1}  p75 {sq3:>9.1}   IQR/p50 {disp_sd:>6.3}");
+    println!("      sd/mean per root          p25 {cq1:>9.4}  p50 {cq2:>9.4}  p75 {cq3:>9.4}   IQR/p50 {disp_cv:>6.3}");
+    println!("      corr(root level, root sd), weighted by degrees of freedom: {r:>+.3}");
+    // The verdict is stated as the rule that produced it, so a reader can disagree with the rule
+    // rather than having to reverse-engineer it from the numbers.
+    let verdict = match () {
+        _ if !disp_sd.is_finite() || !disp_cv.is_finite() => "indeterminate — a zero median",
+        _ if disp_cv < disp_sd && r > 0.3 => {
+            "MULTIPLICATIVE — sd/mean is the tighter invariant and spread rises with level, \
+             so a pooled additive residual is the wrong shape"
+        }
+        _ if disp_sd < disp_cv && r.abs() <= 0.3 => {
+            "ADDITIVE — sd is the tighter invariant and does not track level, so a pooled \
+             residual in blocks is right"
+        }
+        _ => "MIXED — the two tests disagree; neither residual form is clearly right",
+    };
+    println!("      verdict: {verdict}");
 }
 
 /// A per-band structural summary of one census, for comparing two of them.

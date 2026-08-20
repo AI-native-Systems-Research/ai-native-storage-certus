@@ -2208,25 +2208,51 @@ report segments statistics into before/after windows around the event.
   exceed their shared preamble — while the model draws the two independently. That is the same
   independent-versus-correlated defect as the rest of FR-057c's step 3, and it is the fifth place it
   has appeared.
-- **FR-054j**: Where `turn1_path_length` is stated, the draw MUST be **two-level** — a per-root level
-  from the root's own stream and a per-session value around it — with the between-root share
-  (`sessions.turn1_path_root_share`) **fitted** to the measured `eta²` rather than assumed.
-  Measured 2026-08-19, `eta²` is **0.9941** on `exgentic_swebench` and **0.9869** on
-  `exgentic_tau2_airline`: on an agentic trace, root identity explains 99% of the variance in turn-1
-  path length, because one root is one task family. `qwen_code` — production traffic over 153 roots
-  with short conversations — reads **0.5791**, which is why the share is fitted.
-  The mixture MUST preserve the marginal's **spread** as well as its correlation: a weighted sum of
-  two draws from one distribution has variance `(w² + (1−w)²)·Var(X)`, which is 83% of `Var(X)` at
-  `eta² = 0.99`, so the deviation from the mean MUST be rescaled by `√(w² + (1−w)²)`. Fixing a
-  correlation by quietly narrowing a distribution trades one defect for another.
-  **Measured effect, and the prediction that FAILED.** The realised root preamble improves from 44
-  blocks to **88** against the trace's 124 — a 2x gain on top of FR-054i's — and `sharing_depth`
-  improves only marginally, 0.309 to 0.296. **Attrition was predicted to fall to near zero and did
-  not: it is 32%, against the trace's 0.** The prediction was wrong for a locatable reason, and it is
-  the same defect one level up: pinning path length to the root does not couple a root's **path level
-  to its own preamble length**, because those are two independent per-root draws. Preventing attrition
-  needs `path_level(root) >= preamble(root)` for the *same* root, i.e. a joint per-root law, not two
-  marginals that happen to be per-root. Recorded rather than tuned around.
+- **FR-054j**: Where `turn1_path_length` is stated, each root's **level** — the mean turn-1 path
+  length of the sessions that bind to it — MUST be **stated as measured data**, in
+  `roots.popularity`'s rank order, together with a **per-root spread** and a single pooled
+  **standardised** residual shape. A session's turn-1 path is then `level[rank] + z·spread[rank]`
+  with `z` drawn from that shape. The level MUST NOT be drawn from a distribution.
+  Measured 2026-08-19, `eta²` — the between-root share of the variance — is **0.9941** on
+  `exgentic_swebench` and **0.9869** on `exgentic_tau2_airline`: on an agentic trace, root identity
+  explains 99% of the variance in turn-1 path length, because one root is one task family.
+  `qwen_code` — production traffic over 153 roots with short conversations — reads **0.5791**, so
+  this is a correlation the corpus varies in, and the mechanism MUST reproduce it at either end
+  without a fitted mixing weight.
+  **Why the level is data and not a parameter.** A construction that draws each root's level from the
+  population marginal reproduces `eta²` and still gets the distribution wrong, because it redraws
+  *which levels exist*: when `eta² → 1` path length **is** the root's identity, so resampling the
+  levels resamples the marginal itself. Measured against ground truth with a known root structure,
+  8 replicates, median KS versus the pooled marginal: stating the measured levels scores
+  **0.0073 / 0.0036 / 0.0029** at 153 / 27 / 18 roots, at or below the **0.0045 / 0.0046 / 0.0035**
+  sampling control, while every construction that resamples them — a variance-matched mixture of a
+  root draw and a session draw, a Gaussian copula, a redrawn additive decomposition — costs
+  **0.15-0.20** at 18-27 roots, some 40-60x the control. Ranges do not overlap. So a mixing weight,
+  a variance rescale and an `eta²` parameter are all **withdrawn**: `eta²` becomes a diagnostic that
+  the mechanism reproduces to within 0.007, not a target it fits.
+  **Why the spread is also per root.** A pooled residual assumes every root's sessions vary by the
+  same number of blocks. Measured, the per-root standard deviation has an inter-quartile range of
+  **2.43x** its median on `qwen_code` and **12.94x** on `exgentic_tau2_airline`, and it is
+  **negatively** correlated with the level (−0.66, −0.36, −0.20 across three traces) — long-running
+  task families are the *most* consistent, so a pooled residual is simultaneously too wide for them
+  and too narrow for short roots. With that heterogeneity simulated as measured, a pooled residual
+  degrades 3-9x while the per-root spread holds (0.0716 against 0.0073 at 153 roots). The residual
+  MUST therefore be standardised **per root before pooling**, so its shape is not a mixture of
+  differently-scaled residuals.
+  **Measured effect (2026-08-20), and it is the structural result the whole FR-054 sequence was
+  after.** On `exgentic_tau2_airline` the realised root preamble is **124 blocks against the trace's
+  124 — exact**, where the progression before it ran 7 → 44 → 88; on `exgentic_swebench` the whole
+  root band matches the census (**18 segments against 18, median cohort 99 against 100, attrition 0
+  against 0, fanout 18 against 18**). It also **repairs the regression the withdrawn mixture caused**:
+  `request_length` goes 0.1822 → **0.0950** on `qwen_code`, 0.0696 → **0.0355** on airline and
+  0.0516 → **0.0201** on swebench — the last two *below their own floors* (0.0425, 0.0277) — and
+  `unique_keys` on `qwen_code` returns to **0.0534 against a floor of 0.0688**, indistinguishable
+  from perfect. `reuse_distance_objects` improves on both traces that move (0.0438 → 0.0292,
+  0.0288 → 0.0221).
+  **The limit, stated plainly:** the mechanism delivers exactly where `eta²` says it should and not
+  elsewhere — `qwen_code`, at `eta² = 0.58`, still realises a 1-block root preamble against the
+  trace's 29. And `sharing_depth` is **unmoved** (0.400 / 0.298 / 0.468), which is now the sole
+  remaining failure of this arm and is a property of the deep trunk rather than of turn-1 depth.
 - **FR-054k**: A session MUST NOT join a trunk run it cannot walk to the end of, and a run's length
   MUST be capped by a **per-root** quantity rather than a per-session one.
   The invariant being enforced is measured: in every trace examined a shared run ends by
@@ -2251,6 +2277,27 @@ report segments statistics into before/after windows around the event.
   `roots.popularity`. So the joint per-root law wants **(preamble, path level, within-root spread,
   session count)** together, and bounding the preamble by a low quantile of the path distribution —
   not by its level. Recorded rather than guessed at.
+  **THAT DERIVED FIX HAS NOW BEEN BUILT AND IS REFUTED (2026-08-20). Do not rebuild it.** Under
+  FR-054j's per-root table the low quantile is taken from *the root's own* level and spread rather
+  than from a global marginal, which was the stated reason to expect the earlier `1/(k+1)` collapse
+  to lift. It does not lift. The rule still buys attrition at the cost of run length and depth, on
+  every trace measured:
+  - `qwen_code`: attrition falls from 6893 segments to **42** against the trace's 254, and the total
+    segment count lands at **9541 against the trace's 9998** — both the closest ever measured — but
+    **every band's median run length collapses to 1** against the trace's 29/9/18/23/37/13, and
+    `reuse_distance_objects` goes 0.0292 → **0.1015** while `unique_keys` goes 0.0534 → **0.4910**,
+    i.e. from below its floor to 3x its tolerance.
+  - `exgentic_tau2_airline`: attrition reaches **0 in every band, matching the trace exactly**, but
+    the preamble falls 124 → 110, the deepest band empties (**0 synthetic segments where the trace
+    has 35**), and `sharing_depth` *worsens* 0.298 → 0.344.
+  - `exgentic_swebench`: `sharing_depth` and `reuse` are bit-identical; only `unique_keys` moves, and
+    it worsens.
+  The one thing it establishes is a **lever**: `sharing_depth` on `qwen_code` moves 0.400 → **0.206**,
+  the largest movement in that statistic recorded in this work, so run truncation is what
+  `sharing_depth` responds to. It cannot be spent this way. **Two independent parameterisations of
+  the decline rule have now been refuted — the global `1/(k+1)` quantile and the per-root one — so
+  the rule itself, not its calibration, is what fails, and the tension above is a property of
+  bounding a shared run by any quantile of a path-length distribution.**
 - **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
   measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
   sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first

@@ -26,7 +26,8 @@ use serde::{Deserialize, Serialize};
 use crate::dist::{Dist, Shape};
 use crate::keys::CacheKey;
 use crate::schema::{
-    Arrival, ArrivalModel, Branching, Corpus, Document, MixEntry, Roots, Run, Sessions, Trees,
+    Arrival, ArrivalModel, Branching, Corpus, Document, MixEntry, RootTurn1, Roots, Run, Sessions,
+    Trees,
 };
 use crate::stats::FastMap;
 
@@ -55,8 +56,14 @@ const RANK_MAX_STEPS: usize = 4096;
 /// onto a rank — which is exactly how the generator consumes it.
 #[derive(Debug, Default)]
 pub struct RootPopularity {
-    /// Root key of each session's first request.
-    root_of_session: FastMap<u32, CacheKey>,
+    /// Per session: its lowest-numbered turn, that turn's root key, and its path length.
+    ///
+    /// The path length rides along with the root binding so that the per-root turn-1 table and
+    /// `popularity` are measured over one population in one order. They were computed apart
+    /// once — `roots.count`, the popularity support and the realised root layer disagreed three
+    /// ways — and a level attached to the wrong rank is that failure in a form no total would
+    /// reveal.
+    root_of_session: FastMap<u32, (u32, CacheKey, u64)>,
 }
 
 impl RootPopularity {
@@ -65,38 +72,61 @@ impl RootPopularity {
         RootPopularity::default()
     }
 
-    /// Record a session's root — the depth-0 block of its first request.
+    /// Record a session's root — the depth-0 block of its first request — and that request's
+    /// path length.
     ///
-    /// A session binds to one root at birth and stays on it (FR-019a), so the first
-    /// one seen is the binding and later requests cannot change it. Recording
-    /// otherwise would let a session that appears twice count as two.
-    pub fn observe(&mut self, session: u32, root: CacheKey) {
-        self.root_of_session.entry(session).or_insert(root);
+    /// A session binds to one root at birth and stays on it (FR-019a), so later requests cannot
+    /// change the binding. The **lowest-numbered turn** wins rather than the first one seen,
+    /// because a disordered trace's first arrival can be mid-conversation and its path length is
+    /// then not a turn-1 quantity — the same trap already recorded for `private_depth`. The root
+    /// key is invariant across a session's turns (turn n+1 re-reads turn n's blocks, so
+    /// `blocks[0]` is the same key), so taking both from one turn cannot disagree with taking the
+    /// root from the first arrival, and it keeps this measurement aligned with `root_path_eta2`.
+    pub fn observe(&mut self, session: u32, turn: u32, root: CacheKey, path_blocks: u64) {
+        let e = self
+            .root_of_session
+            .entry(session)
+            .or_insert((u32::MAX, root, path_blocks));
+        if turn <= e.0 {
+            *e = (turn, root, path_blocks);
+        }
     }
 
     /// Distinct roots observed, shared or not.
     pub fn roots(&self) -> u64 {
         self.root_of_session
             .values()
+            .map(|(_, root, _)| root)
             .collect::<std::collections::BTreeSet<_>>()
             .len() as u64
     }
 
     /// The fitted root layer, or `None` with nothing to fit.
     pub fn finish(&self) -> Option<FittedRoots> {
-        let mut per_root: FastMap<CacheKey, u64> = FastMap::default();
-        for root in self.root_of_session.values() {
-            *per_root.entry(*root).or_insert(0) += 1;
+        // Per root: sessions, and the sum and sum of squares of their turn-1 path lengths. The
+        // second moment costs one multiply here and is what lets each root state its own level
+        // and spread rather than borrowing the population's.
+        let mut per_root: FastMap<CacheKey, (u64, f64, f64)> = FastMap::default();
+        for (_, root, path) in self.root_of_session.values() {
+            let e = per_root.entry(*root).or_insert((0, 0.0, 0.0));
+            e.0 += 1;
+            e.1 += *path as f64;
+            e.2 += (*path as f64) * (*path as f64);
         }
         if per_root.is_empty() {
             return None;
         }
         let observed = per_root.len() as u32;
-        let mut counts: Vec<u64> = per_root.into_values().collect();
-        // Descending, so rank 1 is the most popular root — the order the schema's
-        // Zipf-over-rank parameter assumes.
-        counts.sort_unstable_by(|a, b| b.cmp(a));
-
+        let mut ranked: Vec<(CacheKey, u64, f64, f64)> = per_root
+            .into_iter()
+            .map(|(k, (c, s, sq))| (k, c, s, sq))
+            .collect();
+        // Descending by session count, so rank 1 is the most popular root — the order the schema's
+        // Zipf-over-rank parameter assumes. Ties break on the root KEY, which matters now that a
+        // per-root level is emitted against a rank: sorting on the count alone left equal-count
+        // roots in hash order, so the rank a level belongs to would differ between two runs over
+        // the same trace while every total stayed identical.
+        ranked.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0 .0.cmp(&b.0 .0)));
         // **Shared roots only**, decided 2026-08-14. `roots.count` is the shared width at
         // depth 0 — keys two or more sessions reached — so the popularity distribution
         // over it must be measured on the same population, or the two disagree and the
@@ -108,11 +138,18 @@ impl RootPopularity {
         // A session on a singleton root shares no prefix with anything, which is a case
         // the model already cannot express — `shared_depth`'s support starts at 1 — so it
         // is counted and reported rather than silently folded into the shared population.
-        let singleton_sessions: u64 = counts.iter().filter(|c| **c < 2).sum();
-        counts.retain(|c| *c >= 2);
-        if counts.is_empty() {
+        let singleton_sessions: u64 = ranked
+            .iter()
+            .map(|(_, c, _, _)| *c)
+            .filter(|c| *c < 2)
+            .sum();
+        // Retained on `ranked` rather than on a copy of the counts, so the per-root turn-1 table
+        // below is over exactly the population `popularity` is over, at exactly its ranks.
+        ranked.retain(|(_, c, _, _)| *c >= 2);
+        if ranked.is_empty() {
             return None;
         }
+        let counts: Vec<u64> = ranked.iter().map(|(_, c, _, _)| *c).collect();
         let count = counts.len() as u32;
         let total: u64 = counts.iter().sum();
 
@@ -154,6 +191,67 @@ impl RootPopularity {
             observed,
             sessions: self.root_of_session.len() as u64,
             singleton_sessions,
+            turn1_path: self.turn1_path(&ranked),
+        })
+    }
+
+    /// Each retained root's turn-1 path level and spread, plus the pooled standardised residual
+    /// (FR-054j).
+    ///
+    /// `ranked` arrives in `popularity`'s rank order and over `popularity`'s population, so the
+    /// two tables are aligned by construction rather than by a second sort agreeing with the
+    /// first.
+    ///
+    /// `None` when no root's sessions vary at all: the shape would then be empty, and a document
+    /// stating a zero spread everywhere is better served by its absence, which falls back to the
+    /// population marginal.
+    fn turn1_path(&self, ranked: &[(CacheKey, u64, f64, f64)]) -> Option<RootTurn1> {
+        let mut level = Vec::with_capacity(ranked.len());
+        let mut spread = Vec::with_capacity(ranked.len());
+        let mut of_root: FastMap<CacheKey, (f64, f64)> = FastMap::default();
+        for (key, c, sum, sq) in ranked {
+            let n = *c as f64;
+            let mean = sum / n;
+            // Sample variance from the running sums, floored at zero: the algebraic form can turn
+            // very slightly negative on a root whose sessions all share one path length.
+            let sd = if *c > 1 {
+                ((sq - sum * mean).max(0.0) / (n - 1.0)).sqrt()
+            } else {
+                0.0
+            };
+            level.push(mean);
+            spread.push(sd);
+            of_root.insert(*key, (mean, sd));
+        }
+        // The residual shape, standardised per root before pooling so that it carries shape only
+        // and not the differences in scale `spread` already states. A root with no spread
+        // contributes nothing: its sessions sit exactly at its level, and `0/0` is not an
+        // observation of shape.
+        let mut z: Vec<f64> = Vec::new();
+        for (_, root, path) in self.root_of_session.values() {
+            if let Some((mean, sd)) = of_root.get(root) {
+                if *sd > 0.0 {
+                    z.push((*path as f64 - mean) / sd);
+                }
+            }
+        }
+        if z.len() < 2 {
+            return None;
+        }
+        z.sort_by(f64::total_cmp);
+        // An empirical CDF over the standardised residual, which `Shape::Empirical` carries
+        // directly: its points are real-valued, so a residual below its root's level needs no
+        // offset encoding, and `Dist::sample` returns the signed value.
+        let n = z.len() as f64;
+        let points: Vec<(f64, f64)> = z
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (*v, (i + 1) as f64 / n))
+            .collect();
+        Some(RootTurn1 {
+            level,
+            spread,
+            shape: Dist::Shaped(Shape::Empirical { points }),
         })
     }
 }
@@ -175,6 +273,8 @@ pub struct FittedRoots {
     pub sessions: u64,
     /// Sessions whose root no other session bound to.
     pub singleton_sessions: u64,
+    /// Turn-1 path level and spread per root, in `popularity`'s rank order (FR-054j).
+    pub turn1_path: Option<RootTurn1>,
 }
 
 /// What the caller must supply because no trace carries it.
@@ -192,16 +292,6 @@ pub struct Supplied {
     /// A property of the *sample*, not of the workload, so it is the caller's to fix
     /// and a fit does not invent one that would look measured.
     pub seed: u64,
-    /// The measured between-root share of turn-1 path-length variance — `eta²` (FR-054j).
-    ///
-    /// Supplied by the caller rather than measured in `fit::sessions`, because `SessionShapes`
-    /// accumulates per-session shapes and does not observe **root identity** — a root is a
-    /// property of a session's path. Teaching it about roots for one statistic would be the larger
-    /// change, and supplying it keeps the diagnostic and the emitted parameter as one computation
-    /// rather than two that could disagree.
-    ///
-    /// `None` leaves the parameter unstated, which is the independent draw.
-    pub turn1_path_root_share: Option<f64>,
 }
 
 /// A fitted document, and everything a reader needs to judge it.
@@ -425,6 +515,14 @@ pub fn assemble(
                 roots: Roots {
                     count: fitted_roots.count.max(1),
                     popularity: fitted_roots.popularity.clone(),
+                    // Stated only beside `sessions.turn1_path_length`, which is what decides
+                    // whether turn-1 depth is a measured joint at all: a per-root level is a
+                    // refinement of that draw and means nothing without it. So one experiment
+                    // toggle governs both, and a document either states the joint or does not.
+                    turn1_path: sessions
+                        .turn1_path_length
+                        .as_ref()
+                        .and(fitted_roots.turn1_path.clone()),
                 },
                 shared_depth,
                 // A node-level process where the census produced one, because it is the
@@ -457,13 +555,6 @@ pub fn assemble(
                 // The measured joint turn-1 path length (FR-054i). `Some` only under the
                 // experiment toggle, since stating it changes every generated path.
                 turn1_path_length: sessions.turn1_path_length.clone(),
-                // The measured between-root share of turn-1 path-length variance (FR-054j).
-                // Only meaningful beside the joint above, so it rides the same toggle.
-                // Only meaningful beside the joint above, so it is stated only when that is.
-                turn1_path_root_share: sessions
-                    .turn1_path_length
-                    .as_ref()
-                    .and(supplied.turn1_path_root_share),
                 turns,
                 think_time,
                 private_depth,
@@ -567,11 +658,21 @@ mod tests {
     }
 
     fn roots_with(sessions_per_root: &[u64]) -> RootPopularity {
+        roots_with_paths(sessions_per_root, |_, _| 100)
+    }
+
+    /// Roots with a stated turn-1 path length per session, so the FR-054j table can be checked.
+    ///
+    /// `path(root, i)` gives the `i`-th session on `root` its path length.
+    fn roots_with_paths(
+        sessions_per_root: &[u64],
+        path: impl Fn(usize, u64) -> u64,
+    ) -> RootPopularity {
         let mut r = RootPopularity::new();
         let mut session = 0u32;
         for (root, n) in sessions_per_root.iter().enumerate() {
-            for _ in 0..*n {
-                r.observe(session, CacheKey(root as u64));
+            for i in 0..*n {
+                r.observe(session, 1, CacheKey(root as u64), path(root, i));
                 session += 1;
             }
         }
@@ -580,7 +681,6 @@ mod tests {
 
     fn supplied() -> Supplied {
         Supplied {
-            turn1_path_root_share: None,
             block_bytes: Dist::Scalar(131_072.0),
             rate_per_s: Some(2000.0),
             wss_window_requests: 20_000,
@@ -725,6 +825,120 @@ mod tests {
     }
 
     #[test]
+    fn the_turn1_table_states_each_roots_own_level_and_spread_at_its_own_rank() {
+        // Rank 1 holds 40 sessions of length 100 or 120, rank 2 holds 10 of length 500 or 504.
+        // The levels must land on the ranks `popularity` orders, and each spread must be that
+        // root's own: the whole defect being fixed is a level that came from the population.
+        let r = roots_with_paths(&[40, 10], |root, i| match (root, i % 2) {
+            (0, 0) => 100,
+            (0, _) => 120,
+            (_, 0) => 500,
+            (_, _) => 504,
+        });
+        let t = r.finish().expect("fitted").turn1_path.expect("a table");
+        assert_eq!(t.level.len(), 2);
+        assert_eq!(t.spread.len(), 2);
+        assert!(
+            (t.level[0] - 110.0).abs() < 1e-9,
+            "rank 1 level {:?}",
+            t.level
+        );
+        assert!(
+            (t.level[1] - 502.0).abs() < 1e-9,
+            "rank 2 level {:?}",
+            t.level
+        );
+        // Sample sd of a two-point balanced set is half the gap times sqrt(n/(n-1)) → ~10.1 and
+        // ~2.1, so the ratio of spreads is ~5 while the ratio of levels is ~4.6. A pooled
+        // residual could not tell those apart.
+        assert!(t.spread[0] > 4.0 * t.spread[1], "spreads {:?}", t.spread);
+    }
+
+    #[test]
+    fn the_standardised_residual_is_shared_and_carries_no_scale() {
+        // Two roots with the same shape and very different scales must contribute the SAME
+        // standardised residuals, which is what makes `shape` a shape: pooling raw residuals
+        // instead measured worse (KS 0.0094 against 0.0044 at 27 roots).
+        let r = roots_with_paths(&[100, 100], |root, i| {
+            let step = if i % 2 == 0 { 0 } else { 1 };
+            if root == 0 {
+                100 + step * 10
+            } else {
+                1000 + step * 100
+            }
+        });
+        let t = r.finish().expect("fitted").turn1_path.expect("a table");
+        // Both roots are balanced two-point sets, so every standardised residual is ±c for one
+        // constant c, and the pooled shape therefore holds two values and not four. Compared to a
+        // tolerance rather than bitwise: standardising 100 and 1000 divides by different sds, so
+        // the two roots agree to within rounding and not to the last bit.
+        let vals: Vec<f64> = match t.shape.shape() {
+            Shape::Empirical { points } => points.iter().map(|(v, _)| *v).collect(),
+            other => panic!("expected an empirical shape, got {other:?}"),
+        };
+        let mut distinct: Vec<f64> = Vec::new();
+        for v in &vals {
+            if !distinct.iter().any(|d| (d - v).abs() < 1e-9) {
+                distinct.push(*v);
+            }
+        }
+        assert_eq!(
+            distinct.len(),
+            2,
+            "scale leaked into the shape: {distinct:?}"
+        );
+        // And it is centred: a balanced set standardises to a mean of zero.
+        let mean = t.shape.mean().expect("a mean");
+        assert!(mean.abs() < 1e-9, "shape not centred: {mean}");
+    }
+
+    #[test]
+    fn equal_count_roots_take_a_stable_rank_so_a_level_cannot_move_between_runs() {
+        // Ranks are only meaningful for a per-root level if ties break deterministically. Before
+        // the key tie-break, equal-count roots sat in hash order: every total was identical and
+        // the rank a level belonged to could differ run to run.
+        let build = || {
+            let mut r = RootPopularity::new();
+            let mut session = 0u32;
+            // Three roots of two sessions each, distinguishable only by their path lengths. The
+            // two sessions on a root differ by 10 blocks, since a root whose sessions never vary
+            // contributes no residual and the table would be absent altogether.
+            for (root, path) in [(7u64, 700u64), (3, 300), (5, 500)] {
+                for i in 0..2 {
+                    r.observe(session, 1, CacheKey(root), path + i * 10);
+                    session += 1;
+                }
+            }
+            r.finish()
+                .expect("fitted")
+                .turn1_path
+                .expect("a table")
+                .level
+        };
+        let first = build();
+        assert_eq!(first.len(), 3);
+        for _ in 0..8 {
+            assert_eq!(build(), first, "rank order is not stable across runs");
+        }
+        // Ordered by key, since the counts tie: keys 3, 5, 7 carry levels 305, 505, 705.
+        assert_eq!(first, vec![305.0, 505.0, 705.0]);
+    }
+
+    #[test]
+    fn a_root_whose_sessions_never_vary_yields_no_shape_and_so_no_table() {
+        // With no within-root variation there is no residual to standardise, and a table of zero
+        // spreads with an empty shape would be a parameter nothing can consume — this branch
+        // exists so the document falls back to the population marginal instead.
+        let r = roots_with_paths(&[10, 10], |_, _| 250);
+        let f = r.finish().expect("fitted");
+        assert!(
+            f.turn1_path.is_none(),
+            "expected no table: {:?}",
+            f.turn1_path
+        );
+    }
+
+    #[test]
     fn every_rank_in_the_support_is_reachable_and_the_support_spans_roots_count() {
         // The defect this shape replaced, and the reason rule 8 now checks the support.
         // Eight percentile points with zero-width steps meant `dist::empirical` could
@@ -780,9 +994,9 @@ mod tests {
         // A session binds to one root at birth (FR-019a), so a later request cannot
         // move it and must not double its weight.
         let mut r = RootPopularity::new();
-        r.observe(1, CacheKey(10));
-        r.observe(1, CacheKey(10));
-        r.observe(1, CacheKey(99));
+        r.observe(1, 1, CacheKey(10), 100);
+        r.observe(1, 2, CacheKey(10), 140);
+        r.observe(1, 3, CacheKey(99), 180);
         assert_eq!(r.roots(), 1);
     }
 
