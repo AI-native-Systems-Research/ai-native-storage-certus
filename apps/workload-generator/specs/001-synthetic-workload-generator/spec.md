@@ -2260,6 +2260,9 @@ report segments statistics into before/after windows around the event.
   `exgentic_tau2_airline`, **0 of 85** on `exgentic_swebench`. Every session on a run walks the whole
   run. The generator broke that on **32%** of its runs, because a session whose path ends part-way
   along one stops emitting and every node below it loses a session.
+  Those counts are superseded by the **per-block hazard** of FR-054l, which is the comparable form —
+  it confirms the invariant rather than dissolving it (the model's hazard is ~100x the trace's), but
+  the reason offered here and in FR-054i/j for *why* a trace has it is **refuted** there.
   Enforcing it works: attrition goes to **exactly 0 in every band**, and cohort sizes come within one
   session of the trace's (3/4/2 against 3/3/3 in the mid bands).
   **The cap MUST be per root.** Capping at the session's own reach was implemented and is wrong for a
@@ -2298,6 +2301,42 @@ report segments statistics into before/after windows around the event.
   the decline rule have now been refuted — the global `1/(k+1)` quantile and the per-root one — so
   the rule itself, not its calibration, is what fails, and the tension above is a property of
   bounding a shared run by any quantile of a path-length distribution.**
+- **FR-054l**: Trunk attrition MUST be reported as a **hazard per shared block**, not as a count of
+  attrition segments; and a session's **deepest reach** MUST NOT be modelled as a per-root level.
+  Both halves are measurements, and the second is a refutation of the explanation FR-054i/j/k were
+  built on.
+  **Why the denominator.** A count of attrition segments is not comparable between two censuses whose
+  runs are different lengths: a band whose runs are one block long has no interior for a mid-run
+  departure to land in, so it scores zero attrition however unsynchronised its sessions are. That is
+  not hypothetical — `exgentic_tau2_airline`'s trace runs below depth 32 have a median length of
+  exactly **1**, and its zero attrition was read as an invariant on the strength of the count alone.
+  Normalised, the invariant is **not** an artefact, and it is far stronger than the counts suggested:
+  | trace | trace attrition | synthetic | ratio |
+  | --- | --- | --- | --- |
+  | `exgentic_tau2_airline` | 0 over 16188 shared blocks (**0.00**/kblk) | 154 over 18355 (**8.39**) | >140x |
+  | `qwen_code` | 254 over 507183 (**0.50**/kblk) | 6893 over 160659 (**42.90**) | 86x |
+  | `exgentic_swebench` | 0 over 13794 (**0.00**/kblk) | 69 over 12238 (**5.64**) | >120x |
+  `exgentic_swebench` settles the exposure question on its own: its trace runs below depth 32 have a
+  median length of **736 blocks** at fan-in 68, and still not one of them loses a session part-way.
+  So the model's departure hazard is **~100x** the trace's, measured against a denominator the trace
+  has plenty of.
+  **Why reach is not the fix.** The explanation carried by FR-054i, FR-054j and FR-054k was that a
+  trace correlates path length with the root while the model draws it independently, so departures
+  are synchronised in one and scattered in the other. That holds for **turn-1** depth and is why
+  FR-054j works. It does **not** hold for how deep a session eventually goes, which is the quantity
+  attrition is made of, because the trunk below turn-1 depth is walked only by later turns:
+  | trace | `eta²` turn-1 | `eta²` deepest | within-root sd of deepest | `eta²` turns |
+  | --- | --- | --- | --- | --- |
+  | `exgentic_tau2_airline` | 0.9869 | **0.7105** | **254.2** blocks | 0.1196 |
+  | `qwen_code` | 0.5791 | **0.4790** | **58.6** blocks | 0.0809 |
+  | `exgentic_swebench` | 0.9941 | **0.4599** | **803.7** blocks | 0.3523 |
+  `eta²` **collapses** from turn-1 to deepest reach on all three, and turn count is close to
+  independent of the root everywhere (0.08-0.35). The within-root spread of deepest reach is
+  **59-804 blocks — wider than the runs it would have to survive** on every trace. So if scattered
+  reach were what produced attrition, **the trace would have attrition too, and it does not**: the
+  trace's departures are not synchronised by reach being a property of the root, and no per-root reach
+  law can reproduce a hazard of zero. Stating reach per root is therefore refuted **before** being
+  built, and the mechanism that gives a real trace its near-zero hazard is still unidentified.
 - **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
   measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
   sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first

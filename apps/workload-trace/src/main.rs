@@ -1810,14 +1810,20 @@ fn print_path_budget(
     }
 }
 
-/// What [`root_path_eta2`] measured.
+/// One per-session quantity decomposed **between** and **within** roots.
+///
+/// Every "is this a property of the root?" question is this same decomposition, so it is computed
+/// once here and named by its caller rather than per quantity: turn-1 path length (FR-054j) and a
+/// session's deepest reach (FR-054l) both read it. This file has already had three copies of one
+/// arithmetic disagree by a level, which is why there is one.
 #[derive(Debug, Clone)]
-struct RootPathShare {
-    /// Between-root share of the variance in turn-1 path length.
+struct RootAnova {
+    /// Between-root share of the variance — `eta²`.
     eta2: f64,
     sessions: u64,
     roots: usize,
-    mean_turn1_path: f64,
+    /// Grand mean of the quantity over sessions.
+    mean: f64,
     /// Per root: sessions, mean turn-1 path length, and the within-root standard deviation.
     ///
     /// `eta²` is one number over this table, and one number cannot say whether a two-level draw
@@ -1836,33 +1842,72 @@ struct RootLevel {
     sd: f64,
 }
 
-/// The between-root share of the variance in turn-1 path length — `eta²` (FR-054j).
+/// One session's shape, as the root-correlation diagnostics need it.
+///
+/// Turn-1 is the **lowest-numbered** turn, never the first arrival — a disordered session's first
+/// arrival is mid-conversation, a trap already recorded for `private_depth`. The root is that turn's
+/// first block, which is the binding the emitted root layer uses.
+#[derive(Debug, Clone, Copy)]
+struct SessionReach {
+    turn1: u32,
+    root: workload_model::keys::CacheKey,
+    /// Turn-1's path length in blocks.
+    turn1_blocks: f64,
+    /// The DEEPEST turn's path length: how far down the trunk this session ever walks.
+    ///
+    /// The trunk is re-walked from the root every turn, so a node at depth `d` is reached if ANY
+    /// turn reaches it. This is therefore the depth at which the session stops contributing to the
+    /// trunk's fan-in — the quantity attrition is made of.
+    deepest_blocks: f64,
+    turns: f64,
+}
+
+/// Per-session root, turn-1 length, deepest reach and turn count.
 ///
 /// Measured here rather than in `fit::sessions` because `SessionShapes` accumulates per-session
 /// shapes and does not observe **root identity**: a root is a property of a session's path.
 /// Teaching it about roots for one statistic is the larger change, and measuring it here keeps the
-/// emitted parameter and the diagnostic below as one computation rather than two that could
+/// emitted parameter and the diagnostics below as one computation rather than two that could
 /// disagree.
-///
-/// Turn-1 is the **lowest-numbered** turn, never the first arrival — a disordered session's first
-/// arrival is mid-conversation, a trap already recorded for `private_depth`.
-fn root_path_eta2(invocations: &[read::NormalisedInvocation]) -> Option<RootPathShare> {
-    use workload_model::keys::CacheKey;
+fn session_reaches(
+    invocations: &[read::NormalisedInvocation],
+) -> workload_model::stats::FastMap<u32, SessionReach> {
     use workload_model::stats::FastMap;
 
-    let mut first: FastMap<u32, (u32, CacheKey, usize)> = FastMap::default();
+    let mut per: FastMap<u32, SessionReach> = FastMap::default();
     for inv in invocations {
         if inv.blocks.is_empty() {
             continue;
         }
-        let e = first
-            .entry(inv.session.0)
-            .or_insert((u32::MAX, inv.blocks[0], 0));
-        if inv.turn <= e.0 {
-            *e = (inv.turn, inv.blocks[0], inv.blocks.len());
+        let len = inv.blocks.len() as f64;
+        let e = per.entry(inv.session.0).or_insert(SessionReach {
+            turn1: u32::MAX,
+            root: inv.blocks[0],
+            turn1_blocks: 0.0,
+            deepest_blocks: 0.0,
+            turns: 0.0,
+        });
+        // Ties on the lowest turn number resolve to the last one seen, as the turn-1 measurement
+        // has always done.
+        if inv.turn <= e.turn1 {
+            e.turn1 = inv.turn;
+            e.root = inv.blocks[0];
+            e.turn1_blocks = len;
         }
+        e.deepest_blocks = e.deepest_blocks.max(len);
+        e.turns += 1.0;
     }
-    if first.len() < 2 {
+    per
+}
+
+/// The between-root variance decomposition of one per-session quantity.
+///
+/// `obs` is `(root key, value)` per session. `None` when fewer than two sessions carry the
+/// quantity, which is when neither `eta²` nor a per-root spread means anything.
+fn root_anova(obs: &[(u64, f64)]) -> Option<RootAnova> {
+    use workload_model::stats::FastMap;
+
+    if obs.len() < 2 {
         return None;
     }
     // (count, sum, sum of squares) per root: the squares cost nothing here and are what turn the
@@ -1870,9 +1915,8 @@ fn root_path_eta2(invocations: &[read::NormalisedInvocation]) -> Option<RootPath
     let mut by_root: FastMap<u64, (u64, f64, f64)> = FastMap::default();
     let mut n = 0u64;
     let mut sum = 0.0f64;
-    for (_, root, len) in first.values() {
-        let l = *len as f64;
-        let e = by_root.entry(root.0).or_insert((0, 0.0, 0.0));
+    for (root, l) in obs {
+        let e = by_root.entry(*root).or_insert((0, 0.0, 0.0));
         e.0 += 1;
         e.1 += l;
         e.2 += l * l;
@@ -1884,10 +1928,7 @@ fn root_path_eta2(invocations: &[read::NormalisedInvocation]) -> Option<RootPath
         .values()
         .map(|(c, s, _)| *c as f64 * (s / *c as f64 - grand).powi(2))
         .sum();
-    let total: f64 = first
-        .values()
-        .map(|(_, _, len)| (*len as f64 - grand).powi(2))
-        .sum();
+    let total: f64 = obs.iter().map(|(_, l)| (l - grand).powi(2)).sum();
     let mut levels: Vec<RootLevel> = by_root
         .values()
         .map(|(c, s, sq)| {
@@ -1909,7 +1950,7 @@ fn root_path_eta2(invocations: &[read::NormalisedInvocation]) -> Option<RootPath
     // Descending by population: the roots that carry the sessions are the ones a reader needs, and
     // a stable order makes two runs of the report comparable.
     levels.sort_by(|a, b| b.sessions.cmp(&a.sessions).then(b.mean.total_cmp(&a.mean)));
-    Some(RootPathShare {
+    Some(RootAnova {
         eta2: if total > 0.0 {
             (between / total).clamp(0.0, 1.0)
         } else {
@@ -1917,9 +1958,16 @@ fn root_path_eta2(invocations: &[read::NormalisedInvocation]) -> Option<RootPath
         },
         sessions: n,
         roots: by_root.len(),
-        mean_turn1_path: grand,
+        mean: grand,
         by_root: levels,
     })
+}
+
+/// Turn-1 path length decomposed by root — the FR-054j measurement.
+fn root_path_eta2(invocations: &[read::NormalisedInvocation]) -> Option<RootAnova> {
+    let per = session_reaches(invocations);
+    let obs: Vec<(u64, f64)> = per.values().map(|r| (r.root.0, r.turn1_blocks)).collect();
+    root_anova(&obs)
 }
 
 /// Report whether turn-1 path length is a property of the **root**, and what was fitted from it.
@@ -1958,7 +2006,7 @@ fn print_root_path_correlation(
     );
     println!(
         "    sessions {}, roots {}, mean turn-1 path {:.1} blocks, eta^2 {:.4}",
-        m.sessions, m.roots, m.mean_turn1_path, m.eta2
+        m.sessions, m.roots, m.mean, m.eta2
     );
     // Compared against the GLOBAL shortest path, not each root's own sessions, because the census
     // rows do not carry the root key. So it is an UPPER BOUND on the real violation count, and a
@@ -1973,6 +2021,95 @@ fn print_root_path_correlation(
         root_preamble.len()
     );
     print_within_root_spread(&m);
+    print_root_reach(invocations, trace_rows);
+}
+
+/// Is a session's DEEPEST reach a property of the root, the way its turn-1 depth is? (FR-054l)
+///
+/// FR-054j states each root's turn-1 level instead of drawing it, and that fixed the root preamble
+/// exactly (124 blocks against the trace's 124 on `exgentic_tau2_airline`). It cannot touch the
+/// trunk **below** turn-1 depth, which is reached only by later turns — and their count and growth
+/// are drawn from population marginals with no reference to the root. So if reach is a property of
+/// the root too, the model scatters departures across deep runs where the trace synchronises them,
+/// which is what the structural gate measures as **attrition**: 4129 of 6307 deep segments on
+/// `qwen_code` against the trace's 29, and a fitted run length of 136 blocks realised as 2.
+///
+/// The decisive figure is not `eta²` on its own but the **within-root spread against the length of
+/// the runs it has to survive**: a run is chopped by attrition if the sessions walking it stop at
+/// different depths, so a within-root sd larger than the trace's median deep run length is enough
+/// to fragment every one of them, whatever `eta²` says.
+fn print_root_reach(
+    invocations: &[read::NormalisedInvocation],
+    trace_rows: &[workload_model::fit::segments::SegmentRow],
+) {
+    let per = session_reaches(invocations);
+    let quantity = |f: &dyn Fn(&SessionReach) -> f64| {
+        let obs: Vec<(u64, f64)> = per.values().map(|r| (r.root.0, f(r))).collect();
+        root_anova(&obs)
+    };
+    let Some(turn1) = quantity(&|r| r.turn1_blocks) else {
+        return;
+    };
+    let Some(deepest) = quantity(&|r| r.deepest_blocks) else {
+        return;
+    };
+    let Some(turns) = quantity(&|r| r.turns) else {
+        return;
+    };
+    println!(
+        "\n  root vs REACH — is a session's DEEPEST turn a property of the root, as turn 1 is?\n  \
+         the trunk below turn-1 depth is walked only by later turns, whose count and growth are\n  \
+         drawn independently of the root. A within-root spread wider than the runs down there is\n  \
+         enough to chop every one of them by attrition, however high eta^2 is."
+    );
+    println!(
+        "        quantity                     eta^2       mean    sd p50   sd/mean p50   roots>1"
+    );
+    // `sd` summaries over roots holding more than one session only: a lone session states no
+    // spread, and counting it as `sd = 0` biases every median toward "tight".
+    let row = |name: &str, m: &RootAnova| {
+        let multi: Vec<&RootLevel> = m.by_root.iter().filter(|r| r.sessions > 1).collect();
+        let med = |mut v: Vec<f64>| {
+            if v.is_empty() {
+                return f64::NAN;
+            }
+            v.sort_by(f64::total_cmp);
+            v[(v.len() - 1) / 2]
+        };
+        let sd = med(multi.iter().map(|r| r.sd).collect());
+        let cv = med(multi
+            .iter()
+            .map(|r| if r.mean > 0.0 { r.sd / r.mean } else { 0.0 })
+            .collect());
+        println!(
+            "        {name:<28} {:>6.4} {:>10.1} {sd:>9.1} {cv:>13.4} {:>9}",
+            m.eta2,
+            m.mean,
+            multi.len()
+        );
+    };
+    row("turn-1 path length", &turn1);
+    row("deepest turn's path length", &deepest);
+    row("turns per session", &turns);
+    // The scale that makes the spread mean something: the runs a deep departure would chop.
+    let mut deep: Vec<u64> = trace_rows
+        .iter()
+        .filter(|r| r.start_depth >= 32)
+        .map(|r| u64::from(r.length))
+        .collect();
+    deep.sort_unstable();
+    if deep.is_empty() {
+        return;
+    }
+    let run_med = deep[(deep.len() - 1) / 2];
+    let multi: Vec<&RootLevel> = deepest.by_root.iter().filter(|r| r.sessions > 1).collect();
+    let over = multi.iter().filter(|r| r.sd > run_med as f64).count();
+    println!(
+        "    for scale: the trace's median shared run below depth 32 is {run_med} blocks, and \
+         {over} of {}\n    roots spread their deepest reach wider than that — every run those roots \
+         walk is\n    fragmentable by attrition unless reach is stated per root rather than drawn",
+        multi.len()
+    );
 }
 
 /// Is the spread of turn-1 path length **within** a root a constant number of blocks, or a constant
@@ -1990,7 +2127,7 @@ fn print_root_path_correlation(
 /// constant, and the correlation between a root's level and its spread says the same thing a second
 /// way. Both are reported, along with the weight of evidence behind them, because a corpus trace
 /// can have very few roots with more than one session.
-fn print_within_root_spread(m: &RootPathShare) {
+fn print_within_root_spread(m: &RootAnova) {
     // A root with one session states no spread, and including it as `sd = 0` would bias every
     // summary below toward "additive, and tiny".
     let multi: Vec<&RootLevel> = m.by_root.iter().filter(|r| r.sessions > 1).collect();
@@ -2099,6 +2236,14 @@ struct BandShape {
     /// split together. So attrition-heavy bands say the model's departures are spread across a
     /// run where the trace's are synchronised to its end.
     attrition: u64,
+    /// Total shared blocks in the band — the DENOMINATOR attrition has to be read against.
+    ///
+    /// A count of attrition events is not comparable between two censuses whose runs are different
+    /// lengths: a band whose runs are one block long has no interior for a departure to land in, so
+    /// it scores zero attrition however unsynchronised its sessions are. That is not a hypothesis —
+    /// `exgentic_tau2_airline`'s trace runs below depth 32 have a median length of exactly 1, and
+    /// its zero attrition was read as an invariant. The per-block hazard is the comparable form.
+    blocks: u64,
 }
 
 /// Summarise a census's rows into the same bands the fit uses.
@@ -2134,6 +2279,7 @@ fn band_shapes(rows: &[workload_model::fit::segments::SegmentRow]) -> Vec<(u32, 
                         .iter()
                         .filter(|r| r.ends == workload_model::fit::segments::SegmentEnd::Attrition)
                         .count() as u64,
+                    blocks: in_band.iter().map(|r| u64::from(r.length)).sum(),
                 },
             )
         })
@@ -2198,10 +2344,12 @@ fn print_structure_diff(
          ended: fanout means the structure branched, attrition means sessions stopped arriving\n  \
          part-way along it. A trace preamble ends in FANOUT — every session walks it, then they\n  \
          split together. Attrition-heavy means departures are spread across a run, not \
-         synchronised."
+         synchronised.\n  \
+         at/kb is attrition per 1000 shared blocks — the COMPARABLE form, since a band whose runs\n  \
+         are one block long has no interior for a mid-run departure to land in."
     );
     println!(
-        "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}  {:>9} {:>9}",
+        "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}  {:>7} {:>7}  {:>9} {:>9}",
         "depths",
         "segs T",
         "segs S",
@@ -2211,6 +2359,8 @@ fn print_structure_diff(
         "fanin~S",
         "attrit T",
         "attrit S",
+        "at/kb T",
+        "at/kb S",
         "fanout T",
         "fanout S"
     );
@@ -2219,8 +2369,16 @@ fn print_structure_diff(
         if ts.segments == 0 && ps.segments == 0 {
             continue;
         }
+        // Per 1000 blocks, so the two sides are comparable when their run lengths are not.
+        let hazard = |s: &BandShape| {
+            if s.blocks == 0 {
+                f64::NAN
+            } else {
+                s.attrition as f64 * 1000.0 / s.blocks as f64
+            }
+        };
         println!(
-            "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}  {:>9} {:>9}",
+            "    {:>8}  {:>8} {:>8}  {:>6} {:>6}  {:>8} {:>8}  {:>9} {:>9}  {:>7.1} {:>7.1}  {:>9} {:>9}",
             format!("{lo}+"),
             ts.segments,
             ps.segments,
@@ -2230,6 +2388,8 @@ fn print_structure_diff(
             ps.fan_in_med,
             ts.attrition,
             ps.attrition,
+            hazard(ts),
+            hazard(ps),
             ts.fanout,
             ps.fanout
         );
@@ -2237,6 +2397,27 @@ fn print_structure_diff(
     let (tt, pt): (u64, u64) = (
         t.iter().map(|(_, s)| s.segments).sum(),
         p.iter().map(|(_, s)| s.segments).sum(),
+    );
+    let (tb, pb): (u64, u64) = (
+        t.iter().map(|(_, s)| s.blocks).sum(),
+        p.iter().map(|(_, s)| s.blocks).sum(),
+    );
+    let (ta, pa): (u64, u64) = (
+        t.iter().map(|(_, s)| s.attrition).sum(),
+        p.iter().map(|(_, s)| s.attrition).sum(),
+    );
+    let rate = |a: u64, b: u64| {
+        if b == 0 {
+            f64::NAN
+        } else {
+            a as f64 * 1000.0 / b as f64
+        }
+    };
+    println!(
+        "    whole trunk: trace {ta} attrition over {tb} shared blocks ({:.2}/kblk), synthetic \
+         {pa} over {pb} ({:.2}/kblk)",
+        rate(ta, tb),
+        rate(pa, pb)
     );
     println!(
         "    total shared segments: trace {tt}, synthetic {pt}{}",
@@ -2909,5 +3090,74 @@ mod tests {
         assert!(parse_tolerances(&["sharing_depth=x".into()])
             .unwrap_err()
             .contains("is not a number"));
+    }
+
+    /// `eta²` is 1 when a root fully determines the quantity and 0 when it says nothing, and the
+    /// per-root table carries the level and spread a two-level draw would need.
+    ///
+    /// The arithmetic is shared by every "is this a property of the root?" measurement — turn-1 depth
+    /// (FR-054j) and deepest reach (FR-054l) — so a defect here would move a conclusion on both, and
+    /// this file has already had three copies of one such computation disagree by a level.
+    #[test]
+    fn root_anova_separates_between_root_from_within_root_variance() {
+        // Two roots, no spread inside either: root identity explains everything.
+        let pinned = root_anova(&[(1, 10.0), (1, 10.0), (2, 90.0), (2, 90.0)]).expect("two roots");
+        assert!((pinned.eta2 - 1.0).abs() < 1e-12, "{}", pinned.eta2);
+        assert_eq!(pinned.roots, 2);
+        assert_eq!(pinned.sessions, 4);
+        assert!((pinned.mean - 50.0).abs() < 1e-12);
+        // Sorted by population, then level: both roots hold two sessions with sd 0.
+        assert!(pinned.by_root.iter().all(|r| r.sd == 0.0));
+
+        // The same spread on both roots with the same level: root identity explains nothing.
+        let flat = root_anova(&[(1, 10.0), (1, 90.0), (2, 10.0), (2, 90.0)]).expect("two roots");
+        assert!(flat.eta2 < 1e-12, "{}", flat.eta2);
+        // Sample sd of {10, 90}, which is what a pooled residual would have to reproduce.
+        assert!((flat.by_root[0].sd - 40.0_f64 * 2.0_f64.sqrt()).abs() < 1e-9);
+
+        // A single session states neither, and is refused rather than reported as eta^2 = 0.
+        assert!(root_anova(&[(1, 10.0)]).is_none());
+    }
+
+    /// The attrition denominator is the band's shared blocks, so two censuses whose runs are
+    /// different lengths are comparable (FR-054l).
+    ///
+    /// Counting attrition *segments* alone is what let `exgentic_tau2_airline`'s zero be read as an
+    /// invariant when its deep runs have a median length of exactly 1 — a band of one-block runs has
+    /// no interior for a mid-run departure to land in.
+    #[test]
+    fn band_shapes_carry_the_shared_blocks_attrition_is_read_against() {
+        use workload_model::fit::segments::{SegmentEnd, SegmentRow};
+        let row = |start_depth, length, ends| SegmentRow {
+            start_depth,
+            length,
+            fan_in: 3,
+            ends,
+            out_degree: 1,
+            shared_children: 0,
+            child_fan_in_sum: 0,
+            shared_fan_in_sum: 0,
+            child_fan_in_sq: 0.0,
+            child_fan_in_sq_all: 0.0,
+            top_child_fan_in: 0,
+        };
+        // One 100-block run losing a session, and four 1-block runs that cannot: same band.
+        let rows = vec![
+            row(40, 100, SegmentEnd::Attrition),
+            row(41, 1, SegmentEnd::Fanout),
+            row(42, 1, SegmentEnd::Fanout),
+            row(43, 1, SegmentEnd::Fanout),
+            row(44, 1, SegmentEnd::Fanout),
+        ];
+        let band = band_shapes(&rows)
+            .into_iter()
+            .find(|(lo, s)| *lo == 32 && s.segments > 0)
+            .expect("band 32+")
+            .1;
+        assert_eq!(band.segments, 5);
+        assert_eq!(band.attrition, 1);
+        assert_eq!(band.blocks, 104);
+        // 1 in 5 segments, but 1 in 104 blocks: the two readings differ by 20x on the same data.
+        assert!((band.attrition as f64 * 1000.0 / band.blocks as f64 - 9.615).abs() < 0.001);
     }
 }

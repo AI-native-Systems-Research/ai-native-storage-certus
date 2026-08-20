@@ -855,6 +855,58 @@ below the root.** It is the mechanism the 2026-08-14 fan-out named as the one th
 the corpus has and the model has none of, and it has still not been built. Both failure directions,
 and both traces' `sharing_depth`, follow from it.
 
+#### Attrition needs a denominator, and reach is not what synchronises it (FR-054l)
+
+The attrition finding above was stated as a **count** of segments, and a count is not comparable
+between two censuses whose runs are different lengths. A band whose runs are one block long has no
+interior for a mid-run departure to land in, so it scores zero attrition however unsynchronised its
+sessions are — and `exgentic_tau2_airline`'s trace runs below depth 32 have a median length of
+exactly **1**. The comparable form is the **hazard per shared block**: attrition events over the
+total shared blocks of the band, which is a rate over trie nodes and so does not depend on how the
+nodes were segmented.
+
+Normalised, the invariant is not an artefact. It is stronger than the counts suggested:
+
+| trace | trace attrition | synthetic | ratio |
+| --- | --- | --- | --- |
+| `exgentic_tau2_airline` | 0 over 16188 shared blocks (**0.00**/kblk) | 154 over 18355 (**8.39**) | >140x |
+| `qwen_code` | 254 over 507183 (**0.50**/kblk) | 6893 over 160659 (**42.90**) | 86x |
+| `exgentic_swebench` | 0 over 13794 (**0.00**/kblk) | 69 over 12238 (**5.64**) | >120x |
+
+`exgentic_swebench` settles the exposure question by itself: its trace runs below depth 32 have a
+median length of **736 blocks** at fan-in 68, and not one of them loses a session part-way along.
+So the trace really does have a near-zero departure hazard where it has ample opportunity to show
+one, and the model's is about **100x** larger.
+
+**But the reason this work has been giving for it is wrong.** FR-054i, FR-054j and FR-054k all rest
+on the same story: a trace correlates path length with the root while the model draws it
+independently, so departures are synchronised in one and scattered in the other. Attrition is made of
+how deep a session *eventually* goes, and the trunk below turn-1 depth is walked only by later turns,
+whose count and growth carry no root term at all. Decomposed by root the same way `eta²` decomposes
+turn-1 depth:
+
+| trace | `eta²` turn-1 | `eta²` deepest | within-root sd of deepest | `eta²` turns |
+| --- | --- | --- | --- | --- |
+| `exgentic_tau2_airline` | 0.9869 | **0.7105** | **254.2** blocks | 0.1196 |
+| `qwen_code` | 0.5791 | **0.4790** | **58.6** blocks | 0.0809 |
+| `exgentic_swebench` | 0.9941 | **0.4599** | **803.7** blocks | 0.3523 |
+
+`eta²` **collapses** from turn-1 to deepest reach on all three traces, and turn count is close to
+independent of the root everywhere. More decisively, the **within-root** spread of deepest reach is
+59-804 blocks, wider than the runs it would have to survive on every trace: on
+`exgentic_swebench` all 18 multi-session roots spread their reach wider than the 196-block median
+deep run. **If scattered reach were what produced attrition, the trace would have attrition too.**
+It has none. So reach is not what synchronises a real trace's departures, no per-root reach law can
+reproduce a hazard of zero, and stating reach per root is refuted before being built — the same shape
+of fix as FR-054j, applied one level down, and measurably not available.
+
+What remains is that the trace's shared *mass* and its session endings do not overlap the way the
+model's do: on `qwen_code` the model's trunk holds **160659 shared blocks against the trace's
+507183** — a third of the mass — while carrying **1.37x** as many segments. The model's sharing is a
+thin deep spine laid exactly where sessions are ending; the trace's is thick and sits above them.
+That is the same broad-and-thin against narrow-and-thick statement as the section above, and it is
+still the unbuilt mechanism.
+
 ### The achievable floor — the derivation behind FR-057c, and what it says about the gate
 
 The tolerances of FR-057b were calibrated from the generator against itself across seeds. That is a
