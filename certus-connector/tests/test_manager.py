@@ -58,14 +58,13 @@ class PrepareStoreOutput:
 @dataclass
 class OffloadingEvent:
     keys: list
-    block_size: int
     medium: str
     removed: bool
 
 
 class OffloadingManager(ABC):
     @abstractmethod
-    def lookup(self, keys): ...
+    def lookup(self, key, req_context=None): ...
     @abstractmethod
     def prepare_load(self, keys): ...
     def touch(self, keys): return
@@ -118,7 +117,7 @@ class TestTieredManager:
 
     def test_lookup_empty(self, manager):
         keys = [make_key(i) for i in range(5)]
-        assert manager.lookup(keys) == 0
+        assert all(manager.lookup(k) is False for k in keys)
 
     def test_store_and_lookup(self, manager):
         keys = [make_key(i) for i in range(3)]
@@ -129,10 +128,10 @@ class TestTieredManager:
         assert len(output.store_spec.locations) == 3
 
         # Not ready before complete_store
-        assert manager.lookup(keys) == 0
+        assert all(manager.lookup(k) is False for k in keys)
 
         manager.complete_store(keys, success=True)
-        assert manager.lookup(keys) == 3
+        assert all(manager.lookup(k) is True for k in keys)
 
     def test_store_allocates_both_tiers(self, manager):
         """Store through CPU gives both NVMe slab and DRAM slot."""
@@ -159,13 +158,15 @@ class TestTieredManager:
         assert dram_count <= config.max_dram_slots
         manager.complete_load(keys)
 
-    def test_lookup_partial_prefix(self, manager):
+    def test_lookup_per_key_presence(self, manager):
+        # vLLM's current contract is per-key: lookup(key) -> bool | None.
         k0, k1, k2 = make_key(0), make_key(1), make_key(2)
         output = manager.prepare_store([k0, k1])
         manager.complete_store([k0, k1], success=True)
 
-        assert manager.lookup([k0, k1, k2]) == 2
-        assert manager.lookup([k2, k0]) == 0
+        assert manager.lookup(k0) is True
+        assert manager.lookup(k1) is True
+        assert manager.lookup(k2) is False  # never stored
 
     def test_eviction_frees_both_tiers(self, manager):
         """Eviction frees both NVMe slab and DRAM slot."""
@@ -185,7 +186,7 @@ class TestTieredManager:
         manager.complete_store(new_keys, success=True)
 
         # Evicted blocks gone
-        assert manager.lookup([make_key(0)]) == 0
+        assert manager.lookup(make_key(0)) is False
 
     def test_eviction_skips_pinned(self, manager):
         """Pinned blocks (ref_cnt > 0) are not evicted."""
@@ -217,7 +218,7 @@ class TestTieredManager:
         keys = [make_key(0)]
         manager.prepare_store(keys)
         manager.complete_store(keys, success=False)
-        assert manager.lookup(keys) == 0
+        assert manager.lookup(make_key(0)) is False
 
     def test_touch_updates_lru(self, manager):
         """Touched blocks are not evicted first."""
@@ -290,7 +291,7 @@ class TestTieredManager:
         assert make_key(0) in demoted
 
         # Block still on NVMe, just no DRAM
-        assert mgr.lookup(keys) == 1
+        assert mgr.lookup(make_key(0)) is True
         spec = mgr.prepare_load(keys)
         assert spec.locations[0].dram_slot is None
         assert spec.locations[0].nvme_slab is not None
@@ -316,7 +317,7 @@ class TestTieredManager:
         assert output is not None
         assert len(output.evicted_keys) == 0
         mgr.complete_store(keys, success=True)
-        assert mgr.lookup(keys) == 100
+        assert all(mgr.lookup(k) is True for k in keys)
 
     def test_no_file_paths(self, manager):
         """Verify no file paths anywhere in the spec."""
