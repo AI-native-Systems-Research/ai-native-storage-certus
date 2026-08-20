@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inference Workload → Storage IO Pattern Mapping</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a2e;
+  --accent: #2563eb;
+  --accent2: #7c3aed;
+  --border: #e2e8f0;
+  --code-bg: #f8fafc;
+  --table-header: #f1f5f9;
+  --success: #059669;
+  --warning: #d97706;
+  --danger: #dc2626;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #e2e8f0;
+    --accent: #60a5fa;
+    --accent2: #a78bfa;
+    --border: #334155;
+    --code-bg: #1e293b;
+    --table-header: #1e293b;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.7;
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+h1 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  color: var(--accent);
+  border-bottom: 3px solid var(--accent);
+  padding-bottom: 0.5rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin-top: 2.5rem;
+  margin-bottom: 1rem;
+  color: var(--accent2);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3rem;
+}
+h3 {
+  font-size: 1.2rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+h4 { font-size: 1.05rem; margin-top: 1.2rem; margin-bottom: 0.4rem; }
+p { margin-bottom: 0.8rem; }
+ul, ol { margin-left: 1.5rem; margin-bottom: 0.8rem; }
+li { margin-bottom: 0.3rem; }
+code {
+  background: var(--code-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  font-size: 0.9em;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  overflow-x: auto;
+  margin-bottom: 1rem;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+pre code { background: none; padding: 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+  font-size: 0.9em;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+th {
+  background: var(--table-header);
+  font-weight: 600;
+}
+tr:hover { background: var(--code-bg); }
+hr {
+  border: none;
+  border-top: 2px solid var(--border);
+  margin: 2rem 0;
+}
+strong { color: var(--accent); }
+.research-badge {
+  display: inline-block;
+  background: var(--accent);
+  color: white;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8em;
+  margin-bottom: 1rem;
+}
+.pattern-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem;
+  margin-bottom: 1rem;
+  background: var(--code-bg);
+}
+.pattern-card h3 { margin-top: 0; color: var(--accent); }
+.coverage-full { color: var(--success); font-weight: 600; }
+.coverage-partial { color: var(--warning); font-weight: 600; }
+.coverage-none { color: var(--danger); font-weight: 600; }
+.toc {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.2rem;
+  margin-bottom: 2rem;
+}
+.toc h3 { margin-top: 0; }
+.toc ul { list-style: none; margin-left: 0; }
+.toc li { margin-bottom: 0.2rem; }
+.toc a { color: var(--accent); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.store-load-diagram {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  font-family: monospace;
+  font-size: 0.85em;
+  overflow-x: auto;
+}
+</style>
+</head>
+<body>
+
+<h1>Inference Workload → Storage IO Pattern Mapping</h1>
+<p>Mapping high-level LLM inference serving behaviors to concrete storage access patterns for certus-api-bench.</p>
+<p><span class="research-badge">8 systems/papers investigated</span> FlexGen, InstInfer, InfiniGen, Mooncake, DistServe/Splitwise, Sarathi-Serve, BurstGPT, SpecInfer — plus vLLM/SGLang/llm-d source code analysis. No existing storage-level KV cache workload generator found in literature.</p>
+
+<div class="toc">
+<h3>Contents</h3>
+<ul>
+<li><a href="#s1">§1. KV Cache Prefill → Large Sequential Writes</a></li>
+<li><a href="#s2">§2. Cohort Sharing → Multiple Readers on Same Extent</a></li>
+<li><a href="#s3">§3. Decode Phase → Small Random Reads + Appends</a></li>
+<li><a href="#s4">§4. Eviction Pressure → Working Set Exceeding Capacity</a></li>
+<li><a href="#s5">§5. Shared Prefix → Unique Suffix (Compound Pattern)</a></li>
+<li><a href="#s6">§6. Additional Patterns (Validated via Research)</a></li>
+<li><a href="#s7">§7. Realistic Parameter Summary</a></li>
+<li><a href="#s8">§8. Proposed Bench Scenarios</a></li>
+<li><a href="#s9">§9. Research Findings & Sources</a></li>
+<li><a href="#s10">§10. BENCH_TARGET (vLLM Multi-Turn ShareGPT Replay)</a></li>
+<li><a href="#s11">§11. Synthetic Bench Versions (v1/v2/v3)</a></li>
+<li><a href="#store-load">Store vs Load: When Each Happens</a></li>
+<li><a href="#roadmap">Proposed Bench Version Roadmap (v4–v8)</a></li>
+</ul>
+</div>
+
+<hr>
+
+<h2 id="s1">1. KV Cache Prefill → Large Sequential Writes</h2>
+<div class="pattern-card">
+<h3>Inference Behavior</h3>
+<p>A new request arrives. The model processes the prompt tokens in one forward pass, generating KV cache entries for all prompt tokens simultaneously.</p>
+<h3>Storage Pattern</h3>
+<ul>
+<li>Write size: 2–80 MB per offloaded block (model-dependent)</li>
+<li>Access: Sequential within a request — blocks written in monotonically increasing index order</li>
+<li>Concurrency: Multiple requests prefilling simultaneously (continuous batching)</li>
+<li>Semantics: Write-once, content-addressed (dedup by hash)</li>
+<li>Burstiness: Prefill generates all blocks at once → burst of writes, then silence</li>
+</ul>
+</div>
+
+<table>
+<tr><th>Parameter</th><th>Typical Range</th><th>Notes</th></tr>
+<tr><td>Write size</td><td>2 MB (Llama-8B) – 80 MB (Llama-70B, factor=16)</td><td>Cross-layer layout</td></tr>
+<tr><td>Writes per prefill</td><td>64–512 blocks</td><td>1K–8K prompt tokens / 16 tokens per block</td></tr>
+<tr><td>Concurrent prefills</td><td>1–8</td><td>Limited by GPU memory</td></tr>
+<tr><td>Inter-arrival</td><td>Poisson or bursty</td><td>Depends on scheduler</td></tr>
+</table>
+
+<hr>
+
+<h2 id="s2">2. Cohort Sharing → Multiple Readers on Same Extent Range</h2>
+<div class="pattern-card">
+<h3>Inference Behavior</h3>
+<p>Multiple requests share a common system prompt or document prefix. The KV cache for this shared prefix is computed once and reused (prefix caching / RadixAttention).</p>
+<h3>Storage Pattern</h3>
+<ul>
+<li>Read size: Same block size as writes (2–80 MB per block)</li>
+<li>Access: N sessions all read the same set of blocks (the shared prefix)</li>
+<li>After shared prefix: each session diverges into unique blocks</li>
+<li>Sharing ratio: In real deployments, 60–90% of tokens can be shared prefix</li>
+</ul>
+<p><strong>Key insight</strong>: Shared prefix blocks are hot — read N times but written once. Primary caching opportunity.</p>
+</div>
+
+<table>
+<tr><th>Parameter</th><th>Typical Range</th><th>Notes</th></tr>
+<tr><td>Cohort size</td><td>2–64 sessions</td><td>Same system prompt or document</td></tr>
+<tr><td>Shared blocks</td><td>32–256 (512–4096 tokens)</td><td>System prompts: 1K–4K tokens</td></tr>
+<tr><td>Read concurrency</td><td>Up to cohort_size × blocks</td><td>All members reading simultaneously</td></tr>
+<tr><td>Divergence point</td><td>After shared_blocks</td><td>Fan-out pattern</td></tr>
+</table>
+
+<hr>
+
+<h2 id="s3">3. Decode Phase → Small Random Reads + Small Appends</h2>
+<div class="pattern-card">
+<h3>Inference Behavior</h3>
+<p>After prefill, the model generates tokens one at a time. Each new token requires reading all previous KV cache entries and appending one new KV entry.</p>
+<h3>Storage Pattern</h3>
+<ul>
+<li>Reads: If KV was evicted, reload full blocks on cache miss</li>
+<li>Writes: Accumulated until a full block (16 tokens) triggers a write</li>
+<li>Access: Random across active sessions (scheduler interleaves)</li>
+<li>Latency-critical: Each decode step blocks on KV availability</li>
+</ul>
+<p><strong>Note</strong>: In well-provisioned systems, decode rarely hits storage. When it does, it's latency-critical.</p>
+</div>
+
+<table>
+<tr><th>Parameter</th><th>Typical Range</th><th>Notes</th></tr>
+<tr><td>Read size per miss</td><td>2–80 MB (full block)</td><td>Whole block must be loaded</td></tr>
+<tr><td>Write accumulation</td><td>16 decode steps → 1 block</td><td>block_size = 16 tokens</td></tr>
+<tr><td>Active sessions</td><td>32–256 concurrent</td><td>Continuous batching</td></tr>
+<tr><td>IO pattern</td><td>Random read + sequential append</td><td>Mixed read/write</td></tr>
+</table>
+
+<hr>
+
+<h2 id="s4">4. Eviction Pressure → Working Set Exceeding Capacity</h2>
+<div class="pattern-card">
+<h3>Inference Behavior</h3>
+<p>GPU HBM and DRAM staging tiers are full. LRU/ARC eviction selects cold blocks to push down the tier hierarchy (GPU → DRAM → SSD).</p>
+<h3>Storage Pattern</h3>
+<ul>
+<li>Writes: Burst of eviction writes (scattered — LRU blocks are spatially random)</li>
+<li>Concurrent with: Hot-path reads (loading prefixes for new requests)</li>
+<li>Contention: Eviction writes compete with prefill reads on same NVMe devices</li>
+</ul>
+</div>
+
+<table>
+<tr><th>Parameter</th><th>Typical Range</th><th>Notes</th></tr>
+<tr><td>Eviction batch size</td><td>1–32 blocks per cycle</td><td>Watermark-based triggering</td></tr>
+<tr><td>Write pattern</td><td>Random (scattered)</td><td>Unlike sequential prefill writes</td></tr>
+<tr><td>Capacity ratio</td><td>1.2–5× over-subscription</td><td>working_set / cache_capacity</td></tr>
+<tr><td>Eviction frequency</td><td>Every 1–5ms under pressure</td><td>Per scheduling step</td></tr>
+</table>
+
+<hr>
+
+<h2 id="s5">5. Shared Prefix → Unique Suffix (The Compound Pattern)</h2>
+<div class="pattern-card">
+<h3>Inference Behavior</h3>
+<p>N sessions share a common tool output, document, or system prompt, then each continues with unique conversation. The canonical pattern for multi-user chat, RAG, tool-use, batch processing.</p>
+<h3>Storage Pattern</h3>
+<pre><code>Time →
+
+Session 1: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M₁]
+Session 2: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M₂]
+Session 3: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M₃]
+...
+Session N: [READ shared blocks 0..K] → [WRITE unique blocks K+1..K+M_N]</code></pre>
+</div>
+
+<table>
+<tr><th>Parameter</th><th>Typical Range</th><th>Notes</th></tr>
+<tr><td>N (cohort size)</td><td>4–64</td><td>Sessions sharing prefix</td></tr>
+<tr><td>K (shared blocks)</td><td>32–256</td><td>Shared prefix length</td></tr>
+<tr><td>M (unique blocks/session)</td><td>16–512</td><td>Varies by generation length</td></tr>
+<tr><td>Read amplification</td><td>N × K</td><td>Total shared reads</td></tr>
+<tr><td>Write parallelism</td><td>N independent streams</td><td>After divergence</td></tr>
+</table>
+
+<hr>
+
+<h2 id="s6">6. Additional Patterns (Validated via Research)</h2>
+
+<div class="pattern-card">
+<h3>6a. Chunked Prefill (Sarathi-Serve)</h3>
+<p>Long prompts split into fixed chunks (512–2048 tokens). Pattern: <strong>periodic medium write bursts interleaved with decode reads</strong>. Each chunk writes ~4 MB KV then yields to decode steps.</p>
+</div>
+
+<div class="pattern-card">
+<h3>6b. Speculative Decoding / Tree Verification (SpecInfer)</h3>
+<p>Branching factor 3–5×. Most branches rejected → write amplification. Pattern: <strong>high write + high discard (rollback), tree-structured reads</strong>.</p>
+</div>
+
+<div class="pattern-card">
+<h3>6c. Beam Search / Parallel Sampling</h3>
+<p>B beams share prefix, diverge at each step. <strong>Copy-on-write semantics</strong>: physical blocks shared via refcount. N×read of shared blocks per step, COW write only at divergence.</p>
+</div>
+
+<div class="pattern-card">
+<h3>6d. Continuous Batching Steady-State</h3>
+<p>No global prefill/decode phases. KV blocks allocated/freed <strong>asynchronously</strong>. Arrival bursts (10–100× variation per BurstGPT) → variable memory pressure. Pattern: <strong>mixed async alloc/free</strong>.</p>
+</div>
+
+<div class="pattern-card">
+<h3>6e. Multi-Turn Conversation Reuse</h3>
+<p>KV from prior turns persisted to storage. Pattern: <strong>large read burst at turn-start</strong> (reload prior conversation) → small appends. Growing read set over conversation lifetime.</p>
+</div>
+
+<div class="pattern-card">
+<h3>6f. Disaggregated Prefill-Decode (DistServe, Splitwise, Mooncake)</h3>
+<p>Storage = communication channel between nodes. Pattern: <strong>one-shot bulk write (prefill node) → one-shot bulk read (decode node)</strong>. Llama-70B at 4K tokens ≈ 2.5–5 GB per request. Latency-critical.</p>
+</div>
+
+<div class="pattern-card">
+<h3>6g. Selective/Sparse KV Retrieval (InfiniGen)</h3>
+<p>Only 10–30% of KV entries are important per attention step. Pattern: <strong>sparse random reads</strong>, not bulk sequential scan. Fundamentally different from full-prefix read.</p>
+</div>
+
+<div class="pattern-card">
+<h3>6h. LRU Eviction with Prefix Awareness (vLLM)</h3>
+<p>Freed blocks added in <strong>reverse order</strong>: unique-suffix evicted first, shared-prefix preserved longer. Cold reads disproportionately hit unique-suffix blocks.</p>
+</div>
+
+<hr>
+
+<h2 id="s7">7. Realistic Parameter Summary</h2>
+<table>
+<tr><th>Dimension</th><th>Value</th><th>Source</th></tr>
+<tr><td>Block size (cross-layer)</td><td>2–5 MB (TP=1), 0.25–0.6 MB (TP=8)</td><td>kv_IO_pattern.md formula</td></tr>
+<tr><td>Offloaded block (factor=16)</td><td>32–80 MB</td><td>16 GPU blocks bundled</td></tr>
+<tr><td>Offloaded block (factor=1)</td><td>2–5 MB</td><td>1 GPU block</td></tr>
+<tr><td>Tokens per block</td><td>16 (default)</td><td>vLLM block_size config</td></tr>
+<tr><td>Concurrent readers (llm-d)</td><td>48 threads (64 × 0.75)</td><td>kv_IO_pattern.md</td></tr>
+<tr><td>Prefix hit ratio (production)</td><td>60–90%</td><td>RadixAttention / SGLang papers</td></tr>
+<tr><td>Typical prompt length</td><td>1K–8K tokens</td><td>Depends on use case</td></tr>
+<tr><td>Typical generation length</td><td>256–4K tokens</td><td>Depends on use case</td></tr>
+<tr><td>Scheduling step interval</td><td>1–10 ms</td><td>Continuous batching cadence</td></tr>
+<tr><td>Active requests</td><td>32–256</td><td>GPU memory dependent</td></tr>
+</table>
+
+<hr>
+
+<h2 id="s8">8. Proposed Bench Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>Primary Pattern</th><th>Key Stress Point</th></tr>
+<tr><td><code>prefill-burst</code></td><td>§1</td><td>Sequential write throughput, concurrent streams</td></tr>
+<tr><td><code>prefix-sharing</code></td><td>§2 + §5</td><td>Read amplification, cache hit rate</td></tr>
+<tr><td><code>decode-steady</code></td><td>§3</td><td>Mixed random read + small append, latency</td></tr>
+<tr><td><code>eviction-thrash</code></td><td>§4</td><td>Read/write contention, LRU churn</td></tr>
+<tr><td><code>cohort-diverge</code></td><td>§5</td><td>Shared→unique transition, fan-out</td></tr>
+<tr><td><code>disaggregated-pipeline</code></td><td>§6f</td><td>Producer-consumer, tail latency</td></tr>
+<tr><td><code>multi-turn-grow</code></td><td>§6e</td><td>Growing read set, conversation lifecycle</td></tr>
+</table>
+
+<hr>
+
+<h2 id="s9">9. Research Findings & Sources</h2>
+
+<h3>Key Findings</h3>
+<ul>
+<li><strong>No existing KV cache storage workload generator exists.</strong> certus-api-bench would be first.</li>
+<li><strong>FlexGen</strong>: LP-scheduled "zig-zag" bulk transfers. Throughput-oriented (offline), not latency.</li>
+<li><strong>Write amplification</strong> from speculative decoding: branching factor 3–5× writes.</li>
+<li><strong>Temporal profile</strong>: Prefill = burst (2.5 GB in 100–500ms). Decode = steady 20–50ms/token. Read-dominated ~400:1.</li>
+<li><strong>Sharing ratios</strong>: System prompts (200–2000 tokens) 100% shared. &gt;50% prefix hit in production.</li>
+<li><strong>Selective retrieval</strong>: Only 10–30% of KV entries important per attention step.</li>
+</ul>
+
+<h3>Sources</h3>
+<table>
+<tr><th>System</th><th>Venue</th><th>Relevance</th></tr>
+<tr><td>FlexGen</td><td>ICML 2023</td><td>SSD offload scheduling (LP zig-zag), throughput-oriented</td></tr>
+<tr><td>InstInfer</td><td>ASPLOS 2024</td><td>Computational storage, KV stays on flash, P2P attention</td></tr>
+<tr><td>InfiniGen</td><td>OSDI 2024</td><td>Selective KV retrieval, sparse reads (10–30%)</td></tr>
+<tr><td>Mooncake</td><td>Kimi/Moonshot 2024</td><td>Production disaggregated, GPU/CPU/SSD tiers</td></tr>
+<tr><td>DistServe/Splitwise</td><td>OSDI 2024</td><td>Disaggregated prefill-decode, storage as cross-node channel</td></tr>
+<tr><td>Sarathi-Serve</td><td>2024</td><td>Chunked prefill, temporal interleaving</td></tr>
+<tr><td>BurstGPT</td><td>Azure traces</td><td>10.3M requests, 213 days, arrival patterns</td></tr>
+<tr><td>SpecInfer</td><td>2024</td><td>Tree-based speculative decoding, branching IO impact</td></tr>
+</table>
+
+<hr>
+
+<h2 id="s10">10. BENCH_TARGET (vLLM Multi-Turn ShareGPT Replay)</h2>
+
+<p><strong>What it is</strong>: Real vLLM inference via Certus gRPC connector, replaying 450 ShareGPT conversations × 12 turns. Actual model inference with real KV cache offloading through the full stack.</p>
+
+<p><strong>Dataset</strong>: <code>sharegpt_12turn_450.json</code> — 450 real conversations, ≥2 human turns, 12 rounds.</p>
+
+<table>
+<tr><th>Parameter</th><th>BENCH_TARGET</th><th>firstrun</th></tr>
+<tr><td>Conversations</td><td>256</td><td>64</td></tr>
+<tr><td>Turns</td><td>12</td><td>12</td></tr>
+<tr><td>Output tokens</td><td>150</td><td>150</td></tr>
+<tr><td>MAX_NUM_SEQS</td><td>64</td><td>64</td></tr>
+<tr><td>Model</td><td>Llama-3-8B, bf16, TP=1</td><td>Same</td></tr>
+<tr><td>Slab size</td><td>2 MiB</td><td>128 KiB</td></tr>
+<tr><td>Memory tier</td><td>32 GiB</td><td>45 GiB</td></tr>
+<tr><td>Prefix caching</td><td>Enabled (RadixAttention)</td><td>Enabled</td></tr>
+</table>
+
+<h3>Patterns Exercised</h3>
+<table>
+<tr><th>Pattern</th><th>How it manifests</th><th>Coverage</th></tr>
+<tr><td>§1 Prefill writes</td><td>Each turn generates KV for accumulated context</td><td class="coverage-full">Full</td></tr>
+<tr><td>§3 Decode phase</td><td>150 output tokens per generation</td><td class="coverage-full">Full</td></tr>
+<tr><td>§5 Shared prefix</td><td>Intra-conversation sharing (turns share accumulated prefix)</td><td class="coverage-partial">Partial</td></tr>
+<tr><td>§6e Multi-turn reuse</td><td>THE primary pattern — turn 12 re-reads ALL prior turns</td><td class="coverage-full">Excellent</td></tr>
+<tr><td>§4 Eviction</td><td>256 convs × growing context exceeds 32 GiB tier</td><td class="coverage-full">Good</td></tr>
+<tr><td>§6d Continuous batching</td><td>64 MAX_NUM_SEQS from 256 conversations = preemption</td><td class="coverage-full">Full</td></tr>
+<tr><td>§6a Chunked prefill</td><td>vLLM 0.26 chunks long contexts</td><td class="coverage-partial">Implicit</td></tr>
+</table>
+
+<p><strong>This is the ground truth</strong> — synthetic benches (v1–v3) are probes of individual sub-patterns. BENCH_TARGET exercises all simultaneously with real model inference.</p>
+
+<hr>
+
+<h2 id="s11">11. Synthetic Bench Versions → Pattern Coverage</h2>
+
+<h3>certus-api-bench (v1)</h3>
+<p>Sequential populate → hot lookup → cold lookup. Single-threaded, no pipelining.</p>
+<table>
+<tr><th>Phase</th><th>Pattern</th><th>Coverage</th></tr>
+<tr><td>Populate</td><td>§1 Prefill (serialized)</td><td class="coverage-partial">Partial</td></tr>
+<tr><td>Hot lookup</td><td>§3 Decode (single stream)</td><td class="coverage-partial">Partial</td></tr>
+<tr><td>Cold lookup</td><td>§4 Eviction reload</td><td class="coverage-partial">Partial</td></tr>
+</table>
+<p><strong>Stresses</strong>: Baseline single-stream latency. Not covered: concurrency, contention, sharing.</p>
+
+<h3>certus-api-bench_v2</h3>
+<p>Multi-client, pipelined RPCs, distinct GPU IPC buffers per key.</p>
+<table>
+<tr><th>Phase</th><th>Pattern</th><th>Coverage</th></tr>
+<tr><td>Populate (multi-client)</td><td>§1 Concurrent prefill streams</td><td class="coverage-full">Good</td></tr>
+<tr><td>Hot lookup (pipelined)</td><td>§3 Saturate PCIe (48 threads)</td><td class="coverage-full">Good</td></tr>
+<tr><td>Cold lookup (pipelined)</td><td>§4 + §6f Disaggregated load</td><td class="coverage-full">Good</td></tr>
+</table>
+<p><strong>Stresses</strong>: PCIe bandwidth, multi-client scaling. Not covered: shared reads, bidirectional, temporal mixing.</p>
+
+<h3>certus-api-bench_v3 (fix/shared-queue)</h3>
+<p>Bidirectional phase, per-block latency, Reserve→CopyToStore→Commit protocol.</p>
+<table>
+<tr><th>Phase</th><th>Pattern</th><th>Coverage</th></tr>
+<tr><td>Populate (3-phase)</td><td>§1 Write-once staging</td><td class="coverage-full">Good</td></tr>
+<tr><td>Hot lookup</td><td>§3 Decode DRAM hits</td><td class="coverage-full">Good</td></tr>
+<tr><td><strong>Bidirectional</strong></td><td>§4 + §6d Eviction writes + prefix loads</td><td class="coverage-full">Excellent</td></tr>
+<tr><td>Per-block latency</td><td>§3 Decode latency floor</td><td class="coverage-full">Good</td></tr>
+<tr><td>Cold lookup</td><td>§4 SSD reload</td><td class="coverage-full">Good</td></tr>
+</table>
+<p><strong>Key metric</strong>: <code>bidir_degradation</code> = "how much does decode latency suffer when prefills are running" — THE QoS metric.</p>
+
+<hr>
+
+<h2 id="store-load">Store vs Load: When Each Happens in Real Inference</h2>
+
+<h4>STORE (GPU→DRAM→SSD) triggers:</h4>
+<table>
+<tr><th>Trigger</th><th>Pattern</th><th>Size</th><th>Frequency</th></tr>
+<tr><td>Prefill completes</td><td>§1</td><td>All prompt KV (N blocks)</td><td>Once per new request</td></tr>
+<tr><td>Decode fills a block</td><td>§3</td><td>1 block (16 tokens)</td><td>Every 16 decode steps</td></tr>
+<tr><td>Eviction (tier full)</td><td>§4</td><td>1–32 blocks per cycle</td><td>Per step under pressure</td></tr>
+<tr><td>Chunked prefill chunk</td><td>§6a</td><td>~32 blocks per chunk</td><td>Per chunk boundary</td></tr>
+<tr><td>Speculative branches</td><td>§6b</td><td>Per-branch KV (discarded soon)</td><td>Per speculation step</td></tr>
+<tr><td>Disaggregated prefill done</td><td>§6f</td><td>Entire request KV (GB-scale)</td><td>Once per request</td></tr>
+</table>
+
+<h4>LOAD (SSD→DRAM→GPU) triggers:</h4>
+<table>
+<tr><th>Trigger</th><th>Pattern</th><th>Size</th><th>Frequency</th></tr>
+<tr><td>Prefix cache hit</td><td>§2, §5</td><td>Shared prefix blocks</td><td>Once per new request with hit</td></tr>
+<tr><td>Decode cache miss</td><td>§3, §4</td><td>Full block(s)</td><td>On eviction + reaccess</td></tr>
+<tr><td>New turn (multi-turn)</td><td>§6e</td><td>ALL prior turns' KV</td><td>Once per new turn</td></tr>
+<tr><td>Preempted request rescheduled</td><td>§6d</td><td>Evicted request's KV</td><td>On reschedule</td></tr>
+<tr><td>Disaggregated decode starts</td><td>§6f</td><td>Entire request KV (GB-scale)</td><td>Once per request</td></tr>
+<tr><td>Selective retrieval</td><td>§6g</td><td>10–30% of prior KV</td><td>Per decode step</td></tr>
+</table>
+
+<h4>Temporal Interleave (what the server sees):</h4>
+<div class="store-load-diagram">
+Steady state with 256 conversations, MAX_NUM_SEQS=64:
+
+  STORE: ████░░████░░██░░████░░  (bursty: prefill completions + eviction)
+  LOAD:  ░░██████░░██████░░████  (bursty: new turns + preemption reloads)
+         ↑                       ↑
+         prefill burst           eviction triggers concurrent
+         writes KV               load of rescheduled requests
+
+Early rounds (1–3):  Store-dominated (all prefilling, small contexts)
+Middle rounds (4–8): Mixed (growing prefills + prior-turn reloads + eviction)
+Late rounds (9–12):  Load-dominated (massive contexts, heavy eviction reload)
+</div>
+
+<p><strong>Key insight</strong>: v1/v2 test Store and Load <strong>sequentially</strong>. v3 tests them <strong>concurrently</strong>. Real inference has them <strong>interleaved with temporal correlation</strong> — a Store (eviction) directly causes a future Load (reschedule).</p>
+
+<hr>
+
+<h2 id="roadmap">Proposed Bench Version Roadmap</h2>
+
+<p>Each version isolates one pattern. Together they decompose what BENCH_TARGET does in aggregate.</p>
+
+<table>
+<tr><th>Bench</th><th>Pattern</th><th>What it isolates</th><th>Status</th></tr>
+<tr><td>v1</td><td>Baseline latency</td><td>Single-stream overhead floor</td><td class="coverage-full">Exists</td></tr>
+<tr><td>v2</td><td>§1 + §4</td><td>Pipelined multi-client throughput</td><td class="coverage-full">Exists</td></tr>
+<tr><td>v3</td><td>§4 + §6d</td><td>Store/load overlap, DMA stream efficiency</td><td class="coverage-full">Exists (fix/shared-queue)</td></tr>
+<tr><td><strong>v4</strong></td><td>§2 + §5</td><td>N readers on same keys → diverge</td><td class="coverage-none">Planned</td></tr>
+<tr><td><strong>v5</strong></td><td>§6e</td><td>Growing read set per turn</td><td class="coverage-none">Planned</td></tr>
+<tr><td><strong>v6</strong></td><td>§6a</td><td>Periodic writes mixed with decode reads</td><td class="coverage-none">Planned</td></tr>
+<tr><td><strong>v7</strong></td><td>§6f</td><td>Bulk write → bulk read (producer-consumer)</td><td class="coverage-none">Planned</td></tr>
+<tr><td><strong>v8</strong></td><td>§4 + §6h</td><td>Gradual LRU, unique-suffix-first eviction</td><td class="coverage-none">Planned</td></tr>
+</table>
+
+<p><strong>Relationship</strong>: Each synthetic bench measures ONE dimension in isolation. When an optimization improves v4 (cohort reads) but regresses v3 (bidirectional), you know exactly what tradeoff you made. BENCH_TARGET gives the aggregate integration answer.</p>
+
+<hr>
+
+<p style="text-align: center; color: #64748b; font-size: 0.85em; margin-top: 3rem;">
+Generated from <code>knowledge/inference_workload_mapping.md</code> · 8 papers investigated · 13 patterns cataloged
+</p>
+
+</body>
+</html>
