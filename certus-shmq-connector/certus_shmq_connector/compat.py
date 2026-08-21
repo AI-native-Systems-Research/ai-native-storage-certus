@@ -529,6 +529,10 @@ def lookup_result(state):
     ``CHECK_PENDING`` — see ``ring.check_states``).
 
     * **0.26+** (``CAPS.lookup_returns_enum``): a ``LookupResult`` enum —
+<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/compat.py
+      ``HIT`` when the key is present, ``MISS`` otherwise.
+    * **≤0.24**: a plain ``bool``.
+========
       ``MISS`` / ``HIT`` / ``HIT_PENDING``. ``HIT_PENDING`` tells the scheduler a
       store is in flight: the block is coming, so defer the lookup rather than
       recompute. (``RETRY`` — pure backpressure with no reservation — is never
@@ -540,6 +544,7 @@ def lookup_result(state):
 
     A plain ``bool`` is still accepted for callers not yet threading the tri-state
     (``True`` → resident, ``False`` → miss).
+>>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/compat.py
     """
     from .ring import CHECK_MISS, CHECK_PENDING, CHECK_RESIDENT
 
@@ -555,6 +560,18 @@ def lookup_result(state):
             CHECK_PENDING: LookupResult.HIT_PENDING,
         }[state]
     return {CHECK_MISS: False, CHECK_RESIDENT: True, CHECK_PENDING: None}[state]
+
+
+def lookup_result_pending():
+    """Return ``HIT_PENDING`` on 0.26+, or ``True`` on ≤0.24.
+
+    Used when a block is in-flight (store submitted but not yet committed).
+    The scheduler defers the request and re-polls on the next step.
+    """
+    if CAPS.lookup_returns_enum:
+        LookupResult = _lazy_base_attr("LookupResult")
+        return LookupResult.HIT_PENDING
+    return True
 
 
 def block_bytes_from_offloading_config(config) -> int:
