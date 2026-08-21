@@ -474,6 +474,7 @@ nonparametric branching process with no closed-form fit:
 | `branching` | the **width-by-depth profile** `w(d) = distinct keys at depth d that **two or more sessions** reached`, segmented per `research.md` § The branching segmentation rule; each segment's fanout is the geometric mean of the ratios inside it |
 | `branch_skew` | the exponent whose **collision probability** `H_n(2s)/H_n(s)²` matches the fan-in-weighted mean of `Σ c²/(Σ c)²` measured over each split's children, per segment — **not** a fit to the rank curve, which does not transfer across the corpus; see FR-055j |
 | `branching.by_depth[].length` | per band, the empirical distribution of a segment's run length, **unweighted — one observation per segment**. The walk draws it once per **node** (`Corpus::run_length`), so the population it must match is the segments and not the arrivals; fitting it fan-in weighted, as `branch_skew` correctly is, understated `qwen_code`'s root band by 1 against 29 — see FR-054m. The rule is about the **key**: weight a law by what its draw is keyed on, not by what consumes it |
+| `branching.by_depth[].length_by_cohort` | per band, a **step multiplier per fan-in bucket** (`2 / 3 / 4-15 / 16-255 / 256+`), each the bucket's median run length over the band's, so a node in a bucket realises that bucket's own measured median. **Unweighted over segments**, for the same reason `length` is. Buckets with no segments are omitted, not interpolated; a band populating only one states no law. Fitted because run length is **correlated with fan-in** and the sign is per trace — `qwen_code`'s root band runs 49 blocks at fan-in 2 and 18 at 256+, `tau2_airline`'s runs 60 at fan-in 3 and 146 at 16-255. A **power law here is refuted**: one fitted exponent overshot 6.1x at `qwen_code`'s root because the dependence flattens, and a step function both bends and cannot extrapolate — see FR-054o |
 | `branching.by_depth[].out_degree` | per band, the total children at a split, over segments that ended in a **fanout** — a leaf has no out-degree and an attrition boundary is a cohort shrinking rather than dividing. Still **fan-in weighted**, and knowingly wrong by FR-054m's rule: it is fitted as a pair with `branch_skew` under FR-055j, and moving one without re-fitting the other breaks the pairing |
 | `private_depth` | path depth of the **lowest-numbered turn** − that request's longest common prefix |
 | `growth_per_turn` | path-depth increment between consecutive turns of one session, **in turn-index order**, accumulated **per session-length band** — see below |
@@ -995,7 +996,13 @@ The generator rejects, rather than silently accepting:
 8. `roots.count < 1`, `branch_skew < 0`, any `branching` segment with `fanout < 1` (a trunk node
    with no children
    would let a session run off the end of the trunk), or an `n` supplied to
-   `roots.popularity` (its support is `roots.count`). Also rejected: a **bounded-support**
+   `roots.popularity` (its support is `roots.count`). Also rejected: a `length_by_cohort` whose
+   `by_fan_in` list is **empty** (omit the field instead — that is what "no dependence" means), whose
+   buckets do not **ascend** by `from_fan_in` (`scale_at` scans upward and stops at the first bucket the
+   cohort does not reach, so a disordered list silently returns an earlier bucket's scale for every
+   cohort past the disorder), or that states a `scale` which is not finite and positive — a scale
+   multiplies a run length, so zero collapses every run in the bucket to the one-block floor. Also
+   rejected: a **bounded-support**
    `roots.popularity` whose support does not span `1..=roots.count` — an `empirical` whose top rank
    falls short leaves every rank above it unreachable, so the realised root layer is narrower than
    the document declares, and it is silent because a draw inside a narrow support records no clamp.

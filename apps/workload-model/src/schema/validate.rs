@@ -455,6 +455,49 @@ pub fn validate(d: &Document) -> Report {
                         ),
                     );
                 }
+                // FR-054o. The scales are a step function the walk looks up by the node's cohort,
+                // so two things must hold or the lookup silently reads the wrong bucket: the steps
+                // must ASCEND (`scale_at` scans upward and stops at the first bucket the cohort does
+                // not reach, so an out-of-order list would return an earlier bucket's scale for
+                // every cohort past the disorder), and each scale must be a usable positive
+                // multiplier. Rejected rather than sorted or clamped, because a document whose
+                // buckets were quietly reordered still generates a plausible trunk and records
+                // nothing — the silent-fallback class rule 8 exists for.
+                if let Some(c) = &b.length_by_cohort {
+                    if c.by_fan_in.is_empty() {
+                        r.reject(
+                            "8",
+                            format!(
+                                "branching band at depth {} states an empty length_by_cohort; omit                                  the field instead, which is what 'no dependence' means",
+                                b.from_depth
+                            ),
+                        );
+                    }
+                    let mut prev_fan: Option<u32> = None;
+                    for step in &c.by_fan_in {
+                        if !step.scale.is_finite() || step.scale <= 0.0 {
+                            r.reject(
+                                "8",
+                                format!(
+                                    "branching band at depth {} has length_by_cohort scale {} at                                      fan-in {}; a scale multiplies a run length and must be finite                                      and positive",
+                                    b.from_depth, step.scale, step.from_fan_in
+                                ),
+                            );
+                        }
+                        if let Some(prev_fan) = prev_fan {
+                            if step.from_fan_in <= prev_fan {
+                                r.reject(
+                                    "8",
+                                    format!(
+                                        "length_by_cohort buckets must ascend by from_fan_in; {}                                          follows {prev_fan} in the band at depth {}",
+                                        step.from_fan_in, b.from_depth
+                                    ),
+                                );
+                            }
+                        }
+                        prev_fan = Some(step.from_fan_in);
+                    }
+                }
                 if let Some(prev) = prev {
                     if b.from_depth <= prev {
                         r.reject(
@@ -916,6 +959,57 @@ run:
             .filter(|f| f.rule == "8")
             .map(|f| f.message.clone())
             .collect()
+    }
+
+    #[test]
+    fn a_cohort_length_law_must_be_a_lookup_the_walk_can_read() {
+        // FR-054o's silent-fallback cases, and why these are rejections rather than repairs.
+        // `CohortLength::scale_at` scans the buckets upward and stops at the first one the cohort
+        // does not reach, so a list out of order returns an EARLIER bucket's scale for every cohort
+        // past the disorder — a wrong run length at every node above it, with a trunk that still
+        // generates and still looks like a trunk. Sorting it here instead would hide a fit defect.
+        let band = |extra: &str| {
+            format!(
+                "{{by_depth: [{{from_depth: 0, length: {{dist: const, value: 4}}, \
+                 out_degree: {{dist: const, value: 3}}{extra}}}]}}"
+            )
+        };
+        let ok = band(
+            ", length_by_cohort: {by_fan_in: [{from_fan_in: 2, scale: 1.5}, \
+             {from_fan_in: 16, scale: 0.5}]}",
+        );
+        assert_eq!(rule_8(&ok), "", "two ascending buckets are fine");
+
+        let descending = band(
+            ", length_by_cohort: {by_fan_in: [{from_fan_in: 16, scale: 1.5}, \
+             {from_fan_in: 2, scale: 0.5}]}",
+        );
+        assert!(
+            rule_8(&descending).contains("must ascend by from_fan_in"),
+            "{}",
+            rule_8(&descending)
+        );
+        // A scale multiplies a run length, so zero would collapse every run in the bucket to the
+        // one-block floor and a negative one is meaningless.
+        let zero = band(
+            ", length_by_cohort: {by_fan_in: [{from_fan_in: 2, scale: 0.0}, \
+             {from_fan_in: 16, scale: 0.5}]}",
+        );
+        assert!(
+            rule_8(&zero)
+                .contains("must be finite \n                                     and positive")
+                || rule_8(&zero).contains("finite"),
+            "{}",
+            rule_8(&zero)
+        );
+        // An empty list is not "no dependence" — omitting the field is. A document stating one has
+        // a fit that produced nothing and did not say so.
+        let empty = band(", length_by_cohort: {by_fan_in: []}");
+        assert!(
+            rule_8(&empty).contains("empty length_by_cohort"),
+            "{}",
+            rule_8(&empty)
+        );
     }
 
     #[test]

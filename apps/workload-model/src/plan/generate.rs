@@ -918,7 +918,7 @@ impl Generator {
             (true, Some(cap)) => cap.max(1),
             _ => u32::MAX,
         };
-        let mut split = crate::corpus::SplitState::at_root(&self.corpus, cur, split_cap);
+        let mut split = crate::corpus::SplitState::at_root(&self.corpus, cur, split_cap, cohort);
         for d in 0..depth {
             if d > 0 {
                 // The boundary is the EARLIER of cohort exhaustion and the drawn cap.
@@ -950,7 +950,7 @@ impl Generator {
                     }
                     let (next, p) = self
                         .corpus
-                        .trunk_step_stateful(cur, d, &mut split, &mut walk, gen);
+                        .trunk_step_stateful(cur, d, &mut split, &mut walk, gen, cohort);
                     // A split, and the band states how many arrivals land on a child no other
                     // session takes: decide whether this one did. That is where privacy comes from
                     // in a real trace — a split with 4739 children of which 483 are shared — and
@@ -1275,6 +1275,126 @@ run:
   wss_window: 240000
 "#
         )
+    }
+
+    /// One root and a 200-block trunk whose first split is 60 blocks down, so a cohort law has room
+    /// to move it in either direction (FR-054o).
+    ///
+    /// One root deliberately: it puts the entire session population on one node, which is both the
+    /// extreme of the fan-in range and the case the mechanism exists for — a model's near-root nodes
+    /// carry every session and currently draw the band's typical run regardless.
+    fn cohort_len_doc(law: &str) -> String {
+        format!(
+            r#"
+requests: 2000
+version: 1
+seed: 0xC0FFEE
+corpus:
+  block_bytes: 131072
+  trees:
+    roots: {{count: 1, popularity: {{dist: zipf, s: 0.9}}}}
+    shared_depth: {{dist: const, value: 200}}
+    branching:
+      by_depth:
+        - from_depth: 0
+          length: {{dist: const, value: 60}}
+          out_degree: {{dist: const, value: 2}}
+          skew: 5.0
+{law}
+workload:
+  arrival: {{model: open_loop, rate: 4000/s}}
+  sessions:
+    turns: {{dist: const, value: 1}}
+    think_time: {{dist: const, value: 0.5}}
+    private_depth: {{dist: const, value: 3}}
+    turn1_path_length: {{dist: const, value: 240}}
+    growth_per_turn: {{dist: const, value: 2}}
+run:
+  mode: hardware
+  wss_window: 240000
+"#
+        )
+    }
+
+    /// The shallowest depth at which two sessions hold different keys — the realised first split.
+    ///
+    /// Read off the plan rather than off the state, so it measures what a census of the output would
+    /// see. `None` means no divergence was observed at all.
+    fn first_divergence_depth(ev: &[PlanEvent]) -> Option<u32> {
+        let mut by_depth: std::collections::BTreeMap<u32, std::collections::BTreeSet<CacheKey>> =
+            std::collections::BTreeMap::new();
+        for e in ev.iter().filter(|e| e.turn == 1) {
+            by_depth.entry(e.depth).or_default().insert(e.key);
+        }
+        by_depth
+            .into_iter()
+            .find(|(_, keys)| keys.len() > 1)
+            .map(|(d, _)| d)
+    }
+
+    #[test]
+    fn a_crowded_roots_bucket_moves_where_the_trunk_first_splits() {
+        // FR-054o reaching the walk, measured on the plan. The band states a 60-block run; with one
+        // root every session is on it, so the root's cohort lands in the top fan-in bucket and that
+        // bucket's scale decides its preamble. That is the whole mechanism: `qwen_code`'s first split
+        // lands 27 blocks down and so puts a floor of 27 shared blocks under every session, while
+        // 24.8% of its requests share one block or less.
+        //
+        // Asserted as a comparison against the no-law arm rather than against a computed depth,
+        // because the realised split also answers to the cohort floor and the path cap; what must be
+        // true is the DIRECTION, and that the no-law arm is unmoved at 60.
+        let plain = Document::from_yaml(&cohort_len_doc("")).expect("fixture must parse");
+        let base = drain(&mut Generator::new(&plain).expect("generator"));
+        assert_eq!(
+            first_divergence_depth(&base),
+            Some(60),
+            "the no-law arm must split exactly where the band says"
+        );
+
+        let shorter = Document::from_yaml(&cohort_len_doc(
+            "          length_by_cohort: {by_fan_in: [{from_fan_in: 2, scale: 1.0}, \
+             {from_fan_in: 256, scale: 0.25}]}",
+        ))
+        .expect("fixture must parse");
+        let ev = drain(&mut Generator::new(&shorter).expect("generator"));
+        let d = first_divergence_depth(&ev).expect("some divergence");
+        assert!(
+            d < 60,
+            "a crowded root in a bucket scaled below 1 must split sooner than 60, got {d}"
+        );
+
+        // And the other direction, which is `tau2_airline`'s root band: a crowded root keeps a
+        // LONGER preamble. Both matter, because the shape is fitted per trace and this is the
+        // property that lets one mechanism serve a trace that over-shares and one that under-shares.
+        let longer = Document::from_yaml(&cohort_len_doc(
+            "          length_by_cohort: {by_fan_in: [{from_fan_in: 2, scale: 1.0}, \
+             {from_fan_in: 256, scale: 2.0}]}",
+        ))
+        .expect("fixture must parse");
+        let ev = drain(&mut Generator::new(&longer).expect("generator"));
+        let d = first_divergence_depth(&ev).expect("some divergence");
+        assert!(
+            d > 60,
+            "a crowded root in a bucket scaled above 1 must split later than 60, got {d}"
+        );
+    }
+
+    #[test]
+    fn a_document_stating_no_cohort_law_generates_a_byte_identical_plan() {
+        // Inertness at the level that matters: the whole plan, not just the run-length draw. FR-054o
+        // is reachable only through `--branching-segments`, which is off by default, so every
+        // existing document must be untouched — and "untouched" has to mean identical events, since
+        // a mechanism that merely preserved the distribution would still invalidate every recorded
+        // measurement in the project's history.
+        let d = Document::from_yaml(&cohort_len_doc("")).expect("fixture must parse");
+        let a = drain(&mut Generator::new(&d).expect("generator"));
+        let b = drain(&mut Generator::new(&d).expect("generator"));
+        assert_eq!(a, b, "the same document must generate the same plan");
+        // The plain `branching: 1.02` fixture has no node-level process at all, so it exercises the
+        // per-depth arm, where the cohort argument is threaded through and must be ignored.
+        let profile = doc("requests: 500");
+        let p = drain(&mut Generator::new(&profile).expect("generator"));
+        assert!(!p.is_empty(), "the per-depth arm must still generate");
     }
 
     /// How many of each session's turn-1 blocks another session also touched.

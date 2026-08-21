@@ -227,6 +227,7 @@ pub fn auto_fanout(sessions_per_window: f64, roots: u32, trunk_steps: u32) -> f6
 struct ResolvedBand {
     from_depth: u32,
     length: Dist,
+    length_by_cohort: Option<crate::schema::CohortLength>,
     out_degree: Dist,
     skew: Option<f64>,
     singleton_share: Option<f64>,
@@ -248,6 +249,7 @@ impl ResolvedSegments {
             .map(|s| ResolvedBand {
                 from_depth: s.from_depth,
                 length: s.length.clone(),
+                length_by_cohort: s.length_by_cohort.clone(),
                 out_degree: s.out_degree.clone(),
                 skew: s.skew,
                 singleton_share: s.singleton_share,
@@ -275,10 +277,31 @@ impl ResolvedSegments {
     /// Keyed on the **node**, not on the visit, for the same reason `child_count` is: it is
     /// what keeps a long run reproducible and independent of arrival order, and it is why a
     /// walker needs no stored trie.
-    pub fn run_length(&self, seed: u64, node: CacheKey, depth: u32) -> u32 {
-        let len = &self.at(depth).length;
+    ///
+    /// `cohort` is the expected number of sessions on this node, and conditioning on it does **not**
+    /// break that keying — the same argument [`SplitState::set_cap`] already relies on. Every walker
+    /// reaching a node arrived through the same root and made the same child choices, so all of them
+    /// carry the same cohort product and draw the same length. The draw stays a function of the
+    /// node; it is the *law* that now depends on the node's own cohort (FR-054o).
+    pub fn run_length(&self, seed: u64, node: CacheKey, depth: u32, cohort: f64) -> u32 {
+        let band = self.at(depth);
         let mut st = Stream::new(seed ^ node.0, u64::from(depth) ^ TAG_SEGMENT);
-        len.sample_u64(&mut st).max(1).min(u64::from(u32::MAX)) as u32
+        let raw = band.length.sample_u64(&mut st).max(1);
+        // Applied to the DRAW rather than to the law, so the band's shape is preserved and only its
+        // scale moves with the cohort. Nothing is drawn when the band states no dependence, which is
+        // what keeps existing documents byte-identical rather than merely equal in distribution.
+        let scaled = match band
+            .length_by_cohort
+            .as_ref()
+            .and_then(|c| c.scale_at(cohort))
+        {
+            None => raw as f64,
+            Some(scale) => raw as f64 * scale,
+        };
+        if !scaled.is_finite() {
+            return raw.min(u64::from(u32::MAX)) as u32;
+        }
+        (scaled.round().max(1.0) as u64).min(u64::from(u32::MAX)) as u32
     }
 
     /// Children at the split at `node` — the total, singletons included.
@@ -383,14 +406,19 @@ impl SplitState {
     /// The root is itself a split node, so its run length comes from *its* stream — which is
     /// exactly what gives each root its own preamble length. Under a per-depth profile every
     /// depth is a potential split, which is the degenerate case of the same state.
-    pub fn at_root(corpus: &Corpus, root: CacheKey, path_cap: u32) -> SplitState {
+    ///
+    /// `cohort` is the root's own expected session count, which is the fan-in of the preamble it is
+    /// about to draw (FR-054o). This is the node where conditioning matters most: a root carries
+    /// every one of its sessions, so it sits at the extreme of the fan-in range the law was fitted
+    /// over, and it is the one node whose run length no later split can shorten.
+    pub fn at_root(corpus: &Corpus, root: CacheKey, path_cap: u32, cohort: f64) -> SplitState {
         match &corpus.segments {
             None => SplitState {
                 next_split_depth: 0,
                 path_cap,
             },
             Some(s) => SplitState {
-                next_split_depth: s.run_length(corpus.seed, root, 0).min(path_cap),
+                next_split_depth: s.run_length(corpus.seed, root, 0, cohort).min(path_cap),
                 path_cap,
             },
         }
@@ -564,6 +592,11 @@ impl Corpus {
     /// * node-level segments — a split happens only where the run drawn at the last split
     ///   ends. Between splits the node has exactly one child, so the cohort is *not* divided,
     ///   which is what makes a long run a shared segment rather than a slow fanout.
+    ///
+    /// `cohort` is the expected sessions **arriving** at `cur`. It is needed because a run drawn at a
+    /// split belongs to the child, whose own cohort is `cohort * p` — the fan-in of the segment the
+    /// census would record — and FR-054o conditions run length on exactly that. Ignored under a
+    /// per-depth profile, which has no run-length law to condition.
     pub fn trunk_step_stateful(
         &self,
         cur: CacheKey,
@@ -571,6 +604,7 @@ impl Corpus {
         state: &mut SplitState,
         st: &mut Stream,
         gen: Generation,
+        cohort: f64,
     ) -> (CacheKey, f64) {
         let skew = self.skew_at(depth);
         match &self.segments {
@@ -587,8 +621,12 @@ impl Corpus {
                     let n = s.out_degree(self.seed, cur, depth);
                     let (idx, p) = self.pick_child_p(st, n, skew);
                     let child = trunk_child(cur, idx, gen);
+                    // The child's own cohort, not the parent's: the run about to be drawn is the
+                    // child's segment, and the census's `fan_in` for it counts the sessions that
+                    // took this child. Same product the caller is about to accumulate, so the two
+                    // cannot disagree about which cohort a node has.
                     state.next_split_depth = depth
-                        .saturating_add(s.run_length(self.seed, child, depth))
+                        .saturating_add(s.run_length(self.seed, child, depth, cohort * p))
                         .min(state.path_cap);
                     (child, p)
                 }
@@ -840,11 +878,169 @@ mod tests {
             by_depth: vec![SegmentBand {
                 from_depth: 0,
                 length: Dist::Scalar(length),
+                length_by_cohort: None,
                 out_degree: Dist::Scalar(out_degree),
                 skew: None,
                 singleton_share: None,
             }],
         }))
+    }
+
+    /// A one-band process whose run length scales with the node's cohort (FR-054o).
+    ///
+    /// `length` is a constant so that every block of the assertion is the scaling and none of it is
+    /// the draw: with `Dist::Scalar` the raw length is exact, and the realised run is exactly
+    /// `length * scale(cohort)` rounded.
+    fn cohort_corpus(length: f64, steps: &[(u32, f64)]) -> Corpus {
+        use crate::schema::{CohortLength, CohortStep, SegmentBand, SegmentProcess};
+        corpus(Branching::Segments(SegmentProcess {
+            by_depth: vec![SegmentBand {
+                from_depth: 0,
+                length: Dist::Scalar(length),
+                length_by_cohort: Some(CohortLength {
+                    by_fan_in: steps
+                        .iter()
+                        .map(|(from_fan_in, scale)| CohortStep {
+                            from_fan_in: *from_fan_in,
+                            scale: *scale,
+                        })
+                        .collect(),
+                }),
+                out_degree: Dist::Scalar(4.0),
+                skew: None,
+                singleton_share: None,
+            }],
+        }))
+    }
+
+    #[test]
+    fn a_crowded_node_draws_a_shorter_run_when_the_band_says_so() {
+        // FR-054o's whole content: the same node, the same stream, different cohorts, different run
+        // lengths. The falling shape is the `qwen_code` case — its root band runs a median 49 blocks
+        // at fan-in 2 and 18 at fan-in 256+ — and the point of the mechanism is that the model's
+        // near-root nodes, which carry every session, stop drawing the band's typical run.
+        let c = cohort_corpus(100.0, &[(2, 1.5), (16, 1.0), (256, 0.25)]);
+        let node = c.root_key(0, Generation::STABLE);
+        let s = c.segments.as_ref().expect("a node-level process");
+        assert_eq!(s.run_length(c.seed, node, 0, 2.0), 150);
+        assert_eq!(
+            s.run_length(c.seed, node, 0, 15.9),
+            150,
+            "still the first bucket"
+        );
+        assert_eq!(s.run_length(c.seed, node, 0, 16.0), 100);
+        assert_eq!(s.run_length(c.seed, node, 0, 255.0), 100);
+        assert_eq!(s.run_length(c.seed, node, 0, 256.0), 25);
+        // And the rising shape, which is `tau2_airline`'s root band: 60 blocks at fan-in 3 against
+        // 146 at fan-in 16-255, so a crowded root keeps its long preamble. The sign is fitted per
+        // trace, and a step law represents either without being told which to expect.
+        let up = cohort_corpus(100.0, &[(2, 0.5), (16, 2.0)]);
+        let s = up.segments.as_ref().expect("a node-level process");
+        assert_eq!(s.run_length(up.seed, node, 0, 2.0), 50);
+        assert_eq!(s.run_length(up.seed, node, 0, 100.0), 200);
+    }
+
+    #[test]
+    fn a_step_law_cannot_extrapolate_however_far_the_cohort_is_outside_it() {
+        // The property that replaced the refuted power law's clamp, and the reason the step form is
+        // right rather than merely flexible. The walk's cohort is an ESTIMATE
+        // (`sessions_per_window * p(rank)`, then a product of child probabilities) and nothing ties
+        // its range to the census's. A power law evaluated far outside its data turns a modest
+        // exponent into an arbitrary run length: `qwen_code` band 0's fitted exponent of -0.304
+        // asked for a 2.9-block run at the root against the trace's measured 18, a 6.1x overshoot,
+        // and that arm was a Pareto loss. A step function has nothing to extrapolate WITH — the
+        // outermost buckets simply continue — so this asserts saturation at both ends.
+        let c = cohort_corpus(100.0, &[(2, 2.0), (256, 0.5)]);
+        let node = c.root_key(0, Generation::STABLE);
+        let s = c.segments.as_ref().expect("a node-level process");
+        let top = s.run_length(c.seed, node, 0, 256.0);
+        assert_eq!(top, 50);
+        for far in [1.0e3, 1.0e6, 1.0e9, f64::MAX] {
+            assert_eq!(s.run_length(c.seed, node, 0, far), top, "saturates above");
+        }
+        let bottom = s.run_length(c.seed, node, 0, 2.0);
+        assert_eq!(bottom, 200);
+        for below in [0.0, 1.0, 1.9] {
+            assert_eq!(s.run_length(c.seed, node, 0, below), bottom, "and below");
+        }
+    }
+
+    #[test]
+    fn a_bucket_with_no_segments_falls_to_the_nearest_measured_one_below() {
+        // Buckets are omitted rather than interpolated when the band has no segments in them, so a
+        // cohort landing in a gap must take the nearest MEASURED bucket below it. Interpolating
+        // would state a scale for a fan-in the trace never exhibited at this depth, which is the
+        // same invention the power law was refuted for. Real bands are full of such gaps — on
+        // `exgentic_swebench` band 0 only the `fan 2` and `fan 16-255` buckets are populated.
+        let c = cohort_corpus(80.0, &[(2, 1.0), (256, 0.5)]);
+        let node = c.root_key(0, Generation::STABLE);
+        let s = c.segments.as_ref().expect("a node-level process");
+        for gap in [3.0, 4.0, 15.0, 16.0, 200.0, 255.0] {
+            assert_eq!(
+                s.run_length(c.seed, node, 0, gap),
+                80,
+                "a cohort in an unmeasured bucket must not invent a scale"
+            );
+        }
+    }
+
+    #[test]
+    fn a_run_is_at_least_one_block_however_the_scaling_falls() {
+        // The floor `run_length` has always had, now with a second way to reach it: a scaling
+        // factor can drive a run below one block where a draw could only reach zero. A run of 0
+        // would make `next_split_depth` equal the current depth forever, so the walk would split
+        // at every block and the node-level spelling would silently degenerate into a per-depth
+        // profile — the failure mode being that it still generates, and plausibly.
+        let c = cohort_corpus(1.0, &[(2, 1.0), (16, 1.0e-9)]);
+        let node = c.root_key(0, Generation::STABLE);
+        let s = c.segments.as_ref().expect("a node-level process");
+        for cohort in [1.0, 100.0, 1.0e6, 1.0e9] {
+            assert!(s.run_length(c.seed, node, 0, cohort) >= 1);
+        }
+    }
+
+    #[test]
+    fn every_walker_at_one_node_agrees_on_its_run_length() {
+        // The invariant the node keying exists for, and the reason FR-054o may condition on the
+        // cohort at all: a run length that varied between walkers arriving at the same node would
+        // make the trie inconsistent — one session's shared segment would be another's split — and
+        // no census of the result would mean anything.
+        //
+        // It holds because the cohort is a function of the PATH: every walker at a node came
+        // through the same root and made the same child choices, so it carries the same product.
+        // This asserts the arithmetic half of that (equal cohorts in, equal lengths out); the
+        // generator supplies the same product by construction at the one call site.
+        let c = cohort_corpus(50.0, &[(2, 1.3), (4, 0.9), (256, 0.4)]);
+        let s = c.segments.as_ref().expect("a node-level process");
+        for i in 0..8u32 {
+            let node = c.root_key(i, Generation::STABLE);
+            let first = s.run_length(c.seed, node, 0, 137.5);
+            for _ in 0..4 {
+                assert_eq!(s.run_length(c.seed, node, 0, 137.5), first);
+            }
+        }
+    }
+
+    #[test]
+    fn a_band_stating_no_cohort_law_draws_exactly_what_it_did_before() {
+        // Inertness, asserted rather than assumed. Every document in existence omits
+        // `length_by_cohort`, and the mechanism is only reachable through `--branching-segments`,
+        // so this is the property that keeps FR-054o from touching anything that has not asked
+        // for it. Note it is a byte-identity claim about the DRAW, not a distributional one: the
+        // scaling is applied to the sampled value, so an absent law means no arithmetic at all
+        // and not a factor that happens to be 1.
+        let plain = seg_corpus(7.0, 4.0);
+        let s = plain.segments.as_ref().expect("a node-level process");
+        for i in 0..16u32 {
+            let node = plain.root_key(i, Generation::STABLE);
+            for cohort in [1.0, 42.0, 9999.0] {
+                assert_eq!(
+                    s.run_length(plain.seed, node, 0, cohort),
+                    7,
+                    "an absent law must ignore the cohort entirely"
+                );
+            }
+        }
     }
 
     #[test]
@@ -862,6 +1058,7 @@ mod tests {
             by_depth: vec![crate::schema::SegmentBand {
                 from_depth: 0,
                 length: Dist::Shaped(crate::dist::Shape::Geometric { mean: 20.0 }),
+                length_by_cohort: None,
                 out_degree: Dist::Scalar(3.0),
                 skew: None,
                 singleton_share: None,
@@ -869,7 +1066,7 @@ mod tests {
         }));
         let firsts: Vec<u32> = (0..12u32)
             .map(|i| {
-                SplitState::at_root(&c, c.root_key(i, Generation::STABLE), u32::MAX)
+                SplitState::at_root(&c, c.root_key(i, Generation::STABLE), u32::MAX, 1.0)
                     .next_split_depth
             })
             .collect();
@@ -892,13 +1089,14 @@ mod tests {
         // expected cohort is unchanged. Only a split divides it.
         let c = seg_corpus(5.0, 4.0);
         let root = c.root_key(0, Generation::STABLE);
-        let mut state = SplitState::at_root(&c, root, u32::MAX);
+        let mut state = SplitState::at_root(&c, root, u32::MAX, 1.0);
         assert_eq!(state.next_split_depth, 5, "a const run length of 5");
         let mut st = Stream::new(1, 1);
         let mut cur = root;
         let mut ps = Vec::new();
         for d in 1..=6u32 {
-            let (next, p) = c.trunk_step_stateful(cur, d, &mut state, &mut st, Generation::STABLE);
+            let (next, p) =
+                c.trunk_step_stateful(cur, d, &mut state, &mut st, Generation::STABLE, 1.0);
             ps.push(p);
             cur = next;
         }
@@ -1031,6 +1229,7 @@ mod tests {
                 SegmentBand {
                     from_depth: 0,
                     length: Dist::Scalar(4.0),
+                    length_by_cohort: None,
                     out_degree: Dist::Scalar(16.0),
                     singleton_share: None,
                     skew: Some(2.5),
@@ -1038,6 +1237,7 @@ mod tests {
                 SegmentBand {
                     from_depth: 8,
                     length: Dist::Scalar(4.0),
+                    length_by_cohort: None,
                     out_degree: Dist::Scalar(16.0),
                     singleton_share: None,
                     skew: Some(0.0),
@@ -1053,7 +1253,8 @@ mod tests {
         // while s = 0 divides it sixteen ways.
         let decay = |depth: u32| {
             let mut st = Stream::new(9, 9);
-            let mut state = SplitState::at_root(&c, c.root_key(0, Generation::STABLE), u32::MAX);
+            let mut state =
+                SplitState::at_root(&c, c.root_key(0, Generation::STABLE), u32::MAX, 1.0);
             state.next_split_depth = depth;
             let (_, p) = c.trunk_step_stateful(
                 c.root_key(0, Generation::STABLE),
@@ -1061,6 +1262,7 @@ mod tests {
                 &mut state,
                 &mut st,
                 Generation::STABLE,
+                1.0,
             );
             p
         };

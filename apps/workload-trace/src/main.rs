@@ -2364,6 +2364,12 @@ fn weighted_median(pairs: &[(u64, u64)]) -> u64 {
 ///
 /// A residual `stated~`-vs-`trace/seg` gap of one step is the ≤64-step coarsening of the emitted
 /// empirical plus the even-sample median convention, not a return of the weighting.
+///
+/// **`drawn~` here is the band's MARGINAL, and since FR-054o the walk does not draw it directly**: a
+/// node's draw is scaled by its fan-in bucket's `length_by_cohort` multiplier, which this table
+/// deliberately does not apply because it has no node and therefore no cohort. So `drawn~` remains the
+/// right thing to check `stated~` against, and the conditional law is read from the `len x fan` column
+/// of the fitted-process table beside it. `arrivals~` is what the conditioning exists to close.
 fn print_run_length_draw(
     doc: &workload_model::schema::Document,
     trace_rows: &[workload_model::fit::segments::SegmentRow],
@@ -2381,6 +2387,8 @@ fn print_run_length_draw(
         "\n    run length: what the band SAYS against what a per-node draw YIELDS\n    \
          `length` is drawn once per NODE and since FR-054m is fitted over SEGMENTS, so `stated~`,\n    \
          `drawn~` and `trace/seg` are all the same quantity and should agree — a gap is a defect.\n    \
+         `drawn~` is the MARGINAL: since FR-054o the walk scales a node's draw by its fan-in bucket,\n    \
+         which this table cannot apply because it has no node — see the `len x fan` column above.\n    \
          `arrivals~` is the same rows fan-in weighted, i.e. the run a typical ARRIVAL walks: what\n    \
          `length` used to be fitted to, kept here because the child law is still weighted that way."
     );
@@ -2427,6 +2435,89 @@ fn print_run_length_draw(
             } else {
                 seg[seg.len() / 2]
             }
+        );
+    }
+}
+
+/// Is a segment's run length independent of its **fan-in**? (FR-054o)
+///
+/// The question this answers, and why it needs its own table: [`print_run_length_draw`] shows that
+/// a band's per-segment median and its fan-in weighted median can differ by 29x, and both are
+/// facts about the same rows. They can only both be true if length and fan-in are **correlated** —
+/// so this stratifies the band's segments by fan-in and prints the per-segment median length within
+/// each stratum. A flat column is independence and the model's single per-band law is then correct;
+/// a sloped one is a joint law stated as two marginals, and the slope's **sign and size are what a
+/// conditional law has to be fitted to.**
+///
+/// Strata are **fixed geometric fan-in buckets**, not the band's own quartiles, and the first
+/// version of this table used quartiles and was WRONG — recorded here because the failure is not
+/// visible in the output. Fan-in is overwhelmingly tied at 2: on `qwen_code`'s deeper bands three
+/// of four fan-in quartiles are all `f2-2`, so the quartile edges fall inside one tie group and the
+/// partition is decided entirely by the tie-break. With the rows sorted as `(fan_in, length)` that
+/// tie-break was **length itself**, so the table reported a 1-to-101 "slope" that was nothing but
+/// length sorted against itself. A stratification of a heavily tied variable must bucket by VALUE.
+///
+/// `n` is printed beside each median because a bucket of a thin band is a handful of segments and a
+/// slope read off six observations is not a slope.
+fn print_length_by_fanin(trace_rows: &[workload_model::fit::segments::SegmentRow]) {
+    // The SAME cuts the fit states its scales against, so this table and the document cannot
+    // disagree by a bucket.
+    use workload_model::fit::segments::{BANDS, FAN_IN_BUCKETS as FAN};
+
+    println!(
+        "\n    run length by FAN-IN bucket — is `length` independent of the cohort? (FR-054o)\n    \
+         the model draws one law per band with no reference to the node's own cohort. a sloped row\n    \
+         means that law is a marginal of a joint, and the SIGN of the slope is what must be fitted.\n    \
+         buckets are fan-in VALUES, not quantiles: fan-in is tied at 2 for most segments, so\n    \
+         quantile strata fall inside the tie group and measure only their own tie-break."
+    );
+    println!(
+        "    {:>8}  {:>11} {:>11} {:>11} {:>11} {:>11}  {:>9}",
+        "depths", "fan 2", "fan 3", "fan 4-15", "fan 16-255", "fan 256+", "hi/lo"
+    );
+    for (i, lo) in BANDS.iter().enumerate() {
+        let hi = BANDS.get(i + 1).copied().unwrap_or(u32::MAX);
+        let in_band = || {
+            trace_rows
+                .iter()
+                .filter(move |r| r.start_depth >= *lo && (hi == u32::MAX || r.start_depth < hi))
+        };
+        if in_band().next().is_none() {
+            continue;
+        }
+        let mut cells: Vec<(u64, usize)> = Vec::new();
+        for (j, flo) in FAN.iter().enumerate() {
+            let fhi = FAN.get(j + 1).copied().unwrap_or(u32::MAX);
+            let mut lens: Vec<u32> = in_band()
+                .filter(|r| r.fan_in >= *flo && (fhi == u32::MAX || r.fan_in < fhi))
+                .map(|r| r.length)
+                .collect();
+            if lens.is_empty() {
+                cells.push((0, 0));
+                continue;
+            }
+            lens.sort_unstable();
+            cells.push((u64::from(lens[lens.len() / 2]), lens.len()));
+        }
+        // Reported as the ratio of the extreme **populated** buckets rather than a fitted
+        // coefficient: the dependence is not assumed monotone, so one regression slope would
+        // average a shape it cannot represent. `hi/lo` says which end has the long runs and by how
+        // much, which is what the design decision needs.
+        let lowest = cells.iter().find(|(_, n)| *n > 0);
+        let highest = cells.iter().rev().find(|(_, n)| *n > 0);
+        let ratio = match (lowest, highest) {
+            (Some((l, _)), Some((h, _))) if *l > 0 => *h as f64 / *l as f64,
+            _ => f64::NAN,
+        };
+        println!(
+            "    {:>8}  {:>11} {:>11} {:>11} {:>11} {:>11}  {:>9.2}",
+            format!("{lo}+"),
+            format!("{} n{}", cells[0].0, cells[0].1),
+            format!("{} n{}", cells[1].0, cells[1].1),
+            format!("{} n{}", cells[2].0, cells[2].1),
+            format!("{} n{}", cells[3].0, cells[3].1),
+            format!("{} n{}", cells[4].0, cells[4].1),
+            ratio
         );
     }
 }
@@ -2544,6 +2635,7 @@ fn print_structure_diff(
         p.iter().map(|(_, s)| s.segments).sum(),
     );
     print_run_length_draw(doc, trace_rows);
+    print_length_by_fanin(trace_rows);
     // Why a realised run is shorter than the fitted one, which is the sharpest open gap in the
     // trunk fit: `qwen_code`'s band 32-127 states a run length of 136 blocks and realises 2. A run
     // drawn as 136 can only appear in the plan as far as some session walked it, so the median split
@@ -2886,10 +2978,13 @@ fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
          child\n  under `skew`. splits/blk is off the MEAN length; decay/band = \
          coll^(span/mean len);\n  cum is the product down the trunk. Compare against the census \
          above: `len` is fitted\n  over SEGMENTS and should MATCH its per-segment median (FR-054m), \
-         while `deg` is still fan-in\n  weighted and is meant to differ from it."
+         while `deg` is still fan-in\n  weighted and is meant to differ from it. `len^f` is FR-054o: \
+         the exponent by which a node's\n  own cohort scales `len`, with the support the walk clamps \
+         a cohort into. `len` is the law AT\n  that support's reference, so a band with an exponent \
+         states its marginal and not its every node."
     );
     println!(
-        "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>7}  {:>10}  {:>9}  {:>9}",
+        "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>7}  {:>16}  {:>10}  {:>9}  {:>9}",
         "depths",
         "len_p10",
         "len_p50",
@@ -2899,6 +2994,7 @@ fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
         "deg_mean",
         "skew",
         "escape",
+        "len x fan  (from_fan_in:scale per bucket)",
         "splits/blk",
         "decay/band",
         "cum"
@@ -2926,8 +3022,18 @@ fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
             Some(d) if d < 1e-6 => "<1e-6".to_string(),
             Some(d) => format!("{d:.5}"),
         };
+        // The exponent and its support together, because neither is readable alone: an exponent of
+        // -0.2 means nothing until you know the walk may only evaluate it between fan-in 2 and
+        // 16045, and the reference is where the stated `len` actually applies.
+        let by_cohort = b.length_by_cohort.as_ref().map_or("-".to_string(), |c| {
+            c.by_fan_in
+                .iter()
+                .map(|s| format!("{}:{:.2}", s.from_fan_in, s.scale))
+                .collect::<Vec<_>>()
+                .join(" ")
+        });
         println!(
-            "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>7}  {:>10}  {:>9}  {:>9}",
+            "    {:>10}  {:>7}  {:>7}  {:>7}  {:>8}  {:>7}  {:>8}  {:>6}  {:>7}  {:>44}  {:>10}  {:>9}  {:>9}",
             span,
             q(&b.length, 0.10),
             q(&b.length, 0.50),
@@ -2938,6 +3044,7 @@ fn print_fitted_process(fit: &workload_model::fit::segments::ProcessFit) {
             b.skew.map_or("-".to_string(), |s| format!("{s:.3}")),
             b.singleton_share
                 .map_or("-".to_string(), |q| format!("{q:.4}")),
+            by_cohort,
             this.map_or("-".to_string(), |x| format!("{:.4}", x.splits_per_block)),
             factor(this.and_then(|x| x.decay_in_band)),
             factor(this.and_then(|x| x.cumulative)),

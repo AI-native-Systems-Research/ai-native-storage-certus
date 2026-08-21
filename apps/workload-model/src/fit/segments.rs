@@ -364,6 +364,21 @@ impl SegmentRow {
 /// copy that drifted would misattribute every fitted law by one band.
 pub const BANDS: [u32; 6] = [0, 1, 8, 32, 128, 512];
 
+/// Lower edges of the **fan-in** buckets a band's run length is conditioned on (FR-054o).
+///
+/// Geometric and starting at 2 because a shared segment has fan-in >= 2 by definition and the
+/// distribution is extreme — a median of 2 against a maximum of 16045 on `qwen_code`. Buckets by
+/// **value** rather than by quantile, because fan-in is tied at 2 for most segments in most bands, so
+/// quantile strata fall inside that tie group and separate nothing: an earlier version of the
+/// `--explain` diagnostic partitioned by fan-in quartile and, having sorted `(fan_in, length)`, was
+/// tie-broken on **length itself** and reported a 1-to-101 dependence that was length sorted against
+/// itself. The failure was invisible in the output.
+///
+/// Public for the same reason [`BANDS`] is: `fit --explain` prints the census stratified by these and
+/// the fit states its scales against them, and a second copy that drifted would misattribute every
+/// fitted scale by one bucket.
+pub const FAN_IN_BUCKETS: [u32; 5] = [2, 3, 4, 16, 256];
+
 /// Fit a node-level trunk process from the census.
 ///
 /// Per band, the distribution of a split's **run length** and of its **total out-degree**,
@@ -453,9 +468,13 @@ pub fn fit_process(rows: &[SegmentRow]) -> Option<ProcessFit> {
             // 2026-08-18 and it is not a criterion. `BandSkew::ess` is reported instead, because
             // the measurement refuted the hypothesis that motivated the floor — see research.md
             // § The child-choice law.
+            // FR-054o. Fitted from the same rows as `length` and read together with it: `length` is
+            // the law at this field's `reference` fan-in, not at every node.
+            let length_by_cohort = fit_length_by_cohort(in_band().cloned());
             bands.push(SegmentBand {
                 from_depth: *lo,
                 length,
+                length_by_cohort,
                 out_degree,
                 skew: skew.as_ref().map(|s| s.skew),
                 singleton_share,
@@ -793,6 +812,84 @@ fn weighted_collision(s: f64, pairs: &[(u64, f64)]) -> Option<f64> {
     }
 }
 
+/// Fit `length`'s dependence on the node's own **fan-in** for one band (FR-054o).
+///
+/// A **step multiplier per fan-in bucket**, each the bucket's median run length over the band's, so
+/// that a node in a bucket realises that bucket's own measured median — see
+/// [`crate::schema::CohortStep::scale`]. **Unweighted over segments**: FR-054m's rule applies to this
+/// exactly as it applies to the marginal it modifies, because the law is drawn once per node, and
+/// weighting by fan-in would fit the scales to the arrivals and reintroduce that defect one level up.
+///
+/// # A power law was built here first, and its own fit refuted it
+///
+/// The first version fitted one exponent per band by OLS of `ln(length)` on `ln(fan_in)`. It tracks
+/// `qwen_code`'s root band to within 1.1x at fan-in 2, 3 and 8 and then diverges — 1.5x at 60, 2.6x
+/// at 1000 and **6.1x at the root**, asking for a 2.9-block run where the trace's top bucket medians
+/// 18 — because the dependence **flattens** in log-log and one slope cannot bend. A power law
+/// therefore concentrates its whole error on the highest-fan-in node in the trie, which is the node
+/// the mechanism exists for. Measured, it was a Pareto loss on `qwen_code` (reuse 0.0264 → 0.1115,
+/// `unique_keys` 0.2656 → 0.4729). Two further reasons the step form is right and not merely
+/// flexible: it **cannot extrapolate**, so a cohort estimate whose range does not match the census's
+/// cannot be turned into an arbitrary run length; and it is fitted on **medians**, matching the
+/// median-preserving empirical it scales, where the mean-of-logs slope came out nearly twice as steep
+/// as the bucket medians imply (−0.304 against −0.151).
+///
+/// Returns `None` unless **two buckets** have segments — one bucket is a band with no measured
+/// dependence, and stating a single scale of 1.0 would put a field in the document that says nothing.
+/// Buckets with no segments are omitted rather than interpolated.
+///
+/// Deliberately **no sample-size floor**: one was built for the child-law fit on 2026-08-18 and
+/// measured not to be a criterion, so the segment count per bucket is *reported* by `fit --explain`
+/// instead of silently gating the law. See research.md § The child-choice law.
+fn fit_length_by_cohort(
+    rows: impl Iterator<Item = SegmentRow> + Clone,
+) -> Option<crate::schema::CohortLength> {
+    use crate::schema::{CohortLength, CohortStep};
+
+    let median = |v: &mut Vec<u32>| -> Option<f64> {
+        if v.is_empty() {
+            return None;
+        }
+        v.sort_unstable();
+        Some(f64::from(v[v.len() / 2]))
+    };
+    // The denominator is restricted to the rows the buckets can hold, so that it and they are the
+    // SAME population by construction. Every caller passes `Census::finish(2)` and a shared segment
+    // has fan-in >= 2 by definition, so nothing is excluded in practice — but that is the caller's
+    // invariant, not this function's, and a scale computed as a ratio of two different populations
+    // would be wrong in a way no test of the callers would show.
+    let covered = || {
+        rows.clone()
+            .filter(|r| r.length >= 1 && r.fan_in >= FAN_IN_BUCKETS[0])
+    };
+    let mut all: Vec<u32> = covered().map(|r| r.length).collect();
+    // The band's own median, which is what `length` states since FR-054m. Taken from these rows
+    // rather than from the emitted `Dist` so the two cannot disagree through the empirical builder's
+    // ≤64-step coarsening.
+    let band_median = median(&mut all)?;
+    if band_median <= 0.0 {
+        return None;
+    }
+    let mut steps: Vec<CohortStep> = Vec::new();
+    for (i, lo) in FAN_IN_BUCKETS.iter().enumerate() {
+        let hi = FAN_IN_BUCKETS.get(i + 1).copied().unwrap_or(u32::MAX);
+        let mut lens: Vec<u32> = covered()
+            .filter(|r| r.fan_in >= *lo && (hi == u32::MAX || r.fan_in < hi))
+            .map(|r| r.length)
+            .collect();
+        if let Some(m) = median(&mut lens) {
+            let scale = m / band_median;
+            if scale.is_finite() && scale > 0.0 {
+                steps.push(CohortStep {
+                    from_fan_in: *lo,
+                    scale,
+                });
+            }
+        }
+    }
+    (steps.len() >= 2).then_some(CohortLength { by_fan_in: steps })
+}
+
 /// An empirical step distribution over `(value, weight)` pairs.
 fn weighted_empirical(obs: impl Iterator<Item = (u64, u64)>) -> Option<crate::dist::Dist> {
     let mut pairs: Vec<(u64, u64)> = obs.collect();
@@ -828,6 +925,135 @@ mod tests {
             }
         }
         c
+    }
+
+    /// A bare row carrying only the two fields the cohort fit reads.
+    fn len_fan(length: u32, fan_in: u32) -> SegmentRow {
+        SegmentRow {
+            start_depth: 0,
+            length,
+            fan_in,
+            ends: SegmentEnd::Fanout,
+            out_degree: 2,
+            shared_children: 2,
+            child_fan_in_sum: u64::from(fan_in),
+            shared_fan_in_sum: u64::from(fan_in),
+            child_fan_in_sq: 0.0,
+            child_fan_in_sq_all: 0.0,
+            top_child_fan_in: fan_in,
+        }
+    }
+
+    #[test]
+    fn each_fan_in_buckets_scale_makes_it_realise_its_own_measured_median() {
+        // The fit's central claim, and it is directly checkable rather than an argument about
+        // centring: `scale` is the bucket's median over the band's, and the band's `length` is a
+        // median-preserving empirical, so a node in a bucket realises THAT BUCKET's median.
+        //
+        // Planted with the shape the corpus actually shows — falling and FLATTENING, which is what
+        // refuted the power law: 100 / 80 / 60 / 50 / 48 blocks across the five buckets. A single
+        // log-log slope cannot bend like that; five scales reproduce it exactly.
+        let planted = [(2u32, 100u32), (3, 80), (4, 60), (16, 50), (256, 48)];
+        let mut rows: Vec<SegmentRow> = Vec::new();
+        for (fan, len) in planted {
+            // Five segments per bucket so each has an unambiguous median.
+            rows.extend((0..5).map(|_| len_fan(len, fan)));
+        }
+        let c = fit_length_by_cohort(rows.iter().cloned()).expect("five populated buckets");
+        assert_eq!(c.by_fan_in.len(), 5, "one step per populated bucket");
+        // 25 segments over five distinct lengths: the band median is the middle bucket's, 60.
+        let band_median = 60.0;
+        for (step, (fan, len)) in c.by_fan_in.iter().zip(planted) {
+            assert_eq!(step.from_fan_in, fan);
+            let realised = band_median * step.scale;
+            assert!(
+                (realised - f64::from(len)).abs() < 1e-9,
+                "bucket {fan} must realise its own median {len}, got {realised}"
+            );
+        }
+        // And the flattening is preserved, which is the property a power law loses: the step from
+        // the fourth bucket to the fifth is far smaller than the first to the second.
+        let d = |a: usize, b: usize| c.by_fan_in[a].scale - c.by_fan_in[b].scale;
+        assert!(
+            d(0, 1) > 4.0 * d(3, 4),
+            "the fitted law must keep the shape's flattening, not straighten it"
+        );
+    }
+
+    #[test]
+    fn the_cohort_law_is_fitted_over_segments_and_not_over_arrivals() {
+        // FR-054m's rule applied to FR-054o: weight a law by what its draw is keyed ON. The scales
+        // modify `length`, which is drawn once per NODE, so each bucket's median takes one
+        // observation per segment. Fan-in weighting would fit them to the ARRIVALS and reintroduce
+        // one level up the exact defect FR-054m removed — and invisibly, since plausible scales come
+        // out either way.
+        //
+        // The fixture makes the two disagree: the `fan 2` bucket holds twenty 100-block segments and
+        // one 4-block one, so its unweighted median is 100. Weighted by fan-in the single crowded
+        // segment in the top bucket would dominate the band median instead, moving every scale.
+        let mut rows: Vec<SegmentRow> = (0..20).map(|_| len_fan(100, 2)).collect();
+        rows.push(len_fan(4, 2));
+        rows.extend((0..20).map(|_| len_fan(10, 300)));
+        let c = fit_length_by_cohort(rows.iter().cloned()).expect("two populated buckets");
+        assert_eq!(c.by_fan_in.len(), 2, "buckets 3, 4-15 and 16-255 are empty");
+        assert_eq!(c.by_fan_in[0].from_fan_in, 2);
+        assert_eq!(c.by_fan_in[1].from_fan_in, 256);
+        // 41 segments; the band median is 10 (21 of them are 10 or below... the sorted middle is 10).
+        // So `fan 2` scales up by 10x and `fan 256+` sits at 1.0.
+        assert!(
+            c.by_fan_in[0].scale > c.by_fan_in[1].scale,
+            "the thin-and-long bucket must scale above the crowded-and-short one: {:?}",
+            c.by_fan_in
+        );
+        let band_median = 10.0;
+        assert!(
+            (band_median * c.by_fan_in[0].scale - 100.0).abs() < 1e-9,
+            "the unweighted median of the fan-2 bucket is 100, not the weighted one"
+        );
+    }
+
+    #[test]
+    fn the_scales_denominator_covers_exactly_the_rows_the_buckets_do() {
+        // A `scale` is a ratio of a bucket's median to the band's, so the two must be medians of the
+        // SAME population. Rows below the first bucket's fan-in would otherwise sit in the
+        // denominator and in no numerator, tilting every scale in the band at once. Every caller
+        // passes `Census::finish(2)` so this cannot arise today — which is exactly why it is pinned
+        // here rather than left to the callers, whose invariant it currently is.
+        //
+        // Twenty unshared rows are added with lengths that would drag the band median down from 100
+        // to 1 if they counted. The fitted scales must be identical with and without them.
+        let shared = [
+            len_fan(100, 2),
+            len_fan(100, 2),
+            len_fan(100, 2),
+            len_fan(40, 300),
+            len_fan(40, 300),
+            len_fan(40, 300),
+        ];
+        let clean = fit_length_by_cohort(shared.iter().cloned()).expect("two buckets");
+        let mut polluted: Vec<SegmentRow> = shared.to_vec();
+        polluted.extend((0..20).map(|_| len_fan(1, 1)));
+        let dirty = fit_length_by_cohort(polluted.iter().cloned()).expect("two buckets");
+        assert_eq!(
+            clean.by_fan_in, dirty.by_fan_in,
+            "fan-in-1 segments belong to no bucket and must not move the denominator"
+        );
+    }
+
+    #[test]
+    fn a_band_filling_only_one_bucket_states_no_cohort_law() {
+        // The honest absence. Most deep bands in the corpus are overwhelmingly fan-in 2 — that tie
+        // group is what broke the first version of the `--explain` diagnostic — and a band whose
+        // segments all land in one bucket has no measured dependence. Emitting a single step of
+        // scale 1.0 would put a field in the document that says nothing, and the walk would then
+        // multiply every run by it.
+        let rows: Vec<SegmentRow> = (0..50).map(|i| len_fan(i % 17 + 1, 2)).collect();
+        assert!(fit_length_by_cohort(rows.iter().cloned()).is_none());
+        // One segment cannot populate two buckets either.
+        assert!(fit_length_by_cohort([len_fan(9, 4)].iter().cloned()).is_none());
+        // Two segments in two buckets is the minimum that CAN state one.
+        let two = [len_fan(9, 2), len_fan(90, 300)];
+        assert!(fit_length_by_cohort(two.iter().cloned()).is_some());
     }
 
     #[test]

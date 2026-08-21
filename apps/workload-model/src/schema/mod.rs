@@ -298,7 +298,29 @@ pub struct SegmentBand {
     /// This band holds from here until the next.
     pub from_depth: u32,
     /// Blocks a unary run continues before the next split. Drawn per split node.
+    ///
+    /// The band's **marginal**. When `length_by_cohort` is set this is the law at that field's
+    /// `reference` fan-in rather than at every node, and the two are read together.
     pub length: Dist,
+    /// How `length` varies with the **cohort at the node** (FR-054o).
+    ///
+    /// `length` alone is a marginal of a joint. Measured: on `qwen_code`'s root band the segments
+    /// with fan-in 2 run a median 49 blocks and those with fan-in 256+ run 18, monotonically down
+    /// through the buckets between; on `tau2_airline`'s root band it runs the other way, 60 blocks
+    /// at fan-in 3 against 146 at fan-in 16-255. Stating only the marginal gives every node the
+    /// band's typical run whatever its cohort, and since a model's near-root nodes carry *every*
+    /// session that is where the error is largest — `qwen_code`'s first split lands 27 blocks down,
+    /// which puts a floor of 27 shared blocks under every session while 24.8% of the trace's
+    /// requests share one block or less.
+    ///
+    /// **The sign is a property of the trace, so it is fitted and never assumed.** That is also why
+    /// this mechanism can help both traces at once where a tuned rate cannot: `qwen_code`
+    /// over-shares and fits a negative exponent, so its crowded root splits sooner;
+    /// `tau2_airline` under-shares and fits a positive one, so its 124-block root preamble survives.
+    ///
+    /// Unset means no dependence, which keeps every existing document's stream byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length_by_cohort: Option<CohortLength>,
     /// Children at the split that ends the run — **total**, singletons included.
     pub out_degree: Dist,
     /// Zipf exponent over child rank at this band's splits; overrides `branch_skew`.
@@ -338,6 +360,76 @@ pub struct SegmentBand {
     /// `None` the walk draws nothing at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub singleton_share: Option<f64>,
+}
+
+/// How a band's run length scales with the cohort at the node (FR-054o).
+///
+/// A **step function over fan-in buckets**, not a power law. A power law was built first and refuted
+/// by its own fit: on `qwen_code`'s root band a fitted exponent of −0.304 tracks the trace to within
+/// 1.1x at fan-in 2, 3 and 8, then overshoots progressively — 1.5x at 60, 2.6x at 1000 and **6.1x at
+/// the root**, where it asks for a 2.9-block run against the trace's measured 18. The dependence
+/// **flattens** in log-log and one slope cannot bend, so a power law puts its whole error on the
+/// highest-fan-in node in the trie — which is precisely the node this mechanism exists for, since a
+/// model's root carries every session. Measured: that form was a Pareto loss on `qwen_code`.
+///
+/// A step function bends by construction, and it also **cannot extrapolate**: a cohort above the top
+/// bucket's floor takes the top bucket's scale, so no support range is needed and no cohort estimate
+/// can be turned into an arbitrary run length. That the walk's cohort is an *estimate* whose range
+/// need not match the census's is what made extrapolation dangerous in the first place.
+///
+/// Each `scale` is that bucket's median run length over the band's, so a node in a bucket realises
+/// **that bucket's own measured median** — see [`CohortStep::scale`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CohortLength {
+    /// One step per fan-in bucket that had segments, ascending by `from_fan_in`.
+    ///
+    /// Buckets with no segments are **omitted rather than interpolated**, so a cohort falling in one
+    /// takes the nearest measured bucket below it. Interpolating would state a scale for a fan-in the
+    /// trace never exhibited at this depth, which is the extrapolation the power law was refuted for
+    /// in a smaller form.
+    pub by_fan_in: Vec<CohortStep>,
+}
+
+/// One fan-in bucket's multiplier on a band's run length (FR-054o).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CohortStep {
+    /// This bucket holds from this fan-in until the next step's.
+    pub from_fan_in: u32,
+    /// Multiplier on the band's `length` draw for a node in this bucket.
+    ///
+    /// Defined as the bucket's median run length divided by the band's, which makes the realised
+    /// median in the bucket the **trace's measured median for that bucket**: the band's `length` is a
+    /// median-preserving empirical law, so scaling a draw from it by `M_bucket / M_band` lands its
+    /// median on `M_bucket`. That is a directly checkable claim about the generated trunk rather than
+    /// a centring argument about the fit, and it is why the scale is a ratio of medians and not of
+    /// means — mixing a median-based marginal with a mean-based slope is what made the power law's
+    /// exponent nearly twice as steep as the bucket medians imply (−0.304 against −0.151).
+    pub scale: f64,
+}
+
+impl CohortLength {
+    /// The multiplier in force for a node whose cohort is `cohort`.
+    ///
+    /// The **highest** step whose `from_fan_in` the cohort reaches, so a cohort above the top bucket
+    /// takes the top bucket's scale and one below the first takes the first's. That is what makes the
+    /// step form incapable of extrapolating, which is the property the refuted power law lacked.
+    ///
+    /// `None` when the law states no steps at all, which the walk treats as no dependence — the same
+    /// path an absent law takes, so a degenerate document cannot silently scale by something.
+    ///
+    /// A linear scan rather than a binary search: there are at most a handful of buckets, and this is
+    /// called once per split rather than once per block.
+    pub fn scale_at(&self, cohort: f64) -> Option<f64> {
+        let mut found = None;
+        for step in &self.by_fan_in {
+            if cohort >= f64::from(step.from_fan_in) || found.is_none() {
+                found = Some(step.scale);
+            } else {
+                break;
+            }
+        }
+        found.filter(|s| s.is_finite() && *s > 0.0)
+    }
 }
 
 impl Default for Branching {

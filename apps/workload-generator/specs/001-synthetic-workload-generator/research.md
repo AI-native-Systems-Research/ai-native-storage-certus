@@ -590,6 +590,89 @@ depth**, so applying a population-average decay to every walker sheds the wrong 
 measured in the refuted `fanout < 1` experiment, then again when survivor-conditioning recovered almost
 nothing, and now here — and the sample-floor sweep below makes it a fourth, by yet another route.
 
+### Run length against fan-in — the derivation behind FR-054o, and why a power law fails
+
+FR-054m established that `length` must be fitted **unweighted over segments**, because the walk draws
+it once per node. That fixed the *stated* law — on both traces examined the stated median then matched
+the census's per-segment median in all six bands — and left a gap it could not close: on `qwen_code`'s
+root band the same segments **fan-in weighted** median 1 block, i.e. a typical *arrival* walks one
+block where the model makes every arrival walk 27. Two medians of one population, both correct, can
+only differ like that if run length is **correlated with fan-in**.
+
+Measured directly, by stratifying each band's segments on fan-in **value** and taking the per-segment
+median inside each stratum:
+
+| band | trace | fan 2 | fan 3 | fan 4-15 | fan 16-255 | fan 256+ |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0+ | `qwen_code` | 49 (n23) | 39 (n13) | 33 (n40) | 24 (n28) | **18** (n6) |
+| 0+ | `tau2_airline` | – | 60 (n1) | 115 (n6) | **146** (n19) | – |
+| 0+ | `exgentic_swebench` | 468 (n1) | – | – | **2** (n17) | – |
+| 512+ | `qwen_code` | 16 (n1361) | 13 (n888) | 12 (n1998) | 3 (n145) | 2 (n14) |
+
+**The sign is a property of the trace, not of the depth.** `qwen_code` and `exgentic_swebench` fall
+with fan-in at the root; `tau2_airline` rises. That is what makes a *fitted* conditional law able to
+serve an over-sharing trace and an under-sharing one at once, where no tuned rate can — and it is why
+implementing this as "shorter runs near the root" is forbidden.
+
+**Buckets must be values, not quantiles, and the first version of this table was wrong.** Fan-in is
+tied at 2 for most segments in most bands, so three of four fan-in *quartiles* on `qwen_code`'s deeper
+bands are all `f2-2`: the quartile edges fall inside one tie group and the partition is decided
+entirely by the tie-break. Sorting rows as `(fan_in, length)` made that tie-break **length itself**,
+and the table reported a 1-to-101 "dependence" that was length sorted against itself. Nothing in the
+output revealed it. A claim carried in the spec on the strength of that table — that the sign varies by
+*band*, citing `qwen_code` band 32+ at 136 against 23 — is withdrawn; that cell holds **four**
+segments, and with value buckets the trace falls in five of six bands.
+
+#### A power law was built, and its own fit refuted it
+
+The parsimonious form is one exponent per band, `length(f) = length(ref) · (f/ref)^β`, fitted by OLS of
+`ln length` on `ln fan_in` and centred on the geometric-mean fan-in so the scaling averages to a factor
+of 1 over the segments fitted. On `qwen_code` band 0 that gives β = −0.304, and it tracks the trace
+well where the data is dense and fails where it is not:
+
+| fan-in | 2 | 3 | 8 | 60 | 1000 | **16045 (the root)** |
+| --- | --- | --- | --- | --- | --- | --- |
+| law predicts | 45.3 | 40.1 | 29.7 | 16.1 | 6.9 | **2.9** |
+| trace bucket median | 49 | 39 | 33 | 24 | 18 | **18** |
+| overshoot | 1.08x | 0.97x | 1.11x | 1.49x | 2.63x | **6.11x** |
+
+The dependence **flattens** in log-log and a single slope cannot bend, so the whole error lands on the
+highest-fan-in node in the trie — which is precisely the node the mechanism exists for, since a model's
+root carries every session. Measured, the arm was a Pareto loss on `qwen_code`: reuse distance
+0.0264 → 0.1115, `sharing_depth` 0.0894 → 0.1020, `unique_keys` 0.2656 → 0.4729.
+
+Two further defects of the form, both structural rather than a matter of calibration:
+
+- **It extrapolates.** The walk's cohort is an *estimate* — `sessions_per_window · p(rank)` and then a
+  product of child probabilities — and nothing ties its range to the census's. A clamp to the observed
+  support was added and is not enough, because the observed support legitimately *includes* fan-in
+  16045 on this band; the law is simply wrong out there.
+- **It mixes measures.** `length` is a median-preserving empirical, and a mean-of-logs slope is not the
+  companion of a median. Fitted to the bucket medians instead, the same band gives β = −0.151, less
+  than half as steep — a factor-of-two disagreement caused purely by the choice of centre.
+
+#### The step form, and the claim it makes checkable
+
+Each populated fan-in bucket states a `scale`: its median run length over the band's. Since `length`
+preserves its median, a node in a bucket then realises **that bucket's own measured median** — a claim
+about the generated trunk that can be read off `--explain` rather than an argument about the fit. On
+`qwen_code` band 0 the fitted scales are 1.69 / 1.34 / 1.14 / 0.83 / 0.62 against a stated median of
+27, so the root draws ≈ 17 blocks against the trace's 18, where the power law asked for 2.9.
+
+The form also **cannot extrapolate** — the outermost buckets simply continue, so no cohort estimate
+becomes an arbitrary run length — and it represents non-monotone shapes, which matters because a few
+bands do reverse. Buckets with no segments are omitted rather than interpolated, since interpolating
+states a scale for a fan-in the trace never exhibited at that depth; a cohort in a gap takes the
+nearest measured bucket below. A band populating one bucket states no law, because a single scale of
+1.0 is a field that says nothing and the walk would still multiply by it.
+
+Fitted unweighted over segments, for exactly FR-054m's reason: the scales modify a draw keyed on the
+node, so weighting them by fan-in would fit them to the arrivals and reintroduce that defect one level
+up. `length` stays keyed on the node — a run length varying by arrival makes the trie inconsistent —
+and conditioning it on the node's own cohort keeps the key while supplying the joint, because two
+walkers at one node arrived through the same root and made the same child choices and so carry the same
+cohort product. That is the argument FR-054k's run cap already relies on.
+
 ### Cohort exhaustion as the trunk boundary — step 3, measured and not yet adopted
 
 The named defect behind `sharing_depth` and reuse distance failing 8 of 8 is that the model draws

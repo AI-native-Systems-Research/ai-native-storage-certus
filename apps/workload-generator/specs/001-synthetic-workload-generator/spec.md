@@ -2461,36 +2461,76 @@ report segments statistics into before/after windows around the event.
   reverted walk is verified **byte-identical** to the previous commit's output on both traces.
 - **FR-054o**: A per-band run length MUST be fitted and drawn **conditioned on the node's own fan-in**,
   because the two are correlated in every trace measured and the model draws them independently. This
-  is the seventh instance of an independent draw standing in for a correlated structure.
-  **The measurement**, from `fit --explain`'s run-length table, where the last column is the same
-  segments fan-in weighted, i.e. the run a typical **arrival** walks:
-  | band | stated~ = drawn~ | `qwen_code` per SEGMENT | `qwen_code` per ARRIVAL | `tau2_airline` per SEGMENT | `tau2_airline` per ARRIVAL |
-  | --- | --- | --- | --- | --- | --- |
-  | 0+ | 27 / 124 | 29 | **1** | 124 | 124 |
-  | 1+ | 9 / 14 | 9 | 3 | 14 | 41 |
-  | 8+ | 18 / 11 | 18 | 8 | 11 | 6 |
-  | 32+ | 23 / 1 | 23 | **136** | 1 | 1 |
-  | 128+ | 36 / 1 | 37 | 21 | 1 | **119** |
-  | 512+ | 14 / 1 | 13 | 9 | 1 | 1 |
-  **FR-054m is a complete success on its own terms and still wrong for the walker**: the stated law now
-  matches the per-segment median in all six bands of both traces, yet `qwen_code`'s arrivals in band 0
+  is the seventh instance of an independent draw standing in for a correlated structure. The
+  conditioning MUST be a **step function over fan-in buckets**, and MUST NOT be a power law — see the
+  refutation below.
+  **The measurement.** Stratifying each band's segments by fan-in **value** and taking the per-segment
+  median run length inside each bucket (`fit --explain`, run length by fan-in bucket):
+  | band | `qwen_code` fan 2 / 3 / 4-15 / 16-255 / 256+ | `tau2_airline` fan 2 / 3 / 4-15 / 16-255 |
+  | --- | --- | --- |
+  | 0+ | 49 / 39 / 33 / 24 / **18** | – / 60 / 115 / **146** |
+  | 1+ | 13 / 8 / 3 / 1 / 3 | 14 / 7 / 13 / **730** |
+  | 8+ | 20 / 17 / 14 / 3 / 7 | 14 / 12 / 6 / – |
+  | 512+ | 16 / 13 / 12 / 3 / 2 | 1 / 1 / 1 / 1 |
+  **FR-054m is a complete success on its own terms and still wrong for the walker**: the stated law
+  matches the per-segment median in all six bands of both traces, yet `qwen_code`'s band-0 arrivals
   walk a **1-block** run where the model makes every arrival walk **27**. Both medians are facts about
-  one trace, and they can only both hold if run length is correlated with fan-in — high-traffic
-  near-root nodes carry short runs, long runs sit on low-traffic nodes — while the model gives the
-  near-root nodes, which carry every session, the long runs.
-  **The dependence MUST be fitted, not assumed: its sign varies by band and by trace.** Negative on
-  `qwen_code` band 0 (1 against 29), **positive** at band 32+ (136 against 23); exactly equal on
-  `tau2_airline` band 0 (124 against 124) and strongly positive at its band 128+ (119 against 1).
-  Implementing this as "shorter runs near the root" is therefore forbidden.
-  **It reconciles FR-054m rather than reversing it.** `length` MUST stay keyed on the node — a run
-  length varying by arrival makes the trie inconsistent, which is why FR-054m fitted it unweighted.
-  Conditioning that per-node draw on the node's own cohort keeps the key and supplies the joint; the
-  walk already carries `cohort`, and the census already records `fan_in` per segment, so both sides
-  exist. **NOT YET BUILT**, and as a mechanism it requires the FR-055f corpus matrix before adoption.
-  **Do not argue this from the generated trunk's realised length** (1-4 blocks against a drawn 27): in
-  that arm the synthetic also carries 98.8 attritions per 1000 shared blocks against the trace's 0.0,
-  so realised length conflates the draw with mid-run truncation. The per-arrival against per-segment
-  gap is trace-side only and is the clean measurement.
+  one trace and can only both hold if run length is correlated with fan-in — and the table above is the
+  direct measurement of that correlation rather than an inference from the two medians.
+  **The dependence MUST be fitted, not assumed, because its sign varies BY TRACE.** `qwen_code` and
+  `exgentic_swebench` fall with fan-in at the root band (49 → 18, and 468 → 2); `tau2_airline` **rises**
+  (60 → 146). So "shorter runs near the root" is forbidden, and so is any single tuned rate. This is
+  also why the mechanism can serve an over-sharing and an under-sharing trace at once, which no rate
+  can: the sign comes from the trace.
+  **Buckets MUST be fan-in VALUES, not quantiles.** Fan-in is tied at 2 for most segments in most
+  bands, so quantile strata fall inside that tie group and separate nothing. The first version of the
+  `--explain` diagnostic partitioned by fan-in quartile and, having sorted rows as `(fan_in, length)`,
+  was tie-broken on **length itself**; it reported a 1-to-101 dependence that was length sorted against
+  itself, and nothing in the output revealed it. **A claim this spec previously carried — that the sign
+  varies by BAND, citing `qwen_code` band 32+ at 136 against 23 — came from that diagnostic and from a
+  cell holding four segments, and is WITHDRAWN.** With value buckets `qwen_code` falls in five of six
+  bands.
+  **A POWER LAW WAS BUILT HERE FIRST AND IS REFUTED — do not rebuild it.** One exponent per band, OLS
+  of `ln(length)` on `ln(fan_in)`, centred on the geometric-mean fan-in. Fitted on `qwen_code` band 0
+  it gives −0.304 and tracks the trace closely at low fan-in, then diverges monotonically:
+  | fan-in | 2 | 3 | 8 | 60 | 1000 | **16045 (the root)** |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | law predicts | 45.3 | 40.1 | 29.7 | 16.1 | 6.9 | **2.9** |
+  | trace bucket median | 49 | 39 | 33 | 24 | 18 | **18** |
+  | overshoot | 1.08x | 0.97x | 1.11x | 1.49x | 2.63x | **6.11x** |
+  The dependence **flattens** and one slope cannot bend, so a power law puts its entire error on the
+  highest-fan-in node in the trie — the node the mechanism exists for, since a model's root carries
+  every session. Measured, that arm was a **Pareto loss on `qwen_code`** (reuse 0.0264 → 0.1115,
+  `sharing_depth` 0.0894 → 0.1020, `unique_keys` 0.2656 → 0.4729). Two further defects of the form: it
+  **extrapolates**, and the walk's cohort is an estimate whose range need not match the census's; and
+  its mean-of-logs slope contradicts the median-preserving empirical it scales, coming out nearly twice
+  as steep as the bucket medians imply (−0.304 against −0.151).
+  **The step form.** Each bucket states a `scale`, its median run length over the band's, so a node in
+  a bucket realises **that bucket's own measured median** — a directly checkable claim about the
+  generated trunk rather than a centring argument about the fit. It bends by construction, and it
+  **cannot extrapolate**: the outermost buckets simply continue, so no cohort estimate can be turned
+  into an arbitrary run length. Buckets with no segments MUST be omitted rather than interpolated; a
+  cohort landing in a gap takes the nearest measured bucket below it. A band populating only one bucket
+  MUST state no law at all, since a single scale of 1.0 is a field that says nothing.
+  **It reconciles FR-054m rather than reversing it.** `length` stays keyed on the node — a run length
+  varying by arrival makes the trie inconsistent, which is why FR-054m fitted it unweighted — and the
+  scales are fitted unweighted over segments for the same reason. Conditioning the per-node draw on the
+  node's own cohort keeps the key and supplies the joint. Two walkers at one node arrived through the
+  same root and made the same child choices, so they carry the same cohort product and agree; that is
+  the argument FR-054k's run cap already relies on.
+  **Measured, plain `--branching-segments`, against the code before it:**
+  | trace | reuse | `sharing_depth` | `request_length` | `unique_keys` | |
+  | --- | --- | --- | --- | --- | --- |
+  | `qwen_code` | 0.0264 → 0.0754 | **0.0894 → 0.0852** | identical | 0.2656 → 0.3762 | trade |
+  | `tau2_airline` | 0.03073 → **0.03029** | **0.4051 → 0.4022** | identical | 0.5512 → **0.5274** | **Pareto win** |
+  | `exgentic_swebench` | 0.0926 → 0.0959 | **0.4600 → 0.1761** | identical | 0.2661 → **0.2094** | near-Pareto win |
+  `sharing_depth` improves on **all three**, which matters because FR-057c ranks it the one statistic
+  worth gating on as-is (worst-case dynamic range 4.86x). `exgentic_swebench`'s **−62%** is the largest
+  movement in that statistic recorded in this effort. `request_length` is bit-identical on all three —
+  the check that this is trunk shape and not a path-length term.
+  **Do not argue this from the generated trunk's realised length** where the arm carries attrition the
+  trace does not: realised length then conflates the draw with mid-run truncation. The per-bucket
+  trace-side medians are the clean measurement.
 - **FR-056b**: **Fan-in per block** — the number of distinct sessions that reference a key — MUST be
   measured, and a candidate statistic MUST clear the FR-057c criterion (low achievable floor, high
   sibling bound over several pairs) **before** it is added to the FR-056 gate. Fan-in is the first
