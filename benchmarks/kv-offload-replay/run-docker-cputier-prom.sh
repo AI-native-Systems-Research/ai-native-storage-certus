@@ -23,7 +23,7 @@
 #                 the rootless-mapped container uid, else stores silently fail).
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
-IMAGE="${IMAGE:-certus-cpu-offload-bench}"
+IMAGE="${IMAGE:-certus-offload-bench}"
 CPU_BYTES="${CPU_BYTES:-$((8 * (1 << 30)))}"      # CPU primary tier (bytes)
 # TieringOffloadingSpec allocates its CPU primary tier as a /dev/shm mmap and
 # force-populates it with MADV_POPULATE_WRITE. Podman's default /dev/shm is 64M,

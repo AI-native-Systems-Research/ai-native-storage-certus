@@ -387,6 +387,16 @@ impl IGpuServices for BenchGpuServices {
     ) -> Result<(), String> {
         Ok(())
     }
+    fn memcpy_batch_async(
+        &self,
+        ops: &[interfaces::GpuMemcpyBatchOp],
+        stream: interfaces::GpuStream,
+    ) -> Result<(), String> {
+        for op in ops {
+            self.memcpy_d2h_async(op.src, op.dst, op.size, stream)?;
+        }
+        Ok(())
+    }
 }
 
 struct BenchMemoryTier {

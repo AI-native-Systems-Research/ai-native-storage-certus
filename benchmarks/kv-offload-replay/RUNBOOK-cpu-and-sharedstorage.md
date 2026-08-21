@@ -43,21 +43,25 @@ $V run_multiturn_nooffload.py 2>&1 | tee nooffload_450.log
 There is no offload tier, so no `CPU_BYTES` / `DRAM`.
 
 ### Container
-A self-contained image (`Dockerfile.nooffload`) packages the driver + dataset on
-a `vllm/vllm-openai` base (default `v0.23.0`; override with `--build-arg
-VLLM_VERSION=...`) — the same base family as the other bench images. No server, no
-shmq mailbox, no `--ipc=host`, and no offload tier to size. Its `ENV` defaults match this
-section (`NUM_CONVS=450`, 450×12 dataset).
+The unified image (`Dockerfile.offload` → `certus-offload-bench`) covers this
+baseline as well as CPU-offload and tiered — one image, one driver
+(`run_multiturn_offloading.py`), backend picked at run time. For the GPU-only
+baseline, set `OFFLOAD_MODE=none`: the driver passes no `kv_transfer_config`, so
+there is no offload tier to size. The base is `vllm/vllm-openai` (default
+`v0.26.0`; override with `--build-arg VLLM_VERSION=...`). No server, no gRPC, no
+`--ipc=host`. Its `ENV` defaults match this section (`NUM_CONVS=450`, 450×12
+dataset).
 ```bash
 # build from the repo root (context needs the bench dir + dataset)
-podman build -f benchmarks/kv-offload-replay/Dockerfile.nooffload -t certus-nooffload-bench .
-# ...or pin a newer vLLM (tag the image so versions don't collide):
-podman build --build-arg VLLM_VERSION=0.26.0 \
-    -f benchmarks/kv-offload-replay/Dockerfile.nooffload -t certus-nooffload-bench:vllm0.26 .
-# run (GPU required; mount the HF cache)
+podman build -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
+# ...or pin a specific vLLM (tag the image so versions don't collide):
+podman build --build-arg VLLM_VERSION=0.20.0 \
+    -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench:vllm0.20 .
+# run (GPU required; mount the HF cache) — OFFLOAD_MODE=none selects the baseline
 podman run --rm --device nvidia.com/gpu=all \
+    -e OFFLOAD_MODE=none \
     -v $HOME/.cache/huggingface:/root/.cache/huggingface \
-    certus-nooffload-bench
+    certus-offload-bench
 ```
 
 ### Notes / gotchas
@@ -108,9 +112,11 @@ default 4 GiB) · `TRACE_OFFLOAD` (0 = built-in connector, no tracing — defaul
 1 = Tracing* wrappers) · `MODEL` · `DATASET_PATH`.
 
 ### Container
-A self-contained image (`Dockerfile.cpu-offload`) packages the driver + dataset
-on a `vllm/vllm-openai` base (default `v0.23.0`; override with `--build-arg
-VLLM_VERSION=...`). No server, no shmq mailbox, no `--ipc=host`. Its `ENV` defaults match
+The unified image (`Dockerfile.offload` → `certus-offload-bench`) covers this
+backend too — it is the **default** mode (no `OFFLOAD_MODE`, no `DISK_DIR`),
+so the driver uses the in-process `OffloadingConnector` + `CPUOffloadingSpec`. Base
+is `vllm/vllm-openai` (default `v0.26.0`; override with `--build-arg
+VLLM_VERSION=...`). No server, no gRPC, no `--ipc=host`. Its `ENV` defaults match
 this section (`NUM_CONVS=450`, `CPU_BYTES=16 GiB`, `TRACE_OFFLOAD=0`, 450×12
 dataset). Note: the in-process `CPUOffloadingSpec`/`OffloadingConnector` API
 shifted across vLLM releases (the same multi-region change that broke the Certus
@@ -118,14 +124,15 @@ connector path at 0.23+), so a newer-version image builds but the driver may nee
 connector-side fixes to run.
 ```bash
 # build from the repo root (context needs the bench dir + dataset)
-podman build -f benchmarks/kv-offload-replay/Dockerfile.cpu-offload -t certus-cpu-offload-bench .
-# ...or pin a newer vLLM:
-podman build --build-arg VLLM_VERSION=0.26.0 \
-    -f benchmarks/kv-offload-replay/Dockerfile.cpu-offload -t certus-cpu-offload-bench:vllm0.26 .
+podman build -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
+# ...or pin a specific vLLM:
+podman build --build-arg VLLM_VERSION=0.20.0 \
+    -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench:vllm0.20 .
 # run (GPU required; mount the HF cache; free hugepages first if host was in Certus mode)
+# default mode = CPU offload; no OFFLOAD_MODE / DISK_DIR needed
 podman run --rm --device nvidia.com/gpu=all \
     -v $HOME/.cache/huggingface:/root/.cache/huggingface \
-    certus-cpu-offload-bench
+    certus-offload-bench
 ```
 
 ### Notes / gotchas
