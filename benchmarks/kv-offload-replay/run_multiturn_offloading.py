@@ -87,6 +87,47 @@ if __name__ == "__main__":
     DISK_READ_THREADS = int(os.environ.get("DISK_READ_THREADS", 16))
     DISK_WRITE_THREADS = int(os.environ.get("DISK_WRITE_THREADS", 16))
 
+    # Secondary offload tier. "" (default) = CPU-only (CPUOffloadingSpec, host RAM).
+    # "fs" = vLLM's native TieringOffloadingManager with the CPU tier as PRIMARY and
+    # a filesystem tier as SECONDARY (spills overflow blocks to FS_ROOT_DIR). CPU_BYTES
+    # then sizes only the primary tier; blocks the primary evicts fall through to disk.
+    SECONDARY_TIER = os.environ.get("SECONDARY_TIER", "").strip().lower()
+    FS_ROOT_DIR = os.environ.get("FS_ROOT_DIR", "/mnt/fs-tier/kv-tier")
+    FS_READ_THREADS = int(os.environ.get("FS_READ_THREADS", 16))
+    FS_WRITE_THREADS = int(os.environ.get("FS_WRITE_THREADS", 16))
+
+    # ── Per-round physical disk I/O accounting ────────────────────────────
+    # /sys/block/<dev>/stat exposes cumulative sectors read (field 3) and
+    # written (field 7) in 512-byte units. Snapshotting around each generate()
+    # gives bytes moved to/from the device per round. For Tiered-CPU-FS the
+    # fs secondary tier lives on DISK_DEV (the RAID0 md), so this captures the
+    # real SSD read/write of the spill tier; for CPU-only offload it stays ~0.
+    # Reading the md device aggregates all RAID0 member I/O in one place.
+    DISK_DEV = os.environ.get("DISK_DEV", "").strip()
+    DISK_STAT = f"/sys/block/{DISK_DEV}/stat" if DISK_DEV else ""
+    SECTOR = 512
+
+    def disk_rw_bytes():
+        """Return (bytes_read, bytes_written) cumulative for DISK_DEV, or (None, None)."""
+        if not DISK_STAT:
+            return None, None
+        try:
+            with open(DISK_STAT) as _f:
+                fields = _f.read().split()
+            return int(fields[2]) * SECTOR, int(fields[6]) * SECTOR
+        except (OSError, IndexError, ValueError):
+            return None, None
+
+    def gib(n):
+        return "n/a" if n is None else f"{n / (1024 ** 3):.2f} GiB"
+
+    if DISK_DEV and disk_rw_bytes()[1] is None:
+        print(f"[run] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled",
+              file=sys.stderr, flush=True)
+    elif not DISK_DEV:
+        print("[run] DISK_DEV unset — per-round disk I/O accounting disabled",
+              file=sys.stderr, flush=True)
+
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
     print(f"[run] model={MODEL}", file=sys.stderr)
     print(f"[run] num_convs={NUM_CONVS} max_model_len={MAX_MODEL_LEN} "
@@ -166,6 +207,33 @@ if __name__ == "__main__":
                 "eviction_policy": "lru",
             },
         }
+    elif SECONDARY_TIER == "fs":
+        # Tiered: CPU primary + filesystem secondary. TieringOffloadingSpec is a
+        # CPUOffloadingSpec subclass registered by name in vLLM's
+        # OffloadingSpecFactory (vLLM >= 0.26); "fs" resolves to FileSystemTierManager
+        # via the SecondaryTierFactory. CPU_BYTES sizes the primary tier; primary
+        # evictions spill to FS_ROOT_DIR. root_dir must exist and be writable.
+        os.makedirs(FS_ROOT_DIR, exist_ok=True)
+        KV_CONFIG = {
+            "kv_connector": "OffloadingConnector",
+            "kv_role": "kv_both",
+            "kv_connector_extra_config": {
+                "cpu_bytes_to_use": CPU_BYTES,
+                "spec_name": "TieringOffloadingSpec",
+                "eviction_policy": "lru",
+                "secondary_tiers": [
+                    {
+                        "type": "fs",
+                        "root_dir": FS_ROOT_DIR,
+                        "n_read_threads": FS_READ_THREADS,
+                        "n_write_threads": FS_WRITE_THREADS,
+                    },
+                ],
+            },
+        }
+        print(f"[run] secondary_tier=fs root_dir={FS_ROOT_DIR} "
+              f"read_threads={FS_READ_THREADS} write_threads={FS_WRITE_THREADS}",
+              file=sys.stderr)
     else:
         # CPUOffloadingSpec is registered by name in vLLM's OffloadingSpecFactory,
         # so no spec_module_path is needed.
@@ -193,6 +261,31 @@ if __name__ == "__main__":
 
     from vllm import LLM, SamplingParams
 
+    # Capturing vLLM's Prometheus counters requires the engine's stat logging to
+    # be on (it's what advances the metrics). Enabling it has a small overhead, so
+    # a capture run is not byte-identical to the stats-off timing baseline —
+    # CAPTURE_METRICS=0 restores that baseline and skips the per-round snapshot.
+    CAPTURE_METRICS = os.environ.get("CAPTURE_METRICS", "1") != "0"
+
+    # Model FLOPs Utilization (MFU): enable_mfu_metrics makes the engine emit
+    # estimated per-GPU FLOPs / read+write bytes as monotonic Counters
+    # (vllm:estimated_flops_per_gpu_total et al.), captured per round by the
+    # prom_counters() snapshot below. The arg only exists on newer vLLM — detect
+    # support at runtime so older versions don't reject the kwarg.
+    _mfu_kwargs = {}
+    if CAPTURE_METRICS:
+        try:
+            import dataclasses as _dc
+            from vllm.engine.arg_utils import EngineArgs as _EA
+            if any(f.name == "enable_mfu_metrics" for f in _dc.fields(_EA)):
+                _mfu_kwargs["enable_mfu_metrics"] = True
+        except Exception as e:  # noqa: BLE001
+            print(f"[prom] enable_mfu_metrics unavailable: {e}", file=sys.stderr)
+        print(f"[prom] enable_mfu_metrics={bool(_mfu_kwargs)} "
+              f"(estimated_flops_per_gpu_total "
+              f"{'captured per round' if _mfu_kwargs else 'ABSENT'})",
+              file=sys.stderr)
+
     llm = LLM(
         model=MODEL,
         max_model_len=MAX_MODEL_LEN,
@@ -213,10 +306,8 @@ if __name__ == "__main__":
         # Override with ASYNC_SCHED=1 to reproduce the crash.
         async_scheduling=(os.environ.get("ASYNC_SCHED", "0") != "0"),
         kv_transfer_config=KV_CONFIG,
-        # LOG_STATS=1 keeps vLLM's stats logging on so its PrometheusStatLogger
-        # registers metrics (incl. the tiering/kv_offload counters). Default off
-        # to keep per-round output clean.
-        disable_log_stats=(os.environ.get("LOG_STATS", "0") == "0"),
+        **_mfu_kwargs,
+        disable_log_stats=not CAPTURE_METRICS,
     )
 
     # Optional Prometheus exporter. When PROM_PORT is set, expose vLLM's engine
@@ -254,6 +345,95 @@ if __name__ == "__main__":
     # next_turn[i] = index of the next human turn to emit
     next_turn = [0] * len(convs)
 
+    # ── vLLM Prometheus counters (per round) ──────────────────────────────
+    # vLLM registers every metric on the default prometheus_client REGISTRY under
+    # the `vllm:` prefix, updated as the engine steps (present on both the V0 and
+    # V1 engines whenever stat logging is on). Snapshot each counter (samples
+    # named `vllm:*_total`, summed across label sets) at the end of every round
+    # and log the delta; the full per-round series is also dumped to JSON.
+    def prom_counters():
+        # Prefer the V1 offline snapshot: engine counters (prompt/generation
+        # tokens, prefix-cache queries/hits, preemptions) are exposed by
+        # llm.get_metrics() and are NOT on the global prometheus REGISTRY in
+        # offline mode — reading only the REGISTRY (or the log_stats logger) misses
+        # them. Then supplement with the REGISTRY for older (V0) engines, where
+        # get_metrics() is absent, and for connector-registered metrics
+        # (vllm:kv_offload_*) which only ever live on the global registry.
+        # Names differ by source: get_metrics() uses bare names
+        # (vllm:prefix_cache_queries); REGISTRY counter samples carry the _total
+        # suffix — we keep both keys so the delta shows under whichever the
+        # running version populates.
+        vals = {}
+        if not CAPTURE_METRICS:
+            return vals
+        try:
+            for m in llm.get_metrics():
+                if type(m).__name__ != "Counter":
+                    continue
+                name = getattr(m, "name", "")
+                val = getattr(m, "value", None)
+                if name.startswith("vllm:") and isinstance(val, (int, float)):
+                    # Sum across label sets: get_metrics() emits one Counter per
+                    # sample, so labeled metrics (request_success by finish_reason,
+                    # prompt_tokens_by_source, per-engine under TP>1) share a name.
+                    vals[name] = vals.get(name, 0.0) + float(val)
+        except Exception:  # noqa: BLE001 - get_metrics() is V1-only; skip on V0
+            pass
+        try:
+            from prometheus_client import REGISTRY
+            for metric in REGISTRY.collect():
+                if not metric.name.startswith("vllm:"):
+                    continue
+                for s in metric.samples:
+                    if s.name.endswith("_total"):
+                        vals[s.name] = vals.get(s.name, 0.0) + float(s.value)
+        except Exception as e:  # noqa: BLE001
+            print(f"[prom] collect failed: {e}", file=sys.stderr, flush=True)
+        return vals
+
+    def prom_histograms(names):
+        # Sample the named vLLM latency histograms ONCE (cumulative over the whole
+        # run). get_metrics() exposes each as Histogram(count, sum, buckets) where
+        # buckets maps an upper bound `le` -> cumulative count <= le; sum across
+        # label sets (per-engine / finish-reason) into one distribution per name.
+        out = {}
+        if not CAPTURE_METRICS:
+            return out
+        try:
+            for m in llm.get_metrics():
+                if type(m).__name__ != "Histogram":
+                    continue
+                name = getattr(m, "name", "")
+                if name not in names:
+                    continue
+                agg = out.setdefault(name, {"count": 0, "sum": 0.0, "buckets": {}})
+                agg["count"] += int(getattr(m, "count", 0))
+                agg["sum"] += float(getattr(m, "sum", 0.0))
+                for le, c in (getattr(m, "buckets", {}) or {}).items():
+                    agg["buckets"][le] = agg["buckets"].get(le, 0) + int(c)
+        except Exception as e:  # noqa: BLE001 - get_metrics() is V1-only
+            print(f"[prom] histogram sample failed: {e}", file=sys.stderr)
+        return out
+
+    def _hist_pct(buckets, count, p):
+        # Percentile from cumulative buckets: the smallest upper bound `le` whose
+        # cumulative count first reaches p*count. Bucket-granular approximation;
+        # returns inf when the crossing lands in the +Inf bucket.
+        if not count:
+            return None
+        target = p * count
+
+        def _le(k):
+            return float("inf") if k in ("+Inf", "inf", "Inf") else float(k)
+
+        for le in sorted(buckets, key=_le):
+            if buckets[le] >= target:
+                return _le(le)
+        return float("inf")
+
+    prom_prev = prom_counters()
+    prom_rounds = []  # (round, {counter_name: delta})
+
     rounds_done = 0
     total_generations = 0
     t_start = time.perf_counter()
@@ -289,21 +469,70 @@ if __name__ == "__main__":
             break
 
         rounds_done += 1
+        rd0, wr0 = disk_rw_bytes()
         round_start = time.perf_counter()
         outs = llm.generate(active_prompts, sp)
+        round_elapsed = time.perf_counter() - round_start
+        rd1, wr1 = disk_rw_bytes()
+        d_rd = None if rd0 is None or rd1 is None else rd1 - rd0
+        d_wr = None if wr0 is None or wr1 is None else wr1 - wr0
         # Append vLLM's own response for next round's prefix
         for i, out in zip(active_idx, outs):
             response = out.outputs[0].text if out.outputs else ""
             contexts[i] = contexts[i] + response
             next_turn[i] += 1
         total_generations += len(active_prompts)
-        round_elapsed = time.perf_counter() - round_start
         n_alive = sum(alive)
         print(f"[run] round {rounds_done}: {len(active_prompts)} prompts in "
-              f"{round_elapsed:.1f}s  ({n_alive} convs still alive)",
+              f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
+              f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
               file=sys.stderr, flush=True)
+        if CAPTURE_METRICS:
+            prom_now = prom_counters()
+            d_prom = {k: prom_now.get(k, 0.0) - prom_prev.get(k, 0.0)
+                      for k in prom_now}
+            prom_prev = prom_now
+            prom_rounds.append((rounds_done, d_prom))
+            shown = " ".join(f"{k[len('vllm:'):]}={d_prom[k]:.0f}"
+                             for k in sorted(d_prom) if d_prom[k])
+            print(f"[prom] round {rounds_done}: {shown or '(no counter movement)'}",
+                  file=sys.stderr, flush=True)
 
     elapsed = time.perf_counter() - t_start
+    if CAPTURE_METRICS and prom_rounds:
+        try:
+            with open(os.path.join(_here, "prom_counters_rounds.json"), "w") as f:
+                json.dump([{"round": r, "counters": d} for r, d in prom_rounds],
+                          f, indent=2)
+        except OSError as e:
+            print(f"[prom] could not save json: {e}", file=sys.stderr)
+
+    # Latency-distribution histograms: sampled once here (cumulative over the run,
+    # not per round) — queue time (WAITING phase) and decode time (DECODE phase).
+    if CAPTURE_METRICS:
+        hists = prom_histograms({"vllm:request_queue_time_seconds",
+                                 "vllm:request_decode_time_seconds"})
+        for name, h in sorted(hists.items()):
+            cnt, tot = h["count"], h["sum"]
+            mean = tot / cnt if cnt else 0.0
+            fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
+            print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
+                  f"p50={fmt(_hist_pct(h['buckets'], cnt, 0.50))} "
+                  f"p90={fmt(_hist_pct(h['buckets'], cnt, 0.90))} "
+                  f"p99={fmt(_hist_pct(h['buckets'], cnt, 0.99))}",
+                  file=sys.stderr, flush=True)
+        if hists:
+            # Full buckets on one stderr line so the per-variant teed log is a
+            # complete source (the shared-name JSON below is overwritten when two
+            # variants share this driver / dir).
+            print(f"[prom] histjson {json.dumps(hists, separators=(',', ':'))}",
+                  file=sys.stderr, flush=True)
+            try:
+                with open(os.path.join(_here, "prom_histograms.json"), "w") as f:
+                    json.dump(hists, f, indent=2)
+            except OSError as e:
+                print(f"[prom] could not save histogram json: {e}", file=sys.stderr)
+
     summary = {
         "elapsed_time": elapsed,
         "num_conversations": len(convs),

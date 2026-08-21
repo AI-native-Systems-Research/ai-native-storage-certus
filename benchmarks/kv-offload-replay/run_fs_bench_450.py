@@ -140,6 +140,11 @@ def main():
     from vllm import LLM, SamplingParams
 
     print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
+    # Capturing vLLM's Prometheus counters requires the engine's stat logging to
+    # be on (it's what advances the metrics). Enabling it has a small overhead, so
+    # a capture run is not byte-identical to the stats-off timing baseline —
+    # CAPTURE_METRICS=0 restores that baseline and skips the per-round snapshot.
+    CAPTURE_METRICS = os.environ.get("CAPTURE_METRICS", "1") != "0"
     llm = LLM(
         model=MODEL,
         max_model_len=MAX_MODEL_LEN,
@@ -149,9 +154,7 @@ def main():
         enable_prefix_caching=True,
         enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
         kv_transfer_config=KV_CONFIG,
-        # LOG_STATS=1 keeps vLLM's stats logging on so its PrometheusStatLogger
-        # registers metrics (incl. kv_offload counters). Default off.
-        disable_log_stats=(os.environ.get("LOG_STATS", "0") == "0"),
+        disable_log_stats=not CAPTURE_METRICS,
     )
     print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
 
@@ -189,6 +192,56 @@ def main():
     total_generations = 0
     rounds_done = 0
     round_io = []  # (round, prompts, read_bytes, write_bytes)
+
+    # ── vLLM Prometheus counters (per round) ──────────────────────────────
+    # vLLM registers every metric on the default prometheus_client REGISTRY under
+    # the `vllm:` prefix, updated as the engine steps (present on both the V0 and
+    # V1 engines whenever stat logging is on). Snapshot each counter (samples
+    # named `vllm:*_total`, summed across label sets) at the end of every round
+    # and log the delta; the full per-round series is also dumped to JSON.
+    def prom_counters():
+        # Prefer the V1 offline snapshot: engine counters (prompt/generation
+        # tokens, prefix-cache queries/hits, preemptions) are exposed by
+        # llm.get_metrics() and are NOT on the global prometheus REGISTRY in
+        # offline mode — reading only the REGISTRY (or the log_stats logger) misses
+        # them. Then supplement with the REGISTRY for older (V0) engines, where
+        # get_metrics() is absent, and for connector-registered metrics
+        # (vllm:kv_offload_*) which only ever live on the global registry.
+        # Names differ by source: get_metrics() uses bare names
+        # (vllm:prefix_cache_queries); REGISTRY counter samples carry the _total
+        # suffix — we keep both keys so the delta shows under whichever the
+        # running version populates.
+        vals = {}
+        if not CAPTURE_METRICS:
+            return vals
+        try:
+            for m in llm.get_metrics():
+                if type(m).__name__ != "Counter":
+                    continue
+                name = getattr(m, "name", "")
+                val = getattr(m, "value", None)
+                if name.startswith("vllm:") and isinstance(val, (int, float)):
+                    # Sum across label sets: get_metrics() emits one Counter per
+                    # sample, so labeled metrics (request_success by finish_reason,
+                    # prompt_tokens_by_source, per-engine under TP>1) share a name.
+                    vals[name] = vals.get(name, 0.0) + float(val)
+        except Exception:  # noqa: BLE001 - get_metrics() is V1-only; skip on V0
+            pass
+        try:
+            from prometheus_client import REGISTRY
+            for metric in REGISTRY.collect():
+                if not metric.name.startswith("vllm:"):
+                    continue
+                for s in metric.samples:
+                    if s.name.endswith("_total"):
+                        vals[s.name] = vals.get(s.name, 0.0) + float(s.value)
+        except Exception as e:  # noqa: BLE001
+            print(f"[prom] collect failed: {e}", file=sys.stderr, flush=True)
+        return vals
+
+    prom_prev = prom_counters()
+    prom_rounds = []  # (round, {counter_name: delta})
+
     t_start = time.perf_counter()
     print(f"[trace] +{time.perf_counter()-t0:.1f}s entering generate loop", file=sys.stderr, flush=True)
 
@@ -237,8 +290,28 @@ def main():
               f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
               f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
               file=sys.stderr, flush=True)
+        if CAPTURE_METRICS:
+            prom_now = prom_counters()
+            d_prom = {k: prom_now.get(k, 0.0) - prom_prev.get(k, 0.0)
+                      for k in prom_now}
+            prom_prev = prom_now
+            prom_rounds.append((rounds_done, d_prom))
+            shown = " ".join(f"{k[len('vllm:'):]}={d_prom[k]:.0f}"
+                             for k in sorted(d_prom) if d_prom[k])
+            print(f"[prom] round {rounds_done}: {shown or '(no counter movement)'}",
+                  file=sys.stderr, flush=True)
 
     elapsed = time.perf_counter() - t_start
+    if CAPTURE_METRICS and prom_rounds:
+        try:
+            _prom_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      "prom_counters_rounds.json")
+            with open(_prom_path, "w") as f:
+                json.dump([{"round": r, "counters": d} for r, d in prom_rounds],
+                          f, indent=2)
+            print(f"[prom] saved {_prom_path}", file=sys.stderr)
+        except OSError as e:
+            print(f"[prom] could not save json: {e}", file=sys.stderr)
     print(f"\n[run] done. wall={elapsed:.1f}s  generations={total_generations} rounds={rounds_done}",
           file=sys.stderr)
 
