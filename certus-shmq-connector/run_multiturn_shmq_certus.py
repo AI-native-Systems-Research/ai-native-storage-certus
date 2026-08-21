@@ -35,10 +35,12 @@ Environment:
     SLAB_SIZE_BYTES  offload block size (default 131072)
     DATASET_PATH     override dataset json
 
-NOTE vs the gRPC driver: the ring transport has no GetIoStats op (that RPC was a
-gRPC-only side channel for per-round SSD I/O deltas), so the per-round output
-here reports generations/rounds only. Read SSD I/O from the server's own
-telemetry (its stderr / iostat) when it is built with --features rw-telemetry.
+Per-round SSD device I/O: the server's cumulative NVMe read/write byte counters
+(its rw-telemetry) are queried over the shmq ring's GetIoStats op each round and
+printed as ssd_read_bytes / ssd_write_bytes deltas on the [prom] line, which the
+kvprofile renderer plots. This is the same mechanism the old gRPC driver used
+(its GetIoStats RPC), now carried over shm-queue. The byte counts are real only
+when the server is built with --features rw-telemetry (zero otherwise).
 """
 
 if __name__ == "__main__":
@@ -216,7 +218,8 @@ if __name__ == "__main__":
         # LOG_STATS=1 surfaces vLLM's periodic engine stats, including the
         # OffloadingConnector's KVConnectorStats (per-interval blocks/tokens
         # loaded and stored over the KV-offload API). Default off to keep the
-        # per-round output clean; the SSD I/O deltas below are always printed.
+        # per-round output clean; per-round SSD device-byte deltas ride the
+        # [prom] line below (see the GetIoStats snapshot).
         disable_log_stats=not (CAPTURE_METRICS or _log_stats_on),
     )
 
@@ -249,11 +252,35 @@ if __name__ == "__main__":
     alive = [True] * len(convs)
     next_turn = [0] * len(convs)
 
-    # NOTE: no per-round SSD I/O accounting here. The gRPC driver polled the
-    # server's GetIoStats RPC each round for read/write byte deltas; the ring
-    # transport has no equivalent op (it carries only the connector control
-    # plane). Read SSD I/O from the server side instead (its stderr telemetry
-    # when built with --features rw-telemetry, or host `iostat`).
+    # ── Per-round SSD device I/O (Certus rw-telemetry over the shmq ring) ──
+    # The server exposes its cumulative NVMe read/write byte counters via the
+    # ring's GetIoStats op (translate.rs op_get_io_stats -> dispatcher
+    # read_write_stats). Attach our own Ring to the same mailbox — Ring(path)
+    # mmaps the segment and claims its own sticky channel, independent of the
+    # connector's worker channels — and snapshot it around each round to print
+    # per-round ssd_read_bytes / ssd_write_bytes deltas on the [prom] line, which
+    # the kvprofile renderer plots. Real only in an --features rw-telemetry
+    # server build; otherwise the counters stay zero and the renderer drops the
+    # empty series. (Restores what the gRPC driver did, now over shm-queue.)
+    from certus_shmq_connector.ring import Ring
+
+    try:
+        io_ring = Ring(SHM_PATH)
+    except Exception as e:  # noqa: BLE001
+        io_ring = None
+        print(f"[io] GetIoStats unavailable ({e}); per-round SSD bytes disabled",
+              file=sys.stderr)
+
+    def io_rw_bytes():
+        """(read_bytes, write_bytes) cumulative from the server, or (None, None)."""
+        if io_ring is None:
+            return None, None
+        try:
+            s = io_ring.get_io_stats()
+            return int(s["read_bytes"]), int(s["write_bytes"])
+        except Exception as e:  # noqa: BLE001
+            print(f"[io] GetIoStats query failed: {e}", file=sys.stderr)
+            return None, None
 
     # ── vLLM Prometheus counters (per round) ──────────────────────────────
     # vLLM registers every metric on the default prometheus_client REGISTRY under
@@ -343,6 +370,7 @@ if __name__ == "__main__":
 
     prom_prev = prom_counters()
     prom_rounds = []  # (round, {counter_name: delta})
+    io_prev = io_rw_bytes()  # cumulative SSD device bytes before round 1
 
     rounds_done = 0
     total_generations = 0
@@ -403,8 +431,19 @@ if __name__ == "__main__":
                       for k in prom_now}
             prom_prev = prom_now
             prom_rounds.append((rounds_done, d_prom))
-            shown = " ".join(f"{k[len('vllm:'):]}={d_prom[k]:.0f}"
-                             for k in sorted(d_prom) if d_prom[k])
+            vllm_shown = " ".join(f"{k[len('vllm:'):]}={d_prom[k]:.0f}"
+                                  for k in sorted(d_prom) if d_prom[k])
+            # Per-round SSD device byte deltas from the server (Certus rw-telemetry
+            # via GetIoStats). Emitted as ssd_read_bytes / ssd_write_bytes so the
+            # kvprofile renderer picks them up on the same [prom] line.
+            ssd_shown = ""
+            io_now = io_rw_bytes()
+            if io_now[0] is not None and io_prev[0] is not None:
+                ssd_shown = (f"ssd_read_bytes={io_now[0] - io_prev[0]} "
+                             f"ssd_write_bytes={io_now[1] - io_prev[1]}")
+            if io_now[0] is not None:
+                io_prev = io_now
+            shown = " ".join(x for x in (vllm_shown, ssd_shown) if x)
             print(f"[prom] round {rounds_done}: {shown or '(no counter movement)'}",
                   file=sys.stderr, flush=True)
 

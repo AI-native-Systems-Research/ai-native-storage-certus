@@ -67,6 +67,12 @@ COUNTERS = [
     ("external_prefix_cache_hits",    "Offload-tier hits",          "int"),
     ("kv_offload_store_bytes",        "Bytes stored to tier",       "bytes"),
     ("kv_offload_load_bytes",         "Bytes loaded from tier",     "bytes"),
+    # Certus-SPDK only: real NVMe device bytes per round, from the server's
+    # rw-telemetry (read_write_stats) queried over the shmq ring's GetIoStats op
+    # and printed by the shmq driver on its [prom] line. Absent (→ dropped) for
+    # backends whose driver does not emit them.
+    ("ssd_read_bytes",                "SSD bytes read (device)",    "bytes"),
+    ("ssd_write_bytes",               "SSD bytes written (device)", "bytes"),
     ("num_preemptions",               "Engine preemptions",         "int"),
 ]
 COUNTER_KEYS = [c[0] for c in COUNTERS]

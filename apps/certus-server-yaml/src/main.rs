@@ -301,9 +301,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Always-on KV-cache tier-event telemetry: a periodic "tier-events" line
     // (cumulative counts, every ~2s) that the kvprofile renderer parses into the
-    // promotions/evictions series. Unlike io-stats this is not rw-telemetry-gated
-    // — the dispatcher's tier counters are always present. Exits when SHUTDOWN
-    // flips; the process exits before any join is needed.
+    // promotions/evictions series. The dispatcher's tier counters are always
+    // present. (SSD read/write bytes are not logged here — the client queries
+    // them over the shmq ring via GetIoStats, mirroring the old gRPC path.)
+    // Exits when SHUTDOWN flips; the process exits before any join is needed.
     {
         let tier_disp = Arc::clone(&stack.dispatcher);
         let tier_logger = Arc::clone(&logger);
