@@ -228,6 +228,48 @@ pub struct GpuStream(pub *mut std::ffi::c_void);
 unsafe impl Send for GpuStream {}
 unsafe impl Sync for GpuStream {}
 
+/// Source-access ordering hint for batched GPU copies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuMemcpySrcAccessOrder {
+    /// Source reads are ordered by the stream (safe when a GPU stream may be
+    /// writing to the source concurrently). Use for D2H stores.
+    Stream,
+    /// Source reads may occur out of stream order (allows DMA engine pipelining).
+    /// Safe only when no concurrent writer touches the source — e.g. pinned host
+    /// memory during H2D loads.
+    Any,
+}
+
+/// One copy descriptor for [`IGpuServices::memcpy_batch_async`].
+#[derive(Debug, Clone, Copy)]
+pub struct GpuMemcpyBatchOp {
+    pub src: *const std::ffi::c_void,
+    pub dst: *mut std::ffi::c_void,
+    pub size: usize,
+    pub src_access_order: GpuMemcpySrcAccessOrder,
+}
+
+// SAFETY: raw pointers are CUDA device/host pointers valid across threads.
+unsafe impl Send for GpuMemcpyBatchOp {}
+unsafe impl Sync for GpuMemcpyBatchOp {}
+
+// # Verified Properties (see `components/gpu-services/verif/`)
+//
+// The following invariants are formally proved with Creusot:
+//
+// - P1 (init-guard): operations fail when not initialized
+// - P2 (init-idempotent): calling initialize() twice succeeds
+// - P3 (shutdown-clears): shutdown sets initialized to false
+// - P4 (handle-state-machine): IPC handle transitions: fresh→verified→pinned
+// - P5 (verify-ptr-valid): verify_memory requires non-null device pointer
+// - P6 (pin-requires-verified): pin_memory requires verified == true
+// - P7 (dma-requires-pinned): create_dma_buffer requires pinned == true
+// - P8 (copy-size-check): DMA copy rejects size > buffer length
+// - P9 (stream-lifecycle): create_stream/destroy_stream paired correctly
+// - P10 (register-lifecycle): register/unregister host memory paired
+//
+// Total: 10 properties, 19 verification conditions discharged by SMT solvers.
+
 define_interface! {
     pub IGpuServices {
         /// Initialize CUDA libraries and discover qualifying GPUs.
@@ -752,5 +794,29 @@ define_interface! {
         /// Returns an error if unregistration fails.
         #[cfg(feature = "spdk")]
         fn unregister_host_memory(&self, ptr: *mut std::ffi::c_void, size: usize) -> Result<(), String>;
+
+        /// Submit multiple copy operations in a single driver call.
+        ///
+        /// On CUDA 12.8+ uses `cuMemcpyBatchAsync` for minimal per-copy
+        /// submission overhead. Falls back to a loop of individual async
+        /// copies on older drivers.
+        ///
+        /// Each [`GpuMemcpyBatchOp`] specifies source, destination, size, and
+        /// source-access ordering. Use [`GpuMemcpySrcAccessOrder::Any`] for H2D
+        /// loads from stable pinned host memory to enable DMA pipelining.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * All `src`/`dst` pointers must be valid for their respective `size`.
+        /// * Pointers must remain valid until the stream is synchronized.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if any copy in the batch fails.
+        fn memcpy_batch_async(
+            &self,
+            ops: &[GpuMemcpyBatchOp],
+            stream: GpuStream,
+        ) -> Result<(), String>;
     }
 }

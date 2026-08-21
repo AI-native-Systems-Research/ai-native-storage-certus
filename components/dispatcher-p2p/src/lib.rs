@@ -2674,7 +2674,7 @@ mod tests {
 
     use interfaces::{
         CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle,
-        GpuStream, IMemoryTier, LookupConfig, LookupResult, MemoryTierError,
+        GpuMemcpyBatchOp, GpuStream, IMemoryTier, LookupConfig, LookupResult, MemoryTierError,
         MemoryTierTelemetrySnapshot, RemoteLookupError,
     };
 
@@ -3421,6 +3421,26 @@ mod tests {
         ) -> Result<(), String> {
             unsafe {
                 std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn memcpy_batch_async(
+            &self,
+            ops: &[GpuMemcpyBatchOp],
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            for op in ops {
+                if let Some(ref p) = self.probe {
+                    p.record(GpuEvent::SubmitH2d);
+                    let nth = p.submissions.fetch_add(1, Ordering::Relaxed) + 1;
+                    if p.fail_submit_on == nth {
+                        return Err("mock: injected batch submission failure".into());
+                    }
+                }
+                // SAFETY: In tests, both src and dst are valid host pointers valid for `size`.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(op.src as *const u8, op.dst as *mut u8, op.size);
+                }
             }
             Ok(())
         }

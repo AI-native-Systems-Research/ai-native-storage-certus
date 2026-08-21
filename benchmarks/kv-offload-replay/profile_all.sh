@@ -3,13 +3,13 @@
 # 12-turn ShareGPT replay workload and emit a side-by-side throughput table.
 #
 # Variants (run in this order):
-#   NoOffload      GPU-only baseline                 (image certus-nooffload-bench)
+#   NoOffload      GPU-only baseline                 (certus-offload-bench, OFFLOAD_MODE=none)
 #   Certus-SPDK    shmq client + certus-server-yaml  (image certus-shmq-bench + host server)
-#   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-cpu-offload-bench)
+#   CPUOffload     vLLM OffloadingConnector -> host RAM (certus-offload-bench, default mode)
 #   SharedStorage  llmd_fs_backend on RAID0/XFS      (image certus-sharedstorage-bench)
 #                  vLLM <= 0.23 path (native tiering not yet available)
 #   Tiered-CPU-FS  vLLM TieringOffloadingManager: CPU primary + FS secondary
-#                  vLLM >= 0.23 path (reuses certus-cpu-offload-bench; FS tier on RAID0/XFS)
+#                  vLLM >= 0.23 path (reuses certus-offload-bench; FS tier on RAID0/XFS)
 #
 # Certus-SPDK runs first (of the storage backends) on purpose: it consumes the
 # boot-reserved 1G hugepage pool while it is still intact (no runtime realloc, no
@@ -84,8 +84,11 @@ LOGDIR=""
 # Image tags. Env-overridable (a caller can point this at externally-built
 # images). With --vllm-version set, an untagged name here gets a :vllm<ver> tag
 # appended below so multiple versions coexist.
-IMG_NOOFFLOAD="${IMG_NOOFFLOAD:-certus-nooffload-bench}"
-IMG_CPU="${IMG_CPU:-certus-cpu-offload-bench}"
+# NoOffload and CPUOffload are the SAME unified image (certus-offload-bench, built
+# from Dockerfile.offload); they differ only at run time by OFFLOAD_MODE=none vs
+# the default CPU-offload mode. Built once, reused by the second variant.
+IMG_NOOFFLOAD="${IMG_NOOFFLOAD:-certus-offload-bench}"
+IMG_CPU="${IMG_CPU:-certus-offload-bench}"
 IMG_SHARED="${IMG_SHARED:-certus-sharedstorage-bench}"
 IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-bench}"
 
@@ -659,16 +662,16 @@ run_container_bench() {  # variant image extra-args...
 # ══ NoOffload ═════════════════════════════════════════════════════════════════
 if want nooffload; then
     if ! img_exists "$IMG_NOOFFLOAD"; then
-        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_NOOFFLOAD" Dockerfile.nooffload nooffload; then
-            run_container_bench "NoOffload" "$IMG_NOOFFLOAD"
+        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_NOOFFLOAD" Dockerfile.offload offload; then
+            run_container_bench "NoOffload" "$IMG_NOOFFLOAD" -e "OFFLOAD_MODE=none"
         else
             reason="image ${IMG_NOOFFLOAD} missing (pass --build)"
-            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_NOOFFLOAD} build failed (see build-nooffload.log)"
+            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_NOOFFLOAD} build failed (see build-offload.log)"
             record "NoOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
             warn "NoOffload SKIPPED: $reason"
         fi
     else
-        run_container_bench "NoOffload" "$IMG_NOOFFLOAD"
+        run_container_bench "NoOffload" "$IMG_NOOFFLOAD" -e "OFFLOAD_MODE=none"
     fi
 fi
 
@@ -812,11 +815,11 @@ fi
 # ══ CPUOffload ════════════════════════════════════════════════════════════════
 if want cpuoffload; then
     if ! img_exists "$IMG_CPU"; then
-        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
+        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_CPU" Dockerfile.offload offload; then
             run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
         else
             reason="image ${IMG_CPU} missing (pass --build)"
-            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_CPU} build failed (see build-cpu-offload.log)"
+            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_CPU} build failed (see build-offload.log)"
             record "CPUOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
             warn "CPUOffload SKIPPED: $reason"
         fi

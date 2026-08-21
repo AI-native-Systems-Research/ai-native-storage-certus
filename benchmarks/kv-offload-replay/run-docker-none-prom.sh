@@ -1,6 +1,7 @@
 #!/bin/bash
-# NoOffload + Prometheus — GPU-only baseline (image certus-nooffload-bench) with
-# the bench's vLLM engine exposing Prometheus metrics on port 8000.
+# NoOffload + Prometheus — GPU-only baseline (unified image certus-offload-bench,
+# OFFLOAD_MODE=none) with the bench's vLLM engine exposing Prometheus metrics on
+# port 8000.
 #
 # The bench drives vLLM through the offline LLM(...) engine (no OpenAI server),
 # so there is no /metrics endpoint unless the driver opens one. This variant
@@ -13,9 +14,9 @@
 #   PROM_PORT=9100 NUM_CONVS=100 ./run-docker-none-prom.sh
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
-IMAGE="${IMAGE:-certus-nooffload-bench}"
+IMAGE="${IMAGE:-certus-offload-bench}"
 LOG="${LOG:-${SCRIPT_DIR}/nooffload_prom_$(stamp).log}"
-DRIVER="${DRIVER:-${SCRIPT_DIR}/run_multiturn_nooffload.py}"
+DRIVER="${DRIVER:-${SCRIPT_DIR}/run_multiturn_offloading.py}"
 
 # ── Prometheus wiring (the only substantive difference from the base script) ──
 PROM_PORT="${PROM_PORT:-8000}"        # host port the exporter is published on
@@ -26,7 +27,8 @@ require_image "$IMAGE"
 
 echo "[nooffload] prometheus exporter -> http://127.0.0.1:${PROM_PORT}/metrics"
 run_container "$LOG" "$IMAGE" \
+  -e "OFFLOAD_MODE=none" \
   -p "${PROM_PORT}:${PROM_PORT}" \
   -e "PROM_PORT=${PROM_PORT}" \
   -e "LOG_STATS=${LOG_STATS}" \
-  -v "${DRIVER}:/workspace/bench/run_multiturn_nooffload.py:z"
+  -v "${DRIVER}:/workspace/bench/run_multiturn_offloading.py:z"

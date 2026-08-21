@@ -70,6 +70,14 @@ if __name__ == "__main__":
     MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
     MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # 0 = until convs exhausted
 
+    # OFFLOAD_MODE — top-level backend selector for the unified image. "none" runs
+    # the GPU-only baseline (no kv_transfer_config); any other value (incl. the
+    # default empty) uses an offload tier, whose kind is picked by the DISK_DIR /
+    # TRACE_OFFLOAD selectors below (empty => host-RAM CPUOffload, DISK_DIR set =>
+    # CPU+FS Tiered). This lets one image drive NoOffload, CPUOffload, and Tiered
+    # by env alone.
+    OFFLOAD_MODE = os.environ.get("OFFLOAD_MODE", "").strip().lower()
+
     # DISK_DIR — when set, add a filesystem (disk) secondary tier below the CPU
     # tier via vLLM 0.26's native TieringOffloadingSpec + "fs" tier. This is the
     # in-tree CPU+disk offload path that replaces the (0.26-broken) SharedStorage
@@ -152,7 +160,14 @@ if __name__ == "__main__":
     # shmq backend, which also uses the plain OffloadingConnector. Set
     # TRACE_OFFLOAD=1 to instead use the local Tracing* wrappers, which record
     # per-op offload traces (offloading_mgr_<pid>.jsonl etc.) at some overhead.
-    if DISK_DIR:
+    if OFFLOAD_MODE == "none":
+        # GPU-only baseline: no offload tier at all. Evicted KV is recomputed on
+        # the GPU rather than fetched from a tier. kv_transfer_config=None is how
+        # vLLM expresses "no connector", so the LLM(...) call below passes None.
+        KV_CONFIG = None
+        print("[run] OFFLOAD_MODE=none — GPU-only baseline (no kv_transfer_config)",
+              file=sys.stderr)
+    elif DISK_DIR:
         # CPU + disk offload via vLLM 0.26's native multi-tier framework.
         # OffloadingConnector -> TieringOffloadingSpec: CPU primary tier
         # (cpu_bytes_to_use) with an "fs" secondary tier rooted at DISK_DIR
@@ -231,9 +246,10 @@ if __name__ == "__main__":
                 "eviction_policy": "lru",
             },
         }
-    print(f"[run] kv_connector={KV_CONFIG['kv_connector']} "
-          f"spec={KV_CONFIG['kv_connector_extra_config'].get('spec_name')} "
-          f"(TRACE_OFFLOAD={os.environ.get('TRACE_OFFLOAD', '0')})", file=sys.stderr)
+    if KV_CONFIG is not None:
+        print(f"[run] kv_connector={KV_CONFIG['kv_connector']} "
+              f"spec={KV_CONFIG['kv_connector_extra_config'].get('spec_name')} "
+              f"(TRACE_OFFLOAD={os.environ.get('TRACE_OFFLOAD', '0')})", file=sys.stderr)
 
     # Clear stale trace files
     for f in os.listdir(_here):

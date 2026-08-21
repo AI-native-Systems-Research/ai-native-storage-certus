@@ -39,6 +39,8 @@ pub use ieviction_policy::SessionId;
 pub use igpu_services::GpuDeviceInfo;
 pub use igpu_services::GpuDmaBuffer;
 pub use igpu_services::GpuIpcHandle;
+pub use igpu_services::GpuMemcpyBatchOp;
+pub use igpu_services::GpuMemcpySrcAccessOrder;
 pub use igpu_services::GpuStream;
 pub use igpu_services::IGpuServices;
 pub use igreeter::IGreeter;
