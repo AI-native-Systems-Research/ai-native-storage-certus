@@ -14,6 +14,11 @@ Data sources, per run directory (in priority order):
                     lines are parsed for the counter deltas. Falls back to the
                     `[run] done. wall=Xs` line for wall time if results.json is
                     absent.
+  * server.log    — Certus-SPDK only: the certus-server's own log. Its periodic
+                    `tier-events promotions[->memory M, ->gpu G] evictions[memory
+                    E, ssd S]` lines (plus the `FINAL tier-events` summary) give
+                    the cumulative KV tier-movement counts, rendered as four extra
+                    Certus-only panels. Absent → those panels are dropped.
 
 Pass several directories to overlay several runs. When the SAME variant appears
 in more than one directory (e.g. three Tiered-CPU-FS repeats) each gets its own
@@ -65,6 +70,24 @@ COUNTERS = [
     ("num_preemptions",               "Engine preemptions",         "int"),
 ]
 COUNTER_KEYS = [c[0] for c in COUNTERS]
+
+# ── Certus-server KV tier-movement counters, parsed from server.log (not the
+# vLLM [prom] stream). Cumulative counts; rendered as their own panels showing
+# the run's growth curve, with the final total in the panel subtitle. Only the
+# Certus-SPDK variant has a certus-server, so these appear for that series alone.
+TIER_COUNTERS = [
+    ("tier_promotions_to_memory", "KV promotions SSD→DRAM (cumulative)",  "int"),
+    ("tier_promotions_to_gpu",    "KV promotions →GPU (cumulative)",      "int"),
+    ("tier_evictions_from_memory","KV evictions from DRAM (cumulative)",       "int"),
+    ("tier_evictions_from_ssd",   "KV evictions from SSD (cumulative)",        "int"),
+]
+TIER_KEYS = [c[0] for c in TIER_COUNTERS]
+# Matches both the periodic "tier-events …" line and the "FINAL tier-events …"
+# summary (the leading FINAL is outside the capture). Numbers are cumulative.
+TIER_RE = re.compile(
+    r"tier-events\s+promotions\[->memory\s+(\d+),\s*->gpu\s+(\d+)\]"
+    r"\s+evictions\[memory\s+(\d+),\s*ssd\s+(\d+)\]"
+)
 
 # Fixed colour per variant (normalised name -> hex); unknown variants draw from
 # FALLBACK in first-seen order.
@@ -123,6 +146,28 @@ def rounds_to_series(rounds: "OrderedDict[int, dict]") -> dict:
     return {k: [rounds[r].get(k, 0.0) for r in order] for k in COUNTER_KEYS}
 
 
+def parse_tier_log(path: str) -> dict:
+    """Parse a certus-server.log into cumulative per-tick series for the four KV
+    tier-movement counters. Returns {tier_key: [cumulative value per tick]} in
+    log order (the periodic ticks plus the FINAL summary). Empty if none found."""
+    cols = {k: [] for k in TIER_KEYS}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = TIER_RE.search(line)
+                if not m:
+                    continue
+                pm, pg, em, es = (int(g) for g in m.groups())
+                cols["tier_promotions_to_memory"].append(pm)
+                cols["tier_promotions_to_gpu"].append(pg)
+                cols["tier_evictions_from_memory"].append(em)
+                cols["tier_evictions_from_ssd"].append(es)
+    except OSError as e:
+        print(f"warning: cannot read {path}: {e}", file=sys.stderr)
+        return {}
+    return {k: v for k, v in cols.items() if v}
+
+
 def wall_from_log(path: str):
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -155,6 +200,11 @@ def load_run(run_dir: str, tag: str):
     A series: {variant, tag, color_key, wall, data:{counter:[...]}}.
     """
     results = os.path.join(run_dir, "results.json")
+    # certus-server tier-event counters live in a sibling server.log, keyed to
+    # the Certus-SPDK variant (the only one with a server). Parsed once here and
+    # merged into that variant's per-round data below.
+    server_log = os.path.join(run_dir, "server.log")
+    tier = parse_tier_log(server_log) if os.path.isfile(server_log) else {}
     entries = []
     if os.path.isfile(results):
         try:
@@ -169,6 +219,8 @@ def load_run(run_dir: str, tag: str):
             name = e.get("variant") or "?"
             log = resolve_log(run_dir, e.get("log", ""))
             data = rounds_to_series(parse_prom_log(log)) if log else {}
+            if norm(name) == "certusspdk":
+                data = {**data, **tier}
             wall = e.get("wall_s")
             if wall is None and log:
                 wall = wall_from_log(log)
@@ -184,8 +236,12 @@ def load_run(run_dir: str, tag: str):
         if not rounds:
             continue
         found = True
-        yield {"variant": os.path.splitext(fn)[0], "tag": tag,
-               "wall": wall_from_log(path), "data": rounds_to_series(rounds)}
+        name = os.path.splitext(fn)[0]
+        data = rounds_to_series(rounds)
+        if norm(name) == "certusspdk":
+            data = {**data, **tier}
+        yield {"variant": name, "tag": tag,
+               "wall": wall_from_log(path), "data": data}
     if not found:
         print(f"warning: no results.json and no [prom] logs in {run_dir}",
               file=sys.stderr)
@@ -271,8 +327,9 @@ def render(series, out_path, title, subtitle, dark, dpi):
         "axes.linewidth": 0.8,
     })
 
-    # which counters have any nonzero data across series
-    active = [c for c in COUNTERS
+    # which counters have any nonzero data across series (vLLM per-round counters
+    # first, then the Certus-server tier-movement counters)
+    active = [c for c in COUNTERS + TIER_COUNTERS
               if any(any(v != 0 for v in s["data"].get(c[0], [])) for s in series)]
     ncol = 3
     nrow = (len(active) + ncol - 1) // ncol if active else 0
@@ -339,13 +396,16 @@ def render(series, out_path, title, subtitle, dark, dpi):
                 continue
             xs = list(range(1, len(vals) + 1))
             cax.plot(xs, vals, color=s["color"], linestyle=s["style"], lw=1.8)
+        is_tier = key in TIER_KEYS
         cax.set_title(ctitle, loc="left", fontsize=10, fontweight="bold", color=fg,
                       pad=20)
-        cax.text(0, 1.012, "vllm:" + key, transform=cax.transAxes, fontsize=7.5,
+        src = ("certus-server:" + key[len("tier_"):]) if is_tier else ("vllm:" + key)
+        cax.text(0, 1.012, src, transform=cax.transAxes, fontsize=7.5,
                  va="bottom", ha="left", color=mut, family="monospace")
         cax.yaxis.set_major_formatter(FuncFormatter(fmt_bytes if unit == "bytes"
                                                     else fmt_compact))
-        cax.set_xlabel("round", color=mut, fontsize=8)
+        cax.set_xlabel("telemetry tick" if is_tier else "round",
+                       color=mut, fontsize=8)
         cax.margins(x=0.02)
         cax.set_ylim(bottom=0)
         for sp in ("top", "right"):
@@ -371,6 +431,10 @@ def main(argv=None):
                     help="subtitle line (default: auto from results.json)")
     ap.add_argument("--variants", default=None,
                     help="comma list; keep only these (matched loosely by name)")
+    ap.add_argument("--color", action="append", default=[], metavar="TAG=HEX",
+                    help="override a run's line/bar colour by its legend tag, e.g. "
+                         "--color shmq+fix-sq='#7048e8' (repeatable). Lets one run "
+                         "of a shared variant stand out from its same-coloured kin.")
     ap.add_argument("--dark", action="store_true", help="dark theme")
     ap.add_argument("--dpi", type=int, default=200)
     args = ap.parse_args(argv)
@@ -394,6 +458,19 @@ def main(argv=None):
         series = [s for s in series if norm(s["variant"]) in keep]
     if not series:
         ap.error("no variants found (bad dirs, or --variants filtered everything)")
+
+    # Per-run colour overrides (by legend tag), applied after variant colouring so
+    # one run of a shared variant can be given a distinct hue.
+    if args.color:
+        overrides = {}
+        for spec in args.color:
+            if "=" not in spec:
+                ap.error(f"--color expects TAG=HEX, got: {spec}")
+            tag, hexv = spec.split("=", 1)
+            overrides[tag] = hexv
+        for s in series:
+            if s["tag"] in overrides:
+                s["color"] = overrides[s["tag"]]
 
     subtitle = args.subtitle
     if subtitle is None:
