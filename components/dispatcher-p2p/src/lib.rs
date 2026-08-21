@@ -2661,6 +2661,11 @@ impl IDispatcher for DispatcherP2pComponent {
         }
         agg
     }
+
+    fn tier_event_stats(&self) -> interfaces::TierEventStats {
+        // dispatcher-p2p does not track tier-movement counters; report zeroed.
+        interfaces::TierEventStats::default()
+    }
 }
 
 #[cfg(test)]

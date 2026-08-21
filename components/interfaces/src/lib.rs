@@ -30,6 +30,7 @@ pub use idispatcher::DispatcherError;
 #[cfg(feature = "spdk")]
 pub use idispatcher::IDispatcher;
 pub use idispatcher::IpcHandle;
+pub use idispatcher::TierEventStats;
 pub use ieviction_policy::BlockSemantics;
 pub use ieviction_policy::EvictionHandle;
 pub use ieviction_policy::EvictionPolicyError;
