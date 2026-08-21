@@ -124,8 +124,11 @@ apps/workload-model/             # library: no binary
 └── benches/                     # generation throughput (FR-037), statistics cost (SC-004)
 
 apps/workload-generator/         # binary: certus-workload  (plan | report | emit)
-apps/workload-trace/             # binary: certus-trace     (fit | validate | convert)
+apps/workload-trace/             # binary: certus-trace     (fit | validate | floor | convert)
                                  #   arrow/parquet behind `parquet`, default off
+                                 #   eviction-replay-benchmark + the two policy components, for
+                                 #   `fit --cache-curve` (FR-057d). A measuring instrument in the
+                                 #   TOOL: workload-model stays free of `interfaces` (FR-018a)
 apps/workload-runner/            # binary: certus-workload-run (run) — hardware only
 
 tests/                           # workspace-level: the FR-058a round trip crosses two binaries

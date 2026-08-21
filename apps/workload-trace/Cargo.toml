@@ -29,6 +29,22 @@ parquet = ["dep:arrow", "dep:parquet"]
 
 [dependencies]
 workload-model = { path = "../workload-model" }
+# The cache-curve check of `fit --cache-curve` (spec FR-057d): the fidelity loop
+# replays both the trace and the plan fitted from it through a real
+# `IEvictionPolicy` component and compares hit rate against capacity.
+#
+# These deps live HERE and never in `workload-model`, which still knows nothing of a
+# cache (FR-018a). The deferred cache simulator is not being un-deferred: there is
+# no tier, no disk, no latency and no byte accounting, only a bounded block set and
+# a hit fraction, and the result is a statement about a FIT rather than a property
+# of a workload. Simulating with the same component both arms go through is what
+# makes a hit mean one thing on both sides -- the same reason every statistic comes
+# from `workload_model::stats`.
+eviction-replay-benchmark = { path = "../eviction-replay-benchmark" }
+eviction-policy-lru.workspace = true
+eviction-policy-session-lists.workspace = true
+interfaces.workspace = true
+component-core.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

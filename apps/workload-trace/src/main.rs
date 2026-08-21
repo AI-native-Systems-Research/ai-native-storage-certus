@@ -30,6 +30,7 @@ use workload_model::stats::divergence::{
 };
 use workload_model::stats::{Ref, Report, Statistics};
 
+mod cache;
 #[cfg(feature = "parquet")]
 mod parquet;
 mod read;
@@ -134,6 +135,30 @@ enum Cmd {
         /// distance. So the report says so rather than printing a bare `within`.
         #[arg(long)]
         no_floor: bool,
+        /// Replay both streams through a cache and compare hit rate against capacity.
+        ///
+        /// The fidelity loop of FR-057d. Every gated statistic is a marginal, and SC-002
+        /// only *asserts* that matching the reuse-distance CDF makes LRU hit rate agree
+        /// at every capacity. This measures that implication: the trace and the plan
+        /// fitted from it go through the same `IEvictionPolicy` component in arrival
+        /// order, at a geometric sweep of capacities.
+        ///
+        /// Costs one replay per capacity per arm — a pass over the references, so on the
+        /// corpus's larger traces it is minutes rather than seconds.
+        #[arg(long)]
+        cache_curve: bool,
+        /// Capacities to sweep, in blocks. Defaults to a geometric sweep of the trace's
+        /// working set, ending at the whole of it (where the cache cannot evict).
+        #[arg(long = "cache-size", value_delimiter = ',', value_name = "BLOCKS")]
+        cache_sizes: Vec<usize>,
+        /// Which policy component to measure both arms through.
+        ///
+        /// `session-lists` is the interesting one for trunk shape: it chains a session's
+        /// blocks and evicts only leaves, so it treats a thin deep spine and a thick
+        /// shallow trunk very differently — which is exactly the structural difference
+        /// the four marginals cannot see.
+        #[arg(long = "cache-policy", value_enum, default_value_t = cache::Policy::Lru)]
+        cache_policy: cache::Policy,
     },
     /// Compare two reference streams statistic by statistic.
     ///
@@ -263,6 +288,9 @@ fn main() -> ExitCode {
             explain,
             branching_segments,
             no_floor,
+            cache_curve,
+            cache_sizes,
+            cache_policy,
         } => cmd_fit(
             &trace,
             out.as_deref(),
@@ -276,6 +304,11 @@ fn main() -> ExitCode {
             explain,
             branching_segments,
             no_floor,
+            CacheCurve {
+                run: cache_curve,
+                sizes: cache_sizes,
+                policy: cache_policy,
+            },
         ),
         Cmd::Validate {
             plan,
@@ -468,6 +501,19 @@ fn cmd_convert(plan: &Path, out: &Path, block_size: u32, blocks: u64) -> Result<
     Ok(true)
 }
 
+/// What `fit --cache-curve` was asked for.
+///
+/// One struct rather than three more positional arguments, because the three are only
+/// ever meaningful together: sizes and policy say nothing with `run` false.
+struct CacheCurve {
+    /// Whether to run the sweep at all.
+    run: bool,
+    /// Explicit capacities in blocks; empty means the derived geometric sweep.
+    sizes: Vec<usize>,
+    /// Which policy component to measure both arms through.
+    policy: cache::Policy,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_fit(
     trace_path: &Path,
@@ -482,6 +528,7 @@ fn cmd_fit(
     explain: bool,
     branching_segments: bool,
     no_floor: bool,
+    cache_curve: CacheCurve,
 ) -> Result<bool, String> {
     let trace =
         read::read_trace(trace_path, allow_partial, block_size).map_err(|e| e.to_string())?;
@@ -1044,6 +1091,20 @@ fn cmd_fit(
         print_path_budget(&trace_report, &synthetic, &shapes.path_budget());
         print_sharing_spaces(&trace_report, &mut shapes);
         print_explanation(&synthetic, &trace_report, &d, "synthetic", "trace");
+    }
+
+    // Before the refusal below, deliberately. Every real trace in the corpus currently
+    // exceeds tolerance, so a curve printed only on a passing fit would never be printed
+    // at all — and the whole point of FR-057d is to find out whether a model the marginals
+    // reject is nonetheless fit for driving a cache.
+    if cache_curve.run {
+        cache::print_cache_curve(
+            &trace.invocations,
+            trace.chronological,
+            &doc,
+            &cache_curve.sizes,
+            cache_curve.policy,
+        )?;
     }
 
     if !d.within_tolerance() {

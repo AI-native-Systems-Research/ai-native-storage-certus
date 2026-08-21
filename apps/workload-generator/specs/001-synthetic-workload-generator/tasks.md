@@ -309,6 +309,19 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
   becomes a refusal are both visible. It exists because a `tau2`-only workflow had already stated
   FR-054g wider than its evidence and left seven `metadata_only` traces misclassified as `CALLER
   INPUT`; the standing exposure it covers is prioritisation, not any single parameter
+- [X] T102b Close the **fidelity loop**: bridge a generated plan and its source trace into the
+  existing `apps/eviction-replay-benchmark` simulator and compare **hit rate against capacity**
+  through the same `IEvictionPolicy` component (FR-057d, `fit --cache-curve`,
+  `apps/workload-trace/src/cache.rs`). It exists because SC-002 and SC-010a *assert* that a
+  reuse-distance match implies hit-rate agreement, and ten mechanisms had been judged against
+  marginals nobody had validated. Measured on `tau2_airline`: a model failing all four gates
+  reproduces LRU hit rate within 0.7–2.7 points above 1.6% of the working set, and the implication
+  fails in both directions. Not a reversal of the cache-simulation deferral — the three reasons for
+  that deferral are checked against it one by one in spec § Out of Scope
+- [ ] T102c Measure the cache curve's own **achievable floor** — two halves of one real trace swept at
+  the same capacities through the same policy — so that FR-057c's rule is satisfied and a curve gap
+  can be told from sampling noise. Until it exists the curve MUST stay ungated, which is what
+  `fit --cache-curve` prints. `certus-trace floor`'s session/time split is the machinery
 - [ ] T102 Update `research.md` § Open derivations as each item is discharged, and close out the remaining one — the occupancy-bound derivation (FR-009f/FR-009g). The `GetIoStats` cross-check tolerance that used to be listed there is discharged by removal
 - [ ] T103 Run `component-check-leakage` and the repo's doc-sync skills, then re-verify `fmt`, `clippy -D warnings` and `cargo doc` across all four crates
 

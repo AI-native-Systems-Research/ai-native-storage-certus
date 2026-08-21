@@ -1593,6 +1593,209 @@ is not in any single parameter — every parameter is fitted — but in **priori
 gets chased is set by whichever traces are in front of whoever is looking, and on a differently-shaped
 workload the dominant term may be a different one entirely.
 
+## The cache curve — measuring SC-002's implication instead of asserting it (FR-057d)
+
+### Why a curve, when four marginals already gate the fit
+
+Ten mechanisms have been built against the four gated statistics and none adopted, 0 of 32 cells sit
+inside tolerance, and the shipped generator is unchanged by the effort. The honest reading, agreed
+2026-08-20, is that **the objective was never validated**: every gated statistic is a marginal over
+one axis, and no combination of them is known to imply the thing a KV cache actually does — convert
+reuse into hits at a capacity. The spec already asserts the implication twice. SC-002 says a
+reuse-distance match holds "so that LRU hit rate agrees at every capacity under test", and SC-010a
+calls the reuse-distance CDF a capacity-free object that *encodes* the achievable hit-rate curve.
+Neither had been checked, and FR-057c gave specific grounds for doubt: reuse distance's whole
+discriminating band on `tau2_airline` is 0.007–0.012 wide while its tolerance is 0.020, so a model can
+pass while being further from the trace than a *different workload* is.
+
+The curve is measurable at no research cost because the instrument already exists in the workspace:
+`apps/eviction-replay-benchmark` is a fixed-capacity cache **simulator** driven by an
+`IEvictionPolicy`, reporting hit rate at several capacities, needing no server, no CUDA, no transport
+and no fabric. Its input unit (`Op { keys, session_id }`, `Trace { ops, distinct_keys,
+total_key_refs }`) is one adapter away from a plan. So closing the loop is a **bridge**, not a
+runner — which is why this displaced "build the runner" in the plan of 2026-08-20.
+
+### What had to be decided, and why each decision can invalidate the comparison
+
+- **One simulator, both arms.** Two implementations would make a curve comparison a comparison of two
+  definitions of a hit — the identical argument that puts every marginal in `workload_model::stats`.
+- **Arrival order, not session order.** A cache is recency-sensitive. The trace arm replays in the
+  trace's own invocation order and the plan arm in emission order (`t_ns` non-decreasing). The
+  segment census needs the *opposite* — a session's requests contiguous, for exact fan-in — and
+  reusing that grouping here would hand both arms a locality no consumer ever sees. Where a trace has
+  no usable timestamps (FR-055d) its order is file order and the report says the curve is
+  order-dependent, rather than comparing quietly.
+- **Session identity is the conversation, on both sides.** `BlockSemantics::session_id` is what a
+  lineage-aware policy consumes; `eviction-policy-session-lists` chains a session's blocks and evicts
+  only *leaves*, so ancestors with live descendants are protected. The trace's session is one
+  conversation and the plan's `session_id` is the same thing. It is **not** `root_index`: a
+  shared-prefix family is a set of different conversations that happen to share a trunk, and feeding
+  it would give the synthetic arm lineage chains the real arm has no counterpart for — an
+  incomparable pair that still produces a plausible curve.
+- **Capacities are sized from the trace's working set, not each arm's own.** Sizing each arm by its
+  own working set asks two different operational questions and calls the difference fidelity. The
+  sweep is geometric over three decades (1/1024 … 1 of the working set) because a hit-rate curve is
+  flat at both ends and all of its shape is in the middle.
+- **Warmup requests are dropped from the plan arm and counted.** A warmup window belongs to a
+  measured run rather than to a workload (FR-045) and a trace has none, so replaying the plan's would
+  charge the synthetic arm compulsory misses the real arm never pays. Dropping them entirely rather
+  than replaying them warm is the mirror of a trace, which begins cold.
+- **The bridge is cross-checked against the fit's own counts, on both arms.** On all seven traces
+  swept, each arm's request and reference totals equal the figures `fit` computes independently
+  through `workload_model::stats` — trace side `10916/7578057` … `91768/125818574`, synthetic side
+  `10916/7783597` … `91768/118817210`, exact on every one. So the adapter drops no request, splits
+  none, and double-counts none, which is the failure mode an adapter between two grouping conventions
+  is most likely to have and the one a plausible-looking curve would hide.
+- **The unbounded ceiling is reported separately, because it decomposes the comparison.** At a
+  capacity equal to the working set the cache cannot evict, so hit rate is exactly
+  `1 - distinct/references` — a function of how *much* reuse a stream carries and not of where that
+  reuse sits. A gap there and a gap below it are different defects wanting different fixes, and no
+  single curve statistic separates them.
+
+### The first measurement — `tau2_airline`, 2026-08-20
+
+The fitted model **exceeds all four** gated tolerances (reuse 0.026/0.020, `sharing_depth`
+0.102/0.050, `request_length` 0.026/0.020, `unique_keys` 0.335/0.150). Hit rate, trace against
+synthetic, in percentage points:
+
+| capacity | frac of ws | LRU trace | LRU synth | delta | session-lists delta |
+| --- | --- | --- | --- | --- | --- |
+| 346 | 0.0010 | 6.5% | 7.9% | +1.4 | +12.5 |
+| 1384 | 0.0039 | 54.5% | 61.9% | **+7.5** | **+14.4** |
+| 5538 | 0.0156 | 92.1% | 91.4% | −0.7 | −1.0 |
+| 22152 | 0.0625 | 95.2% | 92.5% | −2.7 | −2.7 |
+| 88607 | 0.2500 | 95.3% | 93.8% | −1.5 | −1.5 |
+| 354427 | 1.0000 | 95.3% | 94.4% | −0.9 | −0.9 |
+
+Four things follow, and the third is the one that changes what to do next.
+
+1. **Failing all four marginals cost little LRU hit-rate agreement above 1.6% of the working set** —
+   0.7 to 2.7 points, with the unbounded ceilings at 95.3% against 94.4%. So the *quantity* of reuse
+   is nearly right, and a consumer sizing a cache in that range would see nearly the right number
+   from this "failing" model.
+2. **The disagreement is concentrated at capacities holding under 0.5% of the working set, and the
+   sign inverts across the sweep** (+7.5 then −0.7 … −2.7). A level offset would not invert; this is
+   a shape difference, so the synthetic stream has *too many very short* reuse distances and slightly
+   too few long ones. That is consistent with a trunk re-walked more tightly than the trace's.
+3. **The lineage policy roughly doubles the small-capacity gap (+12.5 and +14.4) while leaving every
+   large-capacity figure identical.** This is the recorded thin-deep-spine versus thick-shallow-trunk
+   defect appearing in a **consumer-visible** number for the first time. A policy that protects
+   ancestors is sensitive to trunk shape exactly where the four marginals are blind to it — which
+   makes the choice of policy part of the measurement, and makes `session-lists` the discriminating
+   arm to carry forward.
+4. **SC-002's implication fails in both directions.** Failing the reuse-distance gate did not cost
+   hit-rate agreement in the operational range, and passing it would not have guaranteed agreement at
+   *every* capacity, since the curve disagrees by 7.5 points (14.4 under `session-lists`) at 0.39% of
+   the working set. The criterion survives as the cheapest proxy and must stop being read as a
+   certificate.
+
+### The corpus result — all 8 traces that fit, 2026-08-20
+
+Same command on every trace (`--no-floor --cache-curve --cache-policy both`, seed 4242, block_bytes
+131072). `ceil` is the unbounded ceiling; `span` is how much the **trace's own** hit rate moves across
+the sweep, i.e. what capacity buys on that workload; `worst` is the largest gap in percentage points
+and `band` the largest at capacities holding **≥1.6%** of the working set. **Every one of these models
+exceeds all four gated tolerances.**
+
+| trace | reuse KS | ceil T | ceil S | ws | span T | LRU worst | band | band/span | s-lists worst |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| tau2_airline | 0.0262 | 95.3% | 94.4% | 1.221 | 88.8 | **+7.5** | −2.7 | 0.03 | +14.4 |
+| tau2_retail | 0.0393 | 95.4% | 93.9% | 1.275 | 74.4 | **+15.0** | −2.8 | 0.04 | +26.1 |
+| tau2_telecom | 0.0499 | 98.6% | 96.7% | **1.986** | 97.6 | **+27.9** | −2.8 | 0.03 | +22.1 |
+| browsecompplus | 0.0806 | 94.3% | 94.1% | 1.014 | 69.0 | **+45.3** | +0.6 | 0.01 | +48.5 |
+| swebench | 0.0976 | 97.8% | 97.5% | 1.042 | 62.6 | **+39.5** | +2.4 | 0.04 | +48.5 |
+| qwen_code | 0.0354 | 66.4% | 65.4% | 1.200 | 47.9 | **−13.2** | −4.6 | 0.10 | −13.1 |
+| qwen_reasoning | 0.0681 | 46.2% | 42.6% | 1.072 | 28.6 | **−13.6** | −9.2 | **0.32** | −13.4 |
+| wildchat | 0.0301 | 74.6% | 72.8% | 1.137 | **0.8** | **−2.5** | −2.5 | **3.13** | −2.5 (identical) |
+
+Seven findings. The first two bear on what to build next; the third is an instrument caveat that had to
+be added after `wildchat` landed and inverted the naive reading.
+
+1. **ON 7 OF 8, THE WHOLE DISAGREEMENT LIVES BELOW 0.5% OF THE WORKING SET.** Restricted to capacities
+   holding **1.6% or more**, the worst gap is **9.2 points** (qwen_reasoning), 7 of 8 are inside
+   **4.6** and 6 of 8 inside **2.8** — against up to 45.3 over the full sweep. Normalised by what
+   capacity buys on that trace, the operational-band gap is **1–4% of span on 6 of 8**. So a model
+   failing every gated statistic reproduces hit rate to a few percent of the capacity effect wherever
+   a cache holds a non-trivial fraction of the working set, and the residual defect is specifically
+   about **very short reuse distances**. This is the strongest evidence yet that the *definition of
+   success* was the problem rather than the model, and the first such evidence a consumer would care
+   about.
+2. **THE SIGN SPLITS BY FAMILY, 5–3.** On every `exgentic` trace the synthetic stream is *easier* to
+   cache at small capacity; on all three production traces (`qwen_code`, `qwen_reasoning`, `wildchat`)
+   it is *harder*. That is the same opposite-directions split already recorded for `sharing_depth`
+   (qwen over-shares, the tau2 family under-shares), now in a consumer-visible number — a cross-check
+   that the curve measures structure rather than noise, and a warning that **no single rate fixes
+   both**. The exgentic traces are agent loops re-reading a large prompt, and their real reuse
+   distances are long because many other sessions interleave between one session's turns; the
+   synthetic packs a session's re-reads closer together. On the production traces it is the reverse.
+3. **A GAP IN POINTS MEANS NOTHING WITHOUT THE TRACE'S OWN SPAN, AND `wildchat` PROVES IT.** Its
+   absolute gap is the *smallest* in the corpus (2.5 points, uniform across the sweep) and by span it
+   is the *worst*: capacity moves its hit rate by only **0.8 points** between 0.1% and 100% of the
+   working set, so the model is off by **3.1x the entire capacity effect**. It is also the one trace
+   whose gap does **not** shrink with capacity — a level offset, essentially its 1.8-point ceiling
+   deficit, rather than a small-capacity shape error. So the two normalisations each degenerate where
+   the other works: absolute points is the operational figure, gap/span the sensitivity figure, and
+   **where the span approaches zero the ceiling comparison replaces both** — on a flat-curve workload
+   the question is not what capacity buys but whether the stream carries the right amount of reuse at
+   all. Read all three columns or misread the table; the first draft of this section, written before
+   `wildchat`, generalised "the disagreement lives at small capacity" from seven traces and was wrong
+   about the eighth.
+4. **The unbounded ceilings agree within 3.6 points on all eight** (worst: qwen_reasoning 46.2 vs
+   42.6, telecom 98.6 vs 96.7, wildchat 74.6 vs 72.8). By the decomposition above the *amount* of
+   reuse is broadly right everywhere and the problem is its **arrangement** — the class of defect the
+   four marginals were least able to localise. The exception to the "so it hardly matters" reading is
+   again `wildchat`, where the ceiling gap *is* the whole curve gap.
+5. **The reuse-distance KS is a decent ORDINAL proxy within a family and not across one.** Inside
+   `exgentic` it tracks the worst gap almost monotonically (0.026→7.5, 0.039→15.0, 0.050→27.9,
+   0.081→45.3, 0.098→39.5 — one adjacent inversion). Across families it fails outright:
+   `qwen_reasoning`'s 0.068 goes with 13.6 points where telecom's smaller 0.050 goes with 27.9, and
+   `wildchat`'s 0.030 — the second-best in the corpus — goes with the worst span-normalised gap of
+   all. So it can rank two candidate models of *one* workload and cannot compare fidelity between
+   workloads.
+6. **`sharing_depth` does not track the curve at all.** Telecom has the corpus's worst sharing
+   divergence (0.542) and the third-worst curve; qwen_code has the best (0.060) and a mid-table gap.
+   A statistic FR-057c ranks highest on dynamic range is nearly uninformative about hit rate, which is
+   worth stating plainly: dynamic range says a statistic can *tell two workloads apart*, not that it
+   predicts what a consumer sees.
+7. **The lineage policy amplifies the gap on `exgentic` and not on the production traces** — airline
+   +7.5→+14.4, retail +15.0→+26.1, but qwen_code −13.2→−13.1, qwen_reasoning −13.6→−13.4, and on
+   `wildchat` it is **identical to LRU on every row of both arms**. So
+   `eviction-policy-session-lists` adds discrimination exactly where the synthetic **over**-produces
+   short reuse, because protecting ancestors converts those extra near-term re-references into hits;
+   where sessions are short its chains are short, nearly every block is a leaf, and it degenerates to
+   recency. It is the more sensitive instrument on 5 of 8 and never the less sensitive one, which is
+   why it is worth sweeping even though it costs a second pass.
+
+**Two further caveats to carry with this table.** `tau2_telecom`'s synthetic working set is **1.986x**
+the trace's on 0.818x the references, so a capacity fixed in blocks is a materially different
+*fraction* of each arm's working set and part of its 27.9 points is that scale mismatch rather than
+arrangement; airline, retail and qwen_code carry a milder version (1.20–1.28x). And the worst-gap
+column is measured where the trace's own hit rate is as low as 1.0% (telecom at 0.1% of the working
+set), a capacity nothing would be operated at — which is why finding 1 reports the band separately.
+
+### What this measurement is NOT, and the one thing it still needs
+
+It is not the deferred cache simulator, and the three reasons for that deferral are checked against
+it one by one in spec § Out of Scope and FR-057d: no part of the workload's definition depends on it,
+the policy is consumed as a component rather than reimplemented, and there is no tier, device,
+latency or byte accounting anywhere in it.
+
+One preliminary anchor exists and should be read with care. On the self-fitted fixture of
+`tests/cache_curve.rs` — a model fitted from a trace the generator itself emitted, so the model is
+*correct* by construction — the two arms' LRU curves still differ by **3.8 points** at their worst.
+That is not the FR-057c floor (it compares a model against its own output rather than two halves of
+one real trace) and the fixture is far smaller than any corpus trace, which inflates it. But it is a
+same-instrument reference for what agreement looks like when nothing is wrong, and it sits at the same
+scale as the 2.8–4.6 points the real traces show in the operational band — which is the reason not to
+start explaining that residual before the real floor is measured.
+
+It is also **not yet gateable**, by this file's own rule. FR-057c requires a statistic to be
+justified against a measured achievable floor before it may gate, and the curve has none: two halves
+of one real trace have to be swept the same way to learn how far apart two samples of one workload
+are at each capacity. Until that exists, a 7.5-point gap cannot be told from sampling noise, and the
+report says so instead of printing a verdict. That floor is the immediate next measurement, and
+`certus-trace floor`'s existing session/time split is the machinery for it.
+
 ## Threats to validity
 
 1. **Convenience sample.** 24 traces, chosen by availability. Shapes are likely to recur; the

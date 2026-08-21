@@ -147,7 +147,11 @@ Two properties disqualify a trace from parts of a fit regardless of its class, a
 from `field_status` rather than from the trace's identity. A trace with a null `session_id` cannot
 supply `turns`, `growth_per_turn`, or the sticky root binding of FR-009a, because requests cannot be
 grouped into sessions. A trace with no timestamps gives no arrival model, and its reuse statistics
-depend on file order, so `fit` MUST report them as order-dependent rather than as measured.
+depend on file order, so `fit` MUST report them as order-dependent rather than as measured. **The
+same caveat governs `fit --cache-curve` (FR-057d) and more sharply**: a cache is recency-sensitive,
+so replaying a trace whose order is file order measures a property of that order as much as of the
+workload. The curve report MUST say so on such a trace rather than printing a comparison that looks
+like any other.
 
 ## JSONL is a container, not a lesser format
 

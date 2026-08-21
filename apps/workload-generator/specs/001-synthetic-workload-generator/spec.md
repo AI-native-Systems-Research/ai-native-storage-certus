@@ -28,7 +28,7 @@ statistics are testable in CI without SPDK, CUDA, RDMA, or a columnar-format dep
 | --- | --- | --- | --- |
 | `apps/workload-model` | *(library)* | `serde`, `serde_yaml`, a hashing crate. **No `interfaces`, no `IEvictionPolicy`, no policy component** — with cache simulation deferred nothing here needs them, and nothing in the generator knows what a cache is (FR-018a, FR-034) | **`default-members`** |
 | `apps/workload-generator` | `certus-workload` (`plan`, `report`, `emit`) | `workload-model`, `serde_json` | **`default-members`** |
-| `apps/workload-trace` | `certus-trace` (`fit`, `validate`, `convert`) | `workload-model`, `serde_json`; `arrow`/`parquet` behind a **`parquet` feature, default off** | **`default-members`** — so `fit` and `validate` are tested by `cargo test --all`, over JSONL |
+| `apps/workload-trace` | `certus-trace` (`fit`, `validate`, `floor`, `convert`) | `workload-model`, `serde_json`; `arrow`/`parquet` behind a **`parquet` feature, default off**; `eviction-replay-benchmark` + the two policy components for `fit --cache-curve` (FR-057d) — a measuring instrument in the *tool*, which is why it is here and not one row up | **`default-members`** — so `fit` and `validate` are tested by `cargo test --all`, over JSONL |
 | `apps/workload-runner` | `certus-workload-run` (`run`) | `workload-model`, `tonic`, local CUDA externs | `members` only — needs hardware |
 
 **`apps/workload-model` exists for a correctness reason, not for tidiness.** FR-056's four statistics
@@ -2186,6 +2186,69 @@ report segments statistics into before/after windows around the event.
   nonstationarity to the floor (airline `sharing_depth` 0.211 against 0.034 by session), so a model
   of a stationary process cannot match it, which is a limit of the model that MUST be stated rather
   than tuned against.
+- **FR-057d**: SC-002's implication — that matching the reuse-distance CDF makes hit rate agree at
+  every capacity — MUST be **measured** rather than assumed. `fit --cache-curve` MUST replay the
+  source trace and the plan fitted from it through the **same** `IEvictionPolicy` component, at a
+  sweep of capacities, and report hit rate per capacity per arm with the gap between them. It MUST
+  report the **unbounded-cache ceiling** (`1 - distinct/references`) for both arms alongside the
+  curve, because that decomposes the comparison: the ceiling is a function of how *much* reuse a
+  stream carries and the curve below it of how that reuse is *arranged*, and the two failures want
+  different fixes. The result MUST NOT gate a fit until it has an achievable floor of its own
+  measured the same way (FR-057c's own rule), and MUST be printed even when the marginal comparison
+  fails — the question it exists to answer is precisely whether a model the marginals reject is
+  nonetheless fit to drive a cache.
+  **This is not the deferred cache simulator** (see Out of Scope) and MUST NOT become it. Three
+  constraints keep the distinction real, and each maps onto one of that entry's three reasons: no
+  part of the workload's *definition* may depend on it — no schema field, no fitted parameter, and
+  `workload-model` MUST continue to depend on no `interfaces` and no policy component (FR-018a); the
+  replacement policy MUST be **consumed** as a component and never reimplemented here, so there is
+  no second copy to drift from Certus and the report MUST name the policy it measured through; and
+  there MUST be no tier, no device model, no latency and no byte accounting — a bounded set of
+  blocks and a hit fraction only, which is what keeps the "unbounded error" objection to a simulated
+  SSD from applying.
+  **Measured 2026-08-20 on `tau2_airline`, and the result bears directly on FR-057c's premise:** the
+  fitted model exceeds **all four** gated tolerances (reuse 0.026/0.020, `sharing_depth`
+  0.102/0.050, `request_length` 0.026/0.020, `unique_keys` 0.335/0.150) and yet reproduces the
+  trace's **LRU** hit rate to within **0.7–2.7 points** at every capacity from 1.6% of the working
+  set upward, with the unbounded ceilings agreeing at **95.3% against 94.4%**. Its whole
+  disagreement is at capacities holding under 0.5% of the working set (**+7.5 points at 0.39%**),
+  where the synthetic stream is *easier* to cache, and the sign **inverts** above that — so this is
+  a shape difference and not a level offset. Under the lineage-aware
+  `eviction-policy-session-lists` the same small-capacity gap is **roughly doubled** (+12.5 and
+  +14.4 points) while the large-capacity figures are unchanged, which is the recorded thin-deep-spine
+  versus thick-shallow-trunk defect appearing in a *consumer-visible* number for the first time: a
+  policy that protects ancestors is sensitive to trunk shape exactly where the four marginals are
+  blind to it.
+  **Extended to all 8 fitting traces the same day, and the corpus result is stronger than the single
+  trace** (full table in `research.md` § The cache curve). Restricted to capacities holding **1.6% or
+  more** of the working set, the worst hit-rate gap on any trace is **9.2 points**, 7 of 8 are inside
+  **4.6** and 6 of 8 inside **2.8** — against up to **45.3** over the whole sweep — and normalised by
+  what capacity buys on that trace it is **1–4% of span on 6 of 8**. So on 7 of 8 the disagreement
+  lives below 0.5% of the working set and is specifically about very short reuse distances, and the
+  unbounded ceilings agree within **3.6 points on all eight**, which by the decomposition above means
+  the *amount* of reuse is broadly right and its **arrangement** is what is wrong. The sign of the gap
+  splits **by family**, 5–3: easier to cache at small capacity on every `exgentic` trace, harder on all
+  three production traces — the same opposite-directions split already recorded for `sharing_depth`, so
+  no single rate corrects both.
+  **A REPORTING RULE FALLS OUT OF THIS AND IS PART OF THE REQUIREMENT: a gap in percentage points MUST
+  be read against the span of the trace's own curve**, and where that span approaches zero the ceiling
+  comparison replaces both. `wildchat` is the case that forces it — the corpus's *smallest* absolute
+  gap (2.5 points) is its *largest* by span, because capacity moves its hit rate by only 0.8 points
+  end to end, so the model is off by 3.1x the entire capacity effect; it is also the only trace whose
+  gap does not shrink with capacity, being a level offset rather than a small-capacity shape error.
+  Two statistics also behave unexpectedly and both are worth recording: the reuse-distance KS tracks
+  the worst gap almost monotonically *within* the `exgentic` family and fails **across** families
+  (`wildchat`'s 0.030 is the second-best divergence in the corpus and the worst span-normalised gap),
+  so it can rank two models of one workload but cannot compare fidelity between workloads; and
+  `sharing_depth` — the statistic FR-057c ranks best on dynamic range — is nearly **uninformative**
+  about the curve (telecom has the corpus's worst sharing divergence, 0.542, and only the third-worst
+  curve). Dynamic range says a statistic can tell two workloads apart; it does not say the statistic
+  predicts what a consumer sees.
+  Which policy is measured through is itself part of the result: `eviction-policy-session-lists`
+  roughly doubles the gap on the `exgentic` family, changes it by ~0.2 points on the `qwen` family,
+  and is **identical to LRU on every row of both arms** on `wildchat` — because where sessions are
+  short its chains are short, nearly every block is a leaf, and it degenerates to recency. It is the
+  more sensitive instrument on 5 of 8 and never the less sensitive one.
 - **FR-056**: `fit` MUST validate the fitted model by comparing four statistics between the
   real trace and synthetic output: reuse-distance CDF (primary), prefix-sharing depth
   histogram, request-length distribution, and unique-keys-over-time curve.
@@ -2645,7 +2708,18 @@ report segments statistics into before/after windows around the event.
 - **SC-002**: A plan generated from a fitted YAML matches the source trace's reuse-distance
   CDF within that statistic's tolerance — supplied on the `fit`/`validate` command line, per
   FR-057b, and recorded in the validation report — so that LRU hit rate agrees at every capacity
-  under test.
+  under test. **The "so that" is an implication, and FR-057d measures it rather than assuming it.**
+  First measurement, `tau2_airline` 2026-08-20: the implication does not hold in either direction as
+  stated. The reuse-distance divergence **exceeds** its tolerance (0.026 against 0.020) while LRU hit
+  rate agrees to within 0.7–2.7 points above 1.6% of the working set — so failing this criterion did
+  not cost hit-rate agreement — and at the same time the curve disagrees by 7.5 points at 0.39% of
+  the working set and 14.4 under a lineage policy, so passing it would not have guaranteed agreement
+  at *every* capacity either. Across 7 traces the same pattern holds: every model fails this
+  criterion, and every one agrees on hit rate to within 9.2 points — 5 of 7 within 2.8 — at any
+  capacity holding 1.6% or more of the working set. The criterion is kept, because a reuse-distance
+  match is still the cheapest available proxy and it does rank two models of *one* workload
+  correctly, but it MUST NOT be read as certifying the hit-rate curve when the curve itself can now
+  be measured, and it does NOT compare fidelity across workloads (FR-057d).
 - **SC-003**: The same YAML and seed produce a byte-identical plan across repeated runs, and
   two arms of a policy comparison produce identical stream digests.
 - **SC-004**: `report` computes every FR-034a statistic over a 10^7-request plan in under one
@@ -2681,7 +2755,12 @@ report segments statistics into before/after windows around the event.
 - **SC-010a**: Every plan report states the compulsory-miss floor and the reuse-distance CDF, so
   that a consumer's single measured number is interpretable on its own — the floor says what the
   best imaginable consumer could do on this workload, and the CDF says what capacity would buy.
-  Neither requires this tool to model a cache.
+  Neither requires this tool to model a cache. **Qualified 2026-08-20 by FR-057d:** "what capacity
+  would buy" holds as a *reading* of the CDF, but the CDF's **divergence** from a trace's does not
+  bound the hit-rate gap at a given capacity — measured, a KS distance of 0.050 went with a 27.9-point
+  gap where a larger 0.068 went with 13.6. The floor's status is unaffected: it is the ceiling at
+  unbounded capacity, and measured on both arms of seven traces it agrees within 3.6 points, so it is
+  the part of this criterion that survives contact with a real policy.
 - **SC-011**: A single YAML expresses the full test matrix in the Test Matrix section below,
   and each case is runnable without editing code.
 - **SC-012**: `cargo test --all` builds and passes with **no columnar-format dependency compiled**,
@@ -2800,6 +2879,22 @@ not a claim that the generator measures any of it.
   already models the two-tier server in SimPy and already replays a block trace. Nothing in this
   feature forecloses it — a plan is a plain reference trace, so a simulator is just another
   consumer of one, and FR-036's digests let its results be compared against hardware honestly.
+
+  **This deferral STANDS, and `fit --cache-curve` (FR-057d) is not an exception to it — read the
+  three reasons above against it before adding anything nearby.** What that flag does is replay both
+  a trace and the plan fitted from it through a real `IEvictionPolicy` and compare hit rate against
+  capacity, as a check on the *fit*. It crosses none of the three: nothing in the workload's
+  definition depends on it (no schema field, no fitted parameter, and `workload-model` still depends
+  on no `interfaces` and no policy component); the policy is consumed as a component and named in the
+  report rather than reimplemented, so there is no second copy to track a moving target; and there is
+  no tier, no device, no latency and no byte accounting, so the "error of unknown magnitude"
+  objection — which was about approximating an SSD — has nothing to attach to. A bounded set of
+  blocks and a hit fraction is not a model of a memory hierarchy.
+  What WOULD cross the line, and MUST stay out: a modelled tier of any kind, a latency or bandwidth
+  number, promotion or demotion traffic, byte provenance, a policy reimplemented inside this suite,
+  or any parameter of the generated workload derived from a cache outcome. The last is the one to
+  watch: fitting a model *to* a hit-rate curve would make the workload a function of a consumer's
+  internals, which is precisely what FR-018a forbids.
 - **Instrumenting the consumer's internals — the reporting boundary.** The runner reports what it can
   observe as a client, plus whatever the server volunteers per entry. It does **not** report anything
   that would require modelling how the consumer is built. Three requirements were removed on this

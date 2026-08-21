@@ -90,6 +90,28 @@ supply a path. `fit` reads the trace's own `manifest.json` to learn what it can 
   indistinguishable from no churn and any fitted value would be biased short;
 - **leave every placement field unset**, because no known trace carries node attribution at all.
 
+### 4a. Ask whether the fit is good enough to drive a cache
+
+```sh
+certus-trace fit --trace /path/to/some-trace --block-bytes 131072 \
+    --cache-curve --cache-policy both
+```
+
+The four gated statistics are marginals, and a verdict from them says nothing directly about the one
+thing a KV cache does. `--cache-curve` replays the trace **and** the plan fitted from it through a
+real `IEvictionPolicy` component at a geometric sweep of capacities and prints hit rate side by side
+(FR-057d). Read it in two parts: `hit@ws` is the unbounded ceiling, so a gap *there* means the
+synthetic stream has the wrong **amount** of reuse, while a gap only below it means the amount is
+right and its **arrangement** is wrong.
+
+It prints even when the fit is refused — that is the point, since the question is whether a model the
+marginals reject is nonetheless usable. `--cache-policy session-lists` is the more revealing arm: it
+protects blocks with live descendants, so it responds to trunk *shape* where a recency-only policy
+cannot. Nothing here gates the fit, and the report says why: the curve has no achievable floor
+measured yet, so a gap cannot yet be told from sampling noise.
+
+Cost is one replay per capacity per arm per policy, so on the corpus's larger traces this is minutes.
+
 ## 5. Check the tool against itself
 
 ```sh
