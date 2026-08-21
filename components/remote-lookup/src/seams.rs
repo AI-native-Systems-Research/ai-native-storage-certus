@@ -34,7 +34,7 @@ use interfaces::{
     IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin, IpcHandle, LocalRegion,
     LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot, PeerId, PushCompletion, PushStatus,
     ReadWriteStats, RemoteLookupRdmaInitiatorError, RemoteLookupRdmaResponderError, RemoteRegion,
-    ResponderCommand, ResponderEvent,
+    ResponderCommand, ResponderEvent, TierEventStats,
 };
 
 /// Default byte-backing pool size for a [`NodeWorld`] (64 MiB).
@@ -745,6 +745,10 @@ impl IDispatcher for MockDispatcher {
         // Telemetry is not exercised by remote-lookup tests; return zeroed
         // counters, matching the disabled-telemetry contract on the real device.
         ReadWriteStats::default()
+    }
+
+    fn tier_event_stats(&self) -> TierEventStats {
+        TierEventStats::default()
     }
 }
 

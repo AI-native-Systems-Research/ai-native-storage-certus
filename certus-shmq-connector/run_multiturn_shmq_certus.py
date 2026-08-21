@@ -35,10 +35,12 @@ Environment:
     SLAB_SIZE_BYTES  offload block size (default 131072)
     DATASET_PATH     override dataset json
 
-NOTE vs the gRPC driver: the ring transport has no GetIoStats op (that RPC was a
-gRPC-only side channel for per-round SSD I/O deltas), so the per-round output
-here reports generations/rounds only. Read SSD I/O from the server's own
-telemetry (its stderr / iostat) when it is built with --features rw-telemetry.
+Per-round SSD device I/O: the server's cumulative NVMe read/write byte counters
+(its rw-telemetry) are queried over the shmq ring's GetIoStats op each round and
+printed as ssd_read_bytes / ssd_write_bytes deltas on the [prom] line, which the
+kvprofile renderer plots. This is the same mechanism the old gRPC driver used
+(its GetIoStats RPC), now carried over shm-queue. The byte counts are real only
+when the server is built with --features rw-telemetry (zero otherwise).
 """
 
 if __name__ == "__main__":
@@ -231,20 +233,69 @@ if __name__ == "__main__":
         tokenizer = llm.get_tokenizer()
         n_tokens = common.make_n_tokens(tokenizer)
 
-        # NOTE: no per-round SSD I/O accounting here. The gRPC driver polled the
-        # server's GetIoStats RPC each round for read/write byte deltas; the ring
-        # transport has no equivalent op (it carries only the connector control
-        # plane). Read SSD I/O from the server side instead (its stderr telemetry
-        # when built with --features rw-telemetry, or host `iostat`).
-        _gen_total = [0]
+        CAPTURE_METRICS = not _log_stats_off
+
+        # Per-round SSD device I/O. The server's cumulative NVMe read/write byte
+        # counters (its rw-telemetry) are queried over the shmq ring's GetIoStats
+        # op (translate.rs op_get_io_stats -> dispatcher read_write_stats) and the
+        # per-round deltas are emitted as ssd_read_bytes / ssd_write_bytes on the
+        # [prom] line, which the kvprofile renderer plots. Same mechanism the old
+        # gRPC driver used (its GetIoStats RPC), now carried over shm-queue. Byte
+        # counts are real only when the server is built with --features
+        # rw-telemetry (zero otherwise).
+        from certus_shmq_connector.ring import Ring
+
+        try:
+            io_ring = Ring(SHM_PATH)
+        except Exception as e:  # noqa: BLE001 - ring may be absent; degrade gracefully
+            io_ring = None
+            print(f"[io] GetIoStats unavailable ({e}); per-round SSD bytes disabled",
+                  file=sys.stderr)
+
+        def io_rw_bytes():
+            """(cumulative read_bytes, write_bytes) from the server, or (None, None)."""
+            if io_ring is None:
+                return None, None
+            try:
+                s = io_ring.get_io_stats()
+                return int(s["read_bytes"]), int(s["write_bytes"])
+            except Exception as e:  # noqa: BLE001
+                print(f"[io] GetIoStats query failed: {e}", file=sys.stderr)
+                return None, None
+
+        # ── vLLM Prometheus counters + SSD device bytes (per round) ───────────
+        # prom counters snapshot at round end; SSD device bytes bracketed around
+        # generate() (snapshot pre in on_round_start, diff post in on_round_end).
+        prom_prev = [common.prom_counters(llm, CAPTURE_METRICS)]
+        prom_rounds = []  # (round, {counter_name: delta})
+        io_pre = [None, None]
+
+        def on_round_start(round_idx, n_prompts):
+            io_pre[0], io_pre[1] = io_rw_bytes()
 
         def on_round_end(round_idx, n_prompts, round_elapsed, n_alive):
-            _gen_total[0] += n_prompts
-            print(
-                f"[run] round {round_idx}: {n_prompts} prompts, "
-                f"{_gen_total[0]} total generations",
-                file=sys.stderr,
-            )
+            rd0, wr0 = io_pre
+            rd1, wr1 = io_rw_bytes()
+            ssd_shown = ""
+            if rd0 is not None and rd1 is not None:
+                ssd_shown = (f"ssd_read_bytes={rd1 - rd0} "
+                             f"ssd_write_bytes={wr1 - wr0}")
+            print(f"[run] round {round_idx}: {n_prompts} prompts in "
+                  f"{round_elapsed:.1f}s  ({n_alive} convs still alive)",
+                  file=sys.stderr, flush=True)
+            if CAPTURE_METRICS:
+                prom_now = common.prom_counters(llm, CAPTURE_METRICS)
+                d_prom = {k: prom_now.get(k, 0.0) - prom_prev[0].get(k, 0.0)
+                          for k in prom_now}
+                prom_prev[0] = prom_now
+                prom_rounds.append((round_idx, d_prom))
+                shown = " ".join(f"{k[len('vllm:'):]}={d_prom[k]:.0f}"
+                                 for k in sorted(d_prom) if d_prom[k])
+            else:
+                shown = ""
+            line = " ".join(x for x in (shown, ssd_shown) if x)
+            print(f"[prom] round {round_idx}: {line or '(no counter movement)'}",
+                  file=sys.stderr, flush=True)
 
         result = batched.run_batched(
             llm, convs, sp,
@@ -253,11 +304,43 @@ if __name__ == "__main__":
             n_tokens=n_tokens,
             skip_empty=True,
             session_id_fn=_session_id_fn,
+            on_round_start=on_round_start,
             on_round_end=on_round_end,
         )
         rounds_done = result["rounds_done"]
         total_generations = result["total_generations"]
         elapsed = result["elapsed"]
+
+        if CAPTURE_METRICS and prom_rounds:
+            try:
+                with open(os.path.join(_here, "prom_counters_rounds.json"), "w") as f:
+                    json.dump([{"round": r, "counters": d} for r, d in prom_rounds],
+                              f, indent=2)
+            except OSError as e:
+                print(f"[prom] could not save json: {e}", file=sys.stderr)
+
+        # Latency-distribution histograms: sampled once (cumulative over the run).
+        if CAPTURE_METRICS:
+            hists = common.prom_histograms(llm, {"vllm:request_queue_time_seconds",
+                                                 "vllm:request_decode_time_seconds"},
+                                           CAPTURE_METRICS)
+            for name, h in sorted(hists.items()):
+                cnt, tot = h["count"], h["sum"]
+                mean = tot / cnt if cnt else 0.0
+                fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
+                print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
+                      f"p50={fmt(common.hist_pct(h['buckets'], cnt, 0.50))} "
+                      f"p90={fmt(common.hist_pct(h['buckets'], cnt, 0.90))} "
+                      f"p99={fmt(common.hist_pct(h['buckets'], cnt, 0.99))}",
+                      file=sys.stderr, flush=True)
+            if hists:
+                print(f"[prom] histjson {json.dumps(hists, separators=(',', ':'))}",
+                      file=sys.stderr, flush=True)
+                try:
+                    with open(os.path.join(_here, "prom_histograms.json"), "w") as f:
+                        json.dump(hists, f, indent=2)
+                except OSError as e:
+                    print(f"[prom] could not save histogram json: {e}", file=sys.stderr)
 
     print(
         f"[run] DONE rounds={rounds_done} generations={total_generations} "

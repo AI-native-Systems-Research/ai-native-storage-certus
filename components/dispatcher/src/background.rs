@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
 
-use crate::{EvictionEvent, EvictionReason};
+use crate::{EvictionEvent, EvictionReason, TierEventCounters};
 
 /// A job for the background writer to persist a memory-tier entry to SSD.
 #[derive(Debug)]
@@ -242,6 +242,7 @@ impl BackgroundEvictor {
         config: EvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
         eviction_tx: Option<Sender<EvictionEvent>>,
+        tier_counters: Arc<TierEventCounters>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
@@ -257,6 +258,7 @@ impl BackgroundEvictor {
                     &config,
                     logger.as_deref(),
                     eviction_tx.as_ref(),
+                    &tier_counters,
                 );
             })
             .expect("failed to spawn SSD evictor thread");
@@ -282,6 +284,7 @@ impl BackgroundEvictor {
         config: &EvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
         eviction_tx: Option<&Sender<EvictionEvent>>,
+        tier_counters: &TierEventCounters,
     ) {
         loop {
             thread::sleep(config.interval);
@@ -343,6 +346,7 @@ impl BackgroundEvictor {
                 }
 
                 evicted += 1;
+                tier_counters.record_eviction_from_ssd();
 
                 // Re-check utilization after each removal.
                 let (used_now, _) = Self::compute_utilization(extent_mgrs);
@@ -428,6 +432,7 @@ impl MemoryTierEvictor {
         config: MemoryTierEvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
         eviction_tx: Arc<Mutex<Option<Sender<EvictionEvent>>>>,
+        tier_counters: Arc<TierEventCounters>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
@@ -442,6 +447,7 @@ impl MemoryTierEvictor {
                     &config,
                     logger.as_deref(),
                     &eviction_tx,
+                    &tier_counters,
                 );
             })
             .expect("failed to spawn memory-tier evictor thread");
@@ -466,6 +472,7 @@ impl MemoryTierEvictor {
         config: &MemoryTierEvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
         eviction_tx: &Mutex<Option<Sender<EvictionEvent>>>,
+        tier_counters: &TierEventCounters,
     ) {
         let mut consecutive_dry_runs = 0u32;
 
@@ -534,6 +541,7 @@ impl MemoryTierEvictor {
                 }
 
                 demoted += 1;
+                tier_counters.record_eviction_from_memory();
 
                 let used_now = mt.used();
                 let util_now = used_now as f64 / capacity as f64;
