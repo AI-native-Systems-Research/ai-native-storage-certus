@@ -176,3 +176,15 @@ align-tasks after the sweep re-analysis and maintainer fork decisions.
 - **CLAUDE.md skeleton staleness (Low, doc-only)** — ⏳ OPEN. Component-root
   `CLAUDE.md` Overview still describes a bare `initialize()`/`shutdown()`
   skeleton; outside `specs/**`, deliberately not edited by spec-sync.
+
+---
+
+# 2026-08-20 Sweep — No ALIGN tasks generated
+
+Based on: `.specify/sync/drift-report.{json,md}` (generated 2026-08-20;
+77/78 aligned, 1 drifted). The single drift item — spec 003
+`FR-012` — was classified **BACKFILL** (the code correctly performs chunked
+NVMe reads; the MDTS ceiling is an operator responsibility documented via CLI
+help, not a runtime-validated constraint that the code violates). It was
+resolved by spec backfill (see `proposals.md` / `apply-report.md`), so **no
+ALIGN task** was generated this run.

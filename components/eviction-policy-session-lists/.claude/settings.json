@@ -3,13 +3,13 @@
     "allow": [
       "Read(components/eviction-policy-session-lists/**)",
       "Write(components/eviction-policy-session-lists/**)",
-      "Read(components/component-framework/**)",
+      "Read(lib/component-framework/**)",
       "Read(components/interfaces/**)",
       "Write(components/interfaces/**)",
       "Read(components/logger/**)"
     ],
     "deny": [
-      "Read(components/spdk-sys/**)",
+      "Read(lib/spdk-sys/**)",
       "Read(components/spdk-env/**)",
       "Read(components/block-device-spdk-nvme/**)"
     ],

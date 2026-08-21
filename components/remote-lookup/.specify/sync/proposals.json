@@ -1,68 +1,86 @@
 {
-  "generated": "2026-06-19T19:30:00Z",
-  "based_on": "drift-report from 2026-06-19",
+  "generated": "2026-08-20",
+  "based_on": "components/remote-lookup/.specify/sync/drift-report.json",
+  "project": "remote-lookup",
   "summary": {
-    "backfill": 5,
-    "align": 0,
-    "human_decision": 0,
-    "new_specs": 0,
-    "remove": 0
+    "backfill_applied": 5,
+    "align_tasks": 1,
+    "unspecced_backfilled": 3,
+    "resolved": 0,
+    "human_decision": 0
   },
   "proposals": [
     {
-      "id": 1,
-      "spec": "001-remote-lookup-placeholder",
-      "requirement": "FR-003",
-      "direction": "BACKFILL",
-      "current_spec": "When connected, each entry in batch_lookup MUST produce a log message via the ILogger receptacle",
-      "current_code": "Logging is unconditional — no connection state exists",
-      "proposed_text": "Each entry in `batch_lookup` MUST produce a log message via the `ILogger` receptacle (placeholder behavior). If the ILogger receptacle is not bound, logging is silently skipped.",
-      "confidence": "HIGH",
-      "status": "approved"
+      "requirement": "002-remote-lookup-rdma/FR-018",
+      "direction": "ALIGN",
+      "rationale": "Spec correctly requires unknown/malformed wire frames to be logged AND ignored. Code (src/actor.rs:314,330) ignores them correctly but emits no log line on either the WireMessage::Unknown arm (:330) or the malformed-decode Err(_) arm (:314). Correct spec + buggy (incomplete) code => ALIGN task, no source edit this pass. The ignore half is aligned; only the logging half is a code gap.",
+      "before": "Unknown message types MUST be logged and ignored.",
+      "after": "See align-tasks.md Task 3 (emit a logger line on both the WireMessage::Unknown arm and the malformed-decode Err(_) arm before dropping the frame). FR-018 spec text was also BACKFILLED (see unspecced item below) to name the malformed-frame class explicitly.",
+      "spec_edit": false
     },
     {
-      "id": 2,
-      "spec": "001-remote-lookup-placeholder",
-      "requirement": "FR-005",
+      "requirement": "001-remote-lookup-placeholder/FR-001",
       "direction": "BACKFILL",
-      "current_spec": "When not connected, batch_lookup MUST return Err(RemoteLookupError::NotConnected) for every entry",
-      "current_code": "NotConnected variant removed. No connection state.",
-      "proposed_text": "The `batch_lookup` method MUST be callable at any time after component instantiation. No connection precondition is required.",
-      "confidence": "HIGH",
-      "status": "approved"
+      "rationale": "Spec-lag: spec 001 is a superseded placeholder; the shipped code intentionally uses &[(CacheKey, u32)] (IpcHandle dropped, CPU/DRAM-only) per 002 FR-001 / Clarifications Q1. Code is the intended reality; annotate the stale requirement inline as superseded rather than rewrite the retained-for-history placeholder.",
+      "before": "FR-001: ... batch_lookup ... signature fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>.",
+      "after": "FR-001: ... (same text) *(Superseded by 002 FR-001: shipped signature is &[(CacheKey, u32 /* size */)]; IpcHandle intentionally dropped (CPU/DRAM-only); Ok(()) means resident in local memory tier. Retained for history.)*",
+      "spec_edit": true
     },
     {
-      "id": 3,
-      "spec": "001-remote-lookup-placeholder",
-      "requirement": "FR-008",
+      "requirement": "001-remote-lookup-placeholder/FR-003",
       "direction": "BACKFILL",
-      "current_spec": "Component MUST expose functionality only through the IRemoteLookup interface",
-      "current_code": "join_cluster and leave_cluster are interface methods (compliant)",
-      "proposed_text": null,
-      "confidence": "HIGH",
-      "status": "approved"
+      "rationale": "Spec-lag: the shipped component runs the real KEY_QUERY->RDMA protocol (002 FR-005/006a/007), not a per-entry placeholder log. Annotate as superseded.",
+      "before": "FR-003: Each entry in batch_lookup MUST produce a log message via the ILogger receptacle (placeholder behavior). ...",
+      "after": "FR-003: ... (same text) *(Superseded by 002: shipped component runs the real KEY_QUERY->RDMA protocol and emits no per-entry placeholder log. Retained for history.)*",
+      "spec_edit": true
     },
     {
-      "id": 4,
-      "spec": "001-remote-lookup-placeholder",
-      "requirement": "FR-009",
+      "requirement": "001-remote-lookup-placeholder/FR-004",
       "direction": "BACKFILL",
-      "current_spec": null,
-      "current_code": "join_cluster method on IRemoteLookup interface",
-      "proposed_text": "The `IRemoteLookup` interface MUST expose a `join_cluster` method with signature `fn join_cluster(&self, endpoint: &str) -> Result<(), RemoteLookupError>`. The placeholder implementation MUST log the endpoint and return `Ok(())`.",
-      "confidence": "HIGH",
-      "status": "approved"
+      "rationale": "Spec-lag: shipped component performs real zyre + one-sided RDMA I/O and returns Ok(()) when a key becomes resident; NotFound only on deadline. Annotate as superseded.",
+      "before": "FR-004: When connected, the placeholder implementation MUST return Err(RemoteLookupError::NotFound) for each entry (no actual network I/O).",
+      "after": "FR-004: ... (same text) *(Superseded by 002 FR-005..FR-012: real zyre + one-sided RDMA I/O; Ok(()) when resident, Err(NotFound) only when unresolved within the deadline. Retained for history.)*",
+      "spec_edit": true
     },
     {
-      "id": 5,
-      "spec": "001-remote-lookup-placeholder",
-      "requirement": "FR-010",
+      "requirement": "001-remote-lookup-placeholder/FR-008",
       "direction": "BACKFILL",
-      "current_spec": null,
-      "current_code": "leave_cluster method on IRemoteLookup interface",
-      "proposed_text": "The `IRemoteLookup` interface MUST expose a `leave_cluster` method with signature `fn leave_cluster(&self) -> Result<(), RemoteLookupError>`. The placeholder implementation MUST log the call and return `Ok(())`.",
-      "confidence": "HIGH",
-      "status": "approved"
+      "rationale": "Spec-lag: 002 FR-029 intentionally adds out-of-interface pub fns (peers_seen/signal_shutdown/shutdown) for multi-actor teardown ordering and test coordination the interface cannot express. Annotate as superseded.",
+      "before": "FR-008: The component MUST expose functionality only through the IRemoteLookup interface - no public functions outside the interface.",
+      "after": "FR-008: ... (same text) *(Superseded by 002 FR-029: intentional out-of-interface teardown/test hooks peers_seen()/signal_shutdown()/shutdown(); not part of the IRemoteLookup contract. Retained for history.)*",
+      "spec_edit": true
+    },
+    {
+      "requirement": "001-remote-lookup-placeholder/SC-002",
+      "direction": "BACKFILL",
+      "rationale": "Spec-lag: shipped interface compiles with (CacheKey, u32); the deliberate IpcHandle drop removes the type-equality goal with IDispatcher::batch_lookup. Annotate as superseded.",
+      "before": "SC-002: The interface compiles with the same (CacheKey, IpcHandle) parameter types as IDispatcher::batch_lookup.",
+      "after": "SC-002: ... (same text) *(Superseded by 002 FR-001: interface compiles with (CacheKey, u32); IpcHandle drop removes the type-equality goal. Retained for history.)*",
+      "spec_edit": true
+    },
+    {
+      "requirement": "unspecced: DISCONNECT_ACK_TIMEOUT (fixed 500ms bounded wait for DisconnectAck)",
+      "direction": "BACKFILL-UNSPECCED",
+      "rationale": "Load-bearing shipped behavior (src/actor.rs:37,1020-1033): teardown_peer blocks for DisconnectAck bounded by a hardcoded 500ms DISCONNECT_ACK_TIMEOUT so the ack handshake cannot hang the poll loop. Distinct from the configurable connection_teardown_timeout orphan grace (FR-031). Backfill a note into FR-014.",
+      "before": "FR-014: ... issue Disconnect { node } and block for DisconnectAck. ... only the physical slot reclaim waits on the ack.",
+      "after": "FR-014: ... + The block for DisconnectAck MUST be bounded by a fixed DISCONNECT_ACK_TIMEOUT (hardcoded 500 ms, src/actor.rs:37); a lost ack makes the actor give up rather than hang. Deliberately not a LookupConfig knob; distinct from FR-031's configurable connection_teardown_timeout orphan grace.",
+      "spec_edit": true
+    },
+    {
+      "requirement": "unspecced: Malformed/truncated wire frame silent drop",
+      "direction": "BACKFILL-UNSPECCED",
+      "rationale": "src/actor.rs:314 drops malformed/truncated frames (WireMessage::decode Err) - a class FR-018 did not name (it covered only unknown msg_type). Backfill FR-018 to require ignoring BOTH classes and logging both; the logging code work is folded into the FR-018 ALIGN task (now covering the Unknown arm and the malformed Err arm).",
+      "before": "FR-018: ... Unknown message types MUST be logged and ignored. ...",
+      "after": "FR-018: ... Two classes of non-actionable inbound frame MUST be ignored: (a) unrecognized msg_type (WireMessage::Unknown) and (b) malformed/truncated frames that fail to decode. Both MUST be logged before being dropped. + note: logging is not yet met (ALIGN task); ignore half aligned.",
+      "spec_edit": true
+    },
+    {
+      "requirement": "unspecced: publish_success AlreadyExists size-collision guard",
+      "direction": "BACKFILL-UNSPECCED",
+      "rationale": "src/actor.rs:576-591: on create_memory_tier_entry AlreadyExists, success is counted only when entry_size(key) == len; a differing size discards the private slot (memory_tier.remove) and marks the key unsatisfied, never evicting the resident entry. FR-006 said only 'a racing AlreadyExists counts as success', omitting the size qualification. Documented in knowledge/size-mismatch-handling.md. Backfill FR-006.",
+      "before": "FR-006: ... release_write(key) (a racing AlreadyExists counts as success); on failure/peer-exit ...",
+      "after": "FR-006: ... A racing AlreadyExists counts as success only when the existing entry's size equals the landing slot length (entry_size(key) == len); a differing size is treated as unsatisfied - discard the private slot (memory_tier.remove) and never evict/overwrite the resident entry.",
+      "spec_edit": true
     }
   ]
 }

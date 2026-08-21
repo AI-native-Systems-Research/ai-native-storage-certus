@@ -1,106 +1,113 @@
 {
-  "generated": "2026-08-07T15:38:00Z",
+  "generated": "pending",
   "project": "block-device-spdk-nvme",
   "summary": {
     "specs_analyzed": 2,
-    "requirements_checked": 72,
-    "aligned": 62,
-    "drifted": 10,
+    "requirements_checked": 73,
+    "aligned": 70,
+    "drifted": 3,
     "not_implemented": 0,
-    "unspecced_features": 7
+    "unspecced_features": 8
   },
   "specs": [
     {
-      "spec": "001-spdk-nvme-block-device",
-      "requirements": [
-        {"id": "FR-001", "status": "aligned", "severity": null, "location": "lib.rs:389", "note": "IBlockDevice::connect_client() creates/connects client channels."},
-        {"id": "FR-002", "status": "aligned", "severity": null, "location": "lib.rs:405-413", "note": "Two per-client SPSC channels: ingress Command + callback Completion."},
-        {"id": "FR-003", "status": "aligned", "severity": null, "location": "actor.rs:596,622", "note": "ReadSync/WriteSync with ns_id, DmaBuffer, LBA, no timeout."},
-        {"id": "FR-004", "status": "drifted", "severity": "minor", "location": "actor.rs:652-671; iblock_device.rs:261-285", "note": "Handle assigned at submission but only returned in the completion (fire-and-forget over channel); client correlates via caller tag, not the handle."},
-        {"id": "FR-005", "status": "drifted", "severity": "minor", "location": "actor.rs:907-912", "note": "AbortOp only removes from pending_ops and acks; does not cancel the SPDK command. Client never receives the handle to abort a specific op (see FR-004)."},
-        {"id": "FR-006", "status": "aligned", "severity": null, "location": "actor.rs:872,1106", "note": "WriteZeros via spdk_nvme_ns_cmd_write_zeroes."},
-        {"id": "FR-007", "status": "aligned", "severity": null, "location": "actor.rs:887-906", "note": "BatchSubmit processes ops on a shared batch qpair."},
-        {"id": "FR-008", "status": "aligned", "severity": null, "location": "actor.rs:913-971", "note": "NsProbe/NsCreate/NsFormat/NsDelete handled; namespace.rs helpers."},
-        {"id": "FR-009", "status": "aligned", "severity": null, "location": "actor.rs:538-576", "note": "handle_controller_reset cancels all pending ops then resets and refreshes namespaces."},
-        {"id": "FR-010", "status": "drifted", "severity": "minor", "location": "controller.rs:153-158; lib.rs:325", "note": "nvme_version (1.0.0), max_transfer_size (131072), and NUMA node (0) are hardcoded constants, not read from hardware. Capacity/sector/qd/io-queues are real."},
-        {"id": "FR-011", "status": "aligned", "severity": null, "location": "telemetry.rs:60-167", "note": "min/max/mean latency, total ops, mean throughput; FeatureNotEnabled error without telemetry feature."},
-        {"id": "FR-012", "status": "aligned", "severity": null, "location": "lib.rs:110-252", "note": "Single controller per instance via set_pci_address + initialize."},
-        {"id": "FR-013", "status": "drifted", "severity": "minor", "location": "lib.rs:220-236,325", "note": "Actor NUMA-pinned, but controller NUMA node hardcoded to 0 at probe, so pinning always targets node 0."},
-        {"id": "FR-014", "status": "aligned", "severity": null, "location": "actor.rs:370", "note": "poll_clients polls all attached client ingress channels."},
-        {"id": "FR-015", "status": "aligned", "severity": null, "location": "qpair.rs:141,173,258-279", "note": "STANDARD_DEPTHS [4,16,64,256], io_queue_requests=depth*4, shallowest-with-capacity, fallback most-available. Exact match."},
-        {"id": "FR-016", "status": "aligned", "severity": null, "location": "lib.rs:78-81", "note": "ILogger receptacle wired; used throughout actor."},
-        {"id": "FR-017", "status": "aligned", "severity": null, "location": "lib.rs:130", "note": "Uses spdk-env ISPDKEnv receptacle; checks is_connected before init."},
-        {"id": "FR-018", "status": "aligned", "severity": null, "location": "iblock_device.rs:243-285", "note": "Commands carry Arc<Mutex<DmaBuffer>> / Arc<DmaBuffer>."},
-        {"id": "FR-019", "status": "aligned", "severity": null, "location": "actor.rs:440-464,480-513", "note": "Closed channel detected, client swap_removed, pending ops dropped, completions discarded."},
-        {"id": "FR-020", "status": "aligned", "severity": null, "location": "actor.rs:913-971", "note": "Namespace ops dispatched serially on the actor thread."},
-        {"id": "FR-021", "status": "aligned", "severity": null, "location": "iblock_device.rs:503-539; lib.rs:342-376", "note": "IBlockDeviceAdmin: set_pci_address, set_actor_cpu, initialize, shutdown."},
-        {"id": "FR-022", "status": "aligned", "severity": null, "location": "tsc.rs:43-49; actor.rs:1234", "note": "TscClock calibrated once at construction; timeout check throttled to ~1ms via TSC deadline."},
-        {"id": "FR-023", "status": "aligned", "severity": null, "location": "actor.rs:80-115,182", "note": "ContextPool slab: acquire at submit, release in callback; allocates on first use, no full pre-alloc."},
-        {"id": "FR-024", "status": "aligned", "severity": null, "location": "actor.rs:233,237,479,522", "note": "Reusable completion_scratch and timeout_scratch buffers."},
-        {"id": "FR-025", "status": "aligned", "severity": null, "location": "actor.rs:35,699-736,813-848", "note": "ENOMEM retry to min(timeout_ms,1000).max(1); polls all qpairs each iteration; fails on deadline."},
-        {"id": "FR-026", "status": "aligned", "severity": null, "location": "command.rs:35-56; iblock_device.rs:350", "note": "ClientSession::deliver/flush_pending non-blocking FIFO backlog; Completion derives Clone."},
-        {"id": "FR-027", "status": "aligned", "severity": null, "location": "lib.rs:355-380", "note": "signal_stop closes channel without join; detach_controller drops parked controller."},
-        {"id": "FR-028", "status": "drifted", "severity": "minor", "location": "actor.rs:1256-1291", "note": "on_stop drains (5s deadline) then delivers Error{Aborted} then parks controller; spec requires parking BEFORE the drain deadline is evaluated (order inverted, though actor loop already stopped)."},
-        {"id": "FR-029", "status": "aligned", "severity": null, "location": "actor.rs:378,393-400", "note": "Round-robin via rotating poll_start_idx; MAX_COMMANDS_PER_CLIENT_PER_POLL = 64 matches spec."},
-        {"id": "SC-001", "status": "aligned", "severity": null, "location": "actor.rs:1004-1103", "note": "Sync read/write round-trip path present; latency envelope not statically verifiable."},
-        {"id": "SC-002", "status": "aligned", "severity": null, "location": "actor.rs:519-535,1234", "note": "Async timeout via TSC deadline with ~1ms throttle; bounded margin achievable."},
-        {"id": "SC-003", "status": "aligned", "severity": null, "location": "actor.rs:887-906", "note": "Batch path routes to a shared qpair for aggregate throughput."},
-        {"id": "SC-004", "status": "aligned", "severity": null, "location": "actor.rs:913-971", "note": "Full namespace lifecycle handled; refresh after each op."},
-        {"id": "SC-005", "status": "drifted", "severity": "moderate", "location": "controller.rs:153-158; lib.rs:325", "note": "Device info not fully hardware-consistent: version/max-transfer-size/NUMA are fixed constants regardless of the bound controller."},
-        {"id": "SC-006", "status": "aligned", "severity": null, "location": "actor.rs:161,613", "note": "Telemetry records real TSC-derived latency (not hardcoded 0); accuracy within envelope."},
-        {"id": "SC-007", "status": "drifted", "severity": "moderate", "location": "lib.rs:220-236,325", "note": "Actor-vs-controller NUMA co-location not truly verified: controller NUMA node hardcoded 0, so guarantee degenerates to node 0."},
-        {"id": "SC-008", "status": "aligned", "severity": null, "location": "benches/latency.rs, benches/throughput.rs; apps/iops-benchmark", "note": "Unit/doc tests present; perf coverage via benches + iops-benchmark app."}
-      ]
+      "id": "001-spdk-nvme-block-device",
+      "title": "SPDK NVMe Block Device Component",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-006", "FR-007", "FR-008",
+        "FR-009", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016",
+        "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023",
+        "FR-024", "FR-025", "FR-026", "FR-027", "FR-028", "FR-029", "FR-030",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-006", "SC-007", "SC-008"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-005",
+          "spec_text": "The buffer-lifetime/UAF abort fix is drafted on branch sync/spec-drift-sweep-20260807 and requires hardware validation (align-tasks.md Task BD-1).",
+          "actual": "The defer-until-completion contract is fully implemented: op marked aborting, PendingOp+buffer retained, real spdk_nvme_ctrlr_cmd_abort_ext issued, AbortAck deferred to real completion, unknown handle acked immediately. Code is ahead of the spec's 'drafted' status wording.",
+          "location": "src/actor.rs:972-1020,534-537",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-010",
+          "spec_text": "device-info max_transfer_size returns 131072 (128 KiB) as a fixed constant.",
+          "actual": "max_transfer_size is auto-detected from controller MDTS via spdk_nvme_ctrlr_get_max_xfer_size; 131072 is only the fallback when MDTS==0. nvme_version=1.0.0 and numa_node=0 ARE genuinely hardcoded (match spec).",
+          "location": "src/controller.rs:169-177; src/lib.rs:468-472",
+          "severity": "minor"
+        },
+        {
+          "requirement": "SC-005",
+          "spec_text": "nvme_version, max_transfer_size, and numa_id are currently fixed constants.",
+          "actual": "max_transfer_size is MDTS-derived (hardware-consistent), not fixed; only nvme_version and numa_id are fixed constants. Same root cause as FR-010.",
+          "location": "src/controller.rs:169-177; src/lib.rs:468-472",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
     },
     {
-      "spec": "002-iops-benchmark",
-      "requirements": [
-        {"id": "FR-001", "status": "aligned", "severity": null, "location": "config.rs:68", "note": "--op read/write/rw, default read."},
-        {"id": "FR-002", "status": "aligned", "severity": null, "location": "config.rs:74", "note": "--block-size default 4096."},
-        {"id": "FR-003", "status": "aligned", "severity": null, "location": "config.rs:85", "note": "--queue-depth default 32."},
-        {"id": "FR-004", "status": "aligned", "severity": null, "location": "config.rs:88", "note": "--threads default 1."},
-        {"id": "FR-005", "status": "aligned", "severity": null, "location": "config.rs:92", "note": "--duration default 10."},
-        {"id": "FR-006", "status": "aligned", "severity": null, "location": "config.rs:96", "note": "--ns-id default 1."},
-        {"id": "FR-006a", "status": "aligned", "severity": null, "location": "config.rs:100; main.rs:65-91", "note": "--pci-addr optional; uses first available device otherwise."},
-        {"id": "FR-006b", "status": "aligned", "severity": null, "location": "config.rs:108", "note": "--pattern random/sequential, default random."},
-        {"id": "FR-007", "status": "aligned", "severity": null, "location": "config.rs:124-174", "note": "Validates block-size multiple-of-sector, threads/duration/queue-depth >= 1 before IO."},
-        {"id": "FR-008", "status": "aligned", "severity": null, "location": "config.rs:182-190", "note": "clamp_queue_depth to device max with warning."},
-        {"id": "FR-009", "status": "aligned", "severity": null, "location": "main.rs:278", "note": "Each worker calls ibd.connect_client() for its own channel pair."},
-        {"id": "FR-010", "status": "aligned", "severity": null, "location": "worker.rs:103-139", "note": "Async pipeline kept full to configured queue depth."},
-        {"id": "FR-011", "status": "aligned", "severity": null, "location": "worker.rs:221-227", "note": "rw mode uses rand::random::<bool>() for 50/50 read/write."},
-        {"id": "FR-012", "status": "aligned", "severity": null, "location": "report.rs:9-31", "note": "Config summary prints op, io-mode, pattern, block size(s), batch, queue depth, threads, duration, device, namespace."},
-        {"id": "FR-013", "status": "aligned", "severity": null, "location": "main.rs:342-376; report.rs:37-62", "note": "Per-second progress to stderr with elapsed + instantaneous IOPS unless --quiet."},
-        {"id": "FR-014", "status": "aligned", "severity": null, "location": "main.rs:331-390", "note": "Timer sets stop_flag; workers joined and results collected."},
-        {"id": "FR-015", "status": "aligned", "severity": null, "location": "report.rs:65-133; stats.rs:56-122", "note": "Final summary: total IOPS, MB/s, latency min/mean/p50/p99/max in us."},
-        {"id": "FR-016", "status": "aligned", "severity": null, "location": "report.rs:105-120", "note": "rw mode reports read and write IOPS separately plus combined total."},
-        {"id": "FR-017", "status": "aligned", "severity": null, "location": "lba.rs:38-90", "note": "RandomLba uniform within capacity; SequentialLba per-thread non-overlapping regions."},
-        {"id": "FR-018", "status": "aligned", "severity": null, "location": "worker.rs:249-276", "note": "IO/timeout/error completions counted; thread continues."},
-        {"id": "FR-019", "status": "aligned", "severity": null, "location": "main.rs", "note": "exit 1 on validation failure, exit 2 on fatal, 0 on success."},
-        {"id": "FR-020", "status": "aligned", "severity": null, "location": "config.rs:116", "note": "--quiet suppresses progress output."},
-        {"id": "FR-021", "status": "aligned", "severity": null, "location": "config.rs:64-66", "note": "--help via clap derive."},
-        {"id": "FR-022", "status": "drifted", "severity": "minor", "location": "worker.rs:112-116,128-131,207-216", "note": "--io-mode sync sends ReadSync/WriteSync but worker still pipelines to --queue-depth rather than enforcing effective QD1; QD1 realized only via actor-side serialization, and sync latency includes channel-queue wait."},
-        {"id": "FR-023", "status": "aligned", "severity": null, "location": "config.rs:74; worker.rs:177-182", "note": "Comma-separated --block-size list; each IO randomly picks one size."},
-        {"id": "FR-024", "status": "drifted", "severity": "minor", "location": "worker.rs:159-172,189-190,237-268", "note": "--batch-size groups into BatchSubmit, but latency is measured per sub-op (one Instant + one completion each), not as aggregate latency per batch as the spec requires."},
-        {"id": "FR-025", "status": "aligned", "severity": null, "location": "main.rs:222-253,296-302", "note": "Worker NUMA pinning from device info (ibd.numa_node) via set_thread_affinity; excludes actor CPUs."},
-        {"id": "FR-026", "status": "aligned", "severity": null, "location": "main.rs:65-149,255-257,397-428; config.rs:162", "note": "--device-count parallel multi-device init, threads*device_count workers, aggregate + per-device summary, pci-addr precedence, validate >=1."},
-        {"id": "SC-001", "status": "aligned", "severity": null, "location": "main.rs:262,328-339", "note": "Barrier-gated start + timer thread bound to duration."},
-        {"id": "SC-002", "status": "aligned", "severity": null, "location": "main.rs:278", "note": "Exactly one connect_client per worker thread (per device)."},
-        {"id": "SC-003", "status": "aligned", "severity": null, "location": "worker.rs", "note": "4KB random read path present; comparison to fio not statically verifiable."},
-        {"id": "SC-004", "status": "aligned", "severity": null, "location": "main.rs:203-212", "note": "Config validated across devices before any IO."},
-        {"id": "SC-005", "status": "aligned", "severity": null, "location": "main.rs:354-374", "note": "Progress computed from live per-thread op-counter deltas."},
-        {"id": "SC-006", "status": "drifted", "severity": "minor", "location": "worker.rs:241; stats.rs:93-104; apps/iops-benchmark/Cargo.toml", "note": "Latency stats computed correctly from actual completion times, but spec's telemetry cross-check is not wired: crate depends on block-device-spdk-nvme without the telemetry feature, so component telemetry() is unavailable."},
-        {"id": "SC-007", "status": "aligned", "severity": null, "location": "worker.rs:249-276", "note": "IO errors counted in report without crashing or hanging."}
-      ]
+      "id": "002-iops-benchmark",
+      "title": "IOPS Benchmark Example Application",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-006a",
+        "FR-006b", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
+        "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018", "FR-019",
+        "FR-020", "FR-021", "FR-022", "FR-023", "FR-024", "FR-025", "FR-026",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007"
+      ],
+      "drifted": [],
+      "not_implemented": []
     }
   ],
   "unspecced": [
-    {"item": "IBlockDevice::read_write_stats() + ReadWriteStats type", "location": "iblock_device.rs:494; lib.rs:511; telemetry.rs:140", "note": "Per-direction read/write byte/op/latency counters not described in spec 001 (which specifies only aggregate telemetry)."},
-    {"item": "crossbeam-channel dependency", "location": "components/block-device-spdk-nvme/Cargo.toml", "note": "Declared but unused in src/; production channels use component_core SpscChannel. Spec assumption flags cleanup via align-tasks.md."},
-    {"item": "benches/completion_routing.rs", "location": "components/block-device-spdk-nvme/benches/completion_routing.rs", "note": "Extra Criterion bench not referenced by SC-008."},
-    {"item": "--batch-size <= --queue-depth validation constraint", "location": "config.rs:156-161", "note": "Constraint not stated in spec-002 FR-024."},
-    {"item": "Per-device summary output block", "location": "main.rs:397-428", "note": "Beyond FR-026's aggregate-across-devices requirement."},
-    {"item": "[timing] diagnostic stderr lines", "location": "main.rs:55,150-153", "note": "SPDK-init and device-init timing output not described in any FR."},
-    {"item": "Per-thread IOPS breakdown (progress + final report)", "location": "report.rs:43-62,74-103", "note": "Extra multi-thread detail beyond FR-013/FR-015."}
+    {
+      "feature": "Command::FlushSync/FlushDone + do_sync_flush (comment references extent-manager FR-030, a different spec); the SPDK component's own spec 001 never mentions FlushSync.",
+      "location": "src/actor.rs",
+      "lines": "941-951,1218-1260",
+      "suggested_spec": "Backfill an FR in spec 001 for the FlushSync durability barrier."
+    },
+    {
+      "feature": "Dead probe() free function superseded by discover_namespaces.",
+      "location": "src/namespace.rs",
+      "lines": "20-47",
+      "suggested_spec": "Remove dead code or note as internal helper."
+    },
+    {
+      "feature": "Multi-device per-device summary block (cosmetic unbalanced-'(' format bug at line 423).",
+      "location": "apps/iops-benchmark/src/main.rs",
+      "lines": "397-428",
+      "suggested_spec": "Backfill under spec 002 FR-026 reporting; fix format string."
+    },
+    {
+      "feature": "Barrier-based start sync excluding init time from wall-clock measurement.",
+      "location": "apps/iops-benchmark/src/main.rs; apps/iops-benchmark/src/worker.rs",
+      "lines": "262,328-329 (main); 106 (worker)",
+      "suggested_spec": "Note in spec 002 as measurement methodology."
+    },
+    {
+      "feature": "throughput_gbps computed and reported.",
+      "location": "apps/iops-benchmark/src/stats.rs; apps/iops-benchmark/src/report.rs",
+      "lines": "38,83 (stats); 122-124 (report)",
+      "suggested_spec": "Extend spec 002 FR-015 output list."
+    },
+    {
+      "feature": "Per-thread IOPS breakdown in final report.",
+      "location": "apps/iops-benchmark/src/report.rs",
+      "lines": "74-103",
+      "suggested_spec": "Extend spec 002 FR-015/FR-016 reporting."
+    },
+    {
+      "feature": "Batch send-failure rollback of in-flight entries.",
+      "location": "apps/iops-benchmark/src/worker.rs",
+      "lines": "165-171",
+      "suggested_spec": "Note under spec 002 FR-024."
+    },
+    {
+      "feature": "Parallel device init via thread::scope with distinct actor-CPU assignments plus [timing] init eprintlns.",
+      "location": "apps/iops-benchmark/src/main.rs",
+      "lines": "52-55,105-153",
+      "suggested_spec": "Note under spec 002 FR-026."
+    }
   ],
   "conflicts": []
 }

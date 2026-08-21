@@ -282,9 +282,6 @@ define_interface! {
         /// Returns an error if CUDA drivers are not installed, no
         /// qualifying GPU is detected, or CUDA initialization fails.
         ///
-        /// # Verified: P2 (init-idempotent)
-        /// Calling initialize() when already initialized returns Ok.
-        ///
         /// # Examples
         ///
         /// ```no_run
@@ -299,14 +296,6 @@ define_interface! {
         ///
         /// Closes any open IPC handles, unpins memory, and clears
         /// device state.  Safe to call even if not initialized.
-        ///
-        /// # Verified: P3 (shutdown-clears)
-        /// After shutdown, initialized becomes false and all operations
-        /// requiring initialization will fail.
-        ///
-        /// # Unchecked: All open IPC handles closed on shutdown
-        /// Claims to close open handles, but handle tracking depends on
-        /// runtime HashSet correctness. Suggested technique: leak detector test.
         ///
         /// # Examples
         ///

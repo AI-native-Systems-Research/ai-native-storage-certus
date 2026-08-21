@@ -209,7 +209,7 @@ shared `/dev/shm` mailbox path *is* the endpoint — there is no server address 
 configure. `--ipc=host` does double duty: the host server opens the container's
 CUDA IPC handles, and the container sees the host `/dev/shm` mailbox.
 
-## shmq Ops (opcode-framed, see `components/shmq-dispatcher/src/wire.rs`)
+## shmq Ops (opcode-framed, see `lib/shmq-dispatcher/src/wire.rs`)
 
 The transport is a small opcode-based binary framing carried in the `/dev/shm`
 mailbox. Each op maps to an `IDispatcher` method.

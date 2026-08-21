@@ -64,7 +64,7 @@ session that inherits only the source's constitution.
      mirroring any options (e.g. `default-features = false`) used by the source's entry.
 
 9. Add a permissions file `.claude/settings.json` in the new sub-directory that allows
-   access to the component itself, `components/component-framework`, `components/interfaces`,
+   access to the component itself, `lib/component-framework`, `components/interfaces`,
    and the directories of any components corresponding to its receptacles. Avoid granting
    access to components that are not directly used. Model it on the source component's
    `.claude/settings.json` if present.

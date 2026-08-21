@@ -1,69 +1,65 @@
-# Spec Sync Proposals — `interfaces`
+# Spec-Sync Phase B Proposals — `interfaces`
 
-**Generated**: 2026-07-21
+**Generated**: 2026-08-20 (Phase B)
 **Spec**: `components/interfaces/specs/001-interfaces/spec.md`
-**Base commit**: `833e9f36e01f1df8a0e0fc57d5cd223d823d3199`
-**Next available FR numbers**: FR-027, FR-028 (highest existing is FR-026)
+**Policy**: `.specify/sync/PHASE_B_POLICY.md`
+**Drift source**: `.specify/sync/drift-report.json` (2 drifted requirements, 0 not_implemented, 0 unspecced)
+
+## Summary
+
+| Direction | Count |
+|-----------|-------|
+| BACKFILL (spec → code) | 0 |
+| ALIGN (task, no code change) | 0 |
+| RESOLVED (code already fixed) | 2 |
+| BACKFILL-UNSPECCED | 0 |
+| HUMAN_DECISION | 0 |
+
+Both drift items were the same orphaned-module defect (`IExtendedMetadataStore` /
+`ExtendedMetadataStoreError` defined but never wired into `lib.rs`). Per the Phase B
+per-component note for `interfaces`, this defect was **already fixed on the main
+development thread**. Both items are verified present in the current source and marked
+**RESOLVED**. The spec's FR-014/FR-025 text already describes the implemented trait, so
+**no spec backfill is required and no spec.md is edited**.
 
 ---
 
-## Proposal 1 — DispatcherConfig cold-load staging fields
+## Proposal 1 — FR-014 `IExtendedMetadataStore` Interface
 
-- **Direction**: BACKFILL
-- **Current State**: FR-018 describes `DispatcherConfig` as a "14-field
-  configuration". The struct now has 16 fields: `cold_staging_slots` (usize,
-  default 64) and `cold_staging_buf_bytes` (usize, default 4 MiB) were added at
-  `src/idispatcher.rs:81-87` (defaults `:109-110`) and are undocumented.
-- **Proposed Resolution**:
-  - Add new **FR-027: IDispatcher Cold-Load Staging Configuration**:
-
-    > The dispatcher SHALL maintain a bounded pool of pre-registered pinned host DRAM staging buffers for SSD→GPU cold loads that cannot obtain a memory-tier slot under pressure, sized by `DispatcherConfig::cold_staging_slots` (buffer count, default 64; 0 disables staging so cold loads fail on a full memory tier) and `DispatcherConfig::cold_staging_buf_bytes` (per-buffer byte capacity, must be ≥ the largest per-block transfer size, default 4 MiB), bounding concurrent cold-read parallelism so a burst cannot exhaust the memory tier.
-
-  - Update **FR-018** first bullet: change "14-field configuration" to "16-field
-    configuration (… plus cold-staging slots and buffer size)".
-- **Rationale**: Additive fields with defaults; backward compatible via `Default`.
-  Backfilled spec predates the multi-GPU cold-staging work.
-- **Confidence**: High
-- [ ] Approved
+- **Direction**: RESOLVED (code already fixed on main thread)
+- **Reported drift**: Trait defined in `src/iextended_metadata_store.rs` but the module
+  was never declared (`mod`) or re-exported (`pub use`) in `src/lib.rs`, so it was not part
+  of the compiled crate (major; would break the `extended-metadata-store` consumer, masked
+  only because that crate was out-of-workspace).
+- **Verification (current source)**:
+  - `src/lib.rs:77` — `mod iextended_metadata_store;` (ungated) ✓
+  - `src/lib.rs:99` — `pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};` (ungated) ✓
+  - Trait defined at `src/iextended_metadata_store.rs:30` with `put`/`get`/`delete`/`iterate_all`/`force_flush`.
+- **Rationale**: The trait is now compiled into and exported from the crate exactly as
+  FR-014 describes. Spec text is already accurate.
+- **before / after**: n/a (no spec edit).
 
 ---
 
-## Proposal 2 — IGpuServices multi-GPU device routing methods
+## Proposal 2 — FR-025 Supporting Types: `ExtendedMetadataStoreError`
 
-- **Direction**: BACKFILL
-- **Current State**: FR-011 lists `IGpuServices` methods but omits the two new
-  methods at `src/igpu_services.rs:532-578`: `set_device(&self, device: i32) ->
-  Result<(), String>` and `device_of_ptr(&self, ptr: *const c_void) ->
-  Result<i32, String>`.
-- **Proposed Resolution**:
-  - Add new **FR-028: IGpuServices Multi-GPU Device Routing**:
-
-    > `IGpuServices` SHALL provide `set_device(device: i32) -> Result<(), String>` to bind the calling OS thread's current CUDA device (CUDA tracks the current device per thread; required before creating a stream or issuing a DMA for a specific GPU) and `device_of_ptr(ptr: *const c_void) -> Result<i32, String>` to return the CUDA device ordinal owning a device pointer via `cudaPointerGetAttributes` (`-1` for a pointer with no device association, e.g. host memory), so DMAs can be routed to a stream on the pointer's own device under multi-GPU / tensor parallelism.
-
-  - Append two bullets to the **FR-011** method list:
-    - `set_device(&self, device: i32) -> Result<(), String>` - Select the calling thread's current CUDA device.
-    - `device_of_ptr(&self, ptr: *const c_void) -> Result<i32, String>` - Return the CUDA device ordinal owning a device pointer (-1 if unknown).
-- **Rationale**: Additive trait methods for multi-GPU routing; no existing method
-  changed.
-- **Confidence**: High
-- [ ] Approved
+- **Direction**: RESOLVED (code already fixed on main thread)
+- **Reported drift**: 4-variant enum existed but lived in the undeclared module, so it was
+  not exported. Same orphaned-module root cause as FR-014.
+- **Verification (current source)**:
+  - Enum with exactly `NotFound`, `StorageError`, `CapacityExhausted`, `ValueTooLarge` at
+    `src/iextended_metadata_store.rs:5-15` ✓
+  - Re-exported via the ungated `pub use` at `src/lib.rs:99` ✓
+- **Rationale**: The enum is now exported with exactly the 4 variants FR-025 requires. Spec
+  text is already accurate.
+- **before / after**: n/a (no spec edit).
 
 ---
 
-## Proposal 3 — Completion enum Clone derive (entity-attribute note)
+## Note (informational, no action taken)
 
-- **Direction**: BACKFILL
-- **Current State**: `Completion` changed from `#[derive(Debug)]` to
-  `#[derive(Debug, Clone)]` at `src/iblock_device.rs:350`. FR-017 lists
-  `Completion` as a "10-variant enum" and NFR-003 states only that "`Command` and
-  `Completion` are `Send`". The `Clone` capability is undocumented.
-- **Proposed Resolution** (amendment, no new FR needed):
-  - Amend the **FR-017** `Completion` bullet to read:
-
-    > `Completion`: 10-variant enum for operation results; derives `Clone` (in addition to `Debug`) so the block-device actor can `try_send` a clone of a completion on a full ring without consuming the original, enabling non-blocking completion delivery.
-
-  - Amend **NFR-003** to note `Completion` is `Send + Clone` (`Command` remains `Send`).
-- **Rationale**: Small additive derive; purely enables non-blocking delivery, does
-  not alter thread-safety guarantees.
-- **Confidence**: High
-- [ ] Approved
+The spec header's `Last Synced 2026-08-07` block (`spec.md:17-22`) still carries a stale
+"**Deferred (not applied):** FR-014/FR-025 ... remains an orphaned module" note that
+predates the main-thread fix. Per the Phase B policy for `interfaces` ("Spec needs no
+change"), the spec is **left untouched** this pass. Refreshing that historical sync note is
+optional cleanup for a future edit and is out of scope for this RESOLVED-only pass.

@@ -1,7 +1,7 @@
 # component-core
 
 **Crate**: `component-core`
-**Path**: `components/component-framework/crates/component-core/`
+**Path**: `lib/component-framework/crates/component-core/`
 **Version**: 0.1.0
 
 ## Description

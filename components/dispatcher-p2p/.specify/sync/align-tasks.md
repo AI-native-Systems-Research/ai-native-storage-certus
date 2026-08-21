@@ -1,42 +1,58 @@
 # Spec Sync — Align Tasks
 Project: dispatcher-p2p
-Source drift cycle: 2026-07-22T22:35:42Z (`drift-report.json` / `drift-report.md`)
+Source drift cycle: `drift-report.json` / `drift-report.md` (Spec-Sync Phase B, 2026-08-20)
 
-Items below were deferred during AUTO-BACKFILL apply (2026-07-22) because resolving them
-requires information/decisions beyond what is verifiable from `src/` and existing specs alone.
+Items below are real code-vs-spec defects: the spec requirement is correct and agreed,
+the code does not meet it. Per Phase B policy these are resolved by an ALIGN task (fix the
+code to match the spec) — **no `.rs` source is modified by this sync pass**.
 
 ---
 
 ## Task: Align 001-gpudirect-cold-path/FR-017
 
-**Severity**: Low (AMBIGUOUS)
+**Severity**: Moderate
 
-**Spec Requirement**: FR-017 (newly backfilled) documents the eviction-event channel
-(`create_eviction_channel`, `EvictionEvent`/`EvictionReason`, `eviction_dropped_count`) purely
-in terms of its producer-side contract: bounded channel, single subscriber, non-blocking
-`try_send`, drop-and-count backpressure. It intentionally does NOT name a consumer.
+**Spec Requirement**: FR-017 requires that when an `EvictionEvent` cannot be delivered (channel
+full, or no subscriber registered) "the event MUST be silently dropped **and counted**, and the
+running drop count MUST be readable and reset via `eviction_dropped_count()`."
 
-**Current Code**: `src/lib.rs:213-232` (`create_eviction_channel`, `eviction_dropped_count`,
-`emit_eviction`) and `:546-650` (`evict_for_space_inner`/`evict_for_space_emit` emission sites)
-implement the producer side only. No call site of `create_eviction_channel` exists within
-`components/dispatcher-p2p` itself — the drift report (`drift-report.md` §Unspecced Code)
-speculates the consumer is "plausibly the gRPC `TakeEvents` RPC added in sibling commit
-`4d5bd13`" but this was not verified against that commit or against any wiring code in this
-component's tree.
+**Current Code**: The drop counter (`eviction_dropped.fetch_add`) is incremented in exactly one
+place — `emit_eviction` (`src/lib.rs:228-236`), which is annotated `#[allow(dead_code)]` and has
+**no call sites**. Every live eviction path publishes via a bare `let _ = tx.try_send(...)` that
+discards the `Err` without incrementing the counter:
+- `evict_for_space_inner` / `evict_for_space_emit` — `src/lib.rs:602-607, 618-623, 633-645`
+- `BackgroundEvictor::evictor_loop` — `src/background.rs:414-419`
+- `MemoryTierEvictor::evictor_loop` — `src/background.rs:611-616`
 
-**Required Change**: A human (or a follow-up sync pass with access to the consuming
-component/service, e.g. the server crate implementing `TakeEvents`) should confirm:
-1. Whether `create_eviction_channel` is actually called anywhere today, and by what component.
-2. Whether the RPC/consumer has its own delivery-semantics expectations (ordering, at-most-once
-   vs. best-effort, capacity sizing) that should be reflected back into FR-017 or cross-referenced
-   from it.
-3. Whether this warrants promoting eviction-event delivery into its own spec (e.g.
-   `002-eviction-telemetry`) once a real consumer contract exists, rather than living as a single
-   FR inside `001-gpudirect-cold-path`.
+As a result `eviction_dropped_count()` (`src/lib.rs:224-226`) always returns 0. The channel /
+`try_send` / non-blocking / silent-drop parts of FR-017 are correctly implemented; only the
+**drop-count** guarantee is unmet.
 
-**Files to Modify**: `components/dispatcher-p2p/specs/001-gpudirect-cold-path/spec.md` (FR-017),
-`components/dispatcher-p2p/specs/001-gpudirect-cold-path/data-model.md` (`EvictionEvent /
-EvictionReason` entity) — pending confirmation of consumer contract; possibly a new spec directory
-if eviction telemetry grows its own acceptance scenarios/success criteria.
+**Required Change**: Make every live eviction publish site increment `eviction_dropped` on a
+failed `try_send`, so the running count reflects reality. Route all three call sites (inline
+`evict_for_space_*`, `BackgroundEvictor`, `MemoryTierEvictor`) through a single shared helper that
+performs `try_send` and, on `Err`, `eviction_dropped.fetch_add(1, Relaxed)` — then either promote
+`emit_eviction` into that shared helper (removing `#[allow(dead_code)]`) or delete it if the new
+helper supersedes it. Note the background evictors currently hold `Sender<EvictionEvent>` clones
+directly, so the shared counter (`Arc<AtomicU64>`) must be threaded into those threads at
+construction (`BackgroundEvictor::start` / `MemoryTierEvictor::start`) alongside the sender.
 
----
+**Files to Modify**: `components/dispatcher-p2p/src/lib.rs` (eviction publish sites + counter
+plumbing), `components/dispatcher-p2p/src/background.rs` (`BackgroundEvictor` and
+`MemoryTierEvictor` publish sites + shared counter injection).
+
+**Estimated Effort**: Small–Medium (single shared helper + threading an `Arc<AtomicU64>` into two
+background threads; add a unit test that fills a capacity-1 channel and asserts
+`eviction_dropped_count()` is non-zero, then zero after reset).
+
+### Acceptance Criteria
+
+- [ ] All live eviction publish sites (inline `evict_for_space_*`, `BackgroundEvictor`,
+      `MemoryTierEvictor`) increment `eviction_dropped` when `try_send` fails.
+- [ ] `eviction_dropped_count()` returns the true number of dropped events since the last call and
+      resets to 0 on read (existing swap semantics preserved).
+- [ ] No remaining `#[allow(dead_code)]` eviction-emit path that silently bypasses the counter.
+- [ ] A test drives evictions with a full (or unregistered) channel and asserts the drop count is
+      non-zero, then zero after a subsequent read.
+- [ ] Non-blocking / silent-drop behavior of eviction delivery is unchanged (eviction never blocks
+      or fails on a full channel).

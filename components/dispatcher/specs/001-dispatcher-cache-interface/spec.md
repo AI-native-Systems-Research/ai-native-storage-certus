@@ -6,6 +6,8 @@
 **Input**: Dispatcher component providing IDispatcher interface with DRAM memory-tier caching and write-through to SSD for GPU data flows  
 **Last Synced**: 2026-08-07 — drift sweep on branch `sync/spec-drift-sweep-20260807`. All backfills (spec→code): FR-001 method inventory expanded to the full shipped `IDispatcher` surface; FR-039 `batch_lookup` signature corrected to multi-region `&[(CacheKey, Vec<IpcHandle>)]`; FR-042 `create_eviction_channel` given its `capacity: usize` argument; FR-033 config list extended with the partition-size and backfill-delay fields; new FR-056 documents the GPU-staged memory-lifecycle primitives (reserve/copy/complete/release/pin/unpin) and the flush/stats methods. Separately, the `IDispatcher` interface doc comment previously advertised a Creusot proof tree (`components/dispatcher/verif/`, "24 verification conditions discharged by SMT solvers") that does not exist; that claim was softened to "informal design invariants" in `interfaces/src/idispatcher.rs` on the same branch. No behavior changes.
 
+**Last Synced**: 2026-08-20 — Spec-Sync Phase B. BACKFILL: User Story 11 narrative + acceptance scenario 3 corrected from the stale `16 / num_queues` (`max_queue_depth = 8`, ≤16 per drive) wording to `max_queue_depth = 128` per thread, resolving an intra-spec contradiction with FR-039 step (5) / FR-019 and matching `src/lib.rs:2217`. BACKFILL-UNSPECCED: new FR-057 + SC-016 document the `DispatcherComponent` dependency-injection / test surface (`set_block_device_factory`, `set_extent_manager_factory`, `set_pipeline_metrics`). Two documentation-only drifts in the component `CLAUDE.md` (stale `../../component-framework/crates/` path after the `components/ → lib/` move; stale `-v2` crate names) are recorded in `.specify/sync/proposals.*` as BACKFILL but were NOT applied here — `CLAUDE.md` is outside this sync's editable scope (`.specify/sync/` and `specs/` only) and is left for a follow-up doc pass. No source or behavior changes.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Cache Population (GPU to Memory-Tier with Write-Through) (Priority: P1)
@@ -168,7 +170,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 
 ### User Story 11 - Parallel Batch Cold Promotion (Priority: P1)
 
-A client application submits a batch of cache keys to `batch_lookup`. For entries in BlockDevice state (cold — evicted from memory-tier but on SSD), the dispatcher promotes them in parallel across drives and queue threads. Each data drive's cold entries are split across up to `MAX_QUEUES_PER_DRIVE` (default 2) threads, each with its own NVMe client channels and CUDA streams. Each thread uses a reduced NVMe pipeline depth (`16 / num_queues`) to share the drive's submission queue capacity without overflow. This delivers significantly higher single-client cold throughput by exploiting drive-level and queue-level parallelism.
+A client application submits a batch of cache keys to `batch_lookup`. For entries in BlockDevice state (cold — evicted from memory-tier but on SSD), the dispatcher promotes them in parallel across drives and queue threads. Each data drive's cold entries are split across up to `MAX_QUEUES_PER_DRIVE` (default 2) threads, each with its own NVMe client channels and CUDA streams. Each thread drives its cold promotions with a deep per-thread NVMe pipeline depth (`max_queue_depth = 128`, per FR-039 step (5) and FR-019) to saturate the drive's submission queue for maximum per-drive parallelism. This delivers significantly higher single-client cold throughput by exploiting drive-level and queue-level parallelism.
 
 **Why this priority**: Single-entry sequential cold promotion yields only ~0.34 GB/s per client (limited by queue-depth-1 per drive). Parallel batch promotion reaches ~5.6 GB/s by saturating multiple drives and queues concurrently, closing the gap between cold and hot throughput for inference workloads that experience working-set churn.
 
@@ -178,7 +180,7 @@ A client application submits a batch of cache keys to `batch_lookup`. For entrie
 
 1. **Given** 20 entries exist in BlockDevice state spread across 3 drives, **When** `batch_lookup` is called with all 20 keys and IPC handles, **Then** cold entries are promoted in parallel (per-drive thread groups), all results are returned in input order, and total latency is bounded by the slowest single drive (not sum of all entries).
 2. **Given** a batch contains a mix of MemoryTier (hot) and BlockDevice (cold) entries, **When** `batch_lookup` is called, **Then** hot entries are served inline without waiting for cold promotions to complete, and cold entries are promoted in parallel.
-3. **Given** `MAX_QUEUES_PER_DRIVE = 2`, **When** a drive has 10 cold entries, **Then** entries are split into two groups of 5, each processed by a separate thread with `max_queue_depth = 8` (16/2), keeping total per-drive NVMe commands at ≤16.
+3. **Given** `MAX_QUEUES_PER_DRIVE = 2`, **When** a drive has 10 cold entries, **Then** entries are split into two groups of 5, each processed by a separate thread, and each thread drives its cold promotions with `max_queue_depth = 128` (per FR-039 step (5) / FR-019) to saturate the drive's NVMe submission queue.
 4. **Given** a cold entry's NVMe read or GPU DMA fails, **When** the thread encounters the error, **Then** the error is reported for that entry only; other entries in the batch continue to be processed independently.
 5. **Given** entries that do not exist in the dispatch map, **When** `batch_lookup` is called, **Then** those entries receive `KeyNotFound` errors while valid entries are served normally.
 
@@ -322,6 +324,13 @@ When the memory-tier DRAM pool approaches capacity, a background evictor proacti
     - `flush_to_ssd() -> usize` forces a synchronous write-through flush of pending dirty entries to SSD and returns the number of entries flushed (design invariant P9).
     - `read_write_stats() -> ReadWriteStats` returns aggregate read/write I/O counters (the `ReadWriteStats` type is shared from `iblock_device`).
 
+- **FR-057** *(Sync 2026-08-20 — backfilled; the dependency-injection / test surface shipped with no requirement)*: To enable component testing without SPDK/NVMe hardware, the concrete `DispatcherComponent` MUST expose inherent dependency-injection setters that override its internally-constructed dependencies. These are inherent methods on `DispatcherComponent` (NOT `IDispatcher` trait methods), each guarded so that when it is not called the dispatcher falls back to its default hard-coded implementation:
+  - `set_block_device_factory(factory: BlockDeviceFactory)` — installs a factory the dispatcher uses, in place of the hard-coded SPDK NVMe block-device implementation, when creating the N data block devices during `initialize()`.
+  - `set_extent_manager_factory(factory: ExtentManagerFactory)` — installs a factory the dispatcher uses, in place of the default extent-manager implementation, when creating the N extent managers during `initialize()`.
+  - `set_pipeline_metrics(m: Arc<dyn PipelineMetrics>)` — installs a `PipelineMetrics` implementation (FR-043) so that internal data-path stages report timing through the trait; when no implementation is installed, timing observations are no-ops.
+
+  These setters let unit/integration tests inject mock block-device and extent-manager components and observe pipeline telemetry against a dispatcher that is otherwise driven through its normal lifecycle, with no NVMe hardware present.
+
 ### Key Entities
 
 - **CacheKey**: A 64-bit identifier for cached data elements. Used to address entries in the dispatch map and memory-tier.
@@ -354,6 +363,7 @@ When the memory-tier DRAM pool approaches capacity, a background evictor proacti
 - **SC-013**: The background SSD evictor removes the oldest BlockDevice entries when SSD utilization exceeds the configured threshold, freeing extents until utilization drops below the low-water mark.
 - **SC-014**: `batch_lookup` with a batch of 20 cold entries across 3 drives completes with total wall time bounded by the slowest single drive (parallel promotion), achieving ≥5x throughput improvement over sequential single-entry lookups.
 - **SC-015**: Concurrent `batch_lookup` promotions of the same cold key both succeed — the loser of the `IMemoryTier::insert` race is served the winner's promoted data (via the concurrent-promotion recovery pass) rather than failing the load with `AlreadyExists`.
+- **SC-016** *(Sync 2026-08-20 — backfilled; covers FR-057)*: With mock block-device and extent-manager factories injected via `set_block_device_factory` / `set_extent_manager_factory` and a `PipelineMetrics` recorder installed via `set_pipeline_metrics`, a test can exercise dispatcher data-path operations and observe their pipeline timings without SPDK/NVMe hardware; when no factory is injected the dispatcher uses its default hard-coded implementations.
 
 ## Assumptions
 

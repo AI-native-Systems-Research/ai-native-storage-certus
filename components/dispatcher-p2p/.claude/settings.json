@@ -3,7 +3,7 @@
     "allow": [
       "Read(components/dispatcher-p2p/**)",
       "Write(components/dispatcher-p2p/**)",
-      "Read(components/component-framework/**)",
+      "Read(lib/component-framework/**)",
       "Read(components/interfaces/**)",
       "Read(components/gpu-services/**)",
       "Read(components/spdk-env/**)",

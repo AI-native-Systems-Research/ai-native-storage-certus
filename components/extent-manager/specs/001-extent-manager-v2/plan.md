@@ -3,6 +3,14 @@
 **Branch**: `001-extent-manager-v2` | **Date**: 2026-04-27 | **Spec**: [spec.md](spec.md)
 **Context**: Updated for two-device architecture (separate data + metadata disks).
 
+> **Last Synced 2026-08-20** (spec-sync Phase B): refreshed to match the shipped
+> component. This plan previously described a `block_device` data-device receptacle
+> and a `components/extent-manager/v2/` source tree. As built, the component exposes
+> only `metadata_device` + `logger` receptacles (spec FR-001) over a flat `src/`; the
+> data path is owned by the caller (`dispatcher`/`dispatcher-p2p`), which consumes the
+> disk offsets returned by `reserve_extent` and applies `data_base_lba` (spec FR-036).
+> The component performs no data-device I/O itself.
+
 ## Summary
 
 ExtentManagerV2 is a crash-consistent extent-to-disk-location mapper
@@ -21,9 +29,11 @@ using `define_component!` with receptacle-based dependency injection.
 - `crc32fast` -- CRC32 checksums for superblock and checkpoint regions
 - `parking_lot` -- `RwLock` with downgrade support for checkpoint serialization
 
-**Storage**: Two NVMe block devices via IBlockDevice receptacles
-  - `block_device` — data device for user extents
+**Storage**: One NVMe metadata device via an IBlockDevice receptacle
   - `metadata_device` — metadata device for superblock + checkpoint regions
+  - The data device is *not* a receptacle of this component: the caller
+    (`dispatcher`/`dispatcher-p2p`) owns the data path. `reserve_extent`
+    returns disk byte offsets and the component issues no data-device I/O.
 **Testing**: `cargo test` with in-memory MockBlockDevice and heap DMA allocation
 **Target Platform**: Linux (SPDK/VFIO), macOS for development (mock-only)
 **Performance Goals**: ~100M extents on a 10 TB data device with 128 KiB extents
@@ -36,9 +46,9 @@ using `define_component!` with receptacle-based dependency injection.
 ```
 ExtentManagerV2 (define_component!)
 ├── Receptacles
-│   ├── block_device: IBlockDevice     (data device)
 │   ├── metadata_device: IBlockDevice  (metadata device)
 │   └── logger: ILogger
+│   (data device is caller-owned, not a receptacle — see FR-036)
 ├── State
 │   ├── regions: RwLock<Vec<Arc<RwLock<RegionState>>>>
 │   ├── shared: Mutex<SharedState>
@@ -210,7 +220,7 @@ initialize()
 ### Source Code
 
 ```text
-components/extent-manager/v2/
+components/extent-manager/
 ├── Cargo.toml
 ├── README.md
 ├── src/

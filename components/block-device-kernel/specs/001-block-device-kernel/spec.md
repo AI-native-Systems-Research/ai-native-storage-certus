@@ -8,7 +8,7 @@
 
 **Source**: Generated from existing implementation
 
-**Last Synced**: 2026-08-07 (drift sweep on branch `sync/spec-drift-sweep-20260807`) — the FR-021/SC-006 telemetry-latency defect (record_op previously passed a hardcoded `0`) was **fixed in code** on the branch (per-op start time captured, elapsed ns recorded), so those requirements now hold as written; backfilled FR-009 (async `tag` currently emitted as `0`), added FR-026 (device-info methods `read_write_stats`/`numa_node`/`nvme_version`), and extended the US2 device-info acceptance scenario. See `.specify/sync/apply-report.md`. Prior sync: 2026-07-22 AUTO-BACKFILL.
+**Last Synced**: 2026-08-20 (Spec-Sync Phase B) — the 2026-08-07 telemetry-latency fix is only **partial**: the three sync paths (`handle_read_sync`, `handle_write_sync`, `write_zeros`) and the blocking `wait_for_cqe` completion site now capture a real submission `Instant` and record `start.elapsed()`, but the primary async-completion path `harvest_completions()` still calls `record_op(0, op.bytes)` with a hardcoded `0` (`src/actor.rs:776`) even though `InflightOp` carries a populated `start` timestamp. Async `ReadAsync`/`WriteAsync` ops therefore record 0 ns latency, driving `min_latency_ns` to 0 and skewing the mean — so FR-021/SC-006 do **NOT** yet hold for async IO. This residual defect is tracked as an ALIGN task in `.specify/sync/align-tasks.md` (no code changed by this sync). Also added FR-027 documenting the `FlushSync` validated-no-op handler (previously unspecced). See `.specify/sync/apply-report.md`. Prior syncs: 2026-08-07 drift sweep; 2026-07-22 AUTO-BACKFILL.
 
 ## Backfill Notice
 
@@ -56,6 +56,7 @@ A developer working on higher-level Certus components (dispatcher, extent-manage
 2. **Given** the component, **When** queried via `IUnknown`, **Then** it provides `IBlockDevice` and `IBlockDeviceAdmin` interfaces.
 3. **Given** the component, **When** `NsCreate`, `NsDelete`, `NsFormat`, or `ControllerReset` commands are sent, **Then** a `NotSupported` error completion is returned.
 4. **Given** the component, **When** `NsProbe` is sent, **Then** a single `NamespaceInfo` is returned with `ns_id=1`, the configured `num_sectors`, and the configured `sector_size`.
+5. **Given** the component, **When** a `FlushSync { ns_id: 1 }` command is sent, **Then** a `FlushDone` completion with `Ok(())` is returned as a validated no-op (writes are already durable via `O_DIRECT | O_DSYNC`); when `ns_id != 1`, an `InvalidNamespace` error is returned. See FR-027.
 
 ---
 
@@ -135,6 +136,8 @@ A developer needs to benchmark the kernel block device to compare latency and th
 - **FR-025**: Component MUST deliver completions to clients without ever blocking the actor thread. `ClientSession::deliver()` attempts a non-blocking `try_send`; on failure (callback ring full, or receiver disconnected) the completion is appended to an unbounded per-client FIFO backlog (`pending: VecDeque<Completion>`) instead of being dropped. `KernelHandler::poll_clients()` retries the backlog oldest-first on every idle-loop tick (`ClientSession::flush_pending`), stopping at the first entry that still can't be sent to preserve ordering. *(Backfilled 2026-07-22 — this is deliberate anti-head-of-line-blocking behavior: a slow or stalled client must never block completion delivery to every other client sharing the device.)*
 
 - **FR-026**: *(Backfilled 2026-08-07 — documents interface-required device-info methods the original spec omitted.)* Because `IBlockDevice` is shared with `block-device-spdk-nvme`, the component MUST implement the full device-info surface, including the fields that have no meaningful value for a kernel block device: `numa_node()` MUST return `-1` (device-to-NUMA affinity is not discovered/modeled here), `nvme_version()` MUST return the fixed string `"N/A (kernel block device)"` (there is no NVMe controller behind the kernel block layer), and `read_write_stats()` MUST return a well-formed `ReadWriteStats` value (currently zero-initialized — per-direction read/write counters are not separately tracked by this component; aggregate telemetry under FR-021 is the supported path). These are stable, intentional constants, not runtime-discovered values.
+
+- **FR-027**: *(Backfilled 2026-08-20 — the shared `IBlockDevice` gained a `FlushSync` command after this spec was written; documents the implemented handler, parallel to `block-device-filesys` FR-022.)* The component MUST handle the `FlushSync { ns_id }` command by replying with `Completion::FlushDone { handle, result }`. For the sole valid namespace (`ns_id == 1`) the flush is a **validated no-op** returning `Ok(())`: because the backing device is opened `O_DIRECT | O_DSYNC` (FR-004), every write is already forced to non-volatile media on completion — there is no volatile write cache to drain, so an explicit flush has nothing to do. An invalid `ns_id` (anything other than 1) MUST return an `InvalidNamespace` error without side effects. Unlike `block-device-filesys` FR-022 (which issues a real `fdatasync(2)`), no syscall is needed here because durability is guaranteed at the fd flags level.
 
 ### Non-Functional Requirements
 

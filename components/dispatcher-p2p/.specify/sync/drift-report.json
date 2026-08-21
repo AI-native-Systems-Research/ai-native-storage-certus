@@ -1,44 +1,81 @@
 {
-  "generated": "2026-08-07T15:31:21Z",
+  "generated": "pending",
   "project": "dispatcher-p2p",
-  "spec": "specs/001-gpudirect-cold-path/spec.md",
   "summary": {
     "specs_analyzed": 1,
-    "functional_requirements": 17,
-    "success_criteria": 6,
-    "aligned": 23,
-    "drifted": 0,
+    "requirements_checked": 23,
+    "aligned": 21,
+    "drifted": 2,
     "not_implemented": 0,
-    "unspecced": 1
+    "unspecced_features": 7
   },
   "specs": [
     {
-      "spec": "specs/001-gpudirect-cold-path/spec.md",
-      "findings": [],
-      "aligned": [
-        "FR-001","FR-002","FR-003","FR-004","FR-005","FR-006","FR-007","FR-008","FR-009",
-        "FR-010","FR-011","FR-012","FR-013","FR-014","FR-015","FR-016","FR-017",
-        "SC-001","SC-002","SC-003","SC-004","SC-005","SC-006"
+      "id": "001-gpudirect-cold-path",
+      "title": "GPUDirect Storage Cold Path",
+      "aligned": 21,
+      "drifted": [
+        {
+          "requirement": "FR-017",
+          "spec_text": "the event MUST be silently dropped AND counted, and the running drop count MUST be readable and reset via eviction_dropped_count().",
+          "actual": "The drop counter (eviction_dropped.fetch_add) lives ONLY inside emit_eviction, which is #[allow(dead_code)] with no call sites (lib.rs:228-236). The live eviction paths (evict_for_space_inner lib.rs:603-646; BackgroundEvictor::evictor_loop background.rs:415; MemoryTierEvictor::evictor_loop background.rs:612) all publish via `let _ = tx.try_send(...)`, discarding the Err without incrementing eviction_dropped. So eviction_dropped_count() (lib.rs:224-226) always returns 0. The channel/try_send/non-blocking parts of FR-017 are correct; only the drop-count guarantee is unmet.",
+          "location": "components/dispatcher-p2p/src/lib.rs:224-236,603-646; components/dispatcher-p2p/src/background.rs:415,612",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "SC-006",
+          "spec_text": "Initialization panics with a clear diagnostic when P2P ring allocation fails (GDRCopy/BAR1 unavailable).",
+          "actual": "Initialization does NOT panic; it logs a non-fatal diagnostic ('P2P ring unavailable, cold reads use DRAM path', lib.rs:1209-1213). The panic is deferred to the first cold batch_lookup via .expect(...) (lib.rs:1752-1755). This matches FR-006 and User Story 2 AC-1, so the drift is between SC-006's wording and the rest of the spec, not a code defect. Recommend rewording SC-006.",
+          "location": "components/dispatcher-p2p/src/lib.rs:1209-1213,1752-1755",
+          "severity": "minor"
+        }
       ],
-      "aligned_evidence": {
-        "FR-001/002": "src/pipeline.rs:703 (pipelined_ssd_to_gpu_p2p); src/cold_pool.rs:153 (pipelined_multi_object_p2p)",
-        "FR-003": "src/p2p_ring.rs:19 P2P_RING_SLOTS=64, :30 NUM_STREAMS=4, :58 cudaMalloc, :108 min-2, :5/:34 GDRCopy+spdk_mem_register",
-        "FR-004": "src/p2p_ring.rs:25 MAX_QD_PER_THREAD=16, :161 ThreadPartition, :9 MAX_QUEUES_PER_DRIVE",
-        "FR-006/007": "src/lib.rs:1754 batch_lookup panic; src/lib.rs:1552-1563 single-lookup DRAM fallback; :1211 non-fatal init warn; :1199-1207 ring allocated once",
-        "FR-008": "src/lib.rs:67 IRemoteLookup receptacle; :3524 batch_lookup(&[(CacheKey,u32)])",
-        "FR-009/014": "src/background.rs:236 DramBackfillWorker; src/lib.rs:1300-1305 gated on backfill_delay_ms>0",
-        "FR-013": "src/lib.rs:2457,1358,2574 promote_to_memory_tier; src/pipeline.rs:1128 pipelined_ssd_to_dram_only",
-        "FR-015": "src/lib.rs:3355,3358 set_device/device_of_ptr on receptacle; NOT wired into src/pipeline.rs/src/cold_pool.rs cold path - matches spec NOTE",
-        "FR-016": "src/cold_pool.rs:41 P2pColdReadPool; :61-63 non-fatal inline fallback",
-        "FR-017": "src/lib.rs:215-227 create_eviction_channel(capacity)+eviction_dropped_count; :420 evict_for_space_emit"
-      },
       "not_implemented": []
     }
   ],
   "unspecced": [
-    {"item": "set_block_device_factory / set_extent_manager_factory (DI/test hooks)", "location": "components/dispatcher-p2p/src/lib.rs:205,211", "notes": "Public injection hooks on the component struct, not in spec. Minor."}
+    {
+      "feature": "MemoryTierEvictor — proactive background DRAM->SSD demotion sweep (config memory_tier_eviction_*)",
+      "location": "components/dispatcher-p2p/src/background.rs",
+      "lines": "490-654",
+      "suggested_spec": "Add FR for proactive memory-tier demotion; FR-017 only covers the event, not the sweep."
+    },
+    {
+      "feature": "BackgroundEvictor — SSD extent eviction at utilization threshold (config ssd_eviction_*)",
+      "location": "components/dispatcher-p2p/src/background.rs",
+      "lines": "303-488",
+      "suggested_spec": "Add FR for SSD capacity reclamation / watermarks."
+    },
+    {
+      "feature": "ParallelBackgroundWriter — write-through persistence memory-tier->SSD, one thread/drive",
+      "location": "components/dispatcher-p2p/src/background.rs",
+      "lines": "154-219",
+      "suggested_spec": "Spec the write/persistence path (spec is cold-read-only)."
+    },
+    {
+      "feature": "clear_memory_tier() — flush entire memory tier",
+      "location": "components/dispatcher-p2p/src/lib.rs",
+      "lines": "2606+",
+      "suggested_spec": "Add FR or note as admin/maintenance op."
+    },
+    {
+      "feature": "lookup_async() — returns GpuStream for caller-side pipelined hot-path sync",
+      "location": "components/dispatcher-p2p/src/lib.rs",
+      "lines": "2044-2110",
+      "suggested_spec": "Document async single-key contract in interface spec."
+    },
+    {
+      "feature": "pins::PinnedKeys — read-pin lifetime guard across async H2D copy (remote-lookup path)",
+      "location": "components/dispatcher-p2p/src/pins.rs",
+      "lines": "26-57",
+      "suggested_spec": "Note pin-lifetime correctness invariant in data-model."
+    },
+    {
+      "feature": "cold_staging_slots / cold_staging_buf_bytes config fields (appear unused by the P2P cold path)",
+      "location": "components/interfaces/src/idispatcher.rs",
+      "lines": "82-87",
+      "suggested_spec": "Confirm whether these apply to dispatcher-p2p or remove from its config surface."
+    }
   ],
-  "conflicts": [
-    {"type": "spec-references-nonexistent", "detail": "Shared interface components/interfaces/src/idispatcher.rs:185-198 claims Creusot 'Verified Properties (see components/dispatcher/verif/)' (P1-P10, 24 VCs); no verif/ directory exists under dispatcher or dispatcher-p2p.", "location": "components/interfaces/src/idispatcher.rs:185-198"}
-  ]
+  "conflicts": []
 }

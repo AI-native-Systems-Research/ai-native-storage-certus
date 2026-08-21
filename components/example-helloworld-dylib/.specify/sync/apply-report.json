@@ -1,0 +1,33 @@
+{
+  "generated": "2026-08-20",
+  "phase": "Spec-Sync Phase B",
+  "component": "example-helloworld-dylib",
+  "based_on": "drift-report.{json,md} (2026-08-20T09:24 regeneration)",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "summary": {
+    "backfill_applied": 0,
+    "align_tasks": 1,
+    "unspecced_backfilled": 0,
+    "resolved": 0,
+    "human_decision": 0
+  },
+  "specs_updated": [],
+  "align_tasks_generated": [
+    {
+      "spec": "001-example-helloworld-dylib",
+      "requirement": "FR-4 / Overview",
+      "task": "align-tasks.md Task 2 — correct the stale module doc comment (src/lib.rs:4-7)",
+      "severity": "moderate",
+      "status": "open (pre-existing, covers FR-4 exactly; re-confirmed this phase)",
+      "change_type": "doc-only code fix (queued, not applied — no .rs edited)"
+    }
+  ],
+  "unspecced_backfilled": [],
+  "resolved": [],
+  "backups": {
+    "spec_md_files_edited": 0,
+    "new_backups_created": [],
+    "note": "No spec.md edited this phase (spec already correct), so no new backups were required. Pre-existing backups from the 2026-07-22 backfill remain: backups/spec.md.bak, backups/plan.md.bak, backups/tasks.md.bak."
+  },
+  "notes": "No .rs source modified; no cargo run. Edits confined to .specify/sync/. The host-app doc apps/dynamic-loading-example/src/main.rs:6-9 repeats the same stale claim (out of scope; noted only)."
+}

@@ -37,11 +37,11 @@ Block devices and extent managers are created internally during `initialize()` b
 
 ### Key Internal Dependencies
 
-- `component-framework`, `component-core`, `component-macros` — at `../../component-framework/crates/`
+- `component-framework`, `component-core`, `component-macros` — at `../../lib/component-framework/crates/`
 - `interfaces` — at `../../interfaces` — where `IDispatcher`, `ILogger`, `IDispatchMap`, `IGpuServices` are defined
 - `spdk-env` — at `../../spdk-env` — provides `ISPDKEnv` trait
-- `block-device-spdk-nvme-v2` — NVMe block device driver
-- `extent-manager-v2` — fixed-size extent allocator
+- `block-device-spdk-nvme` — NVMe block device driver
+- `extent-manager` — fixed-size extent allocator
 
 ### Internal Modules
 
@@ -50,5 +50,5 @@ Block devices and extent managers are created internally during `initialize()` b
 
 ## Active Technologies
 - Rust stable, edition 2021, MSRV 1.75 + `component-framework`, `component-core`, `component-macros`, `interfaces` (with `spdk` feature)
-- NVMe SSDs via SPDK (block-device-spdk-nvme-v2), extent-manager-v2 for space allocation
+- NVMe SSDs via SPDK (block-device-spdk-nvme), extent-manager for space allocation
 - GPU DMA via IGpuServices (dma_copy_to_host for populate, dma_copy_to_device for lookup)
