@@ -1,6 +1,6 @@
 # Implementation Plan: Synthetic KV Workload Generator
 
-**Branch**: `002-served-by-tier-attribution` (see § Branch note) | **Date**: 2026-08-10
+**Branch**: `synthetic-workload-generation` (renamed 2026-08-21 from `002-served-by-tier-attribution`; see § Branch note) | **Date**: 2026-08-10
 **Spec**: `apps/workload-generator/specs/001-synthetic-workload-generator/spec.md`
 
 **Input**: the feature specification above, its three contracts, and `research.md`.
@@ -151,11 +151,19 @@ and comment style already used for the SPDK crates and `remote-lookup`.
 
 ### Branch note, and the speckit setup that fixes it
 
-The spec lives at `apps/workload-generator/specs/001-synthetic-workload-generator/` while the git
-branch is `002-served-by-tier-attribution`, because this work began as a dependency of that feature.
-The repository-level `.specify/scripts/bash/setup-plan.sh` derives its feature directory from the
-branch name, so it would have created a stray `specs/002-served-by-tier-attribution/` at the repo root
-and copied the template into it. This plan was therefore written to the correct path by hand.
+The spec lives at `apps/workload-generator/specs/001-synthetic-workload-generator/` and the git branch
+is `synthetic-workload-generation`. **The branch was renamed 2026-08-21 from
+`002-served-by-tier-attribution`**, which is where this work began — as a dependency of that feature —
+and which had become misleading once the workload generator was almost all of the branch's content. The
+served-by design still rides on this branch; its spec keeps its own directory name,
+`components/dispatcher/specs/002-served-by-tier-attribution/`, because that is a feature directory
+rather than a branch.
+The original mismatch was not merely cosmetic. The repository-level
+`.specify/scripts/bash/setup-plan.sh` derives its feature directory from the branch name, so it would
+have created a stray `specs/002-served-by-tier-attribution/` at the repo root and copied the template
+into it. This plan was therefore written to the correct path by hand. The rename does not on its own
+fix that — the branch name still differs from the directory name — and it does not need to, because
+the app-local setup below removes the dependence on the branch name altogether.
 
 **Now fixed at the source.** `apps/workload-generator` has been speckit-initialised
 (`specify init . --integration claude --script sh`) with `.specify/feature.json` pinning

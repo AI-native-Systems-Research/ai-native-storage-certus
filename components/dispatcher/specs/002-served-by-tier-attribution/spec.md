@@ -1,6 +1,10 @@
 # Feature Specification: Serving-Tier Attribution (`served_by`)
 
-**Feature Branch**: `002-served-by-tier-attribution`
+**Feature Branch**: `synthetic-workload-generation` — renamed 2026-08-21 from
+`002-served-by-tier-attribution`, which is what this feature's branch was called before the synthetic
+workload generator grew to be almost all of its content. This design still rides on that branch; only
+the branch was renamed, and **this feature directory keeps its own name** because a feature directory
+is not a branch.
 
 **Created**: 2026-08-04
 
