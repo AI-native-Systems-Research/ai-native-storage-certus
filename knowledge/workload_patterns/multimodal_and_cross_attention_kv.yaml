@@ -1,0 +1,57 @@
+id: multimodal-and-cross-attention-kv
+name: Cross-Attention KV Compute and Persist
+status: candidate
+parameters:
+  media_tokens:
+    type: integer
+    range:
+    - 64
+    - 4096
+    default: 576
+  cross_attention_layers:
+    type: integer
+    range:
+    - 4
+    - 32
+    default: 16
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  media_kv_blocks:
+    cardinality: ceil(media_tokens / block_size)
+    object_bytes: block_size * cross_attention_layers * kv_bytes_per_token_per_layer
+    sharing: global
+    disjoint_between_actors: false
+preconditions:
+- subject: media_kv_blocks
+  state: absent_from_store
+  value: true
+phases:
+- id: media-kv-store
+  actors:
+    count: 1
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: store
+    keys: media_kv_blocks
+    order: sequential
+    repeat: ceil(media_tokens / block_size)
+measure:
+- phase: media-kv-store
+  operation: store
+  metrics:
+  - throughput_MBps
+expected_io:
+  stores: ceil(media_tokens / block_size)
+  loads: '0'

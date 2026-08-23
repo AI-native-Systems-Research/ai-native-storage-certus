@@ -1,0 +1,57 @@
+id: sliding-window-and-attention-sinks
+name: Sliding Window Block Expiry
+status: candidate
+parameters:
+  expired_blocks:
+    type: integer
+    range:
+    - 1
+    - 4096
+    default: 64
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  window_expired_blocks:
+    cardinality: expired_blocks
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: window_expired_blocks
+  state: present_in_store
+  value: true
+phases:
+- id: window-delete
+  actors:
+    count: 1
+    arrival: serial
+    concurrency: 1
+  operations:
+  - op: delete
+    keys: window_expired_blocks
+    order: sequential
+    repeat: expired_blocks
+measure:
+- phase: window-delete
+  operation: store
+  metrics:
+  - latency_p50_ms
+expected_io:
+  stores: '0'
+  loads: '0'

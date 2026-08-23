@@ -1,0 +1,93 @@
+id: batch-splitting-merging
+name: Batch Merge Prefix Dedup on Consolidation
+status: candidate
+parameters:
+  cohort_size:
+    type: integer
+    range:
+    - 2
+    - 256
+    default: 8
+  shared_prefix_blocks:
+    type: integer
+    range:
+    - 1
+    - 8192
+    default: 128
+  suffix_blocks_per_request:
+    type: integer
+    range:
+    - 1
+    - 1024
+    default: 32
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  shared_blocks:
+    cardinality: shared_prefix_blocks
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: global
+    disjoint_between_actors: false
+  per_request_suffix:
+    cardinality: suffix_blocks_per_request * cohort_size
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: shared_blocks
+  state: present_in_store
+  value: true
+- subject: shared_blocks
+  state: absent_from_local_cache
+  value: true
+phases:
+- id: shared-load
+  actors:
+    count: cohort_size
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: load
+    keys: shared_blocks
+    order: sequential
+    repeat: shared_prefix_blocks
+  barrier_after: true
+- id: suffix-stores
+  depends_on: shared-load
+  actors:
+    count: cohort_size
+    arrival: burst
+    concurrency: cohort_size
+  operations:
+  - op: store
+    keys: per_request_suffix
+    order: sequential
+    repeat: suffix_blocks_per_request
+measure:
+- phase: shared-load
+  operation: load
+  metrics:
+  - throughput_MBps
+- phase: suffix-stores
+  operation: store
+  metrics:
+  - throughput_MBps
+expected_io:
+  stores: suffix_blocks_per_request * cohort_size
+  loads: shared_prefix_blocks

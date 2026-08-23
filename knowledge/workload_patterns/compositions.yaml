@@ -1,0 +1,669 @@
+kind: composition
+id: chat-multi-turn
+name: Chat Multi-Turn Conversation
+status: candidate
+parameters:
+  turns:
+    type: integer
+    range: [2, 50]
+    default: 5
+  system_prompt_tokens:
+    type: integer
+    range: [64, 8192]
+    default: 1024
+  user_message_tokens:
+    type: integer
+    range: [16, 4096]
+    default: 256
+  assistant_output_tokens:
+    type: integer
+    range: [32, 4096]
+    default: 512
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  inter_turn_gap_ms:
+    type: integer
+    range: [500, 3600000]
+    default: 15000
+  concurrent_sessions:
+    type: integer
+    range: [1, 1024]
+    default: 32
+members:
+  - ref: cold-prefill-store
+    role: first-turn-system-prompt-store
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_sessions
+    duration: "ceil((system_prompt_tokens + user_message_tokens) / block_size)"
+  - ref: decode-block-store
+    role: first-turn-generation-writeback
+    repeat: 1
+    arrival: serial
+    concurrent_start: concurrent_sessions
+    duration: "floor(assistant_output_tokens / block_size)"
+  - ref: multi-turn-reuse
+    role: subsequent-turn-prefix-reload-and-suffix-store
+    repeat: "turns - 1"
+    arrival: staggered
+    concurrent_start: concurrent_sessions
+    duration: "ceil((system_prompt_tokens + turns * user_message_tokens) / block_size)"
+  - ref: decode-block-store
+    role: subsequent-turn-generation-writeback
+    repeat: "turns - 1"
+    arrival: serial
+    concurrent_start: concurrent_sessions
+    duration: "floor(assistant_output_tokens / block_size)"
+  - ref: compute-local-eviction-and-later-reload
+    role: inter-turn-eviction-and-reload
+    repeat: "turns - 1"
+    arrival: staggered
+    concurrent_start: concurrent_sessions
+    duration: "ceil((system_prompt_tokens + turns * user_message_tokens) / block_size)"
+  - ref: request-completion-retention-and-delete
+    role: session-end-cleanup
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_sessions
+    duration: "ceil((system_prompt_tokens + turns * (user_message_tokens + assistant_output_tokens)) / block_size)"
+evidence:
+  - "Gao et al. 2024 CachedAttention arXiv:2403.19708: multi-turn KV reuse with CPU/SSD tier offload"
+  - "Zheng et al. 2023 SGLang RadixAttention: radix tree prefix matching across turns"
+---
+kind: composition
+id: rag-shared-prefix
+name: RAG Shared-Prefix Retrieval-Augmented Generation
+status: candidate
+parameters:
+  system_prompt_tokens:
+    type: integer
+    range: [64, 8192]
+    default: 1024
+  retrieved_context_tokens:
+    type: integer
+    range: [256, 32768]
+    default: 4096
+  user_query_tokens:
+    type: integer
+    range: [16, 1024]
+    default: 128
+  output_tokens:
+    type: integer
+    range: [32, 4096]
+    default: 512
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  concurrent_requests:
+    type: integer
+    range: [1, 512]
+    default: 32
+  prefix_hit_rate:
+    type: number
+    range: [0.0, 1.0]
+    default: 0.7
+members:
+  - ref: warm-prefill-load-and-suffix-store
+    role: prefix-cache-hit-with-suffix-compute
+    repeat: "ceil(concurrent_requests * prefix_hit_rate)"
+    arrival: burst
+    concurrent_start: "ceil(concurrent_requests * prefix_hit_rate)"
+    duration: "ceil((retrieved_context_tokens + user_query_tokens) / block_size)"
+  - ref: cold-prefill-store
+    role: prefix-cache-miss-full-prefill
+    repeat: "ceil(concurrent_requests * (1 - prefix_hit_rate))"
+    arrival: burst
+    concurrent_start: "ceil(concurrent_requests * (1 - prefix_hit_rate))"
+    duration: "ceil((system_prompt_tokens + retrieved_context_tokens + user_query_tokens) / block_size)"
+  - ref: cohort-sharing-and-load-coalescing
+    role: shared-system-prompt-coalesced-load
+    repeat: 1
+    arrival: burst
+    concurrent_start: 1
+    duration: "ceil(system_prompt_tokens / block_size)"
+  - ref: decode-block-store
+    role: generation-writeback
+    repeat: 1
+    arrival: serial
+    concurrent_start: concurrent_requests
+    duration: "floor(output_tokens / block_size)"
+  - ref: store-admission-filtering-and-dedup
+    role: prefix-dedup-on-writeback
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil((system_prompt_tokens + retrieved_context_tokens) / block_size)"
+  - ref: request-completion-retention-and-delete
+    role: completion-with-prefix-retention
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil((system_prompt_tokens + retrieved_context_tokens + user_query_tokens + output_tokens) / block_size)"
+evidence:
+  - "Juravsky et al. 2024 Hydragen arXiv:2402.05099: high-throughput shared-prefix inference"
+  - "Zheng et al. 2023 SGLang RadixAttention: automatic prefix sharing for RAG workloads"
+---
+kind: composition
+id: agentic-tool-use
+name: Agentic Tool-Use Multi-Step Reasoning
+status: candidate
+parameters:
+  tool_calls:
+    type: integer
+    range: [1, 20]
+    default: 5
+  system_prompt_tokens:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  tool_result_tokens:
+    type: integer
+    range: [64, 8192]
+    default: 1024
+  reasoning_tokens:
+    type: integer
+    range: [32, 2048]
+    default: 256
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  concurrent_agents:
+    type: integer
+    range: [1, 256]
+    default: 16
+members:
+  - ref: cold-prefill-store
+    role: initial-system-prompt-and-tools-prefill
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_agents
+    duration: "ceil(system_prompt_tokens / block_size)"
+  - ref: decode-block-store
+    role: reasoning-and-tool-call-generation
+    repeat: tool_calls
+    arrival: serial
+    concurrent_start: concurrent_agents
+    duration: "floor(reasoning_tokens / block_size)"
+  - ref: warm-prefill-load-and-suffix-store
+    role: tool-result-append-with-prefix-reuse
+    repeat: tool_calls
+    arrival: serial
+    concurrent_start: concurrent_agents
+    duration: "ceil(tool_result_tokens / block_size)"
+  - ref: preemption-and-reschedule
+    role: preemption-during-tool-wait
+    repeat: tool_calls
+    arrival: staggered
+    concurrent_start: concurrent_agents
+    duration: "ceil((system_prompt_tokens + tool_calls * (tool_result_tokens + reasoning_tokens)) / block_size)"
+  - ref: compute-local-eviction-and-later-reload
+    role: eviction-during-tool-latency
+    repeat: tool_calls
+    arrival: staggered
+    concurrent_start: concurrent_agents
+    duration: "ceil((system_prompt_tokens + tool_calls * tool_result_tokens) / block_size)"
+  - ref: request-completion-retention-and-delete
+    role: agent-session-end-cleanup
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_agents
+    duration: "ceil((system_prompt_tokens + tool_calls * (tool_result_tokens + reasoning_tokens)) / block_size)"
+evidence:
+  - "vLLM multi-step scheduling: KV retention across tool-call boundaries with swap-out during tool wait"
+  - "SGLang fork/join primitives: prefix sharing across agentic branching with radix tree retention"
+---
+kind: composition
+id: single-turn-api
+name: Single-Turn API Request-Response
+status: candidate
+parameters:
+  prompt_tokens:
+    type: integer
+    range: [16, 32768]
+    default: 1024
+  output_tokens:
+    type: integer
+    range: [16, 4096]
+    default: 256
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  concurrent_requests:
+    type: integer
+    range: [1, 4096]
+    default: 128
+  prefix_hit_rate:
+    type: number
+    range: [0.0, 1.0]
+    default: 0.3
+members:
+  - ref: warm-prefill-load-and-suffix-store
+    role: prefix-hit-requests
+    repeat: "ceil(concurrent_requests * prefix_hit_rate)"
+    arrival: burst
+    concurrent_start: "ceil(concurrent_requests * prefix_hit_rate)"
+    duration: "ceil(prompt_tokens / block_size)"
+  - ref: cold-prefill-store
+    role: prefix-miss-requests
+    repeat: "ceil(concurrent_requests * (1 - prefix_hit_rate))"
+    arrival: burst
+    concurrent_start: "ceil(concurrent_requests * (1 - prefix_hit_rate))"
+    duration: "ceil(prompt_tokens / block_size)"
+  - ref: decode-block-store
+    role: generation-writeback
+    repeat: 1
+    arrival: serial
+    concurrent_start: concurrent_requests
+    duration: "floor(output_tokens / block_size)"
+  - ref: request-completion-retention-and-delete
+    role: immediate-cleanup
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil((prompt_tokens + output_tokens) / block_size)"
+evidence:
+  - "Kwon et al. 2023 PagedAttention SOSP: single-request lifecycle with block allocation and free"
+  - "Standard LLM API serving pattern: prefill then decode then release"
+---
+kind: composition
+id: reasoning-long-decode
+name: Reasoning Long-Decode Chain-of-Thought
+status: candidate
+parameters:
+  prompt_tokens:
+    type: integer
+    range: [128, 16384]
+    default: 2048
+  output_tokens:
+    type: integer
+    range: [1024, 32768]
+    default: 8192
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  concurrent_reasoning:
+    type: integer
+    range: [1, 128]
+    default: 16
+members:
+  - ref: cold-prefill-store
+    role: prompt-prefill
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_reasoning
+    duration: "ceil(prompt_tokens / block_size)"
+  - ref: decode-block-store
+    role: long-cot-generation-writeback
+    repeat: 1
+    arrival: serial
+    concurrent_start: concurrent_reasoning
+    duration: "floor(output_tokens / block_size)"
+  - ref: background-writeback-flush-and-backpressure
+    role: async-writeback-during-long-decode
+    repeat: "floor(output_tokens / block_size)"
+    arrival: staggered
+    concurrent_start: concurrent_reasoning
+    duration: 1
+  - ref: speculative-decoding-and-branching
+    role: speculative-acceleration
+    repeat: "floor(output_tokens / 5)"
+    arrival: serial
+    concurrent_start: concurrent_reasoning
+    duration: 1
+  - ref: compute-local-eviction-and-later-reload
+    role: eviction-under-memory-pressure
+    repeat: "floor(output_tokens / (block_size * 64))"
+    arrival: staggered
+    concurrent_start: concurrent_reasoning
+    duration: "ceil((prompt_tokens + output_tokens) / (block_size * 4))"
+  - ref: request-completion-retention-and-delete
+    role: reasoning-completion-cleanup
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_reasoning
+    duration: "ceil((prompt_tokens + output_tokens) / block_size)"
+evidence:
+  - "Long CoT models (o1, DeepSeek-R1): output_tokens >> prompt_tokens, sustained decode-phase IO"
+  - "Leviathan et al. 2023 Speculative Decoding: draft-verify loop during long generation"
+---
+kind: composition
+id: code-generation
+name: Code Generation with Large System Context
+status: candidate
+parameters:
+  system_context_tokens:
+    type: integer
+    range: [1024, 65536]
+    default: 16384
+  user_instruction_tokens:
+    type: integer
+    range: [32, 4096]
+    default: 512
+  output_tokens:
+    type: integer
+    range: [128, 16384]
+    default: 2048
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  concurrent_requests:
+    type: integer
+    range: [1, 256]
+    default: 32
+  context_prefix_hit_rate:
+    type: number
+    range: [0.0, 1.0]
+    default: 0.8
+members:
+  - ref: warm-prefill-load-and-suffix-store
+    role: repo-context-prefix-hit
+    repeat: "ceil(concurrent_requests * context_prefix_hit_rate)"
+    arrival: burst
+    concurrent_start: "ceil(concurrent_requests * context_prefix_hit_rate)"
+    duration: "ceil(user_instruction_tokens / block_size)"
+  - ref: cold-prefill-store
+    role: repo-context-prefix-miss
+    repeat: "ceil(concurrent_requests * (1 - context_prefix_hit_rate))"
+    arrival: burst
+    concurrent_start: "ceil(concurrent_requests * (1 - context_prefix_hit_rate))"
+    duration: "ceil((system_context_tokens + user_instruction_tokens) / block_size)"
+  - ref: chunked-prefill
+    role: long-context-chunked-processing
+    repeat: "ceil(concurrent_requests * (1 - context_prefix_hit_rate))"
+    arrival: burst
+    concurrent_start: "ceil(concurrent_requests * (1 - context_prefix_hit_rate))"
+    duration: "ceil(system_context_tokens / block_size)"
+  - ref: decode-block-store
+    role: code-generation-writeback
+    repeat: 1
+    arrival: serial
+    concurrent_start: concurrent_requests
+    duration: "floor(output_tokens / block_size)"
+  - ref: speculative-decoding-and-branching
+    role: speculative-code-completion
+    repeat: "floor(output_tokens / 5)"
+    arrival: serial
+    concurrent_start: concurrent_requests
+    duration: 1
+  - ref: request-completion-retention-and-delete
+    role: completion-with-context-retention
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil((system_context_tokens + user_instruction_tokens + output_tokens) / block_size)"
+evidence:
+  - "Copilot/Cursor-style completion: high prefix-hit rate on repository context"
+  - "SGLang RadixAttention: long shared repo context cached across completions within same file"
+---
+kind: composition
+id: multimodal
+name: Multimodal Vision-Language Inference
+status: candidate
+parameters:
+  image_tokens:
+    type: integer
+    range: [256, 4096]
+    default: 576
+  text_prompt_tokens:
+    type: integer
+    range: [16, 4096]
+    default: 256
+  output_tokens:
+    type: integer
+    range: [32, 4096]
+    default: 512
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  concurrent_requests:
+    type: integer
+    range: [1, 256]
+    default: 32
+  has_cross_attention:
+    type: enum
+    range: [true, false]
+    default: false
+members:
+  - ref: multimodal-and-cross-attention-kv
+    role: cross-attn-kv-store
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil(image_tokens / block_size)"
+  - ref: cold-prefill-store
+    role: fused-image-text-prefill
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil((image_tokens + text_prompt_tokens) / block_size)"
+  - ref: decode-block-store
+    role: generation-writeback
+    repeat: 1
+    arrival: serial
+    concurrent_start: concurrent_requests
+    duration: "floor(output_tokens / block_size)"
+  - ref: selective-kv-retrieval
+    role: sparse-image-kv-retrieval-during-decode
+    repeat: "floor(output_tokens / block_size)"
+    arrival: serial
+    concurrent_start: concurrent_requests
+    duration: "ceil(image_tokens / (block_size * 4))"
+  - ref: request-completion-retention-and-delete
+    role: completion-cleanup
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil((image_tokens + text_prompt_tokens + output_tokens) / block_size)"
+evidence:
+  - "LLaVA/Qwen-VL: image tokens fused as self-attention prefix KV (no cross-attention)"
+  - "Flamingo-style cross-attention: separate KV with distinct lifetime from self-attention"
+---
+kind: composition
+id: continuous-batching
+name: Continuous Batching Mixed Workload
+status: candidate
+parameters:
+  prefill_chunk_tokens:
+    type: integer
+    range: [128, 8192]
+    default: 512
+  decode_batch_size:
+    type: integer
+    range: [1, 4096]
+    default: 256
+  new_arrivals_per_iteration:
+    type: integer
+    range: [1, 64]
+    default: 4
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  iterations:
+    type: integer
+    range: [1, 10000]
+    default: 1000
+members:
+  - ref: continuous-batching-mix
+    role: interleaved-prefill-decode-store
+    repeat: iterations
+    arrival: serial
+    concurrent_start: 1
+    duration: "floor(prefill_chunk_tokens / block_size) + floor(decode_batch_size / block_size)"
+  - ref: chunked-prefill
+    role: chunked-long-prompt-processing
+    repeat: new_arrivals_per_iteration
+    arrival: staggered
+    concurrent_start: new_arrivals_per_iteration
+    duration: "ceil(prefill_chunk_tokens / block_size)"
+  - ref: preemption-and-reschedule
+    role: preemption-under-memory-pressure
+    repeat: "floor(iterations / 100)"
+    arrival: staggered
+    concurrent_start: 1
+    duration: "ceil(decode_batch_size / block_size)"
+  - ref: priority-preemption-cascades
+    role: priority-based-eviction-cascade
+    repeat: "floor(iterations / 200)"
+    arrival: burst
+    concurrent_start: 1
+    duration: "ceil(decode_batch_size / (block_size * 4))"
+  - ref: background-writeback-flush-and-backpressure
+    role: continuous-async-writeback
+    repeat: iterations
+    arrival: staggered
+    concurrent_start: 1
+    duration: "floor(decode_batch_size / block_size)"
+  - ref: request-completion-retention-and-delete
+    role: completed-request-cleanup
+    repeat: "new_arrivals_per_iteration * iterations"
+    arrival: staggered
+    concurrent_start: new_arrivals_per_iteration
+    duration: "ceil(prefill_chunk_tokens / block_size)"
+evidence:
+  - "Agrawal et al. 2024 Sarathi-Serve: chunked prefill interleaved with decode in continuous batching"
+  - "Yu et al. 2022 Orca: iteration-level scheduling with continuous batching"
+  - "Kwon et al. 2023 vLLM: PagedAttention with preemption under memory pressure"
+---
+kind: composition
+id: disaggregated-prefill-decode
+name: Disaggregated Prefill-Decode Serving
+status: candidate
+parameters:
+  prompt_tokens:
+    type: integer
+    range: [128, 131072]
+    default: 4096
+  output_tokens:
+    type: integer
+    range: [32, 8192]
+    default: 512
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  concurrent_requests:
+    type: integer
+    range: [1, 512]
+    default: 64
+members:
+  - ref: cold-prefill-store
+    role: prefill-node-kv-compute
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil(prompt_tokens / block_size)"
+  - ref: disaggregated-prefill-decode
+    role: kv-handoff-to-decode-node
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil(prompt_tokens / block_size)"
+  - ref: decode-block-store
+    role: decode-node-generation-writeback
+    repeat: 1
+    arrival: serial
+    concurrent_start: concurrent_requests
+    duration: "floor(output_tokens / block_size)"
+  - ref: model-parallel-kv-sharding-and-replication
+    role: tp-shard-distribution-on-decode-node
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil(prompt_tokens / block_size)"
+  - ref: tier-promotion-and-prefetch
+    role: prefetch-kv-ahead-of-decode-scheduling
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil(prompt_tokens / block_size)"
+  - ref: request-completion-retention-and-delete
+    role: cross-node-cleanup
+    repeat: 1
+    arrival: burst
+    concurrent_start: concurrent_requests
+    duration: "ceil((prompt_tokens + output_tokens) / block_size)"
+evidence:
+  - "Patel et al. 2024 Splitwise: phase splitting with KV transfer between prefill and decode pools"
+  - "Zhong et al. 2024 DistServe arXiv:2401.09670: disaggregated serving with inter-node KV migration"
+  - "Qin et al. 2024 Mooncake arXiv:2407.00079: RDMA-based KV transfer at 87-190 GB/s"

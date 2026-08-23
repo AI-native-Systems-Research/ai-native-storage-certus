@@ -1,0 +1,69 @@
+id: speculative-decoding-and-branching
+name: Speculative Accepted Tokens Seal and Writeback
+status: candidate
+parameters:
+  speculation_depth:
+    type: integer
+    range:
+    - 1
+    - 16
+    default: 5
+  acceptance_rate:
+    type: number
+    range:
+    - 0.3
+    - 0.95
+    default: 0.7
+  iterations:
+    type: integer
+    range:
+    - 1
+    - 2048
+    default: 100
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  speculative_sealed_blocks:
+    cardinality: floor(iterations * speculation_depth * acceptance_rate / block_size)
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: speculative_sealed_blocks
+  state: absent_from_store
+  value: true
+phases:
+- id: accepted-writeback
+  actors:
+    count: 1
+    arrival: staggered
+    concurrency: 1
+  operations:
+  - op: store
+    keys: speculative_sealed_blocks
+    order: sequential
+    repeat: floor(iterations * speculation_depth * acceptance_rate / block_size)
+measure:
+- phase: accepted-writeback
+  operation: store
+  metrics:
+  - throughput_MBps
+expected_io:
+  stores: floor(iterations * speculation_depth * acceptance_rate / block_size)
+  loads: '0'

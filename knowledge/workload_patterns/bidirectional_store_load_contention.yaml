@@ -1,0 +1,87 @@
+id: bidirectional-store-load-contention
+name: Concurrent Store and Load on Shared Storage Path
+status: candidate
+parameters:
+  store_actors:
+    type: integer
+    range: [1, 16]
+    default: 4
+  load_actors:
+    type: integer
+    range: [1, 16]
+    default: 4
+  objects_per_actor:
+    type: integer
+    range: [8, 256]
+    default: 64
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+  duration_s:
+    type: integer
+    range: [5, 120]
+    default: 30
+keyspaces:
+  store_targets:
+    cardinality: objects_per_actor
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+  load_sources:
+    cardinality: objects_per_actor
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+  - subject: load_sources
+    state: present_in_store
+    value: true
+  - subject: load_sources
+    state: absent_from_local_cache
+    value: true
+  - subject: store_targets
+    state: absent_from_store
+    value: true
+phases:
+  - id: seed-load-data
+    actors:
+      count: 1
+      arrival: serial
+      concurrency: 1
+    operations:
+      - op: store
+        keys: load_sources
+        order: sequential
+    barrier_after: true
+  - id: concurrent-bidir
+    actors:
+      count: store_actors + load_actors
+      arrival: burst
+      concurrency: store_actors + load_actors
+    operations:
+      - op: store
+        keys: store_targets
+        order: sequential
+      - op: load
+        keys: load_sources
+        order: sequential
+    barrier_after: false
+measure:
+  - phase: concurrent-bidir
+    operation: load
+    metrics: [latency_p50_ms, latency_p99_ms, throughput_MBps]
+  - phase: concurrent-bidir
+    operation: store
+    metrics: [throughput_MBps]
+expected_io:
+  stores: store_actors * objects_per_actor
+  loads: load_actors * objects_per_actor

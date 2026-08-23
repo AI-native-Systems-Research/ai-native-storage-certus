@@ -1,0 +1,83 @@
+id: continuous-batching-mix
+name: Interleaved Prefill Burst and Decode Trickle
+status: candidate
+parameters:
+  prefill_chunk_tokens:
+    type: integer
+    range:
+    - 128
+    - 8192
+    default: 512
+  decode_sequences:
+    type: integer
+    range:
+    - 1
+    - 4096
+    default: 64
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  prefill_sealed_blocks:
+    cardinality: floor(prefill_chunk_tokens / block_size)
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+  decode_sealed_blocks:
+    cardinality: floor(decode_sequences / block_size)
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: prefill_sealed_blocks
+  state: absent_from_store
+  value: true
+phases:
+- id: prefill-burst
+  actors:
+    count: 1
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: store
+    keys: prefill_sealed_blocks
+    order: sequential
+    repeat: floor(prefill_chunk_tokens / block_size)
+- id: decode-trickle
+  actors:
+    count: decode_sequences
+    arrival: staggered
+    concurrency: decode_sequences
+  operations:
+  - op: store
+    keys: decode_sealed_blocks
+    order: sequential
+    repeat: '1'
+measure:
+- phase: prefill-burst
+  operation: store
+  metrics:
+  - throughput_MBps
+- phase: decode-trickle
+  operation: store
+  metrics:
+  - throughput_MBps
+  - latency_p50_ms
+expected_io:
+  stores: floor(prefill_chunk_tokens / block_size) + floor(decode_sequences / block_size)
+  loads: '0'

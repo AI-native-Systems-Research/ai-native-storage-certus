@@ -1,0 +1,67 @@
+id: cohort-sharing-and-load-coalescing
+name: Shared Prefix Coalesced Load
+status: candidate
+parameters:
+  cohort_size:
+    type: integer
+    range:
+    - 2
+    - 1024
+    default: 8
+  shared_prefix_blocks:
+    type: integer
+    range:
+    - 1
+    - 8192
+    default: 128
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  shared_blocks:
+    cardinality: shared_prefix_blocks
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: global
+    disjoint_between_actors: false
+preconditions:
+- subject: shared_blocks
+  state: present_in_store
+  value: true
+- subject: shared_blocks
+  state: absent_from_local_cache
+  value: true
+phases:
+- id: coalesced-load
+  actors:
+    count: cohort_size
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: load
+    keys: shared_blocks
+    order: sequential
+    repeat: shared_prefix_blocks
+measure:
+- phase: coalesced-load
+  operation: load
+  metrics:
+  - throughput_MBps
+  - latency_p99_ms
+expected_io:
+  stores: '0'
+  loads: shared_prefix_blocks

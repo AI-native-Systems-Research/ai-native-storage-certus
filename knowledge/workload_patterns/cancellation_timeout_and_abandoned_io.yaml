@@ -1,0 +1,57 @@
+id: cancellation-timeout-and-abandoned-io
+name: Client Cancel Mid-Decode Cleanup
+status: candidate
+parameters:
+  abandoned_blocks:
+    type: integer
+    range:
+    - 1
+    - 2048
+    default: 64
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  cancelled_blocks:
+    cardinality: abandoned_blocks
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: cancelled_blocks
+  state: present_in_store
+  value: true
+phases:
+- id: cancel-cleanup
+  actors:
+    count: 1
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: delete
+    keys: cancelled_blocks
+    order: sequential
+    repeat: abandoned_blocks
+measure:
+- phase: cancel-cleanup
+  operation: store
+  metrics:
+  - latency_p50_ms
+expected_io:
+  stores: '0'
+  loads: '0'
