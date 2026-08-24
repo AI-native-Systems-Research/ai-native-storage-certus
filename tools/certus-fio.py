@@ -39,7 +39,6 @@ from certus_shmq_helpers import (
     RingError,
     add_shm_arg,
     connect,
-    run_pipeline,
     single_region,
 )
 
@@ -181,11 +180,10 @@ class PhaseResult:
 
 class BenchRunner:
     def __init__(self, pattern: WorkloadPattern, ring: Ring, gpu_id: int = 0,
-                 pipeline_depth: int = 4, cleanup_before: bool = False):
+                 cleanup_before: bool = False):
         self.pattern = pattern
         self.ring = ring
         self.gpu_id = gpu_id
-        self.pipeline_depth = pipeline_depth
         self.cleanup_before = cleanup_before
         self._stop = threading.Event()
         self._all_keys = set()
@@ -245,13 +243,17 @@ class BenchRunner:
                 if ks["sharing"] == "global":
                     keys = self._get_keys(ks_name, 0, 1)
                     entries = [(k, [region]) for k in keys]
-                    self.ring.populate(entries)
+                    oks = self.ring.populate(entries)
+                    if not all(oks):
+                        print(f"  WARNING: {sum(1 for o in oks if not o)}/{len(oks)} populate failures in setup")
                 else:
                     max_actors = self._max_actors_for_keyspace(ks_name)
                     for aid in range(max_actors):
                         keys = self._get_keys(ks_name, aid, max_actors)
                         entries = [(k, [region]) for k in keys]
-                        self.ring.populate(entries)
+                        oks = self.ring.populate(entries)
+                        if not all(oks):
+                            print(f"  WARNING: populate failures for actor {aid}")
 
                 self.ring.flush_to_ssd()
                 time.sleep(0.5)
@@ -273,102 +275,99 @@ class BenchRunner:
                 except RingError:
                     pass
 
-    def _run_actor(self, actor_id, op, ks_name, num_actors, object_bytes, repeat_count,
-                   order, result: PhaseResult, start_event: threading.Event,
+    def _run_actor(self, actor_id, ops_sequence, num_actors, start_event: threading.Event,
                    concurrency_sem: threading.Semaphore, ready_latch: list):
+        """Run one actor thread. Each actor claims one Ring channel (auto on first call).
+
+        ops_sequence: list of (op, ks_name, object_bytes, repeat_count, order, result)
+        For multi-op phases, same actor runs ops sequentially (not split across actors).
+        """
         _libcudart.cudaSetDevice(self.gpu_id)
 
+        # Pre-allocate one buffer per op type (one buffer per actor is correct for shmq
+        # since Ring is blocking — no async pipelining within one channel)
         import itertools
-        base_keys = list(self._get_keys(ks_name, actor_id, num_actors))
-        if repeat_count > 1 and repeat_count != len(base_keys):
-            keys = list(itertools.islice(itertools.cycle(base_keys), repeat_count))
-        else:
-            keys = base_keys[:]
-
-        if order == "random":
-            random.shuffle(keys)
-
-        if op == "load":
-            buffers = [self._alloc_buffer(object_bytes) for _ in range(self.pipeline_depth)]
-        elif op == "store":
-            buffers = [self._alloc_buffer(object_bytes)]
-        else:
-            buffers = []
+        op_buffers = {}
+        for op, ks_name, object_bytes, _, _, _ in ops_sequence:
+            if op in ("store", "load") and op not in op_buffers:
+                op_buffers[op] = self._alloc_buffer(object_bytes)
 
         ready_latch.append(True)
         start_event.wait()
 
         concurrency_sem.acquire()
         try:
-            if op == "store":
-                handle_bytes, size = buffers[0]
-                region = single_region(handle_bytes, self.gpu_id, size)
-                for key in keys:
-                    if self._stop.is_set():
-                        break
-                    t0 = time.perf_counter()
-                    try:
-                        oks = self.ring.populate([(key, [region])])
-                        t1 = time.perf_counter()
-                        if oks and oks[0]:
-                            result.record(t1 - t0, object_bytes)
-                        else:
-                            result.record_error()
-                    except RingError:
-                        result.record_error()
-                    self._all_keys.add(key)
+            for op, ks_name, object_bytes, repeat_count, order, result in ops_sequence:
+                if self._stop.is_set():
+                    break
 
-            elif op == "load":
-                regions = [single_region(h, self.gpu_id, s) for h, s in buffers]
-                slot = 0
-                for key in keys:
-                    if self._stop.is_set():
-                        break
-                    region = regions[slot % self.pipeline_depth]
-                    t0 = time.perf_counter()
-                    try:
-                        oks = self.ring.lookup([(key, [region])])
-                        _libcudart.cudaDeviceSynchronize()
-                        t1 = time.perf_counter()
-                        if oks and oks[0]:
-                            result.record(t1 - t0, object_bytes)
-                        else:
-                            result.record_error()
-                    except RingError:
-                        result.record_error()
-                    slot += 1
+                base_keys = list(self._get_keys(ks_name, actor_id, num_actors))
+                if repeat_count > 1 and repeat_count != len(base_keys):
+                    keys = list(itertools.islice(itertools.cycle(base_keys), repeat_count))
+                else:
+                    keys = base_keys[:]
+                if order == "random":
+                    random.shuffle(keys)
 
-            elif op == "delete":
-                for batch_start in range(0, len(keys), 100):
-                    if self._stop.is_set():
-                        break
-                    batch_keys = keys[batch_start:batch_start + 100]
-                    t0 = time.perf_counter()
-                    try:
-                        self.ring.remove(batch_keys)
-                        t1 = time.perf_counter()
-                        result.record(t1 - t0, 0)
-                    except RingError:
-                        result.record_error()
+                if op == "store":
+                    handle_bytes, size = op_buffers["store"]
+                    region = single_region(handle_bytes, self.gpu_id, size)
+                    for key in keys:
+                        if self._stop.is_set():
+                            break
+                        t0 = time.perf_counter()
+                        try:
+                            oks = self.ring.populate([(key, [region])])
+                            t1 = time.perf_counter()
+                            if oks and oks[0]:
+                                result.record(t1 - t0, object_bytes)
+                            else:
+                                result.record_error()
+                        except RingError:
+                            result.record_error()
+                        self._all_keys.add(key)
+
+                elif op == "load":
+                    handle_bytes, size = op_buffers["load"]
+                    region = single_region(handle_bytes, self.gpu_id, size)
+                    for key in keys:
+                        if self._stop.is_set():
+                            break
+                        t0 = time.perf_counter()
+                        try:
+                            oks = self.ring.lookup([(key, [region])])
+                            _libcudart.cudaDeviceSynchronize()
+                            t1 = time.perf_counter()
+                            if oks and oks[0]:
+                                result.record(t1 - t0, object_bytes)
+                            else:
+                                result.record_error()
+                        except RingError:
+                            result.record_error()
+
+                elif op == "delete":
+                    for batch_start in range(0, len(keys), 100):
+                        if self._stop.is_set():
+                            break
+                        batch_keys = keys[batch_start:batch_start + 100]
+                        t0 = time.perf_counter()
+                        try:
+                            self.ring.remove(batch_keys)
+                            t1 = time.perf_counter()
+                            result.record(t1 - t0, 0)
+                        except RingError:
+                            result.record_error()
         finally:
             concurrency_sem.release()
+            self.ring.release_channel()
 
-    def _split_actors(self, operations, total_actors):
-        splits = []
+    def _is_parallel_split(self, operations):
+        """Determine if multi-op phase should split actors (parallel) or run sequentially."""
+        # Parallel if explicit actor params exist (e.g., store_actors, load_actors)
         for op_spec in operations:
-            param_name = f"{op_spec['op']}_actors"
-            if param_name in self.pattern.params:
-                splits.append(max(1, int(self.pattern.params[param_name])))
-            else:
-                splits.append(None)
-        if all(s is not None for s in splits):
-            return splits
-        if total_actors <= len(operations):
-            return [max(1, total_actors)] * len(operations)
-        per_op = max(1, total_actors // len(operations))
-        result = [per_op] * len(operations)
-        result[0] += total_actors - sum(result)
-        return result
+            if f"{op_spec['op']}_actors" in self.pattern.params:
+                return True
+        return False
 
     def _run_phase(self, phase_spec) -> list:
         phase_id = phase_spec["id"]
@@ -377,47 +376,82 @@ class BenchRunner:
         total_actors = max(1, eval_expr(actors_spec.get("count", 1), self.pattern.params))
         concurrency = max(1, eval_expr(actors_spec.get("concurrency", total_actors), self.pattern.params))
 
-        if len(operations) > 1:
-            actors_per_op = self._split_actors(operations, total_actors)
-        else:
-            actors_per_op = [total_actors]
+        # FIX #3: Release main thread's channel before measured phase
+        self.ring.release_channel()
+
+        # FIX #4: Determine if multi-op is parallel (split actors) or sequential (same actors)
+        parallel_split = len(operations) > 1 and self._is_parallel_split(operations)
+
+        # FIX: Compute effective concurrency BEFORE creating semaphore and threads
+        effective_concurrency = min(concurrency, self.ring.channel_count)
 
         start_event = threading.Event()
-        concurrency_sem = threading.Semaphore(concurrency)
+        concurrency_sem = threading.Semaphore(effective_concurrency)
         ready_latch = []
         results = []
         threads = []
-        total_thread_count = 0
-        actor_offset = 0
 
-        for op_idx, op_spec in enumerate(operations):
-            op = op_spec["op"]
-            ks_name = op_spec["keys"]
-            ks = self.pattern.keyspaces[ks_name]
-            object_bytes = ks["object_bytes"]
-            repeat_count = eval_expr(op_spec.get("repeat", 1), self.pattern.params) if "repeat" in op_spec else 1
-            order = op_spec.get("order", "sequential")
-            op_actors = actors_per_op[op_idx]
+        # Build per-operation result objects
+        op_results = {}
+        for op_spec in operations:
+            r = PhaseResult(phase_id, op_spec["op"])
+            results.append(r)
+            op_results[op_spec["op"]] = r
 
-            result = PhaseResult(phase_id, op)
-            results.append(result)
+        if parallel_split:
+            # Bidirectional case: split actors between ops, each actor does one op
+            for op_spec in operations:
+                op = op_spec["op"]
+                ks_name = op_spec["keys"]
+                ks = self.pattern.keyspaces[ks_name]
+                object_bytes = ks["object_bytes"]
+                repeat_count = eval_expr(op_spec.get("repeat", 1), self.pattern.params) if "repeat" in op_spec else 1
+                order = op_spec.get("order", "sequential")
+                param_name = f"{op}_actors"
+                op_actors = max(1, int(self.pattern.params.get(param_name, total_actors // len(operations))))
 
-            for i in range(op_actors):
+                for i in range(op_actors):
+                    ops_seq = [(op, ks_name, object_bytes, repeat_count, order, op_results[op])]
+                    t = threading.Thread(
+                        target=self._run_actor,
+                        args=(i, ops_seq, op_actors, start_event, concurrency_sem, ready_latch),
+                        daemon=True,
+                    )
+                    threads.append(t)
+        else:
+            # Sequential case: each actor runs ALL ops in order (load-then-delete, etc.)
+            ops_seq_template = []
+            for op_spec in operations:
+                op = op_spec["op"]
+                ks_name = op_spec["keys"]
+                ks = self.pattern.keyspaces[ks_name]
+                object_bytes = ks["object_bytes"]
+                repeat_count = eval_expr(op_spec.get("repeat", 1), self.pattern.params) if "repeat" in op_spec else 1
+                order = op_spec.get("order", "sequential")
+                ops_seq_template.append((op, ks_name, object_bytes, repeat_count, order, op_results[op]))
+
+            for i in range(total_actors):
                 t = threading.Thread(
                     target=self._run_actor,
-                    args=(actor_offset + i, op, ks_name, total_actors, object_bytes,
-                          repeat_count, order, result, start_event, concurrency_sem, ready_latch),
+                    args=(i, ops_seq_template, total_actors, start_event, concurrency_sem, ready_latch),
                     daemon=True,
                 )
                 threads.append(t)
-                total_thread_count += 1
-            actor_offset += op_actors
+
+        if len(threads) > effective_concurrency:
+            print(f"  Note: {len(threads)} actors, {effective_concurrency} concurrent "
+                  f"(server channels: {self.ring.channel_count})")
 
         for t in threads:
             t.start()
+
+        # Wait for all actors to be ready
         deadline = time.time() + 30
-        while len(ready_latch) < total_thread_count and time.time() < deadline:
+        while len(ready_latch) < len(threads) and time.time() < deadline:
             time.sleep(0.01)
+
+        if len(ready_latch) < len(threads):
+            print(f"  WARNING: only {len(ready_latch)}/{len(threads)} actors ready (timeout)")
 
         wall_start = time.perf_counter()
         for r in results:
@@ -436,7 +470,7 @@ class BenchRunner:
         print(f"certus-fio: {self.pattern.id}")
         print(f"{'='*70}")
         print(f"  Pattern: {self.pattern.name}")
-        print(f"  Pipeline depth: {self.pipeline_depth}")
+        print(f"  Channels available: {self.ring.channel_count}")
         for k, v in self.pattern.params.items():
             print(f"  {k}: {v}")
         for ks_name, ks in self.pattern.keyspaces.items():
@@ -534,7 +568,7 @@ def cmd_run(args):
     ring = connect(args.shm_path, ready_timeout=10.0)
     runner = BenchRunner(
         pattern=pattern, ring=ring, gpu_id=args.gpu,
-        pipeline_depth=args.pipeline_depth, cleanup_before=args.cleanup_before,
+        cleanup_before=args.cleanup_before,
     )
 
     def sighandler(sig, frame):
@@ -589,7 +623,6 @@ def main():
     p_run = subparsers.add_parser("run", help="Run a benchmark")
     p_run.add_argument("--pattern", required=True)
     p_run.add_argument("--gpu", type=int, default=0)
-    p_run.add_argument("--pipeline-depth", type=int, default=4)
     p_run.add_argument("--override", nargs="*", help="key=value overrides")
     p_run.add_argument("--cleanup-before", action="store_true")
 
