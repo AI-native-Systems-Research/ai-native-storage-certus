@@ -1,13 +1,13 @@
 ---
 name: tools-verify-creusot-with-properties
-description: Create a Creusot verification for a Certus component from BOTH its spec and its Rust code — at function granularity with spec-derived contracts — prove it, and emit a plain-English `verified_properties.md` recording exactly what was proved (with evidence). Use for the normal verify-and-document workflow (not the blind property-extraction experiment).
+description: Create a Creusot verification for a Certus component from BOTH its spec and its Rust code — at function granularity with spec-derived contracts — prove it, and emit a plain-English `PROPERTIES.md` recording exactly what was proved (with evidence). Use for the normal verify-and-document workflow (not the blind property-extraction experiment).
 argument-hint: "<component-name-or-path>"
 ---
 
 ## Goal
 Verify a component with Creusot **and** leave a human-readable record of the proven properties.
 Inputs are the component's **spec** (the intended behavior) and its **Rust code** (the functions to
-prove). Outputs are (1) the Creusot `verif/` artifacts and (2) `verified_properties.md` beside them.
+prove). Outputs are (1) the Creusot `verif/` artifacts and (2) `PROPERTIES.md` beside them.
 
 This skill = **`tools-verify-creusot` + explicit spec pairing + a documented-properties step.** Use
 `tools-verify-creusot` for the create/proof mechanics (pure-core extraction, `verif/` crate,
@@ -26,11 +26,11 @@ spec-derived-contract sourcing and the plain-English output.
 3. **Prove.** `cargo creusot` to green; iterate. Record every `#[trusted]` boundary and assumption.
 4. **Validate (anti-vacuity).** Fault-inject each function (a contract-violating change) and confirm the
    proof goes **red**; if it stays green, the contract is vacuous — strengthen it. Then revert.
-5. **Document → `components/<name>/verif/verified_properties.md`** (see shape below): for each proven
+5. **Document → `components/<name>/verif/PROPERTIES.md`** (see shape below): for each proven
    property, the operation, the property in **plain English**, its **spec source**, and the **evidence**.
    Be honest — a green proof of a *mirror* only covers the mirror; say so, and list trusted boundaries.
 
-## `verified_properties.md` shape
+## `PROPERTIES.md` shape
 ```
 # Verified properties — <component> (Creusot)
 Proven from spec `specs/<...>/spec.md` against code `src/<...>`. Artifacts: `verif/`.
