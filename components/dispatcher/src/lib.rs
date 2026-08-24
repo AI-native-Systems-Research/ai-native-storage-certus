@@ -77,7 +77,7 @@ use interfaces::{
     CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
     DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
     IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupResult,
-    PciAddress,
+    PciAddress, TierEventStats,
 };
 
 use component_core::binding::bind;
@@ -99,6 +99,63 @@ pub enum EvictionReason {
 pub struct EvictionEvent {
     pub key: CacheKey,
     pub reason: EvictionReason,
+}
+
+/// Lifetime counters for KV-cache tier movement events. All fields are
+/// monotonic (cumulative since process start); `snapshot()` reads them without
+/// resetting, so a periodic telemetry tick and a final summary can both read
+/// independently and a caller derives per-interval deltas by subtracting
+/// successive snapshots. Shared behind an `Arc` so the background evictor
+/// threads can bump the same counters as the foreground dispatcher paths.
+#[derive(Debug, Default)]
+pub struct TierEventCounters {
+    /// Blocks promoted SSD -> DRAM (memory tier), across all promote paths.
+    promotions_to_memory: AtomicU64,
+    /// Lookups served up to the GPU (one per successfully-served lookup key),
+    /// whether the source was the memory tier or SSD.
+    promotions_to_gpu: AtomicU64,
+    /// Memory-tier (DRAM) entries evicted — demoted to SSD or dropped — by
+    /// either the foreground clean-eviction path or the background evictor.
+    evictions_from_memory: AtomicU64,
+    /// Extents freed on SSD by the background extent evictor.
+    evictions_from_ssd: AtomicU64,
+}
+
+impl TierEventCounters {
+    #[inline]
+    pub fn record_promotion_to_memory(&self) {
+        self.promotions_to_memory.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_promotion_to_gpu(&self) {
+        self.promotions_to_gpu.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_promotions_to_gpu(&self, n: u64) {
+        self.promotions_to_gpu.fetch_add(n, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_eviction_from_memory(&self) {
+        self.evictions_from_memory.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_eviction_from_ssd(&self) {
+        self.evictions_from_ssd.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Read the cumulative counters without resetting them.
+    pub fn snapshot(&self) -> TierEventStats {
+        TierEventStats {
+            promotions_to_memory: self.promotions_to_memory.load(Ordering::Relaxed),
+            promotions_to_gpu: self.promotions_to_gpu.load(Ordering::Relaxed),
+            evictions_from_memory: self.evictions_from_memory.load(Ordering::Relaxed),
+            evictions_from_ssd: self.evictions_from_ssd.load(Ordering::Relaxed),
+        }
+    }
 }
 
 /// Holds one (block-device, extent-manager) pair for a data drive.
@@ -257,6 +314,7 @@ define_component! {
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
             eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
             eviction_dropped: AtomicU64,
+            tier_counters: Arc<TierEventCounters>,
         },
     }
 }
@@ -632,7 +690,12 @@ impl DispatcherComponent {
             );
             std::mem::forget(temp_buf);
             // Register promoted entry in dispatch-map.
-            let _ = dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size);
+            if dm
+                .create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
+                .is_ok()
+            {
+                self.tier_counters.record_promotion_to_memory();
+            }
             let _ = dm.release_write(key);
             return result.map_err(|e| {
                 DispatcherError::IoError(format!("GPU DMA copy (promote) failed: {e}"))
@@ -709,6 +772,7 @@ impl DispatcherComponent {
         let _ = offset; // offset retained inside promote_block_to_memory_tier
         dm.promote_block_to_memory_tier(key, mem_ptr, ipc_handle.size)
             .map_err(|e| DispatcherError::IoError(format!("promote transition failed: {e}")))?;
+        self.tier_counters.record_promotion_to_memory();
 
         Ok(())
     }
@@ -864,6 +928,7 @@ impl DispatcherComponent {
             if dm.try_evict_to_block(cand).is_ok() {
                 let _ = mt.remove(cand);
                 self.emit_eviction(cand, EvictionReason::Demoted);
+                self.tier_counters.record_eviction_from_memory();
                 return true;
             }
             // Fallback: write-through incomplete so it can't be demoted. Drop it
@@ -873,6 +938,7 @@ impl DispatcherComponent {
             if dm.remove(cand).is_ok() {
                 let _ = mt.remove(cand);
                 self.emit_eviction(cand, EvictionReason::Removed);
+                self.tier_counters.record_eviction_from_memory();
                 return true;
             }
             // Pinned by an in-flight load — leave it and try the next candidate.
@@ -1854,6 +1920,7 @@ impl IDispatcher for DispatcherComponent {
                     },
                     evictor_logger,
                     evictor_eviction_tx,
+                    Arc::clone(&self.tier_counters),
                 );
                 *self.bg_evictor.lock().unwrap() = Some(evictor);
             }
@@ -1883,6 +1950,7 @@ impl IDispatcher for DispatcherComponent {
                 },
                 mt_evictor_logger,
                 Arc::clone(&self.eviction_tx),
+                Arc::clone(&self.tier_counters),
             );
             *self.bg_mt_evictor.lock().unwrap() = Some(mt_evictor);
         }
@@ -2192,11 +2260,12 @@ impl IDispatcher for DispatcherComponent {
                         .insert(entry.key, entry.total_size)
                         .map(|mem_ptr| {
                             // In-place, pin-safe promote (no remove/recreate).
-                            let _ = dm.promote_block_to_memory_tier(
-                                entry.key,
-                                mem_ptr,
-                                entry.total_size,
-                            );
+                            if dm
+                                .promote_block_to_memory_tier(entry.key, mem_ptr, entry.total_size)
+                                .is_ok()
+                            {
+                                self.tier_counters.record_promotion_to_memory();
+                            }
                         })
                         .map_err(|e| match e {
                             // Preserve AlreadyExists so the recovery pass below
@@ -2425,6 +2494,7 @@ impl IDispatcher for DispatcherComponent {
                                     ))
                                 })
                                 .and_then(|()| {
+                                    self.tier_counters.record_promotion_to_memory();
                                     // Multi-region (N>1): the pipeline only filled
                                     // the DRAM slot (gpu_dst was null). Scatter the
                                     // now-resident slot to the N GPU allocations.
@@ -2627,7 +2697,15 @@ impl IDispatcher for DispatcherComponent {
             }
         }
 
-        results.into_iter().map(|r| r.unwrap()).collect()
+        let out: Vec<Result<(), DispatcherError>> =
+            results.into_iter().map(|r| r.unwrap()).collect();
+        // One "promotion to GPU" per key successfully served up to the caller's
+        // GPU buffer this batch (warm hit, cold promote, or remote fetch alike).
+        let served = out.iter().filter(|r| r.is_ok()).count() as u64;
+        if served > 0 {
+            self.tier_counters.record_promotions_to_gpu(served);
+        }
+        out
     }
 
     fn lookup_async(
@@ -2694,11 +2772,15 @@ impl IDispatcher for DispatcherComponent {
                         );
                         let _ = dm.release_read(key);
                         mt.touch(key);
+                        if r.is_ok() {
+                            self.tier_counters.record_promotion_to_gpu();
+                        }
                         r.map(|()| null_stream)
                     }
                     LookupResult::BlockDevice { offset } => {
                         let _ = dm.release_read(key);
                         self.promote_and_serve(key, offset, &ipc_handle, &gpu, &dm, &mt, device)?;
+                        self.tier_counters.record_promotion_to_gpu();
                         Ok(null_stream)
                     }
                 }
@@ -3143,7 +3225,12 @@ impl IDispatcher for DispatcherComponent {
                 }
                 if let Ok(mem_ptr) = mt.insert(entry.key, entry.size) {
                     // In-place promote (pin-safe): no remove/recreate.
-                    let _ = dm.promote_block_to_memory_tier(entry.key, mem_ptr, entry.size);
+                    if dm
+                        .promote_block_to_memory_tier(entry.key, mem_ptr, entry.size)
+                        .is_ok()
+                    {
+                        self.tier_counters.record_promotion_to_memory();
+                    }
                 }
             }
             return;
@@ -3228,7 +3315,12 @@ impl IDispatcher for DispatcherComponent {
                         }
 
                         // In-place, pin-safe promote (no remove/recreate).
-                        let _ = dm.promote_block_to_memory_tier(entry.key, mem_ptr, entry.size);
+                        if dm
+                            .promote_block_to_memory_tier(entry.key, mem_ptr, entry.size)
+                            .is_ok()
+                        {
+                            self.tier_counters.record_promotion_to_memory();
+                        }
                     }
                 });
             }
@@ -3293,6 +3385,10 @@ impl IDispatcher for DispatcherComponent {
             agg.merge_from(&drive.block_dev_iface.read_write_stats());
         }
         agg
+    }
+
+    fn tier_event_stats(&self) -> interfaces::TierEventStats {
+        self.tier_counters.snapshot()
     }
 }
 
@@ -4190,6 +4286,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -4349,6 +4446,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -4396,6 +4494,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
     }
 
@@ -4416,6 +4515,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -4438,6 +4538,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -4465,6 +4566,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -4493,6 +4595,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -4521,6 +4624,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -4544,6 +4648,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -4567,6 +4672,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -4595,6 +4701,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -4626,6 +4733,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -4648,6 +4756,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -4671,6 +4780,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -4725,6 +4835,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -4758,6 +4869,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -4835,6 +4947,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -5385,6 +5498,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
 
         // Pool is now full (16384 used). Trying to add 4096 more should evict.
@@ -5420,6 +5534,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
 
         // Plenty of space, no eviction needed.
@@ -5450,6 +5565,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -5518,6 +5634,7 @@ mod tests {
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -5735,6 +5852,7 @@ mod tests {
             },
             None,
             None,
+            Arc::new(crate::TierEventCounters::default()),
         );
 
         std::thread::sleep(std::time::Duration::from_millis(200));

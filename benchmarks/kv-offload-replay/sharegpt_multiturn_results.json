@@ -1,0 +1,96 @@
+{
+  "model": "NousResearch/Meta-Llama-3-8B",
+  "max_model_len": 8192,
+  "output_tokens": 150,
+  "cpu_bytes_to_use": 17179869184,
+  "disk_dir": null,
+  "tier": "cpu",
+  "elapsed_time": 12.1092296380084,
+  "num_conversations": 16,
+  "num_rounds": 3,
+  "total_generations": 48,
+  "mode": "async",
+  "turn_latency_p50": 3.845954033007729,
+  "turn_latency_p90": 4.543956158988294,
+  "turn_latency_p99": 4.549192007005331,
+  "ttft_p50": 0.0776108709978871,
+  "counter_movement": {
+    "vllm:kv_offload_total_bytes_total": 580911104.0,
+    "vllm:kv_offload_total_time_total": 0.11931321561336518,
+    "vllm:kv_offload_store_bytes_total": 580911104.0,
+    "vllm:kv_offload_store_time_total": 0.11931321561336518,
+    "vllm:estimated_flops_per_gpu_total": 97103703441408.0,
+    "vllm:estimated_read_bytes_per_gpu_total": 6507813699584.0,
+    "vllm:estimated_write_bytes_per_gpu_total": 26009569280.0,
+    "vllm:prefix_cache_queries_total": 7132.0,
+    "vllm:prefix_cache_hits_total": 5920.0,
+    "vllm:external_prefix_cache_queries_total": 1212.0,
+    "vllm:prompt_tokens_total": 7132.0,
+    "vllm:prompt_tokens_by_source_total": 7132.0,
+    "vllm:prompt_tokens_cached_total": 5920.0,
+    "vllm:generation_tokens_total": 5300.0,
+    "vllm:request_success_total": 36.0
+  },
+  "samples": [
+    {
+      "t": 87971.971192618,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87972.974774832,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87973.977619888,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87974.980828518,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87975.983696597,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87976.986682745,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87977.989412276,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87978.992424602,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87979.99572386,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87981.000364167,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87982.003513879,
+      "read_bytes": null,
+      "write_bytes": null
+    },
+    {
+      "t": 87983.006682004,
+      "read_bytes": null,
+      "write_bytes": null
+    }
+  ]
+}

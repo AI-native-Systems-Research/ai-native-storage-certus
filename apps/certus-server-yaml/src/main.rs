@@ -38,6 +38,19 @@ extern "C" fn handle_signal(_sig: libc::c_int) {
     SHUTDOWN.store(true, Ordering::SeqCst);
 }
 
+/// Format the cumulative KV-cache tier-movement counters for the server log.
+/// The `tier-events` shape here is what the kvprofile renderer's parser scans
+/// for; keep it in sync with `tools/render_kvprofile.py`'s `TIER_RE`.
+fn format_tier_stats(s: &interfaces::TierEventStats) -> String {
+    format!(
+        "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]",
+        pm = s.promotions_to_memory,
+        pg = s.promotions_to_gpu,
+        em = s.evictions_from_memory,
+        es = s.evictions_from_ssd,
+    )
+}
+
 /// Certus dispatcher server (YAML-composed) over a /dev/shm mailbox.
 #[derive(Parser)]
 #[command(
@@ -286,6 +299,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         libc::signal(libc::SIGTERM, handle_signal as libc::sighandler_t);
     }
 
+    // Always-on KV-cache tier-event telemetry: a periodic "tier-events" line
+    // (cumulative counts, every ~2s) that the kvprofile renderer parses into the
+    // promotions/evictions series. The dispatcher's tier counters are always
+    // present. (SSD read/write bytes are not logged here — the client queries
+    // them over the shmq ring via GetIoStats, mirroring the old gRPC path.)
+    // Exits when SHUTDOWN flips; the process exits before any join is needed.
+    {
+        let tier_disp = Arc::clone(&stack.dispatcher);
+        let tier_logger = Arc::clone(&logger);
+        std::thread::Builder::new()
+            .name("tier-events".into())
+            .spawn(move || {
+                while !SHUTDOWN.load(Ordering::Relaxed) {
+                    // Sleep in small steps so shutdown is responsive.
+                    for _ in 0..8 {
+                        if SHUTDOWN.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(250));
+                    }
+                    tier_logger.info(&format!(
+                        "certus-server-yaml: tier-events {}",
+                        format_tier_stats(&tier_disp.tier_event_stats())
+                    ));
+                }
+            })
+            .expect("failed to spawn tier-events telemetry thread");
+    }
+
     // Run the shared poller + worker-pool + reaper loop; blocks until SHUTDOWN.
     // Offloaded to a blocking thread so the tokio runtime keeps driving the
     // metrics HTTP endpoint and OTel export.
@@ -308,6 +350,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         libc::signal(libc::SIGINT, libc::SIG_IGN);
         libc::signal(libc::SIGTERM, libc::SIG_IGN);
     }
+
+    // Always-on: the cumulative KV-cache tier-movement counts for this run,
+    // logged before teardown while the dispatcher's counters are still live.
+    logger.info(&format!(
+        "certus-server-yaml: FINAL tier-events {}",
+        format_tier_stats(&stack.dispatcher.tier_event_stats())
+    ));
 
     let _ = stack.dispatcher.shutdown();
     stack.spdk_env.fini();

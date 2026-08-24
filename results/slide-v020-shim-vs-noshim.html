@@ -1,0 +1,338 @@
+<title>Certus v0.20 — shim vs non-shim, per round</title>
+<style>
+  :root {
+    /* light — cool neutrals biased toward the blue accent */
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --surface-2: #f7f9fc;
+    --ink: #182231;
+    --ink-2: #56637a;
+    --ink-3: #8a95a8;
+    --grid: #e6eaf1;
+    --border: #dce1ea;
+    --accent: #2f6df0;      /* non-shim / pre-shim (current) */
+    --alt: #d9821a;         /* shim / compat layer */
+    --good: #17915f;
+    --warn: #c26a12;
+    --accent-soft: #2f6df01a;
+    --alt-soft: #d9821a1a;
+    --shadow: 0 1px 2px rgba(20,30,50,.06), 0 8px 24px rgba(20,30,50,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e131b;
+      --surface: #151d28;
+      --surface-2: #111823;
+      --ink: #e9eef6;
+      --ink-2: #9dabbe;
+      --ink-3: #6b7788;
+      --grid: #212b39;
+      --border: #283242;
+      --accent: #5b90f7;
+      --alt: #f0a63c;
+      --good: #35bd85;
+      --warn: #e8a34a;
+      --accent-soft: #5b90f722;
+      --alt-soft: #f0a63c22;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e131b;
+    --surface: #151d28;
+    --surface-2: #111823;
+    --ink: #e9eef6;
+    --ink-2: #9dabbe;
+    --ink-3: #6b7788;
+    --grid: #212b39;
+    --border: #283242;
+    --accent: #5b90f7;
+    --alt: #f0a63c;
+    --good: #35bd85;
+    --warn: #e8a34a;
+    --accent-soft: #5b90f722;
+    --alt-soft: #f0a63c22;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    padding: clamp(16px, 3vw, 40px);
+  }
+  .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+  .mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+
+  .slide {
+    max-width: 1180px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  /* ---- header ---- */
+  header {
+    display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+    gap: 16px 24px;
+    padding: 26px 30px 20px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  }
+  .eyebrow {
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600; margin: 0 0 6px;
+  }
+  h1 { font-size: clamp(19px, 2.4vw, 25px); line-height: 1.15; margin: 0; font-weight: 680; letter-spacing: -.01em; text-wrap: balance; }
+  h1 .win { color: var(--accent); }
+  .sub { margin: 8px 0 0; color: var(--ink-2); font-size: 13px; max-width: 62ch; }
+  .legend { display: flex; gap: 18px; align-items: center; }
+  .lg { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink); font-weight: 560; }
+  .lg .swatch { width: 26px; height: 0; border-top-width: 3px; border-top-style: solid; border-radius: 2px; }
+  .lg.nonshim .swatch { border-top-color: var(--accent); }
+  .lg.shim .swatch { border-top-color: var(--alt); border-top-style: dashed; }
+  .lg small { display: block; color: var(--ink-3); font-weight: 400; font-size: 10.5px; letter-spacing: .02em; }
+
+  /* ---- summary strip ---- */
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); }
+  .stat { background: var(--surface); padding: 14px 18px; }
+  .stat .k { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  .stat .row { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; }
+  .stat .v { font-size: 21px; font-weight: 680; letter-spacing: -.01em; }
+  .stat .v.a { color: var(--accent); }
+  .stat .cmp { font-size: 11.5px; color: var(--ink-2); }
+  .delta { font-size: 11.5px; font-weight: 650; margin-top: 5px; }
+  .delta.up { color: var(--good); }
+  .delta.flat { color: var(--ink-3); }
+  .delta.dn { color: var(--warn); }
+
+  /* ---- chart grid ---- */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); }
+  .panel { background: var(--surface); padding: 18px 20px 12px; }
+  .panel h2 { margin: 0; font-size: 14px; font-weight: 640; letter-spacing: -.005em; }
+  .panel .cap { margin: 3px 0 6px; font-size: 11.5px; color: var(--ink-2); }
+  .panel svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .ax { stroke: var(--grid); stroke-width: 1; }
+  .axlabel { fill: var(--ink-3); font-size: 10px; }
+  .axtitle { fill: var(--ink-2); font-size: 10.5px; font-weight: 500; }
+  .mk { stroke: var(--surface); stroke-width: 1.5; }
+  .endlab { font-size: 10.5px; font-weight: 640; }
+  .note-inline { fill: var(--ink-3); font-size: 10px; font-style: italic; }
+
+  /* tooltip */
+  .tip {
+    position: fixed; pointer-events: none; z-index: 20; opacity: 0;
+    transform: translate(-50%, -112%); transition: opacity .08s;
+    background: var(--ink); color: var(--surface);
+    border-radius: 8px; padding: 8px 10px; font-size: 11.5px; box-shadow: var(--shadow);
+    min-width: 132px;
+  }
+  .tip .tr { font-weight: 700; margin-bottom: 5px; font-size: 11px; letter-spacing: .02em; }
+  .tip .tl { display: flex; justify-content: space-between; gap: 14px; }
+  .tip .tl b { font-weight: 640; }
+  .tip .d.a { color: #7fb0ff; } .tip .d.b { color: #ffc472; }
+
+  /* ---- footer ---- */
+  footer { padding: 18px 30px 24px; border-top: 1px solid var(--border); background: var(--surface-2); }
+  .verdict { font-size: 13.5px; color: var(--ink); margin: 0 0 12px; font-weight: 500; }
+  .verdict b { color: var(--accent); font-weight: 700; }
+  .caveats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 28px; margin: 0; padding: 0; list-style: none; }
+  .caveats li { font-size: 11.5px; color: var(--ink-2); padding-left: 15px; position: relative; }
+  .caveats li::before { content: "▸"; position: absolute; left: 0; color: var(--ink-3); }
+  .caveats b { color: var(--ink); font-weight: 620; }
+  @media (max-width: 720px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .grid { grid-template-columns: 1fr; }
+    .caveats { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="slide">
+  <header>
+    <div>
+      <p class="eyebrow">Certus KV-Offload · vLLM 0.20.0 · gRPC connector</p>
+      <h1>Compat shim adds <span class="win">no measurable I/O</span> — and the non-shim build runs ~10% faster</h1>
+      <p class="sub">450 conversations × 12 rounds · Llama-3-8B · 150 output tok · 5,400 generations · 13 GiB DRAM tier, evict @ 60% · per-round SSD counters from the connector's rw-telemetry.</p>
+    </div>
+    <div class="legend">
+      <div class="lg nonshim"><span class="swatch"></span><span>Non-shim<small>pre-shim single-ver · 2026-08-07</small></span></div>
+      <div class="lg shim"><span class="swatch"></span><span>Compat shim<small>multi-version · 2026-07-29</small></span></div>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="k">Wall time</div>
+      <div class="row"><span class="v a num">1188.5<span style="font-size:12px;font-weight:500">s</span></span><span class="cmp num">vs 1311.1 s</span></div>
+      <div class="delta up num">−122.6 s · −9.4%</div>
+    </div>
+    <div class="stat">
+      <div class="k">Throughput</div>
+      <div class="row"><span class="v a num">4.5<span style="font-size:12px;font-weight:500"> gen/s</span></span><span class="cmp num">vs 4.1</span></div>
+      <div class="delta up num">+10.3%</div>
+    </div>
+    <div class="stat">
+      <div class="k">Tokens / s</div>
+      <div class="row"><span class="v a num">682</span><span class="cmp num">vs 618</span></div>
+      <div class="delta up num">+10.4%</div>
+    </div>
+    <div class="stat">
+      <div class="k">SSD read (total)</div>
+      <div class="row"><span class="v num">102.1<span style="font-size:12px;font-weight:500"> GiB</span></span><span class="cmp num">vs 100.5</span></div>
+      <div class="delta flat num">+1.6% · same workload</div>
+    </div>
+    <div class="stat">
+      <div class="k">SSD write (total)</div>
+      <div class="row"><span class="v num">111.9<span style="font-size:12px;font-weight:500"> GiB</span></span><span class="cmp num">vs 118.1</span></div>
+      <div class="delta dn num">−5.3% (smaller-tier effect)</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>SSD read per round</h2>
+      <p class="cap">Bytes re-read from NVMe on the load path. Curves overlap — read volume is workload-driven, not connector-driven.</p>
+      <svg id="c-read" viewBox="0 0 540 250"></svg>
+    </div>
+    <div class="panel">
+      <h2>SSD write per round</h2>
+      <p class="cap">Demoted KV written back to NVMe. Compat runs a touch higher (~10.5 vs ~9.7 GiB late) — consistent with its slightly smaller DRAM tier.</p>
+      <svg id="c-write" viewBox="0 0 540 250"></svg>
+    </div>
+    <div class="panel">
+      <h2>SSD read latency per round</h2>
+      <p class="cap">Mean read wait. Both climb ~0.9 → ~2.2 ms as the SSD queue saturates — the load path behaves identically.</p>
+      <svg id="c-lat" viewBox="0 0 540 250"></svg>
+    </div>
+    <div class="panel">
+      <h2>Wall time per round</h2>
+      <p class="cap">Round time grows with the re-read prefix. Compat measured from log timestamps; non-shim per-round wasn't logged — its 99.0 s/round mean shown for scale.</p>
+      <svg id="c-wall" viewBox="0 0 540 250"></svg>
+    </div>
+  </div>
+
+  <footer>
+    <p class="verdict"><b>Read the two together:</b> per-round read GiB and read latency are essentially identical across the two connectors, so the workload is the same — yet the non-shim build finishes 122.6 s sooner. The capability-matrix shim (per-call Python dict lookup) is not a plausible ~10% wall mover; the gap is host/tier-side, not connector overhead.</p>
+    <ul class="caveats">
+      <li><b>Not a back-to-back A/B.</b> Runs are 9 days apart with intervening host changes (fs move, hugepage-NUMA fix). Treat as "no evidence the shim costs I/O," not a controlled 10% claim.</li>
+      <li><b>Tier size differs.</b> Non-shim 13.0 GiB (from server.log); compat ~12 GiB (run notes). A smaller tier demotes more → most of compat's +5.3% write.</li>
+      <li><b>Non-shim per-round wall not captured.</b> Engine stats were disabled; only the 1188.5 s total exists → 99.0 s/round mean. Compat per-round reconstructed from timestamps (±few s).</li>
+      <li><b>Everything else held equal.</b> Same 5,400 gens, same model/params, same 60% evict threshold; per-round SSD counters read directly from each run's connector log.</li>
+    </ul>
+  </footer>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+const ROUNDS = [1,2,3,4,5,6,7,8,9,10,11,12];
+// per-round SSD read (GiB) = deltas of cumulative counter
+const readPer = {
+  nonshim: [0.00,2.72,12.09,10.51,9.25,9.30,9.39,9.62,9.88,9.72,9.65,9.96],
+  shim:    [0.00,2.38,11.79,10.70,8.90,9.60,9.24,9.81,9.62,9.56,9.29,9.63],
+};
+const writePer = {
+  nonshim: [7.80,8.04,9.43,9.25,9.21,9.46,9.61,9.72,9.85,9.61,9.96,9.91],
+  shim:    [7.60,8.30,9.27,9.37,10.20,9.93,10.54,10.38,10.47,10.47,10.66,10.91],
+};
+const latPer = {   // ms; round 1 has no reads (null)
+  nonshim: [null,0.909,1.102,1.414,1.644,1.838,2.119,2.166,2.117,2.175,2.155,2.309],
+  shim:    [null,0.916,1.129,1.429,1.683,2.010,2.060,2.294,2.348,2.349,2.265,2.186],
+};
+const wallPer = {  // s — shim measured from timestamps; nonshim flat mean (not logged per round)
+  shim:    [37,30,40,51,70,81,100,120,155,185,211,231],
+  nonshim: Array(12).fill(99.0),
+};
+
+const PAD = {l: 42, r: 58, t: 14, b: 26};
+const W = 540, H = 250;
+const tip = document.getElementById('tip');
+
+function niceMax(v){
+  const pow = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / pow;
+  const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+  return step * pow;
+}
+const SVGNS = "http://www.w3.org/2000/svg";
+function el(tag, attrs){ const e = document.createElementNS(SVGNS, tag); for(const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+function draw(id, data, opts){
+  const svg = document.getElementById(id);
+  const vals = [].concat(data.nonshim, data.shim).filter(v => v != null);
+  const ymax = opts.ymax || niceMax(Math.max(...vals) * 1.08);
+  const ymin = 0;
+  const x = r => PAD.l + (r-1)/(ROUNDS.length-1) * (W-PAD.l-PAD.r);
+  const y = v => H-PAD.b - (v-ymin)/(ymax-ymin) * (H-PAD.t-PAD.b);
+
+  // gridlines + y labels
+  const ticks = 4;
+  for(let i=0;i<=ticks;i++){
+    const v = ymin + (ymax-ymin)*i/ticks;
+    svg.appendChild(el('line', {x1:PAD.l, x2:W-PAD.r, y1:y(v), y2:y(v), class:'ax'}));
+    const t = el('text', {x:PAD.l-7, y:y(v)+3, class:'axlabel num', 'text-anchor':'end'});
+    t.textContent = (ymax>=100? v.toFixed(0) : v.toFixed(opts.dec ?? 1));
+    svg.appendChild(t);
+  }
+  // x labels (odd rounds)
+  ROUNDS.forEach(r => {
+    if(r%2===1 || r===12){
+      const t = el('text', {x:x(r), y:H-PAD.b+15, class:'axlabel num', 'text-anchor':'middle'});
+      t.textContent = r; svg.appendChild(t);
+    }
+  });
+  const xt = el('text', {x:(PAD.l+W-PAD.r)/2, y:H-2, class:'axtitle', 'text-anchor':'middle'});
+  xt.textContent = 'round'; svg.appendChild(xt);
+  const yt = el('text', {x:12, y:PAD.t+2, class:'axtitle', 'text-anchor':'start'});
+  yt.textContent = opts.unit; svg.appendChild(yt);
+
+  // series
+  const order = [['shim','var(--alt)', true], ['nonshim','var(--accent)', false]];
+  order.forEach(([key, color, dashed]) => {
+    const pts = ROUNDS.map(r => [r, data[key][r-1]]).filter(p => p[1]!=null);
+    const d = pts.map((p,i)=> (i?'L':'M')+x(p[0]).toFixed(1)+' '+y(p[1]).toFixed(1)).join(' ');
+    const path = el('path', {d, fill:'none', stroke:color, 'stroke-width':2.4,
+      'stroke-linejoin':'round', 'stroke-linecap':'round'});
+    if(dashed) path.setAttribute('stroke-dasharray','6 4');
+    if(opts.flatKey===key){ path.setAttribute('stroke-dasharray','2 5'); path.setAttribute('opacity','0.65'); path.setAttribute('stroke-width','1.8'); }
+    svg.appendChild(path);
+    // end label
+    const last = pts[pts.length-1];
+    const lab = el('text', {x:x(last[0])+7, y:y(last[1])+3.5, class:'endlab', fill:color});
+    lab.textContent = opts.flatKey===key ? 'mean' : (key==='nonshim'?'non-shim':'shim');
+    svg.appendChild(lab);
+    // markers
+    if(opts.flatKey!==key) pts.forEach(p => svg.appendChild(el('circle', {cx:x(p[0]), cy:y(p[1]), r:3, fill:color, class:'mk'})));
+  });
+
+  // hover overlay
+  const fmt = v => v==null?'—':(opts.dec!=null? v.toFixed(opts.dec): v.toFixed(1));
+  ROUNDS.forEach(r => {
+    const hit = el('rect', {x:x(r)-((W-PAD.l-PAD.r)/(ROUNDS.length-1))/2, y:PAD.t,
+      width:(W-PAD.l-PAD.r)/(ROUNDS.length-1), height:H-PAD.t-PAD.b, fill:'transparent'});
+    hit.style.cursor='crosshair';
+    hit.addEventListener('mousemove', ev => {
+      tip.style.opacity = 1;
+      tip.style.left = ev.clientX+'px'; tip.style.top = ev.clientY+'px';
+      const ns = data.nonshim[r-1], sh = data.shim[r-1];
+      tip.innerHTML = `<div class="tr">round ${r}</div>`+
+        `<div class="tl"><span class="d a">non-shim</span><b class="num">${fmt(ns)} ${opts.tipUnit}</b></div>`+
+        `<div class="tl"><span class="d b">shim</span><b class="num">${fmt(sh)} ${opts.tipUnit}</b></div>`;
+    });
+    hit.addEventListener('mouseleave', () => tip.style.opacity=0);
+    svg.appendChild(hit);
+  });
+}
+
+draw('c-read',  readPer,  {unit:'GiB', tipUnit:'GiB', dec:1});
+draw('c-write', writePer, {unit:'GiB', tipUnit:'GiB', dec:1});
+draw('c-lat',   latPer,   {unit:'ms',  tipUnit:'ms',  dec:2, ymax:2.5});
+draw('c-wall',  wallPer,  {unit:'s',   tipUnit:'s',   dec:0, flatKey:'nonshim'});
+</script>

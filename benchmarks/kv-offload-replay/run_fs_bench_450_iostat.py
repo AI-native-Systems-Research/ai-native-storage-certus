@@ -1,4 +1,11 @@
 import os, sys, json, time
+
+_here = os.path.dirname(os.path.abspath(__file__))
+if _here not in sys.path:
+    sys.path.insert(0, _here)
+import run_multiturn_common as common
+import run_multiturn_sync_batched as batched
+
 os.chdir("/home/bdh/kvconn-trace")
 
 
@@ -98,40 +105,33 @@ preflight()
 
 t0 = time.perf_counter()
 print(f"[trace] +0.0s loading dataset", file=sys.stderr, flush=True)
-with open(SUBSET_PATH) as f:
-    all_data = json.load(f)
-convs = []
-for entry in all_data:
-    if len(convs) >= NUM_CONVS:
-        break
-    turns = entry.get("conversations", [])
-    human_turns = [t["value"] for t in turns if t.get("from") == "human"]
-    if len(human_turns) >= 2:
-        convs.append(human_turns)
+convs = common.load_convs(SUBSET_PATH, NUM_CONVS)
 print(f"[trace] +{time.perf_counter()-t0:.1f}s loaded {len(convs)} conversations", file=sys.stderr, flush=True)
 
 print(f"[trace] +{time.perf_counter()-t0:.1f}s importing vllm", file=sys.stderr, flush=True)
-from vllm import LLM, SamplingParams
+from vllm import SamplingParams
 
-print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
-llm = LLM(
+# WORKLOAD_MODE=async runs one vLLM coroutine per conversation (V1 AsyncLLM);
+# "batched" (default) runs the synchronous per-round generate loop. Both share
+# engine_kwargs below.
+WORKLOAD_MODE = os.environ.get("WORKLOAD_MODE", "batched").strip().lower()
+MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # async per-conv turn cap
+
+engine_kwargs = dict(
     model=MODEL,
     max_model_len=MAX_MODEL_LEN,
     max_num_seqs=MAX_NUM_SEQS,
     gpu_memory_utilization=GPU_MEM_UTIL,
     dtype="float16",
     enable_prefix_caching=True,
+    # ENFORCE_EAGER=1 disables CUDA-graph capture / torch.compile. Default 0
+    # (graphs on) — matches vLLM's default and the other profile backends.
     enforce_eager=(os.environ.get("ENFORCE_EAGER", "0") != "0"),
     kv_transfer_config=KV_CONFIG,
     disable_log_stats=False,  # enable built-in metrics: prefix-cache + preemption counters
 )
-print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
 
 sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
-tokenizer = llm.get_tokenizer()
-
-def n_tokens(text):
-    return len(tokenizer.encode(text))
 
 # --- Per-round disk I/O accounting -------------------------------------------
 # /sys/block/<dev>/stat exposes cumulative sectors read (field 3) and sectors
@@ -140,23 +140,55 @@ def n_tokens(text):
 # all filesystem I/O across the RAID0 members in one place.
 DISK_DEV = os.environ.get("DISK_DEV", "md0")
 DISK_STAT = f"/sys/block/{DISK_DEV}/stat"
-SECTOR = 512
 
 def disk_rw_bytes():
     """Return (bytes_read, bytes_written) cumulative for DISK_DEV, or (None, None)."""
-    try:
-        with open(DISK_STAT) as f:
-            fields = f.read().split()
-        return int(fields[2]) * SECTOR, int(fields[6]) * SECTOR
-    except (OSError, IndexError, ValueError):
-        return None, None
+    return common.disk_rw_bytes(DISK_STAT)
 
-def gib(n):
-    return "n/a" if n is None else f"{n / (1024**3):.2f} GiB"
+gib = common.gib
 
 if disk_rw_bytes()[1] is None:
     print(f"[trace] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled "
           f"(set DISK_DEV or check mode)", file=sys.stderr, flush=True)
+
+if WORKLOAD_MODE == "async":
+    # The rich per-round prefix_stats table below is a batched-only artifact —
+    # under the one-coroutine-per-conv model there are no rounds, so this path is
+    # aggregate-only: the 1 Hz sampler captures md0 read/write bytes, and the
+    # whole-run vllm: counter movement (external_prefix_cache_queries/hits,
+    # num_preemptions) lands in the summary instead of per-round deltas.
+    import run_multiturn_async as async_run
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s WORKLOAD_MODE=async "
+          "(aggregate-only; no per-round prefix table)", file=sys.stderr, flush=True)
+    summary = async_run.run_async_driver(
+        engine_kwargs, convs, sp,
+        prompt_budget=PROMPT_BUDGET,
+        max_rounds=MAX_ROUNDS,
+        capture_metrics=True,
+        disk_rw_bytes=disk_rw_bytes,
+        n_tokens_flavor="encode",
+        skip_empty=False,
+        summary_base={"model": MODEL, "max_model_len": MAX_MODEL_LEN,
+                      "output_tokens": OUTPUT_TOKENS, "backend": "sharedstorage",
+                      "dev": DISK_DEV},
+    )
+    try:
+        with open(os.path.join(_here,
+                  f"ss_async_results_{int(summary['elapsed_time'])}.json"), "w") as f:
+            json.dump(summary, f, indent=2)
+    except OSError as e:
+        print(f"[io] could not save json: {e}", file=sys.stderr)
+    print(f"\n[run] done. wall={summary['elapsed_time']:.1f}s  "
+          f"generations={summary['total_generations']} rounds={summary['num_rounds']}",
+          file=sys.stderr)
+    sys.exit(0)
+
+print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
+llm = common.build_engine(engine_kwargs, async_mode=False)
+print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
+
+tokenizer = llm.get_tokenizer()
+n_tokens = common.make_n_tokens(tokenizer, "encode")
 
 # --- vLLM-layer offload / recompute counters ---------------------------------
 # LLM.get_metrics() returns a Prometheus snapshot of cumulative counters. The
@@ -187,63 +219,28 @@ def prefix_stats():
 def hitrate(hit, q):
     return f"{100.0*hit/q:.1f}%" if q else "n/a"
 
-ps_prev = prefix_stats()
+ps_prev = [prefix_stats()]
+round_io = []  # (round, prompts, read_bytes, write_bytes, ...)
+disk_pre = [None, None]
 
-alive = [True] * len(convs)
-next_turn = [0] * len(convs)
-contexts = [""] * len(convs)
-total_generations = 0
-rounds_done = 0
-round_io = []  # (round, prompts, read_bytes, write_bytes)
-t_start = time.perf_counter()
-print(f"[trace] +{time.perf_counter()-t0:.1f}s entering generate loop", file=sys.stderr, flush=True)
+def on_round_start(round_idx, n_prompts):
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s calling generate round {round_idx} ({n_prompts} prompts)", file=sys.stderr, flush=True)
+    disk_pre[0], disk_pre[1] = disk_rw_bytes()
 
-while True:
-    active_idx = []
-    active_prompts = []
-    for i, conv in enumerate(convs):
-        if not alive[i]:
-            continue
-        k = next_turn[i]
-        if k >= len(conv):
-            alive[i] = False
-            continue
-        human = conv[k]
-        candidate = human if k == 0 else contexts[i] + "\n\n" + human
-        if n_tokens(candidate) > PROMPT_BUDGET:
-            alive[i] = False
-            continue
-        contexts[i] = candidate
-        active_idx.append(i)
-        active_prompts.append(candidate)
-
-    if not active_prompts:
-        break
-
-    rounds_done += 1
-    print(f"[trace] +{time.perf_counter()-t0:.1f}s calling generate round {rounds_done} ({len(active_prompts)} prompts)", file=sys.stderr, flush=True)
-    rd0, wr0 = disk_rw_bytes()
-    round_start = time.perf_counter()
-    outs = llm.generate(active_prompts, sp)
-    round_elapsed = time.perf_counter() - round_start
+def on_round_end(round_idx, n_prompts, round_elapsed, n_alive):
+    rd0, wr0 = disk_pre
     rd1, wr1 = disk_rw_bytes()
-    for i, out in zip(active_idx, outs):
-        response = out.outputs[0].text if out.outputs else ""
-        contexts[i] = contexts[i] + response
-        next_turn[i] += 1
-    total_generations += len(active_prompts)
-    n_alive = sum(alive)
     # Delta of cumulative counters = bytes moved during this round.
     d_rd = (rd1 - rd0) if (rd0 is not None and rd1 is not None) else None
     d_wr = (wr1 - wr0) if (wr0 is not None and wr1 is not None) else None
     # vLLM-layer offload/recompute deltas for this round.
     ps_now = prefix_stats()
-    d_gq, d_gh, d_eq, d_eh, d_pre = (ps_now[k] - ps_prev[k] for k in range(5))
-    ps_prev = ps_now
+    d_gq, d_gh, d_eq, d_eh, d_pre = (ps_now[k] - ps_prev[0][k] for k in range(5))
+    ps_prev[0] = ps_now
     d_recompute = d_eq - d_eh  # offload-tier misses -> recomputed on GPU
-    round_io.append((rounds_done, len(active_prompts), d_rd, d_wr,
+    round_io.append((round_idx, n_prompts, d_rd, d_wr,
                      round_elapsed, d_eq, d_eh, d_recompute, d_pre, d_gq, d_gh))
-    print(f"[run] round {rounds_done}: {len(active_prompts)} prompts in "
+    print(f"[run] round {round_idx}: {n_prompts} prompts in "
           f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
           f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}  "
           f"offload_q={d_eq} offload_hit={d_eh} recompute={d_recompute} "
@@ -251,7 +248,19 @@ while True:
           f"preempt={d_pre}",
           file=sys.stderr, flush=True)
 
-elapsed = time.perf_counter() - t_start
+print(f"[trace] +{time.perf_counter()-t0:.1f}s entering generate loop", file=sys.stderr, flush=True)
+result = batched.run_batched(
+    llm, convs, sp,
+    prompt_budget=PROMPT_BUDGET,
+    max_rounds=0,
+    n_tokens=n_tokens,
+    skip_empty=False,
+    on_round_start=on_round_start,
+    on_round_end=on_round_end,
+)
+elapsed = result["elapsed"]
+rounds_done = result["rounds_done"]
+total_generations = result["total_generations"]
 print(f"\n[run] done. wall={elapsed:.1f}s  generations={total_generations} rounds={rounds_done}",
       file=sys.stderr)
 

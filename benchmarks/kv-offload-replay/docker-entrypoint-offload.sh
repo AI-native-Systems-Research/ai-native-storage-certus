@@ -8,10 +8,10 @@
 #   OFFLOAD_MODE=none               GPU-only baseline (no kv_transfer_config).
 #                                   Nothing to size, nothing to check.
 #   OFFLOAD_MODE unset/other,       CPU-offload (host-RAM tier). Sanity-check that
-#     DISK_DIR empty                the pinned CPU_BYTES tier fits in RAM.
-#   DISK_DIR=/path                  Tiered CPU primary + fs secondary. Additionally
+#     SECONDARY_TIER empty          the pinned CPU_BYTES tier fits in RAM.
+#   SECONDARY_TIER=fs (or DISK_DIR) Tiered CPU primary + fs secondary. Additionally
 #                                   check /dev/shm (the CPU tier is an shm mmap) and
-#                                   warn if DISK_DIR is not a bind mount.
+#                                   warn if the fs tier dir is not a bind mount.
 #
 # All three are self-contained: no external server, no gRPC, no CUDA IPC. There is
 # nothing to wait for — we validate the environment for the selected mode, then
@@ -34,7 +34,7 @@ fi
 # default /dev/shm is 64M, so --shm-size >= CPU_BYTES is required. Fail early with
 # an actionable message rather than deep in vLLM init.
 is_tiered=0
-if [ -n "${DISK_DIR:-}" ]; then
+if [ -n "${SECONDARY_TIER:-}" ] || [ -n "${DISK_DIR:-}" ]; then
     is_tiered=1
 fi
 
@@ -47,12 +47,13 @@ if [ "${is_tiered}" -eq 1 ]; then
         echo "[entrypoint]        --shm-size >= ${cpu_bytes} (e.g. --shm-size $(( cpu_bytes / (1<<30) + 4 ))g)." >&2
         exit 1
     fi
-    # The fs disk tier writes block files under DISK_DIR. Bind a host dir onto it
-    # to hit real disk; without a bind it lands on the ephemeral layer.
-    if [ -n "${DISK_DIR}" ]; then
-        mkdir -p "${DISK_DIR}"
-        if ! mountpoint -q "${DISK_DIR}" 2>/dev/null; then
-            echo "[entrypoint] WARNING: ${DISK_DIR} is not a bind mount — the fs disk tier will" >&2
+    # The fs disk tier writes block files under DISK_DIR / FS_ROOT_DIR. Bind a host
+    # dir onto it to hit real disk; without a bind it lands on the ephemeral layer.
+    fs_dir="${DISK_DIR:-${FS_ROOT_DIR:-}}"
+    if [ -n "${fs_dir}" ]; then
+        mkdir -p "${fs_dir}"
+        if ! mountpoint -q "${fs_dir}" 2>/dev/null; then
+            echo "[entrypoint] WARNING: ${fs_dir} is not a bind mount — the fs disk tier will" >&2
             echo "[entrypoint]          write to the container's ephemeral layer (lost on --rm)." >&2
         fi
     fi
@@ -73,7 +74,7 @@ if [ -r /proc/meminfo ]; then
 fi
 
 if [ "${is_tiered}" -eq 1 ]; then
-    echo "[entrypoint] Tiering CPU+FS run: NUM_CONVS=${NUM_CONVS:-?} MODEL=${MODEL:-?} CPU_BYTES=${cpu_bytes} DISK_DIR=${DISK_DIR}"
+    echo "[entrypoint] Tiering CPU+FS run: NUM_CONVS=${NUM_CONVS:-?} MODEL=${MODEL:-?} CPU_BYTES=${cpu_bytes} fs_dir=${DISK_DIR:-${FS_ROOT_DIR:-?}}"
 else
     echo "[entrypoint] CPU-offload run: NUM_CONVS=${NUM_CONVS:-?} MODEL=${MODEL:-?} CPU_BYTES=${cpu_bytes} DATASET_PATH=${DATASET_PATH:-?}"
 fi

@@ -1,0 +1,85 @@
+{
+  "elapsed_time": 1961.730093697086,
+  "num_conversations": 450,
+  "num_rounds": 12,
+  "total_generations": 5376,
+  "tokens_per_sec": 411.0657233586373,
+  "model": "ibm-granite/granite-4.1-8b",
+  "max_model_len": 8192,
+  "output_tokens": 150,
+  "offload": "none",
+  "rounds": [
+    {
+      "round": 1,
+      "prompts": 448,
+      "elapsed": 45.20652238605544,
+      "alive": 448
+    },
+    {
+      "round": 2,
+      "prompts": 448,
+      "elapsed": 50.71280731505249,
+      "alive": 448
+    },
+    {
+      "round": 3,
+      "prompts": 448,
+      "elapsed": 67.72000510105863,
+      "alive": 448
+    },
+    {
+      "round": 4,
+      "prompts": 448,
+      "elapsed": 91.31052735901903,
+      "alive": 448
+    },
+    {
+      "round": 5,
+      "prompts": 448,
+      "elapsed": 119.21769069798756,
+      "alive": 448
+    },
+    {
+      "round": 6,
+      "prompts": 448,
+      "elapsed": 142.38055181491654,
+      "alive": 448
+    },
+    {
+      "round": 7,
+      "prompts": 448,
+      "elapsed": 167.34558390791062,
+      "alive": 448
+    },
+    {
+      "round": 8,
+      "prompts": 448,
+      "elapsed": 195.39864304894581,
+      "alive": 448
+    },
+    {
+      "round": 9,
+      "prompts": 448,
+      "elapsed": 222.56756452808622,
+      "alive": 448
+    },
+    {
+      "round": 10,
+      "prompts": 448,
+      "elapsed": 252.90921024396084,
+      "alive": 448
+    },
+    {
+      "round": 11,
+      "prompts": 448,
+      "elapsed": 282.0987346949987,
+      "alive": 448
+    },
+    {
+      "round": 12,
+      "prompts": 448,
+      "elapsed": 308.81119660800323,
+      "alive": 448
+    }
+  ]
+}

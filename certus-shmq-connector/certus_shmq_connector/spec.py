@@ -36,18 +36,11 @@ from .manager import ShmqCertusOffloadingManager
 from .mediums import CertusLoadStoreSpec
 from .ring import Ring
 
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/spec.py
-# Process-level singletons: one channel/stub per worker process, shared across
-# manager + handlers.
-_CHANNEL_SINGLETON = None
-_STUB_SINGLETON = None
-========
 # Process-level singleton: one attached Ring per worker process, keyed by shm
 # path, shared across manager + handlers. Attaching spins on the header READY
 # flag, so the first spec instance blocks until the server is up.
 _RING_LOCK = threading.Lock()
 _RING_SINGLETONS: dict[str, Ring] = {}
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/spec.py
 
 
 def _get_or_create_ring(shm_path: str) -> Ring:
@@ -179,20 +172,8 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             f"per-region strides={[r.stride_bytes for r in kv_regions]}",
             flush=True,
         )
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/spec.py
-        store_executor = ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix="certus-grpc-store"
-        )
-        load_executor = ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix="certus-grpc-load"
-        )
-        self._worker = worker_class()(
-            stub, kv_regions, block_bytes, store_executor, load_executor
-        )
-========
         executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="certus-shmq")
         self._worker = worker_class()(ring, kv_regions, block_bytes, executor)
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/spec.py
         return self._worker
 
     def get_worker(self, kv_caches):

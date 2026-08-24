@@ -16,7 +16,7 @@ previews what will run, launches the orchestrator, and formats the result.
 |---|---|---|
 | NoOffload | GPU-only baseline | `certus-offload-bench` (OFFLOAD_MODE=none) |
 | CPUOffload | vLLM OffloadingConnector → host RAM | `certus-offload-bench` (default mode) |
-| Tiered-CPU-FS | vLLM native CPU primary + FS secondary | `certus-offload-bench` (DISK_DIR=/path) |
+| Tiered-CPU-FS | vLLM native CPU primary + FS secondary | `certus-offload-bench` (SECONDARY_TIER=fs) |
 | SharedStorage | `llmd_fs_backend` RAID0/XFS | `certus-sharedstorage-bench` |
 | Certus-SPDK | gRPC client + `certus-server-yaml` (SPDK NVMe) | `certus-grpc-bench` + host server |
 

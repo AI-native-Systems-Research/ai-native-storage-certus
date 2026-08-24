@@ -722,7 +722,7 @@ mod tests {
     use super::*;
     use interfaces::{
         CacheKey, DispatcherConfig, DispatcherError, GpuStream, IDispatcher, IpcHandle,
-        ReadWriteStats,
+        ReadWriteStats, TierEventStats,
     };
     use std::sync::atomic::AtomicU64;
 
@@ -820,6 +820,10 @@ mod tests {
         }
         fn read_write_stats(&self) -> ReadWriteStats {
             ReadWriteStats::default()
+        }
+
+        fn tier_event_stats(&self) -> TierEventStats {
+            TierEventStats::default()
         }
     }
 

@@ -1,0 +1,1 @@
+      8 Prefix cache hit rate: 0.0%

@@ -55,6 +55,13 @@ WORKDIR /workspace
 # context). torch/numpy/vllm come from the base image. NOTE: no grpcio/protobuf
 # install here — the shmq connector's transport is pure ctypes + mmap.
 COPY certus-shmq-connector/ /workspace/certus-shmq-connector/
+# The shmq driver imports the shared workload modules from the sibling bench dir
+# (sys.path insert of ../benchmarks/kv-offload-replay -> /workspace/benchmarks/...):
+# run_multiturn_common (engine/telemetry setup), run_multiturn_sync_batched (the
+# batched loop) and run_multiturn_async (WORKLOAD_MODE=async) — all three needed.
+COPY benchmarks/kv-offload-replay/run_multiturn_common.py /workspace/benchmarks/kv-offload-replay/
+COPY benchmarks/kv-offload-replay/run_multiturn_sync_batched.py /workspace/benchmarks/kv-offload-replay/
+COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/benchmarks/kv-offload-replay/
 COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 RUN pip install --no-cache-dir -e /workspace/certus-shmq-connector

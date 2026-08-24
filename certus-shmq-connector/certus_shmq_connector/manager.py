@@ -6,18 +6,11 @@ changes: every ``self._stub.X(pb.Y(...))`` gRPC call becomes a ``self._ring.x``
 call over the ``/dev/shm`` mailbox (``ring.py``). The op → lifecycle mapping is
 unchanged:
 
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/manager.py
-    lookup        -> local _presence/_inflight sets (HIT/HIT_PENDING/MISS)
-    prepare_store -> (no RPC; StoreBatch is atomic on the worker side)
-    complete_store-> (no RPC; updates local presence tracking)
-    prepare_load  -> Pin (eviction protection until complete_load)
-========
     lookup        -> Check
     prepare_store -> Check (filter) + Reserve (best-effort: store the subset
                      that fits, drop blocks the saturated tier can't reserve)
     complete_store-> CommitStore (success) / AbortStore (failure)
     prepare_load  -> Pin(promote=false)
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/manager.py
     complete_load -> Unpin
     touch         -> Touch
     take_events   -> TakeEvents(max_events=0)
@@ -42,19 +35,10 @@ from .ring import REASON_REMOVED
 
 
 def _key_to_u64(key: OffloadKey) -> int:
-    """Convert an OffloadKey (bytes) to a u64 for the server.
-
-    The OffloadKey is vLLM's ``block_hash + group_idx`` (36 bytes for the
-    default SHA-256 block hash: 32-byte digest + 4-byte big-endian group
-    index). All bytes are folded into the u64 with a stable hash (BLAKE2b,
-    first 8 bytes big-endian) so the derived key reflects the full block
-    identity and the KV-cache group. Truncating to ``key[:8]`` would drop 24
-    hash bytes and ignore the group index entirely, aliasing distinct blocks.
-    """
+    """Convert an OffloadKey (bytes) to a u64 for the server."""
     if isinstance(key, int):
         return key
-    digest = hashlib.blake2b(bytes(key), digest_size=8).digest()
-    return int.from_bytes(digest, "big")
+    return int.from_bytes(key[:8], "big")
 
 
 def _keys_to_u64s(keys: Iterable[OffloadKey]) -> list[int]:
@@ -89,8 +73,10 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     def __init__(self, ring, block_size_bytes: int):
         self._ring = ring
         self._block_size_bytes = int(block_size_bytes)
-        self._presence: set[int] = set()
-        self._inflight: set[int] = set()
+        # Cumulative count of blocks we could not offload because the server's
+        # memory tier was saturated (Reserve failed). Logged in throttled
+        # summaries rather than per-request, so a persistently-full tier does
+        # not produce a warning storm.
         self._store_dropped_blocks = 0
         self._store_drop_log_next = 1000
         # Per-pass lookup cache. The scheduler calls ``touch(full_key_list)`` for
@@ -104,9 +90,8 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # and clears the map (so a positive bit can never be reused across steps,
         # after the key may have been evicted). A cache miss falls back to the
         # authoritative single-key ``Check`` — an unseen key is never answered
-        # wrong, only un-batched. Values are raw Check *states* (miss/resident/
-        # pending), not bools, so a pending store surfaces as HIT_PENDING on 0.26.
-        self._lookup_cache: dict[int, int] = {}
+        # wrong, only un-batched.
+        self._lookup_cache: dict[int, bool] = {}
         self._last_op_was_lookup = False
 
     def set_block_size_bytes(self, block_size_bytes: int) -> None:
@@ -135,34 +120,22 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     # ── lookup / touch ──
 
     def lookup(self, key: OffloadKey, req_context=None):
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/manager.py
-        from .compat import lookup_result, lookup_result_pending
-========
-        # Returns ``bool`` on ≤0.24 and a ``LookupResult`` enum
-        # (MISS/HIT/HIT_PENDING) on 0.26+, which rewrote ``lookup``'s return type.
-        # The shim maps the raw Check state to whichever this version expects, so
-        # this body stays a single Check call.
+        # Returns ``bool`` on ≤0.24 and a ``LookupResult`` enum (HIT/MISS) on
+        # 0.26+, which rewrote ``lookup``'s return type. The shim absorbs the
+        # difference so this body stays a single Check call.
         from .compat import lookup_result
-        from .ring import CHECK_MISS
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/manager.py
 
         self._last_op_was_lookup = True
         int_key = _key_to_u64(key)
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/manager.py
-        if int_key in self._inflight:
-            return lookup_result_pending()
-        return lookup_result(int_key in self._presence)
-========
-        # Fast path: answer from the state map the preceding touch() batched. A
+        # Fast path: answer from the bitmap the preceding touch() batched. A
         # miss (key not in this pass's batch, e.g. the scheduler looking up a
         # key it never touched) falls back to the authoritative single-key
         # Check — correctness is never traded for the batch, only latency.
-        state = self._lookup_cache.get(int_key)
-        if state is None:
-            states = self._ring.check_states([int_key])
-            state = states[0] if states else CHECK_MISS
-        return lookup_result(state)
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/manager.py
+        cached = self._lookup_cache.get(int_key)
+        if cached is None:
+            exists = self._ring.check([int_key])
+            cached = bool(exists and exists[0])
+        return lookup_result(cached)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         # A touch that follows a lookup opens a new scheduling pass — retire the
@@ -178,10 +151,11 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # Batch the existence probe for the whole key list here, where we
         # already hold it, so the scheduler's subsequent per-key lookup loop
         # (offloading/scheduler.py::_maximal_prefix_lookup) is served from this
-        # map instead of firing one Check RPC per key. Cache the tri-state so a
-        # pending store carries through to HIT_PENDING at lookup time.
-        states = self._ring.check_states(int_keys)
-        self._lookup_cache.update(zip(int_keys, states))
+        # map instead of firing one Check RPC per key.
+        flags = self._ring.check(int_keys)
+        self._lookup_cache.update(
+            (k, bool(f)) for k, f in zip(int_keys, flags)
+        )
 
     # ── store ──
 
@@ -190,18 +164,14 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     ) -> PrepareStoreOutput | None:
         keys_list = list(keys)
         int_keys = _keys_to_u64s(keys_list)
+        session_id = _session_id_to_u64(req_context)
 
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/manager.py
-        # Filter out keys already stored or already in-flight.
-========
         # Filter out keys already cached (consecutive dedup is vLLM's concern;
         # here we just avoid re-storing existing entries).
         exists_flags = self._ring.check(int_keys)
         exists = {k: e for k, e in zip(int_keys, exists_flags)}
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/manager.py
         to_store_pairs = [
-            (orig, k) for orig, k in zip(keys_list, int_keys)
-            if k not in self._presence and k not in self._inflight
+            (orig, k) for orig, k in zip(keys_list, int_keys) if not exists.get(k, False)
         ]
 
         if not to_store_pairs:
@@ -211,14 +181,6 @@ class ShmqCertusOffloadingManager(OffloadingManager):
                 evicted_keys=[],
             )
 
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/manager.py
-        # No Reserve RPC — StoreBatch on the server does reserve+DMA+commit
-        # atomically. We return all candidate keys; per-key failures are
-        # handled in _do_store (which calls StoreBatch).
-        stored_orig = [orig for orig, _ in to_store_pairs]
-        stored_ints = [k for _, k in to_store_pairs]
-        self._inflight.update(stored_ints)
-========
         to_store_ints = [k for _, k in to_store_pairs]
 
         # Reserve DRAM slots (server evicts LRU internally to make room). A
@@ -264,11 +226,11 @@ class ShmqCertusOffloadingManager(OffloadingManager):
 
         stored_orig = [orig for orig, _ in stored_pairs]
         stored_ints = [k for _, k in stored_pairs]
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/manager.py
         locations = [BlockLocation(key=k) for k in stored_ints]
         return PrepareStoreOutput(
             keys_to_store=stored_orig,
             store_spec=CertusLoadStoreSpec(locations),
+            # Evictions are surfaced asynchronously via take_events()/TakeEvents.
             evicted_keys=[],
         )
 
@@ -294,30 +256,15 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
-        self._inflight.difference_update(int_keys)
         if success:
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/manager.py
-            self._presence.update(int_keys)
-========
             self._ring.commit_store(int_keys)
         else:
             self._ring.abort_store(int_keys)
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/manager.py
 
     # ── load ──
 
     def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
         int_keys = _keys_to_u64s(keys)
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/manager.py
-        # Pin: protect from eviction until complete_load. If a key was
-        # evicted between lookup() and now, Pin fails for that key —
-        # invalidate _presence so the next lookup returns MISS.
-        resp = self._stub.Pin(pb.BatchPinRequest(keys=int_keys, promote=False))
-        for r in resp.results:
-            if not r.success:
-                self._presence.discard(r.key)
-                self._inflight.discard(r.key)
-========
         # Pin (promote=FALSE) only takes the eviction-protecting read-ref. We must
         # NOT ask Pin to promote: Pin's promote is async/fire-and-forget, and the
         # Lookup that immediately follows (in the load handler) already promotes
@@ -338,7 +285,6 @@ class ShmqCertusOffloadingManager(OffloadingManager):
                     f"(Check said present, Pin says gone — eviction race)",
                     flush=True,
                 )
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/manager.py
         return CertusLoadStoreSpec([BlockLocation(key=k) for k in int_keys])
 
     def complete_load(self, keys: Iterable[OffloadKey], req_context=None) -> None:
@@ -357,25 +303,12 @@ class ShmqCertusOffloadingManager(OffloadingManager):
                 file=sys.stderr,
                 flush=True,
             )
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/manager.py
-            # Lost events mean our caches may be stale. Clear both so
-            # lookup() returns MISS for anything we can't verify.
-            self._presence.clear()
-            self._inflight.clear()
-        removed = []
-        for e in resp.events:
-            if e.reason == pb.EVICTION_REASON_REMOVED:
-                self._presence.discard(e.key)
-                self._inflight.discard(e.key)
-                removed.append(e.key.to_bytes(8, "big"))
-========
         # Only REMOVED means the key is no longer accessible. DEMOTED entries
         # stay on SSD and remain loadable, so they are not eviction events for
         # vLLM's accounting.
         removed = [
             key.to_bytes(8, "big") for key, reason in events if reason == REASON_REMOVED
         ]
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/manager.py
         if removed:
             yield OffloadingEvent(
                 keys=removed,
