@@ -86,6 +86,11 @@ ENFORCE_EAGER=0
 # runs one vLLM coroutine per conversation (V1 AsyncLLM). --async flips it for
 # the whole run; --workload-mode <mode> sets it explicitly.
 WORKLOAD_MODE=batched
+# Metrics are captured on every run: all five drivers default stats ON, so the
+# vllm: prometheus counters (+ the KV-offload connector stats) and, on the
+# Certus-SPDK/shmq path, the per-round SSD device I/O are always recorded. No
+# flag or env is needed to turn them on, and the orchestrator no longer forwards
+# anything to force them off.
 # Named dataset workload, forwarded to every driver as WORKLOAD_NAME (see
 # run_multiturn_common.resolve_workload). Empty = each driver's baked default
 # (the 450x12 dataset). "sharegpt" selects the ShareGPT multi-turn workload by

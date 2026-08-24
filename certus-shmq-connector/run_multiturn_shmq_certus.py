@@ -18,7 +18,9 @@ Environment:
     OUTPUT_TOKENS    per generation (default 150)
     MAX_NUM_SEQS     (default 64)
     GPU_MEM_UTIL     (default 0.90)
-    LOG_STATS        emit vLLM engine + KV-offload stats (default 0 = off)
+    CAPTURE_METRICS  capture vLLM prometheus counters + KV-offload stats
+                     (default 1 = on, like the other drivers); 0 = clean baseline
+    LOG_STATS        legacy alias to force stats on even if CAPTURE_METRICS=0
     TENSOR_PARALLEL_SIZE    GPUs to shard each layer across (default 1)
     PIPELINE_PARALLEL_SIZE  pipeline stages across GPUs/nodes (default 1)
     ENFORCE_EAGER    "0" (default) enables CUDA graphs + torch.compile (faster,
@@ -165,9 +167,15 @@ if __name__ == "__main__":
     # "batched" (default) runs the synchronous per-round generate loop. Both share
     # the engine_kwargs below (same CertusShmq kv_transfer_config + compat flags).
     WORKLOAD_MODE = os.environ.get("WORKLOAD_MODE", "batched").strip().lower()
-    # LOG_STATS gates the PrometheusStatLogger; async metrics read the global
-    # REGISTRY, so counters only populate when LOG_STATS=1 (disable_log_stats off).
-    _log_stats_off = os.environ.get("LOG_STATS", "0") == "0"
+    # Metrics gate — now consistent with the other four drivers: vLLM stats are ON
+    # by default, so the vllm: prometheus counters (prefix-cache, kv_offload_*, MFU)
+    # and the OffloadingConnector's KVConnectorStats are captured out of the box.
+    # CAPTURE_METRICS=0 restores the clean stats-off baseline. LOG_STATS=1 is still
+    # honored as a legacy alias for turning stats on. (Previously this driver gated
+    # solely on LOG_STATS and defaulted OFF — so Certus-SPDK runs silently produced
+    # no vllm: counters, unlike every other backend.)
+    _log_stats_on = os.environ.get("LOG_STATS", "0") != "0"
+    CAPTURE_METRICS = os.environ.get("CAPTURE_METRICS", "1") != "0" or _log_stats_on
 
     engine_kwargs = dict(
         model=MODEL,
@@ -184,11 +192,12 @@ if __name__ == "__main__":
         # Default "auto" = same as model dtype (fp16 here).
         kv_cache_dtype=os.environ.get("KV_CACHE_DTYPE", "auto"),
         kv_transfer_config=KV_CONFIG,
-        # LOG_STATS=1 surfaces vLLM's periodic engine stats, including the
+        # Enabling stats surfaces vLLM's periodic engine stats, including the
         # OffloadingConnector's KVConnectorStats (per-interval blocks/tokens
-        # loaded and stored over the KV-offload API). Default off to keep the
-        # per-round output clean.
-        disable_log_stats=_log_stats_off,
+        # loaded and stored over the KV-offload API), and registers the vllm:
+        # prometheus counters. On by default now (CAPTURE_METRICS); set
+        # CAPTURE_METRICS=0 for the clean stats-off baseline.
+        disable_log_stats=not CAPTURE_METRICS,
         **_engine_kwargs,
     )
 
@@ -210,7 +219,7 @@ if __name__ == "__main__":
             engine_kwargs, convs, sp,
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,
-            capture_metrics=(not _log_stats_off),
+            capture_metrics=CAPTURE_METRICS,
             session_id_fn=_session_id_fn,
             skip_empty=True,
             summary_base={
@@ -234,8 +243,6 @@ if __name__ == "__main__":
 
         tokenizer = llm.get_tokenizer()
         n_tokens = common.make_n_tokens(tokenizer)
-
-        CAPTURE_METRICS = not _log_stats_off
 
         # Per-round SSD device I/O. The server's cumulative NVMe read/write byte
         # counters (its rw-telemetry) are queried over the shmq ring's GetIoStats
