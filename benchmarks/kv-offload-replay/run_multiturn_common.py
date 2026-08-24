@@ -41,34 +41,47 @@ _DATA_DIR = os.path.normpath(
 )
 
 
-def _sharegpt_chunk():
-    """Path to one data/sharegpt/ chunk, chosen by SHAREGPT_CHUNK (default 000).
+def _sharegpt_dataset(has_explicit_path=False):
+    """Dataset path for the ``sharegpt`` workload, selected by human-turn count.
 
-    Each chunk is a standalone ShareGPT-format array of 10,000 conversations in
-    dataset order (009 is the 4,145-conversation remainder); see the dir's
-    README. SHAREGPT_CHUNK accepts "0"/"00"/"000" alike.
+    The workload is defined by the number of *human* turns per conversation via
+    ``SHAREGPT_MIN_TURNS`` / ``SHAREGPT_MAX_TURNS`` (both default 12). Only the
+    12-turn subset is pre-prepared: when min==max==12 this returns
+    ``data/sharegpt_12turn_450.json`` — 450 conversations, each with exactly 12
+    human turns.
 
-    ``SHAREGPT_DIR`` overrides the chunk directory. Containers flatten the repo
-    layout (``benchmarks/kv-offload-replay`` -> ``/workspace/bench``), so the
-    ``__file__``-relative default below does not hold there; the harness
-    bind-mounts the chunks and points ``SHAREGPT_DIR`` at the mount."""
-    chunk = os.environ.get("SHAREGPT_CHUNK", "000").zfill(3)
-    base = os.environ.get("SHAREGPT_DIR") or os.path.join(_DATA_DIR, "sharegpt")
-    return os.path.join(base, f"{chunk}.json")
+    Any other turn range is not prepared here; set ``DATASET_PATH`` to a custom
+    turn-filtered ShareGPT file for those. When one is already set this returns
+    ``None`` (so that path takes over rather than erroring); otherwise a
+    non-12/12 range exits with that instruction."""
+    min_turns = int(os.environ.get("SHAREGPT_MIN_TURNS", "12"))
+    max_turns = int(os.environ.get("SHAREGPT_MAX_TURNS", "12"))
+    if min_turns == 12 and max_turns == 12:
+        return os.path.join(_DATA_DIR, "sharegpt_12turn_450.json")
+    if has_explicit_path:
+        return None
+    raise SystemExit(
+        "[run] WORKLOAD_NAME=sharegpt: only the 12-turn subset "
+        f"(SHAREGPT_MIN_TURNS==SHAREGPT_MAX_TURNS==12) is prepared, got "
+        f"min={min_turns} max={max_turns}. Set DATASET_PATH to a custom "
+        "turn-filtered ShareGPT dataset for other turn counts."
+    )
 
 
-# name -> {dataset: path|callable, num_convs: int, desc: str}. The dataset may be
-# a callable resolved at selection time (so per-run env like SHAREGPT_CHUNK is
-# honored). Add entries here to register new workloads for all five drivers.
+# name -> {dataset: path|callable, num_convs: int, desc: str}. A callable dataset
+# is resolved at selection time (so per-run env like SHAREGPT_MIN_TURNS is
+# honored) and may return None to defer to an explicit DATASET_PATH. Add entries
+# here to register new workloads for all five drivers.
 WORKLOADS = {
     "sharegpt": {
-        # Full ShareGPT_V3 unfiltered, split into 10k-conversation chunks. Meant
-        # for WORKLOAD_MODE=async, where each of the ~10k conversations runs as
-        # its own coroutine (one convo = one coroutine); vLLM's max_num_seqs
-        # bounds the running batch, the rest queue in WAITING.
-        "dataset": _sharegpt_chunk,
-        "num_convs": 10000,
-        "desc": "full ShareGPT_V3 10k-conversation chunk (async: one coroutine per conversation)",
+        # The ShareGPT multi-turn subset, selected by human-turn count. The
+        # default (12/12) is the 450-conversation, 12-human-turn set every bench
+        # image bakes as its DATASET_PATH; other turn counts need an explicit
+        # DATASET_PATH (see _sharegpt_dataset).
+        "dataset": _sharegpt_dataset,
+        "num_convs": 450,
+        "desc": "ShareGPT multi-turn subset by human-turn count "
+                "(SHAREGPT_MIN_TURNS/MAX_TURNS, default 12/12 = the 450-conv set)",
     },
 }
 
@@ -91,6 +104,7 @@ def resolve_workload(default_dataset, default_num_convs):
     entrypoint execs, so the two must not collide."""
     dataset = default_dataset
     num_convs = default_num_convs
+    explicit_path = os.environ.get("DATASET_PATH")
 
     workload = os.environ.get("WORKLOAD_NAME", "").strip().lower()
     if workload:
@@ -100,11 +114,15 @@ def resolve_workload(default_dataset, default_num_convs):
                 f"[run] unknown WORKLOAD_NAME={workload!r}; "
                 f"known: {', '.join(sorted(WORKLOADS)) or '(none)'}"
             )
-        ds = spec["dataset"]
-        dataset = ds() if callable(ds) else ds
         num_convs = spec.get("num_convs", default_num_convs)
+        # A callable dataset is resolved now (so per-run env like
+        # SHAREGPT_MIN_TURNS is honored) and may return None to defer to an
+        # explicit DATASET_PATH rather than erroring on an unprepared range.
+        ds = spec["dataset"]
+        resolved = ds(explicit_path is not None) if callable(ds) else ds
+        if resolved is not None:
+            dataset = resolved
 
-    explicit_path = os.environ.get("DATASET_PATH")
     if explicit_path:
         dataset = explicit_path
 

@@ -65,13 +65,12 @@ WORKLOAD_SRC="${WORKLOAD_SRC:-}"
 CONNECTOR_SRC="${CONNECTOR_SRC:-}"
 # WORKLOAD_NAME — optional named dataset workload forwarded to the driver as the
 # WORKLOAD_NAME env (see run_multiturn_common.resolve_workload). Empty = the
-# image's baked DATASET_PATH (the 450x12 set). SHAREGPT_CHUNK picks the chunk for
-# WORKLOAD_NAME=sharegpt. SHAREGPT_SRC is a host data/sharegpt dir bind-mounted
-# at /workspace/data/sharegpt (the chunks are NOT baked into the image), with
-# SHAREGPT_DIR pointed there so the driver finds them regardless of layout.
+# image's baked DATASET_PATH (the 450x12 set). SHAREGPT_MIN_TURNS/MAX_TURNS pick
+# the human-turn subset for WORKLOAD_NAME=sharegpt; the only prepared value is
+# 12/12, which is exactly the baked DATASET_PATH, so at 12/12 this is a no-op.
 WORKLOAD_NAME="${WORKLOAD_NAME:-}"
-SHAREGPT_CHUNK="${SHAREGPT_CHUNK:-}"
-SHAREGPT_SRC="${SHAREGPT_SRC:-}"
+SHAREGPT_MIN_TURNS="${SHAREGPT_MIN_TURNS:-}"
+SHAREGPT_MAX_TURNS="${SHAREGPT_MAX_TURNS:-}"
 
 # This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
 # needs explicit store paths. Override or unset for a default install.
@@ -184,22 +183,15 @@ if [[ -n "${CONNECTOR_SRC}" ]]; then
 fi
 
 # ── Named-workload passthrough (only if WORKLOAD_NAME set) ──
-# The chunks are not baked into the image, so mount SHAREGPT_SRC at
-# /workspace/data/sharegpt and point SHAREGPT_DIR there; forward the selector +
-# chunk. Empty WORKLOAD_NAME => nothing added, so the baked DATASET_PATH is used.
+# Forward the selector plus any human-turn bounds. No mount: the only prepared
+# sharegpt set is 12/12, which is exactly the image's baked DATASET_PATH, so at
+# 12/12 this is a no-op. Empty WORKLOAD_NAME => nothing added (baked default).
 workload_name_env=()
 if [[ -n "${WORKLOAD_NAME}" ]]; then
     workload_name_env+=(-e "WORKLOAD_NAME=${WORKLOAD_NAME}")
-    [[ -n "${SHAREGPT_CHUNK}" ]] && workload_name_env+=(-e "SHAREGPT_CHUNK=${SHAREGPT_CHUNK}")
-    if [[ -n "${SHAREGPT_SRC}" ]]; then
-        if [[ -d "${SHAREGPT_SRC}" ]]; then
-            workload_name_env+=(-v "${SHAREGPT_SRC}:/workspace/data/sharegpt:z,ro"
-                                -e "SHAREGPT_DIR=/workspace/data/sharegpt")
-            echo "[run-bench] workload=${WORKLOAD_NAME} sharegpt_src=${SHAREGPT_SRC}" >&2
-        else
-            echo "warning: SHAREGPT_SRC=${SHAREGPT_SRC} not found — WORKLOAD_NAME=${WORKLOAD_NAME} will fail to locate its dataset." >&2
-        fi
-    fi
+    [[ -n "${SHAREGPT_MIN_TURNS}" ]] && workload_name_env+=(-e "SHAREGPT_MIN_TURNS=${SHAREGPT_MIN_TURNS}")
+    [[ -n "${SHAREGPT_MAX_TURNS}" ]] && workload_name_env+=(-e "SHAREGPT_MAX_TURNS=${SHAREGPT_MAX_TURNS}")
+    echo "[run-bench] workload=${WORKLOAD_NAME} min_turns=${SHAREGPT_MIN_TURNS:-12} max_turns=${SHAREGPT_MAX_TURNS:-12}" >&2
 fi
 
 echo "[run-bench] image=${IMAGE} gpu=${GPU} shm_path=${SHM_PATH}"

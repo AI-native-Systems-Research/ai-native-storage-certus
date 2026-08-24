@@ -40,47 +40,26 @@ order reproduces the source exactly.
 
 Sizes are compact UTF-8 (`separators=(",", ":")`, `ensure_ascii=False`).
 
-## Running it as a workload
+## Using these chunks
 
-These chunks are registered as the `sharegpt` workload in
-`benchmarks/kv-offload-replay/run_multiturn_common.py`, so any of the five
-multi-turn drivers can replay one with `WORKLOAD_NAME=sharegpt`. It is meant for
-`WORKLOAD_MODE=async`, where each of the ~10,000 conversations runs as its own
-coroutine (vLLM's `max_num_seqs` bounds the running batch; the rest queue):
+These chunks are **not** wired as a named workload. The `sharegpt` workload
+(`WORKLOAD_NAME=sharegpt` in `run_multiturn_common.py`) is defined by human-turn
+count — `SHAREGPT_MIN_TURNS`/`SHAREGPT_MAX_TURNS`, default `12/12` — and only the
+12-turn subset (`data/sharegpt_12turn_450.json`) is pre-prepared; any other turn
+count expects an explicit `DATASET_PATH`.
+
+A chunk here is a plain ShareGPT-format array, so to replay one, point a driver
+at it directly:
 
 ```bash
-# nooffload baseline, async, chunk 000 (all 10k convs as coroutines)
-WORKLOAD_NAME=sharegpt WORKLOAD_MODE=async \
-  python benchmarks/kv-offload-replay/run_multiturn_nooffload.py
-
-# pick a different chunk (000..009) and cap the conversation count
-WORKLOAD_NAME=sharegpt SHAREGPT_CHUNK=3 NUM_CONVS=2000 WORKLOAD_MODE=async \
+DATASET_PATH=data/sharegpt/003.json NUM_CONVS=2000 WORKLOAD_MODE=async \
   python benchmarks/kv-offload-replay/run_multiturn_offloading.py
 ```
 
-`SHAREGPT_CHUNK` selects the chunk (default `000`); `NUM_CONVS` caps how many of
-that chunk's conversations are loaded (default 10,000); `DATASET_PATH` still
-overrides with an explicit path. The same knobs work for the shmq / fs_bench
-drivers.
-
-The selector env is `WORKLOAD_NAME`, **not** `WORKLOAD` — the bench container
-images already use `WORKLOAD` for the driver-script path their entrypoint execs,
-so the two must not collide. `SHAREGPT_DIR` overrides the chunk directory; the
-container harness sets it to the read-only bind-mount of this directory, since
-the `__file__`-relative default does not survive the image's flattened layout.
-
-### Through the orchestrator
-
-`profile_all.sh` forwards the same selection to every backend and bind-mounts
-this directory into the container variants automatically:
-
-```bash
-benchmarks/kv-offload-replay/profile_all.sh \
-  --workload sharegpt --sharegpt-chunk 3 --async --num-convs 2000
-```
-
-`--workload <name>` sets `WORKLOAD_NAME`, `--sharegpt-chunk <n>` sets
-`SHAREGPT_CHUNK`; omit `--workload` for the default 450×12 dataset.
+`DATASET_PATH` always wins over any `WORKLOAD_NAME`; `NUM_CONVS` caps how many of
+the file's conversations are loaded. These chunks are the raw corpus you would
+turn-filter (e.g. to build a new pre-prepared subset), not something the drivers
+select by name.
 
 ## Regenerating
 

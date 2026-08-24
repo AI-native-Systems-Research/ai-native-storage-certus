@@ -88,13 +88,14 @@ ENFORCE_EAGER=0
 WORKLOAD_MODE=batched
 # Named dataset workload, forwarded to every driver as WORKLOAD_NAME (see
 # run_multiturn_common.resolve_workload). Empty = each driver's baked default
-# (the 450x12 dataset). "sharegpt" selects the data/sharegpt 10k chunks, picked
-# by SHAREGPT_CHUNK (000..009). For the self-contained container variants the
-# chunks are NOT baked into the image, so run_container_bench() bind-mounts
-# data/sharegpt read-only and points SHAREGPT_DIR at the mount whenever a
-# workload is selected.
+# (the 450x12 dataset). "sharegpt" selects the ShareGPT multi-turn subset by
+# human-turn count via SHAREGPT_MIN_TURNS/SHAREGPT_MAX_TURNS (default 12/12 =
+# the same 450-conv, 12-turn set every bench image already bakes as its
+# DATASET_PATH — so in the container variants "sharegpt" at 12/12 is a no-op).
+# Only 12/12 is prepared; other turn counts need an explicit DATASET_PATH.
 WORKLOAD_NAME=""
-SHAREGPT_CHUNK=""      # chunk id for WORKLOAD_NAME=sharegpt (000..009); empty = driver default (000)
+SHAREGPT_MIN_TURNS=""  # min human turns for WORKLOAD_NAME=sharegpt; empty = driver default (12)
+SHAREGPT_MAX_TURNS=""  # max human turns for WORKLOAD_NAME=sharegpt; empty = driver default (12)
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
 DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
@@ -167,12 +168,14 @@ Flags (all optional; defaults shown):
                                or async. Forwarded as the WORKLOAD_MODE env var.
   --workload <name>            Named dataset workload for all backends, forwarded as
                                WORKLOAD_NAME. Empty (default) = the baked 450x12
-                               dataset. "sharegpt" = the data/sharegpt 10k-conversation
-                               chunks (meant for --workload-mode async, one coroutine
-                               per conversation); the harness bind-mounts data/sharegpt
-                               into the container variants automatically.
-  --sharegpt-chunk <n>         Chunk id (000..009) for --workload sharegpt. Forwarded
-                               as SHAREGPT_CHUNK. [driver default 000]
+                               dataset. "sharegpt" = the ShareGPT multi-turn subset
+                               selected by human-turn count (--min-turns/--max-turns,
+                               default 12/12 = that same 450x12 set). Only 12/12 is
+                               prepared; other turn counts need an explicit DATASET_PATH.
+  --min-turns <n>              Min human turns for --workload sharegpt. Forwarded as
+                               SHAREGPT_MIN_TURNS. [driver default 12]
+  --max-turns <n>              Max human turns for --workload sharegpt. Forwarded as
+                               SHAREGPT_MAX_TURNS. [driver default 12]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -223,7 +226,8 @@ while [[ $# -gt 0 ]]; do
         --async)            WORKLOAD_MODE=async; shift;;
         --workload-mode)    WORKLOAD_MODE="$2"; shift 2;;
         --workload)         WORKLOAD_NAME="$2"; shift 2;;
-        --sharegpt-chunk)   SHAREGPT_CHUNK="$2"; shift 2;;
+        --min-turns)        SHAREGPT_MIN_TURNS="$2"; shift 2;;
+        --max-turns)        SHAREGPT_MAX_TURNS="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
         --logdir)           LOGDIR="$2"; shift 2;;
@@ -705,22 +709,17 @@ build_offload() {  # image
     return 1
 }
 
-# Named-workload env + mounts shared by every backend launcher. When --workload
-# is set it forwards WORKLOAD_NAME/SHAREGPT_CHUNK; for the sharegpt workload the
-# chunks are NOT baked into any image, so it also bind-mounts host
-# data/sharegpt read-only at /workspace/data/sharegpt and points SHAREGPT_DIR
-# there (the __file__-relative default in the driver does not survive the
-# container's flattened layout). Empty WORKLOAD_NAME => no extra args, so the
-# baked default dataset is used exactly as before.
+# Named-workload env shared by every backend launcher. When --workload is set it
+# forwards WORKLOAD_NAME plus any SHAREGPT_MIN_TURNS/MAX_TURNS. No mounts: the
+# only prepared sharegpt set is 12/12, which every image already bakes as its
+# DATASET_PATH, so at 12/12 this is a harmless no-op (and any other turn count
+# needs an explicit DATASET_PATH the driver won't find in the image). Empty
+# WORKLOAD_NAME => no extra args, so the baked default dataset is used as before.
 workload_container_args() {  # -> prints podman args, one per line
     [[ -z "$WORKLOAD_NAME" ]] && return 0
     printf '%s\n' "-e" "WORKLOAD_NAME=${WORKLOAD_NAME}"
-    [[ -n "$SHAREGPT_CHUNK" ]] && printf '%s\n' "-e" "SHAREGPT_CHUNK=${SHAREGPT_CHUNK}"
-    if [[ "$WORKLOAD_NAME" == "sharegpt" ]]; then
-        printf '%s\n' \
-            "-e" "SHAREGPT_DIR=/workspace/data/sharegpt" \
-            "-v" "${REPO_ROOT}/data/sharegpt:/workspace/data/sharegpt:ro,z"
-    fi
+    [[ -n "$SHAREGPT_MIN_TURNS" ]] && printf '%s\n' "-e" "SHAREGPT_MIN_TURNS=${SHAREGPT_MIN_TURNS}"
+    [[ -n "$SHAREGPT_MAX_TURNS" ]] && printf '%s\n' "-e" "SHAREGPT_MAX_TURNS=${SHAREGPT_MAX_TURNS}"
 }
 
 # Common container run for the three self-contained images (default podman store).
@@ -891,8 +890,8 @@ if want certus-spdk; then
             ENFORCE_EAGER="$ENFORCE_EAGER" \
             WORKLOAD_MODE="$WORKLOAD_MODE" \
             WORKLOAD_NAME="$WORKLOAD_NAME" \
-            SHAREGPT_CHUNK="$SHAREGPT_CHUNK" \
-            SHAREGPT_SRC="${REPO_ROOT}/data/sharegpt" \
+            SHAREGPT_MIN_TURNS="$SHAREGPT_MIN_TURNS" \
+            SHAREGPT_MAX_TURNS="$SHAREGPT_MAX_TURNS" \
             HF_CACHE="$HF_CACHE" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \
