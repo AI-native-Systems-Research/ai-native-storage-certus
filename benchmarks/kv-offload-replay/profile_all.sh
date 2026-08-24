@@ -89,14 +89,15 @@ WORKLOAD_MODE=batched
 # Named dataset workload, forwarded to every driver as WORKLOAD_NAME (see
 # run_multiturn_common.resolve_workload). Empty = each driver's baked default
 # (the 450x12 dataset). "sharegpt" selects the ShareGPT multi-turn workload by
-# human-turn count via SHAREGPT_MIN_TURNS/SHAREGPT_MAX_TURNS. Two configs are
-# prepared: 12/12 (default) = the 450-conv, 12-turn set every image bakes as its
-# DATASET_PATH (so at 12/12 the container variants are a no-op); min-turns 1 =
-# the FULL 94,145-conv corpus (data/sharegpt/*.json), which is mounted in and
-# capped by --num-convs. Other turn counts need an explicit DATASET_PATH.
+# human-turn count via SHAREGPT_MIN_TURNS/SHAREGPT_MAX_TURNS. Exactly two configs
+# are accepted: 12/12 (default) = the 450-conv, 12-turn set every image bakes as
+# its DATASET_PATH (so at 12/12 the container variants are a no-op); 1/1 = the
+# FULL 94,145-conv corpus (data/sharegpt/*.json), which is mounted in and capped
+# by --num-convs. Any other pair errors; use an explicit DATASET_PATH instead.
+# Passing --min-turns/--max-turns implies --workload sharegpt (see below).
 WORKLOAD_NAME=""
-SHAREGPT_MIN_TURNS=""  # min human turns for WORKLOAD_NAME=sharegpt; 1 = full corpus. empty = driver default (12)
-SHAREGPT_MAX_TURNS=""  # max human turns for WORKLOAD_NAME=sharegpt; empty = driver default (12)
+SHAREGPT_MIN_TURNS=""  # min human turns; 1 = full corpus, 12 = 450x12 subset. empty = default (12)
+SHAREGPT_MAX_TURNS=""  # max human turns; empty = mirrors --min-turns (so --min-turns alone works)
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
 DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
@@ -173,12 +174,14 @@ Flags (all optional; defaults shown):
                                selected by human-turn count (--min-turns/--max-turns).
                                12/12 (default) = that baked 450x12 set; --min-turns 1
                                = the FULL 94,145-conv corpus (data/sharegpt/*.json,
-                               mounted in, capped by --num-convs). Other turn counts
-                               need an explicit DATASET_PATH.
-  --min-turns <n>              Min human turns for --workload sharegpt; 1 selects the
-                               full corpus. Forwarded as SHAREGPT_MIN_TURNS. [default 12]
-  --max-turns <n>              Max human turns for --workload sharegpt. Forwarded as
-                               SHAREGPT_MAX_TURNS. [default 12]
+                               mounted in, capped by --num-convs). Any other pair errors;
+                               use an explicit DATASET_PATH instead.
+  --min-turns <n>              Min human turns for the sharegpt workload; 1 selects the
+                               full corpus, 12 the 450x12 subset. Implies --workload
+                               sharegpt. Forwarded as SHAREGPT_MIN_TURNS. [default 12]
+  --max-turns <n>              Max human turns; must match --min-turns (1 or 12). Implies
+                               --workload sharegpt; empty mirrors --min-turns.
+                               Forwarded as SHAREGPT_MAX_TURNS. [default = --min-turns]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -238,6 +241,29 @@ while [[ $# -gt 0 ]]; do
         *) echo "error: unknown argument '$1'" >&2; usage >&2; exit 2;;
     esac
 done
+
+# --min-turns/--max-turns only mean anything for the sharegpt workload, so
+# supplying either without --workload implies it. Without this, turn flags alone
+# leave WORKLOAD_NAME empty, workload_container_args() adds nothing, and every
+# container falls back to its baked 450x12 DATASET_PATH — the "I asked for the
+# full corpus and still got 450 convs" trap.
+if [[ -z "$WORKLOAD_NAME" && ( -n "$SHAREGPT_MIN_TURNS" || -n "$SHAREGPT_MAX_TURNS" ) ]]; then
+    WORKLOAD_NAME="sharegpt"
+fi
+
+# Only two sharegpt turn configs are prepared: 12/12 (450x12 subset) and 1/1
+# (full corpus). Reject anything else here, so the corpus bind-mount below (keyed
+# on min-turns 1) can't pair with a bogus max and force an unvalidated DATASET_PATH.
+# max-turns mirrors min-turns when unset, so --min-turns 1|12 alone is valid.
+if [[ "$WORKLOAD_NAME" == "sharegpt" ]]; then
+    _mn="${SHAREGPT_MIN_TURNS:-12}"; _mx="${SHAREGPT_MAX_TURNS:-$_mn}"
+    if ! { [[ "$_mn" == "12" && "$_mx" == "12" ]] || [[ "$_mn" == "1" && "$_mx" == "1" ]]; }; then
+        echo "error: --workload sharegpt accepts only 12/12 (the 450-conv subset)" >&2
+        echo "       or 1/1 (the full 94,145-conv corpus); got min=${_mn} max=${_mx}." >&2
+        echo "       Use an explicit DATASET_PATH for other turn counts." >&2
+        exit 2
+    fi
+fi
 
 # Reject unknown --only/--skip tokens up front. want() does substring-on-comma
 # matching, so a typo (e.g. --only cpu, --only certus) silently selects nothing and

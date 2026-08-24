@@ -78,6 +78,23 @@ CONNECTOR_SRC="${CONNECTOR_SRC:-}"
 WORKLOAD_NAME="${WORKLOAD_NAME:-}"
 SHAREGPT_MIN_TURNS="${SHAREGPT_MIN_TURNS:-}"
 SHAREGPT_MAX_TURNS="${SHAREGPT_MAX_TURNS:-}"
+# The turn bounds only apply to the sharegpt workload, so setting either without
+# WORKLOAD_NAME implies it — otherwise the passthrough block below adds nothing
+# and the container uses its baked 450x12 DATASET_PATH.
+if [[ -z "${WORKLOAD_NAME}" && ( -n "${SHAREGPT_MIN_TURNS}" || -n "${SHAREGPT_MAX_TURNS}" ) ]]; then
+    WORKLOAD_NAME="sharegpt"
+fi
+# Only 12/12 (450x12 subset) and 1/1 (full corpus) are prepared; reject anything
+# else so the corpus mount below can't pair min-turns 1 with a bogus max and
+# force an unvalidated DATASET_PATH. max-turns mirrors min-turns when unset.
+if [[ "${WORKLOAD_NAME}" == "sharegpt" ]]; then
+    _mn="${SHAREGPT_MIN_TURNS:-12}"; _mx="${SHAREGPT_MAX_TURNS:-$_mn}"
+    if ! { [[ "${_mn}" == "12" && "${_mx}" == "12" ]] || [[ "${_mn}" == "1" && "${_mx}" == "1" ]]; }; then
+        echo "error: sharegpt workload accepts only 12/12 (the 450-conv subset) or 1/1" >&2
+        echo "       (the full corpus); got min=${_mn} max=${_mx}. Use DATASET_PATH otherwise." >&2
+        exit 2
+    fi
+fi
 
 # This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
 # needs explicit store paths. Override or unset for a default install.

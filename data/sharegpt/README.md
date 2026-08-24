@@ -43,32 +43,42 @@ Sizes are compact UTF-8 (`separators=(",", ":")`, `ensure_ascii=False`).
 ## Using these chunks as a workload
 
 The `sharegpt` workload (`WORKLOAD_NAME=sharegpt` in `run_multiturn_common.py`)
-is selected by human-turn count — `SHAREGPT_MIN_TURNS`/`SHAREGPT_MAX_TURNS`,
-default `12/12`. Two configs are prepared:
+is selected by human-turn count — `SHAREGPT_MIN_TURNS`/`SHAREGPT_MAX_TURNS`.
+Exactly two configs are prepared, and only these two are accepted:
 
-- **`12/12`** → `data/sharegpt_12turn_450.json` (the 450-conv, 12-turn subset
-  every bench image bakes as its `DATASET_PATH`).
-- **`min-turns 1`** → *this whole directory* — the full 94,145-conversation
+- **`min-turns 12` (`12/12`)** → `data/sharegpt_12turn_450.json` (the 450-conv,
+  12-turn subset every bench image bakes as its `DATASET_PATH`).
+- **`min-turns 1` (`1/1`)** → *this whole directory* — the full 94,145-conversation
   corpus. `load_convs` reads every `*.json` chunk here in sorted order and
   concatenates them into one conversation stream, capped by `NUM_CONVS`.
 
-Any other turn count expects an explicit `DATASET_PATH`.
+`max-turns` defaults to `min-turns`, so `--min-turns 1` and `--min-turns 12`
+alone each select a prepared config. Any other pair — in particular a `max-turns`
+that isn't `1` (with min 1) or `12` (with min 12) — is rejected; point
+`DATASET_PATH` at a custom turn-filtered file for anything else. Through
+`profile_all.sh`/`run-bench.sh`, supplying `--min-turns`/`--max-turns` implies
+`--workload sharegpt`, so you don't have to pass both.
 
 ```bash
 # full corpus, first 2000 conversations, async
 WORKLOAD_NAME=sharegpt SHAREGPT_MIN_TURNS=1 NUM_CONVS=2000 WORKLOAD_MODE=async \
   python benchmarks/kv-offload-replay/run_multiturn_offloading.py
 
-# through the orchestrator (mounts this dir into the container variants)
-benchmarks/kv-offload-replay/profile_all.sh --workload sharegpt --min-turns 1 --num-convs 2000
+# through the orchestrator (mounts this dir into the container variants;
+# --min-turns implies --workload sharegpt)
+benchmarks/kv-offload-replay/profile_all.sh --min-turns 1 --num-convs 2000
 ```
 
-`min-turns 1` means "draw from the whole corpus" — `max-turns` is not applied as
-an upper filter, and `load_convs` still keeps only conversations with ≥ 2 human
-turns (a single-turn conversation has nothing to replay across rounds). Because
-these chunks are **not** baked into the images, the orchestrator bind-mounts this
-directory read-only and points `DATASET_PATH` at the mount. You can also point a
-driver at a single chunk directly with `DATASET_PATH=data/sharegpt/003.json`.
+`min-turns 1` means "draw from the whole corpus"; `load_convs` still keeps only
+conversations with ≥ 2 human turns (a single-turn conversation has nothing to
+replay across rounds). Because these chunks are **not** baked into the images,
+the orchestrator bind-mounts this directory read-only and points `DATASET_PATH`
+at the mount. You can also point a driver at a single chunk directly with
+`DATASET_PATH=data/sharegpt/003.json`.
+
+> The container variants bake the driver code, so the full-corpus path only works
+> in images built with directory-aware `load_convs` — rebuild the bench images
+> (`profile_all.sh --rebuild`) if `--min-turns 1` was added after they were built.
 
 ## Regenerating
 

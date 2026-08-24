@@ -44,40 +44,47 @@ _DATA_DIR = os.path.normpath(
 
 def _sharegpt_dataset(has_explicit_path=False):
     """Dataset for the ``sharegpt`` workload, selected by human-turn count via
-    ``SHAREGPT_MIN_TURNS`` / ``SHAREGPT_MAX_TURNS`` (both default 12).
+    ``SHAREGPT_MIN_TURNS`` / ``SHAREGPT_MAX_TURNS``.
 
-    Two configurations are prepared:
+    Exactly TWO configurations are prepared, and only these two are accepted:
 
-    * ``min==max==12`` -> ``data/sharegpt_12turn_450.json``: 450 conversations,
-      each with exactly 12 human turns (the set every bench image bakes as its
-      ``DATASET_PATH``).
-    * ``min==1`` -> the ``data/sharegpt/`` directory: the FULL ShareGPT corpus
-      (all chunks, 94,145 conversations). ``load_convs`` reads every ``*.json``
-      chunk in order and caps at ``num_convs`` — so ``min-turns 1`` means "draw
-      from the whole corpus" (``max-turns`` is not applied — no upper filter).
+    * ``min==12`` and ``max==12`` -> ``data/sharegpt_12turn_450.json``: 450
+      conversations, each with exactly 12 human turns (the set every bench image
+      bakes as its ``DATASET_PATH``).
+    * ``min==1`` and ``max==1`` -> the ``data/sharegpt/`` directory: the FULL
+      ShareGPT corpus (all chunks, 94,145 conversations). ``load_convs`` reads
+      every ``*.json`` chunk in order and caps at ``num_convs`` — so
+      ``min-turns 1`` means "draw from the whole corpus".
 
-    Any other turn range is not prepared: set ``DATASET_PATH`` to a custom
-    turn-filtered ShareGPT file. When one is set this returns ``None`` so that
-    path takes over rather than erroring; otherwise it exits with that hint.
+    ``max-turns`` defaults to ``min-turns`` when unset, so ``--min-turns 1`` and
+    ``--min-turns 12`` alone each select a prepared config. Any other pair — in
+    particular any ``max-turns`` value that is not ``1`` (with min 1) or ``12``
+    (with min 12) — is rejected: set ``DATASET_PATH`` to a custom turn-filtered
+    ShareGPT file instead. When ``DATASET_PATH`` is set this returns ``None`` so
+    that path takes over rather than erroring; otherwise it exits with the hint.
 
     Note the corpus directory is resolved ``__file__``-relative, which is only
     correct where the module keeps its repo layout (host runs, and the shmq
     image). The other bench images flatten the layout, so the orchestrator
     overrides ``DATASET_PATH`` with the in-container mount point for the corpus
     case rather than relying on this path."""
-    min_turns = int(os.environ.get("SHAREGPT_MIN_TURNS", "12"))
-    max_turns = int(os.environ.get("SHAREGPT_MAX_TURNS", "12"))
+    min_env = os.environ.get("SHAREGPT_MIN_TURNS")
+    max_env = os.environ.get("SHAREGPT_MAX_TURNS")
+    min_turns = int(min_env) if min_env else 12
+    # max-turns defaults to min-turns so a bare --min-turns N selects config N;
+    # an explicitly-set max that disagrees is validated (and rejected) below.
+    max_turns = int(max_env) if max_env else min_turns
     if min_turns == 12 and max_turns == 12:
         return os.path.join(_DATA_DIR, "sharegpt_12turn_450.json")
-    if min_turns == 1:
+    if min_turns == 1 and max_turns == 1:
         return os.path.join(_DATA_DIR, "sharegpt")  # directory of corpus chunks
     if has_explicit_path:
         return None
     raise SystemExit(
-        "[run] WORKLOAD_NAME=sharegpt: only min-turns 1 (the full corpus) or "
-        "min-turns==max-turns==12 (the 450-conv subset) are prepared, got "
-        f"min={min_turns} max={max_turns}. Set DATASET_PATH to a custom "
-        "turn-filtered ShareGPT dataset for other turn counts."
+        "[run] WORKLOAD_NAME=sharegpt: only min-turns==max-turns==1 (the full "
+        "94,145-conv corpus) or min-turns==max-turns==12 (the 450-conv subset) "
+        f"are prepared, got min={min_turns} max={max_turns}. Set DATASET_PATH "
+        "to a custom turn-filtered ShareGPT dataset for other turn counts."
     )
 
 
@@ -88,7 +95,7 @@ def _sharegpt_dataset(has_explicit_path=False):
 WORKLOADS = {
     "sharegpt": {
         # ShareGPT multi-turn workload, selected by human-turn count (see
-        # _sharegpt_dataset): 12/12 = the baked 450-conv 12-turn subset; min-1 =
+        # _sharegpt_dataset): 12/12 = the baked 450-conv 12-turn subset; 1/1 =
         # the full 94,145-conv corpus dir. num_convs defaults to the whole
         # corpus; for the 450-conv file load_convs simply stops at its 450, and
         # NUM_CONVS overrides either way.
@@ -96,7 +103,7 @@ WORKLOADS = {
         "num_convs": 94145,
         "desc": "ShareGPT multi-turn workload by human-turn count "
                 "(SHAREGPT_MIN_TURNS/MAX_TURNS: 12/12 = 450-conv subset, "
-                "min-1 = full 94,145-conv corpus)",
+                "1/1 = full 94,145-conv corpus)",
     },
 }
 
