@@ -21,8 +21,8 @@ if __name__ == "__main__":
     import run_multiturn_common as common
     import run_multiturn_sync_batched as batched
 
-    # Dataset + conversation count. WORKLOAD=<name> selects a registered workload
-    # (e.g. WORKLOAD=sharegpt -> the data/sharegpt 10k chunks); DATASET_PATH /
+    # Dataset + conversation count. WORKLOAD_NAME=<name> selects a registered workload
+    # (e.g. WORKLOAD_NAME=sharegpt -> the data/sharegpt 10k chunks); DATASET_PATH /
     # NUM_CONVS still override. Default: this driver's own subset, 500 convs.
     SUBSET_PATH, NUM_CONVS = common.resolve_workload(
         os.path.join(_here, "sharegpt_subset_5000.json"), 500)

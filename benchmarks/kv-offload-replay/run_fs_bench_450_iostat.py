@@ -50,8 +50,8 @@ def _pin_to_numa_node():
 
 _pin_to_numa_node()
 
-# WORKLOAD=<name> selects a registered workload (e.g. WORKLOAD=sharegpt -> the
-# data/sharegpt 10k chunks); DATASET_PATH / NUM_CONVS still override.
+# WORKLOAD_NAME=<name> selects a registered workload (e.g. WORKLOAD_NAME=sharegpt
+# -> the data/sharegpt 10k chunks); DATASET_PATH / NUM_CONVS still override.
 SUBSET_PATH, NUM_CONVS = common.resolve_workload("sharegpt_12turn_450.json", 450)
 MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
 OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 150))

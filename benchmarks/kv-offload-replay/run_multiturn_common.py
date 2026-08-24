@@ -32,7 +32,8 @@ import sys
 
 # ── Named workloads ─────────────────────────────────────────────────────────
 # A "workload" names a dataset (+ a sensible default conversation count) so a
-# driver can select it with WORKLOAD=<name> instead of spelling out DATASET_PATH.
+# driver can select it with WORKLOAD_NAME=<name> instead of spelling out
+# DATASET_PATH. (Selector env is WORKLOAD_NAME, not WORKLOAD — see resolve_workload.)
 # The repo-root data dir, resolved relative to this module
 # (benchmarks/kv-offload-replay/ -> ../../data).
 _DATA_DIR = os.path.normpath(
@@ -45,9 +46,15 @@ def _sharegpt_chunk():
 
     Each chunk is a standalone ShareGPT-format array of 10,000 conversations in
     dataset order (009 is the 4,145-conversation remainder); see the dir's
-    README. SHAREGPT_CHUNK accepts "0"/"00"/"000" alike."""
+    README. SHAREGPT_CHUNK accepts "0"/"00"/"000" alike.
+
+    ``SHAREGPT_DIR`` overrides the chunk directory. Containers flatten the repo
+    layout (``benchmarks/kv-offload-replay`` -> ``/workspace/bench``), so the
+    ``__file__``-relative default below does not hold there; the harness
+    bind-mounts the chunks and points ``SHAREGPT_DIR`` at the mount."""
     chunk = os.environ.get("SHAREGPT_CHUNK", "000").zfill(3)
-    return os.path.join(_DATA_DIR, "sharegpt", f"{chunk}.json")
+    base = os.environ.get("SHAREGPT_DIR") or os.path.join(_DATA_DIR, "sharegpt")
+    return os.path.join(base, f"{chunk}.json")
 
 
 # name -> {dataset: path|callable, num_convs: int, desc: str}. The dataset may be
@@ -71,22 +78,26 @@ def resolve_workload(default_dataset, default_num_convs):
 
     Dataset-path precedence:
       1. ``DATASET_PATH`` — explicit ShareGPT-format json; always wins.
-      2. ``WORKLOAD=<name>`` — a registered workload (see :data:`WORKLOADS`).
+      2. ``WORKLOAD_NAME=<name>`` — a registered workload (see :data:`WORKLOADS`).
       3. the caller's ``default_dataset`` (each driver's historical default).
 
     ``NUM_CONVS``, when set, always overrides the count; otherwise a selected
     workload's ``num_convs`` applies, else ``default_num_convs``. This keeps every
-    driver's prior default behavior intact when neither WORKLOAD nor the env
-    overrides are set. Unknown ``WORKLOAD`` names exit with the known list."""
+    driver's prior default behavior intact when neither WORKLOAD_NAME nor the env
+    overrides are set. Unknown ``WORKLOAD_NAME`` values exit with the known list.
+
+    Note: the selector env is ``WORKLOAD_NAME``, not ``WORKLOAD`` — the bench
+    container images already use ``WORKLOAD`` for the driver-script path their
+    entrypoint execs, so the two must not collide."""
     dataset = default_dataset
     num_convs = default_num_convs
 
-    workload = os.environ.get("WORKLOAD", "").strip().lower()
+    workload = os.environ.get("WORKLOAD_NAME", "").strip().lower()
     if workload:
         spec = WORKLOADS.get(workload)
         if spec is None:
             raise SystemExit(
-                f"[run] unknown WORKLOAD={workload!r}; "
+                f"[run] unknown WORKLOAD_NAME={workload!r}; "
                 f"known: {', '.join(sorted(WORKLOADS)) or '(none)'}"
             )
         ds = spec["dataset"]

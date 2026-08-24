@@ -86,6 +86,15 @@ ENFORCE_EAGER=0
 # runs one vLLM coroutine per conversation (V1 AsyncLLM). --async flips it for
 # the whole run; --workload-mode <mode> sets it explicitly.
 WORKLOAD_MODE=batched
+# Named dataset workload, forwarded to every driver as WORKLOAD_NAME (see
+# run_multiturn_common.resolve_workload). Empty = each driver's baked default
+# (the 450x12 dataset). "sharegpt" selects the data/sharegpt 10k chunks, picked
+# by SHAREGPT_CHUNK (000..009). For the self-contained container variants the
+# chunks are NOT baked into the image, so run_container_bench() bind-mounts
+# data/sharegpt read-only and points SHAREGPT_DIR at the mount whenever a
+# workload is selected.
+WORKLOAD_NAME=""
+SHAREGPT_CHUNK=""      # chunk id for WORKLOAD_NAME=sharegpt (000..009); empty = driver default (000)
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
 DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
@@ -156,6 +165,14 @@ Flags (all optional; defaults shown):
                                --workload-mode async.
   --workload-mode <mode>       Execution model for all backends: batched (default)
                                or async. Forwarded as the WORKLOAD_MODE env var.
+  --workload <name>            Named dataset workload for all backends, forwarded as
+                               WORKLOAD_NAME. Empty (default) = the baked 450x12
+                               dataset. "sharegpt" = the data/sharegpt 10k-conversation
+                               chunks (meant for --workload-mode async, one coroutine
+                               per conversation); the harness bind-mounts data/sharegpt
+                               into the container variants automatically.
+  --sharegpt-chunk <n>         Chunk id (000..009) for --workload sharegpt. Forwarded
+                               as SHAREGPT_CHUNK. [driver default 000]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -205,6 +222,8 @@ while [[ $# -gt 0 ]]; do
         --enforce-eager)    ENFORCE_EAGER=1; shift;;
         --async)            WORKLOAD_MODE=async; shift;;
         --workload-mode)    WORKLOAD_MODE="$2"; shift 2;;
+        --workload)         WORKLOAD_NAME="$2"; shift 2;;
+        --sharegpt-chunk)   SHAREGPT_CHUNK="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
         --logdir)           LOGDIR="$2"; shift 2;;
@@ -686,10 +705,29 @@ build_offload() {  # image
     return 1
 }
 
+# Named-workload env + mounts shared by every backend launcher. When --workload
+# is set it forwards WORKLOAD_NAME/SHAREGPT_CHUNK; for the sharegpt workload the
+# chunks are NOT baked into any image, so it also bind-mounts host
+# data/sharegpt read-only at /workspace/data/sharegpt and points SHAREGPT_DIR
+# there (the __file__-relative default in the driver does not survive the
+# container's flattened layout). Empty WORKLOAD_NAME => no extra args, so the
+# baked default dataset is used exactly as before.
+workload_container_args() {  # -> prints podman args, one per line
+    [[ -z "$WORKLOAD_NAME" ]] && return 0
+    printf '%s\n' "-e" "WORKLOAD_NAME=${WORKLOAD_NAME}"
+    [[ -n "$SHAREGPT_CHUNK" ]] && printf '%s\n' "-e" "SHAREGPT_CHUNK=${SHAREGPT_CHUNK}"
+    if [[ "$WORKLOAD_NAME" == "sharegpt" ]]; then
+        printf '%s\n' \
+            "-e" "SHAREGPT_DIR=/workspace/data/sharegpt" \
+            "-v" "${REPO_ROOT}/data/sharegpt:/workspace/data/sharegpt:ro,z"
+    fi
+}
+
 # Common container run for the three self-contained images (default podman store).
 run_container_bench() {  # variant image extra-args...
     local variant="$1" image="$2"; shift 2
     local extra=("$@") f="${LOGDIR}/${variant}.log"
+    local wl=(); mapfile -t wl < <(workload_container_args)
     log "starting ${variant} (image ${image})"
     gpu_mark start "$variant"
     command podman run --rm \
@@ -706,6 +744,7 @@ run_container_bench() {  # variant image extra-args...
         -e "WORKLOAD_MODE=${WORKLOAD_MODE}" \
         -e "HF_HUB_OFFLINE=0" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
+        "${wl[@]}" \
         "${extra[@]}" \
         "$image" 2>&1 | tee "$f"
     local rc="${PIPESTATUS[0]}"
@@ -851,6 +890,9 @@ if want certus-spdk; then
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
             ENFORCE_EAGER="$ENFORCE_EAGER" \
             WORKLOAD_MODE="$WORKLOAD_MODE" \
+            WORKLOAD_NAME="$WORKLOAD_NAME" \
+            SHAREGPT_CHUNK="$SHAREGPT_CHUNK" \
+            SHAREGPT_SRC="${REPO_ROOT}/data/sharegpt" \
             HF_CACHE="$HF_CACHE" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \

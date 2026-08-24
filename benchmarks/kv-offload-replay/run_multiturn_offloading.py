@@ -59,8 +59,8 @@ if __name__ == "__main__":
     DEFAULT_DATASET = os.path.join(
         _here, "..", "..", "data", "sharegpt_12turn_450.json"
     )
-    # WORKLOAD=<name> selects a registered workload (e.g. WORKLOAD=sharegpt ->
-    # data/sharegpt 10k chunks); DATASET_PATH / NUM_CONVS still override.
+    # WORKLOAD_NAME=<name> selects a registered workload (e.g. WORKLOAD_NAME=sharegpt
+    # -> data/sharegpt 10k chunks); DATASET_PATH / NUM_CONVS still override.
     SUBSET_PATH, NUM_CONVS = common.resolve_workload(DEFAULT_DATASET, 450)
     if not os.path.exists(SUBSET_PATH):
         print(f"[run] missing {SUBSET_PATH}", file=sys.stderr)

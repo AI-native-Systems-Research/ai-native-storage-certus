@@ -63,6 +63,15 @@ WORKLOAD_SRC="${WORKLOAD_SRC:-}"
 # rebuild). Unset by default (uses the image's baked connector); declared here so
 # the `-n` test at the mount block below is safe under `set -u`.
 CONNECTOR_SRC="${CONNECTOR_SRC:-}"
+# WORKLOAD_NAME — optional named dataset workload forwarded to the driver as the
+# WORKLOAD_NAME env (see run_multiturn_common.resolve_workload). Empty = the
+# image's baked DATASET_PATH (the 450x12 set). SHAREGPT_CHUNK picks the chunk for
+# WORKLOAD_NAME=sharegpt. SHAREGPT_SRC is a host data/sharegpt dir bind-mounted
+# at /workspace/data/sharegpt (the chunks are NOT baked into the image), with
+# SHAREGPT_DIR pointed there so the driver finds them regardless of layout.
+WORKLOAD_NAME="${WORKLOAD_NAME:-}"
+SHAREGPT_CHUNK="${SHAREGPT_CHUNK:-}"
+SHAREGPT_SRC="${SHAREGPT_SRC:-}"
 
 # This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
 # needs explicit store paths. Override or unset for a default install.
@@ -174,6 +183,25 @@ if [[ -n "${CONNECTOR_SRC}" ]]; then
     fi
 fi
 
+# ── Named-workload passthrough (only if WORKLOAD_NAME set) ──
+# The chunks are not baked into the image, so mount SHAREGPT_SRC at
+# /workspace/data/sharegpt and point SHAREGPT_DIR there; forward the selector +
+# chunk. Empty WORKLOAD_NAME => nothing added, so the baked DATASET_PATH is used.
+workload_name_env=()
+if [[ -n "${WORKLOAD_NAME}" ]]; then
+    workload_name_env+=(-e "WORKLOAD_NAME=${WORKLOAD_NAME}")
+    [[ -n "${SHAREGPT_CHUNK}" ]] && workload_name_env+=(-e "SHAREGPT_CHUNK=${SHAREGPT_CHUNK}")
+    if [[ -n "${SHAREGPT_SRC}" ]]; then
+        if [[ -d "${SHAREGPT_SRC}" ]]; then
+            workload_name_env+=(-v "${SHAREGPT_SRC}:/workspace/data/sharegpt:z,ro"
+                                -e "SHAREGPT_DIR=/workspace/data/sharegpt")
+            echo "[run-bench] workload=${WORKLOAD_NAME} sharegpt_src=${SHAREGPT_SRC}" >&2
+        else
+            echo "warning: SHAREGPT_SRC=${SHAREGPT_SRC} not found — WORKLOAD_NAME=${WORKLOAD_NAME} will fail to locate its dataset." >&2
+        fi
+    fi
+fi
+
 echo "[run-bench] image=${IMAGE} gpu=${GPU} shm_path=${SHM_PATH}"
 echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL} tensor_parallel_size=${TENSOR_PARALLEL_SIZE}"
 
@@ -190,6 +218,7 @@ exec command podman "${store_flags[@]}" run --rm \
     "${logstats_env[@]}" \
     "${workload_mount[@]}" \
     "${connector_mount[@]}" \
+    "${workload_name_env[@]}" \
     "${cache_mount[@]}" \
     "${hf_env[@]}" \
     -e "SHM_PATH=${SHM_PATH}" \
