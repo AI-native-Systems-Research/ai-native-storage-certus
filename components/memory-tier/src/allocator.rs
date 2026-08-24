@@ -83,6 +83,122 @@ impl FreeList {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Kani formal-verification harnesses.
+//
+// These prove properties of the `FreeList` allocator — the pure, pointer-free
+// core of the memory-tier — over the full symbolic input domain (bounded by the
+// unwind depth). The pointer/mmap/SPDK-FFI and `RwLock` layers in `lib.rs` are
+// out of scope for Kani (raw pointers and FFI are not modelled); see
+// `verified_properties.md` for the bounded-scope statement.
+//
+// Each harness calls the REAL `FreeList` functions and mirrors the production
+// preconditions with `kani::assume`:
+//   * `size > 0`                 — `insert()` rejects zero size (InvalidSize, FR-008).
+//   * `size <= u32::MAX as usize`— `IMemoryTier::insert(key, size: u32)` type bound;
+//                                  `deallocate` likewise receives `slot.size as usize`.
+//   * `cap % ALIGNMENT == 0`     — `initialize()` pool sizes are page multiples.
+// -----------------------------------------------------------------------------
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    /// Upper bound on the modelled pool capacity. Keeps solver arithmetic
+    /// tractable while still covering the full u32 allocation-size domain.
+    const MAX_CAP: usize = 1 << 40; // 1 TiB
+
+    /// [FR-004 / FR-007] A successful allocation returns a 4 KiB-aligned offset
+    /// that lies wholly within the pool, and never violates `used <= capacity`.
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn verify_allocate_alignment_and_bounds() {
+        let cap: usize = kani::any();
+        kani::assume(cap > 0 && cap <= MAX_CAP && cap % ALIGNMENT == 0);
+        let mut fl = FreeList::new(cap);
+
+        let size: usize = kani::any();
+        kani::assume(size > 0); // insert() rejects size == 0 (InvalidSize)
+        kani::assume(size <= u32::MAX as usize); // insert(size: u32) type bound
+
+        if let Some(offset) = fl.allocate(size) {
+            assert!(offset % ALIGNMENT == 0, "FR-004: offset is 4 KiB-aligned");
+            let aligned = size.next_multiple_of(ALIGNMENT);
+            assert!(offset + aligned <= cap, "allocation lies within the pool");
+            assert!(fl.used() <= fl.capacity(), "used never exceeds capacity");
+        }
+    }
+
+    /// [FR-010] When the request (aligned up) exceeds the entire free pool,
+    /// `allocate` returns `None` — the `PoolFull` path taken by `insert()`.
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn verify_allocate_poolfull() {
+        let cap: usize = kani::any();
+        kani::assume(cap <= MAX_CAP && cap % ALIGNMENT == 0);
+        let mut fl = FreeList::new(cap);
+
+        let size: usize = kani::any();
+        kani::assume(size > 0 && size <= u32::MAX as usize);
+        let aligned = size.next_multiple_of(ALIGNMENT);
+        kani::assume(aligned > cap);
+
+        assert!(
+            fl.allocate(size).is_none(),
+            "FR-010: over-capacity request yields None"
+        );
+    }
+
+    /// [Accounting invariant / symmetric op] `allocate` then `deallocate` of the
+    /// same region restores `used` exactly and never underflows.
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn verify_alloc_dealloc_roundtrip() {
+        let cap: usize = kani::any();
+        kani::assume(cap > 0 && cap <= MAX_CAP && cap % ALIGNMENT == 0);
+        let mut fl = FreeList::new(cap);
+
+        let size: usize = kani::any();
+        kani::assume(size > 0 && size <= u32::MAX as usize);
+
+        let before = fl.used(); // 0 on a fresh pool
+        if let Some(off) = fl.allocate(size) {
+            let aligned = size.next_multiple_of(ALIGNMENT);
+            assert!(fl.used() == before + aligned, "used grows by aligned size");
+            fl.deallocate(off, size);
+            assert!(
+                fl.used() == before,
+                "round-trip restores used (no underflow)"
+            );
+            assert!(fl.capacity() == cap, "capacity is unchanged");
+        }
+    }
+
+    /// [FR-026] Deallocating two adjacent regions coalesces them: the combined
+    /// span is reallocatable as a single region at the lower offset.
+    ///
+    /// Uses a concrete capacity: coalescing is a structural property of the
+    /// free-list (independent of the exact pool size), and a symbolic capacity
+    /// makes the multi-step alloc/dealloc arithmetic intractable for CBMC.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn verify_coalesce_adjacent() {
+        let cap: usize = 3 * ALIGNMENT; // 12 KiB — room for two page-blocks plus slack
+        let mut fl = FreeList::new(cap);
+
+        let a = fl.allocate(ALIGNMENT).unwrap(); // offset 0
+        let b = fl.allocate(ALIGNMENT).unwrap(); // offset 4096
+        assert!(a == 0 && b == ALIGNMENT, "sequential first-fit offsets");
+
+        fl.deallocate(a, ALIGNMENT);
+        fl.deallocate(b, ALIGNMENT);
+
+        assert!(
+            fl.allocate(2 * ALIGNMENT) == Some(0),
+            "FR-026: adjacent frees coalesce into one region at offset 0"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

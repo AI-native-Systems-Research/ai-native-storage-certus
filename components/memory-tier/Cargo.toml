@@ -9,6 +9,9 @@ publish = false
 spdk = ["dep:spdk-sys"]
 telemetry = []
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [dependencies]
 component-framework.workspace = true
 component-core.workspace = true
