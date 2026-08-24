@@ -46,8 +46,9 @@ def _pin_to_numa_node():
         print(f"[pin] WARNING: NUMA pin failed ({e}); running unpinned", flush=True)
 
 
-SUBSET_PATH = os.environ.get("DATASET_PATH", "sharegpt_12turn_450.json")
-NUM_CONVS = int(os.environ.get("NUM_CONVS", 450))
+# WORKLOAD=<name> selects a registered workload (e.g. WORKLOAD=sharegpt -> the
+# data/sharegpt 10k chunks); DATASET_PATH / NUM_CONVS still override.
+SUBSET_PATH, NUM_CONVS = common.resolve_workload("sharegpt_12turn_450.json", 450)
 MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
 OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 150))
 MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))

@@ -62,13 +62,14 @@ if __name__ == "__main__":
     DEFAULT_DATASET = os.path.join(
         _here, "..", "data", "sharegpt_12turn_450.json"
     )
-    DATASET_PATH = os.environ.get("DATASET_PATH", DEFAULT_DATASET)
+    # WORKLOAD=<name> selects a registered workload (e.g. WORKLOAD=sharegpt ->
+    # the data/sharegpt 10k chunks); DATASET_PATH / NUM_CONVS still override.
+    DATASET_PATH, NUM_CONVS = common.resolve_workload(DEFAULT_DATASET, 450)
     if not os.path.exists(DATASET_PATH):
         print(f"[run] missing dataset {DATASET_PATH}", file=sys.stderr)
         sys.exit(1)
 
     SHM_PATH = os.environ.get("SHM_PATH", "/dev/shm/certus-shmq")
-    NUM_CONVS = int(os.environ.get("NUM_CONVS", 450))
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 150))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))

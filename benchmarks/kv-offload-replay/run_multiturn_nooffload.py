@@ -21,13 +21,14 @@ if __name__ == "__main__":
     import run_multiturn_common as common
     import run_multiturn_sync_batched as batched
 
-    SUBSET_PATH = os.environ.get("DATASET_PATH",
-                                   os.path.join(_here, "sharegpt_subset_5000.json"))
+    # Dataset + conversation count. WORKLOAD=<name> selects a registered workload
+    # (e.g. WORKLOAD=sharegpt -> the data/sharegpt 10k chunks); DATASET_PATH /
+    # NUM_CONVS still override. Default: this driver's own subset, 500 convs.
+    SUBSET_PATH, NUM_CONVS = common.resolve_workload(
+        os.path.join(_here, "sharegpt_subset_5000.json"), 500)
     if not os.path.exists(SUBSET_PATH):
         print(f"[run] missing {SUBSET_PATH}", file=sys.stderr)
         sys.exit(1)
-
-    NUM_CONVS = int(os.environ.get("NUM_CONVS", 500))
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 150))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))

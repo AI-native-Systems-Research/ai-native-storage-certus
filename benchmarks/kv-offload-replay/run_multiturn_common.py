@@ -26,7 +26,82 @@ the (heavy) engine import happens.
 """
 
 import json
+import os
 import sys
+
+
+# ── Named workloads ─────────────────────────────────────────────────────────
+# A "workload" names a dataset (+ a sensible default conversation count) so a
+# driver can select it with WORKLOAD=<name> instead of spelling out DATASET_PATH.
+# The repo-root data dir, resolved relative to this module
+# (benchmarks/kv-offload-replay/ -> ../../data).
+_DATA_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data")
+)
+
+
+def _sharegpt_chunk():
+    """Path to one data/sharegpt/ chunk, chosen by SHAREGPT_CHUNK (default 000).
+
+    Each chunk is a standalone ShareGPT-format array of 10,000 conversations in
+    dataset order (009 is the 4,145-conversation remainder); see the dir's
+    README. SHAREGPT_CHUNK accepts "0"/"00"/"000" alike."""
+    chunk = os.environ.get("SHAREGPT_CHUNK", "000").zfill(3)
+    return os.path.join(_DATA_DIR, "sharegpt", f"{chunk}.json")
+
+
+# name -> {dataset: path|callable, num_convs: int, desc: str}. The dataset may be
+# a callable resolved at selection time (so per-run env like SHAREGPT_CHUNK is
+# honored). Add entries here to register new workloads for all five drivers.
+WORKLOADS = {
+    "sharegpt": {
+        # Full ShareGPT_V3 unfiltered, split into 10k-conversation chunks. Meant
+        # for WORKLOAD_MODE=async, where each of the ~10k conversations runs as
+        # its own coroutine (one convo = one coroutine); vLLM's max_num_seqs
+        # bounds the running batch, the rest queue in WAITING.
+        "dataset": _sharegpt_chunk,
+        "num_convs": 10000,
+        "desc": "full ShareGPT_V3 10k-conversation chunk (async: one coroutine per conversation)",
+    },
+}
+
+
+def resolve_workload(default_dataset, default_num_convs):
+    """Resolve ``(dataset_path, num_convs)`` for this run from the environment.
+
+    Dataset-path precedence:
+      1. ``DATASET_PATH`` — explicit ShareGPT-format json; always wins.
+      2. ``WORKLOAD=<name>`` — a registered workload (see :data:`WORKLOADS`).
+      3. the caller's ``default_dataset`` (each driver's historical default).
+
+    ``NUM_CONVS``, when set, always overrides the count; otherwise a selected
+    workload's ``num_convs`` applies, else ``default_num_convs``. This keeps every
+    driver's prior default behavior intact when neither WORKLOAD nor the env
+    overrides are set. Unknown ``WORKLOAD`` names exit with the known list."""
+    dataset = default_dataset
+    num_convs = default_num_convs
+
+    workload = os.environ.get("WORKLOAD", "").strip().lower()
+    if workload:
+        spec = WORKLOADS.get(workload)
+        if spec is None:
+            raise SystemExit(
+                f"[run] unknown WORKLOAD={workload!r}; "
+                f"known: {', '.join(sorted(WORKLOADS)) or '(none)'}"
+            )
+        ds = spec["dataset"]
+        dataset = ds() if callable(ds) else ds
+        num_convs = spec.get("num_convs", default_num_convs)
+
+    explicit_path = os.environ.get("DATASET_PATH")
+    if explicit_path:
+        dataset = explicit_path
+
+    num_convs_env = os.environ.get("NUM_CONVS")
+    if num_convs_env is not None:
+        num_convs = int(num_convs_env)
+
+    return dataset, num_convs
 
 
 # ── Workload input ────────────────────────────────────────────────────────
