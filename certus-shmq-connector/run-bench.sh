@@ -33,6 +33,12 @@
 #                               host builds into /mnt/certus1 — see below)
 set -euo pipefail
 
+# Repo root, resolved from this script's own location (certus-shmq-connector/..),
+# so the full-corpus mount below works whether launched directly or by the
+# orchestrator, without an extra env.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # Fully-qualified so rootless podman doesn't hit short-name resolution (which
 # can't prompt without a TTY). Override IMAGE to point elsewhere.
 IMAGE="${IMAGE:-localhost/certus-shmq-bench}"
@@ -66,8 +72,9 @@ CONNECTOR_SRC="${CONNECTOR_SRC:-}"
 # WORKLOAD_NAME — optional named dataset workload forwarded to the driver as the
 # WORKLOAD_NAME env (see run_multiturn_common.resolve_workload). Empty = the
 # image's baked DATASET_PATH (the 450x12 set). SHAREGPT_MIN_TURNS/MAX_TURNS pick
-# the human-turn subset for WORKLOAD_NAME=sharegpt; the only prepared value is
-# 12/12, which is exactly the baked DATASET_PATH, so at 12/12 this is a no-op.
+# the sharegpt config: 12/12 is exactly the baked DATASET_PATH (a no-op);
+# min-turns 1 = the full corpus, mounted from the host (see the passthrough
+# block below) since it is not baked into the image.
 WORKLOAD_NAME="${WORKLOAD_NAME:-}"
 SHAREGPT_MIN_TURNS="${SHAREGPT_MIN_TURNS:-}"
 SHAREGPT_MAX_TURNS="${SHAREGPT_MAX_TURNS:-}"
@@ -183,15 +190,27 @@ if [[ -n "${CONNECTOR_SRC}" ]]; then
 fi
 
 # ── Named-workload passthrough (only if WORKLOAD_NAME set) ──
-# Forward the selector plus any human-turn bounds. No mount: the only prepared
-# sharegpt set is 12/12, which is exactly the image's baked DATASET_PATH, so at
-# 12/12 this is a no-op. Empty WORKLOAD_NAME => nothing added (baked default).
+# Forward the selector plus any human-turn bounds. 12/12 is exactly the image's
+# baked DATASET_PATH, so at 12/12 this is a no-op. min-turns 1 selects the FULL
+# corpus, which is NOT baked: bind-mount data/sharegpt read-only and point
+# DATASET_PATH at the mount (DATASET_PATH always wins in resolve_workload).
+# Empty WORKLOAD_NAME => nothing added (baked default).
 workload_name_env=()
 if [[ -n "${WORKLOAD_NAME}" ]]; then
     workload_name_env+=(-e "WORKLOAD_NAME=${WORKLOAD_NAME}")
     [[ -n "${SHAREGPT_MIN_TURNS}" ]] && workload_name_env+=(-e "SHAREGPT_MIN_TURNS=${SHAREGPT_MIN_TURNS}")
     [[ -n "${SHAREGPT_MAX_TURNS}" ]] && workload_name_env+=(-e "SHAREGPT_MAX_TURNS=${SHAREGPT_MAX_TURNS}")
     echo "[run-bench] workload=${WORKLOAD_NAME} min_turns=${SHAREGPT_MIN_TURNS:-12} max_turns=${SHAREGPT_MAX_TURNS:-12}" >&2
+    if [[ "${WORKLOAD_NAME}" == "sharegpt" && "${SHAREGPT_MIN_TURNS}" == "1" ]]; then
+        corpus="${REPO_ROOT}/data/sharegpt"
+        if [[ -d "${corpus}" ]]; then
+            workload_name_env+=(-v "${corpus}:/workspace/data/sharegpt:z,ro"
+                                -e "DATASET_PATH=/workspace/data/sharegpt")
+            echo "[run-bench] min-turns 1: mounting full corpus ${corpus}" >&2
+        else
+            echo "warning: ${corpus} not found — min-turns 1 needs the full ShareGPT corpus (data/sharegpt/*.json); falling back to the baked 450x12 set." >&2
+        fi
+    fi
 fi
 
 echo "[run-bench] image=${IMAGE} gpu=${GPU} shm_path=${SHM_PATH}"

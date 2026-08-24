@@ -25,6 +25,7 @@ Nothing here imports vllm at module load, so the driver stays in control of when
 the (heavy) engine import happens.
 """
 
+import glob
 import json
 import os
 import sys
@@ -42,27 +43,39 @@ _DATA_DIR = os.path.normpath(
 
 
 def _sharegpt_dataset(has_explicit_path=False):
-    """Dataset path for the ``sharegpt`` workload, selected by human-turn count.
+    """Dataset for the ``sharegpt`` workload, selected by human-turn count via
+    ``SHAREGPT_MIN_TURNS`` / ``SHAREGPT_MAX_TURNS`` (both default 12).
 
-    The workload is defined by the number of *human* turns per conversation via
-    ``SHAREGPT_MIN_TURNS`` / ``SHAREGPT_MAX_TURNS`` (both default 12). Only the
-    12-turn subset is pre-prepared: when min==max==12 this returns
-    ``data/sharegpt_12turn_450.json`` — 450 conversations, each with exactly 12
-    human turns.
+    Two configurations are prepared:
 
-    Any other turn range is not prepared here; set ``DATASET_PATH`` to a custom
-    turn-filtered ShareGPT file for those. When one is already set this returns
-    ``None`` (so that path takes over rather than erroring); otherwise a
-    non-12/12 range exits with that instruction."""
+    * ``min==max==12`` -> ``data/sharegpt_12turn_450.json``: 450 conversations,
+      each with exactly 12 human turns (the set every bench image bakes as its
+      ``DATASET_PATH``).
+    * ``min==1`` -> the ``data/sharegpt/`` directory: the FULL ShareGPT corpus
+      (all chunks, 94,145 conversations). ``load_convs`` reads every ``*.json``
+      chunk in order and caps at ``num_convs`` — so ``min-turns 1`` means "draw
+      from the whole corpus" (``max-turns`` is not applied — no upper filter).
+
+    Any other turn range is not prepared: set ``DATASET_PATH`` to a custom
+    turn-filtered ShareGPT file. When one is set this returns ``None`` so that
+    path takes over rather than erroring; otherwise it exits with that hint.
+
+    Note the corpus directory is resolved ``__file__``-relative, which is only
+    correct where the module keeps its repo layout (host runs, and the shmq
+    image). The other bench images flatten the layout, so the orchestrator
+    overrides ``DATASET_PATH`` with the in-container mount point for the corpus
+    case rather than relying on this path."""
     min_turns = int(os.environ.get("SHAREGPT_MIN_TURNS", "12"))
     max_turns = int(os.environ.get("SHAREGPT_MAX_TURNS", "12"))
     if min_turns == 12 and max_turns == 12:
         return os.path.join(_DATA_DIR, "sharegpt_12turn_450.json")
+    if min_turns == 1:
+        return os.path.join(_DATA_DIR, "sharegpt")  # directory of corpus chunks
     if has_explicit_path:
         return None
     raise SystemExit(
-        "[run] WORKLOAD_NAME=sharegpt: only the 12-turn subset "
-        f"(SHAREGPT_MIN_TURNS==SHAREGPT_MAX_TURNS==12) is prepared, got "
+        "[run] WORKLOAD_NAME=sharegpt: only min-turns 1 (the full corpus) or "
+        "min-turns==max-turns==12 (the 450-conv subset) are prepared, got "
         f"min={min_turns} max={max_turns}. Set DATASET_PATH to a custom "
         "turn-filtered ShareGPT dataset for other turn counts."
     )
@@ -74,14 +87,16 @@ def _sharegpt_dataset(has_explicit_path=False):
 # here to register new workloads for all five drivers.
 WORKLOADS = {
     "sharegpt": {
-        # The ShareGPT multi-turn subset, selected by human-turn count. The
-        # default (12/12) is the 450-conversation, 12-human-turn set every bench
-        # image bakes as its DATASET_PATH; other turn counts need an explicit
-        # DATASET_PATH (see _sharegpt_dataset).
+        # ShareGPT multi-turn workload, selected by human-turn count (see
+        # _sharegpt_dataset): 12/12 = the baked 450-conv 12-turn subset; min-1 =
+        # the full 94,145-conv corpus dir. num_convs defaults to the whole
+        # corpus; for the 450-conv file load_convs simply stops at its 450, and
+        # NUM_CONVS overrides either way.
         "dataset": _sharegpt_dataset,
-        "num_convs": 450,
-        "desc": "ShareGPT multi-turn subset by human-turn count "
-                "(SHAREGPT_MIN_TURNS/MAX_TURNS, default 12/12 = the 450-conv set)",
+        "num_convs": 94145,
+        "desc": "ShareGPT multi-turn workload by human-turn count "
+                "(SHAREGPT_MIN_TURNS/MAX_TURNS: 12/12 = 450-conv subset, "
+                "min-1 = full 94,145-conv corpus)",
     },
 }
 
@@ -119,7 +134,7 @@ def resolve_workload(default_dataset, default_num_convs):
         # SHAREGPT_MIN_TURNS is honored) and may return None to defer to an
         # explicit DATASET_PATH rather than erroring on an unprepared range.
         ds = spec["dataset"]
-        resolved = ds(explicit_path is not None) if callable(ds) else ds
+        resolved = ds(bool(explicit_path)) if callable(ds) else ds
         if resolved is not None:
             dataset = resolved
 
@@ -135,11 +150,17 @@ def resolve_workload(default_dataset, default_num_convs):
 
 # ── Workload input ────────────────────────────────────────────────────────
 def load_convs(dataset_path, num_convs, conv_multiplier=1):
-    """Load a ShareGPT-format json and return a list of human-turn streams.
+    """Load ShareGPT-format json and return a list of human-turn streams.
+
+    ``dataset_path`` may be a single json file or a *directory* of json chunks
+    (the full-corpus ``sharegpt`` min-turns-1 case): a directory is read as its
+    ``*.json`` files in sorted (numeric-chunk) order, concatenated, so a chunked
+    corpus replays as one continuous conversation stream.
 
     Each returned element is the list of ``human`` turn strings for one
     conversation (only conversations with >= 2 human turns are kept), capped at
-    ``num_convs`` conversations.
+    ``num_convs`` conversations — the cap short-circuits chunk reads, so a small
+    ``num_convs`` never loads the whole corpus.
 
     ``conv_multiplier`` > 1 replicates the whole set N times for a larger
     concurrent working set; each replica's first turn is tagged ``[r{n}] `` so
@@ -147,16 +168,24 @@ def load_convs(dataset_path, num_convs, conv_multiplier=1):
     byte-identical copies would dedup at the prefix-cache / KV-block layer and
     store no extra data). Replica order is (r0: all convs), (r1: all convs), …
     """
-    with open(dataset_path) as f:
-        all_data = json.load(f)
+    if os.path.isdir(dataset_path):
+        paths = sorted(glob.glob(os.path.join(dataset_path, "*.json")))
+    else:
+        paths = [dataset_path]
+
     convs = []
-    for entry in all_data:
+    for path in paths:
         if len(convs) >= num_convs:
             break
-        turns = entry.get("conversations", [])
-        human_turns = [t["value"] for t in turns if t.get("from") == "human"]
-        if len(human_turns) >= 2:
-            convs.append(human_turns)
+        with open(path) as f:
+            all_data = json.load(f)
+        for entry in all_data:
+            if len(convs) >= num_convs:
+                break
+            turns = entry.get("conversations", [])
+            human_turns = [t["value"] for t in turns if t.get("from") == "human"]
+            if len(human_turns) >= 2:
+                convs.append(human_turns)
 
     if conv_multiplier > 1:
         base = convs

@@ -88,13 +88,14 @@ ENFORCE_EAGER=0
 WORKLOAD_MODE=batched
 # Named dataset workload, forwarded to every driver as WORKLOAD_NAME (see
 # run_multiturn_common.resolve_workload). Empty = each driver's baked default
-# (the 450x12 dataset). "sharegpt" selects the ShareGPT multi-turn subset by
-# human-turn count via SHAREGPT_MIN_TURNS/SHAREGPT_MAX_TURNS (default 12/12 =
-# the same 450-conv, 12-turn set every bench image already bakes as its
-# DATASET_PATH — so in the container variants "sharegpt" at 12/12 is a no-op).
-# Only 12/12 is prepared; other turn counts need an explicit DATASET_PATH.
+# (the 450x12 dataset). "sharegpt" selects the ShareGPT multi-turn workload by
+# human-turn count via SHAREGPT_MIN_TURNS/SHAREGPT_MAX_TURNS. Two configs are
+# prepared: 12/12 (default) = the 450-conv, 12-turn set every image bakes as its
+# DATASET_PATH (so at 12/12 the container variants are a no-op); min-turns 1 =
+# the FULL 94,145-conv corpus (data/sharegpt/*.json), which is mounted in and
+# capped by --num-convs. Other turn counts need an explicit DATASET_PATH.
 WORKLOAD_NAME=""
-SHAREGPT_MIN_TURNS=""  # min human turns for WORKLOAD_NAME=sharegpt; empty = driver default (12)
+SHAREGPT_MIN_TURNS=""  # min human turns for WORKLOAD_NAME=sharegpt; 1 = full corpus. empty = driver default (12)
 SHAREGPT_MAX_TURNS=""  # max human turns for WORKLOAD_NAME=sharegpt; empty = driver default (12)
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
 DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
@@ -168,14 +169,16 @@ Flags (all optional; defaults shown):
                                or async. Forwarded as the WORKLOAD_MODE env var.
   --workload <name>            Named dataset workload for all backends, forwarded as
                                WORKLOAD_NAME. Empty (default) = the baked 450x12
-                               dataset. "sharegpt" = the ShareGPT multi-turn subset
-                               selected by human-turn count (--min-turns/--max-turns,
-                               default 12/12 = that same 450x12 set). Only 12/12 is
-                               prepared; other turn counts need an explicit DATASET_PATH.
-  --min-turns <n>              Min human turns for --workload sharegpt. Forwarded as
-                               SHAREGPT_MIN_TURNS. [driver default 12]
+                               dataset. "sharegpt" = the ShareGPT multi-turn workload
+                               selected by human-turn count (--min-turns/--max-turns).
+                               12/12 (default) = that baked 450x12 set; --min-turns 1
+                               = the FULL 94,145-conv corpus (data/sharegpt/*.json,
+                               mounted in, capped by --num-convs). Other turn counts
+                               need an explicit DATASET_PATH.
+  --min-turns <n>              Min human turns for --workload sharegpt; 1 selects the
+                               full corpus. Forwarded as SHAREGPT_MIN_TURNS. [default 12]
   --max-turns <n>              Max human turns for --workload sharegpt. Forwarded as
-                               SHAREGPT_MAX_TURNS. [driver default 12]
+                               SHAREGPT_MAX_TURNS. [default 12]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -709,17 +712,31 @@ build_offload() {  # image
     return 1
 }
 
-# Named-workload env shared by every backend launcher. When --workload is set it
-# forwards WORKLOAD_NAME plus any SHAREGPT_MIN_TURNS/MAX_TURNS. No mounts: the
-# only prepared sharegpt set is 12/12, which every image already bakes as its
-# DATASET_PATH, so at 12/12 this is a harmless no-op (and any other turn count
-# needs an explicit DATASET_PATH the driver won't find in the image). Empty
-# WORKLOAD_NAME => no extra args, so the baked default dataset is used as before.
+# Named-workload env + mounts shared by every backend launcher. When --workload
+# is set it forwards WORKLOAD_NAME plus any SHAREGPT_MIN_TURNS/MAX_TURNS.
+#
+# The 12/12 sharegpt set is baked into every image (as DATASET_PATH), so at
+# 12/12 this just forwards env and is a harmless no-op. min-turns 1 selects the
+# FULL corpus, which is NOT baked: the images differ in where their
+# __file__-relative data dir resolves (offload/sharedstorage flatten the
+# layout), so instead of trusting that path we bind-mount data/sharegpt
+# read-only and point DATASET_PATH at the mount — DATASET_PATH always wins in
+# resolve_workload, so this overrides the baked 450x12 default uniformly.
+# Empty WORKLOAD_NAME => no extra args, so the baked default dataset is used.
 workload_container_args() {  # -> prints podman args, one per line
     [[ -z "$WORKLOAD_NAME" ]] && return 0
     printf '%s\n' "-e" "WORKLOAD_NAME=${WORKLOAD_NAME}"
     [[ -n "$SHAREGPT_MIN_TURNS" ]] && printf '%s\n' "-e" "SHAREGPT_MIN_TURNS=${SHAREGPT_MIN_TURNS}"
     [[ -n "$SHAREGPT_MAX_TURNS" ]] && printf '%s\n' "-e" "SHAREGPT_MAX_TURNS=${SHAREGPT_MAX_TURNS}"
+    if [[ "$WORKLOAD_NAME" == "sharegpt" && "$SHAREGPT_MIN_TURNS" == "1" ]]; then
+        if [[ -d "${REPO_ROOT}/data/sharegpt" ]]; then
+            printf '%s\n' \
+                "-v" "${REPO_ROOT}/data/sharegpt:/workspace/data/sharegpt:ro,z" \
+                "-e" "DATASET_PATH=/workspace/data/sharegpt"
+        else
+            warn "min-turns 1 needs the full corpus at ${REPO_ROOT}/data/sharegpt (data/sharegpt/*.json) — not found; run will fall back to the baked 450x12 set"
+        fi
+    fi
 }
 
 # Common container run for the three self-contained images (default podman store).
