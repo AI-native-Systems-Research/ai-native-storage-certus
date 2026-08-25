@@ -14,8 +14,10 @@ Turns one or more `profile_all.sh` run directories into a single PNG, stacked as
    (hits ÷ queries). A family with no nonzero total across all variants is dropped,
 3. a **GPU processor-utilization bar chart** — one bar per variant, the **mean**
    `nvidia-smi util.gpu` (GPU *processor* busy-%, not KV-cache/memory occupancy)
-   over that variant's window, annotated with its **p95** and **peak**. Dropped
-   when the run carries no GPU telemetry,
+   over that variant's window, annotated with its **p95** and **peak**; followed
+   by a **GPU-utilization-over-time line panel** (util% vs elapsed within each
+   variant's window, a 10 s moving average since the raw signal bounces 0↔100).
+   Both are dropped when the run carries no GPU telemetry,
 4. a **small-multiples grid** of the same counters plotted **per round**.
 
 PNG only — no HTML, no browser. The only dependency is `matplotlib` (system

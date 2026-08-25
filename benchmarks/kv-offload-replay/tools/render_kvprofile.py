@@ -8,8 +8,9 @@ chart, a set of run-total family panels (each counter rolled up to its whole-run
 total and grouped onto one shared axis per family — Tokens, Prefix-cache queries
 & hits, Bytes moved, KV tier movements — with a per-second average and, for hit
 counters, a hit rate annotated atop each bar), a GPU processor-utilization bar
-chart (mean nvidia-smi util.gpu per variant), and a small-multiples grid of the
-same counters plotted per round. No HTML — PNG only.
+chart (mean nvidia-smi util.gpu per variant) plus a GPU-utilization-over-time
+line panel, and a small-multiples grid of the same counters plotted per round.
+No HTML — PNG only.
 
 Data sources, per run directory (in priority order):
   * results.json  — authoritative index: {variants:[{variant, wall_s, status,
@@ -325,7 +326,14 @@ def load_gpu_windows(run_dir: str) -> dict:
         for variant, start, end in windows:
             win = {t: v for t, v in ticks.items() if start <= t <= end}
             if win:
-                out[variant] = _gpu_report.summarize(variant, win)
+                summ = _gpu_report.summarize(variant, win)
+                # Keep the raw per-tick util series (elapsed_s, util_pct) for the
+                # over-time line panel; elapsed measured from the window's first
+                # sample so variants overlay from a common origin.
+                epochs = sorted(win)
+                t0 = epochs[0]
+                summ["series"] = [(t - t0, win[t]["util"]) for t in epochs]
+                out[variant] = summ
         return out
     except Exception as e:  # noqa: BLE001 - GPU band is optional
         print(f"warning: GPU telemetry parse failed in {run_dir}: {e}",
@@ -572,6 +580,10 @@ def render(series, out_path, title, subtitle, dark, dpi):
     # wall-time band. Only drawn when at least one series carries GPU telemetry.
     has_gpu = any(s.get("gpu") for s in series)
     gpu_h = max(1.6, 0.42 * len(series) + 0.8) if has_gpu else 0.0
+    # GPU-utilization-over-time band: one line per series (util% vs elapsed within
+    # its window). Only when at least one series carries the raw per-tick series.
+    has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
+    gpu_ts_h = 2.9 if has_gpu_ts else 0.0
     fam_ncol = 2
     fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if active_fams else 0
     totals_h = 3.0 * fam_nrow
@@ -590,6 +602,8 @@ def render(series, out_path, title, subtitle, dark, dpi):
     bands = [("hdr", hdr_h), ("bar", bar_h)]
     if has_gpu:
         bands.append(("gpu", gpu_h))
+    if has_gpu_ts:
+        bands.append(("gputs", gpu_ts_h))
     if totals_h:
         bands.append(("totals", totals_h))
     if grid_h:
@@ -681,6 +695,41 @@ def render(series, out_path, title, subtitle, dark, dpi):
             gax.spines[sp].set_visible(False)
         gax.tick_params(left=False)
         gax.grid(axis="x", color=grid, lw=0.7, zorder=0)
+
+    # ── GPU processor utilization over time (one line per variant) ──────────────
+    # The raw util.gpu series bounces 0↔100 tick-to-tick (it is a per-interval busy
+    # flag), so plot a short moving average to show the trend. x = elapsed within
+    # each variant's window, so the sequentially-run variants overlay from t=0.
+    if has_gpu_ts:
+        def _smooth(ys, w=5):
+            if len(ys) < 2:
+                return ys
+            half = w // 2
+            return [sum(ys[max(0, i - half):min(len(ys), i + half + 1)])
+                    / (min(len(ys), i + half + 1) - max(0, i - half))
+                    for i in range(len(ys))]
+
+        gs_gt = fig.add_gridspec(1, 1, left=L, right=R,
+                                 top=pos["gputs"][1], bottom=pos["gputs"][0])
+        gtx = fig.add_subplot(gs_gt[0, 0])
+        for s in series:
+            ser = (s.get("gpu") or {}).get("series")
+            if not ser:
+                continue
+            xs = [t for t, _u in ser]
+            ys = _smooth([u for _t, u in ser])
+            gtx.plot(xs, ys, color=s["color"], linestyle=s["style"], lw=1.8)
+        gtx.set_ylim(0, 105)
+        gtx.set_yticks([0, 25, 50, 75, 100])
+        gtx.set_xlabel("elapsed within variant window (s)", color=mut, fontsize=9)
+        gtx.set_ylabel("GPU util % (10 s moving avg)", color=mut, fontsize=9)
+        gtx.set_title("GPU processor utilization over time", loc="left",
+                      fontsize=11, fontweight="bold", color=fg, pad=6)
+        gtx.margins(x=0.02)
+        for sp in ("top", "right"):
+            gtx.spines[sp].set_visible(False)
+        gtx.grid(color=grid, lw=0.6)
+        gtx.tick_params(labelsize=8)
 
     # ── run-total family bars (2-col band): related counters share one axis, one
     # group per counter, one bar per series (coloured like the legend). ─────────
