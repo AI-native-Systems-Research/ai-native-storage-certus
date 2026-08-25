@@ -12,7 +12,11 @@ Turns one or more `profile_all.sh` run directories into a single PNG, stacked as
    bar is annotated with a **per-second average** (bytes/s for the byte families,
    count/s otherwise), and each cache-hit bar additionally carries its **hit rate**
    (hits ÷ queries). A family with no nonzero total across all variants is dropped,
-3. a **small-multiples grid** of the same counters plotted **per round**.
+3. a **GPU processor-utilization bar chart** — one bar per variant, the **mean**
+   `nvidia-smi util.gpu` (GPU *processor* busy-%, not KV-cache/memory occupancy)
+   over that variant's window, annotated with its **p95** and **peak**. Dropped
+   when the run carries no GPU telemetry,
+4. a **small-multiples grid** of the same counters plotted **per round**.
 
 PNG only — no HTML, no browser. The only dependency is `matplotlib` (system
 `python3` is fine).
@@ -35,6 +39,11 @@ writes). Per directory, in priority order:
   (and the `FINAL tier-events` summary) give the cumulative KV tier-movement
   counts. These feed the "KV tier movements" family and the four Certus-only
   per-round tier panels; absent → those are dropped.
+- **`gpu-timeline.csv` + `gpu-markers.csv`** — `profile_all.sh`'s `nvidia-smi`
+  sampler: per-tick `util.gpu`/clock/mem/power, plus each variant's start/end
+  window. Parsed via `gpu_report.py` and reduced to per-variant mean/p95/peak GPU
+  processor utilization for the GPU band (same numbers as `gpu-summary.txt`).
+  Absent → that band is dropped.
 
 The per-round counters only exist if the run was captured with metrics on —
 which is the **default** in all four drivers (`CAPTURE_METRICS=1`). A run made

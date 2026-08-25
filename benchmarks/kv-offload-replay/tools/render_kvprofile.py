@@ -7,7 +7,8 @@ counter deltas, and renders a single PNG stacked as: a total-wall-time bar
 chart, a set of run-total family panels (each counter rolled up to its whole-run
 total and grouped onto one shared axis per family — Tokens, Prefix-cache queries
 & hits, Bytes moved, KV tier movements — with a per-second average and, for hit
-counters, a hit rate annotated atop each bar), and a small-multiples grid of the
+counters, a hit rate annotated atop each bar), a GPU processor-utilization bar
+chart (mean nvidia-smi util.gpu per variant), and a small-multiples grid of the
 same counters plotted per round. No HTML — PNG only.
 
 Data sources, per run directory (in priority order):
@@ -23,6 +24,11 @@ Data sources, per run directory (in priority order):
                     E, ssd S]` lines (plus the `FINAL tier-events` summary) give
                     the cumulative KV tier-movement counts, rendered as four extra
                     Certus-only panels. Absent → those panels are dropped.
+  * gpu-timeline.csv + gpu-markers.csv — profile_all.sh's nvidia-smi sampler
+                    (per-tick util.gpu/clock/mem/power) plus per-variant start/end
+                    windows. Parsed via gpu_report and reduced to each variant's
+                    mean / p95 / peak GPU processor utilization for the GPU band.
+                    Absent → that band is dropped.
 
 Pass several directories to overlay several runs. When the SAME variant appears
 in more than one directory (e.g. three Tiered-CPU-FS repeats) each gets its own
@@ -56,6 +62,19 @@ import os
 import re
 import sys
 from collections import OrderedDict
+
+# gpu_report.py (sibling of this tools/ dir) already parses the profile_all.sh GPU
+# telemetry: gpu-timeline.csv (per-tick nvidia-smi util.gpu/clock/mem/power) sliced
+# per variant by gpu-markers.csv. Reuse it so the GPU-utilization band shows the
+# exact same numbers as `gpu-summary.txt`. Optional — a failed import just drops
+# the band (older run dirs with no GPU telemetry render exactly as before).
+_BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _BENCH_DIR not in sys.path:
+    sys.path.insert(0, _BENCH_DIR)
+try:
+    import gpu_report as _gpu_report
+except Exception:  # noqa: BLE001 - GPU band is optional
+    _gpu_report = None
 
 # ── Curated counters: (key, title, unit) in render order. Only these are
 # plotted; the noisy ones (request_success, *_time, *_by_source, *_total dupes,
@@ -283,12 +302,52 @@ def log_is_async(path: str) -> bool:
     return False
 
 
+def load_gpu_windows(run_dir: str) -> dict:
+    """``{variant_name: gpu-util summary}`` for a run dir, or ``{}`` if unavailable.
+
+    Reuses gpu_report to parse gpu-timeline.csv sliced by gpu-markers.csv, so the
+    numbers match `gpu-summary.txt` exactly (window mean / max / p95 of
+    util_gpu_pct = GPU *processor* utilization, sampled by nvidia-smi). The variant
+    names gpu-markers.csv records match results.json, so each summary maps straight
+    onto its series by variant name."""
+    if _gpu_report is None:
+        return {}
+    tl = os.path.join(run_dir, "gpu-timeline.csv")
+    mk = os.path.join(run_dir, "gpu-markers.csv")
+    if not os.path.isfile(tl):
+        return {}
+    try:
+        ticks = _gpu_report.read_timeline(tl)
+        if not ticks:
+            return {}
+        windows = _gpu_report.read_windows(mk) if os.path.isfile(mk) else []
+        out = {}
+        for variant, start, end in windows:
+            win = {t: v for t, v in ticks.items() if start <= t <= end}
+            if win:
+                out[variant] = _gpu_report.summarize(variant, win)
+        return out
+    except Exception as e:  # noqa: BLE001 - GPU band is optional
+        print(f"warning: GPU telemetry parse failed in {run_dir}: {e}",
+              file=sys.stderr)
+        return {}
+
+
 def load_run(run_dir: str, tag: str):
     """Yield series dicts for one run directory.
 
-    A series: {variant, tag, color_key, wall, data:{counter:[...]}}.
+    A series: {variant, tag, color_key, wall, data:{counter:[...]}, gpu}.
     """
     results = os.path.join(run_dir, "results.json")
+    # Per-variant GPU processor utilization (nvidia-smi sampler), parsed once for
+    # the whole run dir and matched onto each variant's series by name (exact, then
+    # normalized so display-name vs slug mismatches in the fallback path still map).
+    gpu = load_gpu_windows(run_dir)
+    gpu_norm = {norm(k): v for k, v in gpu.items()}
+
+    def _gpu_for(name):
+        return gpu.get(name) or gpu_norm.get(norm(name))
+
     # certus-server tier-event counters live in a sibling server.log, keyed to
     # the Certus-SPDK variant (the only one with a server). Parsed once here and
     # merged into that variant's per-round data below.
@@ -314,7 +373,8 @@ def load_run(run_dir: str, tag: str):
             if wall is None and log:
                 wall = wall_from_log(log)
             yield {"variant": name, "tag": tag, "wall": wall, "data": data,
-                   "async": log_is_async(log) if log else False}
+                   "async": log_is_async(log) if log else False,
+                   "gpu": _gpu_for(name)}
         return
     # ── fallback: no results.json — discover *.log with [prom] rounds
     found = False
@@ -332,7 +392,7 @@ def load_run(run_dir: str, tag: str):
             data = {**data, **tier}
         yield {"variant": name, "tag": tag,
                "wall": wall_from_log(path), "data": data,
-               "async": log_is_async(path)}
+               "async": log_is_async(path), "gpu": _gpu_for(name)}
     if not found:
         print(f"warning: no results.json and no [prom] logs in {run_dir}",
               file=sys.stderr)
@@ -508,6 +568,10 @@ def render(series, out_path, title, subtitle, dark, dpi):
     legend_rows = (len(series) + 4) // 5
     hdr_h = 1.1 + 0.32 * legend_rows
     bar_h = max(1.6, 0.42 * len(series) + 0.8)
+    # GPU-utilization band: one horizontal bar per series, same geometry as the
+    # wall-time band. Only drawn when at least one series carries GPU telemetry.
+    has_gpu = any(s.get("gpu") for s in series)
+    gpu_h = max(1.6, 0.42 * len(series) + 0.8) if has_gpu else 0.0
     fam_ncol = 2
     fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if active_fams else 0
     totals_h = 3.0 * fam_nrow
@@ -524,6 +588,8 @@ def render(series, out_path, title, subtitle, dark, dpi):
     # totals x-ticks land on the grid titles.
     GAP = 0.9
     bands = [("hdr", hdr_h), ("bar", bar_h)]
+    if has_gpu:
+        bands.append(("gpu", gpu_h))
     if totals_h:
         bands.append(("totals", totals_h))
     if grid_h:
@@ -580,6 +646,41 @@ def render(series, out_path, title, subtitle, dark, dpi):
         ax.spines[sp].set_visible(False)
     ax.tick_params(left=False)
     ax.grid(axis="x", color=grid, lw=0.7, zorder=0)
+
+    # ── GPU processor utilization bars (mean busy-% per variant window) ─────────
+    # Source: profile_all.sh's nvidia-smi sampler (gpu-timeline.csv) sliced per
+    # variant by gpu-markers.csv — the same numbers gpu_report writes to
+    # gpu-summary.txt. This is GPU *processor* utilization (util.gpu = fraction of
+    # the sampling interval a kernel was resident), NOT KV-cache/memory occupancy.
+    # It is a level, so the bar is the window mean and peak/p95 ride alongside.
+    if has_gpu:
+        gs_gpu = fig.add_gridspec(1, 1, left=L, right=R,
+                                  top=pos["gpu"][1], bottom=pos["gpu"][0])
+        gax = fig.add_subplot(gs_gpu[0, 0])
+        gys = list(range(len(series)))[::-1]  # top-down, same order as wall band
+        for y, s in zip(gys, series):
+            g = s.get("gpu")
+            avg = g["util_avg"] if g else 0.0
+            gax.barh(y, avg, color=s["color"], height=0.62, zorder=3)
+            if g:
+                lab = (f"{avg:.0f}%  ·  p95 {g['util_p95']:.0f}%  ·  "
+                       f"peak {g['util_max']:.0f}%")
+            else:
+                lab = "n/a"
+            gax.text(avg if g else 0, y, "  " + lab, va="center", ha="left",
+                     fontsize=9.5, fontweight="bold", color=fg)
+        gax.set_yticks(gys)
+        gax.set_yticklabels([s["label"] for s in series], fontsize=9.5, color=fg)
+        gax.set_xlabel("mean GPU processor utilization — nvidia-smi util.gpu, "
+                       "averaged over each variant's window (%)", color=mut)
+        gax.set_xlim(0, 105)
+        gax.set_xticks([0, 25, 50, 75, 100])
+        gax.set_title("GPU processor utilization", loc="left", fontsize=11,
+                      fontweight="bold", color=fg, pad=6)
+        for sp in ("top", "right", "left"):
+            gax.spines[sp].set_visible(False)
+        gax.tick_params(left=False)
+        gax.grid(axis="x", color=grid, lw=0.7, zorder=0)
 
     # ── run-total family bars (2-col band): related counters share one axis, one
     # group per counter, one bar per series (coloured like the legend). ─────────
