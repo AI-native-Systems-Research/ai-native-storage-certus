@@ -3,8 +3,12 @@
 
 Reads one or more `profile_all.sh` run directories (the `kvprofile-*` dirs it
 writes), extracts each variant's total wall time and per-round vLLM Prometheus
-counter deltas, and renders a single PNG: a total-wall-time bar chart plus a
-small-multiples grid of per-round counter charts. No HTML — PNG only.
+counter deltas, and renders a single PNG stacked as: a total-wall-time bar
+chart, a set of run-total family panels (each counter rolled up to its whole-run
+total and grouped onto one shared axis per family — Tokens, Prefix-cache queries
+& hits, Bytes moved, KV tier movements — with a per-second average and, for hit
+counters, a hit rate annotated atop each bar), and a small-multiples grid of the
+same counters plotted per round. No HTML — PNG only.
 
 Data sources, per run directory (in priority order):
   * results.json  — authoritative index: {variants:[{variant, wall_s, status,

@@ -2,10 +2,20 @@
 
 ## `render_kvprofile.py` — profile → PNG slide
 
-Turns one or more `profile_all.sh` run directories into a single PNG: a
-total-wall-time bar chart plus a small-multiples grid of per-round vLLM
-Prometheus counters. PNG only — no HTML, no browser. The only dependency is
-`matplotlib` (system `python3` is fine).
+Turns one or more `profile_all.sh` run directories into a single PNG, stacked as:
+
+1. a **total-wall-time bar chart** (with each offload variant's ratio vs the
+   NoOffload baseline),
+2. a set of **run-total family panels** — every counter rolled up to its
+   whole-run total and grouped onto one shared axis per family (**Tokens**,
+   **Prefix-cache queries & hits**, **Bytes moved**, **KV tier movements**). Each
+   bar is annotated with a **per-second average** (bytes/s for the byte families,
+   count/s otherwise), and each cache-hit bar additionally carries its **hit rate**
+   (hits ÷ queries). A family with no nonzero total across all variants is dropped,
+3. a **small-multiples grid** of the same counters plotted **per round**.
+
+PNG only — no HTML, no browser. The only dependency is `matplotlib` (system
+`python3` is fine).
 
 ### What it reads
 
@@ -20,6 +30,11 @@ writes). Per directory, in priority order:
   `[prom] round N: k=v ...` lines are parsed for the counter deltas. If
   `results.json` is missing, wall time falls back to the log's
   `[run] done. wall=Xs` line.
+- **`server.log`** (Certus-SPDK only) — the certus-server's own log. Its periodic
+  `tier-events promotions[->memory M, ->gpu G] evictions[memory E, ssd S]` lines
+  (and the `FINAL tier-events` summary) give the cumulative KV tier-movement
+  counts. These feed the "KV tier movements" family and the four Certus-only
+  per-round tier panels; absent → those are dropped.
 
 The per-round counters only exist if the run was captured with metrics on —
 which is the **default** in all four drivers (`CAPTURE_METRICS=1`). A run made
@@ -55,15 +70,30 @@ stay distinguishable.
 | `--title` | `KV-offload profile` | Slide title |
 | `--subtitle` | — | Second header line (free text) |
 | `--variants` | all | Comma-separated subset to plot, e.g. `nooffload,tiered-cpu-fs` |
+| `--color` | — | `TAG=HEX` override for a variant/run colour; repeatable |
 | `--dark` | off | Dark theme |
 | `--dpi` | `200` | Output resolution |
 
-### Counters plotted (per round)
+### Counters plotted
 
+vLLM Prometheus counters (from the `[prom]` lines):
 `prompt_tokens`, `prompt_tokens_cached`, `generation_tokens`,
 `prefix_cache_queries`, `prefix_cache_hits`, `external_prefix_cache_queries`
 (offload-tier queries), `external_prefix_cache_hits` (offload-tier hits),
 `kv_offload_store_bytes`, `kv_offload_load_bytes`, `num_preemptions`.
+
+Certus-SPDK NVMe device bytes (from the shmq driver's `[prom]` line, real only
+when the server is built `--features rw-telemetry`): `ssd_read_bytes`,
+`ssd_write_bytes`.
+
+Certus-SPDK KV tier movements (from `server.log`, cumulative):
+`tier_promotions_to_memory` (SSD→DRAM), `tier_promotions_to_gpu`,
+`tier_evictions_from_memory`, `tier_evictions_from_ssd`.
+
+Each appears both as a per-round small multiple and — grouped by family — as a
+run-total bar with its per-second average (and hit rate, for the cache-hit
+counters). A counter absent from every series is dropped automatically, so a
+write-only run or a non-Certus backend simply omits the counters it never emits.
 
 Variant colours are fixed (NoOffload blue, CPUOffload orange, Tiered-CPU-FS
 green, SharedStorage teal, Certus-SPDK gold) and the bar/legend order is
