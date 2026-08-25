@@ -200,6 +200,27 @@ def resolve_log(run_dir: str, recorded: str) -> str | None:
     return None
 
 
+def log_is_async(path: str) -> bool:
+    """True if <variant>.log came from a WORKLOAD_MODE=async run.
+
+    The async driver prints a one-time ``WORKLOAD_MODE=async`` banner (see
+    run_multiturn_async.run_async_driver). It matters for axis labels: the async
+    path samples the counters at 1 Hz, so its per-``round`` ``[prom]`` deltas are
+    per-second movements over elapsed seconds — not per-workload-round totals like
+    the batched path. The banner lands once the engine is built and generation
+    starts, so a bounded head scan finds it without reading a whole verbose log."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if "WORKLOAD_MODE=async" in line:
+                    return True
+                if i > 20000:
+                    break
+    except OSError:
+        pass
+    return False
+
+
 def load_run(run_dir: str, tag: str):
     """Yield series dicts for one run directory.
 
@@ -230,7 +251,8 @@ def load_run(run_dir: str, tag: str):
             wall = e.get("wall_s")
             if wall is None and log:
                 wall = wall_from_log(log)
-            yield {"variant": name, "tag": tag, "wall": wall, "data": data}
+            yield {"variant": name, "tag": tag, "wall": wall, "data": data,
+                   "async": log_is_async(log) if log else False}
         return
     # ── fallback: no results.json — discover *.log with [prom] rounds
     found = False
@@ -247,7 +269,8 @@ def load_run(run_dir: str, tag: str):
         if norm(name) == "certusspdk":
             data = {**data, **tier}
         yield {"variant": name, "tag": tag,
-               "wall": wall_from_log(path), "data": data}
+               "wall": wall_from_log(path), "data": data,
+               "async": log_is_async(path)}
     if not found:
         print(f"warning: no results.json and no [prom] logs in {run_dir}",
               file=sys.stderr)
@@ -430,6 +453,14 @@ def render(series, out_path, title, subtitle, dark, dpi):
     ax.tick_params(left=False)
     ax.grid(axis="x", color=grid, lw=0.7, zorder=0)
 
+    # Axis semantics of the vLLM/SSD counter panels depend on how the run was
+    # driven. Batched: each [prom] point is one workload round's total, x = round.
+    # Async: the sampler ticks at 1 Hz, so each point is the counter's movement
+    # over ~1 s — i.e. a per-second rate, x = elapsed seconds. Only claim seconds
+    # when EVERY series is async (a mixed overlay can't share one x meaning); the
+    # tier panels keep their own "telemetry tick" x regardless (server.log cadence).
+    x_is_seconds = bool(series) and all(s.get("async") for s in series)
+
     # ── per-counter small multiples ──────────────────────────────────────────
     for i, (key, ctitle, unit) in enumerate(active):
         r, c = divmod(i, ncol)
@@ -448,8 +479,13 @@ def render(series, out_path, title, subtitle, dark, dpi):
                  va="bottom", ha="left", color=mut, family="monospace")
         cax.yaxis.set_major_formatter(FuncFormatter(fmt_bytes if unit == "bytes"
                                                     else fmt_compact))
-        cax.set_xlabel("telemetry tick" if is_tier else "round",
-                       color=mut, fontsize=8)
+        if is_tier:
+            cax.set_xlabel("telemetry tick", color=mut, fontsize=8)
+        elif x_is_seconds:
+            cax.set_xlabel("elapsed (s)", color=mut, fontsize=8)
+            cax.set_ylabel("per second", color=mut, fontsize=8)
+        else:
+            cax.set_xlabel("round", color=mut, fontsize=8)
         cax.margins(x=0.02)
         cax.set_ylim(bottom=0)
         for sp in ("top", "right"):
