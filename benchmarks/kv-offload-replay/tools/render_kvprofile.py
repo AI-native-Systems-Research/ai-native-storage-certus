@@ -111,8 +111,8 @@ FAMILIES = [
     ("Prefix-cache queries & hits — run total", "int", [
         ("prefix_cache_queries",          "GPU q"),
         ("prefix_cache_hits",             "GPU hit"),
-        ("external_prefix_cache_queries", "tier q"),
-        ("external_prefix_cache_hits",    "tier hit"),
+        ("external_prefix_cache_queries", "offload q"),
+        ("external_prefix_cache_hits",    "offload hit"),
     ]),
     ("Bytes moved — run total", "bytes", [
         ("kv_offload_store_bytes", "store"),
