@@ -143,7 +143,7 @@ HIT_DENOM = {
 # begin only after a warmup during which the working set still fits DRAM, and
 # tier movements don't start until the first eviction/promotion — so counting
 # from t=0 would understate the sustained rate (see _active_seconds).
-RATE_KEYS = {"generation_tokens",
+RATE_KEYS = {"prompt_tokens", "prompt_tokens_cached", "generation_tokens",
              "kv_offload_store_bytes", "kv_offload_load_bytes",
              "ssd_read_bytes", "ssd_write_bytes",
              "tier_promotions_to_memory", "tier_promotions_to_gpu",
