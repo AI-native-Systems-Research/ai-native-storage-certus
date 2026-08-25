@@ -579,7 +579,7 @@ def render(series, out_path, title, subtitle, dark, dpi):
     # GPU-utilization band: one horizontal bar per series, same geometry as the
     # wall-time band. Only drawn when at least one series carries GPU telemetry.
     has_gpu = any(s.get("gpu") for s in series)
-    gpu_h = max(1.6, 0.42 * len(series) + 0.8) if has_gpu else 0.0
+    gpu_h = max(1.0, 0.26 * len(series) + 0.45) if has_gpu else 0.0
     # GPU-utilization-over-time band: one line per series (util% vs elapsed within
     # its window). Only when at least one series carries the raw per-tick series.
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
