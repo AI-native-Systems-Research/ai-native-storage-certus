@@ -1,6 +1,3 @@
-Now I have a solid understanding of the format and depth required. I have enough evidence from the web searches and existing files. Let me produce the complete domain reference file for correctness-and-recovery.
-
-```markdown
 ---
 id: correctness-and-recovery
 decision: Whether a proposed storage optimization preserves inference correctness and crash-safe durability of KV blocks
@@ -387,16 +384,3 @@ Lossy compression (CacheGen, 3.5–4.3× compression, SIGCOMM 2024) introduces a
 6. **Recovery time is bounded by index reconstruction, not data validation**: With content-addressed, sealed blocks, post-crash recovery only needs to rebuild the prefix→location index from surviving sealed blocks. Data validation (checksums) can happen lazily on first access. The critical path is index availability, not data verification.
 
 7. **The safest fallback is always recompute**: When any correctness check fails—checksum mismatch, stale version, incomplete transfer, missing layers—the correct response is to recompute from scratch rather than attempt repair. Recompute is expensive but provably correct. The storage system should make "drop and recompute" the default failure path, with repair reserved for cases where correctness is formally provable.
-```
-
-Here's the complete domain reference file for `correctness-and-recovery`. It covers all 9 required sections at ~420 lines, with:
-
-- YAML front matter declaring ownership of atomicity, crash recovery, stale completion, safe reuse, and corruption
-- Governing equations (validity predicate, atomicity invariant, reference safety, recovery bound, staleness cost)
-- 6 alternatives each with specific prefer_when/avoid_when conditions
-- 6 coupled constraints showing interactions with other decisions (throughput, latency, scheduling, capacity, upgrades, compression)
-- 6 failure modes with trigger/symptom/diagnostic/severity
-- 7 testable hypotheses
-- 7 experiments with explicit falsification criteria
-- 8 production evidence entries with specific numbers (vLLM 2–4×, Mooncake 525%, SGLang 6.4×, CacheGen 3.5–4.3×, DistServe 7.4×, FlexGen 1 tok/s on OPT-175B, InfiniGen 3×, LMCache 10×)
-- "Implications for KV Block Storage" concluding section

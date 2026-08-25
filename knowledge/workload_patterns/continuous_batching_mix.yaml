@@ -1,5 +1,4 @@
 id: continuous-batching-mix
-kind: atomic
 name: Interleaved Prefill Burst and Decode Trickle
 status: candidate
 parameters:

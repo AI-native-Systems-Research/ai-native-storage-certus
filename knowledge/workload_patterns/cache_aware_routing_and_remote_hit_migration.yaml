@@ -1,5 +1,4 @@
 id: cache-aware-routing-and-remote-hit-migration
-kind: atomic
 name: Remote Hit KV Pull Migration
 status: candidate
 parameters:

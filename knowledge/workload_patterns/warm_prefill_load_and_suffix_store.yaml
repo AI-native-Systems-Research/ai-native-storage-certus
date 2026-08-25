@@ -1,5 +1,4 @@
 id: warm-prefill-load-and-suffix-store
-kind: atomic
 name: Prefix Cache Hit Load Then Suffix Store
 status: candidate
 parameters:

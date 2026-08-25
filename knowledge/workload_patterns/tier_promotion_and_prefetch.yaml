@@ -1,5 +1,4 @@
 id: tier-promotion-and-prefetch
-kind: atomic
 name: Routing-Hint Prefetch From Lower Tier
 status: candidate
 parameters:

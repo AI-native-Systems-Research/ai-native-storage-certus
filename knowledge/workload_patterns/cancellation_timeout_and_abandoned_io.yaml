@@ -1,5 +1,4 @@
 id: cancellation-timeout-and-abandoned-io
-kind: atomic
 name: Client Cancel Mid-Decode Cleanup
 status: candidate
 parameters:

@@ -1,6 +1,3 @@
-I now have sufficient context from the codebase. Let me compose the full domain reference file.
-
-```markdown
 ---
 id: kv-footprint-and-lifecycle
 decision: How to size, address, and manage the lifetime of KV cache blocks
@@ -410,14 +407,3 @@ From the equations and constraints above, an agent can formulate:
 6. **Multi-representation storage (full-precision + compressed + quantized) is emerging as standard.** The namespace scheme must accommodate multiple representations of logically identical KV without conflating them. CacheGen's 3.5× compression means network-tier and SSD-tier might store different representations of same logical block.
 
 7. **Sub-block addressability is needed for selective retrieval.** InfiniGen's result (only 10-30% of blocks needed per step) means the storage system benefits from per-layer or per-head-group addressing within a token-block, enabling partial loads without reading entire multi-layer blocks.
-```
-
-Here's the complete domain reference file for `kv-footprint-and-lifecycle`. It covers all 9 required sections across ~400 lines, with:
-
-- Governing equations (per-token KV size, block size, fragmentation) with worked examples for real models
-- 5 decision areas (geometry, identity, sealing, namespace, invalidation) each with specific prefer_when/avoid_when conditions
-- Production evidence from 7 systems with specific numbers (vLLM 2-4×, SGLang 6.4×, Mooncake 525%, CacheGen 3.5-4.3×, etc.)
-- 6 testable hypotheses with quantified predictions
-- Matched experiments with explicit falsification criteria
-- Coupled constraints table showing cross-decision interactions
-- "Implications for KV Block Storage" section linking all findings to storage system design decisions

@@ -1,5 +1,4 @@
 id: request-completion-retention-and-delete
-kind: atomic
 name: Request Completion Immediate Delete
 status: candidate
 parameters:

@@ -1,5 +1,4 @@
 id: context-truncation-and-overflow
-kind: atomic
 name: Importance-Scored Selective Eviction at Overflow
 status: candidate
 parameters:

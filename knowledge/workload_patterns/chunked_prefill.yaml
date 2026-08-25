@@ -1,5 +1,4 @@
 id: chunked-prefill
-kind: atomic
 name: Chunked Prefill Incremental Block Store
 status: candidate
 parameters:

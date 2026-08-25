@@ -1,5 +1,4 @@
 id: preemption-and-reschedule
-kind: atomic
 name: Preemption Swap-Out and Swap-In
 status: candidate
 parameters:

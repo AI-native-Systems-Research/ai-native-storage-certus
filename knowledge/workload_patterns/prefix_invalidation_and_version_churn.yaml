@@ -1,5 +1,4 @@
 id: prefix-invalidation-and-version-churn
-kind: atomic
 name: Suffix Fan-Out Invalidation
 status: candidate
 parameters:

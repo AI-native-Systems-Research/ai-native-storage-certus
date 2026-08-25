@@ -1,5 +1,4 @@
 id: cold-prefill-store
-kind: atomic
 name: Cold Prefill Bulk Store
 status: candidate
 parameters:

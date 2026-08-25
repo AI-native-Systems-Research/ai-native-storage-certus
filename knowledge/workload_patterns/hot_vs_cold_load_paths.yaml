@@ -1,5 +1,4 @@
 id: hot-vs-cold-load-paths
-kind: atomic
 name: Hot Path Memory-Tier Load
 status: candidate
 parameters:

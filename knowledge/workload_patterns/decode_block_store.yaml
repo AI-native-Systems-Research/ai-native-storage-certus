@@ -1,5 +1,4 @@
 id: decode-block-store
-kind: atomic
 name: Decode Sealed Block Writeback
 status: candidate
 parameters:

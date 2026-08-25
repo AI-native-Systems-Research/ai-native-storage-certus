@@ -1,5 +1,4 @@
 id: speculative-decoding-and-branching
-kind: atomic
 name: Speculative Accepted Tokens Seal and Writeback
 status: candidate
 parameters:

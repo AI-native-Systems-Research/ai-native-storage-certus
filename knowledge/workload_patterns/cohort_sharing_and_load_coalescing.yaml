@@ -1,5 +1,4 @@
 id: cohort-sharing-and-load-coalescing
-kind: atomic
 name: Shared Prefix Coalesced Load
 status: candidate
 parameters:

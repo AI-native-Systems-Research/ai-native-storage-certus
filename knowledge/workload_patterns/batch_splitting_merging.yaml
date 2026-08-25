@@ -1,5 +1,4 @@
 id: batch-splitting-merging
-kind: atomic
 name: Batch Merge Prefix Dedup on Consolidation
 status: candidate
 parameters:
