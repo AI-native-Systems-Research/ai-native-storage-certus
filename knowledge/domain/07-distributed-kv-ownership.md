@@ -1,3 +1,8 @@
+I now have enough context and evidence from the research. Let me produce the full domain reference file.
+
+---
+
+```markdown
 ---
 id: distributed-kv-ownership
 decision: Which node or service should own, store, and serve KV blocks in a disaggregated multi-node inference cluster

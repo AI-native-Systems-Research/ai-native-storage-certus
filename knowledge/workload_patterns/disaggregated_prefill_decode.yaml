@@ -1,4 +1,5 @@
 id: disaggregated-prefill-decode
+kind: atomic
 name: Disaggregated Prefill-Decode KV Transfer
 status: candidate
 parameters:

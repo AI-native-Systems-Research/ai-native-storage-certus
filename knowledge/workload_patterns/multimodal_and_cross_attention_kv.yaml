@@ -1,4 +1,5 @@
 id: multimodal-and-cross-attention-kv
+kind: atomic
 name: Cross-Attention KV Compute and Persist
 status: candidate
 parameters:

@@ -1,4 +1,5 @@
 id: compute-local-eviction-and-later-reload
+kind: atomic
 name: LRU Eviction to Memory Then Demand Reload
 status: candidate
 parameters:

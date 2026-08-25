@@ -1,4 +1,5 @@
 id: partial-block-sealing-and-tail-append
+kind: atomic
 name: Tail Block Seal and Identity Registration
 status: candidate
 parameters:

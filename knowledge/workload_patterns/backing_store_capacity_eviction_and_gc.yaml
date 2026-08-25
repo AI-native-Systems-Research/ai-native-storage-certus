@@ -1,4 +1,5 @@
 id: backing-store-capacity-eviction-and-gc
+kind: atomic
 name: Persistent-Tier Capacity LRU Eviction
 status: candidate
 parameters:

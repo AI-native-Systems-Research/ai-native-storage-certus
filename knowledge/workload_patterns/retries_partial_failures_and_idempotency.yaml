@@ -1,4 +1,5 @@
 id: retries-partial-failures-and-idempotency
+kind: atomic
 name: Disk Checkpoint Write Retry
 status: candidate
 parameters:

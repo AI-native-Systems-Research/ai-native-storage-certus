@@ -1,4 +1,5 @@
 id: kv-compression-quantization-and-repacking
+kind: atomic
 name: Quantize on Eviction to Host
 status: candidate
 parameters:

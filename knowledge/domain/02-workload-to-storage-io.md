@@ -1,3 +1,8 @@
+I have sufficient information now. Let me compose the full reference file.
+
+Here's the complete domain reference file:
+
+```markdown
 ---
 id: workload-to-storage-io
 decision: How to map serving request patterns into storage IO operations and scheduling policies

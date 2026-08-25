@@ -1,4 +1,5 @@
 id: selective-kv-retrieval
+kind: atomic
 name: Query-Aware Page Selection From Offload
 status: candidate
 parameters:

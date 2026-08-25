@@ -1,4 +1,5 @@
 id: beam-search-and-parallel-sampling
+kind: atomic
 name: Beam Search with Shared Prefix and Divergence
 status: candidate
 parameters:

@@ -1,4 +1,5 @@
 id: priority-preemption-cascades
+kind: atomic
 name: Priority Preemption Repeated Swap Reload
 status: candidate
 parameters:

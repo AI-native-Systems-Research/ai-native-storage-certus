@@ -1,4 +1,5 @@
 id: background-writeback-flush-and-backpressure
+kind: atomic
 name: Async Sealed Block Writeback
 status: candidate
 parameters:

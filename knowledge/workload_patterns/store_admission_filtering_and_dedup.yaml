@@ -1,4 +1,5 @@
 id: store-admission-filtering-and-dedup
+kind: atomic
 name: Content-Hash Admission and Store Deduplication
 status: candidate
 parameters:

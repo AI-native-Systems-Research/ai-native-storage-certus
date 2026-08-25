@@ -1,4 +1,5 @@
 id: true-miss-recompute-and-restorage
+kind: atomic
 name: True Miss Full Recompute and Store
 status: candidate
 parameters:

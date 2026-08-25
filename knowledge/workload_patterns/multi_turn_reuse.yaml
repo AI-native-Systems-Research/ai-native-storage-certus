@@ -1,4 +1,5 @@
 id: multi-turn-reuse
+kind: atomic
 name: Multi-Turn Prefix Load From Memory Tier
 status: candidate
 parameters:

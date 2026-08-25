@@ -1,4 +1,5 @@
 id: model-parallel-kv-sharding-and-replication
+kind: atomic
 name: Disaggregated PD KV Parallelism Resharding
 status: candidate
 parameters:
