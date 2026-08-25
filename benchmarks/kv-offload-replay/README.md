@@ -411,6 +411,22 @@ GPU selector: `all` | `0` | `0,1` | `<uuid>`), and `--logdir <dir>` (output dir;
 defaults to `<model-fs>/kvprofile-<runid>`). Run `profile_all.sh --help` for the full
 list.
 
+### Selecting the workload and execution model
+
+Two orthogonal knobs, both forwarded as env to every backend driver so all
+variants run the same thing:
+
+| Flag | Env forwarded | Meaning |
+|------|---------------|---------|
+| `--workload-mode <batched\|async>` (or `--async`) | `WORKLOAD_MODE` | Execution model. `batched` (default) runs the synchronous per-round `generate()` loop; `async` runs one vLLM coroutine per conversation on a V1 `AsyncLLM` (`max_num_seqs` bounds the running batch, the rest queue). Same engine config either way; in async mode `--max-rounds` becomes a per-conversation turn cap. |
+| `--workload <name>` | `WORKLOAD_NAME` | Named dataset. Empty (default) = each driver's baked 450×12 dataset. `sharegpt` selects the ShareGPT multi-turn workload by human-turn count (see below). |
+| `--min-turns <n>` / `--max-turns <n>` | `SHAREGPT_MIN_TURNS` / `SHAREGPT_MAX_TURNS` | Human-turn window for the `sharegpt` workload — **passing either implies `--workload sharegpt`**. Only two configs are prepared: `12`/`12` (default) = the baked 450×12 subset (the container variants are then a no-op), and `1`/`1` = the **full 94,145-conversation corpus** (`data/sharegpt/*.json`, mounted read-only and capped by `--num-convs`). Any other pair errors — use an explicit `DATASET_PATH` for other turn counts. `--max-turns` mirrors `--min-turns` when unset. |
+
+The corpus itself is documented in [`../../data/sharegpt/README.md`](../../data/sharegpt/README.md).
+The same selection works outside `profile_all.sh`: any driver honours
+`WORKLOAD_NAME` / `WORKLOAD_MODE` / `DATASET_PATH` / `NUM_CONVS` directly (see
+`run_multiturn_common.resolve_workload`).
+
 > **Note:** the container IPC mode is not a CLI flag — `profile_all.sh` launches
 > the shmq client with `--ipc=host` already, which does double duty: the host
 > `certus-server` can open the container's CUDA IPC handles, and the container sees
