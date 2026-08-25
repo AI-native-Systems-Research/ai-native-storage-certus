@@ -137,13 +137,17 @@ HIT_DENOM = {
 }
 
 # Counters that also get a per-second average (total / active seconds) atop their
-# run-total bar — bytes/sec for the byte families, count/sec for tokens and tier
-# movements (formatted per the family unit, see fmt_rate). The active window
-# starts at the counter's first nonzero round, not t=0 — e.g. SSD/tier loads
-# begin only after a warmup during which the working set still fits DRAM, and
-# tier movements don't start until the first eviction/promotion — so counting
-# from t=0 would understate the sustained rate (see _active_seconds).
+# run-total bar — bytes/sec for the byte families, count/sec for tokens, cache
+# queries/hits, and tier movements (formatted per the family unit, see fmt_rate).
+# A hit bar carries both its rate and its hit rate (it's in HIT_DENOM too), the
+# two stacked. The active window starts at the counter's first nonzero round,
+# not t=0 — e.g. SSD/tier loads begin only after a warmup during which the
+# working set still fits DRAM, and tier movements don't start until the first
+# eviction/promotion — so counting from t=0 would understate the sustained rate
+# (see _active_seconds).
 RATE_KEYS = {"prompt_tokens", "prompt_tokens_cached", "generation_tokens",
+             "prefix_cache_queries", "prefix_cache_hits",
+             "external_prefix_cache_queries", "external_prefix_cache_hits",
              "kv_offload_store_bytes", "kv_offload_load_bytes",
              "ssd_read_bytes", "ssd_write_bytes",
              "tier_promotions_to_memory", "tier_promotions_to_gpu",
@@ -598,24 +602,26 @@ def render(series, out_path, title, subtitle, dark, dpi):
                 bars = tax.bar(xs, vals, width=bw * 0.9, color=s["color"], zorder=3)
                 tax.bar_label(bars, labels=[fmt(v) for v in vals], padding=2,
                               fontsize=6.5, rotation=90, color=mut)
-                # Derived number atop the bar, above the (vertical) count label so
-                # both read: hit rate on hit bars, throughput on SSD device bars.
+                # Derived number(s) atop the bar, above the (vertical) count label:
+                # a per-second average (RATE_KEYS) and/or a hit rate (HIT_DENOM).
+                # A hit bar carries both — stacked, rate on top, hit% nearest the
+                # bar (last line, va="bottom" grows the block upward from here).
                 for (k, _lab), x, hv in zip(metrics, xs, vals):
-                    note = None
+                    parts = []
+                    if k in RATE_KEYS and hv:
+                        secs = _active_seconds(s, k)
+                        if secs:
+                            parts.append(fmt_rate(hv / secs, funit))
                     if k in HIT_DENOM:
                         q = _total(s, HIT_DENOM[k])
                         if q:
-                            note = f"{hv / q * 100:.0f}%"
-                    elif k in RATE_KEYS and hv:
-                        secs = _active_seconds(s, k)
-                        if secs:
-                            note = fmt_rate(hv / secs, funit)
-                    if not note:
+                            parts.append(f"{hv / q * 100:.0f}%")
+                    if not parts:
                         continue
                     # Clear the rotated count label first — its height grows with
                     # the string length ("860.3 MiB" is far taller than "1k").
                     off = 14 + len(fmt(hv)) * 4.5
-                    tax.annotate(note, xy=(x, hv),
+                    tax.annotate("\n".join(parts), xy=(x, hv),
                                  xytext=(0, off), textcoords="offset points",
                                  ha="center", va="bottom", fontsize=7,
                                  fontweight="bold", color=fg, zorder=4)
