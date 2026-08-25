@@ -1,4 +1,5 @@
 id: batch-splitting-merging
+kind: atomic
 name: Batch Merge Prefix Dedup on Consolidation
 status: candidate
 parameters:
@@ -67,6 +68,7 @@ phases:
     keys: shared_blocks
     order: sequential
     repeat: shared_prefix_blocks
+    batch_size: ceil(shared_prefix_tokens / block_size)
   barrier_after: true
 - id: suffix-stores
   depends_on: shared-load
@@ -79,6 +81,7 @@ phases:
     keys: per_request_suffix
     order: sequential
     repeat: suffix_blocks_per_request
+    batch_size: 1
 measure:
 - phase: shared-load
   operation: load

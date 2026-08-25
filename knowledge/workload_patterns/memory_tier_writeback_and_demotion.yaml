@@ -1,4 +1,5 @@
 id: memory-tier-writeback-and-demotion
+kind: atomic
 name: Pressure-Triggered Batched Demotion
 status: candidate
 parameters:

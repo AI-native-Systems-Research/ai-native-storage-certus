@@ -1,4 +1,5 @@
 id: partial-block-sealing-and-tail-append
+kind: atomic
 name: Tail Block Seal and Identity Registration
 status: candidate
 parameters:
@@ -47,6 +48,7 @@ phases:
     keys: sealed_blocks
     order: sequential
     repeat: seal_events
+    batch_size: 1
 measure:
 - phase: seal-writeback
   operation: store

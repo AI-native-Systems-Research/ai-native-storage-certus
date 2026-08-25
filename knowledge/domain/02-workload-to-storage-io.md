@@ -1,3 +1,8 @@
+I have sufficient information now. Let me compose the full reference file.
+
+Here's the complete domain reference file:
+
+```markdown
 ---
 id: workload-to-storage-io
 decision: How to map serving request patterns into storage IO operations and scheduling policies
@@ -54,7 +59,9 @@ Each inference phase generates a distinct IO signature:
 Cold prefill:     WRITE burst — ceil(prompt_tokens / block_size) blocks, sequential, bandwidth-bound
 Warm prefill:     READ burst  — ceil(shared_prefix_tokens / block_size) loads, then WRITE for suffix
 Decode:           WRITE trickle — 1 block per (block_size × token_latency) seconds, IOPS-bound
-Preemption out:   WRITE burst — all active blocks for victim sequence, latency-critical
+Preemption out:   FLUSH pending — V1 incremental offload stores blocks as they seal during decode;
+                  preemption flushes already-queued jobs (not a new bulk transfer). Worst case (V0
+                  or unoffloaded sequence): WRITE burst of all active blocks, latency-critical.
 Swap-in:          READ burst  — all blocks for resumed sequence, latency-critical
 Eviction:         DELETE batch — background, throughput-bound
 ```

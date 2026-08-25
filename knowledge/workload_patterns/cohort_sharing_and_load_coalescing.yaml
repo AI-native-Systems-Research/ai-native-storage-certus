@@ -1,4 +1,5 @@
 id: cohort-sharing-and-load-coalescing
+kind: atomic
 name: Shared Prefix Coalesced Load
 status: candidate
 parameters:
@@ -56,6 +57,7 @@ phases:
     keys: shared_blocks
     order: sequential
     repeat: shared_prefix_blocks
+    batch_size: ceil(shared_prefix_tokens / block_size)
 measure:
 - phase: coalesced-load
   operation: load

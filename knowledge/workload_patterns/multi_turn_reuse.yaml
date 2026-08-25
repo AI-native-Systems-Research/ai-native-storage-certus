@@ -1,4 +1,5 @@
 id: multi-turn-reuse
+kind: atomic
 name: Multi-Turn Prefix Load From Memory Tier
 status: candidate
 parameters:
@@ -61,6 +62,7 @@ phases:
     keys: prior_turn_chunks
     order: sequential
     repeat: ceil(shared_prefix_tokens / chunk_size)
+    batch_size: ceil(prior_turn_tokens / block_size)
   barrier_after: true
 - id: store-new-suffix
   depends_on: load-prior-turn

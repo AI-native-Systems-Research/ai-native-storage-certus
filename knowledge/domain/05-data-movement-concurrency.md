@@ -1,3 +1,8 @@
+I now have sufficient context on the format, scope, and evidence. Here's the full domain reference file:
+
+---
+
+```markdown
 ---
 id: data-movement-concurrency
 decision: How many parallel IO operations to issue and how to structure the pipeline stages that move KV blocks between tiers

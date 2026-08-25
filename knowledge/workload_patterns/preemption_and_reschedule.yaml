@@ -1,4 +1,5 @@
 id: preemption-and-reschedule
+kind: atomic
 name: Preemption Swap-Out and Swap-In
 status: candidate
 parameters:
@@ -47,6 +48,7 @@ phases:
     keys: swapped_blocks
     order: sequential
     repeat: preempted_blocks
+    batch_size: 1
   barrier_after: true
 - id: swap-in
   depends_on: swap-out
@@ -59,6 +61,7 @@ phases:
     keys: swapped_blocks
     order: sequential
     repeat: preempted_blocks
+    batch_size: preempted_blocks
   - op: delete
     keys: swapped_blocks
     order: sequential

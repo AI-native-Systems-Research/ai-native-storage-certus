@@ -1,4 +1,5 @@
 id: background-writeback-flush-and-backpressure
+kind: atomic
 name: Async Sealed Block Writeback
 status: candidate
 parameters:
@@ -53,6 +54,7 @@ phases:
     keys: writeback_blocks
     order: sequential
     repeat: writeback_batch_blocks
+    batch_size: 1
 measure:
 - phase: async-writeback
   operation: store

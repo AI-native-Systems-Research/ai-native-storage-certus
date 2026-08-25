@@ -1,4 +1,5 @@
 id: cold-prefill-store
+kind: atomic
 name: Cold Prefill Bulk Store
 status: candidate
 parameters:
@@ -47,6 +48,7 @@ phases:
     keys: prefill_blocks
     order: sequential
     repeat: ceil(prompt_tokens / block_size)
+    batch_size: ceil(prompt_tokens / block_size)
 measure:
 - phase: prefill-writeback
   operation: store

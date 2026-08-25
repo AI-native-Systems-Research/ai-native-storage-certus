@@ -1,4 +1,5 @@
 id: priority-preemption-cascades
+kind: atomic
 name: Priority Preemption Repeated Swap Reload
 status: candidate
 parameters:
@@ -53,6 +54,7 @@ phases:
     keys: preempted_blocks
     order: sequential
     repeat: blocks_per_sequence * preemption_count
+    batch_size: preempted_blocks
 measure:
 - phase: repeated-reload
   operation: load

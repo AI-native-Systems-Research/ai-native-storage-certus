@@ -1,4 +1,5 @@
 id: sliding-window-and-attention-sinks
+kind: atomic
 name: Sliding Window Block Expiry
 status: candidate
 parameters:

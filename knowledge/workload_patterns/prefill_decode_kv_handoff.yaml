@@ -1,14 +1,14 @@
-id: compute-local-eviction-and-later-reload
+id: prefill-decode-kv-handoff
 kind: atomic
-name: LRU Eviction to Memory Then Demand Reload
+name: Cross-Node KV Handoff From Prefill to Decode
 status: candidate
 parameters:
-  evicted_blocks:
+  prompt_tokens:
     type: integer
     range:
-    - 1
-    - 2048
-    default: 128
+    - 128
+    - 131072
+    default: 4096
   block_size:
     type: integer
     range:
@@ -28,51 +28,53 @@ parameters:
     - 16384
     default: 4096
 keyspaces:
-  eviction_blocks:
-    cardinality: evicted_blocks
+  handoff_blocks:
+    cardinality: ceil(prompt_tokens / block_size)
     object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
     sharing: per_actor
     disjoint_between_actors: true
 preconditions:
-- subject: eviction_blocks
+- subject: handoff_blocks
   state: absent_from_store
   value: true
 phases:
-- id: eviction-store
+- id: prefill-push
   actors:
     count: 1
     arrival: burst
     concurrency: 1
   operations:
   - op: store
-    keys: eviction_blocks
+    keys: handoff_blocks
     order: sequential
-    repeat: evicted_blocks
-    batch_size: 1
+    repeat: ceil(prompt_tokens / block_size)
   barrier_after: true
-- id: demand-reload
-  depends_on: eviction-store
+- id: decode-pull
+  depends_on: prefill-push
   actors:
     count: 1
     arrival: burst
     concurrency: 1
   operations:
   - op: load
-    keys: eviction_blocks
+    keys: handoff_blocks
     order: sequential
-    repeat: evicted_blocks
-    batch_size: evicted_blocks
+    repeat: ceil(prompt_tokens / block_size)
+  - op: delete
+    keys: handoff_blocks
+    order: sequential
+    repeat: ceil(prompt_tokens / block_size)
 measure:
-- phase: eviction-store
+- phase: prefill-push
   operation: store
   metrics:
   - throughput_MBps
   - latency_p99_ms
-- phase: demand-reload
+- phase: decode-pull
   operation: load
   metrics:
   - throughput_MBps
   - latency_p99_ms
 expected_io:
-  stores: evicted_blocks
-  loads: evicted_blocks
+  stores: ceil(prompt_tokens / block_size)
+  loads: ceil(prompt_tokens / block_size)

@@ -1,4 +1,5 @@
 id: model-and-adapter-kv-namespace-switching
+kind: atomic
 name: Adapter Switch KV Invalidation and Re-Store
 status: candidate
 parameters:

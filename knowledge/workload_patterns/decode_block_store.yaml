@@ -1,4 +1,5 @@
 id: decode-block-store
+kind: atomic
 name: Decode Sealed Block Writeback
 status: candidate
 parameters:
@@ -47,6 +48,7 @@ phases:
     keys: sealed_decode_blocks
     order: sequential
     repeat: floor(generated_tokens / block_size)
+    batch_size: 1
 measure:
 - phase: decode-writeback
   operation: store

@@ -1,4 +1,5 @@
 id: bidirectional-store-load-contention
+kind: atomic
 name: Concurrent Store and Load on Shared Storage Path
 status: candidate
 parameters:
