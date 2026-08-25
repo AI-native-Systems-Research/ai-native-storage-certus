@@ -136,6 +136,12 @@ HIT_DENOM = {
     "external_prefix_cache_hits": "external_prefix_cache_queries",
 }
 
+# SSD device byte counters that also get a throughput number (bytes / active
+# seconds) atop their run-total bar. The active window starts at the counter's
+# first nonzero round, not t=0 — SSD loads begin only after a warmup during
+# which the working set still fits DRAM (see _active_seconds).
+RATE_KEYS = {"ssd_read_bytes", "ssd_write_bytes"}
+
 # Fixed colour per variant (normalised name -> hex); unknown variants draw from
 # FALLBACK in first-seen order.
 VARIANT_COLOR = {
@@ -443,6 +449,25 @@ def render(series, out_path, title, subtitle, dark, dpi):
         # sum; tier counters are parsed cumulative → the total is the last (max).
         return max(vals) if key in TIER_KEYS else float(sum(vals))
 
+    def _active_seconds(s, key):
+        """Wall seconds from ``key``'s first nonzero round to the run's end.
+
+        SSD I/O begins only after a warmup — early KV loads hit the DRAM tier, so
+        device reads stay zero for the first rounds. Dividing the run's total
+        bytes by the whole wall time would count that idle head as throughput and
+        understate it; instead start the clock when the counter first moves.
+        Uses the round-index fraction against wall (per-round wall isn't parsed),
+        so it's an estimate: wall × (rounds from first activity to end) / rounds."""
+        vals = s["data"].get(key) or []
+        wall = s.get("wall")
+        if not vals or not wall:
+            return None
+        first = next((i for i, v in enumerate(vals) if v), None)
+        if first is None:
+            return None
+        secs = wall * (len(vals) - first) / len(vals)
+        return secs if secs > 0 else None
+
     active_fams = [f for f in FAMILIES
                    if any(_total(s, k) for s in series for k, _lab in f[2])]
 
@@ -538,9 +563,9 @@ def render(series, out_path, title, subtitle, dark, dpi):
             tax = fig.add_subplot(gs_tot[r, c])
             fmt = fmt_bytes if funit == "bytes" else fmt_compact
             n_m = len(metrics)
-            # A hit metric here also carries its rate above the bar, which needs
-            # extra headroom above the tallest bar so it clears the count label.
-            has_hits = any(k in HIT_DENOM for k, _lab in metrics)
+            # Some bars carry a derived number above the count label (hit rate on
+            # hit bars, throughput on SSD bars); that stack needs extra headroom.
+            has_deriv = any(k in HIT_DENOM or k in RATE_KEYS for k, _lab in metrics)
             gw = 0.8                       # width one counter's bar-group spans
             bw = gw / max(len(series), 1)  # per-series bar width within a group
             vmax = 0.0
@@ -552,17 +577,25 @@ def render(series, out_path, title, subtitle, dark, dpi):
                 bars = tax.bar(xs, vals, width=bw * 0.9, color=s["color"], zorder=3)
                 tax.bar_label(bars, labels=[fmt(v) for v in vals], padding=2,
                               fontsize=6.5, rotation=90, color=mut)
-                # Hit-rate % atop each hit bar (hits / queries for the same
-                # series), placed above the vertical count label so both read.
+                # Derived number atop the bar, above the (vertical) count label so
+                # both read: hit rate on hit bars, throughput on SSD device bars.
                 for (k, _lab), x, hv in zip(metrics, xs, vals):
-                    denom = HIT_DENOM.get(k)
-                    if denom is None:
+                    note = None
+                    if k in HIT_DENOM:
+                        q = _total(s, HIT_DENOM[k])
+                        if q:
+                            note = f"{hv / q * 100:.0f}%"
+                    elif k in RATE_KEYS and hv:
+                        secs = _active_seconds(s, k)
+                        if secs:
+                            note = fmt_bytes(hv / secs) + "/s"
+                    if not note:
                         continue
-                    q = _total(s, denom)
-                    if not q:
-                        continue
-                    tax.annotate(f"{hv / q * 100:.0f}%", xy=(x, hv),
-                                 xytext=(0, 26), textcoords="offset points",
+                    # Clear the rotated count label first — its height grows with
+                    # the string length ("860.3 MiB" is far taller than "1k").
+                    off = 14 + len(fmt(hv)) * 4.5
+                    tax.annotate(note, xy=(x, hv),
+                                 xytext=(0, off), textcoords="offset points",
                                  ha="center", va="bottom", fontsize=7,
                                  fontweight="bold", color=fg, zorder=4)
             tax.set_xticks(range(n_m))
@@ -570,7 +603,7 @@ def render(series, out_path, title, subtitle, dark, dpi):
             tax.set_title(ftitle, loc="left", fontsize=10, fontweight="bold",
                           color=fg, pad=6)
             tax.yaxis.set_major_formatter(FuncFormatter(fmt))
-            tax.set_ylim(0, (vmax * (1.6 if has_hits else 1.34)) or 1)
+            tax.set_ylim(0, (vmax * (2.0 if has_deriv else 1.34)) or 1)
             tax.margins(x=0.08)
             for sp in ("top", "right"):
                 tax.spines[sp].set_visible(False)
