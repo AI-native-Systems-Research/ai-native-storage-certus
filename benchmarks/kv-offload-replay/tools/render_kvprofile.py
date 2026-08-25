@@ -117,8 +117,8 @@ FAMILIES = [
     ("Bytes moved — run total", "bytes", [
         ("kv_offload_store_bytes", "store"),
         ("kv_offload_load_bytes",  "load"),
-        ("ssd_read_bytes",         "ssd read"),
-        ("ssd_write_bytes",        "ssd write"),
+        ("ssd_read_bytes",         "SSD read"),
+        ("ssd_write_bytes",        "SSD write"),
     ]),
     ("KV tier movements — run total", "int", [
         ("tier_promotions_to_memory",  "→DRAM"),
@@ -136,13 +136,18 @@ HIT_DENOM = {
     "external_prefix_cache_hits": "external_prefix_cache_queries",
 }
 
-# Byte counters that also get a throughput number (bytes / active seconds) atop
-# their run-total bar. The active window starts at the counter's first nonzero
-# round, not t=0 — e.g. SSD loads (and tier loads) begin only after a warmup
-# during which the working set still fits DRAM, so counting from t=0 would
-# understate the sustained rate (see _active_seconds).
-RATE_KEYS = {"kv_offload_store_bytes", "kv_offload_load_bytes",
-             "ssd_read_bytes", "ssd_write_bytes"}
+# Counters that also get a per-second average (total / active seconds) atop their
+# run-total bar — bytes/sec for the byte families, count/sec for tokens and tier
+# movements (formatted per the family unit, see fmt_rate). The active window
+# starts at the counter's first nonzero round, not t=0 — e.g. SSD/tier loads
+# begin only after a warmup during which the working set still fits DRAM, and
+# tier movements don't start until the first eviction/promotion — so counting
+# from t=0 would understate the sustained rate (see _active_seconds).
+RATE_KEYS = {"generation_tokens",
+             "kv_offload_store_bytes", "kv_offload_load_bytes",
+             "ssd_read_bytes", "ssd_write_bytes",
+             "tier_promotions_to_memory", "tier_promotions_to_gpu",
+             "tier_evictions_from_memory", "tier_evictions_from_ssd"}
 
 # Fixed colour per variant (normalised name -> hex); unknown variants draw from
 # FALLBACK in first-seen order.
@@ -350,6 +355,20 @@ def fmt_bytes(v, _pos=None):
         v /= 1024.0
         i += 1
     return f"{v:.1f} {units[i]}"
+
+
+def fmt_rate(rate, funit):
+    """Per-second label for a run-total bar. Bytes families read as B/KiB/…-per
+    second; count families (tokens, tier movements) read as a compact count per
+    second, but keep one/two decimals below 10 so a sub-unit rate (e.g. 0.3
+    evictions/s) doesn't collapse to ``0/s`` under fmt_compact's integer floor."""
+    if funit == "bytes":
+        return fmt_bytes(rate) + "/s"
+    if rate < 1:
+        return f"{rate:.2f}/s"
+    if rate < 10:
+        return f"{rate:.1f}/s"
+    return fmt_compact(rate) + "/s"
 
 
 def build_series(run_args):
@@ -590,7 +609,7 @@ def render(series, out_path, title, subtitle, dark, dpi):
                     elif k in RATE_KEYS and hv:
                         secs = _active_seconds(s, k)
                         if secs:
-                            note = fmt_bytes(hv / secs) + "/s"
+                            note = fmt_rate(hv / secs, funit)
                     if not note:
                         continue
                     # Clear the rotated count label first — its height grows with
