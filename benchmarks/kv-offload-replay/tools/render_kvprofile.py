@@ -136,11 +136,13 @@ HIT_DENOM = {
     "external_prefix_cache_hits": "external_prefix_cache_queries",
 }
 
-# SSD device byte counters that also get a throughput number (bytes / active
-# seconds) atop their run-total bar. The active window starts at the counter's
-# first nonzero round, not t=0 — SSD loads begin only after a warmup during
-# which the working set still fits DRAM (see _active_seconds).
-RATE_KEYS = {"ssd_read_bytes", "ssd_write_bytes"}
+# Byte counters that also get a throughput number (bytes / active seconds) atop
+# their run-total bar. The active window starts at the counter's first nonzero
+# round, not t=0 — e.g. SSD loads (and tier loads) begin only after a warmup
+# during which the working set still fits DRAM, so counting from t=0 would
+# understate the sustained rate (see _active_seconds).
+RATE_KEYS = {"kv_offload_store_bytes", "kv_offload_load_bytes",
+             "ssd_read_bytes", "ssd_write_bytes"}
 
 # Fixed colour per variant (normalised name -> hex); unknown variants draw from
 # FALLBACK in first-seen order.
