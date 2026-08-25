@@ -333,6 +333,8 @@ def render(series, out_path, title, subtitle, dark, dpi):
         "axes.linewidth": 0.8,
     })
 
+    import textwrap
+
     # which counters have any nonzero data across series (vLLM per-round counters
     # first, then the Certus-server tier-movement counters)
     active = [c for c in COUNTERS + TIER_COUNTERS
@@ -340,19 +342,55 @@ def render(series, out_path, title, subtitle, dark, dpi):
     ncol = 3
     nrow = (len(active) + ncol - 1) // ncol if active else 0
 
+    # Curated counters that are all-zero but WERE measured are a real result (e.g.
+    # a write-only run: the offload tier is queried but hit 0×, nothing is loaded
+    # back, no SSD reads), not missing data — so name them explicitly in a footnote
+    # rather than silently dropping the panel (which reads as "forgot to capture").
+    # A zero is "measured" when: for a vLLM/SSD counter, the run captured metrics
+    # at all (prompt/generation tokens moved somewhere); for a tier counter, the
+    # key was merged in (server.log tier-events parsed). SSD keys additionally need
+    # a Certus-SPDK series present (no other backend emits device I/O).
+    has_certus = any(norm(s["variant"]) == "certusspdk" for s in series)
+    captured = any(v != 0 for s in series for key in ("prompt_tokens", "generation_tokens")
+                   for v in (s["data"].get(key) or []))
+
+    def _measured(c):
+        key = c[0]
+        if key in TIER_KEYS:
+            return any(key in s["data"] for s in series)
+        if key in ("ssd_read_bytes", "ssd_write_bytes"):
+            return has_certus and captured
+        return captured
+
+    zeroed = [c for c in COUNTERS + TIER_COUNTERS if c not in active and _measured(c)]
+    zero_note = ""
+    if zeroed:
+        names = ", ".join(c[1] for c in zeroed)
+        zero_note = ("Measured but zero across all runs (shown for completeness, "
+                     f"not omitted): {names}.")
+    note_lines = textwrap.wrap(zero_note, width=150) if zero_note else []
+
     # header band scales a little with the number of legend rows so the legend
     # never lands on the subtitle.
     legend_rows = (len(series) + 4) // 5
     hdr_h = 1.1 + 0.32 * legend_rows
     bar_h = max(1.6, 0.42 * len(series) + 0.8)
     grid_h = 2.5 * nrow
-    fig_h = hdr_h + bar_h + grid_h
+    # note band = the wrapped text lines, plus a fixed gap above them that clears
+    # the last counter row's x-axis tick labels + "round" label (~0.5in), plus a
+    # small bottom margin.
+    note_text_h = 0.22 * len(note_lines)
+    note_h = (note_text_h + 0.55) if note_lines else 0.0
+    fig_h = hdr_h + bar_h + grid_h + note_h
     fig = plt.figure(figsize=(12.5, fig_h), dpi=dpi)
+    # The grid starts above the whole note band, so the last row's x-axis label
+    # can't land on the note; 0.03 (the prior fixed margin) when there is no note.
+    gs_bottom = note_h / fig_h if note_lines else 0.03
     gs = fig.add_gridspec(
         2 + nrow, ncol,
         height_ratios=[hdr_h, bar_h] + [2.5] * nrow,
         hspace=0.85, wspace=0.28,
-        left=0.075, right=0.975, top=0.985, bottom=0.03,
+        left=0.075, right=0.975, top=0.985, bottom=gs_bottom,
     )
 
     # ── title band + legend (row 0, spans all cols): title / subtitle / legend
@@ -418,6 +456,16 @@ def render(series, out_path, title, subtitle, dark, dpi):
             cax.spines[sp].set_visible(False)
         cax.grid(axis="y", color=grid, lw=0.6)
         cax.tick_params(labelsize=8)
+
+    # ── footnote: curated counters that were measured but stayed zero ─────────
+    if note_lines:
+        # Draw the note at the BOTTOM of its reserved band (text block is
+        # note_text_h tall, +0.08in bottom margin); the ~0.47in of slack above it
+        # is what clears the last panel row's hanging x-axis tick + "round" labels.
+        y = (note_text_h + 0.08) / fig_h
+        for ln in note_lines:
+            fig.text(0.075, y, ln, fontsize=8, va="top", ha="left", color=mut)
+            y -= 0.22 / fig_h
 
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
