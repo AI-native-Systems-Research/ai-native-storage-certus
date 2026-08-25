@@ -95,6 +95,39 @@ TIER_RE = re.compile(
     r"\s+evictions\[memory\s+(\d+),\s*ssd\s+(\d+)\]"
 )
 
+# ── Run-total families: the per-round panels show movement over time; these
+# roll each counter up to a single whole-run total and group related counters
+# onto one shared axis so the magnitudes are directly comparable. (title, unit,
+# [(key, short bar label), …]). Every counter in a family shares a unit — the
+# skill's one-axis rule — so no family mixes bytes with counts. A family with no
+# nonzero total across all series is dropped; a zero counter inside a shown
+# family stays as a labelled 0 bar (a measured zero, like store-only vs load).
+FAMILIES = [
+    ("Tokens — run total", "int", [
+        ("prompt_tokens",        "prompt"),
+        ("prompt_tokens_cached", "cached"),
+        ("generation_tokens",    "generation"),
+    ]),
+    ("Prefix-cache queries & hits — run total", "int", [
+        ("prefix_cache_queries",          "GPU q"),
+        ("prefix_cache_hits",             "GPU hit"),
+        ("external_prefix_cache_queries", "tier q"),
+        ("external_prefix_cache_hits",    "tier hit"),
+    ]),
+    ("Bytes moved — run total", "bytes", [
+        ("kv_offload_store_bytes", "store"),
+        ("kv_offload_load_bytes",  "load"),
+        ("ssd_read_bytes",         "ssd read"),
+        ("ssd_write_bytes",        "ssd write"),
+    ]),
+    ("KV tier movements — run total", "int", [
+        ("tier_promotions_to_memory",  "→DRAM"),
+        ("tier_promotions_to_gpu",     "→GPU"),
+        ("tier_evictions_from_memory", "evict DRAM"),
+        ("tier_evictions_from_ssd",    "evict SSD"),
+    ]),
+]
+
 # Fixed colour per variant (normalised name -> hex); unknown variants draw from
 # FALLBACK in first-seen order.
 VARIANT_COLOR = {
@@ -393,32 +426,63 @@ def render(series, out_path, title, subtitle, dark, dpi):
                      f"not omitted): {names}.")
     note_lines = textwrap.wrap(zero_note, width=150) if zero_note else []
 
-    # header band scales a little with the number of legend rows so the legend
-    # never lands on the subtitle.
+    # ── run-total families: roll each counter up to one whole-run number ──────
+    def _total(s, key):
+        vals = s["data"].get(key) or []
+        if not vals:
+            return 0.0
+        # vLLM/SSD [prom] values are per-interval deltas → the run total is their
+        # sum; tier counters are parsed cumulative → the total is the last (max).
+        return max(vals) if key in TIER_KEYS else float(sum(vals))
+
+    active_fams = [f for f in FAMILIES
+                   if any(_total(s, k) for s in series for k, _lab in f[2])]
+
+    # ── vertical band layout ──────────────────────────────────────────────────
+    # The figure is a stack of bands: header, total-wall-time bar, run-total
+    # family bars (2 cols), per-round small multiples (3 cols), and the zero-note.
+    # Each drawn band is its own gridspec positioned by figure fraction so their
+    # column counts can differ; the note occupies [0, note_h] at the very bottom.
     legend_rows = (len(series) + 4) // 5
     hdr_h = 1.1 + 0.32 * legend_rows
     bar_h = max(1.6, 0.42 * len(series) + 0.8)
+    fam_ncol = 2
+    fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if active_fams else 0
+    totals_h = 3.0 * fam_nrow
     grid_h = 2.5 * nrow
     # note band = the wrapped text lines, plus a fixed gap above them that clears
     # the last counter row's x-axis tick labels + "round" label (~0.5in), plus a
     # small bottom margin.
     note_text_h = 0.22 * len(note_lines)
     note_h = (note_text_h + 0.55) if note_lines else 0.0
-    fig_h = hdr_h + bar_h + grid_h + note_h
-    fig = plt.figure(figsize=(12.5, fig_h), dpi=dpi)
-    # The grid starts above the whole note band, so the last row's x-axis label
-    # can't land on the note; 0.03 (the prior fixed margin) when there is no note.
-    gs_bottom = note_h / fig_h if note_lines else 0.03
-    gs = fig.add_gridspec(
-        2 + nrow, ncol,
-        height_ratios=[hdr_h, bar_h] + [2.5] * nrow,
-        hspace=0.85, wspace=0.28,
-        left=0.075, right=0.975, top=0.985, bottom=gs_bottom,
-    )
 
-    # ── title band + legend (row 0, spans all cols): title / subtitle / legend
-    # stacked top-to-bottom, none overlapping. ───────────────────────────────
-    hdr = fig.add_subplot(gs[0, :]); hdr.axis("off")
+    # Gap between stacked bands must clear BOTH the lower band's title (drawn
+    # above its axes) and the upper band's x-axis tick + label (drawn below its
+    # axes) — otherwise the wall-bar's xlabel lands on the totals titles and the
+    # totals x-ticks land on the grid titles.
+    GAP = 0.9
+    bands = [("hdr", hdr_h), ("bar", bar_h)]
+    if totals_h:
+        bands.append(("totals", totals_h))
+    if grid_h:
+        bands.append(("grid", grid_h))
+    fig_h = sum(h for _, h in bands) + note_h + GAP * (len(bands) - 1)
+    fig = plt.figure(figsize=(12.5, fig_h), dpi=dpi)
+
+    pos, cur = {}, fig_h  # (bottom_frac, top_frac) per band, stacked top→bottom
+    for j, (name, h) in enumerate(bands):
+        pos[name] = ((cur - h) / fig_h, cur / fig_h)
+        cur -= h
+        if j < len(bands) - 1:
+            cur -= GAP
+    # By construction cur == note_h now, so the grid's bottom sits exactly on the
+    # note band (matching the footnote's reserved height below).
+    L, R = 0.075, 0.975
+
+    # ── title band + legend: title / subtitle / legend stacked, none overlap ──
+    gs_hdr = fig.add_gridspec(1, 1, left=L, right=R,
+                              top=pos["hdr"][1], bottom=pos["hdr"][0])
+    hdr = fig.add_subplot(gs_hdr[0, 0]); hdr.axis("off")
     hdr.text(0, 1.0, title, fontsize=17, fontweight="bold", va="top", color=fg)
     if subtitle:
         hdr.text(0, 0.62, subtitle, fontsize=10, va="top", color=mut)
@@ -428,8 +492,10 @@ def render(series, out_path, title, subtitle, dark, dpi):
                ncol=min(len(series), 5), frameon=False, fontsize=9,
                handlelength=2.6, columnspacing=1.6, borderaxespad=0)
 
-    # ── total wall-time bars (row 1, spans all cols) ─────────────────────────
-    ax = fig.add_subplot(gs[1, :])
+    # ── total wall-time bars ──────────────────────────────────────────────────
+    gs_bar = fig.add_gridspec(1, 1, left=L, right=R,
+                              top=pos["bar"][1], bottom=pos["bar"][0])
+    ax = fig.add_subplot(gs_bar[0, 0])
     base = next((s["wall"] for s in series if norm(s["variant"]) == "nooffload"
                  and s["wall"]), None)
     ys = list(range(len(series)))[::-1]  # top-down
@@ -453,6 +519,40 @@ def render(series, out_path, title, subtitle, dark, dpi):
     ax.tick_params(left=False)
     ax.grid(axis="x", color=grid, lw=0.7, zorder=0)
 
+    # ── run-total family bars (2-col band): related counters share one axis, one
+    # group per counter, one bar per series (coloured like the legend). ─────────
+    if active_fams:
+        gs_tot = fig.add_gridspec(fam_nrow, fam_ncol, left=L, right=R,
+                                  top=pos["totals"][1], bottom=pos["totals"][0],
+                                  hspace=1.05, wspace=0.18)
+        for fi, (ftitle, funit, metrics) in enumerate(active_fams):
+            r, c = divmod(fi, fam_ncol)
+            tax = fig.add_subplot(gs_tot[r, c])
+            fmt = fmt_bytes if funit == "bytes" else fmt_compact
+            n_m = len(metrics)
+            gw = 0.8                       # width one counter's bar-group spans
+            bw = gw / max(len(series), 1)  # per-series bar width within a group
+            vmax = 0.0
+            for si, s in enumerate(series):
+                offs = -gw / 2 + bw * (si + 0.5)
+                xs = [m + offs for m in range(n_m)]
+                vals = [_total(s, k) for k, _lab in metrics]
+                vmax = max([vmax] + vals)
+                bars = tax.bar(xs, vals, width=bw * 0.9, color=s["color"], zorder=3)
+                tax.bar_label(bars, labels=[fmt(v) for v in vals], padding=2,
+                              fontsize=6.5, rotation=90, color=mut)
+            tax.set_xticks(range(n_m))
+            tax.set_xticklabels([lab for _k, lab in metrics], fontsize=8)
+            tax.set_title(ftitle, loc="left", fontsize=10, fontweight="bold",
+                          color=fg, pad=6)
+            tax.yaxis.set_major_formatter(FuncFormatter(fmt))
+            tax.set_ylim(0, (vmax * 1.34) or 1)
+            tax.margins(x=0.08)
+            for sp in ("top", "right"):
+                tax.spines[sp].set_visible(False)
+            tax.grid(axis="y", color=grid, lw=0.6, zorder=0)
+            tax.tick_params(labelsize=8)
+
     # Axis semantics of the vLLM/SSD counter panels depend on how the run was
     # driven. Batched: each [prom] point is one workload round's total, x = round.
     # Async: the sampler ticks at 1 Hz, so each point is the counter's movement
@@ -462,9 +562,13 @@ def render(series, out_path, title, subtitle, dark, dpi):
     x_is_seconds = bool(series) and all(s.get("async") for s in series)
 
     # ── per-counter small multiples ──────────────────────────────────────────
+    gs_grid = (fig.add_gridspec(nrow, ncol, left=L, right=R,
+                                top=pos["grid"][1], bottom=pos["grid"][0],
+                                hspace=0.85, wspace=0.28)
+               if grid_h else None)
     for i, (key, ctitle, unit) in enumerate(active):
         r, c = divmod(i, ncol)
-        cax = fig.add_subplot(gs[2 + r, c])
+        cax = fig.add_subplot(gs_grid[r, c])
         for s in series:
             vals = s["data"].get(key)
             if not vals or all(v == 0 for v in vals):
