@@ -128,6 +128,14 @@ FAMILIES = [
     ]),
 ]
 
+# Hit counters that have a matching query counter: on the run-total bars the hit
+# bar is annotated with its hit rate (hits / queries) so the raw count reads
+# alongside the ratio that actually matters for cache effectiveness.
+HIT_DENOM = {
+    "prefix_cache_hits":          "prefix_cache_queries",
+    "external_prefix_cache_hits": "external_prefix_cache_queries",
+}
+
 # Fixed colour per variant (normalised name -> hex); unknown variants draw from
 # FALLBACK in first-seen order.
 VARIANT_COLOR = {
@@ -524,12 +532,15 @@ def render(series, out_path, title, subtitle, dark, dpi):
     if active_fams:
         gs_tot = fig.add_gridspec(fam_nrow, fam_ncol, left=L, right=R,
                                   top=pos["totals"][1], bottom=pos["totals"][0],
-                                  hspace=1.05, wspace=0.18)
+                                  hspace=0.3, wspace=0.18)
         for fi, (ftitle, funit, metrics) in enumerate(active_fams):
             r, c = divmod(fi, fam_ncol)
             tax = fig.add_subplot(gs_tot[r, c])
             fmt = fmt_bytes if funit == "bytes" else fmt_compact
             n_m = len(metrics)
+            # A hit metric here also carries its rate above the bar, which needs
+            # extra headroom above the tallest bar so it clears the count label.
+            has_hits = any(k in HIT_DENOM for k, _lab in metrics)
             gw = 0.8                       # width one counter's bar-group spans
             bw = gw / max(len(series), 1)  # per-series bar width within a group
             vmax = 0.0
@@ -541,12 +552,25 @@ def render(series, out_path, title, subtitle, dark, dpi):
                 bars = tax.bar(xs, vals, width=bw * 0.9, color=s["color"], zorder=3)
                 tax.bar_label(bars, labels=[fmt(v) for v in vals], padding=2,
                               fontsize=6.5, rotation=90, color=mut)
+                # Hit-rate % atop each hit bar (hits / queries for the same
+                # series), placed above the vertical count label so both read.
+                for (k, _lab), x, hv in zip(metrics, xs, vals):
+                    denom = HIT_DENOM.get(k)
+                    if denom is None:
+                        continue
+                    q = _total(s, denom)
+                    if not q:
+                        continue
+                    tax.annotate(f"{hv / q * 100:.0f}%", xy=(x, hv),
+                                 xytext=(0, 26), textcoords="offset points",
+                                 ha="center", va="bottom", fontsize=7,
+                                 fontweight="bold", color=fg, zorder=4)
             tax.set_xticks(range(n_m))
             tax.set_xticklabels([lab for _k, lab in metrics], fontsize=8)
             tax.set_title(ftitle, loc="left", fontsize=10, fontweight="bold",
                           color=fg, pad=6)
             tax.yaxis.set_major_formatter(FuncFormatter(fmt))
-            tax.set_ylim(0, (vmax * 1.34) or 1)
+            tax.set_ylim(0, (vmax * (1.6 if has_hits else 1.34)) or 1)
             tax.margins(x=0.08)
             for sp in ("top", "right"):
                 tax.spines[sp].set_visible(False)
