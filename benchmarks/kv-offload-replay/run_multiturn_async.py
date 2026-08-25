@@ -29,6 +29,25 @@ import time
 import run_multiturn_common as common
 
 
+def _prom_key(name):
+    """Normalise a vLLM counter name to the renderer's curated key: drop the
+    ``vllm:`` prefix and a single trailing ``_total``.
+
+    Under a V1 ``AsyncLLM`` there is no ``get_metrics()``, so the sampler reads
+    the global prometheus REGISTRY, whose counter names are the cumulative
+    ``vllm:*_total`` form only (the sync path additionally gets bare names from
+    ``get_metrics()``). ``tools/render_kvprofile.py`` matches its curated
+    ``COUNTERS`` keys *exactly* — bare, no ``_total`` — so both must be stripped
+    for an async ``[prom]`` line to plot (e.g. ``vllm:prompt_tokens_total`` ->
+    ``prompt_tokens``, ``vllm:kv_offload_store_bytes_total`` ->
+    ``kv_offload_store_bytes``)."""
+    if name.startswith("vllm:"):
+        name = name[len("vllm:"):]
+    if name.endswith("_total"):
+        name = name[: -len("_total")]
+    return name
+
+
 async def get_tokenizer(engine):
     """Return the engine's tokenizer, awaiting if the accessor is a coroutine.
 
@@ -271,6 +290,39 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
     print(f"[run] async turn latency: n={len(lat)}  "
           f"p50={_pct(lat, 0.50)} p90={_pct(lat, 0.90)} p99={_pct(lat, 0.99)}  "
           f"ttft_p50={_pct(ttfts, 0.50)}", file=sys.stderr, flush=True)
+
+    # ── Per-tick [prom] markers (renderer input) ──────────────────────────────
+    # The 1 Hz sampler recorded cumulative counters (+ SSD device bytes, when the
+    # driver supplied a disk_rw_bytes closure) at each tick. Emit the per-tick
+    # DELTAS in the same "[prom] round N: k=v …" form the batched path prints, so
+    # tools/render_kvprofile.py plots async runs exactly like batched ones (here a
+    # "round" is one 1 s telemetry tick). Counter names are normalised to the
+    # renderer's curated keys via _prom_key (strip vllm:/_total). Without this an
+    # async run emitted only the single cumulative line below, which the renderer's
+    # per-round parser ignores — so async slides carried no vLLM-counter panels.
+    if capture_metrics:
+        prev_prom = None
+        prev_rd = prev_wr = None
+        for tick, (_t, v) in enumerate(result["samples"]):
+            pr = v.get("prom") or {}
+            parts = []
+            if prev_prom is not None:
+                d = {}
+                for k in pr:
+                    delta = pr.get(k, 0.0) - prev_prom.get(k, 0.0)
+                    if delta:
+                        d[_prom_key(k)] = delta
+                if d:
+                    parts.append(" ".join(f"{k}={d[k]:.0f}" for k in sorted(d)))
+            rd, wr = v.get("read_bytes"), v.get("write_bytes")
+            if (rd is not None and wr is not None
+                    and prev_rd is not None and prev_wr is not None):
+                parts.append(f"ssd_read_bytes={rd - prev_rd} "
+                             f"ssd_write_bytes={wr - prev_wr}")
+            line = " ".join(p for p in parts if p)
+            if line:
+                print(f"[prom] round {tick}: {line}", file=sys.stderr, flush=True)
+            prev_prom, prev_rd, prev_wr = pr, rd, wr
 
     # vLLM counter movement across the run (first sample -> last). AsyncLLM has
     # no get_metrics(), so the sampler read the global REGISTRY; the batched path

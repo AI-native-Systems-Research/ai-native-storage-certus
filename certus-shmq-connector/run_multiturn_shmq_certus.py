@@ -212,6 +212,36 @@ if __name__ == "__main__":
     # non-zero id (0 == "unset" sentinel).
     _session_id_fn = lambda i: i + 1  # noqa: E731
 
+    # ── SSD device I/O source (shared by both execution modes) ────────────────
+    # The server's cumulative NVMe read/write byte counters (its rw-telemetry) are
+    # queried over the shmq ring's GetIoStats op (translate.rs op_get_io_stats ->
+    # dispatcher read_write_stats). The per-round/per-tick deltas are emitted as
+    # ssd_read_bytes / ssd_write_bytes on the [prom] line, which the kvprofile
+    # renderer plots. Same mechanism the old gRPC driver used (its GetIoStats RPC),
+    # now carried over shm-queue. Byte counts are real only when the server is
+    # built with --features rw-telemetry (zero otherwise). Set up here — before the
+    # WORKLOAD_MODE branch — so the async path samples SSD bytes too (its 1 Hz
+    # sampler calls io_rw_bytes), not just the batched round loop.
+    from certus_shmq_connector.ring import Ring
+
+    try:
+        io_ring = Ring(SHM_PATH)
+    except Exception as e:  # noqa: BLE001 - ring may be absent; degrade gracefully
+        io_ring = None
+        print(f"[io] GetIoStats unavailable ({e}); per-round SSD bytes disabled",
+              file=sys.stderr)
+
+    def io_rw_bytes():
+        """(cumulative read_bytes, write_bytes) from the server, or (None, None)."""
+        if io_ring is None:
+            return None, None
+        try:
+            s = io_ring.get_io_stats()
+            return int(s["read_bytes"]), int(s["write_bytes"])
+        except Exception as e:  # noqa: BLE001
+            print(f"[io] GetIoStats query failed: {e}", file=sys.stderr)
+            return None, None
+
     if WORKLOAD_MODE == "async":
         import run_multiturn_async as async_run
 
@@ -220,6 +250,7 @@ if __name__ == "__main__":
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,
             capture_metrics=CAPTURE_METRICS,
+            disk_rw_bytes=io_rw_bytes,
             session_id_fn=_session_id_fn,
             skip_empty=True,
             summary_base={
@@ -244,33 +275,8 @@ if __name__ == "__main__":
         tokenizer = llm.get_tokenizer()
         n_tokens = common.make_n_tokens(tokenizer)
 
-        # Per-round SSD device I/O. The server's cumulative NVMe read/write byte
-        # counters (its rw-telemetry) are queried over the shmq ring's GetIoStats
-        # op (translate.rs op_get_io_stats -> dispatcher read_write_stats) and the
-        # per-round deltas are emitted as ssd_read_bytes / ssd_write_bytes on the
-        # [prom] line, which the kvprofile renderer plots. Same mechanism the old
-        # gRPC driver used (its GetIoStats RPC), now carried over shm-queue. Byte
-        # counts are real only when the server is built with --features
-        # rw-telemetry (zero otherwise).
-        from certus_shmq_connector.ring import Ring
-
-        try:
-            io_ring = Ring(SHM_PATH)
-        except Exception as e:  # noqa: BLE001 - ring may be absent; degrade gracefully
-            io_ring = None
-            print(f"[io] GetIoStats unavailable ({e}); per-round SSD bytes disabled",
-                  file=sys.stderr)
-
-        def io_rw_bytes():
-            """(cumulative read_bytes, write_bytes) from the server, or (None, None)."""
-            if io_ring is None:
-                return None, None
-            try:
-                s = io_ring.get_io_stats()
-                return int(s["read_bytes"]), int(s["write_bytes"])
-            except Exception as e:  # noqa: BLE001
-                print(f"[io] GetIoStats query failed: {e}", file=sys.stderr)
-                return None, None
+        # SSD device I/O (io_ring / io_rw_bytes) was set up above the WORKLOAD_MODE
+        # branch so both modes share it; the batched loop brackets it per round.
 
         # ── vLLM Prometheus counters + SSD device bytes (per round) ───────────
         # prom counters snapshot at round end; SSD device bytes bracketed around
