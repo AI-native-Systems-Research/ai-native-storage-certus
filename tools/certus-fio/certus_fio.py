@@ -743,6 +743,15 @@ def main():
     p_full.add_argument("--warmup", type=int, default=8)
     p_full.add_argument("--output", default=None, help="Write CSV results to file")
 
+    p_report = subparsers.add_parser("report", help="Run full sweep and generate HTML report")
+    p_report.add_argument("--gpu", type=int, default=0)
+    p_report.add_argument("--min-duration", type=float, default=3.0)
+    p_report.add_argument("--warmup", type=int, default=8)
+    p_report.add_argument("--output", default="certus-fio-report.html", help="Output HTML file")
+    p_report.add_argument("--csv", default=None, help="Also write raw CSV")
+    p_report.add_argument("--from-csv", default=None,
+                          help="Generate report from existing CSV (skip sweep)")
+
     args = parser.parse_args()
     if args.command == "list":
         cmd_list(args)
@@ -752,6 +761,8 @@ def main():
         cmd_run(args)
     elif args.command == "full":
         cmd_full(args)
+    elif args.command == "report":
+        cmd_report(args)
 
 
 # Core patterns for full sweep
@@ -864,6 +875,432 @@ def cmd_full(args):
             writer.writeheader()
             writer.writerows(results)
         print(f"\nCSV written to: {args.output}")
+
+
+def run_full_sweep(args):
+    """Run the full sweep and return results list."""
+    ring = connect(args.shm_path, ready_timeout=10.0)
+    results = []
+    try:
+        for obj_cfg in OBJECT_SIZE_CONFIGS:
+            print(f"\n--- Object size: {obj_cfg['label']} ---")
+            for pattern_name in CORE_PATTERNS:
+                pattern_path = resolve_pattern(pattern_name, args.patterns_dir)
+                for bs in BATCH_SIZES:
+                    overrides = {
+                        "num_layers": str(obj_cfg["num_layers"]),
+                        "kv_bytes_per_token_per_layer": str(obj_cfg["kv_bytes_per_token_per_layer"]),
+                        "batch_size": str(bs),
+                    }
+                    try:
+                        pattern = WorkloadPattern(pattern_path, overrides)
+                    except Exception:
+                        continue
+                    runner = BenchRunner(
+                        pattern=pattern, ring=ring, gpu_id=args.gpu,
+                        warmup_ops=args.warmup, min_duration=args.min_duration,
+                    )
+                    try:
+                        report = runner.run()
+                    except Exception as e:
+                        print(f"    ERROR: {pattern_name} bs={bs}: {e}")
+                        continue
+                    if report:
+                        for phase_op, data in report.items():
+                            results.append({
+                                "pattern": pattern_name,
+                                "object_size": obj_cfg["label"],
+                                "batch_size": bs,
+                                "phase_op": phase_op,
+                                "ops": data["ops"],
+                                "throughput_gbps": data["throughput_gbps"],
+                                "avg_us": data["avg_us"],
+                                "p50_us": data["p50_us"],
+                                "p99_us": data["p99_us"],
+                                "total_mb": data["total_bytes"] / (1024 * 1024),
+                                "wall_s": data["wall_s"],
+                                "errors": data["errors"],
+                            })
+    finally:
+        ring.close()
+    return results
+
+
+def analyze_results(results):
+    """Compute optimization findings from sweep results."""
+    findings = []
+
+    # Find peak throughputs by category
+    store_serial = [r for r in results if "/store" in r["phase_op"] and r["batch_size"] == 1
+                    and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1]
+    store_batched = [r for r in results if "/store" in r["phase_op"] and r["batch_size"] == 256
+                     and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1]
+    load_batched = [r for r in results if "/load" in r["phase_op"] and r["batch_size"] >= 16
+                    and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1]
+    load_serial = [r for r in results if "/load" in r["phase_op"] and r["batch_size"] == 1
+                   and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1
+                   and "bidirectional" not in r["pattern"]]
+    contended = [r for r in results if "bidirectional" in r["pattern"]
+                 and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1]
+    small_obj = [r for r in results if "1M" in r["object_size"] and r["batch_size"] == 1
+                 and r["throughput_gbps"] > 0.1]
+    large_obj = [r for r in results if "5M" in r["object_size"] and r["batch_size"] == 1
+                 and r["throughput_gbps"] > 0.1]
+
+    peak_serial_store = max((r["throughput_gbps"] for r in store_serial), default=0)
+    peak_batched_store = max((r["throughput_gbps"] for r in store_batched), default=0)
+    peak_batched_load = max((r["throughput_gbps"] for r in load_batched), default=0)
+    peak_serial_load = max((r["throughput_gbps"] for r in load_serial), default=0)
+    peak_contended = max((r["throughput_gbps"] for r in contended), default=0)
+
+    # Warm vs cold load distinction: warm = memory-tier (eviction reload, swap-in), cold = SSD path
+    warm_loads = [r for r in results if "/load" in r["phase_op"] and "5M" in r["object_size"]
+                  and r["throughput_gbps"] > 0.1
+                  and any(p in r["pattern"] for p in ["eviction", "preemption", "disaggregated"])]
+    cold_loads = [r for r in results if "/load" in r["phase_op"] and "5M" in r["object_size"]
+                  and r["throughput_gbps"] > 0.1
+                  and any(p in r["pattern"] for p in ["hot_vs_cold", "cache_aware", "selective", "tier_promotion"])]
+    peak_warm_load = max((r["throughput_gbps"] for r in warm_loads), default=peak_batched_load)
+    peak_cold_load = max((r["throughput_gbps"] for r in cold_loads), default=peak_serial_load)
+
+    # Check: batched store < serial store (sync-per-key bottleneck)
+    if peak_batched_store > 0 and peak_serial_store > peak_batched_store * 1.3:
+        findings.append({
+            "severity": "critical",
+            "title": "Batched stores slower than serial stores",
+            "detail": (f"Serial store peak: {peak_serial_store:.1f} GB/s. "
+                       f"Batched store (bs=256): {peak_batched_store:.1f} GB/s. "
+                       f"Root cause: op_populate calls stream_synchronize() per key. "
+                       f"Fix: implement batch_populate with async DMA + one final sync."),
+            "impact": f"{peak_serial_store:.1f} → {peak_batched_load:.1f}+ GB/s potential",
+        })
+
+    # Check: contention
+    isolated_avg = (peak_serial_store + peak_batched_load) / 2
+    if peak_contended < isolated_avg * 0.5:
+        findings.append({
+            "severity": "critical",
+            "title": "Contention halves throughput",
+            "detail": (f"Isolated: {isolated_avg:.1f} GB/s avg. "
+                       f"Contended: {peak_contended:.1f} GB/s per-direction. "
+                       f"Store+load actors serialize at shmq channel arbitration."),
+            "impact": f"{peak_contended:.1f} → {isolated_avg*0.7:.1f}+ GB/s with separate pools",
+        })
+
+    # Check: small object penalty
+    small_stores = [r for r in small_obj if "/store" in r["phase_op"]]
+    large_stores = [r for r in large_obj if "/store" in r["phase_op"]]
+    if small_stores and large_stores:
+        avg_small = statistics.mean(r["throughput_gbps"] for r in small_stores)
+        avg_large = statistics.mean(r["throughput_gbps"] for r in large_stores)
+        if avg_small < avg_large * 0.7:
+            findings.append({
+                "severity": "warning",
+                "title": "Small objects (1 MiB) are IOPS-limited",
+                "detail": (f"1 MiB avg store: {avg_small:.2f} GB/s. "
+                           f"5 MiB avg store: {avg_large:.2f} GB/s. "
+                           f"Per-op overhead (IPC handle, reserve, DMA setup) dominates at small sizes."),
+                "impact": "Reduce per-op overhead for Llama-8B workloads",
+            })
+
+    # Positive: batched loads are good
+    if peak_batched_load > 7:
+        findings.append({
+            "severity": "good",
+            "title": "Batched loads saturate PCIe well",
+            "detail": (f"Peak batched load: {peak_batched_load:.1f} GB/s. "
+                       f"batch_lookup with async DMA + deferred sync is well-optimized."),
+            "impact": "No action needed on load path",
+        })
+
+    return {
+        "peak_serial_store": peak_serial_store,
+        "peak_batched_store": peak_batched_store,
+        "peak_batched_load": peak_batched_load,
+        "peak_serial_load": peak_serial_load,
+        "peak_warm_load": peak_warm_load,
+        "peak_cold_load": peak_cold_load,
+        "peak_contended": peak_contended,
+        "findings": findings,
+    }
+
+
+def generate_report_html(results, analysis):
+    """Generate HTML report from sweep results and analysis."""
+    import json as json_mod
+    from datetime import datetime
+
+    # Build data tables for JS
+    rows_json = json_mod.dumps(results)
+    findings_json = json_mod.dumps(analysis["findings"])
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Certus Storage Analysis</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap');
+:root {{
+  --surface:#fcfcfb;--surface-2:#f4f3f1;--text-1:#0b0b0b;--text-2:#52514e;--text-3:#8a8985;
+  --border:#e5e4e0;--store:#2a78d6;--load:#1baf7a;--contend:#eb6834;
+  --critical:#d42b2b;--warning:#eda100;--good:#1baf7a;
+}}
+@media(prefers-color-scheme:dark){{:root:not([data-theme="light"]){{
+  --surface:#141413;--surface-2:#1e1e1c;--text-1:#f0efea;--text-2:#c3c2b7;--text-3:#7a7970;
+  --border:#2e2e2a;--store:#3987e5;--load:#199e70;--contend:#d95926;
+  --critical:#f06060;--warning:#c98500;--good:#199e70;
+}}}}
+:root[data-theme="dark"]{{
+  --surface:#141413;--surface-2:#1e1e1c;--text-1:#f0efea;--text-2:#c3c2b7;--text-3:#7a7970;
+  --border:#2e2e2a;--store:#3987e5;--load:#199e70;--contend:#d95926;
+  --critical:#f06060;--warning:#c98500;--good:#199e70;
+}}
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:'Inter',system-ui,sans-serif;background:var(--surface);color:var(--text-1);
+  line-height:1.5;padding:2rem;max-width:1200px;margin:0 auto}}
+h1{{font-size:1.75rem;font-weight:700;margin-bottom:.25rem}}
+h2{{font-size:1.25rem;font-weight:600;margin:2.5rem 0 1rem}}
+h3{{font-size:.85rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);margin-bottom:.75rem}}
+p{{color:var(--text-2);max-width:65ch;margin-bottom:.5rem}}
+.subtitle{{color:var(--text-2);font-size:.95rem;margin-bottom:2rem}}
+.mono{{font-family:'JetBrains Mono',monospace}}
+.stat-row{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin:1.5rem 0}}
+.stat{{background:var(--surface-2);border-radius:8px;padding:1.25rem;border:1px solid var(--border)}}
+.stat-value{{font-family:'JetBrains Mono',monospace;font-size:1.5rem;font-weight:600}}
+.stat-label{{font-size:.8rem;color:var(--text-3);margin-top:.25rem}}
+.chart-box{{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:1.5rem;margin:1rem 0;overflow-x:auto}}
+table.data{{width:100%;border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-nums}}
+table.data th{{text-align:left;padding:8px;color:var(--text-3);font-size:.75rem;border-bottom:1px solid var(--border)}}
+table.data td{{padding:8px;border-bottom:1px solid var(--border)}}
+table.data td.num{{font-family:'JetBrains Mono',monospace;text-align:right}}
+.finding{{border-left:3px solid var(--critical);padding:.75rem 1rem;margin:.75rem 0;background:var(--surface-2);border-radius:0 6px 6px 0}}
+.finding.warning{{border-left-color:var(--warning)}}
+.finding.good{{border-left-color:var(--good)}}
+.finding-title{{font-weight:600;font-size:.9rem}}
+.finding-detail{{font-size:.85rem;color:var(--text-2);margin-top:.25rem}}
+.finding-impact{{font-size:.8rem;color:var(--good);margin-top:.25rem;font-family:'JetBrains Mono',monospace}}
+.bar{{height:18px;border-radius:3px;transition:width .3s}}
+</style></head><body>
+<h1>Certus Storage Performance Report</h1>
+<p class="subtitle">Generated {datetime.now().strftime('%Y-%m-%d %H:%M')} &middot; 4 NVMe (NUMA 0) &middot; 4 GiB memory tier &middot; shmq</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="stat-value" style="color:var(--load)">{analysis['peak_warm_load']:.1f}</div><div class="stat-label">GB/s warm load (DRAM&rarr;GPU)</div></div>
+  <div class="stat"><div class="stat-value" style="color:var(--load);opacity:0.7">{analysis['peak_cold_load']:.1f}</div><div class="stat-label">GB/s cold load (SSD&rarr;GPU)</div></div>
+  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_serial_store']:.1f}</div><div class="stat-label">GB/s peak store (serial)</div></div>
+  <div class="stat"><div class="stat-value" style="color:var(--critical)">{analysis['peak_batched_store']:.1f}</div><div class="stat-label">GB/s batched store (bottleneck)</div></div>
+  <div class="stat"><div class="stat-value" style="color:var(--contend)">{analysis['peak_contended']:.1f}</div><div class="stat-label">GB/s under contention</div></div>
+</div>
+
+<h2>Optimization Findings</h2>
+<div id="findings"></div>
+
+<h2>Throughput by Pattern (5 MiB objects, natural batch_size)</h2>
+<div class="chart-box"><table class="data" id="main-table"></table></div>
+
+<h2>Batch Size Sensitivity (5 MiB objects)</h2>
+<p>Shows how batch_size affects throughput. Loads benefit from batching (async DMA). Stores degrade at high batch sizes (server-side serialization).</p>
+<div class="chart-box"><table class="data" id="batch-table"></table></div>
+
+<h2>Object Size Scaling (batch_size=1)</h2>
+<div class="chart-box"><table class="data" id="size-table"></table></div>
+
+<h2>Recommended Optimizations</h2>
+<div class="chart-box">
+<table class="data">
+<tr><th>Priority</th><th>Optimization</th><th>Expected Impact</th><th>Complexity</th></tr>
+<tr><td>P0</td><td>Async batch_populate (submit all D2H, one sync)</td><td style="color:var(--good)">Batched store {analysis['peak_batched_store']:.1f} → {analysis['peak_batched_load']:.0f}+ GB/s</td><td>Medium</td></tr>
+<tr><td>P1</td><td>Reduce per-op overhead for small objects</td><td style="color:var(--good)">1 MiB IOPS +50%</td><td>Low</td></tr>
+<tr><td>P2</td><td>Separate store/load shmq channel pools</td><td style="color:var(--good)">Contention {analysis['peak_contended']:.1f} → {analysis['peak_contended']*1.6:.1f}+ GB/s</td><td>High</td></tr>
+<tr><td>P3</td><td>Pipeline prefill store with compute</td><td style="color:var(--good)">Hide offload behind next chunk</td><td>Medium</td></tr>
+</table>
+</div>
+
+<script>
+const DATA = {rows_json};
+const FINDINGS = {findings_json};
+
+// Render findings
+const findingsEl = document.getElementById('findings');
+FINDINGS.forEach(f => {{
+  const cls = f.severity === 'good' ? 'good' : f.severity === 'warning' ? 'warning' : '';
+  findingsEl.innerHTML += `<div class="finding ${{cls}}"><div class="finding-title">${{f.title}}</div><div class="finding-detail">${{f.detail}}</div><div class="finding-impact">${{f.impact}}</div></div>`;
+}});
+
+// Main table: 5M objects, bs=1 (natural)
+const mainTable = document.getElementById('main-table');
+const main5m = DATA.filter(r => r.object_size.includes('5M') && r.batch_size === 1 && r.throughput_gbps > 0.01);
+// Cold patterns (SSD path) - identified by precondition absent_from_local_cache
+const COLD_PATTERNS = ['hot_vs_cold_load_paths','selective_kv_retrieval','tier_promotion_and_prefetch','cache_aware_routing_and_remote_hit_migration'];
+function getPath(r) {{
+  const op = r.phase_op.split('/')[1];
+  if (op === 'store') return 'GPU → DRAM';
+  if (op === 'delete') return 'metadata';
+  if (op === 'load') {{
+    if (COLD_PATTERNS.some(p => r.pattern.includes(p))) return 'SSD → GPU';
+    return 'DRAM → GPU';
+  }}
+  return '';
+}}
+
+mainTable.innerHTML = '<tr><th>Pattern</th><th>Phase</th><th>Path</th><th style="min-width:150px">GB/s</th><th style="min-width:130px">p50 (us)</th></tr>';
+const byPattern = {{}};
+main5m.forEach(r => {{
+  if (!byPattern[r.pattern]) byPattern[r.pattern] = [];
+  byPattern[r.pattern].push(r);
+}});
+const patternOrder = Object.entries(byPattern).sort((a,b) => {{
+  const maxA = Math.max(...a[1].map(x => x.throughput_gbps));
+  const maxB = Math.max(...b[1].map(x => x.throughput_gbps));
+  return maxB - maxA;
+}});
+const maxTp = Math.max(...main5m.map(r => r.throughput_gbps));
+const maxP50 = Math.max(...main5m.map(r => r.p50_us));
+patternOrder.forEach(([pat, rows]) => {{
+  rows.sort((a,b) => b.throughput_gbps - a.throughput_gbps);
+  rows.forEach((r, idx) => {{
+    const op = r.phase_op.split('/')[1];
+    const phase = r.phase_op.split('/')[0];
+    const path = getPath(r);
+    const color = op === 'store' ? 'var(--store)' : op === 'load' ? 'var(--load)' : 'var(--text-3)';
+    const pathColor = path.includes('SSD') ? 'var(--contend)' : color;
+    const tpPct = (r.throughput_gbps / maxTp * 100).toFixed(0);
+    const latPct = (r.p50_us / maxP50 * 100).toFixed(0);
+    const patLabel = idx === 0 ? pat.replace(/_/g,' ').replace('_and_', ' & ').replace('_or_', ' | ') : '';
+    const patStyle = idx === 0 ? 'font-weight:500;font-size:.8rem' : 'color:var(--text-3);font-size:.72rem;padding-left:.5rem';
+    mainTable.innerHTML += `<tr>
+      <td style="${{patStyle}}">${{patLabel}}</td>
+      <td style="font-size:.72rem;color:var(--text-3)">${{phase}}</td>
+      <td style="color:${{pathColor}};font-size:.75rem;white-space:nowrap">${{path}}</td>
+      <td class="num"><span style="margin-right:6px">${{r.throughput_gbps.toFixed(1)}}</span><div class="bar" style="display:inline-block;width:${{tpPct}}px;max-width:80px;background:${{color}};opacity:0.5;vertical-align:middle"></div></td>
+      <td class="num"><span style="margin-right:6px">${{r.p50_us.toFixed(0)}}</span><div class="bar" style="display:inline-block;width:${{latPct}}px;max-width:80px;background:var(--warning);opacity:0.4;vertical-align:middle"></div></td>
+    </tr>`;
+  }});
+  if (rows.length > 1) {{
+    mainTable.innerHTML += `<tr><td colspan="5" style="height:3px;padding:0"></td></tr>`;
+  }}
+}});
+
+// Batch sensitivity heatmap
+const batchTable = document.getElementById('batch-table');
+const patterns5m = [...new Set(DATA.filter(r => r.object_size.includes('5M')).map(r => r.pattern + '|' + r.phase_op))];
+const batchSizes = [1,4,16,64,256];
+const allBatchTps = DATA.filter(r => r.object_size.includes('5M') && r.throughput_gbps > 0.01).map(r => r.throughput_gbps);
+const batchMaxTp = Math.max(...allBatchTps);
+
+function heatBg(val, maxVal) {{
+  const t = Math.min(val / maxVal, 1);
+  const h = 145 - t * 145; // green(145) to red(0)
+  return `hsla(${{h}}, 60%, 45%, ${{0.15 + t * 0.25}})`;
+}}
+
+batchTable.innerHTML = '<tr><th>Pattern</th><th>Path</th>' + batchSizes.map(bs => `<th>BS=${{bs}}</th>`).join('') + '</tr>';
+patterns5m.forEach(pk => {{
+  const [pat, phop] = pk.split('|');
+  const rows = DATA.filter(r => r.pattern === pat && r.phase_op === phop && r.object_size.includes('5M') && r.throughput_gbps > 0.01);
+  if (rows.length < 3) return;
+  const op = phop.split('/')[1];
+  const path = op === 'store' ? 'GPU→DRAM' : COLD_PATTERNS.some(p => pat.includes(p)) ? 'SSD→GPU' : 'DRAM→GPU';
+  const pathColor = path.includes('SSD') ? 'var(--contend)' : op === 'store' ? 'var(--store)' : 'var(--load)';
+  let cells = `<td style="font-size:.75rem">${{pat.replace(/_/g,' ').replace('_and_', ' & ').replace('_or_', ' | ')}}</td>`;
+  cells += `<td style="font-size:.72rem;color:${{pathColor}}">${{path}}</td>`;
+  batchSizes.forEach(bs => {{
+    const r = rows.find(x => x.batch_size === bs);
+    if (r) {{
+      cells += `<td class="num" style="background:${{heatBg(r.throughput_gbps, batchMaxTp)}}">${{r.throughput_gbps.toFixed(1)}}</td>`;
+    }} else {{
+      cells += `<td class="num">-</td>`;
+    }}
+  }});
+  batchTable.innerHTML += `<tr>${{cells}}</tr>`;
+}});
+
+// Add a legend for the heatmap
+batchTable.innerHTML += `<tr><td colspan="${{batchSizes.length + 2}}" style="padding-top:8px;font-size:.72rem;color:var(--text-3)">Color: green=high throughput, red=low. Values in GB/s.</td></tr>`;
+
+// Size scaling heatmap
+const sizeTable = document.getElementById('size-table');
+const objSizes = ['1M','3M','5M'];
+const allSizeTps = DATA.filter(r => r.batch_size === 1 && r.throughput_gbps > 0.01).map(r => r.throughput_gbps);
+const sizeMaxTp = Math.max(...allSizeTps);
+
+sizeTable.innerHTML = '<tr><th>Pattern</th><th>Path</th><th>1 MiB<br><span style="font-weight:400;font-size:.65rem">(Llama-8B)</span></th><th>3 MiB<br><span style="font-weight:400;font-size:.65rem">(Llama-30B)</span></th><th>5 MiB<br><span style="font-weight:400;font-size:.65rem">(Llama-70B)</span></th></tr>';
+const patternsBS1 = [...new Set(DATA.filter(r => r.batch_size === 1 && r.throughput_gbps > 0.01).map(r => r.pattern + '|' + r.phase_op))];
+patternsBS1.forEach(pk => {{
+  const [pat, phop] = pk.split('|');
+  const rows = DATA.filter(r => r.pattern === pat && r.phase_op === phop && r.batch_size === 1 && r.throughput_gbps > 0.01);
+  if (rows.length < 2) return;
+  const op = phop.split('/')[1];
+  const path = op === 'store' ? 'GPU→DRAM' : COLD_PATTERNS.some(p => pat.includes(p)) ? 'SSD→GPU' : 'DRAM→GPU';
+  const pathColor = path.includes('SSD') ? 'var(--contend)' : op === 'store' ? 'var(--store)' : 'var(--load)';
+  let cells = `<td style="font-size:.75rem">${{pat.replace(/_/g,' ').replace('_and_', ' & ').replace('_or_', ' | ')}}</td>`;
+  cells += `<td style="font-size:.72rem;color:${{pathColor}}">${{path}}</td>`;
+  objSizes.forEach(sz => {{
+    const r = rows.find(x => x.object_size.includes(sz));
+    if (r) {{
+      cells += `<td class="num" style="background:${{heatBg(r.throughput_gbps, sizeMaxTp)}}">${{r.throughput_gbps.toFixed(1)}}</td>`;
+    }} else {{
+      cells += `<td class="num">-</td>`;
+    }}
+  }});
+  sizeTable.innerHTML += `<tr>${{cells}}</tr>`;
+}});
+sizeTable.innerHTML += `<tr><td colspan="5" style="padding-top:8px;font-size:.72rem;color:var(--text-3)">Color: green=high throughput, red=low. Values in GB/s. batch_size=1 (serial).</td></tr>`;
+</script></body></html>"""
+    return html
+
+
+def cmd_report(args):
+    """Run full sweep and generate HTML report with optimization analysis."""
+    import csv as csv_mod
+
+    if args.from_csv:
+        print(f"Loading results from: {args.from_csv}")
+        results = []
+        with open(args.from_csv) as f:
+            reader = csv_mod.DictReader(f)
+            for row in reader:
+                results.append({
+                    "pattern": row["pattern"],
+                    "object_size": row["object_size"],
+                    "batch_size": int(row["batch_size"]),
+                    "phase_op": row["phase_op"],
+                    "ops": int(row["ops"]),
+                    "throughput_gbps": float(row["throughput_gbps"]),
+                    "avg_us": float(row["avg_us"]),
+                    "p50_us": float(row["p50_us"]),
+                    "p99_us": float(row["p99_us"]),
+                    "total_mb": float(row["total_mb"]),
+                    "wall_s": float(row["wall_s"]),
+                    "errors": int(row["errors"]),
+                })
+        print(f"  Loaded {len(results)} rows")
+    else:
+        print(f"{'='*70}")
+        print("certus-fio: REPORT")
+        print(f"{'='*70}")
+        total_runs = len(CORE_PATTERNS) * len(OBJECT_SIZE_CONFIGS) * len(BATCH_SIZES)
+        print(f"  Running full sweep: {total_runs} configurations")
+        print(f"  Estimated time: {total_runs * args.min_duration / 60:.0f} min")
+        print()
+
+        results = run_full_sweep(args)
+
+        if args.csv:
+            with open(args.csv, "w", newline="") as f:
+                writer = csv_mod.DictWriter(f, fieldnames=[
+                    "pattern", "object_size", "batch_size", "phase_op",
+                    "ops", "throughput_gbps", "avg_us", "p50_us", "p99_us",
+                    "total_mb", "wall_s", "errors",
+                ])
+                writer.writeheader()
+                writer.writerows(results)
+            print(f"\nCSV: {args.csv}")
+
+    analysis = analyze_results(results)
+    html = generate_report_html(results, analysis)
+    Path(args.output).write_text(html)
+    print(f"\nReport: {args.output}")
+    print(f"  Open: xdg-open {args.output}")
 
 
 if __name__ == "__main__":
