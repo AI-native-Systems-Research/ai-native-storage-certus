@@ -40,6 +40,82 @@ struct TransferJob {
 unsafe impl Send for TransferJob {}
 unsafe impl Sync for TransferJob {}
 
+/// Attempt to reserve a DRAM slot for each key in `cache_keys`.
+///
+/// On the first failed reservation every already-reserved slot is released
+/// through `release_fn` and the function returns `false` (backpressure
+/// signal). When all reservations succeed it returns `true`.
+fn reserve_slots_with_rollback<R, L>(
+    cache_keys: &[CacheKey],
+    size: u32,
+    mut reserve_fn: R,
+    mut release_fn: L,
+) -> bool
+where
+    R: FnMut(CacheKey, u32) -> bool,
+    L: FnMut(CacheKey),
+{
+    let mut reserved: Vec<CacheKey> = Vec::new();
+    for &key in cache_keys {
+        if reserve_fn(key, size) {
+            reserved.push(key);
+        } else {
+            for &rkey in &reserved {
+                release_fn(rkey);
+            }
+            return false;
+        }
+    }
+    true
+}
+
+/// Notify the dispatcher that each previously reserved slot is now populated.
+///
+/// Returns the number of keys successfully marked so the caller can update
+/// `entry_count`. Keys for which `populated_fn` returns `false` are skipped
+/// silently (matching the existing best-effort behaviour in `complete_store`).
+fn notify_slots_populated<P>(
+    cache_keys: &[CacheKey],
+    size: u32,
+    mut populated_fn: P,
+) -> u64
+where
+    P: FnMut(CacheKey, u32) -> bool,
+{
+    let mut count = 0u64;
+    for &key in cache_keys {
+        if populated_fn(key, size) {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Release reserved DRAM slots when a store is aborted.
+///
+/// Tries `remove_fn` first; falls back to `release_fn` when the key has not
+/// yet been committed. Returns the number of entries successfully removed so
+/// the caller can decrement `entry_count`.
+fn release_slots_on_failure<Rem, Rel>(
+    cache_keys: &[CacheKey],
+    mut remove_fn: Rem,
+    mut release_fn: Rel,
+) -> u64
+where
+    Rem: FnMut(CacheKey) -> bool,
+    Rel: FnMut(CacheKey),
+{
+    let mut removed = 0u64;
+    for &key in cache_keys {
+        if remove_fn(key) {
+            removed += 1;
+        } else {
+            release_fn(key);
+        }
+    }
+    removed
+}
+
 fn submit_store_copies<F>(
     cache_keys: &[CacheKey],
     gpu_block_ids: &[u64],
@@ -78,7 +154,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::submit_store_copies;
+    use super::{
+        notify_slots_populated, release_slots_on_failure, reserve_slots_with_rollback,
+        submit_store_copies,
+    };
     use interfaces::{CacheKey, DispatcherError, GpuStream};
 
     #[test]
@@ -104,6 +183,158 @@ mod tests {
 
         assert!(all_ok);
         assert_eq!(seen, cache_keys);
+    }
+
+    // ── prepare_store backpressure: slot exhaustion ───────────────────────────
+
+    /// When every key's reservation succeeds the function returns `true` and
+    /// no rollback calls are issued.
+    #[test]
+    fn reserve_slots_all_succeed_returns_true() {
+        let keys: Vec<CacheKey> = vec![1, 2, 3];
+        let mut reserved = Vec::new();
+        let mut released = Vec::new();
+
+        let ok = reserve_slots_with_rollback(
+            &keys,
+            256,
+            |key, _sz| {
+                reserved.push(key);
+                true
+            },
+            |key| released.push(key),
+        );
+
+        assert!(ok);
+        assert_eq!(reserved, keys);
+        assert!(released.is_empty());
+    }
+
+    /// When the very first reservation fails no rollback is needed — the
+    /// function must return `false` immediately without calling `release_fn`.
+    #[test]
+    fn reserve_slots_first_fails_no_rollback_needed() {
+        let keys: Vec<CacheKey> = vec![10, 20, 30];
+        let mut released = Vec::new();
+
+        let ok = reserve_slots_with_rollback(
+            &keys,
+            256,
+            |_key, _sz| false, // every attempt fails
+            |key| released.push(key),
+        );
+
+        assert!(!ok);
+        assert!(released.is_empty(), "no slots were reserved so none should be released");
+    }
+
+    /// When a mid-batch reservation fails all previously reserved keys must be
+    /// rolled back.  This is the partial-rollback / backpressure path.
+    #[test]
+    fn reserve_slots_mid_batch_fails_rolls_back_prior_keys() {
+        // Keys 1 and 2 succeed; key 3 fails.
+        let keys: Vec<CacheKey> = vec![1, 2, 3];
+        let mut reserved = Vec::new();
+        let mut released = Vec::new();
+
+        let ok = reserve_slots_with_rollback(
+            &keys,
+            256,
+            |key, _sz| {
+                if key == 3 {
+                    return false;
+                }
+                reserved.push(key);
+                true
+            },
+            |key| released.push(key),
+        );
+
+        assert!(!ok, "should signal backpressure");
+        assert_eq!(reserved, vec![1, 2]);
+        // Both previously-reserved keys must be released.
+        let mut released_sorted = released.clone();
+        released_sorted.sort_unstable();
+        assert_eq!(released_sorted, vec![1, 2]);
+    }
+
+    // ── complete_store(success=true): slots marked populated ─────────────────
+
+    /// All keys succeed → populated count equals key count.
+    #[test]
+    fn notify_slots_populated_all_succeed_returns_count() {
+        let keys: Vec<CacheKey> = vec![10, 20, 30];
+        let mut notified = Vec::new();
+
+        let count = notify_slots_populated(&keys, 512, |key, _sz| {
+            notified.push(key);
+            true
+        });
+
+        assert_eq!(count, 3);
+        assert_eq!(notified, keys);
+    }
+
+    /// One key fails → that key is skipped silently; others still count.
+    #[test]
+    fn notify_slots_populated_partial_failure_skips_silently() {
+        let keys: Vec<CacheKey> = vec![10, 20, 30];
+
+        let count = notify_slots_populated(&keys, 512, |key, _sz| key != 20);
+
+        assert_eq!(count, 2, "two keys should be counted; the failing one is skipped");
+    }
+
+    // ── complete_store(success=false): DRAM released on abort ────────────────
+
+    /// When `remove_fn` succeeds for all keys `release_fn` must not be called.
+    #[test]
+    fn release_slots_remove_succeeds_no_release_called() {
+        let keys: Vec<CacheKey> = vec![1, 2, 3];
+        let mut removed = Vec::new();
+        let mut released = Vec::new();
+
+        let count = release_slots_on_failure(
+            &keys,
+            |key| {
+                removed.push(key);
+                true
+            },
+            |key| released.push(key),
+        );
+
+        assert_eq!(count, 3);
+        assert_eq!(removed, keys);
+        assert!(released.is_empty());
+    }
+
+    /// When `remove_fn` fails (key never committed) `release_fn` must be called
+    /// to free the raw DRAM reservation.
+    #[test]
+    fn release_slots_remove_fails_falls_back_to_release() {
+        let keys: Vec<CacheKey> = vec![5, 6, 7];
+        let mut removed = Vec::new();
+        let mut released = Vec::new();
+
+        // Only key 6 was committed; the rest were never added to the map.
+        let count = release_slots_on_failure(
+            &keys,
+            |key| {
+                if key == 6 {
+                    removed.push(key);
+                    true
+                } else {
+                    false
+                }
+            },
+            |key| released.push(key),
+        );
+
+        assert_eq!(count, 1, "only the removed key counts toward entry_count");
+        assert_eq!(removed, vec![6]);
+        let mut released_sorted = released.clone();
+        released_sorted.sort_unstable();
+        assert_eq!(released_sorted, vec![5, 7]);
     }
 }
 
@@ -363,19 +594,16 @@ impl EngineInner {
         // Reserve DRAM slots for all keys that need storing.
         // If any reservation fails, release all prior reservations and return None.
         let size = self.gpu_block_size as u32;
-        let mut reserved = Vec::new();
-        for key in &to_store_cache_keys {
-            match self.dispatcher.reserve_memory(*key, size, 0) {
-                Ok(_ptr) => {
-                    reserved.push(*key);
-                }
-                Err(_) => {
-                    for rkey in &reserved {
-                        let _ = self.dispatcher.release_memory(*rkey);
-                    }
-                    return Ok(None);
-                }
-            }
+        let all_reserved = reserve_slots_with_rollback(
+            &to_store_cache_keys,
+            size,
+            |key, sz| self.dispatcher.reserve_memory(key, sz, 0).is_ok(),
+            |key| {
+                let _ = self.dispatcher.release_memory(key);
+            },
+        );
+        if !all_reserved {
+            return Ok(None);
         }
 
         Ok(Some((to_store, vec![])))
@@ -391,20 +619,21 @@ impl EngineInner {
         let size = self.gpu_block_size as u32;
 
         if success {
-            for key in &cache_keys {
-                if let Err(_e) = self.dispatcher.copy_gpu_to_memory_completed(*key, size) {
-                    continue;
-                }
-                self.entry_count.fetch_add(1, Ordering::Release);
-            }
+            let populated = notify_slots_populated(
+                &cache_keys,
+                size,
+                |key, sz| self.dispatcher.copy_gpu_to_memory_completed(key, sz).is_ok(),
+            );
+            self.entry_count.fetch_add(populated, Ordering::Release);
         } else {
-            for key in &cache_keys {
-                if self.dispatcher.remove(*key).is_ok() {
-                    self.entry_count.fetch_sub(1, Ordering::Release);
-                } else {
-                    let _ = self.dispatcher.release_memory(*key);
-                }
-            }
+            let removed = release_slots_on_failure(
+                &cache_keys,
+                |key| self.dispatcher.remove(key).is_ok(),
+                |key| {
+                    let _ = self.dispatcher.release_memory(key);
+                },
+            );
+            self.entry_count.fetch_sub(removed, Ordering::Release);
         }
         Ok(())
     }
