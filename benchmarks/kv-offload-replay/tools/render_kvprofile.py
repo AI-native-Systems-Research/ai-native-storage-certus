@@ -783,16 +783,30 @@ def render(series, out_path, title, subtitle, dark, dpi):
                     # Clear the rotated count label first — its height grows with
                     # the string length ("860.3 MiB" is far taller than "1k").
                     off = 14 + len(fmt(hv)) * 4.5
+                    # A single-line derived value (the per-second rate on the
+                    # token / byte / tier bars) is rotated vertical like the count
+                    # label beneath it, so neighbouring series' rate labels can't
+                    # collide horizontally when several bars share one group — the
+                    # collision that a wide byte rate like "12.3 MiB/s" hit once
+                    # each variety became its own bar. The two-line hit-rate block
+                    # (rate + hit%) stays horizontal.
+                    rot = 90 if len(parts) == 1 else 0
                     tax.annotate("\n".join(parts), xy=(x, hv),
                                  xytext=(0, off), textcoords="offset points",
-                                 ha="center", va="bottom", fontsize=7,
+                                 ha="center", va="bottom", fontsize=7, rotation=rot,
                                  fontweight="bold", color=fg, zorder=4)
             tax.set_xticks(range(n_m))
             tax.set_xticklabels([lab for _k, lab in metrics], fontsize=8)
             tax.set_title(ftitle, loc="left", fontsize=10, fontweight="bold",
                           color=fg, pad=6)
             tax.yaxis.set_major_formatter(FuncFormatter(fmt))
-            tax.set_ylim(0, (vmax * (2.0 if has_deriv else 1.34)) or 1)
+            # A rotated single-line rate label (see below) stacks taller than the
+            # old horizontal one, so a family carrying one needs more headroom
+            # above the tallest bar than a bare count (1.34x) or a horizontal
+            # 2-line hit block (2.0x).
+            has_rate = any(k in RATE_KEYS and k not in HIT_DENOM for k, _lab in metrics)
+            headroom = 2.9 if has_rate else (2.0 if has_deriv else 1.34)
+            tax.set_ylim(0, (vmax * headroom) or 1)
             tax.margins(x=0.08)
             for sp in ("top", "right"):
                 tax.spines[sp].set_visible(False)
