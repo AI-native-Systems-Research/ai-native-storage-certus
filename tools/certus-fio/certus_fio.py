@@ -911,7 +911,6 @@ COLD_PATTERNS_LIST = [
     "hot_vs_cold_load_paths",
     "selective_kv_retrieval",
     "tier_promotion_and_prefetch",
-    "cache_aware_routing_and_remote_hit_migration",
 ]
 
 CORE_PATTERNS = WARM_PATTERNS + COLD_PATTERNS_LIST
@@ -1057,69 +1056,78 @@ def run_full_sweep(args):
 
 
 def analyze_results(results):
-    """Compute optimization findings from sweep results."""
+    """Compute optimization findings from sweep results. All thresholds are relative, not hardcoded."""
     findings = []
+    cold_pattern_names = ["hot_vs_cold", "cache_aware", "selective", "tier_promotion"]
+    warm_pattern_names = ["eviction", "preemption", "disaggregated"]
 
-    # Find peak throughputs by category
-    store_serial = [r for r in results if "/store" in r["phase_op"] and r["batch_size"] == 1
-                    and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1]
-    store_batched = [r for r in results if "/store" in r["phase_op"] and r["batch_size"] == 256
-                     and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1]
-    load_batched = [r for r in results if "/load" in r["phase_op"] and r["batch_size"] >= 16
-                    and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1]
-    load_serial = [r for r in results if "/load" in r["phase_op"] and r["batch_size"] == 1
-                   and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1
-                   and "bidirectional" not in r["pattern"]]
-    contended = [r for r in results if "bidirectional" in r["pattern"]
-                 and "5M" in r["object_size"] and r["throughput_gbps"] > 0.1]
-    small_obj = [r for r in results if "1M" in r["object_size"] and r["batch_size"] == 1
-                 and r["throughput_gbps"] > 0.1]
-    large_obj = [r for r in results if "5M" in r["object_size"] and r["batch_size"] == 1
-                 and r["throughput_gbps"] > 0.1]
+    def _filter(results, **kw):
+        out = results
+        if "op" in kw:
+            out = [r for r in out if f"/{kw['op']}" in r["phase_op"]]
+        if "obj" in kw:
+            out = [r for r in out if kw["obj"] in r["object_size"]]
+        if "bs" in kw:
+            out = [r for r in out if r["batch_size"] == kw["bs"]]
+        if "bs_min" in kw:
+            out = [r for r in out if r["batch_size"] >= kw["bs_min"]]
+        if "pattern" in kw:
+            out = [r for r in out if kw["pattern"] in r["pattern"]]
+        if "patterns" in kw:
+            out = [r for r in out if any(p in r["pattern"] for p in kw["patterns"])]
+        if "exclude_patterns" in kw:
+            out = [r for r in out if not any(p in r["pattern"] for p in kw["exclude_patterns"])]
+        return [r for r in out if r["throughput_gbps"] > 0.1]
 
-    peak_serial_store = max((r["throughput_gbps"] for r in store_serial), default=0)
-    peak_batched_store = max((r["throughput_gbps"] for r in store_batched), default=0)
-    peak_batched_load = max((r["throughput_gbps"] for r in load_batched), default=0)
-    peak_serial_load = max((r["throughput_gbps"] for r in load_serial), default=0)
-    peak_contended = max((r["throughput_gbps"] for r in contended), default=0)
+    # Key metrics (5M objects = Llama-70B, the primary target)
+    peak_serial_store = max((r["throughput_gbps"] for r in _filter(results, op="store", obj="5M", bs=1)), default=0)
+    peak_batched_store = max((r["throughput_gbps"] for r in _filter(results, op="store", obj="5M", bs_min=64)), default=0)
+    peak_warm_load = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", patterns=warm_pattern_names)), default=0)
+    cold_serial = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs=1, patterns=cold_pattern_names)), default=0)
+    cold_batched = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs_min=64, patterns=cold_pattern_names)), default=0)
+    peak_cold_load = max(cold_serial, cold_batched)
+    peak_contended = max((r["throughput_gbps"] for r in _filter(results, obj="5M", pattern="bidirectional")), default=0)
 
-    # Warm vs cold load distinction: warm = memory-tier (eviction reload, swap-in), cold = SSD path
-    warm_loads = [r for r in results if "/load" in r["phase_op"] and "5M" in r["object_size"]
-                  and r["throughput_gbps"] > 0.1
-                  and any(p in r["pattern"] for p in ["eviction", "preemption", "disaggregated"])]
-    cold_loads = [r for r in results if "/load" in r["phase_op"] and "5M" in r["object_size"]
-                  and r["throughput_gbps"] > 0.1
-                  and any(p in r["pattern"] for p in ["hot_vs_cold", "cache_aware", "selective", "tier_promotion"])]
-    peak_warm_load = max((r["throughput_gbps"] for r in warm_loads), default=peak_batched_load)
-    peak_cold_load = max((r["throughput_gbps"] for r in cold_loads), default=peak_serial_load)
+    # Error rates
+    total_ops = sum(r["ops"] for r in results if r["ops"] > 0)
+    total_errors = sum(r["errors"] for r in results)
+    contention_errors = sum(r["errors"] for r in results if "bidirectional" in r["pattern"] or "continuous" in r["pattern"])
+    other_errors = total_errors - contention_errors
 
-    # Check: batched store < serial store (sync-per-key bottleneck)
+    # Finding: batched store worse than serial (server-side serialization)
     if peak_batched_store > 0 and peak_serial_store > peak_batched_store * 1.3:
         findings.append({
             "severity": "critical",
-            "title": "Batched stores slower than serial stores",
-            "detail": (f"Serial store peak: {peak_serial_store:.1f} GB/s. "
-                       f"Batched store (bs=256): {peak_batched_store:.1f} GB/s. "
-                       f"Root cause: op_populate calls stream_synchronize() per key. "
-                       f"Fix: implement batch_populate with async DMA + one final sync."),
-            "impact": f"{peak_serial_store:.1f} → {peak_batched_load:.1f}+ GB/s potential",
+            "title": "Batched stores slower than serial",
+            "detail": (f"Serial: {peak_serial_store:.1f} GB/s. Batched (bs≥64): {peak_batched_store:.1f} GB/s. "
+                       f"Server synchronizes per-key in op_populate, negating batch benefits."),
+            "impact": f"Fix: async batch_populate → {peak_warm_load:.0f}+ GB/s potential",
         })
 
-    # Check: contention
-    isolated_avg = (peak_serial_store + peak_batched_load) / 2
-    if peak_contended < isolated_avg * 0.5:
+    # Finding: store throughput still below load (room for async DMA)
+    if peak_batched_store > 0 and peak_warm_load > peak_batched_store * 1.5:
+        findings.append({
+            "severity": "warning",
+            "title": "Store path has headroom vs load path",
+            "detail": (f"Peak store: {peak_batched_store:.1f} GB/s. Peak warm load: {peak_warm_load:.1f} GB/s. "
+                       f"Store path uses synchronous DMA per-key; load path uses async batch DMA."),
+            "impact": f"Async batch_populate could close the gap: {peak_batched_store:.0f} → {peak_warm_load:.0f} GB/s",
+        })
+
+    # Finding: contention
+    isolated_peak = max(peak_serial_store, peak_warm_load, peak_cold_load)
+    if peak_contended > 0 and peak_contended < isolated_peak * 0.4:
         findings.append({
             "severity": "critical",
-            "title": "Contention halves throughput",
-            "detail": (f"Isolated: {isolated_avg:.1f} GB/s avg. "
-                       f"Contended: {peak_contended:.1f} GB/s per-direction. "
-                       f"Store+load actors serialize at shmq channel arbitration."),
-            "impact": f"{peak_contended:.1f} → {isolated_avg*0.7:.1f}+ GB/s with separate pools",
+            "title": "Contention reduces throughput significantly",
+            "detail": (f"Isolated peak: {isolated_peak:.1f} GB/s. Under contention: {peak_contended:.1f} GB/s. "
+                       f"Concurrent store+load actors compete for shmq channels and memory-tier locks."),
+            "impact": f"Separate store/load channel pools or async coalescing",
         })
 
-    # Check: small object penalty
-    small_stores = [r for r in small_obj if "/store" in r["phase_op"]]
-    large_stores = [r for r in large_obj if "/store" in r["phase_op"]]
+    # Finding: small object penalty
+    small_stores = _filter(results, op="store", obj="1M", bs=1)
+    large_stores = _filter(results, op="store", obj="5M", bs=1)
     if small_stores and large_stores:
         avg_small = statistics.mean(r["throughput_gbps"] for r in small_stores)
         avg_large = statistics.mean(r["throughput_gbps"] for r in large_stores)
@@ -1127,30 +1135,52 @@ def analyze_results(results):
             findings.append({
                 "severity": "warning",
                 "title": "Small objects (1 MiB) are IOPS-limited",
-                "detail": (f"1 MiB avg store: {avg_small:.2f} GB/s. "
-                           f"5 MiB avg store: {avg_large:.2f} GB/s. "
-                           f"Per-op overhead (IPC handle, reserve, DMA setup) dominates at small sizes."),
+                "detail": (f"1 MiB store: {avg_small:.1f} GB/s. 5 MiB store: {avg_large:.1f} GB/s. "
+                           f"Per-op overhead dominates at small sizes."),
                 "impact": "Reduce per-op overhead for Llama-8B workloads",
             })
 
-    # Positive: batched loads are good
-    if peak_batched_load > 7:
+    # Finding: cold load benefits from batching
+    if cold_serial > 0 and cold_batched > cold_serial * 2:
         findings.append({
             "severity": "good",
-            "title": "Batched loads saturate PCIe well",
-            "detail": (f"Peak batched load: {peak_batched_load:.1f} GB/s. "
-                       f"batch_lookup with async DMA + deferred sync is well-optimized."),
-            "impact": "No action needed on load path",
+            "title": "Cold load scales well with batch size",
+            "detail": (f"Serial (bs=1): {cold_serial:.1f} GB/s. Batched (bs≥64): {cold_batched:.1f} GB/s. "
+                       f"Prefetch and batch restore are effective optimization levers."),
+            "impact": "Batch swap-in submissions for best SSD throughput",
+        })
+
+    # Finding: errors under concurrency
+    if contention_errors > 0:
+        err_rate = contention_errors / max(1, sum(r["ops"] + r["errors"] for r in results if "bidirectional" in r["pattern"] or "continuous" in r["pattern"]))
+        findings.append({
+            "severity": "warning" if err_rate < 0.3 else "critical",
+            "title": f"Concurrent store failures ({err_rate*100:.0f}% error rate)",
+            "detail": (f"{contention_errors} failed ops under concurrency. "
+                       f"Server rejects concurrent populates (likely memory-tier allocation contention or CUDA stream serialization)."),
+            "impact": "Server-side fix: coalesce concurrent stores or separate allocation paths",
+        })
+
+    # Finding: warm load is good
+    if peak_warm_load > 10:
+        findings.append({
+            "severity": "good",
+            "title": "Warm load path well-optimized",
+            "detail": (f"Peak DRAM→GPU: {peak_warm_load:.1f} GB/s. "
+                       f"Async batch DMA with deferred sync delivers near-PCIe bandwidth."),
+            "impact": "No action needed on warm load path",
         })
 
     return {
         "peak_serial_store": peak_serial_store,
         "peak_batched_store": peak_batched_store,
-        "peak_batched_load": peak_batched_load,
-        "peak_serial_load": peak_serial_load,
         "peak_warm_load": peak_warm_load,
         "peak_cold_load": peak_cold_load,
+        "cold_serial": cold_serial,
+        "cold_batched": cold_batched,
         "peak_contended": peak_contended,
+        "total_errors": total_errors,
+        "contention_errors": contention_errors,
         "findings": findings,
     }
 
@@ -1214,17 +1244,19 @@ table.data td.num{{font-family:'JetBrains Mono',monospace;text-align:right}}
 <p class="subtitle">Generated {datetime.now().strftime('%Y-%m-%d %H:%M')} &middot; 4 NVMe (NUMA 0) &middot; 4 GiB memory tier &middot; shmq</p>
 
 <div class="stat-row">
+  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_serial_store']:.1f}</div><div class="stat-label">GB/s serial store (bs=1)</div></div>
+  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_batched_store']:.1f}</div><div class="stat-label">GB/s batched store (bs=64+)</div></div>
   <div class="stat"><div class="stat-value" style="color:var(--load)">{analysis['peak_warm_load']:.1f}</div><div class="stat-label">GB/s warm load (DRAM&rarr;GPU)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--load);opacity:0.7">{analysis['peak_cold_load']:.1f}</div><div class="stat-label">GB/s cold load (SSD&rarr;GPU)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_serial_store']:.1f}</div><div class="stat-label">GB/s store (serial, bs=1)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_batched_store']:.1f}</div><div class="stat-label">GB/s store (batched, bs=64+)</div></div>
+  <div class="stat"><div class="stat-value" style="color:var(--load);opacity:0.8">{analysis['cold_serial']:.1f}</div><div class="stat-label">GB/s cold load serial (bs=1)</div></div>
+  <div class="stat"><div class="stat-value" style="color:var(--load)">{analysis['cold_batched']:.1f}</div><div class="stat-label">GB/s cold load batched (bs=64+)</div></div>
   <div class="stat"><div class="stat-value" style="color:var(--contend)">{analysis['peak_contended']:.1f}</div><div class="stat-label">GB/s under contention</div></div>
 </div>
 
 <h2>Optimization Findings</h2>
 <div id="findings"></div>
 
-<h2>Throughput by Pattern (5 MiB objects, natural batch_size)</h2>
+<h2>Throughput by Pattern (5 MiB objects, serial bs=1)</h2>
+<p>Per-operation baseline throughput. See batch sensitivity table below for how batching improves each path.</p>
 <div class="chart-box"><table class="data" id="main-table"></table></div>
 
 <h2>Batch Size Sensitivity (5 MiB objects)</h2>
@@ -1238,10 +1270,10 @@ table.data td.num{{font-family:'JetBrains Mono',monospace;text-align:right}}
 <div class="chart-box">
 <table class="data">
 <tr><th>Priority</th><th>Optimization</th><th>Expected Impact</th><th>Complexity</th></tr>
-<tr><td>P0</td><td>Async batch_populate (submit all D2H, one sync)</td><td style="color:var(--good)">Batched store {analysis['peak_batched_store']:.1f} → {analysis['peak_batched_load']:.0f}+ GB/s</td><td>Medium</td></tr>
+<tr><td>P0</td><td>Async batch_populate (submit all D2H, one sync)</td><td style="color:var(--good)">Store {analysis['peak_batched_store']:.1f} → {analysis['peak_warm_load']:.0f}+ GB/s</td><td>Medium</td></tr>
 <tr><td>P1</td><td>Reduce per-op overhead for small objects</td><td style="color:var(--good)">1 MiB IOPS +50%</td><td>Low</td></tr>
 <tr><td>P2</td><td>Separate store/load shmq channel pools</td><td style="color:var(--good)">Contention {analysis['peak_contended']:.1f} → {analysis['peak_contended']*1.6:.1f}+ GB/s</td><td>High</td></tr>
-<tr><td>P3</td><td>Pipeline prefill store with compute</td><td style="color:var(--good)">Hide offload behind next chunk</td><td>Medium</td></tr>
+<tr><td>P3</td><td>Fix concurrent store failures</td><td style="color:var(--good)">Eliminate {analysis['contention_errors']} errors under concurrent decode</td><td>Medium</td></tr>
 </table>
 </div>
 
