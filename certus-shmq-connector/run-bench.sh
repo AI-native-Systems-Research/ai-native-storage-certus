@@ -47,7 +47,7 @@ GPU="${GPU:-all}"
 # container, so the SAME path is valid on both sides — no host-gateway address
 # like the gRPC connector needed. Must match the server's --shm-path.
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"
-NUM_CONVS="${NUM_CONVS:-450}"
+NUM_CONVS="${NUM_CONVS:-}"   # empty = default by turn config (450 only for 12/12, whole corpus otherwise)
 MAX_ROUNDS="${MAX_ROUNDS:-0}"   # 0 = replay all turns; N caps at N rounds/turns
 MODEL="${MODEL:-ibm-granite/granite-4.1-8b}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
@@ -95,6 +95,20 @@ if [[ "${WORKLOAD_NAME}" == "sharegpt" ]]; then
         echo "error: sharegpt workload accepts only 12/12 (the 450-conv subset) or 2/2" >&2
         echo "       (the full corpus; 1 also accepted); got min=${_mn} max=${_mx}. Use DATASET_PATH otherwise." >&2
         exit 2
+    fi
+fi
+
+# Default the conversation count from the turn config (mirrors
+# run_multiturn_common._sharegpt_num_convs): 450 only for the exactly-12/12
+# subset, the whole corpus otherwise. Without this the hardcoded 450 default was
+# forwarded as NUM_CONVS and — being the final override in resolve_workload —
+# masked the corpus default, so min-turns 2 still ran 450 convs. An explicit
+# NUM_CONVS in the environment always wins.
+if [[ -z "${NUM_CONVS}" ]]; then
+    if [[ "${WORKLOAD_NAME}" == "sharegpt" && ( "${SHAREGPT_MIN_TURNS:-12}" == "1" || "${SHAREGPT_MIN_TURNS:-12}" == "2" ) ]]; then
+        NUM_CONVS=94145   # full corpus (= _SHAREGPT_CORPUS_CONVS; load_convs caps here)
+    else
+        NUM_CONVS=450
     fi
 fi
 

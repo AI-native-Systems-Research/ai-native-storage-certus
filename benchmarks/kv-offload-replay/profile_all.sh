@@ -47,7 +47,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 MODEL="NousResearch/Meta-Llama-3-8B"
 MODEL_FS="/mnt/certus1"
 declare -a DEVICE_PCI=()
-NUM_CONVS=450
+NUM_CONVS=""           # empty = default by turn config (450 only for 12/12, whole corpus otherwise); --num-convs overrides
 MAX_ROUNDS=0           # 0 = replay all turns; N caps every backend at N rounds/turns
 OUTPUT_TOKENS=150
 MAX_MODEL_LEN=8192
@@ -272,6 +272,20 @@ if [[ "$WORKLOAD_NAME" == "sharegpt" ]]; then
         echo "       or 2/2 (the full 94,145-conv corpus; 1 also accepted); got min=${_mn} max=${_mx}." >&2
         echo "       Use an explicit DATASET_PATH for other turn counts." >&2
         exit 2
+    fi
+fi
+
+# Default the conversation count from the turn config (mirrors
+# run_multiturn_common._sharegpt_num_convs): 450 only for the exactly-12/12
+# subset, the whole corpus otherwise. Without this the hardcoded 450 default was
+# forwarded as NUM_CONVS and — being the final override in resolve_workload —
+# masked the corpus default, so --min-turns 2 still ran 450 convs. An explicit
+# --num-convs (NUM_CONVS non-empty) always wins.
+if [[ -z "$NUM_CONVS" ]]; then
+    if [[ "$WORKLOAD_NAME" == "sharegpt" && ( "${SHAREGPT_MIN_TURNS:-12}" == "1" || "${SHAREGPT_MIN_TURNS:-12}" == "2" ) ]]; then
+        NUM_CONVS=94145   # full corpus (= _SHAREGPT_CORPUS_CONVS; load_convs caps here)
+    else
+        NUM_CONVS=450
     fi
 fi
 
