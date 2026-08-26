@@ -37,6 +37,7 @@ import asyncio
 import json
 import math
 import random
+import re
 import signal
 import string
 import sys
@@ -47,36 +48,21 @@ from pathlib import Path
 HUMAN = "human"
 GPT = "gpt"
 
-# json_schema for one conversation's turn list. Exact count is requested in the
-# prompt and re-asserted in post-processing; the schema just guarantees shape.
-TURN_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "turns": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "from": {"type": "string", "enum": [HUMAN, GPT]},
-                    "value": {"type": "string"},
-                },
-                "required": ["from", "value"],
-                "additionalProperties": False,
-            },
-        }
-    },
-    "required": ["turns"],
-    "additionalProperties": False,
-}
-
+# Output is requested as a raw JSON object rather than via the API's structured-
+# output feature (output_config.format), because that feature isn't supported by
+# older SDKs (0.x) or by LiteLLM-style proxy gateways. The exact turn count is
+# requested in the prompt and re-asserted in post-processing (normalize_turns),
+# and parse_turns tolerates markdown fences, surrounding prose, and truncation.
 SYSTEM_PROMPT = (
     "You author realistic, self-contained multi-turn chat conversations between a "
     "human user and an AI assistant, for use as a benchmark dataset. Conversations "
     "must read like genuine ShareGPT logs: the human asks, follows up, refines, and "
     "changes direction naturally; the assistant answers helpfully and at realistic "
     "length (a mix of short clarifications and longer explanations, code, or lists). "
-    "Do not include any meta-commentary about being synthetic. Return only the "
-    "structured turns."
+    "Do not include any meta-commentary about being synthetic.\n\n"
+    'Respond with ONLY a single JSON object of the form '
+    '{"turns": [{"from": "human", "value": "..."}, {"from": "gpt", "value": "..."}, ...]}. '
+    "No prose before or after, and no markdown code fences."
 )
 
 # Built-in topic pool for diversity. Override with --topics-file (one topic/line).
@@ -174,9 +160,58 @@ def build_user_prompt(topic: str, human_turns: int, nonce: str) -> str:
         f"and starting with the human. The human's later turns should build on the "
         f"conversation — follow-ups, corrections, tangents, or requests for more "
         f"detail — not restart the topic. Vary assistant reply length naturally.\n\n"
-        f"Return the turns via the structured schema. Diversity token: {nonce} "
+        f'Respond with ONLY the JSON object {{"turns": [...]}} described in the system '
+        f"prompt — no prose, no markdown fences. Diversity token: {nonce} "
         f"(use it only to vary the conversation; do not mention it)."
     )
+
+
+def parse_turns(text: str) -> list[dict]:
+    """Extract the list of turn dicts from a model response, tolerantly.
+
+    Handles: clean JSON, JSON wrapped in ```json fences or surrounding prose, and
+    output truncated mid-array (e.g. hit max_tokens) — in which case every complete
+    ``{"from": ..., "value": ...}`` object up to the break is salvaged.
+    """
+    s = text.strip()
+    # Strip a leading/trailing markdown code fence if present.
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z0-9]*\s*\n?", "", s)
+        s = re.sub(r"\n?```\s*$", "", s).strip()
+
+    # strict=False lets literal newlines/tabs inside string values through — LLMs
+    # routinely emit multi-line code blocks and lists that strict JSON rejects.
+    dec = json.JSONDecoder(strict=False)
+
+    # Fast path: a complete JSON object with a "turns" array.
+    lb, rb = s.find("{"), s.rfind("}")
+    if lb != -1 and rb > lb:
+        try:
+            obj = dec.decode(s[lb:rb + 1])
+            if isinstance(obj, dict) and isinstance(obj.get("turns"), list):
+                return obj["turns"]
+        except json.JSONDecodeError:
+            pass
+
+    # Salvage path: scan the turns array and decode complete objects one at a time,
+    # stopping at the first incomplete one (the truncation point).
+    key = s.find('"turns"')
+    start = s.find("[", key if key != -1 else 0)
+    if start == -1:
+        return []
+    turns, idx, n = [], start + 1, len(s)
+    while idx < n:
+        while idx < n and s[idx] in " \t\r\n,":
+            idx += 1
+        if idx >= n or s[idx] == "]":
+            break
+        try:
+            obj, idx = dec.raw_decode(s, idx)
+        except json.JSONDecodeError:
+            break  # incomplete trailing object → stop
+        if isinstance(obj, dict) and "value" in obj:
+            turns.append(obj)
+    return turns
 
 
 def normalize_turns(raw_turns: list[dict], target_human: int) -> list[dict]:
@@ -202,19 +237,27 @@ def normalize_turns(raw_turns: list[dict], target_human: int) -> list[dict]:
     ]
 
 
-async def gen_one(client, sem, model, effort, max_tokens, topic, human_turns,
+# Rough per-message output-token budget, used to size max_tokens from turn count
+# so long conversations don't get truncated mid-array.
+TOKENS_PER_MSG = 350
+MAX_TOKENS_CAP = 64000
+
+
+def conv_max_tokens(human_turns: int, floor: int) -> int:
+    """max_tokens for a conversation: at least `floor`, scaled up for many turns."""
+    need = human_turns * 2 * TOKENS_PER_MSG + 1500
+    return min(MAX_TOKENS_CAP, max(floor, need))
+
+
+async def gen_one(client, sem, model, max_tokens_floor, topic, human_turns,
                   conv_id, nonce, counts):
     """Generate a single conversation; returns a ShareGPT record or None on failure."""
     async with sem:
         try:
             resp = await client.messages.create(
                 model=model,
-                max_tokens=max_tokens,
+                max_tokens=conv_max_tokens(human_turns, max_tokens_floor),
                 system=SYSTEM_PROMPT,
-                output_config={
-                    "effort": effort,
-                    "format": {"type": "json_schema", "schema": TURN_SCHEMA},
-                },
                 messages=[{
                     "role": "user",
                     "content": build_user_prompt(topic, human_turns, nonce),
@@ -241,24 +284,24 @@ async def gen_one(client, sem, model, effort, max_tokens, topic, human_turns,
             counts["failed"] += 1
             print(f"  [gen] empty id={conv_id}", file=sys.stderr)
             return None
-        try:
-            turns = normalize_turns(json.loads(text)["turns"], human_turns)
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            counts["failed"] += 1
-            print(f"  [gen] unparseable id={conv_id}: {e}", file=sys.stderr)
-            return None
+
+        # parse_turns salvages complete turns even if the response was truncated.
+        turns = normalize_turns(parse_turns(text), human_turns)
+        if resp.stop_reason == "max_tokens":
+            counts["truncated"] += 1  # kept, but shorter than requested
 
         if len(turns) < 4:  # < 2 human turns => load_convs would drop it
             counts["too_short"] += 1
-            print(f"  [gen] too short id={conv_id} ({len(turns)} turns)",
-                  file=sys.stderr)
+            print(f"  [gen] too short id={conv_id} "
+                  f"({len(turns)} turns, stop={resp.stop_reason})", file=sys.stderr)
             return None
 
         counts["ok"] += 1
         counts["realized_human_turns"] += len(turns) // 2
         if counts["ok"] % 25 == 0:
             print(f"  [gen] ok={counts['ok']} failed={counts['failed']} "
-                  f"refused={counts['refused']}", file=sys.stderr)
+                  f"refused={counts['refused']} truncated={counts['truncated']}",
+                  file=sys.stderr)
         return {"id": conv_id, "conversations": turns}
 
 
@@ -275,8 +318,11 @@ def print_stats(counts, turn_counts, model, elapsed):
     realized_mean = (counts["realized_human_turns"] / counts["ok"]) if counts["ok"] else 0
     requested_mean = sum(turn_counts) / len(turn_counts) if turn_counts else 0
     print("\n[gen] stats:", file=sys.stderr)
-    for k in ("ok", "failed", "refused", "too_short"):
+    for k in ("ok", "failed", "refused", "too_short", "truncated"):
         print(f"  {k:<22} {counts[k]:>8,}", file=sys.stderr)
+    if counts["truncated"]:
+        print("  (truncated = hit max_tokens; kept but shorter than requested — "
+              "raise --max-tokens or lower -m)", file=sys.stderr)
     print(f"  requested mean h-turns {requested_mean:>8.2f}", file=sys.stderr)
     print(f"  realized  mean h-turns {realized_mean:>8.2f}", file=sys.stderr)
     print(f"  input tokens          {counts['in_tokens']:>8,}", file=sys.stderr)
@@ -317,9 +363,9 @@ async def run(args) -> int:
             bar = "#" * min(60, dist[k])
             print(f"  {k:>3} turns: {dist[k]:>5}  {bar}", file=sys.stderr)
         total_turns = sum(turn_counts)
-        # Very rough: ~250 output tokens/turn, ~600 input tokens/call (prompt+schema).
+        # Very rough: ~250 output tokens/turn, ~500 input tokens/call (prompt).
         est_out = total_turns * 250
-        est_in = args.num_convs * 600
+        est_in = args.num_convs * 500
         note = ""
         if args.model in PRICING:
             pi, po = PRICING[args.model]
@@ -336,7 +382,7 @@ async def run(args) -> int:
 
     client = AsyncAnthropic()
     sem = asyncio.Semaphore(args.concurrency)
-    counts = {"ok": 0, "failed": 0, "refused": 0, "too_short": 0,
+    counts = {"ok": 0, "failed": 0, "refused": 0, "too_short": 0, "truncated": 0,
               "in_tokens": 0, "out_tokens": 0, "realized_human_turns": 0}
 
     tasks = []
@@ -344,7 +390,7 @@ async def run(args) -> int:
         topic = topic_rng.choice(topics)
         nonce = f"{args.seed}-{i}"
         tasks.append(gen_one(
-            client, sem, args.model, args.effort, args.max_tokens,
+            client, sem, args.model, args.max_tokens,
             topic, ht, gen_id(id_rng), nonce, counts))
 
     print(f"[gen] generating {args.num_convs} conversations with {args.model} "
@@ -384,14 +430,12 @@ def main() -> int:
     ap.add_argument("--model", default="claude-opus-5",
                     help="Claude model id (default: claude-opus-5; "
                          "claude-sonnet-5 / claude-haiku-4-5 are cheaper for bulk)")
-    ap.add_argument("--effort", default="low",
-                    choices=["low", "medium", "high", "xhigh", "max"],
-                    help="reasoning effort (default: low — generation isn't "
-                         "reasoning-heavy; higher = better prose, more cost)")
     ap.add_argument("--concurrency", type=int, default=8,
                     help="max concurrent API requests (default: 8)")
     ap.add_argument("--max-tokens", type=int, default=16000,
-                    help="max output tokens per conversation (default: 16000)")
+                    help="floor for max output tokens per conversation (default: "
+                         "16000); automatically raised for high turn counts, capped "
+                         f"at {MAX_TOKENS_CAP}")
     ap.add_argument("--min-turns", type=int, default=2,
                     help="floor for human-turn count (default: 2 — the bench "
                          "minimum; conversations with fewer are dropped by load_convs)")

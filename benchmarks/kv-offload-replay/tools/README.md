@@ -119,12 +119,21 @@ written in the exact ShareGPT schema the multi-turn bench consumes (a JSON array
 `data/sharegpt_12turn_450.json` at any size or turn distribution without pulling
 from the real corpus.
 
-Each conversation is authored in a **single** Claude API call via structured output
-(not one call per turn), so cost scales with N, not N×M. Human-turn counts are drawn
-from a **Poisson(M)** distribution with a seeded RNG, so a given `--seed` reproduces
-the same turn-count distribution and ids. Output strictly alternates `human → gpt`
-starting with `human` (roles are re-asserted by position), always has an even turn
-count and ≥ 2 human turns, so every conversation is kept by `load_convs`.
+Each conversation is authored in a **single** Claude API call returning a JSON object
+(not one call per turn), so cost scales with N, not N×M. The response is parsed
+tolerantly — markdown fences, surrounding prose, and truncated output are all handled
+— so the tool works with older `anthropic` SDKs (0.x) and LiteLLM-style proxy gateways
+that don't support the structured-output API. Human-turn counts are drawn from a
+**Poisson(M)** distribution with a seeded RNG, so a given `--seed` reproduces the same
+turn-count distribution and ids. Output strictly alternates `human → gpt` starting with
+`human` (roles are re-asserted by position), always has an even turn count and ≥ 2
+human turns, so every conversation is kept by `load_convs`.
+
+`--max-tokens` auto-scales with the requested turn count, but very large `M` (say,
+≳ 30 human turns = 60+ messages in one response) strains single-call generation: the
+model may stop early or truncate, so the realized mean can run below `M`. The stats
+report a `truncated` count and the realized mean; lower `M` or raise `--max-tokens` if
+you need the count to hold exactly.
 
 ### Setup
 
@@ -160,9 +169,8 @@ A usage + estimated-cost summary is printed to stderr at the end.
 | `-m`, `--mean-turns` | — | Mean human-turn count (M); actual counts are Poisson-distributed (required) |
 | `-o`, `--out` | — | Output ShareGPT `.json` path (required) |
 | `--model` | `claude-opus-5` | Claude model id; `claude-sonnet-5` / `claude-haiku-4-5` are cheaper for bulk |
-| `--effort` | `low` | Reasoning effort (`low`…`max`); higher = better prose, more cost |
 | `--concurrency` | `8` | Max concurrent API requests |
-| `--max-tokens` | `16000` | Max output tokens per conversation |
+| `--max-tokens` | `16000` | Floor for max output tokens per conversation; auto-raised for high turn counts (capped at 64000) |
 | `--min-turns` | `2` | Floor for human-turn count (clamped to ≥ 2, the bench minimum) |
 | `--max-turns` | `40` | Ceiling for human-turn count |
 | `--seed` | `1234` | RNG seed for turn-count distribution, ids, and topic selection |
