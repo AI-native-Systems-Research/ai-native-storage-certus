@@ -138,13 +138,17 @@ def _sharegpt_num_convs(has_explicit_path=False):
 # here each document's filler is drawn independently so the blocks are distinct.)
 #
 # The three shape parameters are env-tunable; defaults are chosen so a document
-# plus all its turns fits the DEFAULT 8192 window (budget MAX_MODEL_LEN -
-# OUTPUT_TOKENS, ~7992). The document is big enough to build sizeable KV yet
-# leaves room for the accumulated follow-ups + generations, so a plain run does
-# NOT retire every conversation on turn 0. Raise LONGDOC_DOC_TOKENS together with
-# --max-model-len for a larger reused prefix (a bigger doc than the window holds
-# would trip the loop's nt > prompt_budget guard and drop the conversation).
-#   LONGDOC_DOC_TOKENS  approx document length, tokens ≈ words  (default 5000)
+# plus ALL of its accumulated turns fits the DEFAULT 8192 window (budget
+# MAX_MODEL_LEN - OUTPUT_TOKENS, as low as ~7992 at OUTPUT_TOKENS=200) with real
+# headroom. This matters because the loop's `nt > prompt_budget` guard RETIRES the
+# whole conversation on overflow (it does not truncate) — a too-large default
+# would silently drop every conversation and produce a near-empty run. By turn 7
+# the prompt is doc + 7 responses + the accumulated follow-ups; at a conservative
+# ~1.3 tokens/word a 4000-word doc lands near ~6.7k tokens, comfortably inside the
+# window even at OUTPUT_TOKENS=200. It is still large in aggregate: ~4000 tokens ×
+# 1000 docs of DISTINCT prefix KV, well past any GPU cache. Raise LONGDOC_DOC_TOKENS
+# together with --max-model-len for a bigger reused prefix.
+#   LONGDOC_DOC_TOKENS  approx document length, tokens ≈ words  (default 4000)
 #   LONGDOC_QUESTIONS   human turns per document (doc+Q1, then follow-ups) (default 8)
 #   LONGDOC_NUM_DOCS    documents in the generated corpus        (default 1000)
 #   LONGDOC_SEED        RNG seed for a reproducible corpus        (default 1234)
@@ -188,7 +192,7 @@ def _int_env(name, default):
 def _longdoc_params():
     """(doc_tokens, questions, num_docs, seed) for the long-doc-qa workload."""
     return (
-        _int_env("LONGDOC_DOC_TOKENS", 5000),
+        _int_env("LONGDOC_DOC_TOKENS", 4000),
         max(2, _int_env("LONGDOC_QUESTIONS", 8)),  # loader needs >= 2 human turns
         _int_env("LONGDOC_NUM_DOCS", 1000),
         _int_env("LONGDOC_SEED", 1234),

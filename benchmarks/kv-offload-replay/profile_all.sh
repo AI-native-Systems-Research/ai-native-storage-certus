@@ -193,7 +193,7 @@ Flags (all optional; defaults shown):
                                "long-doc-qa" = synthetic long-document QA (a large
                                per-doc-unique prefix + follow-ups; KV-cache stress).
                                Shape via env LONGDOC_DOC_TOKENS / LONGDOC_QUESTIONS /
-                               LONGDOC_NUM_DOCS / LONGDOC_SEED (defaults 5000/8/1000);
+                               LONGDOC_NUM_DOCS / LONGDOC_SEED (defaults 4000/8/1000);
                                NUM_CONVS defaults to LONGDOC_NUM_DOCS. Big docs need a
                                matching --max-model-len.
   --min-turns <n>              Min human turns for the sharegpt workload; 2 selects the
