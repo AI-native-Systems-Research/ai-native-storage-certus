@@ -1294,7 +1294,7 @@ FINDINGS.forEach(f => {{
 // Main table: 5M objects at realistic batch sizes per pattern
 const mainTable = document.getElementById('main-table');
 const all5m = DATA.filter(r => r.object_size.includes('5M') && r.throughput_gbps > 0.01);
-const COLD_PATTERNS = ['hot_vs_cold_load_paths','selective_kv_retrieval','tier_promotion_and_prefetch','cache_aware_routing_and_remote_hit_migration'];
+const COLD_PATTERNS = ['hot_vs_cold_load_paths','selective_kv_retrieval','tier_promotion_and_prefetch','cache_aware_routing_and_remote_hit_migration','warm_prefill_load_and_suffix_store','bidirectional_store_load_contention'];
 function getPath(r) {{
   const op = r.phase_op.split('/')[1];
   if (op === 'store') return 'GPU → DRAM';
