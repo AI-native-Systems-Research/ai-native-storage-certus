@@ -51,6 +51,7 @@ phases:
     keys: promotable_blocks
     order: sequential
     repeat: prefetch_blocks
+    batch_size: prefetch_blocks
 measure:
 - phase: prefetch-promote
   operation: load

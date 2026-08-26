@@ -51,6 +51,7 @@ phases:
     keys: remote_blocks
     order: sequential
     repeat: missing_blocks
+    batch_size: missing_blocks
 measure:
 - phase: remote-pull
   operation: load

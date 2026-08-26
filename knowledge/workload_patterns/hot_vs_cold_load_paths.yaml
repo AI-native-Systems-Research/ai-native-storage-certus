@@ -51,6 +51,7 @@ phases:
     keys: cached_blocks
     order: sequential
     repeat: requested_blocks
+    batch_size: requested_blocks
 measure:
 - phase: hot-load
   operation: load

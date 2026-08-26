@@ -48,6 +48,9 @@ preconditions:
 - subject: prefill_sealed_blocks
   state: absent_from_store
   value: true
+- subject: decode_sealed_blocks
+  state: absent_from_store
+  value: true
 phases:
 - id: prefill-burst
   actors:
@@ -59,6 +62,7 @@ phases:
     keys: prefill_sealed_blocks
     order: sequential
     repeat: floor(prefill_chunk_tokens / block_size)
+    batch_size: floor(prefill_chunk_tokens / block_size)
 - id: decode-trickle
   actors:
     count: decode_sequences

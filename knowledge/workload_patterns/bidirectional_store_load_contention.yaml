@@ -53,16 +53,6 @@ preconditions:
     state: absent_from_store
     value: true
 phases:
-  - id: seed-load-data
-    actors:
-      count: 1
-      arrival: serial
-      concurrency: 1
-    operations:
-      - op: store
-        keys: load_sources
-        order: sequential
-    barrier_after: true
   - id: concurrent-bidir
     actors:
       count: store_actors + load_actors

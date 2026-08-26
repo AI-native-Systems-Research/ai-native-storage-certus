@@ -159,6 +159,7 @@ class PhaseResult:
         self.total_bytes = 0
         self.wall_start = 0.0
         self.wall_end = 0.0
+        self._measured_elapsed = 0.0
         self._lock = threading.Lock()
 
     def record(self, latency, nbytes):
@@ -172,6 +173,8 @@ class PhaseResult:
 
     @property
     def elapsed(self):
+        if self._measured_elapsed > 0:
+            return self._measured_elapsed
         return self.wall_end - self.wall_start
 
     @property
@@ -182,7 +185,8 @@ class PhaseResult:
 class BenchRunner:
     def __init__(self, pattern: WorkloadPattern, ring: Ring, gpu_id: int = 0,
                  cleanup_before: bool = False, warmup_ops: int = 8,
-                 min_duration: float = 3.0, max_iterations: int = 200):
+                 min_duration: float = 3.0, max_iterations: int = 200,
+                 batch_size_override: int = 0):
         self.pattern = pattern
         self.ring = ring
         self.gpu_id = gpu_id
@@ -190,18 +194,27 @@ class BenchRunner:
         self.warmup_ops = warmup_ops
         self.min_duration = min_duration
         self.max_iterations = max_iterations
+        self.batch_size_override = batch_size_override
         self._stop = threading.Event()
         self._all_keys = set()
         self._gpu_buffers = []
+        self._gpu_buffer_cache = {}
         self._key_cache = {}
         self._key_base = random.randint(1_000_000, 50_000_000)
 
         _libcudart.cudaSetDevice(gpu_id)
 
-    def _alloc_buffer(self, size):
+    def _alloc_buffer(self, size, shared=True):
+        """Allocate a CUDA buffer. shared=True reuses cached allocation (for preconditions),
+        shared=False allocates a new unique buffer (for concurrent actors)."""
+        if shared and size in self._gpu_buffer_cache:
+            return self._gpu_buffer_cache[size]
         ptr, handle_bytes = cuda_alloc(size)
         self._gpu_buffers.append(ptr)
-        return handle_bytes, size
+        result = (handle_bytes, size)
+        if shared:
+            self._gpu_buffer_cache[size] = result
+        return result
 
     def _run_warmup(self):
         """Run a few store+load ops to warm CUDA context, IPC handles, and TLBs."""
@@ -258,18 +271,24 @@ class BenchRunner:
         for phase in self.pattern.phases:
             for op in phase.get("operations", []):
                 if op.get("keys") == ks_name:
-                    count = eval_expr(phase.get("actors", {}).get("count", 1), self.pattern.params)
+                    # In parallel-split phases, use op-specific actor count
+                    param_name = f"{op['op']}_actors"
+                    if param_name in self.pattern.params:
+                        count = int(self.pattern.params[param_name])
+                    else:
+                        count = eval_expr(phase.get("actors", {}).get("count", 1), self.pattern.params)
                     max_a = max(max_a, count)
         return max_a
 
-    def _setup_preconditions(self):
+    def _setup_preconditions(self, verbose=True):
         for pc in self.pattern.preconditions:
             ks_name = pc["subject"]
             state = pc["state"]
             ks = self.pattern.keyspaces[ks_name]
 
             if state == "present_in_store" and pc["value"]:
-                print(f"  Setup: populating {ks_name} ({ks['cardinality']} x {ks['object_bytes']} bytes)")
+                if verbose:
+                    print(f"  Setup: populating {ks_name} ({ks['cardinality']} x {ks['object_bytes']} bytes)")
                 handle_bytes, size = self._alloc_buffer(ks["object_bytes"])
                 region = single_region(handle_bytes, self.gpu_id, size)
 
@@ -289,11 +308,12 @@ class BenchRunner:
                             print(f"  WARNING: populate failures for actor {aid}")
 
                 self.ring.flush_to_ssd()
-                time.sleep(0.5)
 
             if state == "absent_from_local_cache" and pc["value"]:
-                print(f"  Setup: clearing memory tier")
+                if verbose:
+                    print(f"  Setup: clearing memory tier")
                 self.ring.clear_memory_tier()
+                time.sleep(0.1)
 
             if state == "absent_from_store" and pc["value"]:
                 if ks["sharing"] == "global":
@@ -317,14 +337,15 @@ class BenchRunner:
         """
         _libcudart.cudaSetDevice(self.gpu_id)
 
-        # Pre-allocate buffers per op type. For batched loads, allocate one buffer
-        # per key in the batch to avoid coalesced DMA giving artificially low latency.
+        # Pre-allocate buffers per op type. Store buffers are unique per actor
+        # (concurrent DMA from same source address causes server failures).
+        # Load buffers can be shared (DMA targets, not sources).
         import itertools
         op_buffers = {}
         load_batch_buffers = []
         for op, ks_name, object_bytes, _, _, batch_sz, _ in ops_sequence:
             if op == "store" and "store" not in op_buffers:
-                op_buffers["store"] = self._alloc_buffer(object_bytes)
+                op_buffers["store"] = self._alloc_buffer(object_bytes, shared=False)
             elif op == "load" and "load" not in op_buffers:
                 op_buffers["load"] = self._alloc_buffer(object_bytes)
                 if batch_sz > 1:
@@ -340,7 +361,7 @@ class BenchRunner:
                     break
 
                 base_keys = list(self._get_keys(ks_name, actor_id, num_actors))
-                if repeat_count > 1 and repeat_count != len(base_keys):
+                if repeat_count != len(base_keys):
                     keys = list(itertools.islice(itertools.cycle(base_keys), repeat_count))
                 else:
                     keys = base_keys[:]
@@ -475,7 +496,7 @@ class BenchRunner:
                 object_bytes = ks["object_bytes"]
                 repeat_count = eval_expr(op_spec.get("repeat", 1), self.pattern.params) if "repeat" in op_spec else 1
                 order = op_spec.get("order", "sequential")
-                batch_sz = max(1, eval_expr(op_spec.get("batch_size", 1), self.pattern.params))
+                batch_sz = self.batch_size_override if self.batch_size_override > 0 else max(1, eval_expr(op_spec.get("batch_size", 1), self.pattern.params))
                 param_name = f"{op}_actors"
                 op_actors = max(1, int(self.pattern.params.get(param_name, total_actors // len(operations))))
 
@@ -497,7 +518,7 @@ class BenchRunner:
                 object_bytes = ks["object_bytes"]
                 repeat_count = eval_expr(op_spec.get("repeat", 1), self.pattern.params) if "repeat" in op_spec else 1
                 order = op_spec.get("order", "sequential")
-                batch_sz = max(1, eval_expr(op_spec.get("batch_size", 1), self.pattern.params))
+                batch_sz = self.batch_size_override if self.batch_size_override > 0 else max(1, eval_expr(op_spec.get("batch_size", 1), self.pattern.params))
                 ops_seq_template.append((op, ks_name, object_bytes, repeat_count, order, batch_sz, op_results[op]))
 
             for i in range(total_actors):
@@ -570,14 +591,31 @@ class BenchRunner:
 
             first_wall = sum(r.elapsed for r in all_results if r.elapsed > 0) or 0.001
             iteration = 1
+            total_measured = first_wall
+
+            # Seed measured_elapsed with first iteration before repeating
+            for r in all_results:
+                r._measured_elapsed = r.elapsed
 
             # Auto-repeat until min_duration is met
-            while first_wall * iteration < self.min_duration and iteration < self.max_iterations:
+            while total_measured < self.min_duration and iteration < self.max_iterations:
+                # Clean up previous iteration: remove keys + free memory tier
+                if self._all_keys:
+                    old_keys = list(self._all_keys)
+                    for batch_start in range(0, len(old_keys), 100):
+                        try:
+                            self.ring.remove(old_keys[batch_start:batch_start + 100])
+                        except RingError:
+                            pass
+                    self._all_keys.clear()
+                self.ring.clear_memory_tier()
+
                 self._key_base = random.randint(1_000_000, 50_000_000)
                 self._key_cache.clear()
-                self._setup_preconditions()
+                self._setup_preconditions(verbose=False)
 
                 phase_offset = 0
+                iter_elapsed = 0.0
                 for phase in self.pattern.phases:
                     phase_results = self._run_phase(phase)
                     for j, new_r in enumerate(phase_results):
@@ -585,14 +623,16 @@ class BenchRunner:
                         existing_r.latencies.extend(new_r.latencies)
                         existing_r.total_bytes += new_r.total_bytes
                         existing_r.errors += new_r.errors
-                        existing_r.wall_end = existing_r.wall_start + existing_r.elapsed + new_r.elapsed
+                        existing_r._measured_elapsed += new_r.elapsed
+                        iter_elapsed += new_r.elapsed
                     phase_offset += len(phase_results)
                     if phase.get("barrier_after", False):
                         self.ring.flush_to_ssd()
                 iteration += 1
+                total_measured += iter_elapsed
 
             if iteration > 1:
-                print(f"\n  Iterations: {iteration} ({iteration * first_wall:.1f}s measured)")
+                print(f"\n  Iterations: {iteration} ({total_measured:.1f}s measured)")
 
             print(f"\n{'='*70}")
             print(f"Results: {self.pattern.id}")
@@ -737,6 +777,11 @@ def main():
     p_run.add_argument("--max-iterations", type=int, default=200,
                        help="Maximum iteration repeats (safety cap)")
 
+    p_quick = subparsers.add_parser("quick", help="Quick health check: 5 key patterns at 5M objects (~20s)")
+    p_quick.add_argument("--gpu", type=int, default=0)
+    p_quick.add_argument("--min-duration", type=float, default=2.0)
+    p_quick.add_argument("--warmup", type=int, default=8)
+
     p_full = subparsers.add_parser("full", help="Full sweep: vary batch_size and object_size across core patterns")
     p_full.add_argument("--gpu", type=int, default=0)
     p_full.add_argument("--min-duration", type=float, default=3.0)
@@ -759,14 +804,98 @@ def main():
         cmd_describe(args)
     elif args.command == "run":
         cmd_run(args)
+    elif args.command == "quick":
+        cmd_quick(args)
     elif args.command == "full":
         cmd_full(args)
     elif args.command == "report":
         cmd_report(args)
 
 
-# Core patterns for full sweep
-CORE_PATTERNS = [
+# Quick health check patterns (5M objects, natural batch sizes)
+QUICK_PATTERNS = [
+    ("decode_block_store", 1),
+    ("cold_prefill_store", 64),
+    ("compute_local_eviction_and_later_reload", 64),
+    ("hot_vs_cold_load_paths", 1),
+    ("hot_vs_cold_load_paths", 64),
+    ("bidirectional_store_load_contention", 1),
+]
+
+
+def cmd_quick(args):
+    """Quick health check: 5 key patterns at Llama-70B object size."""
+    print(f"{'='*70}")
+    print("certus-fio: QUICK HEALTH CHECK")
+    print(f"{'='*70}")
+    print(f"  Object size: 5 MiB (Llama-70B)")
+    print(f"  Patterns: {len(QUICK_PATTERNS)}")
+    print(f"  Duration per pattern: {args.min_duration}s")
+    print()
+
+    overrides_70b = {"num_layers": "80", "kv_bytes_per_token_per_layer": "4096"}
+    ring = connect(args.shm_path, ready_timeout=10.0)
+    results = {}
+
+    try:
+        for pattern_name, bs in QUICK_PATTERNS:
+            pattern_path = resolve_pattern(pattern_name, args.patterns_dir)
+            overrides = {**overrides_70b}
+            try:
+                pattern = WorkloadPattern(pattern_path, overrides)
+            except Exception as e:
+                print(f"  SKIP {pattern_name}: {e}")
+                continue
+            runner = BenchRunner(
+                pattern=pattern, ring=ring, gpu_id=args.gpu,
+                warmup_ops=args.warmup, min_duration=args.min_duration,
+                batch_size_override=bs,
+            )
+            try:
+                report = runner.run()
+            except Exception as e:
+                print(f"  ERROR {pattern_name}: {e}")
+                continue
+            if report:
+                results[(pattern_name, bs)] = report
+    finally:
+        ring.close()
+
+    # Summary
+    print(f"\n{'='*70}")
+    print("QUICK RESULTS (5 MiB objects, Llama-70B)")
+    print(f"{'='*70}")
+    print(f"{'Test':<40} {'Path':<12} {'GB/s':>6} {'p50us':>7} {'p99us':>7} {'Err':>5}")
+    print("-" * 75)
+
+    def _row(label, path, report, phase_op):
+        if phase_op in report:
+            d = report[phase_op]
+            err_str = str(d["errors"]) if d["errors"] > 0 else ""
+            print(f"{label:<40} {path:<12} {d['throughput_gbps']:>6.1f} {d['p50_us']:>7.0f} {d['p99_us']:>7.0f} {err_str:>5}")
+        else:
+            print(f"{label:<40} {'?':<12} {'—':>6}")
+
+    if ("decode_block_store", 1) in results:
+        _row("Serial store (bs=1)", "GPU→DRAM", results[("decode_block_store", 1)], "decode-writeback/store")
+    if ("cold_prefill_store", 64) in results:
+        _row("Batched store (bs=64)", "GPU→DRAM", results[("cold_prefill_store", 64)], "prefill-writeback/store")
+    if ("compute_local_eviction_and_later_reload", 64) in results:
+        _row("Warm load (bs=64)", "DRAM→GPU", results[("compute_local_eviction_and_later_reload", 64)], "demand-reload/load")
+    if ("hot_vs_cold_load_paths", 1) in results:
+        _row("Cold load serial (bs=1)", "SSD→GPU", results[("hot_vs_cold_load_paths", 1)], "hot-load/load")
+    if ("hot_vs_cold_load_paths", 64) in results:
+        _row("Cold load batched (bs=64)", "SSD→GPU", results[("hot_vs_cold_load_paths", 64)], "hot-load/load")
+    if ("bidirectional_store_load_contention", 1) in results:
+        r = results[("bidirectional_store_load_contention", 1)]
+        _row("Contended store (bs=1)", "GPU→DRAM", r, "concurrent-bidir/store")
+        _row("Contended load (bs=1)", "SSD→GPU", r, "concurrent-bidir/load")
+
+    print(f"{'='*75}")
+
+
+# Core patterns for full sweep — warm path (data stays in memory tier)
+WARM_PATTERNS = [
     "cold_prefill_store",
     "decode_block_store",
     "warm_prefill_load_and_suffix_store",
@@ -776,6 +905,16 @@ CORE_PATTERNS = [
     "disaggregated_prefill_decode",
     "continuous_batching_mix",
 ]
+
+# Cold-path patterns (SSD→GPU loads; require clear_memory_tier, run last)
+COLD_PATTERNS_LIST = [
+    "hot_vs_cold_load_paths",
+    "selective_kv_retrieval",
+    "tier_promotion_and_prefetch",
+    "cache_aware_routing_and_remote_hit_migration",
+]
+
+CORE_PATTERNS = WARM_PATTERNS + COLD_PATTERNS_LIST
 
 # Object sizes: model the range from small (Llama-8B) to large (Llama-70B)
 # object_bytes = block_size(16) * num_layers * kv_bytes_per_token_per_layer
@@ -793,7 +932,7 @@ def cmd_full(args):
     print(f"{'='*70}")
     print("certus-fio: FULL SWEEP")
     print(f"{'='*70}")
-    print(f"  Patterns: {len(CORE_PATTERNS)}")
+    print(f"  Patterns: {len(CORE_PATTERNS)} ({len(WARM_PATTERNS)} warm + {len(COLD_PATTERNS_LIST)} cold)")
     print(f"  Object sizes: {len(OBJECT_SIZE_CONFIGS)}")
     print(f"  Batch sizes: {BATCH_SIZES}")
     print(f"  Min duration per run: {args.min_duration}s")
@@ -802,53 +941,24 @@ def cmd_full(args):
     print(f"  Estimated time: {total_runs * args.min_duration / 60:.0f} min")
     print()
 
-    ring = connect(args.shm_path, ready_timeout=10.0)
     results = []
 
+    # Warm patterns
+    ring = connect(args.shm_path, ready_timeout=10.0)
     try:
-        for obj_cfg in OBJECT_SIZE_CONFIGS:
-            print(f"\n--- Object size: {obj_cfg['label']} ---")
-            for pattern_name in CORE_PATTERNS:
-                pattern_path = resolve_pattern(pattern_name, args.patterns_dir)
-                for bs in BATCH_SIZES:
-                    overrides = {
-                        "num_layers": str(obj_cfg["num_layers"]),
-                        "kv_bytes_per_token_per_layer": str(obj_cfg["kv_bytes_per_token_per_layer"]),
-                        "batch_size": str(bs),
-                    }
-                    try:
-                        pattern = WorkloadPattern(pattern_path, overrides)
-                    except Exception as e:
-                        continue
-
-                    runner = BenchRunner(
-                        pattern=pattern, ring=ring, gpu_id=args.gpu,
-                        warmup_ops=args.warmup, min_duration=args.min_duration,
-                    )
-                    try:
-                        report = runner.run()
-                    except Exception as e:
-                        print(f"    ERROR: {pattern_name} bs={bs}: {e}")
-                        continue
-
-                    if report:
-                        for phase_op, data in report.items():
-                            results.append({
-                                "pattern": pattern_name,
-                                "object_size": obj_cfg["label"],
-                                "batch_size": bs,
-                                "phase_op": phase_op,
-                                "ops": data["ops"],
-                                "throughput_gbps": data["throughput_gbps"],
-                                "avg_us": data["avg_us"],
-                                "p50_us": data["p50_us"],
-                                "p99_us": data["p99_us"],
-                                "total_mb": data["total_bytes"] / (1024 * 1024),
-                                "wall_s": data["wall_s"],
-                                "errors": data["errors"],
-                            })
+        print("\n=== WARM PATH PATTERNS ===")
+        _run_pattern_group(WARM_PATTERNS, args, ring, results)
     finally:
         ring.close()
+
+    # Cold patterns (reconnect for clean channel state)
+    if COLD_PATTERNS_LIST:
+        ring = connect(args.shm_path, ready_timeout=10.0)
+        try:
+            print("\n=== COLD PATH PATTERNS (SSD → GPU) ===")
+            _run_pattern_group(COLD_PATTERNS_LIST, args, ring, results)
+        finally:
+            ring.close()
 
     # Print summary table
     print(f"\n\n{'='*90}")
@@ -877,52 +987,72 @@ def cmd_full(args):
         print(f"\nCSV written to: {args.output}")
 
 
+def _run_pattern_group(pattern_names, args, ring, results):
+    """Run a group of patterns across object sizes and batch sizes."""
+    for obj_cfg in OBJECT_SIZE_CONFIGS:
+        print(f"\n--- Object size: {obj_cfg['label']} ---")
+        for pattern_name in pattern_names:
+            pattern_path = resolve_pattern(pattern_name, args.patterns_dir)
+            for bs in BATCH_SIZES:
+                overrides = {
+                    "num_layers": str(obj_cfg["num_layers"]),
+                    "kv_bytes_per_token_per_layer": str(obj_cfg["kv_bytes_per_token_per_layer"]),
+                    "batch_size": str(bs),
+                }
+                try:
+                    pattern = WorkloadPattern(pattern_path, overrides)
+                except Exception:
+                    continue
+                runner = BenchRunner(
+                    pattern=pattern, ring=ring, gpu_id=args.gpu,
+                    warmup_ops=args.warmup, min_duration=args.min_duration,
+                    batch_size_override=bs,
+                )
+                try:
+                    report = runner.run()
+                except Exception as e:
+                    print(f"    ERROR: {pattern_name} bs={bs}: {e}")
+                    continue
+                if report:
+                    for phase_op, data in report.items():
+                        results.append({
+                            "pattern": pattern_name,
+                            "object_size": obj_cfg["label"],
+                            "batch_size": bs,
+                            "phase_op": phase_op,
+                            "ops": data["ops"],
+                            "throughput_gbps": data["throughput_gbps"],
+                            "avg_us": data["avg_us"],
+                            "p50_us": data["p50_us"],
+                            "p99_us": data["p99_us"],
+                            "total_mb": data["total_bytes"] / (1024 * 1024),
+                            "wall_s": data["wall_s"],
+                            "errors": data["errors"],
+                        })
+
+
 def run_full_sweep(args):
     """Run the full sweep and return results list."""
-    ring = connect(args.shm_path, ready_timeout=10.0)
     results = []
+
+    # Warm patterns first (data stays in memory tier between ops)
+    ring = connect(args.shm_path, ready_timeout=10.0)
     try:
-        for obj_cfg in OBJECT_SIZE_CONFIGS:
-            print(f"\n--- Object size: {obj_cfg['label']} ---")
-            for pattern_name in CORE_PATTERNS:
-                pattern_path = resolve_pattern(pattern_name, args.patterns_dir)
-                for bs in BATCH_SIZES:
-                    overrides = {
-                        "num_layers": str(obj_cfg["num_layers"]),
-                        "kv_bytes_per_token_per_layer": str(obj_cfg["kv_bytes_per_token_per_layer"]),
-                        "batch_size": str(bs),
-                    }
-                    try:
-                        pattern = WorkloadPattern(pattern_path, overrides)
-                    except Exception:
-                        continue
-                    runner = BenchRunner(
-                        pattern=pattern, ring=ring, gpu_id=args.gpu,
-                        warmup_ops=args.warmup, min_duration=args.min_duration,
-                    )
-                    try:
-                        report = runner.run()
-                    except Exception as e:
-                        print(f"    ERROR: {pattern_name} bs={bs}: {e}")
-                        continue
-                    if report:
-                        for phase_op, data in report.items():
-                            results.append({
-                                "pattern": pattern_name,
-                                "object_size": obj_cfg["label"],
-                                "batch_size": bs,
-                                "phase_op": phase_op,
-                                "ops": data["ops"],
-                                "throughput_gbps": data["throughput_gbps"],
-                                "avg_us": data["avg_us"],
-                                "p50_us": data["p50_us"],
-                                "p99_us": data["p99_us"],
-                                "total_mb": data["total_bytes"] / (1024 * 1024),
-                                "wall_s": data["wall_s"],
-                                "errors": data["errors"],
-                            })
+        print("\n=== WARM PATH PATTERNS ===")
+        _run_pattern_group(WARM_PATTERNS, args, ring, results)
     finally:
         ring.close()
+
+    # Cold patterns second (SSD→GPU; each run calls clear_memory_tier)
+    # Reconnect to ensure clean channel state after warm patterns
+    if COLD_PATTERNS_LIST:
+        ring = connect(args.shm_path, ready_timeout=10.0)
+        try:
+            print("\n=== COLD PATH PATTERNS (SSD → GPU) ===")
+            _run_pattern_group(COLD_PATTERNS_LIST, args, ring, results)
+        finally:
+            ring.close()
+
     return results
 
 

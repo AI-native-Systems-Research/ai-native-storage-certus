@@ -57,6 +57,7 @@ phases:
     keys: selected_pages
     order: random
     repeat: ceil(total_pages * selection_ratio)
+    batch_size: ceil(total_pages * selection_ratio)
 measure:
 - phase: selective-load
   operation: load
