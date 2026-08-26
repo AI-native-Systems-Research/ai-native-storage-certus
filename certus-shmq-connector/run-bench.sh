@@ -105,8 +105,7 @@ fi
 # in resolve_workload — masked the corpus default, so min-turns 2 still ran 450
 # convs. An explicit NUM_CONVS in the environment always wins.
 if [[ -z "${NUM_CONVS}" ]]; then
-    _mx_nc="${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}"
-    if [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${_mx_nc}" == "12" ]]; then
+    if [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
         NUM_CONVS=450     # exactly-12/12 subset
     else
         NUM_CONVS=94145   # everything else -> whole corpus (= _SHAREGPT_CORPUS_CONVS; load_convs caps here)
