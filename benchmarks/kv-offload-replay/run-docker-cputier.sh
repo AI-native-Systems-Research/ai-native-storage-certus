@@ -35,6 +35,16 @@ require_image "$IMAGE"
 [[ -f "$DRIVER" ]] || { echo "error: driver not found at ${DRIVER}" >&2; exit 1; }
 mkdir -p "$DISK_DIR_HOST"
 
+# The driver was refactored to import sibling modules (run_multiturn_common,
+# run_multiturn_sync_batched, and run_multiturn_async for the async path). The
+# baked images ship only run_multiturn_offloading.py under /workspace/bench, so
+# bind-mount every helper that exists next to the driver — otherwise the mounted
+# (newer) driver dies with ModuleNotFoundError.
+HELPER_MOUNTS=()
+for _h in run_multiturn_common.py run_multiturn_sync_batched.py run_multiturn_async.py; do
+  [[ -f "${SCRIPT_DIR}/${_h}" ]] && HELPER_MOUNTS+=( -v "${SCRIPT_DIR}/${_h}:/workspace/bench/${_h}:z" )
+done
+
 run_container "$LOG" "$IMAGE" \
   --shm-size "${SHM_BYTES}" \
   -e "CPU_BYTES=${CPU_BYTES}" \
@@ -42,4 +52,5 @@ run_container "$LOG" "$IMAGE" \
   -e "DISK_READ_THREADS=${DISK_READ_THREADS}" \
   -e "DISK_WRITE_THREADS=${DISK_WRITE_THREADS}" \
   -v "${DRIVER}:/workspace/bench/run_multiturn_offloading.py:z" \
+  "${HELPER_MOUNTS[@]}" \
   -v "${DISK_DIR_HOST}:${DISK_DIR_CTR}:z"

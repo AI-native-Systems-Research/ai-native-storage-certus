@@ -95,6 +95,19 @@ if [[ "${WORKLOAD_NAME}" == "sharegpt" ]]; then
         exit 2
     fi
 fi
+# Optional dataset override (host path). When set, mount it read-only and point
+# DATASET_PATH at it instead of the image's baked sharegpt_12turn_450.json —
+# lets a run use a larger conversation set (e.g. 10000 convs from sharegpt_v3)
+# without an image rebuild. Empty = baked dataset.
+DATASET_HOST="${DATASET_HOST:-}"
+# ASYNC_SRC — optional host path to run_multiturn_async.py, bind-mounted over the
+# copy baked into the image at /workspace/benchmarks/kv-offload-replay/. Lets an
+# edit to the async execution model (e.g. the closed-loop ACTIVE_SESSIONS
+# scheduler) take effect WITHOUT rebuilding the image. Empty = baked module.
+ASYNC_SRC="${ASYNC_SRC:-}"
+# ACTIVE_SESSIONS — forwarded to the driver. WORKLOAD_MODE=async only: >0 keeps
+# that many conversations active (closed loop, admit-on-finish); 0 = open loop.
+ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-0}"
 
 # This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
 # needs explicit store paths. Override or unset for a default install.
@@ -230,6 +243,36 @@ if [[ -n "${WORKLOAD_NAME}" ]]; then
     fi
 fi
 
+# ── Async-helper override mount (only if ASYNC_SRC set) ──
+# The async execution model lives in run_multiturn_async.py, baked into the image
+# at /workspace/benchmarks/kv-offload-replay/. Mounting a host copy over it runs
+# an edited scheduler (e.g. ACTIVE_SESSIONS closed loop) without a rebuild — same
+# :z,ro rationale as the workload mount.
+async_mount=()
+if [[ -n "${ASYNC_SRC}" ]]; then
+    if [[ -f "${ASYNC_SRC}" ]]; then
+        async_mount+=(-v "${ASYNC_SRC}:/workspace/benchmarks/kv-offload-replay/run_multiturn_async.py:z,ro")
+        echo "[run-bench] async-helper override: ${ASYNC_SRC}" >&2
+    else
+        echo "warning: ASYNC_SRC=${ASYNC_SRC} not found — using image's baked async helper." >&2
+    fi
+fi
+
+# ── Dataset override mount (only if DATASET_HOST set) ──
+# Same :z,ro rationale as the workload mount; container path is fixed and the
+# DATASET_PATH env below points the driver at it.
+dataset_mount=()
+dataset_env=()
+if [[ -n "${DATASET_HOST}" ]]; then
+    if [[ -f "${DATASET_HOST}" ]]; then
+        dataset_mount+=(-v "${DATASET_HOST}:/workspace/data/replay-dataset.json:z,ro")
+        dataset_env+=(-e "DATASET_PATH=/workspace/data/replay-dataset.json")
+        echo "[run-bench] dataset override: ${DATASET_HOST}" >&2
+    else
+        echo "warning: DATASET_HOST=${DATASET_HOST} not found — using image's baked dataset." >&2
+    fi
+fi
+
 echo "[run-bench] image=${IMAGE} gpu=${GPU} shm_path=${SHM_PATH}"
 echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL} tensor_parallel_size=${TENSOR_PARALLEL_SIZE}"
 
@@ -247,11 +290,15 @@ exec command podman "${store_flags[@]}" run --rm \
     "${workload_mount[@]}" \
     "${connector_mount[@]}" \
     "${workload_name_env[@]}" \
+    "${async_mount[@]}" \
     "${cache_mount[@]}" \
+    "${dataset_mount[@]}" \
+    "${dataset_env[@]}" \
     "${hf_env[@]}" \
     -e "SHM_PATH=${SHM_PATH}" \
     -e "NUM_CONVS=${NUM_CONVS}" \
     -e "MAX_ROUNDS=${MAX_ROUNDS}" \
+    -e "ACTIVE_SESSIONS=${ACTIVE_SESSIONS}" \
     -e "MODEL=${MODEL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \

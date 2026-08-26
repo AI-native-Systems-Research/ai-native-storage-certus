@@ -76,6 +76,11 @@ if __name__ == "__main__":
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 150))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))
+    # ACTIVE_SESSIONS — WORKLOAD_MODE=async only. >0 = closed loop: keep this many
+    # conversations active, admitting the next as one finishes (steady-state
+    # concurrency); 0 (default) = open loop (all launched at once). Keep
+    # <= MAX_NUM_SEQS so the driver, not the engine queue, is the concurrency gate.
+    ACTIVE_SESSIONS = int(os.environ.get("ACTIVE_SESSIONS", 0))
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
     # Multi-GPU: shard each layer's weights/KV across TENSOR_PARALLEL_SIZE GPUs
     # (default 1 = single GPU). PIPELINE_PARALLEL_SIZE splits layers into stages
@@ -253,6 +258,7 @@ if __name__ == "__main__":
             disk_rw_bytes=io_rw_bytes,
             session_id_fn=_session_id_fn,
             skip_empty=True,
+            active_sessions=ACTIVE_SESSIONS,
             summary_base={
                 "model": MODEL, "shm_path": SHM_PATH,
                 "max_model_len": MAX_MODEL_LEN, "output_tokens": OUTPUT_TOKENS,

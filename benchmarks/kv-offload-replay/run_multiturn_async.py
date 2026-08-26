@@ -64,15 +64,25 @@ async def get_tokenizer(engine):
 async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds,
                     n_tokens, skip_empty=False, session_id_fn=None,
                     sampler=None, sample_hz=1.0, on_turn_end=None,
-                    progress_interval=0.0):
+                    progress_interval=0.0, active_sessions=0):
     """Drive the same multi-turn workload as one coroutine per conversation.
 
-    Every conversation is launched at once; within a coroutine its turns run
-    sequentially (each turn's prompt is the running context + the next human
-    turn, exactly as ``run_multiturn_sync_batched.run_batched`` builds it). vLLM's
-    ``max_num_seqs`` bounds how many run concurrently — the rest queue in WAITING
-    — so this is the max-concurrency analogue of the batched rounds, not a
-    behavioral change to the workload itself.
+    Within a coroutine a conversation's turns run sequentially (each turn's
+    prompt is the running context + the next human turn, exactly as
+    ``run_multiturn_sync_batched.run_batched`` builds it).
+
+    Two admission models, selected by ``active_sessions``:
+
+    * ``active_sessions=0`` (default) — **open loop**: every conversation is
+      launched at once and vLLM's ``max_num_seqs`` bounds how many run
+      concurrently, the rest queue in WAITING. The max-concurrency analogue of
+      the batched rounds; unchanged historical behavior.
+    * ``active_sessions=N`` (> 0) — **closed loop**: keep exactly ``N``
+      conversations active at a time (a fixed pool of ``N`` workers pulls the
+      next conversation from the backlog whenever one finishes all its turns),
+      so a new session is admitted only as a running one retires — steady-state
+      concurrency rather than a load-everything-up-front burst. ``N`` should be
+      ``<= max_num_seqs`` so the driver, not the engine queue, is the gate.
 
     Each turn issues a unique ``request_id=f"{conv}:{turn}"`` and consumes
     ``engine.generate`` to the finished output, recording a turn record
@@ -170,12 +180,44 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
                   f"{len(active)} in flight{spread}",
                   file=sys.stderr, flush=True)
 
+    async def worker(pull):
+        """Closed-loop worker: run conversations to completion, one after the
+        next, until the shared backlog is drained. ``pull`` hands back the next
+        (index, conv) or None. Keeping a fixed number of these coroutines alive
+        holds the active-session count constant."""
+        while True:
+            item = pull()
+            if item is None:
+                return
+            i, conv = item
+            await run_conv(i, conv)
+
     t_start = time.perf_counter()
     sampler_task = asyncio.create_task(sample_loop()) if sampler else None
     progress_task = (asyncio.create_task(progress_loop())
                      if progress_interval and progress_interval > 0 else None)
     try:
-        await asyncio.gather(*(run_conv(i, c) for i, c in enumerate(convs)))
+        if active_sessions and active_sessions > 0:
+            # Closed loop: a fixed pool of `active_sessions` workers. No await
+            # between reading and advancing `nxt`, so a plain counter is safe
+            # under the single-threaded event loop (no lock needed).
+            nxt = 0
+            n_workers = min(active_sessions, len(convs))
+
+            def pull():
+                nonlocal nxt
+                if nxt >= len(convs):
+                    return None
+                i = nxt
+                nxt += 1
+                return i, convs[i]
+
+            print(f"[run] async closed loop: {n_workers} active sessions over "
+                  f"{len(convs)} conversations (admit-on-finish)",
+                  file=sys.stderr, flush=True)
+            await asyncio.gather(*(worker(pull) for _ in range(n_workers)))
+        else:
+            await asyncio.gather(*(run_conv(i, c) for i, c in enumerate(convs)))
     finally:
         for task in (sampler_task, progress_task):
             if task is not None:
@@ -192,13 +234,16 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
         "elapsed": elapsed,
         "turn_records": turn_records,
         "samples": samples,
+        "active_sessions": (min(active_sessions, len(convs))
+                            if active_sessions and active_sessions > 0
+                            else len(convs)),
     }
 
 
 def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
                      max_rounds, capture_metrics=True, disk_rw_bytes=None,
                      session_id_fn=None, skip_empty=False, summary_base=None,
-                     n_tokens_flavor="input_ids"):
+                     n_tokens_flavor="input_ids", active_sessions=0):
     """Run the async execution model end-to-end and return a summary dict.
 
     This is the single entry point a backend driver's ``WORKLOAD_MODE=async``
@@ -245,10 +290,16 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
         progress_interval = 10.0
     _cadence = (f", progress every {progress_interval:g}s"
                 if progress_interval > 0 else "")
-    print("[run] WORKLOAD_MODE=async — one coroutine per conversation "
-          f"(max_num_seqs bounds the running batch); "
-          f"{len(convs)} conversations{_cadence}",
-          file=sys.stderr, flush=True)
+    if active_sessions and active_sessions > 0:
+        print(f"[run] WORKLOAD_MODE=async — closed loop, {active_sessions} "
+              f"active sessions (driver admits a new conversation on finish); "
+              f"{len(convs)} conversations{_cadence}",
+              file=sys.stderr, flush=True)
+    else:
+        print("[run] WORKLOAD_MODE=async — one coroutine per conversation "
+              f"(max_num_seqs bounds the running batch); "
+              f"{len(convs)} conversations{_cadence}",
+              file=sys.stderr, flush=True)
 
     def _disk():
         return disk_rw_bytes() if disk_rw_bytes is not None else (None, None)
@@ -274,6 +325,7 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
             session_id_fn=session_id_fn,
             sampler=sampler if capture_metrics else None,
             progress_interval=progress_interval,
+            active_sessions=active_sessions,
         )
 
     result = asyncio.run(_amain())
@@ -351,6 +403,7 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
         "num_rounds": result["rounds_done"],
         "total_generations": result["total_generations"],
         "mode": "async",
+        "active_sessions": result.get("active_sessions"),
         "turn_latency_p50": _pct(lat, 0.50),
         "turn_latency_p90": _pct(lat, 0.90),
         "turn_latency_p99": _pct(lat, 0.99),

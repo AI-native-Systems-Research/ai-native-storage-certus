@@ -441,6 +441,99 @@ a `--only` subset), `<logdir>/results.json` (aggregate), and the comparison tabl
 stdout. Wrapping the invocation in `time` (as above) captures total wall-clock across
 all selected phases including the host reconfiguration.
 
+## Closed-loop head-to-head by hand (cputier-fixed vs certus-shmq)
+
+`profile_all.sh` above is the automated all-backends sweep. The two stability
+scripts below are the manual path for the **closed-loop** live comparison used
+for the fixed-concurrency head-to-head: **cputier-fixed** (vLLM 0.26.0 native
+CPU+fs tiering with the baked tiering fix — image `certus-offload-bench-fix026`)
+vs **certus-shmq** (host `certus-server` over SPDK NVMe + shmq client container).
+
+### Open-loop vs closed-loop
+
+The workload driver has two modes, selected by `ACTIVE_SESSIONS`:
+
+- `ACTIVE_SESSIONS=0` (default) — **open-loop**: every conversation is launched
+  up front and the driver waits for all to finish (historical `gather`-all).
+- `ACTIVE_SESSIONS=N` — **closed-loop**: a fixed pool of `N` worker coroutines
+  keeps exactly `N` conversations in flight; each finishing conversation admits
+  the next from a shared counter (admit-on-finish). This holds a steady
+  concurrency level regardless of how many total conversations (`NUM_CONVS`) are
+  queued, which is what makes the two arms comparable. Requires
+  `WORKLOAD_MODE=async`.
+
+For a fair steady-state comparison, `MAX_NUM_SEQS` must be `>= ACTIVE_SESSIONS`
+(otherwise vLLM's own WAITING queue, not the driver's session pool, becomes the
+concurrency gate).
+
+### Step 1 — (shmq only) rebuild the client image first
+
+The shmq image bakes the driver **and** its three helper modules
+(`run_multiturn_common.py`, `run_multiturn_sync_batched.py`,
+`run_multiturn_async.py`) via `COPY` lines in `certus-shmq-connector/Dockerfile`.
+An older image can predate those lines and be missing
+`/workspace/benchmarks/kv-offload-replay/` entirely, which surfaces at runtime as
+`ModuleNotFoundError: No module named 'run_multiturn_common'`. Rebuild so the
+image is self-consistent (build context is the repo root):
+
+```bash
+podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
+    build --build-arg VLLM_VERSION=0.26.0 \
+    -f certus-shmq-connector/Dockerfile -t certus-shmq-bench .
+```
+
+> **After rebuilding, do NOT pass `WORKLOAD_SRC` or `ASYNC_SRC`.** Those single-file
+> bind-mounts exist only as an emergency override. Mounting one file into the
+> `/workspace/benchmarks/kv-offload-replay/` dir when that dir does *not* already
+> exist in the image makes podman create a fresh dir containing **only** that file,
+> shadowing the baked siblings and re-triggering the `ModuleNotFoundError`. With a
+> current image all the helpers are baked, so leave both variables unset.
+
+The shmq arm also needs (not done by these scripts — they require `sudo`; see
+`certus-shmq-connector/setup-host.sh` or `tools/configure-bench.sh`): the
+`certus-server` binary built (`cargo build --release -p certus-server`), NVMe
+devices `0000:{61,62,63,64}:00.0` bound to `vfio-pci`, and 1G hugepages reserved
+on NUMA node 0.
+
+### Step 2 — run each arm
+
+Both scripts take an output-dir name as `$1` and write `<out>/progress.log` with a
+`RUN_DONE … gens=… elapsed=… gen_per_s=…` line per run. Use `RUNS=1` for a single
+timed run (raise it for stability/CoV sampling). Matched-tier fairness: the
+cputier `CPU_BYTES` must equal the shmq `MEM_TIER_SIZE` (both `13G` for the
+head-to-head).
+
+```bash
+cd benchmarks/kv-offload-replay
+
+# Arm 1 — cputier-fixed (native CPU+fs tiering, patched image)
+RUNS=1 NUM_CONVS=1000 MAX_ROUNDS=0 WORKLOAD_MODE=async ACTIVE_SESSIONS=60 \
+    DATASET_HOST=/home/dwaddington/certus/data/sharegpt_v3.json \
+    bash ./run_cputier_patched_stability.sh cl60-cputier-$(date +%Y%m%d_%H%M%S)
+
+# Arm 2 — certus-shmq (SPDK NVMe + shmq client)   [image rebuilt in Step 1]
+RUNS=1 NUM_CONVS=1000 MAX_ROUNDS=0 WORKLOAD_MODE=async ACTIVE_SESSIONS=60 \
+    DATASET_HOST=/home/dwaddington/certus/data/sharegpt_v3.json \
+    bash ./run_certus_stability.sh cl60-shmq-$(date +%Y%m%d_%H%M%S)
+```
+
+`MAX_ROUNDS=0` replays every human turn in each conversation; set a positive value
+to cap turns per conversation.
+
+### Step 3 (optional) — both arms back-to-back
+
+`run_cl60_headtohead.sh` runs cputier then shmq sequentially (they share the GPU,
+so they must not overlap), stamping both output dirs with one timestamp:
+
+```bash
+NUM_CONVS=1000 ACTIVE_SESSIONS=60 bash ./run_cl60_headtohead.sh
+```
+
+Overridable env: `NUM_CONVS`, `ACTIVE_SESSIONS`, `MAX_ROUNDS`, `DS` (dataset path),
+`STAMP`. It does **not** rebuild the shmq image — do Step 1 first if the image is
+stale. Compare the two `RUN_DONE … gen_per_s=…` lines in
+`cl60-cputier-<stamp>/progress.log` and `cl60-shmq-<stamp>/progress.log`.
+
 ## Other datasets
 
 `--num-conversations` is ShareGPT-specific (the filter expects the ShareGPT V3 schema with `id` and `conversations[{from,value}]`). For other datasets, skip the flag and use `vllm bench throughput`'s native dataset options (`--dataset-name random`, `--dataset-name sonnet`, a custom `--dataset-path`, etc.) — the tracing connectors do not care where the prompts come from.
