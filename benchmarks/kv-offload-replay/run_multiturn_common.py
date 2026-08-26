@@ -304,7 +304,11 @@ def resolve_workload(default_dataset, default_num_convs):
     entrypoint execs, so the two must not collide."""
     dataset = default_dataset
     num_convs = default_num_convs
-    explicit_path = os.environ.get("DATASET_PATH")
+    # An empty/whitespace DATASET_PATH counts as unset: the bench images bake
+    # DATASET_PATH=<450x12 sharegpt>, so an orchestrator selecting a self-generating
+    # workload (e.g. long-doc-qa) blanks it with `-e DATASET_PATH=` to stop the
+    # baked path winning here. Treat that as "no explicit path" so WORKLOAD_NAME wins.
+    explicit_path = (os.environ.get("DATASET_PATH") or "").strip() or None
 
     workload = os.environ.get("WORKLOAD_NAME", "").strip().lower()
     # Turn bounds only mean anything for the sharegpt workload, so setting either

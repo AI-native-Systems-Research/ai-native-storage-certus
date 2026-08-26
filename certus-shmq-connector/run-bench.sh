@@ -251,6 +251,14 @@ if [[ -n "${WORKLOAD_NAME}" ]]; then
         else
             echo "warning: ${corpus} not found — min-turns ${SHAREGPT_MIN_TURNS} needs the full ShareGPT corpus (data/sharegpt/*.json); falling back to the baked 450x12 set." >&2
         fi
+    elif [[ "${WORKLOAD_NAME}" != "sharegpt" ]]; then
+        # A self-generating workload (e.g. long-doc-qa builds its own dataset in
+        # the container). The image bakes DATASET_PATH=<450x12 sharegpt>, and an
+        # explicit DATASET_PATH WINS over WORKLOAD_NAME in resolve_workload — so
+        # blank it, else the named workload is silently ignored and the baked
+        # 450-conv ShareGPT set runs instead. An empty value reads as unset there.
+        workload_name_env+=(-e "DATASET_PATH=")
+        echo "[run-bench] workload=${WORKLOAD_NAME}: clearing baked DATASET_PATH" >&2
     fi
 fi
 

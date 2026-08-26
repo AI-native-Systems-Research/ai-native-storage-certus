@@ -806,6 +806,13 @@ workload_container_args() {  # -> prints podman args, one per line
         else
             warn "min-turns ${SHAREGPT_MIN_TURNS} needs the full corpus at ${REPO_ROOT}/data/sharegpt (data/sharegpt/*.json) — not found; run will fall back to the baked 450x12 set"
         fi
+    elif [[ "$WORKLOAD_NAME" != "sharegpt" ]]; then
+        # A self-generating workload (e.g. long-doc-qa builds its own dataset in
+        # the container). Every image bakes DATASET_PATH=<450x12 sharegpt>, and an
+        # explicit DATASET_PATH WINS over WORKLOAD_NAME in resolve_workload — so
+        # unless we blank it, the named workload is silently ignored and the baked
+        # 450-conv ShareGPT set runs instead. An empty value reads as unset there.
+        printf '%s\n' "-e" "DATASET_PATH="
     fi
 }
 
