@@ -419,10 +419,37 @@ variants run the same thing:
 | Flag | Env forwarded | Meaning |
 |------|---------------|---------|
 | `--workload-mode <batched\|async>` (or `--async`) | `WORKLOAD_MODE` | Execution model. `batched` (default) runs the synchronous per-round `generate()` loop; `async` runs one vLLM coroutine per conversation on a V1 `AsyncLLM` (`max_num_seqs` bounds the running batch, the rest queue). Same engine config either way; in async mode `--max-rounds` becomes a per-conversation turn cap. |
-| `--workload <name>` | `WORKLOAD_NAME` | Named dataset. Empty (default) = each driver's baked 450×12 dataset. `sharegpt` selects the ShareGPT multi-turn workload by human-turn count (see below). |
+| `--workload <name>` | `WORKLOAD_NAME` | Named dataset. Empty (default) = each driver's baked 450×12 dataset. `sharegpt` selects the ShareGPT multi-turn workload by human-turn count (see below). `long-doc-qa` selects the synthetic long-document QA workload (see below). |
 | `--min-turns <n>` / `--max-turns <n>` | `SHAREGPT_MIN_TURNS` / `SHAREGPT_MAX_TURNS` | Human-turn window for the `sharegpt` workload — **passing either implies `--workload sharegpt`**. Only two configs are prepared: `12`/`12` (default) = the baked 450×12 subset (the container variants are then a no-op), and `1`/`1` = the **full 94,145-conversation corpus** (`data/sharegpt/*.json`, mounted read-only and capped by `--num-convs`). Any other pair errors — use an explicit `DATASET_PATH` for other turn counts. `--max-turns` mirrors `--min-turns` when unset. |
 
 The corpus itself is documented in [`../../data/sharegpt/README.md`](../../data/sharegpt/README.md).
+
+### `long-doc-qa` — synthetic long-document QA (KV-cache stress)
+
+`--workload long-doc-qa` swaps the ShareGPT content for a synthetic long-document
+workload while keeping **everything else the same** — same drivers, same
+`profile_all.sh`, same execution models (`--workload-mode batched|async`), same
+render tools. Each conversation is one long, **per-document-unique** document
+followed by short follow-up questions: turn 0's prompt is `document + Q1`, a large
+reused prefix the accumulating-context loop caches once and every later turn
+reuses. The distinct working set is therefore ≈ `num_docs × doc_tokens` of KV,
+sized to overflow the GPU cache and drive the offload tier. (Unlike upstream
+[`../long-doc-qa`](../long-doc-qa), whose documents are an identical `"hi hi …"`
+string — those dedup at the KV-block layer — each document here draws its filler
+independently, so the blocks are distinct and actually occupy the tier.)
+
+The dataset is generated deterministically to a temp file at selection time (no
+committed artifact, regenerated per container), so no driver changes are needed.
+Shape knobs (all env, forwarded to every backend):
+
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `LONGDOC_DOC_TOKENS` | `4000` | Approx document length (tokens ≈ words). The default fits the default 8192 window with all 8 turns and headroom; **raise it together with `--max-model-len`** or later turns overflow the budget and the conversation is retired (the loop drops on overflow, it does not truncate). |
+| `LONGDOC_QUESTIONS` | `8` | Human turns per document (turn 0 = doc + Q1, then follow-ups). |
+| `LONGDOC_NUM_DOCS` | `1000` | Documents in the generated corpus. `--num-convs` caps this at run time and defaults to it for this workload. |
+| `LONGDOC_SEED` | `1234` | RNG seed for a reproducible corpus. |
+
+Example: `LONGDOC_DOC_TOKENS=12000 ./profile_all.sh --workload long-doc-qa --max-model-len 16384 …`
 The same selection works outside `profile_all.sh`: any driver honours
 `WORKLOAD_NAME` / `WORKLOAD_MODE` / `DATASET_PATH` / `NUM_CONVS` directly (see
 `run_multiturn_common.resolve_workload`).
