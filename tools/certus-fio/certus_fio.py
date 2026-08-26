@@ -1055,6 +1055,66 @@ def run_full_sweep(args):
     return results
 
 
+def detect_hardware():
+    """Detect hardware environment for report from system + running server."""
+    import subprocess
+    rows = []
+
+    try:
+        out = subprocess.check_output(["grep", "-m1", "model name", "/proc/cpuinfo"], text=True)
+        cpu = out.split(":", 1)[1].strip()
+        rows.append(("CPU", cpu))
+    except Exception:
+        rows.append(("CPU", "unknown"))
+
+    try:
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+            text=True,
+        ).strip().split("\n")[0]
+        rows.append(("GPU", out))
+    except Exception:
+        rows.append(("GPU", "unknown"))
+
+    # Detect from running certus-server process
+    num_drives = 0
+    mem_tier = ""
+    try:
+        out = subprocess.check_output(["pgrep", "-a", "certus-server"], text=True)
+        import re
+        drives = re.findall(r"--device-pci\s+(\S+)", out)
+        num_drives = len(drives)
+        mt = re.search(r"--memory-tier-size\s+(\S+)", out)
+        if mt:
+            mem_tier = mt.group(1)
+    except Exception:
+        pass
+
+    try:
+        out = subprocess.check_output(["lspci"], text=True)
+        nvme_lines = [l for l in out.split("\n") if "Non-Volatile" in l]
+        if nvme_lines:
+            model = nvme_lines[0].split(":", 2)[-1].strip()
+            count = num_drives if num_drives else len(nvme_lines)
+            rows.append(("NVMe", f"{count}&times; {model}"))
+        else:
+            rows.append(("NVMe", "not detected"))
+    except Exception:
+        rows.append(("NVMe", "unknown"))
+
+    if mem_tier:
+        rows.append(("Memory tier", f"{mem_tier} (SPDK hugepages, CUDA-pinned)"))
+
+    try:
+        ring = connect(DEFAULT_SHM_PATH, ready_timeout=3.0)
+        rows.append(("Transport", f"shmq &middot; {ring.channel_count} channels"))
+        ring.close()
+    except Exception:
+        pass
+
+    return rows
+
+
 def analyze_results(results):
     """Compute optimization findings from sweep results. All thresholds are relative, not hardcoded."""
     findings = []
@@ -1171,6 +1231,13 @@ def analyze_results(results):
             "impact": "No action needed on warm load path",
         })
 
+    # Hardware detection
+    hw_rows = detect_hardware()
+    hw_table = "\n".join(
+        f'<tr><td style="color:var(--text-3)">{k}</td><td>{v}</td></tr>'
+        for k, v in hw_rows
+    )
+
     return {
         "peak_serial_store": peak_serial_store,
         "peak_batched_store": peak_batched_store,
@@ -1182,6 +1249,7 @@ def analyze_results(results):
         "total_errors": total_errors,
         "contention_errors": contention_errors,
         "findings": findings,
+        "hw_table": hw_table,
     }
 
 
@@ -1241,7 +1309,14 @@ table.data td.num{{font-family:'JetBrains Mono',monospace;text-align:right}}
 .bar{{height:18px;border-radius:3px;transition:width .3s}}
 </style></head><body>
 <h1>Certus Storage Performance Report</h1>
-<p class="subtitle">Generated {datetime.now().strftime('%Y-%m-%d %H:%M')} &middot; 4 NVMe (NUMA 0) &middot; 4 GiB memory tier &middot; shmq</p>
+<p class="subtitle">Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+
+<h3>Hardware</h3>
+<div class="chart-box" style="font-size:.82rem;padding:1rem 1.25rem">
+<table class="data" style="max-width:600px">
+{analysis['hw_table']}
+</table>
+</div>
 
 <h2>Key Results (5 MiB objects, Llama-70B)</h2>
 <div class="chart-box">
