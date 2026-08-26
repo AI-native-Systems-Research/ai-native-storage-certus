@@ -104,6 +104,14 @@ WORKLOAD_MODE=batched
 WORKLOAD_NAME=""
 SHAREGPT_MIN_TURNS=""  # min human turns; 2 = full corpus (1 = alias), 12 = 450x12 subset. empty = default (12)
 SHAREGPT_MAX_TURNS=""  # max human turns; empty = mirrors --min-turns (so --min-turns alone works)
+# long-doc-qa (--workload long-doc-qa) shape knobs. Empty = the workload's baked
+# defaults (5000 tok / 8 turns / 1000 docs); set via the environment to tune. All
+# forwarded to every backend; only read when WORKLOAD_NAME=long-doc-qa. Declared
+# here (with :- fallbacks) so `set -u` doesn't trip on an unset knob.
+LONGDOC_DOC_TOKENS="${LONGDOC_DOC_TOKENS:-}"
+LONGDOC_QUESTIONS="${LONGDOC_QUESTIONS:-}"
+LONGDOC_NUM_DOCS="${LONGDOC_NUM_DOCS:-}"
+LONGDOC_SEED="${LONGDOC_SEED:-}"
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
 DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
@@ -182,6 +190,12 @@ Flags (all optional; defaults shown):
                                = the FULL 94,145-conv corpus (data/sharegpt/*.json,
                                mounted in, capped by --num-convs). Any other pair errors;
                                use an explicit DATASET_PATH instead.
+                               "long-doc-qa" = synthetic long-document QA (a large
+                               per-doc-unique prefix + follow-ups; KV-cache stress).
+                               Shape via env LONGDOC_DOC_TOKENS / LONGDOC_QUESTIONS /
+                               LONGDOC_NUM_DOCS / LONGDOC_SEED (defaults 5000/8/1000);
+                               NUM_CONVS defaults to LONGDOC_NUM_DOCS. Big docs need a
+                               matching --max-model-len.
   --min-turns <n>              Min human turns for the sharegpt workload; 2 selects the
                                full corpus (the loader's >=2-turn floor; 1 = legacy
                                alias), 12 the 450x12 subset. Implies --workload
@@ -282,7 +296,13 @@ fi
 # in resolve_workload — masked the corpus default, so --min-turns 2 still ran 450
 # convs. An explicit --num-convs (NUM_CONVS non-empty) always wins.
 if [[ -z "$NUM_CONVS" ]]; then
-    if [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
+    if [[ "$WORKLOAD_NAME" == "long-doc-qa" ]]; then
+        # Draw the whole generated corpus; the workload's own default is
+        # LONGDOC_NUM_DOCS (also 1000), and load_convs caps at NUM_CONVS. Kept as
+        # a literal here (not read from the workload) so the sharegpt-shaped
+        # defaulting below stays untouched for that workload.
+        NUM_CONVS="${LONGDOC_NUM_DOCS:-1000}"
+    elif [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
         NUM_CONVS=450     # exactly-12/12 subset
     else
         NUM_CONVS=94145   # everything else -> whole corpus (= _SHAREGPT_CORPUS_CONVS; load_convs caps here)
@@ -808,6 +828,10 @@ run_container_bench() {  # variant image extra-args...
         -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
         -e "ENFORCE_EAGER=${ENFORCE_EAGER}" \
         -e "WORKLOAD_MODE=${WORKLOAD_MODE}" \
+        -e "LONGDOC_DOC_TOKENS=${LONGDOC_DOC_TOKENS}" \
+        -e "LONGDOC_QUESTIONS=${LONGDOC_QUESTIONS}" \
+        -e "LONGDOC_NUM_DOCS=${LONGDOC_NUM_DOCS}" \
+        -e "LONGDOC_SEED=${LONGDOC_SEED}" \
         -e "HF_HUB_OFFLINE=0" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${wl[@]}" \
@@ -959,6 +983,10 @@ if want certus-spdk; then
             WORKLOAD_NAME="$WORKLOAD_NAME" \
             SHAREGPT_MIN_TURNS="$SHAREGPT_MIN_TURNS" \
             SHAREGPT_MAX_TURNS="$SHAREGPT_MAX_TURNS" \
+            LONGDOC_DOC_TOKENS="$LONGDOC_DOC_TOKENS" \
+            LONGDOC_QUESTIONS="$LONGDOC_QUESTIONS" \
+            LONGDOC_NUM_DOCS="$LONGDOC_NUM_DOCS" \
+            LONGDOC_SEED="$LONGDOC_SEED" \
             HF_CACHE="$HF_CACHE" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \

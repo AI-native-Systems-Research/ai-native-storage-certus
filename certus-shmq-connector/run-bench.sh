@@ -78,6 +78,12 @@ CONNECTOR_SRC="${CONNECTOR_SRC:-}"
 WORKLOAD_NAME="${WORKLOAD_NAME:-}"
 SHAREGPT_MIN_TURNS="${SHAREGPT_MIN_TURNS:-}"
 SHAREGPT_MAX_TURNS="${SHAREGPT_MAX_TURNS:-}"
+# long-doc-qa (WORKLOAD_NAME=long-doc-qa) shape knobs, forwarded to the driver.
+# Empty = the workload's baked defaults; only read when WORKLOAD_NAME=long-doc-qa.
+LONGDOC_DOC_TOKENS="${LONGDOC_DOC_TOKENS:-}"
+LONGDOC_QUESTIONS="${LONGDOC_QUESTIONS:-}"
+LONGDOC_NUM_DOCS="${LONGDOC_NUM_DOCS:-}"
+LONGDOC_SEED="${LONGDOC_SEED:-}"
 # The turn bounds only apply to the sharegpt workload, so setting either without
 # WORKLOAD_NAME implies it — otherwise the passthrough block below adds nothing
 # and the container uses its baked 450x12 DATASET_PATH.
@@ -105,7 +111,9 @@ fi
 # in resolve_workload — masked the corpus default, so min-turns 2 still ran 450
 # convs. An explicit NUM_CONVS in the environment always wins.
 if [[ -z "${NUM_CONVS}" ]]; then
-    if [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
+    if [[ "${WORKLOAD_NAME}" == "long-doc-qa" ]]; then
+        NUM_CONVS="${LONGDOC_NUM_DOCS:-1000}"   # whole generated corpus; load_convs caps here
+    elif [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
         NUM_CONVS=450     # exactly-12/12 subset
     else
         NUM_CONVS=94145   # everything else -> whole corpus (= _SHAREGPT_CORPUS_CONVS; load_convs caps here)
@@ -273,5 +281,9 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
     -e "ENFORCE_EAGER=${ENFORCE_EAGER:-0}" \
     -e "WORKLOAD_MODE=${WORKLOAD_MODE:-batched}" \
+    -e "LONGDOC_DOC_TOKENS=${LONGDOC_DOC_TOKENS}" \
+    -e "LONGDOC_QUESTIONS=${LONGDOC_QUESTIONS}" \
+    -e "LONGDOC_NUM_DOCS=${LONGDOC_NUM_DOCS}" \
+    -e "LONGDOC_SEED=${LONGDOC_SEED}" \
     -e "DTYPE=${DTYPE:-float16}" \
     "${IMAGE}"
