@@ -71,49 +71,36 @@ where
 
 /// Notify the dispatcher that each previously reserved slot is now populated.
 ///
-/// Returns the number of keys successfully marked so the caller can update
-/// `entry_count`. Keys for which `populated_fn` returns `false` are skipped
-/// silently (matching the existing best-effort behaviour in `complete_store`).
-fn notify_slots_populated<P>(
-    cache_keys: &[CacheKey],
-    size: u32,
-    mut populated_fn: P,
-) -> u64
+/// Calls `populated_fn` for every key. Any per-key side effects (such as
+/// updating `entry_count`) should be performed inside `populated_fn`.
+fn notify_slots_populated<P>(cache_keys: &[CacheKey], size: u32, mut populated_fn: P)
 where
-    P: FnMut(CacheKey, u32) -> bool,
+    P: FnMut(CacheKey, u32),
 {
-    let mut count = 0u64;
     for &key in cache_keys {
-        if populated_fn(key, size) {
-            count += 1;
-        }
+        populated_fn(key, size);
     }
-    count
 }
 
 /// Release reserved DRAM slots when a store is aborted.
 ///
-/// Tries `remove_fn` first; falls back to `release_fn` when the key has not
-/// yet been committed. Returns the number of entries successfully removed so
-/// the caller can decrement `entry_count`.
+/// For each key, tries `remove_fn` first; if it returns `false` (key was
+/// never committed to the dispatch-map) `release_fn` is called to free the
+/// raw DRAM reservation.
 fn release_slots_on_failure<Rem, Rel>(
     cache_keys: &[CacheKey],
     mut remove_fn: Rem,
     mut release_fn: Rel,
-) -> u64
+)
 where
     Rem: FnMut(CacheKey) -> bool,
     Rel: FnMut(CacheKey),
 {
-    let mut removed = 0u64;
     for &key in cache_keys {
-        if remove_fn(key) {
-            removed += 1;
-        } else {
+        if !remove_fn(key) {
             release_fn(key);
         }
     }
-    removed
 }
 
 fn submit_store_copies<F>(
@@ -260,29 +247,35 @@ mod tests {
 
     // ── complete_store(success=true): slots marked populated ─────────────────
 
-    /// All keys succeed → populated count equals key count.
+    /// All keys are visited and `populated_fn` is called for each one.
     #[test]
-    fn notify_slots_populated_all_succeed_returns_count() {
+    fn notify_slots_populated_visits_all_keys() {
         let keys: Vec<CacheKey> = vec![10, 20, 30];
         let mut notified = Vec::new();
 
-        let count = notify_slots_populated(&keys, 512, |key, _sz| {
+        notify_slots_populated(&keys, 512, |key, _sz| {
             notified.push(key);
-            true
         });
 
-        assert_eq!(count, 3);
         assert_eq!(notified, keys);
     }
 
-    /// One key fails → that key is skipped silently; others still count.
+    /// Failures inside `populated_fn` are the closure's responsibility; the
+    /// iterator still visits every key regardless.
     #[test]
-    fn notify_slots_populated_partial_failure_skips_silently() {
+    fn notify_slots_populated_visits_all_keys_even_on_partial_failure() {
         let keys: Vec<CacheKey> = vec![10, 20, 30];
+        let mut count = 0u64;
 
-        let count = notify_slots_populated(&keys, 512, |key, _sz| key != 20);
+        notify_slots_populated(&keys, 512, |key, _sz| {
+            // Simulate key 20 failing (e.g. copy_gpu_to_memory_completed error).
+            if key != 20 {
+                count += 1;
+            }
+        });
 
-        assert_eq!(count, 2, "two keys should be counted; the failing one is skipped");
+        // The closure was called for all 3 keys; the caller tracked 2 successes.
+        assert_eq!(count, 2);
     }
 
     // ── complete_store(success=false): DRAM released on abort ────────────────
@@ -294,7 +287,7 @@ mod tests {
         let mut removed = Vec::new();
         let mut released = Vec::new();
 
-        let count = release_slots_on_failure(
+        release_slots_on_failure(
             &keys,
             |key| {
                 removed.push(key);
@@ -303,7 +296,6 @@ mod tests {
             |key| released.push(key),
         );
 
-        assert_eq!(count, 3);
         assert_eq!(removed, keys);
         assert!(released.is_empty());
     }
@@ -317,7 +309,7 @@ mod tests {
         let mut released = Vec::new();
 
         // Only key 6 was committed; the rest were never added to the map.
-        let count = release_slots_on_failure(
+        release_slots_on_failure(
             &keys,
             |key| {
                 if key == 6 {
@@ -330,7 +322,6 @@ mod tests {
             |key| released.push(key),
         );
 
-        assert_eq!(count, 1, "only the removed key counts toward entry_count");
         assert_eq!(removed, vec![6]);
         let mut released_sorted = released.clone();
         released_sorted.sort_unstable();
@@ -619,21 +610,26 @@ impl EngineInner {
         let size = self.gpu_block_size as u32;
 
         if success {
-            let populated = notify_slots_populated(
-                &cache_keys,
-                size,
-                |key, sz| self.dispatcher.copy_gpu_to_memory_completed(key, sz).is_ok(),
-            );
-            self.entry_count.fetch_add(populated, Ordering::Release);
+            notify_slots_populated(&cache_keys, size, |key, sz| {
+                if self.dispatcher.copy_gpu_to_memory_completed(key, sz).is_ok() {
+                    self.entry_count.fetch_add(1, Ordering::Release);
+                }
+            });
         } else {
-            let removed = release_slots_on_failure(
+            release_slots_on_failure(
                 &cache_keys,
-                |key| self.dispatcher.remove(key).is_ok(),
+                |key| {
+                    if self.dispatcher.remove(key).is_ok() {
+                        self.entry_count.fetch_sub(1, Ordering::Release);
+                        true
+                    } else {
+                        false
+                    }
+                },
                 |key| {
                     let _ = self.dispatcher.release_memory(key);
                 },
             );
-            self.entry_count.fetch_sub(removed, Ordering::Release);
         }
         Ok(())
     }
