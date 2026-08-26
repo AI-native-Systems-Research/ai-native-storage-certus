@@ -436,23 +436,28 @@ def fmt_bytes(v, _pos=None):
 
 
 def fmt_rate(rate, funit, stacked=False):
-    """Per-second label for a run-total bar. Bytes families read as B/KiB/…-per
-    second; count families (tokens, tier movements) read as a compact count per
-    second, but keep one/two decimals below 10 so a sub-unit rate (e.g. 0.3
-    evictions/s) doesn't collapse to ``0/s`` under fmt_compact's integer floor.
+    """Per-second label for a run-total bar. The value is rounded to a whole
+    number — bytes read as B/KiB/…-per second (``12 MiB/s``), counts (tokens,
+    tier movements) as a plain or compact count per second. The one exception is
+    a genuinely nonzero sub-unit rate (e.g. 0.3 evictions/s): it keeps a single
+    decimal so it doesn't round down to a misleading ``0/s``.
 
     With ``stacked``, the value and its unit are returned on two lines
-    (``"12.3\\nMiB/s"``) so the horizontal label stays narrow — about as wide as
+    (``"12\\nMiB/s"``) so the horizontal label stays narrow — about as wide as
     its longest single token — and doesn't spill into the neighbouring bar group
     when several series share one group."""
     if funit == "bytes":
-        num = fmt_bytes(rate)
-        val, _, u = num.partition(" ")   # "12.3", " ", "MiB"; u="" if no space
-        unit = (u or "B") + "/s"
-    elif rate < 1:
-        val, unit = f"{rate:.2f}", "/s"
-    elif rate < 10:
-        val, unit = f"{rate:.1f}", "/s"
+        v = float(rate)
+        units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        i = 0
+        while abs(v) >= 1024 and i < len(units) - 1:
+            v /= 1024.0
+            i += 1
+        val, unit = f"{v:.0f}", units[i] + "/s"
+    elif 0 < rate < 0.5:
+        val, unit = f"{rate:.1f}", "/s"   # keep a digit so a real rate isn't "0/s"
+    elif rate < 1000:
+        val, unit = f"{rate:.0f}", "/s"
     else:
         val, unit = fmt_compact(rate), "/s"
     sep = "\n" if stacked else (" " if funit == "bytes" else "")
