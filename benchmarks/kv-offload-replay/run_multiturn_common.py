@@ -166,6 +166,17 @@ def resolve_workload(default_dataset, default_num_convs):
     explicit_path = os.environ.get("DATASET_PATH")
 
     workload = os.environ.get("WORKLOAD_NAME", "").strip().lower()
+    # Turn bounds only mean anything for the sharegpt workload, so setting either
+    # without WORKLOAD_NAME implies it — otherwise SHAREGPT_MIN_TURNS is silently
+    # ignored and the driver keeps its baked 450x12 default (the "asked for the
+    # corpus, still got 450" trap the shell orchestrators already guard against).
+    # This also keeps the 450-conv default tied to the 12/12 config: any other
+    # turn setting now routes through _sharegpt_num_convs (whole corpus) instead
+    # of falling back to default_num_convs.
+    if not workload and (
+        os.environ.get("SHAREGPT_MIN_TURNS") or os.environ.get("SHAREGPT_MAX_TURNS")
+    ):
+        workload = "sharegpt"
     if workload:
         spec = WORKLOADS.get(workload)
         if spec is None:
