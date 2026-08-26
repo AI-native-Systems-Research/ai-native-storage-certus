@@ -99,16 +99,17 @@ if [[ "${WORKLOAD_NAME}" == "sharegpt" ]]; then
 fi
 
 # Default the conversation count from the turn config (mirrors
-# run_multiturn_common._sharegpt_num_convs): 450 only for the exactly-12/12
-# subset, the whole corpus otherwise. Without this the hardcoded 450 default was
-# forwarded as NUM_CONVS and — being the final override in resolve_workload —
-# masked the corpus default, so min-turns 2 still ran 450 convs. An explicit
-# NUM_CONVS in the environment always wins.
+# run_multiturn_common._sharegpt_num_convs): 450 ONLY for the exactly-12/12
+# subset, the whole corpus for every other turn config. Without this the
+# hardcoded 450 default was forwarded as NUM_CONVS and — being the final override
+# in resolve_workload — masked the corpus default, so min-turns 2 still ran 450
+# convs. An explicit NUM_CONVS in the environment always wins.
 if [[ -z "${NUM_CONVS}" ]]; then
-    if [[ "${WORKLOAD_NAME}" == "sharegpt" && ( "${SHAREGPT_MIN_TURNS:-12}" == "1" || "${SHAREGPT_MIN_TURNS:-12}" == "2" ) ]]; then
-        NUM_CONVS=94145   # full corpus (= _SHAREGPT_CORPUS_CONVS; load_convs caps here)
+    _mx_nc="${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}"
+    if [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${_mx_nc}" == "12" ]]; then
+        NUM_CONVS=450     # exactly-12/12 subset
     else
-        NUM_CONVS=450
+        NUM_CONVS=94145   # everything else -> whole corpus (= _SHAREGPT_CORPUS_CONVS; load_convs caps here)
     fi
 fi
 
