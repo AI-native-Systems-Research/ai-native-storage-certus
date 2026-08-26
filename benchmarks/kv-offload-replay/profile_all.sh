@@ -96,12 +96,13 @@ WORKLOAD_MODE=batched
 # (the 450x12 dataset). "sharegpt" selects the ShareGPT multi-turn workload by
 # human-turn count via SHAREGPT_MIN_TURNS/SHAREGPT_MAX_TURNS. Exactly two configs
 # are accepted: 12/12 (default) = the 450-conv, 12-turn set every image bakes as
-# its DATASET_PATH (so at 12/12 the container variants are a no-op); 1/1 = the
+# its DATASET_PATH (so at 12/12 the container variants are a no-op); 2/2 = the
 # FULL 94,145-conv corpus (data/sharegpt/*.json), which is mounted in and capped
-# by --num-convs. Any other pair errors; use an explicit DATASET_PATH instead.
-# Passing --min-turns/--max-turns implies --workload sharegpt (see below).
+# by --num-convs. (2 is the loader's own >=2-turn floor; 1 is accepted as a
+# legacy alias for 2.) Any other pair errors; use an explicit DATASET_PATH
+# instead. Passing --min-turns/--max-turns implies --workload sharegpt (see below).
 WORKLOAD_NAME=""
-SHAREGPT_MIN_TURNS=""  # min human turns; 1 = full corpus, 12 = 450x12 subset. empty = default (12)
+SHAREGPT_MIN_TURNS=""  # min human turns; 2 = full corpus (1 = alias), 12 = 450x12 subset. empty = default (12)
 SHAREGPT_MAX_TURNS=""  # max human turns; empty = mirrors --min-turns (so --min-turns alone works)
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
 DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
@@ -177,14 +178,15 @@ Flags (all optional; defaults shown):
                                WORKLOAD_NAME. Empty (default) = the baked 450x12
                                dataset. "sharegpt" = the ShareGPT multi-turn workload
                                selected by human-turn count (--min-turns/--max-turns).
-                               12/12 (default) = that baked 450x12 set; --min-turns 1
+                               12/12 (default) = that baked 450x12 set; --min-turns 2
                                = the FULL 94,145-conv corpus (data/sharegpt/*.json,
                                mounted in, capped by --num-convs). Any other pair errors;
                                use an explicit DATASET_PATH instead.
-  --min-turns <n>              Min human turns for the sharegpt workload; 1 selects the
-                               full corpus, 12 the 450x12 subset. Implies --workload
+  --min-turns <n>              Min human turns for the sharegpt workload; 2 selects the
+                               full corpus (the loader's >=2-turn floor; 1 = legacy
+                               alias), 12 the 450x12 subset. Implies --workload
                                sharegpt. Forwarded as SHAREGPT_MIN_TURNS. [default 12]
-  --max-turns <n>              Max human turns; must match --min-turns (1 or 12). Implies
+  --max-turns <n>              Max human turns; must match --min-turns (2 or 12). Implies
                                --workload sharegpt; empty mirrors --min-turns.
                                Forwarded as SHAREGPT_MAX_TURNS. [default = --min-turns]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
@@ -256,15 +258,18 @@ if [[ -z "$WORKLOAD_NAME" && ( -n "$SHAREGPT_MIN_TURNS" || -n "$SHAREGPT_MAX_TUR
     WORKLOAD_NAME="sharegpt"
 fi
 
-# Only two sharegpt turn configs are prepared: 12/12 (450x12 subset) and 1/1
-# (full corpus). Reject anything else here, so the corpus bind-mount below (keyed
-# on min-turns 1) can't pair with a bogus max and force an unvalidated DATASET_PATH.
-# max-turns mirrors min-turns when unset, so --min-turns 1|12 alone is valid.
+# Only two sharegpt turn configs are prepared: 12/12 (450x12 subset) and 2/2
+# (full corpus; the loader's own >=2-turn floor, so 1 is accepted as a legacy
+# alias for 2). Reject anything else here, so the corpus bind-mount below (keyed
+# on min-turns 1|2) can't pair with a bogus max and force an unvalidated
+# DATASET_PATH. max-turns mirrors min-turns when unset, so --min-turns 2|12 alone
+# is valid.
 if [[ "$WORKLOAD_NAME" == "sharegpt" ]]; then
     _mn="${SHAREGPT_MIN_TURNS:-12}"; _mx="${SHAREGPT_MAX_TURNS:-$_mn}"
-    if ! { [[ "$_mn" == "12" && "$_mx" == "12" ]] || [[ "$_mn" == "1" && "$_mx" == "1" ]]; }; then
+    if ! { [[ "$_mn" == "12" && "$_mx" == "12" ]] || \
+           { [[ "$_mn" == "1" || "$_mn" == "2" ]] && [[ "$_mx" == "$_mn" ]]; }; }; then
         echo "error: --workload sharegpt accepts only 12/12 (the 450-conv subset)" >&2
-        echo "       or 1/1 (the full 94,145-conv corpus); got min=${_mn} max=${_mx}." >&2
+        echo "       or 2/2 (the full 94,145-conv corpus; 1 also accepted); got min=${_mn} max=${_mx}." >&2
         echo "       Use an explicit DATASET_PATH for other turn counts." >&2
         exit 2
     fi
@@ -747,7 +752,7 @@ build_offload() {  # image
 # is set it forwards WORKLOAD_NAME plus any SHAREGPT_MIN_TURNS/MAX_TURNS.
 #
 # The 12/12 sharegpt set is baked into every image (as DATASET_PATH), so at
-# 12/12 this just forwards env and is a harmless no-op. min-turns 1 selects the
+# 12/12 this just forwards env and is a harmless no-op. min-turns 2 selects the
 # FULL corpus, which is NOT baked: the images differ in where their
 # __file__-relative data dir resolves (offload/sharedstorage flatten the
 # layout), so instead of trusting that path we bind-mount data/sharegpt
@@ -759,13 +764,13 @@ workload_container_args() {  # -> prints podman args, one per line
     printf '%s\n' "-e" "WORKLOAD_NAME=${WORKLOAD_NAME}"
     [[ -n "$SHAREGPT_MIN_TURNS" ]] && printf '%s\n' "-e" "SHAREGPT_MIN_TURNS=${SHAREGPT_MIN_TURNS}"
     [[ -n "$SHAREGPT_MAX_TURNS" ]] && printf '%s\n' "-e" "SHAREGPT_MAX_TURNS=${SHAREGPT_MAX_TURNS}"
-    if [[ "$WORKLOAD_NAME" == "sharegpt" && "$SHAREGPT_MIN_TURNS" == "1" ]]; then
+    if [[ "$WORKLOAD_NAME" == "sharegpt" && ( "$SHAREGPT_MIN_TURNS" == "2" || "$SHAREGPT_MIN_TURNS" == "1" ) ]]; then
         if [[ -d "${REPO_ROOT}/data/sharegpt" ]]; then
             printf '%s\n' \
                 "-v" "${REPO_ROOT}/data/sharegpt:/workspace/data/sharegpt:ro,z" \
                 "-e" "DATASET_PATH=/workspace/data/sharegpt"
         else
-            warn "min-turns 1 needs the full corpus at ${REPO_ROOT}/data/sharegpt (data/sharegpt/*.json) — not found; run will fall back to the baked 450x12 set"
+            warn "min-turns ${SHAREGPT_MIN_TURNS} needs the full corpus at ${REPO_ROOT}/data/sharegpt (data/sharegpt/*.json) — not found; run will fall back to the baked 450x12 set"
         fi
     fi
 }

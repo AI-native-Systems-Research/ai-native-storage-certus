@@ -73,8 +73,8 @@ CONNECTOR_SRC="${CONNECTOR_SRC:-}"
 # WORKLOAD_NAME env (see run_multiturn_common.resolve_workload). Empty = the
 # image's baked DATASET_PATH (the 450x12 set). SHAREGPT_MIN_TURNS/MAX_TURNS pick
 # the sharegpt config: 12/12 is exactly the baked DATASET_PATH (a no-op);
-# min-turns 1 = the full corpus, mounted from the host (see the passthrough
-# block below) since it is not baked into the image.
+# min-turns 2 = the full corpus, mounted from the host (see the passthrough
+# block below) since it is not baked into the image (1 = legacy alias for 2).
 WORKLOAD_NAME="${WORKLOAD_NAME:-}"
 SHAREGPT_MIN_TURNS="${SHAREGPT_MIN_TURNS:-}"
 SHAREGPT_MAX_TURNS="${SHAREGPT_MAX_TURNS:-}"
@@ -84,14 +84,16 @@ SHAREGPT_MAX_TURNS="${SHAREGPT_MAX_TURNS:-}"
 if [[ -z "${WORKLOAD_NAME}" && ( -n "${SHAREGPT_MIN_TURNS}" || -n "${SHAREGPT_MAX_TURNS}" ) ]]; then
     WORKLOAD_NAME="sharegpt"
 fi
-# Only 12/12 (450x12 subset) and 1/1 (full corpus) are prepared; reject anything
-# else so the corpus mount below can't pair min-turns 1 with a bogus max and
-# force an unvalidated DATASET_PATH. max-turns mirrors min-turns when unset.
+# Only 12/12 (450x12 subset) and 2/2 (full corpus; the loader's own >=2-turn
+# floor, so 1 is a legacy alias for 2) are prepared; reject anything else so the
+# corpus mount below can't pair min-turns 1|2 with a bogus max and force an
+# unvalidated DATASET_PATH. max-turns mirrors min-turns when unset.
 if [[ "${WORKLOAD_NAME}" == "sharegpt" ]]; then
     _mn="${SHAREGPT_MIN_TURNS:-12}"; _mx="${SHAREGPT_MAX_TURNS:-$_mn}"
-    if ! { [[ "${_mn}" == "12" && "${_mx}" == "12" ]] || [[ "${_mn}" == "1" && "${_mx}" == "1" ]]; }; then
-        echo "error: sharegpt workload accepts only 12/12 (the 450-conv subset) or 1/1" >&2
-        echo "       (the full corpus); got min=${_mn} max=${_mx}. Use DATASET_PATH otherwise." >&2
+    if ! { [[ "${_mn}" == "12" && "${_mx}" == "12" ]] || \
+           { [[ "${_mn}" == "1" || "${_mn}" == "2" ]] && [[ "${_mx}" == "${_mn}" ]]; }; }; then
+        echo "error: sharegpt workload accepts only 12/12 (the 450-conv subset) or 2/2" >&2
+        echo "       (the full corpus; 1 also accepted); got min=${_mn} max=${_mx}. Use DATASET_PATH otherwise." >&2
         exit 2
     fi
 fi
@@ -208,24 +210,24 @@ fi
 
 # ── Named-workload passthrough (only if WORKLOAD_NAME set) ──
 # Forward the selector plus any human-turn bounds. 12/12 is exactly the image's
-# baked DATASET_PATH, so at 12/12 this is a no-op. min-turns 1 selects the FULL
+# baked DATASET_PATH, so at 12/12 this is a no-op. min-turns 2 selects the FULL
 # corpus, which is NOT baked: bind-mount data/sharegpt read-only and point
 # DATASET_PATH at the mount (DATASET_PATH always wins in resolve_workload).
-# Empty WORKLOAD_NAME => nothing added (baked default).
+# (1 = legacy alias for 2.) Empty WORKLOAD_NAME => nothing added (baked default).
 workload_name_env=()
 if [[ -n "${WORKLOAD_NAME}" ]]; then
     workload_name_env+=(-e "WORKLOAD_NAME=${WORKLOAD_NAME}")
     [[ -n "${SHAREGPT_MIN_TURNS}" ]] && workload_name_env+=(-e "SHAREGPT_MIN_TURNS=${SHAREGPT_MIN_TURNS}")
     [[ -n "${SHAREGPT_MAX_TURNS}" ]] && workload_name_env+=(-e "SHAREGPT_MAX_TURNS=${SHAREGPT_MAX_TURNS}")
     echo "[run-bench] workload=${WORKLOAD_NAME} min_turns=${SHAREGPT_MIN_TURNS:-12} max_turns=${SHAREGPT_MAX_TURNS:-12}" >&2
-    if [[ "${WORKLOAD_NAME}" == "sharegpt" && "${SHAREGPT_MIN_TURNS}" == "1" ]]; then
+    if [[ "${WORKLOAD_NAME}" == "sharegpt" && ( "${SHAREGPT_MIN_TURNS}" == "2" || "${SHAREGPT_MIN_TURNS}" == "1" ) ]]; then
         corpus="${REPO_ROOT}/data/sharegpt"
         if [[ -d "${corpus}" ]]; then
             workload_name_env+=(-v "${corpus}:/workspace/data/sharegpt:z,ro"
                                 -e "DATASET_PATH=/workspace/data/sharegpt")
-            echo "[run-bench] min-turns 1: mounting full corpus ${corpus}" >&2
+            echo "[run-bench] min-turns ${SHAREGPT_MIN_TURNS}: mounting full corpus ${corpus}" >&2
         else
-            echo "warning: ${corpus} not found — min-turns 1 needs the full ShareGPT corpus (data/sharegpt/*.json); falling back to the baked 450x12 set." >&2
+            echo "warning: ${corpus} not found — min-turns ${SHAREGPT_MIN_TURNS} needs the full ShareGPT corpus (data/sharegpt/*.json); falling back to the baked 450x12 set." >&2
         fi
     fi
 fi

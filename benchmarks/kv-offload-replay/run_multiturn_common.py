@@ -69,17 +69,24 @@ def _sharegpt_dataset(has_explicit_path=False):
     * ``min==12`` and ``max==12`` -> ``data/sharegpt_12turn_450.json``: 450
       conversations, each with exactly 12 human turns (the set every bench image
       bakes as its ``DATASET_PATH``).
-    * ``min==1`` and ``max==1`` -> the ``data/sharegpt/`` directory: the FULL
+    * ``min==2`` and ``max==2`` -> the ``data/sharegpt/`` directory: the FULL
       ShareGPT corpus (all chunks, 94,145 conversations). ``load_convs`` reads
       every ``*.json`` chunk in order and caps at ``num_convs`` — so
-      ``min-turns 1`` means "draw from the whole corpus".
+      ``min-turns 2`` means "draw from the whole corpus".
 
-    ``max-turns`` defaults to ``min-turns`` when unset, so ``--min-turns 1`` and
+    ``2`` is the honest floor for the corpus: ``load_convs`` keeps only
+    conversations with ``>= 2`` human turns (a single-turn conversation has no
+    prior context for a multi-turn KV-reuse workload to reuse), so ``min-turns 1``
+    loads the identical set. ``1`` is therefore accepted as a back-compat alias
+    for ``2`` but ``2`` is the canonical value.
+
+    ``max-turns`` defaults to ``min-turns`` when unset, so ``--min-turns 2`` and
     ``--min-turns 12`` alone each select a prepared config. Any other pair — in
-    particular any ``max-turns`` value that is not ``1`` (with min 1) or ``12``
-    (with min 12) — is rejected: set ``DATASET_PATH`` to a custom turn-filtered
-    ShareGPT file instead. When ``DATASET_PATH`` is set this returns ``None`` so
-    that path takes over rather than erroring; otherwise it exits with the hint.
+    particular any ``max-turns`` value that does not mirror ``min`` (2 with min
+    2, 12 with min 12) — is rejected: set ``DATASET_PATH`` to a custom
+    turn-filtered ShareGPT file instead. When ``DATASET_PATH`` is set this returns
+    ``None`` so that path takes over rather than erroring; otherwise it exits with
+    the hint.
 
     Note the corpus directory is resolved ``__file__``-relative, which is only
     correct where the module keeps its repo layout (host runs, and the shmq
@@ -89,15 +96,18 @@ def _sharegpt_dataset(has_explicit_path=False):
     min_turns, max_turns = _sharegpt_turns()
     if min_turns == 12 and max_turns == 12:
         return os.path.join(_DATA_DIR, "sharegpt_12turn_450.json")
-    if min_turns == 1 and max_turns == 1:
+    # min-turns 2 = the whole corpus (load_convs' own >=2 floor); 1 accepted as a
+    # legacy alias for 2 since it loads the identical set.
+    if min_turns in (1, 2) and max_turns == min_turns:
         return os.path.join(_DATA_DIR, "sharegpt")  # directory of corpus chunks
     if has_explicit_path:
         return None
     raise SystemExit(
-        "[run] WORKLOAD_NAME=sharegpt: only min-turns==max-turns==1 (the full "
-        "94,145-conv corpus) or min-turns==max-turns==12 (the 450-conv subset) "
-        f"are prepared, got min={min_turns} max={max_turns}. Set DATASET_PATH "
-        "to a custom turn-filtered ShareGPT dataset for other turn counts."
+        "[run] WORKLOAD_NAME=sharegpt: only min-turns==max-turns==2 (the full "
+        "94,145-conv corpus; 1 also accepted) or min-turns==max-turns==12 (the "
+        f"450-conv subset) are prepared, got min={min_turns} max={max_turns}. "
+        "Set DATASET_PATH to a custom turn-filtered ShareGPT dataset for other "
+        "turn counts."
     )
 
 
@@ -105,7 +115,7 @@ def _sharegpt_num_convs(has_explicit_path=False):
     """Default conversation cap for the ``sharegpt`` workload, by turn config.
 
     The 450-conv cap is the default *only* for the 12/12 subset; every other
-    prepared config (i.e. min-turns 1) defaults to the whole corpus, so lowering
+    prepared config (i.e. min-turns 2) defaults to the whole corpus, so lowering
     the turn threshold draws from all conversations rather than silently keeping
     the 450-conv cap. ``NUM_CONVS`` still overrides either way."""
     min_turns, max_turns = _sharegpt_turns()
