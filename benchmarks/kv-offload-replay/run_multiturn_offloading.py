@@ -59,12 +59,13 @@ if __name__ == "__main__":
     DEFAULT_DATASET = os.path.join(
         _here, "..", "..", "data", "sharegpt_12turn_450.json"
     )
-    SUBSET_PATH = os.environ.get("DATASET_PATH", DEFAULT_DATASET)
+    # WORKLOAD_NAME=<name> selects a registered workload (e.g. WORKLOAD_NAME=sharegpt
+    # -> the ShareGPT multi-turn subset by human-turn count, default 12/12 = the
+    # 450x12 set); DATASET_PATH / NUM_CONVS still override.
+    SUBSET_PATH, NUM_CONVS = common.resolve_workload(DEFAULT_DATASET, 450)
     if not os.path.exists(SUBSET_PATH):
         print(f"[run] missing {SUBSET_PATH}", file=sys.stderr)
         sys.exit(1)
-
-    NUM_CONVS = int(os.environ.get("NUM_CONVS", 450))
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 200))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))

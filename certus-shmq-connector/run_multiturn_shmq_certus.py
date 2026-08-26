@@ -18,7 +18,9 @@ Environment:
     OUTPUT_TOKENS    per generation (default 150)
     MAX_NUM_SEQS     (default 64)
     GPU_MEM_UTIL     (default 0.90)
-    LOG_STATS        emit vLLM engine + KV-offload stats (default 0 = off)
+    CAPTURE_METRICS  capture vLLM prometheus counters + KV-offload stats
+                     (default 1 = on, like the other drivers); 0 = clean baseline
+    LOG_STATS        legacy alias to force stats on even if CAPTURE_METRICS=0
     TENSOR_PARALLEL_SIZE    GPUs to shard each layer across (default 1)
     PIPELINE_PARALLEL_SIZE  pipeline stages across GPUs/nodes (default 1)
     ENFORCE_EAGER    "0" (default) enables CUDA graphs + torch.compile (faster,
@@ -62,13 +64,15 @@ if __name__ == "__main__":
     DEFAULT_DATASET = os.path.join(
         _here, "..", "data", "sharegpt_12turn_450.json"
     )
-    DATASET_PATH = os.environ.get("DATASET_PATH", DEFAULT_DATASET)
+    # WORKLOAD_NAME=<name> selects a registered workload (e.g. WORKLOAD_NAME=sharegpt
+    # -> the ShareGPT multi-turn subset by human-turn count, default 12/12 = the
+    # 450x12 set); DATASET_PATH / NUM_CONVS still override.
+    DATASET_PATH, NUM_CONVS = common.resolve_workload(DEFAULT_DATASET, 450)
     if not os.path.exists(DATASET_PATH):
         print(f"[run] missing dataset {DATASET_PATH}", file=sys.stderr)
         sys.exit(1)
 
     SHM_PATH = os.environ.get("SHM_PATH", "/dev/shm/certus-shmq")
-    NUM_CONVS = int(os.environ.get("NUM_CONVS", 450))
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 150))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))
@@ -163,9 +167,15 @@ if __name__ == "__main__":
     # "batched" (default) runs the synchronous per-round generate loop. Both share
     # the engine_kwargs below (same CertusShmq kv_transfer_config + compat flags).
     WORKLOAD_MODE = os.environ.get("WORKLOAD_MODE", "batched").strip().lower()
-    # LOG_STATS gates the PrometheusStatLogger; async metrics read the global
-    # REGISTRY, so counters only populate when LOG_STATS=1 (disable_log_stats off).
-    _log_stats_off = os.environ.get("LOG_STATS", "0") == "0"
+    # Metrics gate — now consistent with the other four drivers: vLLM stats are ON
+    # by default, so the vllm: prometheus counters (prefix-cache, kv_offload_*, MFU)
+    # and the OffloadingConnector's KVConnectorStats are captured out of the box.
+    # CAPTURE_METRICS=0 restores the clean stats-off baseline. LOG_STATS=1 is still
+    # honored as a legacy alias for turning stats on. (Previously this driver gated
+    # solely on LOG_STATS and defaulted OFF — so Certus-SPDK runs silently produced
+    # no vllm: counters, unlike every other backend.)
+    _log_stats_on = os.environ.get("LOG_STATS", "0") != "0"
+    CAPTURE_METRICS = os.environ.get("CAPTURE_METRICS", "1") != "0" or _log_stats_on
 
     engine_kwargs = dict(
         model=MODEL,
@@ -182,11 +192,12 @@ if __name__ == "__main__":
         # Default "auto" = same as model dtype (fp16 here).
         kv_cache_dtype=os.environ.get("KV_CACHE_DTYPE", "auto"),
         kv_transfer_config=KV_CONFIG,
-        # LOG_STATS=1 surfaces vLLM's periodic engine stats, including the
+        # Enabling stats surfaces vLLM's periodic engine stats, including the
         # OffloadingConnector's KVConnectorStats (per-interval blocks/tokens
-        # loaded and stored over the KV-offload API). Default off to keep the
-        # per-round output clean.
-        disable_log_stats=_log_stats_off,
+        # loaded and stored over the KV-offload API), and registers the vllm:
+        # prometheus counters. On by default now (CAPTURE_METRICS); set
+        # CAPTURE_METRICS=0 for the clean stats-off baseline.
+        disable_log_stats=not CAPTURE_METRICS,
         **_engine_kwargs,
     )
 
@@ -201,6 +212,36 @@ if __name__ == "__main__":
     # non-zero id (0 == "unset" sentinel).
     _session_id_fn = lambda i: i + 1  # noqa: E731
 
+    # ── SSD device I/O source (shared by both execution modes) ────────────────
+    # The server's cumulative NVMe read/write byte counters (its rw-telemetry) are
+    # queried over the shmq ring's GetIoStats op (translate.rs op_get_io_stats ->
+    # dispatcher read_write_stats). The per-round/per-tick deltas are emitted as
+    # ssd_read_bytes / ssd_write_bytes on the [prom] line, which the kvprofile
+    # renderer plots. Same mechanism the old gRPC driver used (its GetIoStats RPC),
+    # now carried over shm-queue. Byte counts are real only when the server is
+    # built with --features rw-telemetry (zero otherwise). Set up here — before the
+    # WORKLOAD_MODE branch — so the async path samples SSD bytes too (its 1 Hz
+    # sampler calls io_rw_bytes), not just the batched round loop.
+    from certus_shmq_connector.ring import Ring
+
+    try:
+        io_ring = Ring(SHM_PATH)
+    except Exception as e:  # noqa: BLE001 - ring may be absent; degrade gracefully
+        io_ring = None
+        print(f"[io] GetIoStats unavailable ({e}); per-round SSD bytes disabled",
+              file=sys.stderr)
+
+    def io_rw_bytes():
+        """(cumulative read_bytes, write_bytes) from the server, or (None, None)."""
+        if io_ring is None:
+            return None, None
+        try:
+            s = io_ring.get_io_stats()
+            return int(s["read_bytes"]), int(s["write_bytes"])
+        except Exception as e:  # noqa: BLE001
+            print(f"[io] GetIoStats query failed: {e}", file=sys.stderr)
+            return None, None
+
     if WORKLOAD_MODE == "async":
         import run_multiturn_async as async_run
 
@@ -208,7 +249,8 @@ if __name__ == "__main__":
             engine_kwargs, convs, sp,
             prompt_budget=PROMPT_BUDGET,
             max_rounds=MAX_ROUNDS,
-            capture_metrics=(not _log_stats_off),
+            capture_metrics=CAPTURE_METRICS,
+            disk_rw_bytes=io_rw_bytes,
             session_id_fn=_session_id_fn,
             skip_empty=True,
             summary_base={
@@ -233,35 +275,8 @@ if __name__ == "__main__":
         tokenizer = llm.get_tokenizer()
         n_tokens = common.make_n_tokens(tokenizer)
 
-        CAPTURE_METRICS = not _log_stats_off
-
-        # Per-round SSD device I/O. The server's cumulative NVMe read/write byte
-        # counters (its rw-telemetry) are queried over the shmq ring's GetIoStats
-        # op (translate.rs op_get_io_stats -> dispatcher read_write_stats) and the
-        # per-round deltas are emitted as ssd_read_bytes / ssd_write_bytes on the
-        # [prom] line, which the kvprofile renderer plots. Same mechanism the old
-        # gRPC driver used (its GetIoStats RPC), now carried over shm-queue. Byte
-        # counts are real only when the server is built with --features
-        # rw-telemetry (zero otherwise).
-        from certus_shmq_connector.ring import Ring
-
-        try:
-            io_ring = Ring(SHM_PATH)
-        except Exception as e:  # noqa: BLE001 - ring may be absent; degrade gracefully
-            io_ring = None
-            print(f"[io] GetIoStats unavailable ({e}); per-round SSD bytes disabled",
-                  file=sys.stderr)
-
-        def io_rw_bytes():
-            """(cumulative read_bytes, write_bytes) from the server, or (None, None)."""
-            if io_ring is None:
-                return None, None
-            try:
-                s = io_ring.get_io_stats()
-                return int(s["read_bytes"]), int(s["write_bytes"])
-            except Exception as e:  # noqa: BLE001
-                print(f"[io] GetIoStats query failed: {e}", file=sys.stderr)
-                return None, None
+        # SSD device I/O (io_ring / io_rw_bytes) was set up above the WORKLOAD_MODE
+        # branch so both modes share it; the batched loop brackets it per round.
 
         # ── vLLM Prometheus counters + SSD device bytes (per round) ───────────
         # prom counters snapshot at round end; SSD device bytes bracketed around

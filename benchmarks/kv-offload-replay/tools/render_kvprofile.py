@@ -3,8 +3,14 @@
 
 Reads one or more `profile_all.sh` run directories (the `kvprofile-*` dirs it
 writes), extracts each variant's total wall time and per-round vLLM Prometheus
-counter deltas, and renders a single PNG: a total-wall-time bar chart plus a
-small-multiples grid of per-round counter charts. No HTML — PNG only.
+counter deltas, and renders a single PNG stacked as: a total-wall-time bar
+chart, a set of run-total family panels (each counter rolled up to its whole-run
+total and grouped onto one shared axis per family — Tokens, Prefix-cache queries
+& hits, Bytes moved, KV tier movements — with a per-second average and, for hit
+counters, a hit rate annotated atop each bar), a GPU processor-utilization bar
+chart (mean nvidia-smi util.gpu per variant) plus a GPU-utilization-over-time
+line panel, and a small-multiples grid of the same counters plotted per round.
+No HTML — PNG only.
 
 Data sources, per run directory (in priority order):
   * results.json  — authoritative index: {variants:[{variant, wall_s, status,
@@ -19,6 +25,11 @@ Data sources, per run directory (in priority order):
                     E, ssd S]` lines (plus the `FINAL tier-events` summary) give
                     the cumulative KV tier-movement counts, rendered as four extra
                     Certus-only panels. Absent → those panels are dropped.
+  * gpu-timeline.csv + gpu-markers.csv — profile_all.sh's nvidia-smi sampler
+                    (per-tick util.gpu/clock/mem/power) plus per-variant start/end
+                    windows. Parsed via gpu_report and reduced to each variant's
+                    mean / p95 / peak GPU processor utilization for the GPU band.
+                    Absent → that band is dropped.
 
 Pass several directories to overlay several runs. When the SAME variant appears
 in more than one directory (e.g. three Tiered-CPU-FS repeats) each gets its own
@@ -52,6 +63,19 @@ import os
 import re
 import sys
 from collections import OrderedDict
+
+# gpu_report.py (sibling of this tools/ dir) already parses the profile_all.sh GPU
+# telemetry: gpu-timeline.csv (per-tick nvidia-smi util.gpu/clock/mem/power) sliced
+# per variant by gpu-markers.csv. Reuse it so the GPU-utilization band shows the
+# exact same numbers as `gpu-summary.txt`. Optional — a failed import just drops
+# the band (older run dirs with no GPU telemetry render exactly as before).
+_BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _BENCH_DIR not in sys.path:
+    sys.path.insert(0, _BENCH_DIR)
+try:
+    import gpu_report as _gpu_report
+except Exception:  # noqa: BLE001 - GPU band is optional
+    _gpu_report = None
 
 # ── Curated counters: (key, title, unit) in render order. Only these are
 # plotted; the noisy ones (request_success, *_time, *_by_source, *_total dupes,
@@ -94,6 +118,64 @@ TIER_RE = re.compile(
     r"tier-events\s+promotions\[->memory\s+(\d+),\s*->gpu\s+(\d+)\]"
     r"\s+evictions\[memory\s+(\d+),\s*ssd\s+(\d+)\]"
 )
+
+# ── Run-total families: the per-round panels show movement over time; these
+# roll each counter up to a single whole-run total and group related counters
+# onto one shared axis so the magnitudes are directly comparable. (title, unit,
+# [(key, short bar label), …]). Every counter in a family shares a unit — the
+# skill's one-axis rule — so no family mixes bytes with counts. A family with no
+# nonzero total across all series is dropped; a zero counter inside a shown
+# family stays as a labelled 0 bar (a measured zero, like store-only vs load).
+FAMILIES = [
+    ("Tokens — run total", "int", [
+        ("prompt_tokens",        "prompt"),
+        ("prompt_tokens_cached", "cached"),
+        ("generation_tokens",    "generation"),
+    ]),
+    ("Prefix-cache queries & hits — run total", "int", [
+        ("prefix_cache_queries",          "GPU q"),
+        ("prefix_cache_hits",             "GPU hit"),
+        ("external_prefix_cache_queries", "offload q"),
+        ("external_prefix_cache_hits",    "offload hit"),
+    ]),
+    ("Bytes moved — run total", "bytes", [
+        ("kv_offload_store_bytes", "store"),
+        ("kv_offload_load_bytes",  "load"),
+        ("ssd_read_bytes",         "SSD read"),
+        ("ssd_write_bytes",        "SSD write"),
+    ]),
+    ("KV tier movements — run total", "int", [
+        ("tier_promotions_to_memory",  "→DRAM"),
+        ("tier_promotions_to_gpu",     "→GPU"),
+        ("tier_evictions_from_memory", "evict DRAM"),
+        ("tier_evictions_from_ssd",    "evict SSD"),
+    ]),
+]
+
+# Hit counters that have a matching query counter: on the run-total bars the hit
+# bar is annotated with its hit rate (hits / queries) so the raw count reads
+# alongside the ratio that actually matters for cache effectiveness.
+HIT_DENOM = {
+    "prefix_cache_hits":          "prefix_cache_queries",
+    "external_prefix_cache_hits": "external_prefix_cache_queries",
+}
+
+# Counters that also get a per-second average (total / active seconds) atop their
+# run-total bar — bytes/sec for the byte families, count/sec for tokens, cache
+# queries/hits, and tier movements (formatted per the family unit, see fmt_rate).
+# A hit bar carries both its rate and its hit rate (it's in HIT_DENOM too), the
+# two stacked. The active window starts at the counter's first nonzero round,
+# not t=0 — e.g. SSD/tier loads begin only after a warmup during which the
+# working set still fits DRAM, and tier movements don't start until the first
+# eviction/promotion — so counting from t=0 would understate the sustained rate
+# (see _active_seconds).
+RATE_KEYS = {"prompt_tokens", "prompt_tokens_cached", "generation_tokens",
+             "prefix_cache_queries", "prefix_cache_hits",
+             "external_prefix_cache_queries", "external_prefix_cache_hits",
+             "kv_offload_store_bytes", "kv_offload_load_bytes",
+             "ssd_read_bytes", "ssd_write_bytes",
+             "tier_promotions_to_memory", "tier_promotions_to_gpu",
+             "tier_evictions_from_memory", "tier_evictions_from_ssd"}
 
 # Fixed colour per variant (normalised name -> hex); unknown variants draw from
 # FALLBACK in first-seen order.
@@ -200,12 +282,80 @@ def resolve_log(run_dir: str, recorded: str) -> str | None:
     return None
 
 
+def log_is_async(path: str) -> bool:
+    """True if <variant>.log came from a WORKLOAD_MODE=async run.
+
+    The async driver prints a one-time ``WORKLOAD_MODE=async`` banner (see
+    run_multiturn_async.run_async_driver). It matters for axis labels: the async
+    path samples the counters at 1 Hz, so its per-``round`` ``[prom]`` deltas are
+    per-second movements over elapsed seconds — not per-workload-round totals like
+    the batched path. The banner lands once the engine is built and generation
+    starts, so a bounded head scan finds it without reading a whole verbose log."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if "WORKLOAD_MODE=async" in line:
+                    return True
+                if i > 20000:
+                    break
+    except OSError:
+        pass
+    return False
+
+
+def load_gpu_windows(run_dir: str) -> dict:
+    """``{variant_name: gpu-util summary}`` for a run dir, or ``{}`` if unavailable.
+
+    Reuses gpu_report to parse gpu-timeline.csv sliced by gpu-markers.csv, so the
+    numbers match `gpu-summary.txt` exactly (window mean / max / p95 of
+    util_gpu_pct = GPU *processor* utilization, sampled by nvidia-smi). The variant
+    names gpu-markers.csv records match results.json, so each summary maps straight
+    onto its series by variant name."""
+    if _gpu_report is None:
+        return {}
+    tl = os.path.join(run_dir, "gpu-timeline.csv")
+    mk = os.path.join(run_dir, "gpu-markers.csv")
+    if not os.path.isfile(tl):
+        return {}
+    try:
+        ticks = _gpu_report.read_timeline(tl)
+        if not ticks:
+            return {}
+        windows = _gpu_report.read_windows(mk) if os.path.isfile(mk) else []
+        out = {}
+        for variant, start, end in windows:
+            win = {t: v for t, v in ticks.items() if start <= t <= end}
+            if win:
+                summ = _gpu_report.summarize(variant, win)
+                # Keep the raw per-tick util series (elapsed_s, util_pct) for the
+                # over-time line panel; elapsed measured from the window's first
+                # sample so variants overlay from a common origin.
+                epochs = sorted(win)
+                t0 = epochs[0]
+                summ["series"] = [(t - t0, win[t]["util"]) for t in epochs]
+                out[variant] = summ
+        return out
+    except Exception as e:  # noqa: BLE001 - GPU band is optional
+        print(f"warning: GPU telemetry parse failed in {run_dir}: {e}",
+              file=sys.stderr)
+        return {}
+
+
 def load_run(run_dir: str, tag: str):
     """Yield series dicts for one run directory.
 
-    A series: {variant, tag, color_key, wall, data:{counter:[...]}}.
+    A series: {variant, tag, color_key, wall, data:{counter:[...]}, gpu}.
     """
     results = os.path.join(run_dir, "results.json")
+    # Per-variant GPU processor utilization (nvidia-smi sampler), parsed once for
+    # the whole run dir and matched onto each variant's series by name (exact, then
+    # normalized so display-name vs slug mismatches in the fallback path still map).
+    gpu = load_gpu_windows(run_dir)
+    gpu_norm = {norm(k): v for k, v in gpu.items()}
+
+    def _gpu_for(name):
+        return gpu.get(name) or gpu_norm.get(norm(name))
+
     # certus-server tier-event counters live in a sibling server.log, keyed to
     # the Certus-SPDK variant (the only one with a server). Parsed once here and
     # merged into that variant's per-round data below.
@@ -230,7 +380,9 @@ def load_run(run_dir: str, tag: str):
             wall = e.get("wall_s")
             if wall is None and log:
                 wall = wall_from_log(log)
-            yield {"variant": name, "tag": tag, "wall": wall, "data": data}
+            yield {"variant": name, "tag": tag, "wall": wall, "data": data,
+                   "async": log_is_async(log) if log else False,
+                   "gpu": _gpu_for(name)}
         return
     # ── fallback: no results.json — discover *.log with [prom] rounds
     found = False
@@ -247,7 +399,8 @@ def load_run(run_dir: str, tag: str):
         if norm(name) == "certusspdk":
             data = {**data, **tier}
         yield {"variant": name, "tag": tag,
-               "wall": wall_from_log(path), "data": data}
+               "wall": wall_from_log(path), "data": data,
+               "async": log_is_async(path), "gpu": _gpu_for(name)}
     if not found:
         print(f"warning: no results.json and no [prom] logs in {run_dir}",
               file=sys.stderr)
@@ -278,6 +431,20 @@ def fmt_bytes(v, _pos=None):
         v /= 1024.0
         i += 1
     return f"{v:.1f} {units[i]}"
+
+
+def fmt_rate(rate, funit):
+    """Per-second label for a run-total bar. Bytes families read as B/KiB/…-per
+    second; count families (tokens, tier movements) read as a compact count per
+    second, but keep one/two decimals below 10 so a sub-unit rate (e.g. 0.3
+    evictions/s) doesn't collapse to ``0/s`` under fmt_compact's integer floor."""
+    if funit == "bytes":
+        return fmt_bytes(rate) + "/s"
+    if rate < 1:
+        return f"{rate:.2f}/s"
+    if rate < 10:
+        return f"{rate:.1f}/s"
+    return fmt_compact(rate) + "/s"
 
 
 def build_series(run_args):
@@ -333,6 +500,8 @@ def render(series, out_path, title, subtitle, dark, dpi):
         "axes.linewidth": 0.8,
     })
 
+    import textwrap
+
     # which counters have any nonzero data across series (vLLM per-round counters
     # first, then the Certus-server tier-movement counters)
     active = [c for c in COUNTERS + TIER_COUNTERS
@@ -340,24 +509,122 @@ def render(series, out_path, title, subtitle, dark, dpi):
     ncol = 3
     nrow = (len(active) + ncol - 1) // ncol if active else 0
 
-    # header band scales a little with the number of legend rows so the legend
-    # never lands on the subtitle.
+    # Curated counters that are all-zero but WERE measured are a real result (e.g.
+    # a write-only run: the offload tier is queried but hit 0×, nothing is loaded
+    # back, no SSD reads), not missing data — so name them explicitly in a footnote
+    # rather than silently dropping the panel (which reads as "forgot to capture").
+    # A zero is "measured" when: for a vLLM/SSD counter, the run captured metrics
+    # at all (prompt/generation tokens moved somewhere); for a tier counter, the
+    # key was merged in (server.log tier-events parsed). SSD keys additionally need
+    # a Certus-SPDK series present (no other backend emits device I/O).
+    has_certus = any(norm(s["variant"]) == "certusspdk" for s in series)
+    captured = any(v != 0 for s in series for key in ("prompt_tokens", "generation_tokens")
+                   for v in (s["data"].get(key) or []))
+
+    def _measured(c):
+        key = c[0]
+        if key in TIER_KEYS:
+            return any(key in s["data"] for s in series)
+        if key in ("ssd_read_bytes", "ssd_write_bytes"):
+            return has_certus and captured
+        return captured
+
+    zeroed = [c for c in COUNTERS + TIER_COUNTERS if c not in active and _measured(c)]
+    zero_note = ""
+    if zeroed:
+        names = ", ".join(c[1] for c in zeroed)
+        zero_note = ("Measured but zero across all runs (shown for completeness, "
+                     f"not omitted): {names}.")
+    note_lines = textwrap.wrap(zero_note, width=150) if zero_note else []
+
+    # ── run-total families: roll each counter up to one whole-run number ──────
+    def _total(s, key):
+        vals = s["data"].get(key) or []
+        if not vals:
+            return 0.0
+        # vLLM/SSD [prom] values are per-interval deltas → the run total is their
+        # sum; tier counters are parsed cumulative → the total is the last (max).
+        return max(vals) if key in TIER_KEYS else float(sum(vals))
+
+    def _active_seconds(s, key):
+        """Wall seconds from ``key``'s first nonzero round to the run's end.
+
+        SSD I/O begins only after a warmup — early KV loads hit the DRAM tier, so
+        device reads stay zero for the first rounds. Dividing the run's total
+        bytes by the whole wall time would count that idle head as throughput and
+        understate it; instead start the clock when the counter first moves.
+        Uses the round-index fraction against wall (per-round wall isn't parsed),
+        so it's an estimate: wall × (rounds from first activity to end) / rounds."""
+        vals = s["data"].get(key) or []
+        wall = s.get("wall")
+        if not vals or not wall:
+            return None
+        first = next((i for i, v in enumerate(vals) if v), None)
+        if first is None:
+            return None
+        secs = wall * (len(vals) - first) / len(vals)
+        return secs if secs > 0 else None
+
+    active_fams = [f for f in FAMILIES
+                   if any(_total(s, k) for s in series for k, _lab in f[2])]
+
+    # ── vertical band layout ──────────────────────────────────────────────────
+    # The figure is a stack of bands: header, total-wall-time bar, run-total
+    # family bars (2 cols), per-round small multiples (3 cols), and the zero-note.
+    # Each drawn band is its own gridspec positioned by figure fraction so their
+    # column counts can differ; the note occupies [0, note_h] at the very bottom.
     legend_rows = (len(series) + 4) // 5
     hdr_h = 1.1 + 0.32 * legend_rows
     bar_h = max(1.6, 0.42 * len(series) + 0.8)
+    # GPU-utilization band: one horizontal bar per series, same geometry as the
+    # wall-time band. Only drawn when at least one series carries GPU telemetry.
+    has_gpu = any(s.get("gpu") for s in series)
+    gpu_h = max(1.0, 0.26 * len(series) + 0.45) if has_gpu else 0.0
+    # GPU-utilization-over-time band: one line per series (util% vs elapsed within
+    # its window). Only when at least one series carries the raw per-tick series.
+    has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
+    gpu_ts_h = 2.9 if has_gpu_ts else 0.0
+    fam_ncol = 2
+    fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if active_fams else 0
+    totals_h = 3.0 * fam_nrow
     grid_h = 2.5 * nrow
-    fig_h = hdr_h + bar_h + grid_h
-    fig = plt.figure(figsize=(12.5, fig_h), dpi=dpi)
-    gs = fig.add_gridspec(
-        2 + nrow, ncol,
-        height_ratios=[hdr_h, bar_h] + [2.5] * nrow,
-        hspace=0.85, wspace=0.28,
-        left=0.075, right=0.975, top=0.985, bottom=0.03,
-    )
+    # note band = the wrapped text lines, plus a fixed gap above them that clears
+    # the last counter row's x-axis tick labels + "round" label (~0.5in), plus a
+    # small bottom margin.
+    note_text_h = 0.22 * len(note_lines)
+    note_h = (note_text_h + 0.55) if note_lines else 0.0
 
-    # ── title band + legend (row 0, spans all cols): title / subtitle / legend
-    # stacked top-to-bottom, none overlapping. ───────────────────────────────
-    hdr = fig.add_subplot(gs[0, :]); hdr.axis("off")
+    # Gap between stacked bands must clear BOTH the lower band's title (drawn
+    # above its axes) and the upper band's x-axis tick + label (drawn below its
+    # axes) — otherwise the wall-bar's xlabel lands on the totals titles and the
+    # totals x-ticks land on the grid titles.
+    GAP = 0.9
+    bands = [("hdr", hdr_h), ("bar", bar_h)]
+    if has_gpu:
+        bands.append(("gpu", gpu_h))
+    if has_gpu_ts:
+        bands.append(("gputs", gpu_ts_h))
+    if totals_h:
+        bands.append(("totals", totals_h))
+    if grid_h:
+        bands.append(("grid", grid_h))
+    fig_h = sum(h for _, h in bands) + note_h + GAP * (len(bands) - 1)
+    fig = plt.figure(figsize=(12.5, fig_h), dpi=dpi)
+
+    pos, cur = {}, fig_h  # (bottom_frac, top_frac) per band, stacked top→bottom
+    for j, (name, h) in enumerate(bands):
+        pos[name] = ((cur - h) / fig_h, cur / fig_h)
+        cur -= h
+        if j < len(bands) - 1:
+            cur -= GAP
+    # By construction cur == note_h now, so the grid's bottom sits exactly on the
+    # note band (matching the footnote's reserved height below).
+    L, R = 0.075, 0.975
+
+    # ── title band + legend: title / subtitle / legend stacked, none overlap ──
+    gs_hdr = fig.add_gridspec(1, 1, left=L, right=R,
+                              top=pos["hdr"][1], bottom=pos["hdr"][0])
+    hdr = fig.add_subplot(gs_hdr[0, 0]); hdr.axis("off")
     hdr.text(0, 1.0, title, fontsize=17, fontweight="bold", va="top", color=fg)
     if subtitle:
         hdr.text(0, 0.62, subtitle, fontsize=10, va="top", color=mut)
@@ -367,8 +634,10 @@ def render(series, out_path, title, subtitle, dark, dpi):
                ncol=min(len(series), 5), frameon=False, fontsize=9,
                handlelength=2.6, columnspacing=1.6, borderaxespad=0)
 
-    # ── total wall-time bars (row 1, spans all cols) ─────────────────────────
-    ax = fig.add_subplot(gs[1, :])
+    # ── total wall-time bars ──────────────────────────────────────────────────
+    gs_bar = fig.add_gridspec(1, 1, left=L, right=R,
+                              top=pos["bar"][1], bottom=pos["bar"][0])
+    ax = fig.add_subplot(gs_bar[0, 0])
     base = next((s["wall"] for s in series if norm(s["variant"]) == "nooffload"
                  and s["wall"]), None)
     ys = list(range(len(series)))[::-1]  # top-down
@@ -392,10 +661,152 @@ def render(series, out_path, title, subtitle, dark, dpi):
     ax.tick_params(left=False)
     ax.grid(axis="x", color=grid, lw=0.7, zorder=0)
 
+    # ── GPU processor utilization bars (mean busy-% per variant window) ─────────
+    # Source: profile_all.sh's nvidia-smi sampler (gpu-timeline.csv) sliced per
+    # variant by gpu-markers.csv — the same numbers gpu_report writes to
+    # gpu-summary.txt. This is GPU *processor* utilization (util.gpu = fraction of
+    # the sampling interval a kernel was resident), NOT KV-cache/memory occupancy.
+    # It is a level, so the bar is the window mean and peak/p95 ride alongside.
+    if has_gpu:
+        gs_gpu = fig.add_gridspec(1, 1, left=L, right=R,
+                                  top=pos["gpu"][1], bottom=pos["gpu"][0])
+        gax = fig.add_subplot(gs_gpu[0, 0])
+        gys = list(range(len(series)))[::-1]  # top-down, same order as wall band
+        for y, s in zip(gys, series):
+            g = s.get("gpu")
+            avg = g["util_avg"] if g else 0.0
+            gax.barh(y, avg, color=s["color"], height=0.62, zorder=3)
+            if g:
+                lab = (f"{avg:.0f}%  ·  p95 {g['util_p95']:.0f}%  ·  "
+                       f"peak {g['util_max']:.0f}%")
+            else:
+                lab = "n/a"
+            gax.text(avg if g else 0, y, "  " + lab, va="center", ha="left",
+                     fontsize=9.5, fontweight="bold", color=fg)
+        gax.set_yticks(gys)
+        gax.set_yticklabels([s["label"] for s in series], fontsize=9.5, color=fg)
+        gax.set_xlabel("mean GPU processor utilization — nvidia-smi util.gpu, "
+                       "averaged over each variant's window (%)", color=mut)
+        gax.set_xlim(0, 105)
+        gax.set_xticks([0, 25, 50, 75, 100])
+        gax.set_title("GPU processor utilization", loc="left", fontsize=11,
+                      fontweight="bold", color=fg, pad=6)
+        for sp in ("top", "right", "left"):
+            gax.spines[sp].set_visible(False)
+        gax.tick_params(left=False)
+        gax.grid(axis="x", color=grid, lw=0.7, zorder=0)
+
+    # ── GPU processor utilization over time (one line per variant) ──────────────
+    # The raw util.gpu series bounces 0↔100 tick-to-tick (it is a per-interval busy
+    # flag), so plot a short moving average to show the trend. x = elapsed within
+    # each variant's window, so the sequentially-run variants overlay from t=0.
+    if has_gpu_ts:
+        def _smooth(ys, w=5):
+            if len(ys) < 2:
+                return ys
+            half = w // 2
+            return [sum(ys[max(0, i - half):min(len(ys), i + half + 1)])
+                    / (min(len(ys), i + half + 1) - max(0, i - half))
+                    for i in range(len(ys))]
+
+        gs_gt = fig.add_gridspec(1, 1, left=L, right=R,
+                                 top=pos["gputs"][1], bottom=pos["gputs"][0])
+        gtx = fig.add_subplot(gs_gt[0, 0])
+        for s in series:
+            ser = (s.get("gpu") or {}).get("series")
+            if not ser:
+                continue
+            xs = [t for t, _u in ser]
+            ys = _smooth([u for _t, u in ser])
+            gtx.plot(xs, ys, color=s["color"], linestyle=s["style"], lw=1.8)
+        gtx.set_ylim(0, 105)
+        gtx.set_yticks([0, 25, 50, 75, 100])
+        gtx.set_xlabel("elapsed within variant window (s)", color=mut, fontsize=9)
+        gtx.set_ylabel("GPU util % (10 s moving avg)", color=mut, fontsize=9)
+        gtx.set_title("GPU processor utilization over time", loc="left",
+                      fontsize=11, fontweight="bold", color=fg, pad=6)
+        gtx.margins(x=0.02)
+        for sp in ("top", "right"):
+            gtx.spines[sp].set_visible(False)
+        gtx.grid(color=grid, lw=0.6)
+        gtx.tick_params(labelsize=8)
+
+    # ── run-total family bars (2-col band): related counters share one axis, one
+    # group per counter, one bar per series (coloured like the legend). ─────────
+    if active_fams:
+        gs_tot = fig.add_gridspec(fam_nrow, fam_ncol, left=L, right=R,
+                                  top=pos["totals"][1], bottom=pos["totals"][0],
+                                  hspace=0.3, wspace=0.18)
+        for fi, (ftitle, funit, metrics) in enumerate(active_fams):
+            r, c = divmod(fi, fam_ncol)
+            tax = fig.add_subplot(gs_tot[r, c])
+            fmt = fmt_bytes if funit == "bytes" else fmt_compact
+            n_m = len(metrics)
+            # Some bars carry a derived number above the count label (hit rate on
+            # hit bars, throughput on SSD bars); that stack needs extra headroom.
+            has_deriv = any(k in HIT_DENOM or k in RATE_KEYS for k, _lab in metrics)
+            gw = 0.8                       # width one counter's bar-group spans
+            bw = gw / max(len(series), 1)  # per-series bar width within a group
+            vmax = 0.0
+            for si, s in enumerate(series):
+                offs = -gw / 2 + bw * (si + 0.5)
+                xs = [m + offs for m in range(n_m)]
+                vals = [_total(s, k) for k, _lab in metrics]
+                vmax = max([vmax] + vals)
+                bars = tax.bar(xs, vals, width=bw * 0.9, color=s["color"], zorder=3)
+                tax.bar_label(bars, labels=[fmt(v) for v in vals], padding=2,
+                              fontsize=6.5, rotation=90, color=mut)
+                # Derived number(s) atop the bar, above the (vertical) count label:
+                # a per-second average (RATE_KEYS) and/or a hit rate (HIT_DENOM).
+                # A hit bar carries both — stacked, rate on top, hit% nearest the
+                # bar (last line, va="bottom" grows the block upward from here).
+                for (k, _lab), x, hv in zip(metrics, xs, vals):
+                    parts = []
+                    if k in RATE_KEYS and hv:
+                        secs = _active_seconds(s, k)
+                        if secs:
+                            parts.append(fmt_rate(hv / secs, funit))
+                    if k in HIT_DENOM:
+                        q = _total(s, HIT_DENOM[k])
+                        if q:
+                            parts.append(f"{hv / q * 100:.0f}%")
+                    if not parts:
+                        continue
+                    # Clear the rotated count label first — its height grows with
+                    # the string length ("860.3 MiB" is far taller than "1k").
+                    off = 14 + len(fmt(hv)) * 4.5
+                    tax.annotate("\n".join(parts), xy=(x, hv),
+                                 xytext=(0, off), textcoords="offset points",
+                                 ha="center", va="bottom", fontsize=7,
+                                 fontweight="bold", color=fg, zorder=4)
+            tax.set_xticks(range(n_m))
+            tax.set_xticklabels([lab for _k, lab in metrics], fontsize=8)
+            tax.set_title(ftitle, loc="left", fontsize=10, fontweight="bold",
+                          color=fg, pad=6)
+            tax.yaxis.set_major_formatter(FuncFormatter(fmt))
+            tax.set_ylim(0, (vmax * (2.0 if has_deriv else 1.34)) or 1)
+            tax.margins(x=0.08)
+            for sp in ("top", "right"):
+                tax.spines[sp].set_visible(False)
+            tax.grid(axis="y", color=grid, lw=0.6, zorder=0)
+            tax.tick_params(labelsize=8)
+
+    # Axis semantics of the vLLM/SSD counter panels depend on how the run was
+    # driven. Batched: each [prom] point is one workload round's total, x = round.
+    # Async: the sampler ticks at 1 Hz, so each point is the counter's movement
+    # over ~1 s — i.e. a per-second rate, x = elapsed seconds. Only claim seconds
+    # when EVERY series is async (a mixed overlay can't share one x meaning); the
+    # tier panels keep their own "telemetry tick" x regardless (server.log cadence).
+    x_is_seconds = bool(series) and all(s.get("async") for s in series)
+
     # ── per-counter small multiples ──────────────────────────────────────────
+    gs_grid = (fig.add_gridspec(nrow, ncol, left=L, right=R,
+                                top=pos["grid"][1], bottom=pos["grid"][0],
+                                hspace=0.85, wspace=0.28)
+               if grid_h else None)
     for i, (key, ctitle, unit) in enumerate(active):
         r, c = divmod(i, ncol)
-        cax = fig.add_subplot(gs[2 + r, c])
+        cax = fig.add_subplot(gs_grid[r, c])
         for s in series:
             vals = s["data"].get(key)
             if not vals or all(v == 0 for v in vals):
@@ -410,14 +821,29 @@ def render(series, out_path, title, subtitle, dark, dpi):
                  va="bottom", ha="left", color=mut, family="monospace")
         cax.yaxis.set_major_formatter(FuncFormatter(fmt_bytes if unit == "bytes"
                                                     else fmt_compact))
-        cax.set_xlabel("telemetry tick" if is_tier else "round",
-                       color=mut, fontsize=8)
+        if is_tier:
+            cax.set_xlabel("telemetry tick", color=mut, fontsize=8)
+        elif x_is_seconds:
+            cax.set_xlabel("elapsed (s)", color=mut, fontsize=8)
+            cax.set_ylabel("per second", color=mut, fontsize=8)
+        else:
+            cax.set_xlabel("round", color=mut, fontsize=8)
         cax.margins(x=0.02)
         cax.set_ylim(bottom=0)
         for sp in ("top", "right"):
             cax.spines[sp].set_visible(False)
         cax.grid(axis="y", color=grid, lw=0.6)
         cax.tick_params(labelsize=8)
+
+    # ── footnote: curated counters that were measured but stayed zero ─────────
+    if note_lines:
+        # Draw the note at the BOTTOM of its reserved band (text block is
+        # note_text_h tall, +0.08in bottom margin); the ~0.47in of slack above it
+        # is what clears the last panel row's hanging x-axis tick + "round" labels.
+        y = (note_text_h + 0.08) / fig_h
+        for ln in note_lines:
+            fig.text(0.075, y, ln, fontsize=8, va="top", ha="left", color=mut)
+            y -= 0.22 / fig_h
 
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)

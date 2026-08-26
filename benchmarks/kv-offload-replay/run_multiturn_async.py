@@ -22,10 +22,30 @@ Like :mod:`run_multiturn_common`, nothing here imports vllm at module load — t
 engine import happens lazily inside ``run_multiturn_common.build_engine``.
 """
 
+import os
 import sys
 import time
 
 import run_multiturn_common as common
+
+
+def _prom_key(name):
+    """Normalise a vLLM counter name to the renderer's curated key: drop the
+    ``vllm:`` prefix and a single trailing ``_total``.
+
+    Under a V1 ``AsyncLLM`` there is no ``get_metrics()``, so the sampler reads
+    the global prometheus REGISTRY, whose counter names are the cumulative
+    ``vllm:*_total`` form only (the sync path additionally gets bare names from
+    ``get_metrics()``). ``tools/render_kvprofile.py`` matches its curated
+    ``COUNTERS`` keys *exactly* — bare, no ``_total`` — so both must be stripped
+    for an async ``[prom]`` line to plot (e.g. ``vllm:prompt_tokens_total`` ->
+    ``prompt_tokens``, ``vllm:kv_offload_store_bytes_total`` ->
+    ``kv_offload_store_bytes``)."""
+    if name.startswith("vllm:"):
+        name = name[len("vllm:"):]
+    if name.endswith("_total"):
+        name = name[: -len("_total")]
+    return name
 
 
 async def get_tokenizer(engine):
@@ -43,7 +63,8 @@ async def get_tokenizer(engine):
 
 async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds,
                     n_tokens, skip_empty=False, session_id_fn=None,
-                    sampler=None, sample_hz=1.0, on_turn_end=None):
+                    sampler=None, sample_hz=1.0, on_turn_end=None,
+                    progress_interval=0.0):
     """Drive the same multi-turn workload as one coroutine per conversation.
 
     Every conversation is launched at once; within a coroutine its turns run
@@ -63,6 +84,11 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
 
     ``max_rounds`` here is a per-conversation turn cap (0 = all turns).
 
+    ``progress_interval`` (seconds, 0 = off) prints a periodic heartbeat to
+    stderr while the run is in flight — conversations finished vs total,
+    generations so far, throughput, and the spread of turn indices currently
+    being worked — so an async run isn't silent between launch and completion.
+
     Returns a dict with ``rounds_done`` (max turns reached by any conv),
     ``total_generations``, ``elapsed``, ``turn_records`` and ``samples``.
     """
@@ -70,6 +96,10 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
 
     turn_records = []  # (conv, turn, prompt_toks, gen_toks, ttft, latency)
     samples = []       # (t, sampler_value)
+    # Live progress state (read by the heartbeat, mutated by each coroutine).
+    n_convs = len(convs)
+    cur_turn = [-1] * n_convs   # turn index each conv is currently working (-1 = not started)
+    conv_done = [False] * n_convs
 
     async def run_conv(i, conv):
         context = ""
@@ -88,6 +118,7 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
             if (skip_empty and nt == 0) or nt > prompt_budget:
                 break
             context = candidate
+            cur_turn[i] = k
             t0 = time.perf_counter()
             ttft = None
             final = None
@@ -107,6 +138,7 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
             turn_records.append((i, k, nt, gen_toks, ttft, latency))
             if on_turn_end is not None:
                 on_turn_end(i, k, nt, gen_toks, ttft, latency)
+        conv_done[i] = True
 
     async def sample_loop():
         while True:
@@ -116,17 +148,42 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
             except Exception:  # noqa: BLE001 - a sampler hiccup must not kill the run
                 pass
 
+    async def progress_loop():
+        # Heartbeat: convs finished vs total, generations so far, gen/s, and the
+        # min/median/max turn index among conversations still in flight (which
+        # shows the async concurrency — turns advance at different rates).
+        while True:
+            await asyncio.sleep(progress_interval)
+            n_done = sum(conv_done)
+            n_gen = len(turn_records)
+            el = time.perf_counter() - t_start
+            rate = n_gen / el if el > 0 else 0.0
+            active = sorted(cur_turn[i] for i in range(n_convs)
+                            if not conv_done[i] and cur_turn[i] >= 0)
+            if active:
+                spread = (f"  turns-in-flight min={active[0]} "
+                          f"med={active[len(active) // 2]} max={active[-1]}")
+            else:
+                spread = ""
+            print(f"[run] async progress: {n_done}/{n_convs} convs done  "
+                  f"{n_gen} generations  {rate:.1f} gen/s  "
+                  f"{len(active)} in flight{spread}",
+                  file=sys.stderr, flush=True)
+
     t_start = time.perf_counter()
     sampler_task = asyncio.create_task(sample_loop()) if sampler else None
+    progress_task = (asyncio.create_task(progress_loop())
+                     if progress_interval and progress_interval > 0 else None)
     try:
         await asyncio.gather(*(run_conv(i, c) for i, c in enumerate(convs)))
     finally:
-        if sampler_task is not None:
-            sampler_task.cancel()
-            try:
-                await sampler_task
-            except asyncio.CancelledError:
-                pass
+        for task in (sampler_task, progress_task):
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
     elapsed = time.perf_counter() - t_start
     return {
@@ -179,8 +236,19 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
 
     engine = common.build_engine(engine_kwargs, async_mode=True)
     common.start_prom_exporter()
+    # Progress heartbeat cadence in seconds (ASYNC_PROGRESS_SECS, default 10;
+    # 0 disables) — keeps the async run from being silent between launch and the
+    # final latency line.
+    try:
+        progress_interval = float(os.environ.get("ASYNC_PROGRESS_SECS", "10"))
+    except ValueError:
+        progress_interval = 10.0
+    _cadence = (f", progress every {progress_interval:g}s"
+                if progress_interval > 0 else "")
     print("[run] WORKLOAD_MODE=async — one coroutine per conversation "
-          "(max_num_seqs bounds the running batch)", file=sys.stderr)
+          f"(max_num_seqs bounds the running batch); "
+          f"{len(convs)} conversations{_cadence}",
+          file=sys.stderr, flush=True)
 
     def _disk():
         return disk_rw_bytes() if disk_rw_bytes is not None else (None, None)
@@ -205,6 +273,7 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
             skip_empty=skip_empty,
             session_id_fn=session_id_fn,
             sampler=sampler if capture_metrics else None,
+            progress_interval=progress_interval,
         )
 
     result = asyncio.run(_amain())
@@ -221,6 +290,39 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
     print(f"[run] async turn latency: n={len(lat)}  "
           f"p50={_pct(lat, 0.50)} p90={_pct(lat, 0.90)} p99={_pct(lat, 0.99)}  "
           f"ttft_p50={_pct(ttfts, 0.50)}", file=sys.stderr, flush=True)
+
+    # ── Per-tick [prom] markers (renderer input) ──────────────────────────────
+    # The 1 Hz sampler recorded cumulative counters (+ SSD device bytes, when the
+    # driver supplied a disk_rw_bytes closure) at each tick. Emit the per-tick
+    # DELTAS in the same "[prom] round N: k=v …" form the batched path prints, so
+    # tools/render_kvprofile.py plots async runs exactly like batched ones (here a
+    # "round" is one 1 s telemetry tick). Counter names are normalised to the
+    # renderer's curated keys via _prom_key (strip vllm:/_total). Without this an
+    # async run emitted only the single cumulative line below, which the renderer's
+    # per-round parser ignores — so async slides carried no vLLM-counter panels.
+    if capture_metrics:
+        prev_prom = None
+        prev_rd = prev_wr = None
+        for tick, (_t, v) in enumerate(result["samples"]):
+            pr = v.get("prom") or {}
+            parts = []
+            if prev_prom is not None:
+                d = {}
+                for k in pr:
+                    delta = pr.get(k, 0.0) - prev_prom.get(k, 0.0)
+                    if delta:
+                        d[_prom_key(k)] = delta
+                if d:
+                    parts.append(" ".join(f"{k}={d[k]:.0f}" for k in sorted(d)))
+            rd, wr = v.get("read_bytes"), v.get("write_bytes")
+            if (rd is not None and wr is not None
+                    and prev_rd is not None and prev_wr is not None):
+                parts.append(f"ssd_read_bytes={rd - prev_rd} "
+                             f"ssd_write_bytes={wr - prev_wr}")
+            line = " ".join(p for p in parts if p)
+            if line:
+                print(f"[prom] round {tick}: {line}", file=sys.stderr, flush=True)
+            prev_prom, prev_rd, prev_wr = pr, rd, wr
 
     # vLLM counter movement across the run (first sample -> last). AsyncLLM has
     # no get_metrics(), so the sampler read the global REGISTRY; the batched path
