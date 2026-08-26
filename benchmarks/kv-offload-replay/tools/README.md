@@ -109,3 +109,65 @@ write-only run or a non-Certus backend simply omits the counters it never emits.
 Variant colours are fixed (NoOffload blue, CPUOffload orange, Tiered-CPU-FS
 green, SharedStorage teal, Certus-SPDK gold) and the bar/legend order is
 canonical, so slides across runs stay visually comparable.
+
+## `gen_synthetic_sharegpt.py` — synthetic ShareGPT dataset generator
+
+Generates **N** synthetic conversations with a mean **human-turn** count of **M**,
+written in the exact ShareGPT schema the multi-turn bench consumes (a JSON array of
+`{"id", "conversations": [{"from": "human"|"gpt", "value": ...}]}` — see
+`../../../data/sharegpt/README.md`). Use it to produce controllable stand-ins for
+`data/sharegpt_12turn_450.json` at any size or turn distribution without pulling
+from the real corpus.
+
+Each conversation is authored in a **single** Claude API call via structured output
+(not one call per turn), so cost scales with N, not N×M. Human-turn counts are drawn
+from a **Poisson(M)** distribution with a seeded RNG, so a given `--seed` reproduces
+the same turn-count distribution and ids. Output strictly alternates `human → gpt`
+starting with `human` (roles are re-asserted by position), always has an even turn
+count and ≥ 2 human turns, so every conversation is kept by `load_convs`.
+
+### Setup
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY=...      # or: ant auth login
+```
+
+### Usage
+
+```bash
+# Mirror data/sharegpt_12turn_450.json: 450 convs, mean 12 human turns
+python tools/gen_synthetic_sharegpt.py -n 450 -m 12 -o data/synth_12turn_450.json
+
+# Preview the turn-count distribution + rough cost, no API calls
+python tools/gen_synthetic_sharegpt.py -n 450 -m 12 -o /tmp/x.json --dry-run
+
+# Larger, cheaper/faster bulk run
+python tools/gen_synthetic_sharegpt.py -n 2000 -m 8 \
+    --model claude-sonnet-5 --concurrency 12 -o data/synth.json
+```
+
+Point a driver at the result with `DATASET_PATH=data/synth_12turn_450.json` (see
+`../../../data/sharegpt/README.md`). Partial output is flushed on Ctrl-C or a
+mid-run error; per-conversation failures and refusals are counted and skipped.
+A usage + estimated-cost summary is printed to stderr at the end.
+
+### Options
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-n`, `--num-convs` | — | Number of conversations to generate (N, required) |
+| `-m`, `--mean-turns` | — | Mean human-turn count (M); actual counts are Poisson-distributed (required) |
+| `-o`, `--out` | — | Output ShareGPT `.json` path (required) |
+| `--model` | `claude-opus-5` | Claude model id; `claude-sonnet-5` / `claude-haiku-4-5` are cheaper for bulk |
+| `--effort` | `low` | Reasoning effort (`low`…`max`); higher = better prose, more cost |
+| `--concurrency` | `8` | Max concurrent API requests |
+| `--max-tokens` | `16000` | Max output tokens per conversation |
+| `--min-turns` | `2` | Floor for human-turn count (clamped to ≥ 2, the bench minimum) |
+| `--max-turns` | `40` | Ceiling for human-turn count |
+| `--seed` | `1234` | RNG seed for turn-count distribution, ids, and topic selection |
+| `--topics-file` | built-in | File of topics, one per line, for conversation diversity |
+| `--indent` | compact | Pretty-print with this indent (default matches the repo's compact sharegpt files) |
+| `--dry-run` | off | Print distribution + rough cost estimate, make no API calls |
+
+The only dependency is the `anthropic` SDK (system `python3` is fine).
