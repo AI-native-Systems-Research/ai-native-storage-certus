@@ -145,8 +145,8 @@ FAMILIES = [
         ("ssd_write_bytes",        "SSD write"),
     ]),
     ("KV tier movements — run total", "int", [
-        ("tier_promotions_to_memory",  "→DRAM"),
-        ("tier_promotions_to_gpu",     "→GPU"),
+        ("tier_promotions_to_memory",  "promotions to DRAM"),
+        ("tier_promotions_to_gpu",     "promotions to GPU"),
         ("tier_evictions_from_memory", "evict DRAM"),
         ("tier_evictions_from_ssd",    "evict SSD"),
     ]),
