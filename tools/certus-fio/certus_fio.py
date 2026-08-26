@@ -815,10 +815,10 @@ def main():
 # Quick health check patterns (5M objects, natural batch sizes)
 QUICK_PATTERNS = [
     ("decode_block_store", 1),
-    ("cold_prefill_store", 64),
-    ("compute_local_eviction_and_later_reload", 64),
+    ("cold_prefill_store", 16),
+    ("compute_local_eviction_and_later_reload", 16),
     ("hot_vs_cold_load_paths", 1),
-    ("hot_vs_cold_load_paths", 64),
+    ("hot_vs_cold_load_paths", 16),
     ("bidirectional_store_load_contention", 1),
 ]
 
@@ -878,14 +878,14 @@ def cmd_quick(args):
 
     if ("decode_block_store", 1) in results:
         _row("Serial store (bs=1)", "GPU→DRAM", results[("decode_block_store", 1)], "decode-writeback/store")
-    if ("cold_prefill_store", 64) in results:
-        _row("Batched store (bs=64)", "GPU→DRAM", results[("cold_prefill_store", 64)], "prefill-writeback/store")
-    if ("compute_local_eviction_and_later_reload", 64) in results:
-        _row("Warm load (bs=64)", "DRAM→GPU", results[("compute_local_eviction_and_later_reload", 64)], "demand-reload/load")
+    if ("cold_prefill_store", 16) in results:
+        _row("Batched store (bs=16)", "GPU→DRAM", results[("cold_prefill_store", 16)], "prefill-writeback/store")
+    if ("compute_local_eviction_and_later_reload", 16) in results:
+        _row("Warm load (bs=16)", "DRAM→GPU", results[("compute_local_eviction_and_later_reload", 16)], "demand-reload/load")
     if ("hot_vs_cold_load_paths", 1) in results:
         _row("Cold load serial (bs=1)", "SSD→GPU", results[("hot_vs_cold_load_paths", 1)], "hot-load/load")
-    if ("hot_vs_cold_load_paths", 64) in results:
-        _row("Cold load batched (bs=64)", "SSD→GPU", results[("hot_vs_cold_load_paths", 64)], "hot-load/load")
+    if ("hot_vs_cold_load_paths", 16) in results:
+        _row("Cold load batched (bs=16)", "SSD→GPU", results[("hot_vs_cold_load_paths", 16)], "hot-load/load")
     if ("bidirectional_store_load_contention", 1) in results:
         r = results[("bidirectional_store_load_contention", 1)]
         _row("Contended store (bs=1)", "GPU→DRAM", r, "concurrent-bidir/store")
@@ -1081,10 +1081,10 @@ def analyze_results(results):
 
     # Key metrics (5M objects = Llama-70B, the primary target)
     peak_serial_store = max((r["throughput_gbps"] for r in _filter(results, op="store", obj="5M", bs=1)), default=0)
-    peak_batched_store = max((r["throughput_gbps"] for r in _filter(results, op="store", obj="5M", bs=64)), default=0)
-    peak_warm_load = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs=64, patterns=warm_pattern_names)), default=0)
+    peak_batched_store = max((r["throughput_gbps"] for r in _filter(results, op="store", obj="5M", bs=16)), default=0)
+    peak_warm_load = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs=16, patterns=warm_pattern_names)), default=0)
     cold_serial = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs=1, patterns=cold_pattern_names)), default=0)
-    cold_batched = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs=64, patterns=cold_pattern_names)), default=0)
+    cold_batched = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs=16, patterns=cold_pattern_names)), default=0)
     peak_cold_load = max(cold_serial, cold_batched)
     peak_contended = max((r["throughput_gbps"] for r in _filter(results, obj="5M", bs=1, pattern="bidirectional")), default=0)
 
@@ -1248,10 +1248,10 @@ table.data td.num{{font-family:'JetBrains Mono',monospace;text-align:right}}
 <table class="data">
 <tr><th>Test</th><th>Path</th><th>bs</th><th>GB/s</th></tr>
 <tr><td>Serial store</td><td style="color:var(--store)">GPU&rarr;DRAM</td><td class="num">1</td><td class="num" style="color:var(--store)">{analysis['peak_serial_store']:.1f}</td></tr>
-<tr><td>Batched store</td><td style="color:var(--store)">GPU&rarr;DRAM</td><td class="num">64</td><td class="num" style="color:var(--store)">{analysis['peak_batched_store']:.1f}</td></tr>
-<tr><td>Warm load</td><td style="color:var(--load)">DRAM&rarr;GPU</td><td class="num">64</td><td class="num" style="color:var(--load)">{analysis['peak_warm_load']:.1f}</td></tr>
+<tr><td>Batched store</td><td style="color:var(--store)">GPU&rarr;DRAM</td><td class="num">16</td><td class="num" style="color:var(--store)">{analysis['peak_batched_store']:.1f}</td></tr>
+<tr><td>Warm load</td><td style="color:var(--load)">DRAM&rarr;GPU</td><td class="num">16</td><td class="num" style="color:var(--load)">{analysis['peak_warm_load']:.1f}</td></tr>
 <tr><td>Cold load serial</td><td style="color:var(--contend)">SSD&rarr;GPU</td><td class="num">1</td><td class="num" style="color:var(--contend)">{analysis['cold_serial']:.1f}</td></tr>
-<tr><td>Cold load batched</td><td style="color:var(--load)">SSD&rarr;GPU</td><td class="num">64</td><td class="num" style="color:var(--load)">{analysis['cold_batched']:.1f}</td></tr>
+<tr><td>Cold load batched</td><td style="color:var(--load)">SSD&rarr;GPU</td><td class="num">16</td><td class="num" style="color:var(--load)">{analysis['cold_batched']:.1f}</td></tr>
 <tr><td>Under contention</td><td style="color:var(--contend)">mixed</td><td class="num">1</td><td class="num" style="color:var(--contend)">{analysis['peak_contended']:.1f}</td></tr>
 </table>
 </div>
@@ -1307,7 +1307,7 @@ function getPath(r) {{
 }}
 
 // Natural batch sizes: serial ops (decode, contention) use bs=1,
-// batched ops (prefill, loads, disaggregated) use bs=64
+// batched ops (prefill, loads, disaggregated) use bs=16 (typical chunked prefill submission)
 const SERIAL_OPS = {{'decode_block_store/store':1, 'bidirectional_store_load_contention/store':1,
   'bidirectional_store_load_contention/load':1, 'continuous_batching_mix/store':1}};
 function naturalBs(r) {{
@@ -1315,7 +1315,7 @@ function naturalBs(r) {{
   if (SERIAL_OPS[key] !== undefined) return SERIAL_OPS[key];
   const op = r.phase_op.split('/')[1];
   if (op === 'delete') return 1;
-  return 64;
+  return 16;
 }}
 
 // For each pattern+phase_op, pick the row at its natural batch size
