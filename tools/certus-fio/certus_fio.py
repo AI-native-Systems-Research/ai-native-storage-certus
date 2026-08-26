@@ -1216,8 +1216,8 @@ table.data td.num{{font-family:'JetBrains Mono',monospace;text-align:right}}
 <div class="stat-row">
   <div class="stat"><div class="stat-value" style="color:var(--load)">{analysis['peak_warm_load']:.1f}</div><div class="stat-label">GB/s warm load (DRAM&rarr;GPU)</div></div>
   <div class="stat"><div class="stat-value" style="color:var(--load);opacity:0.7">{analysis['peak_cold_load']:.1f}</div><div class="stat-label">GB/s cold load (SSD&rarr;GPU)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_serial_store']:.1f}</div><div class="stat-label">GB/s peak store (serial)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--critical)">{analysis['peak_batched_store']:.1f}</div><div class="stat-label">GB/s batched store (bottleneck)</div></div>
+  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_serial_store']:.1f}</div><div class="stat-label">GB/s store (serial, bs=1)</div></div>
+  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_batched_store']:.1f}</div><div class="stat-label">GB/s store (batched, bs=64+)</div></div>
   <div class="stat"><div class="stat-value" style="color:var(--contend)">{analysis['peak_contended']:.1f}</div><div class="stat-label">GB/s under contention</div></div>
 </div>
 
