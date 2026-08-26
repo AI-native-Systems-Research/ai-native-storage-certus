@@ -1081,12 +1081,12 @@ def analyze_results(results):
 
     # Key metrics (5M objects = Llama-70B, the primary target)
     peak_serial_store = max((r["throughput_gbps"] for r in _filter(results, op="store", obj="5M", bs=1)), default=0)
-    peak_batched_store = max((r["throughput_gbps"] for r in _filter(results, op="store", obj="5M", bs_min=64)), default=0)
-    peak_warm_load = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", patterns=warm_pattern_names)), default=0)
+    peak_batched_store = max((r["throughput_gbps"] for r in _filter(results, op="store", obj="5M", bs=64)), default=0)
+    peak_warm_load = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs=64, patterns=warm_pattern_names)), default=0)
     cold_serial = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs=1, patterns=cold_pattern_names)), default=0)
-    cold_batched = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs_min=64, patterns=cold_pattern_names)), default=0)
+    cold_batched = max((r["throughput_gbps"] for r in _filter(results, op="load", obj="5M", bs=64, patterns=cold_pattern_names)), default=0)
     peak_cold_load = max(cold_serial, cold_batched)
-    peak_contended = max((r["throughput_gbps"] for r in _filter(results, obj="5M", pattern="bidirectional")), default=0)
+    peak_contended = max((r["throughput_gbps"] for r in _filter(results, obj="5M", bs=1, pattern="bidirectional")), default=0)
 
     # Error rates
     total_ops = sum(r["ops"] for r in results if r["ops"] > 0)
