@@ -177,8 +177,10 @@ RATE_KEYS = {"prompt_tokens", "prompt_tokens_cached", "generation_tokens",
              "tier_promotions_to_memory", "tier_promotions_to_gpu",
              "tier_evictions_from_memory", "tier_evictions_from_ssd"}
 
-# Fixed colour per variant (normalised name -> hex); unknown variants draw from
-# FALLBACK in first-seen order.
+# Palette base: the canonical colour for each variant, in VARIANT_ORDER. Colours
+# are handed out one-per-series in display order (see build_series) — these
+# first, then FALLBACK — so a single run of each variant keeps its canonical
+# colour while repeated variants pick up distinct hues rather than sharing one.
 VARIANT_COLOR = {
     "nooffload":     "#2a78d6",  # blue
     "cpuoffload":    "#eb6834",  # orange
@@ -453,32 +455,38 @@ def build_series(run_args):
     for tag, d in run_args:
         for s in load_run(d, tag):
             series.append(s)
-    # colour per variant
-    color_map, fb = {}, iter(FALLBACK)
-    for s in series:
-        nk = norm(s["variant"])
-        if nk not in color_map:
-            color_map[nk] = VARIANT_COLOR.get(nk, next(fb, "#666666"))
-    # linestyle per repeat of the same variant (stable in input order)
+    # linestyle per repeat of the same variant (kept as a secondary cue), and
+    # freeze input order for the stable sort below.
     seen = {}
-    for s in series:
+    for i, s in enumerate(series):
         nk = norm(s["variant"])
         idx = seen.get(nk, 0)
         s["style"] = STYLES[idx % len(STYLES)]
-        s["color"] = color_map[nk]
         s["dup"] = None  # filled below
+        s["_ord"] = i    # freeze input order before the sort empties the list
         seen[nk] = idx + 1
     dup_variants = {nk for nk, n in seen.items() if n > 1}
-    for i, s in enumerate(series):
+    for s in series:
         nk = norm(s["variant"])
         s["label"] = s["variant"] + (f" · {s['tag']}" if nk in dup_variants and s["tag"] else "")
-        s["_ord"] = i  # freeze input order before the sort empties the list
     # bar/legend order: canonical variant order, then input order
     def okey(s):
         nk = norm(s["variant"])
         return (VARIANT_ORDER.index(nk) if nk in VARIANT_ORDER else len(VARIANT_ORDER),
                 s["_ord"])
     series.sort(key=okey)
+    # One distinct colour PER SERIES, walked in display order from the palette we
+    # already have (the canonical variant colours in VARIANT_ORDER, then the
+    # FALLBACK hues). Colour now tracks the series, not its variant, so repeated
+    # variants — e.g. several Certus configs — are told apart by hue instead of
+    # all sharing one. A single run of each variant still lands on its canonical
+    # colour (display order matches the palette prefix); extra runs pick up the
+    # next unused hue. A per-run --color override still wins (applied later, in
+    # main). Grey once the palette is exhausted.
+    palette = list(dict.fromkeys([VARIANT_COLOR[k] for k in VARIANT_ORDER] + FALLBACK))
+    pit = iter(palette)
+    for s in series:
+        s["color"] = next(pit, "#666666")
     return series
 
 
