@@ -37,6 +37,7 @@ python3 tools/certus-fio/certus_fio.py run --pattern decode_block_store --min-du
 certus-fio list                             List all available patterns
 certus-fio describe --pattern NAME          Show parameters, keyspaces, phases
 certus-fio run --pattern NAME [opts]        Run a single pattern
+certus-fio quick [opts]                     Health check: 5 key patterns at 5M (~25s)
 certus-fio full [opts]                      Full sweep (core patterns × sizes × batch)
 certus-fio report [opts]                    Full sweep + HTML report with analysis
 
@@ -57,9 +58,42 @@ Full/Report options:
   --gpu ID                      GPU device ID (default: 0)
 ```
 
+## Quick Health Check
+
+Run after code changes to verify no regressions (~25 seconds):
+
+```bash
+python3 tools/certus-fio/certus_fio.py quick
+```
+
+Runs 5 key patterns at Llama-70B object size (5 MiB) with their natural batch sizes:
+
+| Test | Pattern | bs | What it measures |
+|------|---------|---:|------------------|
+| Serial store | `decode_block_store` | 1 | Per-block store latency (decode path) |
+| Batched store | `cold_prefill_store` | 64 | Prefill offload throughput |
+| Warm load | `compute_local_eviction_and_later_reload` | 64 | DRAM→GPU restore |
+| Cold load serial | `hot_vs_cold_load_paths` | 1 | Per-block SSD→GPU (worst case) |
+| Cold load batched | `hot_vs_cold_load_paths` | 64 | Batched SSD→GPU (prefetch/swap-in) |
+| Contended store | `bidirectional_store_load_contention` | 1 | Store throughput under concurrent load |
+| Contended load | `bidirectional_store_load_contention` | 1 | Load throughput under concurrent store |
+
+Example output:
+```
+Test                                     Path           GB/s   p50us   p99us   Err
+---------------------------------------------------------------------------
+Serial store (bs=1)                      GPU→DRAM        3.3    1786    2052
+Batched store (bs=64)                    GPU→DRAM        4.4    1218    1469
+Warm load (bs=64)                        DRAM→GPU       14.8     362     441
+Cold load serial (bs=1)                  SSD→GPU         3.6    1461    1660
+Cold load batched (bs=64)                SSD→GPU        11.8     430     580
+Contended store (bs=1)                   GPU→DRAM        2.0    3440    7938    39
+Contended load (bs=1)                    SSD→GPU         2.1    5395   10148     9
+```
+
 ## Full Sweep & Report
 
-The `full` and `report` commands run 12 core patterns (8 warm + 4 cold) across object sizes and batch sizes:
+The `full` and `report` commands run 11 core patterns (8 warm + 3 cold) across object sizes and batch sizes:
 
 ```bash
 # Full sweep with CSV output (~9 min)
