@@ -17,7 +17,7 @@ build() {
 }
 
 # NoOffload + CPUOffload + Tiered all share one image (run_multiturn_offloading.py
-# drives all three; backend picked at run time by OFFLOAD_MODE / DISK_DIR).
+# drives all three; backend picked at run time by OFFLOAD_MODE / SECONDARY_TIER).
 build offload \
   podman build "${BA[@]}" -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
 

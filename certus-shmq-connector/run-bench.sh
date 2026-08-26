@@ -33,6 +33,12 @@
 #                               host builds into /mnt/certus1 — see below)
 set -euo pipefail
 
+# Repo root, resolved from this script's own location (certus-shmq-connector/..),
+# so the full-corpus mount below works whether launched directly or by the
+# orchestrator, without an extra env.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # Fully-qualified so rootless podman doesn't hit short-name resolution (which
 # can't prompt without a TTY). Override IMAGE to point elsewhere.
 IMAGE="${IMAGE:-localhost/certus-shmq-bench}"
@@ -63,6 +69,32 @@ WORKLOAD_SRC="${WORKLOAD_SRC:-}"
 # rebuild). Unset by default (uses the image's baked connector); declared here so
 # the `-n` test at the mount block below is safe under `set -u`.
 CONNECTOR_SRC="${CONNECTOR_SRC:-}"
+# WORKLOAD_NAME — optional named dataset workload forwarded to the driver as the
+# WORKLOAD_NAME env (see run_multiturn_common.resolve_workload). Empty = the
+# image's baked DATASET_PATH (the 450x12 set). SHAREGPT_MIN_TURNS/MAX_TURNS pick
+# the sharegpt config: 12/12 is exactly the baked DATASET_PATH (a no-op);
+# min-turns 1 = the full corpus, mounted from the host (see the passthrough
+# block below) since it is not baked into the image.
+WORKLOAD_NAME="${WORKLOAD_NAME:-}"
+SHAREGPT_MIN_TURNS="${SHAREGPT_MIN_TURNS:-}"
+SHAREGPT_MAX_TURNS="${SHAREGPT_MAX_TURNS:-}"
+# The turn bounds only apply to the sharegpt workload, so setting either without
+# WORKLOAD_NAME implies it — otherwise the passthrough block below adds nothing
+# and the container uses its baked 450x12 DATASET_PATH.
+if [[ -z "${WORKLOAD_NAME}" && ( -n "${SHAREGPT_MIN_TURNS}" || -n "${SHAREGPT_MAX_TURNS}" ) ]]; then
+    WORKLOAD_NAME="sharegpt"
+fi
+# Only 12/12 (450x12 subset) and 1/1 (full corpus) are prepared; reject anything
+# else so the corpus mount below can't pair min-turns 1 with a bogus max and
+# force an unvalidated DATASET_PATH. max-turns mirrors min-turns when unset.
+if [[ "${WORKLOAD_NAME}" == "sharegpt" ]]; then
+    _mn="${SHAREGPT_MIN_TURNS:-12}"; _mx="${SHAREGPT_MAX_TURNS:-$_mn}"
+    if ! { [[ "${_mn}" == "12" && "${_mx}" == "12" ]] || [[ "${_mn}" == "1" && "${_mx}" == "1" ]]; }; then
+        echo "error: sharegpt workload accepts only 12/12 (the 450-conv subset) or 1/1" >&2
+        echo "       (the full corpus); got min=${_mn} max=${_mx}. Use DATASET_PATH otherwise." >&2
+        exit 2
+    fi
+fi
 
 # This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
 # needs explicit store paths. Override or unset for a default install.
@@ -174,6 +206,30 @@ if [[ -n "${CONNECTOR_SRC}" ]]; then
     fi
 fi
 
+# ── Named-workload passthrough (only if WORKLOAD_NAME set) ──
+# Forward the selector plus any human-turn bounds. 12/12 is exactly the image's
+# baked DATASET_PATH, so at 12/12 this is a no-op. min-turns 1 selects the FULL
+# corpus, which is NOT baked: bind-mount data/sharegpt read-only and point
+# DATASET_PATH at the mount (DATASET_PATH always wins in resolve_workload).
+# Empty WORKLOAD_NAME => nothing added (baked default).
+workload_name_env=()
+if [[ -n "${WORKLOAD_NAME}" ]]; then
+    workload_name_env+=(-e "WORKLOAD_NAME=${WORKLOAD_NAME}")
+    [[ -n "${SHAREGPT_MIN_TURNS}" ]] && workload_name_env+=(-e "SHAREGPT_MIN_TURNS=${SHAREGPT_MIN_TURNS}")
+    [[ -n "${SHAREGPT_MAX_TURNS}" ]] && workload_name_env+=(-e "SHAREGPT_MAX_TURNS=${SHAREGPT_MAX_TURNS}")
+    echo "[run-bench] workload=${WORKLOAD_NAME} min_turns=${SHAREGPT_MIN_TURNS:-12} max_turns=${SHAREGPT_MAX_TURNS:-12}" >&2
+    if [[ "${WORKLOAD_NAME}" == "sharegpt" && "${SHAREGPT_MIN_TURNS}" == "1" ]]; then
+        corpus="${REPO_ROOT}/data/sharegpt"
+        if [[ -d "${corpus}" ]]; then
+            workload_name_env+=(-v "${corpus}:/workspace/data/sharegpt:z,ro"
+                                -e "DATASET_PATH=/workspace/data/sharegpt")
+            echo "[run-bench] min-turns 1: mounting full corpus ${corpus}" >&2
+        else
+            echo "warning: ${corpus} not found — min-turns 1 needs the full ShareGPT corpus (data/sharegpt/*.json); falling back to the baked 450x12 set." >&2
+        fi
+    fi
+fi
+
 echo "[run-bench] image=${IMAGE} gpu=${GPU} shm_path=${SHM_PATH}"
 echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL} tensor_parallel_size=${TENSOR_PARALLEL_SIZE}"
 
@@ -190,6 +246,7 @@ exec command podman "${store_flags[@]}" run --rm \
     "${logstats_env[@]}" \
     "${workload_mount[@]}" \
     "${connector_mount[@]}" \
+    "${workload_name_env[@]}" \
     "${cache_mount[@]}" \
     "${hf_env[@]}" \
     -e "SHM_PATH=${SHM_PATH}" \
@@ -199,5 +256,6 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
     -e "ENFORCE_EAGER=${ENFORCE_EAGER:-0}" \
+    -e "WORKLOAD_MODE=${WORKLOAD_MODE:-batched}" \
     -e "DTYPE=${DTYPE:-float16}" \
     "${IMAGE}"

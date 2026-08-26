@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KV-offload 0.26.0 counters</title>
+<!--
+  ============================================================================
+  KV-offload 4-way comparison — vLLM 0.26.0, 64 conv × 12 turns
+  Every captured vLLM Prometheus counter, graphed per-round (4 backends each).
+  ----------------------------------------------------------------------------
+  Source: /mnt/fs-backend-bench/kvprofile-vllm0.26.0-225237_16222 (2026-08-11)
+  Images REBUILT immediately before this run (--rebuild), so the prom-capture
+  drivers were baked in — values are REAL per-round deltas from the [prom]
+  log lines (the driver prints now-minus-prev each round).
+
+  Counters shown (bare vllm:* names, summed across label sets):
+    prompt_tokens, prompt_tokens_cached, generation_tokens,
+    prefix_cache_queries, prefix_cache_hits,
+    external_prefix_cache_queries, external_prefix_cache_hits,
+    kv_offload_store_bytes, kv_offload_load_bytes, num_preemptions
+  Omitted: request_success (constant 64/round), *_time (coarse integer
+  seconds), kv_offload_total_bytes (= store + load).
+
+  Backend color is FIXED by `key`:
+    NoOffload=blue, CPUOffload=orange, Tiered-CPU-FS=aqua slot, Certus-SPDK=yellow.
+  ============================================================================
+-->
+<style>
+  :root {
+    color-scheme: light;
+    --plane:        #f9f9f7;
+    --surface:      #fcfcfb;
+    --ink:          #0b0b0b;
+    --ink-2:        #52514e;
+    --muted:        #898781;
+    --grid:         #e1e0d9;
+    --axis:         #c3c2b7;
+    --border:       rgba(11,11,11,0.10);
+    --chip:         #f0efec;
+
+    --s-nooffload:     #2a78d6;  /* blue   */
+    --s-cpuoffload:    #eb6834;  /* orange */
+    --s-sharedstorage: #1baf7a;  /* aqua   */
+    --s-certus:        #eda100;  /* yellow */
+    --s-tiered2:       #2f9e44;  /* green (Tiered-CPU-FS 2nd run, dotted) */
+    --s-tiered3:       #66a80f;  /* lime  (Tiered-CPU-FS 3rd run, dashed) */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --plane:  #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+      --muted:  #898781; --grid: #2c2c2a; --axis: #383835;
+      --border: rgba(255,255,255,0.10); --chip: #26261f;
+      --s-nooffload: #3987e5; --s-cpuoffload: #d95926;
+      --s-sharedstorage: #199e70; --s-certus: #c98500;
+      --s-tiered2: #40c057; --s-tiered3: #94d82d;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:  #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+    --muted:  #898781; --grid: #2c2c2a; --axis: #383835;
+    --border: rgba(255,255,255,0.10); --chip: #26261f;
+    --s-nooffload: #3987e5; --s-cpuoffload: #d95926;
+    --s-sharedstorage: #199e70; --s-certus: #c98500;
+    --s-tiered2: #40c057; --s-tiered3: #94d82d;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--plane); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5; font-size: 15px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.run { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+  h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  .subtitle { color: var(--ink-2); margin: 2px 0 0; font-size: 14px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 22px; }
+  .meta .kv { background: var(--chip); border: 1px solid var(--border); border-radius: 6px; padding: 3px 9px; font-size: 12.5px; color: var(--ink-2); }
+  .meta .kv b { color: var(--ink); font-weight: 600; }
+
+  .toggle { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); border-radius: 7px; padding: 5px 11px; font: inherit; font-size: 13px; cursor: pointer; }
+  .toggle:hover { color: var(--ink); }
+  .toggle:focus-visible { outline: 2px solid var(--s-nooffload); outline-offset: 2px; }
+
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin: 16px 0; }
+  section > h2 { font-size: 15px; font-weight: 620; margin: 0 0 2px; letter-spacing: -0.005em; }
+  section > .hint { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 6px; align-items: center; }
+  .legend .item { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
+  .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .legend .note { color: var(--muted); font-size: 12px; }
+
+  .chart { width: 100%; overflow-x: auto; }
+  svg { display: block; width: 100%; height: auto; }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .axis-line { stroke: var(--axis); stroke-width: 1; }
+  .tick { fill: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .axis-label { fill: var(--ink-2); font-size: 11px; }
+  .series-line { fill: none; stroke-width: 2; }
+  .series-dot  { stroke: var(--surface); stroke-width: 1.5; }
+  .bar-value { fill: var(--ink); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bar-name  { fill: var(--ink-2); font-size: 12.5px; }
+  .bar-sub   { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+  .s-nooffload     { color: var(--s-nooffload); }
+  .s-cpuoffload    { color: var(--s-cpuoffload); }
+  .s-tiered        { color: var(--s-sharedstorage); }  /* reuses aqua slot */
+  .s-tiered2       { color: var(--s-tiered2); }         /* 2nd tiered run, green */
+  .s-tiered3       { color: var(--s-tiered3); }         /* 3rd tiered run, lime  */
+  .s-certus        { color: var(--s-certus); }
+  /* the repeat tiered runs draw dotted/dashed so they read apart from run 1's solid aqua */
+  .series-line.s-tiered2 { stroke-dasharray: 2 4; }
+  .series-line.s-tiered3 { stroke-dasharray: 6 3; }
+  .stroke-cur { stroke: currentColor; }
+  .fill-cur   { fill: currentColor; }
+
+  /* small-multiples grid of per-counter charts */
+  .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+  .cc { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px 8px; }
+  .cc h3 { font-size: 13.5px; font-weight: 620; margin: 0; letter-spacing: -0.005em; }
+  .cc .metric { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); }
+  .cc .cc-hint { color: var(--muted); font-size: 11.5px; margin: 3px 0 6px; min-height: 2.4em; }
+
+  .crosshair { stroke: var(--axis); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; opacity: 0; }
+  .tooltip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 11.5px; color: var(--ink); box-shadow: 0 4px 14px rgba(0,0,0,0.12); opacity: 0; transition: opacity .08s; min-width: 140px; z-index: 5; }
+  .tooltip .tt-round { color: var(--muted); font-size: 10.5px; margin-bottom: 4px; }
+  .tooltip .tt-row { display: flex; align-items: center; gap: 7px; justify-content: space-between; }
+  .tooltip .tt-row .l { display: inline-flex; align-items: center; gap: 6px; }
+  .tooltip .tt-row .sw { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .tooltip .tt-row .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .plot-rel { position: relative; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  caption { text-align: left; color: var(--muted); font-size: 12px; margin: 14px 0 6px; }
+  th, td { padding: 5px 9px; text-align: right; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
+  thead th { color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--axis); }
+  tbody tr:hover { background: var(--chip); }
+  .tbl-scroll { overflow-x: auto; }
+  details.tables > summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+  details.tables[open] > summary { margin-bottom: 6px; }
+
+  footer.notes { color: var(--muted); font-size: 12px; margin-top: 24px; }
+  footer.notes code { background: var(--chip); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="run">
+    <div>
+      <h1 id="run-title">KV-offload counters, per round</h1>
+      <p class="subtitle" id="run-subtitle"></p>
+    </div>
+    <button class="toggle" id="theme-toggle" type="button" aria-label="Toggle color theme">◑ Theme</button>
+  </header>
+  <div class="meta" id="run-meta"></div>
+
+  <section aria-labelledby="h-total">
+    <h2 id="h-total">Total wall time</h2>
+    <p class="hint">Seconds to replay the full workload. Lower is better; sub-label is the ratio vs NoOffload.</p>
+    <div class="chart plot-rel" id="chart-total"></div>
+  </section>
+
+  <section aria-labelledby="h-counters">
+    <h2 id="h-counters">Every vLLM Prometheus counter, per round</h2>
+    <p class="hint">One point per round (12 turns). Each line is a backend; y-axis is that round's delta. Hover any chart for exact values.</p>
+    <div class="legend" id="legend"></div>
+    <div class="chart-grid" id="grid"></div>
+  </section>
+
+  <section>
+    <details class="tables">
+      <summary>Data tables (per counter)</summary>
+      <div id="tables"></div>
+    </details>
+  </section>
+
+  <footer class="notes">
+    Source run <code>kvprofile-vllm0.26.0-225237_16222</code> (2026-08-11); the two extra
+    Tiered-CPU-FS lines are repeat runs <code>105057_44497</code> (128.4s) and
+    <code>110404_47600</code> (124.6s), both 2026-08-12. Per-round deltas
+    parsed from <code>[prom]</code> log lines; totals from <code>results.json</code>.
+    <code>request_success</code> (constant 64/round) and the coarse integer-second
+    <code>*_time</code> counters are omitted.
+  </footer>
+</div>
+
+<script>
+// ============================================================================
+// REAL DATA — kvprofile-vllm0.26.0-225237_16222 (64 conv × 12 turns).
+// Parsed straight from the [prom] round-N delta log lines.
+// ============================================================================
+const RUN = {
+  subtitle: "64 conversations × 12 turns — ShareGPT replay (vLLM Prometheus counters, per-round deltas)",
+  meta: {
+    Model: "NousResearch/Meta-Llama-3-8B", vLLM: "0.26.0",
+    Dataset: "sharegpt_12turn_450", Convs: "64", Rounds: "12", Date: "2026-08-11",
+  },
+};
+
+// total wall seconds (results.json) — order fixes the bar order & legend order.
+const TOTALS = [
+  { key: "nooffload",  name: "NoOffload",     total_s: 201.6 },
+  { key: "cpuoffload", name: "CPUOffload",    total_s: 119.0 },
+  { key: "tiered",     name: "Tiered-CPU-FS", total_s: 128.8 },
+  { key: "tiered2",    name: "Tiered-CPU-FS (run 2)", total_s: 128.4 },
+  { key: "tiered3",    name: "Tiered-CPU-FS (run 3)", total_s: 124.6 },
+  { key: "certus",     name: "Certus-SPDK",   total_s: 184.0 },
+];
+
+const MAX_ROUNDS = 12;
+
+// counter -> per-backend array of 12 per-round deltas
+const D = {
+  nooffload: {
+    prompt_tokens:[2523,11935,22441,33153,43864,54619,65173,76629,87893,98869,110044,121481],
+    prompt_tokens_cached:[160,9056,19152,30288,40368,640,448,400,320,48,240,240],
+    generation_tokens:[6956,7715,8354,8390,8372,8281,8893,9108,8706,9088,8769,8651],
+    prefix_cache_queries:[2523,11935,22441,33153,43864,68996,90240,113880,137833,516227,414530,513060],
+    prefix_cache_hits:[160,9056,19152,30288,40368,640,448,448,320,48,240,4320],
+    external_prefix_cache_queries:[0,0,0,0,0,0,0,0,0,0,0,0],
+    external_prefix_cache_hits:[0,0,0,0,0,0,0,0,0,0,0,0],
+    kv_offload_store_bytes:[0,0,0,0,0,0,0,0,0,0,0,0],
+    kv_offload_load_bytes:[0,0,0,0,0,0,0,0,0,0,0,0],
+    num_preemptions:[0,0,0,0,4,7,5,4,3,4,3,4],
+  },
+  cpuoffload: {
+    prompt_tokens:[2523,12210,22160,33123,43648,54510,65422,77030,87713,98488,109434,121434],
+    prompt_tokens_cached:[160,9360,18832,30256,38624,43552,54016,64912,76576,87248,98080,108912],
+    generation_tokens:[7229,7165,8604,8205,8482,8627,9037,8541,8517,8864,9326,8746],
+    prefix_cache_queries:[2523,12210,22160,33123,46641,61999,82357,130133,247534,314281,305022,306017],
+    prefix_cache_hits:[160,9360,18832,30256,36720,2224,816,240,288,224,48,224],
+    external_prefix_cache_queries:[2363,2850,3328,2867,7264,45681,52406,68452,69037,76166,86782,112259],
+    external_prefix_cache_hits:[0,0,0,0,2240,36064,43280,57584,60400,67040,77824,100608],
+    kv_offload_store_bytes:[253755392,1245708288,1298137088,1436549120,1394606080,1413480448,1430257664,1530920960,1400897536,1419771904,1421869056,1572864000],
+    kv_offload_load_bytes:[0,0,0,0,1000341504,5976883200,7180648448,8556380160,10022289408,10921967616,12413042688,14501806080],
+    num_preemptions:[0,0,0,0,327,185,69,102,70,84,32,56],
+  },
+  tiered: {
+    prompt_tokens:[2523,11971,22181,32645,43310,54700,65234,76487,87539,98508,109877,122008],
+    prompt_tokens_cached:[160,9056,18848,29696,40000,45712,55984,65072,76368,87040,98352,109376],
+    generation_tokens:[6988,7427,8110,8347,8993,8259,8684,8894,8705,9287,9451,8855],
+    prefix_cache_queries:[4737,21719,40978,59729,86309,141915,235694,227481,394891,403246,174551,589298],
+    prefix_cache_hits:[160,16080,34640,54032,70160,38784,33424,6720,11568,416,2496,752],
+    external_prefix_cache_queries:[2363,2887,3232,2913,5190,35643,53471,55662,83378,91506,61519,111600],
+    external_prefix_cache_hits:[0,0,0,0,2096,27440,44256,46896,72240,80816,54752,100016],
+    kv_offload_store_bytes:[253755392,1224736768,1333788672,1373634560,1394606080,1491075072,1390411776,1463812096,1455423488,1442840576,1486880768,1587544064],
+    kv_offload_load_bytes:[0,0,0,0,6459228160,11813257216,16546529280,15319695360,15523119104,21751660544,29550968832,22290628608],
+    num_preemptions:[0,0,0,0,351,336,139,98,71,83,133,57],
+  },
+  // Tiered-CPU-FS, 2nd run — kvprofile-vllm0.26.0-105057_44497 (2026-08-12),
+  // wall 128.4s. Same 64×12 workload; drawn green + dotted to overlay run 1.
+  tiered2: {
+    prompt_tokens:[2523,11718,22249,33115,43710,55009,65981,77890,88566,99519,110700,122318],
+    prompt_tokens_cached:[160,9008,19056,30304,40432,46176,56416,66672,77376,88528,99120,110160],
+    generation_tokens:[6742,7742,8510,8274,8907,8688,9335,8525,8695,9098,8948,9019],
+    prefix_cache_queries:[4821,20964,39950,57711,82611,118028,246021,324284,255513,364862,630287,662651],
+    prefix_cache_hits:[160,15776,33696,52288,70192,38640,29024,17824,20000,12608,23488,13984],
+    external_prefix_cache_queries:[2363,2672,3084,2774,5741,34313,51645,58961,80320,82941,97384,109248],
+    external_prefix_cache_hits:[0,0,0,0,2672,25952,42080,49200,70240,73024,87088,98384],
+    kv_offload_store_bytes:[253755392,1157627904,1350565888,1402994688,1396703232,1470103552,1447034880,1560281088,1405091840,1426063360,1468006400,1522532352],
+    kv_offload_load_bytes:[0,0,0,0,6150946816,13174308864,17144217600,17811111936,18578669568,23565697024,21611151360,20990394368],
+    num_preemptions:[0,0,0,0,331,235,192,137,94,94,62,43],
+  },
+  // Tiered-CPU-FS, 3rd run — kvprofile-vllm0.26.0-110404_47600 (2026-08-12),
+  // wall 124.6s. Same 64×12 workload; drawn lime + dashed.
+  tiered3: {
+    prompt_tokens:[2523,11405,21855,33101,44317,55413,66233,77289,87948,98790,109749,121578],
+    prompt_tokens_cached:[160,8800,18736,30064,40720,47760,56560,66560,76832,87488,99344,109344],
+    generation_tokens:[6433,7665,8877,8894,8702,8539,8497,8513,8586,8884,9154,8783],
+    prefix_cache_queries:[4821,20941,39423,59138,89541,107385,174893,288026,321171,387428,397679,488959],
+    prefix_cache_hits:[160,15680,33552,53280,73664,42560,31792,23744,4256,1056,28080,4912],
+    external_prefix_cache_queries:[2363,2574,3008,3007,5979,29628,49428,64699,82122,92555,90725,114782],
+    external_prefix_cache_hits:[0,0,0,0,2592,22752,40656,54672,71664,81680,81040,103104],
+    kv_offload_store_bytes:[253755392,1113587712,1327497216,1468006400,1486880768,1451229184,1409286144,1465909248,1396703232,1419771904,1430257664,1562378240],
+    kv_offload_load_bytes:[0,0,0,0,5337251840,11546918912,11955863552,14000586752,14942208000,22976397312,29393682432,23798480896],
+    num_preemptions:[0,0,0,0,308,204,148,92,91,97,106,72],
+  },
+  certus: {
+    prompt_tokens:[2523,11732,22701,33434,44354,55715,66858,78725,89345,100836,112240,124190],
+    prompt_tokens_cached:[160,8784,19392,30480,40640,43888,55232,66336,78240,88928,100368,111776],
+    generation_tokens:[6764,8175,8376,8600,8967,8855,9293,8476,9224,9316,9273,9153],
+    prefix_cache_queries:[2523,11732,22701,33434,45331,62564,72864,148864,205902,494817,373826,278789],
+    prefix_cache_hits:[160,8784,19392,30480,40848,2032,288,64,112,7232,864,48],
+    external_prefix_cache_queries:[2363,2948,3309,2954,4242,43656,53626,66041,71364,84551,94043,104150],
+    external_prefix_cache_hits:[0,0,0,0,528,34208,44304,55568,62768,74336,84192,93664],
+    kv_offload_store_bytes:[253755392,1197473792,1434451968,1409286144,1423966208,1491075072,1457520640,1560281088,1400897536,1499463680,1495269376,1570766848],
+    kv_offload_load_bytes:[0,0,0,0,794820608,6197084160,7717519360,8849981440,10733223936,11876171776,13277069312,14946402304],
+    num_preemptions:[0,0,0,0,11,7,5,2,6,4,4,4],
+  },
+};
+
+// counter render order + metadata (unit: "bytes" | "int")
+const COUNTERS = [
+  { k: "prompt_tokens",                 title: "Prompt tokens processed",     unit: "int",   hint: "Prompt tokens the engine ingested each round." },
+  { k: "prompt_tokens_cached",          title: "Cached prompt tokens",        unit: "int",   hint: "Prompt tokens whose KV blocks were already cached (GPU + offload tier)." },
+  { k: "generation_tokens",             title: "Generation tokens produced",  unit: "int",   hint: "Decode tokens emitted each round — ~flat: 64 convs × ~140 tok." },
+  { k: "prefix_cache_queries",          title: "GPU prefix-cache queries",    unit: "int",   hint: "Blocks looked up in the on-GPU prefix cache." },
+  { k: "prefix_cache_hits",             title: "GPU prefix-cache hits",       unit: "int",   hint: "Blocks served from the on-GPU prefix cache." },
+  { k: "external_prefix_cache_queries", title: "Offload-tier queries",        unit: "int",   hint: "Blocks looked up in the external offload tier. NoOffload has none → 0." },
+  { k: "external_prefix_cache_hits",    title: "Offload-tier hits",           unit: "int",   hint: "Blocks served from the offload tier." },
+  { k: "kv_offload_store_bytes",        title: "Bytes stored to tier",        unit: "bytes", hint: "Bytes written to the offload tier each round." },
+  { k: "kv_offload_load_bytes",         title: "Bytes loaded from tier",      unit: "bytes", hint: "Bytes fetched from the offload tier each round." },
+  { k: "num_preemptions",               title: "Engine preemptions",          unit: "int",   hint: "Requests preempted (KV evicted, recomputed later). High = KV pressure." },
+];
+
+// ============================================================================
+const NS = "http://www.w3.org/2000/svg";
+const el = (t, a = {}) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+const clsOf = (key) => "s-" + key;
+
+function fmtInt(n)  { return Math.round(n).toLocaleString("en-US"); }
+function fmtSec(s)  { return s.toFixed(1) + "s"; }
+function fmtBytes(b) {
+  if (!b) return "0";
+  const u = ["B", "KiB", "MiB", "GiB", "TiB"]; let i = 0, v = b;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v < 10 && i > 0 ? 2 : 1) + " " + u[i];
+}
+function fmtCompact(n) {
+  if (n === 0) return "0";
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(0) + "k";
+  return "" + Math.round(n);
+}
+function niceMax(m) {
+  if (m <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(m)));
+  const s = m / p; const step = s <= 1 ? 1 : s <= 2 ? 2 : s <= 5 ? 5 : 10;
+  return step * p;
+}
+
+// header
+document.getElementById("run-subtitle").textContent = RUN.subtitle;
+const metaBox = document.getElementById("run-meta");
+for (const k in RUN.meta) {
+  const d = document.createElement("span"); d.className = "kv";
+  d.innerHTML = k + " <b></b>"; d.querySelector("b").textContent = RUN.meta[k];
+  metaBox.appendChild(d);
+}
+
+// shared legend
+const legendBox = document.getElementById("legend");
+TOTALS.forEach((b) => {
+  const item = document.createElement("span"); item.className = "item";
+  const sw = document.createElement("span"); sw.className = "swatch " + clsOf(b.key); sw.style.background = "currentColor";
+  const label = document.createElement("span"); label.textContent = b.name;
+  item.appendChild(sw); item.appendChild(label); legendBox.appendChild(item);
+});
+const note = document.createElement("span"); note.className = "note";
+note.textContent = "— Tiered-CPU-FS runs 2 (dotted) & 3 (dashed) are repeats of the same config; rounds 1–4 are cold, the tier engages at round 5.";
+legendBox.appendChild(note);
+
+// ---- total-time bar chart --------------------------------------------------
+function renderBars(containerId, rows, valFmt) {
+  const c = document.getElementById(containerId); c.innerHTML = "";
+  const W = 720, rowH = 46, padT = 8, padB = 8, labelW = 176, valW = 110;
+  const H = padT + padB + rows.length * rowH;
+  const plotW = W - labelW - valW;
+  const max = niceMax(Math.max(...rows.map((r) => r.total_s)));
+  const base = rows[0].total_s;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Total wall time per backend" });
+  rows.forEach((b, i) => {
+    const y = padT + i * rowH;
+    const bw = Math.max(2, (b.total_s / max) * plotW);
+    const g = el("g");
+    const name = el("text", { x: 0, y: y + rowH / 2 - 3, class: "bar-name", "dominant-baseline": "middle" });
+    name.textContent = b.name; g.appendChild(name);
+    g.appendChild(el("rect", { x: labelW, y: y + 8, width: bw, height: rowH - 22, rx: 4, class: clsOf(b.key), fill: "currentColor" }));
+    const v = el("text", { x: labelW + bw + 8, y: y + rowH / 2 - 3, class: "bar-value", "dominant-baseline": "middle" });
+    v.textContent = valFmt(b.total_s); g.appendChild(v);
+    if (i > 0) {
+      const ratio = b.total_s / base;
+      const sub = el("text", { x: labelW + bw + 8, y: y + rowH / 2 + 12, class: "bar-sub", "dominant-baseline": "middle" });
+      sub.textContent = ratio >= 1 ? ratio.toFixed(2) + "× slower" : (1 / ratio).toFixed(2) + "× faster";
+      g.appendChild(sub);
+    }
+    svg.appendChild(g);
+  });
+  c.appendChild(svg);
+}
+
+// ---- one compact per-round line chart, all backends -----------------------
+function renderCounter(container, counter) {
+  const yFmt = counter.unit === "bytes" ? fmtBytes : fmtInt;
+  const yTick = counter.unit === "bytes" ? fmtBytes : fmtCompact;
+  const W = 460, H = 230, m = { t: 12, r: 14, b: 30, l: 52 };
+  const plotW = W - m.l - m.r, plotH = H - m.t - m.b;
+  const series = TOTALS.map((b) => ({ key: b.key, name: b.name, values: D[b.key][counter.k] }));
+  const rawMax = Math.max(1, ...series.flatMap((s) => s.values));
+  const yMax = niceMax(rawMax);
+  const xOf = (r) => m.l + (MAX_ROUNDS === 1 ? 0 : (r - 1) / (MAX_ROUNDS - 1) * plotW);
+  const yOf = (v) => m.t + plotH - (v / yMax) * plotH;
+
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": counter.title + " per round" });
+  const yTicks = 4;
+  for (let i = 0; i <= yTicks; i++) {
+    const v = (yMax / yTicks) * i, y = yOf(v);
+    svg.appendChild(el("line", { x1: m.l, y1: y, x2: m.l + plotW, y2: y, class: i === 0 ? "axis-line" : "grid-line" }));
+    const t = el("text", { x: m.l - 7, y: y + 3, "text-anchor": "end", class: "tick" });
+    t.textContent = yTick(v); svg.appendChild(t);
+  }
+  for (let r = 1; r <= MAX_ROUNDS; r += 2) {
+    const t = el("text", { x: xOf(r), y: H - m.b + 15, "text-anchor": "middle", class: "tick" });
+    t.textContent = r; svg.appendChild(t);
+  }
+  const xlab = el("text", { x: m.l + plotW / 2, y: H - 3, "text-anchor": "middle", class: "axis-label" });
+  xlab.textContent = "round"; svg.appendChild(xlab);
+
+  series.forEach((s) => {
+    const d = s.values.map((v, i) => (i ? "L" : "M") + xOf(i + 1) + "," + yOf(v)).join(" ");
+    svg.appendChild(el("path", { d, class: "series-line stroke-cur " + clsOf(s.key) }));
+  });
+
+  // hover
+  const cross = el("line", { class: "crosshair", y1: m.t, y2: m.t + plotH }); svg.appendChild(cross);
+  const dots = series.map((s) => { const dot = el("circle", { r: 3.5, class: "series-dot fill-cur " + clsOf(s.key), opacity: 0 }); svg.appendChild(dot); return dot; });
+  const tip = document.createElement("div"); tip.className = "tooltip"; container.appendChild(tip);
+  const overlay = el("rect", { x: m.l, y: m.t, width: plotW, height: plotH, fill: "transparent", style: "cursor:crosshair" }); svg.appendChild(overlay);
+
+  function nearest(clientX) {
+    const rect = svg.getBoundingClientRect();
+    const px = (clientX - rect.left) / rect.width * W;
+    let best = 1, bd = Infinity;
+    for (let r = 1; r <= MAX_ROUNDS; r++) { const d = Math.abs(xOf(r) - px); if (d < bd) { bd = d; best = r; } }
+    return best;
+  }
+  function show(clientX) {
+    const r = nearest(clientX), x = xOf(r);
+    cross.setAttribute("x1", x); cross.setAttribute("x2", x); cross.setAttribute("opacity", 1);
+    let rows = "";
+    series.forEach((s, i) => {
+      const v = s.values[r - 1];
+      dots[i].setAttribute("cx", x); dots[i].setAttribute("cy", yOf(v)); dots[i].setAttribute("opacity", 1);
+      rows += `<div class="tt-row"><span class="l"><span class="sw ${clsOf(s.key)}" style="background:currentColor"></span>${s.name}</span><span class="v">${yFmt(v)}</span></div>`;
+    });
+    tip.innerHTML = `<div class="tt-round">round ${r}</div>` + rows;
+    tip.style.opacity = 1;
+    const rect = svg.getBoundingClientRect(), cont = container.getBoundingClientRect();
+    let tl = (x / W) * rect.width + 12;
+    if (tl + 150 > cont.width) tl = tl - 150 - 24;
+    tip.style.left = Math.max(0, tl) + "px";
+    tip.style.top = (m.t / H) * rect.height + "px";
+  }
+  function hide() { cross.setAttribute("opacity", 0); dots.forEach((d) => d.setAttribute("opacity", 0)); tip.style.opacity = 0; }
+  overlay.addEventListener("mousemove", (e) => show(e.clientX));
+  overlay.addEventListener("mouseleave", hide);
+  container.appendChild(svg);
+}
+
+// build the grid
+const grid = document.getElementById("grid");
+COUNTERS.forEach((counter) => {
+  const cell = document.createElement("div"); cell.className = "cc";
+  const h = document.createElement("h3"); h.textContent = counter.title;
+  const mtr = document.createElement("div"); mtr.className = "metric"; mtr.textContent = "vllm:" + counter.k;
+  const hint = document.createElement("div"); hint.className = "cc-hint"; hint.textContent = counter.hint;
+  const plot = document.createElement("div"); plot.className = "chart plot-rel";
+  cell.appendChild(h); cell.appendChild(mtr); cell.appendChild(hint); cell.appendChild(plot);
+  grid.appendChild(cell);
+  renderCounter(plot, counter);
+});
+
+// per-counter data tables (collapsed)
+function renderTables() {
+  const host = document.getElementById("tables");
+  let html = "";
+  COUNTERS.forEach((counter) => {
+    const yFmt = counter.unit === "bytes" ? fmtBytes : fmtInt;
+    let head = "<th>round</th>" + TOTALS.map((b) => `<th>${b.name}</th>`).join("");
+    let body = "";
+    for (let r = 0; r < MAX_ROUNDS; r++) {
+      body += `<tr><td>${r + 1}</td>` + TOTALS.map((b) => `<td>${yFmt(D[b.key][counter.k][r])}</td>`).join("") + "</tr>";
+    }
+    html += `<div class="tbl-scroll"><table><caption>vllm:${counter.k} — ${counter.title}</caption>`
+         +  `<thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  });
+  host.innerHTML = html;
+}
+
+// theme toggle
+document.getElementById("theme-toggle").addEventListener("click", () => {
+  const root = document.documentElement;
+  const cur = root.getAttribute("data-theme");
+  const dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.setAttribute("data-theme", dark ? "light" : "dark");
+});
+
+renderBars("chart-total", TOTALS, fmtSec);
+renderTables();
+</script>
+</body>
+</html>

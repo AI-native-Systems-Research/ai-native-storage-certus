@@ -48,9 +48,9 @@ baseline as well as CPU-offload and tiered — one image, one driver
 (`run_multiturn_offloading.py`), backend picked at run time. For the GPU-only
 baseline, set `OFFLOAD_MODE=none`: the driver passes no `kv_transfer_config`, so
 there is no offload tier to size. The base is `vllm/vllm-openai` (default
-`v0.26.0`; override with `--build-arg VLLM_VERSION=...`). No server, no gRPC, no
-`--ipc=host`. Its `ENV` defaults match this section (`NUM_CONVS=450`, 450×12
-dataset).
+`v0.26.0`; override with `--build-arg VLLM_VERSION=...`). No server, no shmq
+mailbox, no `--ipc=host`. Its `ENV` defaults match this section (`NUM_CONVS=450`,
+450×12 dataset).
 ```bash
 # build from the repo root (context needs the bench dir + dataset)
 podman build -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
@@ -113,10 +113,10 @@ default 4 GiB) · `TRACE_OFFLOAD` (0 = built-in connector, no tracing — defaul
 
 ### Container
 The unified image (`Dockerfile.offload` → `certus-offload-bench`) covers this
-backend too — it is the **default** mode (no `OFFLOAD_MODE`, no `DISK_DIR`),
+backend too — it is the **default** mode (no `OFFLOAD_MODE`, no `SECONDARY_TIER`),
 so the driver uses the in-process `OffloadingConnector` + `CPUOffloadingSpec`. Base
 is `vllm/vllm-openai` (default `v0.26.0`; override with `--build-arg
-VLLM_VERSION=...`). No server, no gRPC, no `--ipc=host`. Its `ENV` defaults match
+VLLM_VERSION=...`). No server, no shmq mailbox, no `--ipc=host`. Its `ENV` defaults match
 this section (`NUM_CONVS=450`, `CPU_BYTES=16 GiB`, `TRACE_OFFLOAD=0`, 450×12
 dataset). Note: the in-process `CPUOffloadingSpec`/`OffloadingConnector` API
 shifted across vLLM releases (the same multi-region change that broke the Certus
@@ -129,7 +129,7 @@ podman build -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offloa
 podman build --build-arg VLLM_VERSION=0.20.0 \
     -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench:vllm0.20 .
 # run (GPU required; mount the HF cache; free hugepages first if host was in Certus mode)
-# default mode = CPU offload; no OFFLOAD_MODE / DISK_DIR needed
+# default mode = CPU offload; no OFFLOAD_MODE / SECONDARY_TIER needed
 podman run --rm --device nvidia.com/gpu=all \
     -v $HOME/.cache/huggingface:/root/.cache/huggingface \
     certus-offload-bench

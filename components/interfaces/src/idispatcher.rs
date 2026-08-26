@@ -182,6 +182,25 @@ impl fmt::Display for DispatcherError {
 
 impl std::error::Error for DispatcherError {}
 
+/// A cumulative snapshot of the dispatcher's KV-cache tier-movement counters.
+///
+/// All fields are monotonic since process start; subtract two successive
+/// snapshots to obtain a per-interval delta. Returned by
+/// [`IDispatcher::tier_event_stats`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TierEventStats {
+    /// Blocks promoted SSD -> DRAM (memory tier), across all promote paths.
+    pub promotions_to_memory: u64,
+    /// Lookups served up to the GPU (one per successfully-served lookup key),
+    /// whether the source was the memory tier or SSD.
+    pub promotions_to_gpu: u64,
+    /// Memory-tier (DRAM) entries evicted — demoted to SSD or dropped — by
+    /// either the foreground clean-eviction path or the background evictor.
+    pub evictions_from_memory: u64,
+    /// Extents freed on SSD by the background extent evictor.
+    pub evictions_from_ssd: u64,
+}
+
 #[cfg(feature = "spdk")]
 component_macros::define_interface! {
     pub IDispatcher {
@@ -535,6 +554,14 @@ component_macros::define_interface! {
         /// `rw-telemetry` / `telemetry` features. Monotonic; take deltas across
         /// two calls to measure a window.
         fn read_write_stats(&self) -> crate::iblock_device::ReadWriteStats;
+
+        /// Return the cumulative KV-cache tier-movement counters: blocks promoted
+        /// SSD -> DRAM and lookups served up to the GPU, plus evictions from the
+        /// DRAM memory tier and from SSD. Always populated (the counters are
+        /// unconditional, unlike the telemetry-gated `read_write_stats`).
+        /// Monotonic since process start; take deltas across two calls to measure
+        /// a window. Implementations that do no tiering return zeroed counters.
+        fn tier_event_stats(&self) -> crate::TierEventStats;
     }
 }
 

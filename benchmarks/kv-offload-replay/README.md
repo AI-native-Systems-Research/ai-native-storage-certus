@@ -29,7 +29,7 @@ evictions without re-running the model.
 | `tracing_offloading_connector.py` | Drop-in `KVConnectorBase_V1` that wraps vLLM's `OffloadingConnector`. Writes `offloading_trace_<pid>.jsonl` (connector-level calls). |
 | `tracing_offloading_manager.py` | Drop-in `CPUOffloadingSpec` that wraps the underlying `OffloadingManager` + `OffloadingHandler`. Writes `offloading_mgr_<pid>.jsonl` (lookup/touch/prepare_store/…) and `offloading_handler_<pid>.jsonl` (GPU↔CPU transfer jobs). |
 | `run_sharegpt_offloading.py` | Driver: runs `vllm bench throughput` on ShareGPT with the tracing connectors attached. |
-| `run_multiturn_offloading.py` | Driver: the multi-turn 450×12 offload workload for head-to-head vs Certus, and the single driver behind the unified `Dockerfile.offload` image. Selects the backend from env: `OFFLOAD_MODE=none` → GPU-only baseline (no `kv_transfer_config`); default → built-in `OffloadingConnector` CPU-only offload; `DISK_DIR=/path` → native CPU+FS tiering; `TRACE_OFFLOAD=1` → the tracing wrappers above. See [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md). |
+| `run_multiturn_offloading.py` | Driver: the multi-turn 450×12 offload workload for head-to-head vs Certus, and the single driver behind the unified `Dockerfile.offload` image. Selects the backend from env: `OFFLOAD_MODE=none` → GPU-only baseline (no `kv_transfer_config`); default → built-in `OffloadingConnector` CPU-only offload; `SECONDARY_TIER=fs` / `DISK_DIR` → native CPU+FS tiering; `TRACE_OFFLOAD=1` → the tracing wrappers above. See [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md). |
 | `run_multiturn_nooffload.py` | Driver: the multi-turn 450×12 **no-offload** (GPU-only) baseline — same workload with no `kv_transfer_config`, so evicted KV is recomputed rather than fetched. The reference point for the offload backends. Used for the bare-metal path; the containerized baseline now runs through `run_multiturn_offloading.py` with `OFFLOAD_MODE=none` in the unified `Dockerfile.offload`. See [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md). |
 | `replay_offloading_traces.py` | Replays manager and/or handler traces against a pluggable target. Built-in manager targets: pure-Python LRU (default), vLLM `CPUOffloadingManager`, Certus via `CertusOffloadingSpec` (native or policy-only), and `llmd_fs_backend`. Built-in handler targets: `fs-backend`, Certus via `CertusOffloadingSpec.get_handlers()`. |
 
@@ -410,6 +410,22 @@ Other useful flags: `--memory-tier-size <sz>` (Certus-SPDK server DRAM pool, e.g
 GPU selector: `all` | `0` | `0,1` | `<uuid>`), and `--logdir <dir>` (output dir;
 defaults to `<model-fs>/kvprofile-<runid>`). Run `profile_all.sh --help` for the full
 list.
+
+### Selecting the workload and execution model
+
+Two orthogonal knobs, both forwarded as env to every backend driver so all
+variants run the same thing:
+
+| Flag | Env forwarded | Meaning |
+|------|---------------|---------|
+| `--workload-mode <batched\|async>` (or `--async`) | `WORKLOAD_MODE` | Execution model. `batched` (default) runs the synchronous per-round `generate()` loop; `async` runs one vLLM coroutine per conversation on a V1 `AsyncLLM` (`max_num_seqs` bounds the running batch, the rest queue). Same engine config either way; in async mode `--max-rounds` becomes a per-conversation turn cap. |
+| `--workload <name>` | `WORKLOAD_NAME` | Named dataset. Empty (default) = each driver's baked 450×12 dataset. `sharegpt` selects the ShareGPT multi-turn workload by human-turn count (see below). |
+| `--min-turns <n>` / `--max-turns <n>` | `SHAREGPT_MIN_TURNS` / `SHAREGPT_MAX_TURNS` | Human-turn window for the `sharegpt` workload — **passing either implies `--workload sharegpt`**. Only two configs are prepared: `12`/`12` (default) = the baked 450×12 subset (the container variants are then a no-op), and `1`/`1` = the **full 94,145-conversation corpus** (`data/sharegpt/*.json`, mounted read-only and capped by `--num-convs`). Any other pair errors — use an explicit `DATASET_PATH` for other turn counts. `--max-turns` mirrors `--min-turns` when unset. |
+
+The corpus itself is documented in [`../../data/sharegpt/README.md`](../../data/sharegpt/README.md).
+The same selection works outside `profile_all.sh`: any driver honours
+`WORKLOAD_NAME` / `WORKLOAD_MODE` / `DATASET_PATH` / `NUM_CONVS` directly (see
+`run_multiturn_common.resolve_workload`).
 
 > **Note:** the container IPC mode is not a CLI flag — `profile_all.sh` launches
 > the shmq client with `--ipc=host` already, which does double duty: the host

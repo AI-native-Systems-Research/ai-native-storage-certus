@@ -1,6 +1,6 @@
 ---
 name: tools-verify-kani-with-properties
-description: Create Kani harnesses for a Certus component from BOTH its spec and its Rust code — at function granularity, calling the real function under spec-derived pre/postconditions — run them, and emit a plain-English `verified_properties.md` of what was verified (with evidence). Use for the normal verify-and-document workflow (not the blind property-extraction experiment).
+description: Create Kani harnesses for a Certus component from BOTH its spec and its Rust code — at function granularity, calling the real function under spec-derived pre/postconditions — run them, and emit a plain-English `PROPERTIES.md` of what was verified (with evidence). Use for the normal verify-and-document workflow (not the blind property-extraction experiment).
 argument-hint: "[component-path] [interface-path]"
 ---
 
@@ -8,7 +8,7 @@ argument-hint: "[component-path] [interface-path]"
 Verify a component with Kani **and** leave a human-readable record of the verified properties.
 Inputs are the component's **spec** (the intended behavior) and its **Rust code** (functions +
 interface). Outputs are (1) the `#[cfg(kani)] mod verification` harnesses and (2)
-`verified_properties.md` in the component directory.
+`PROPERTIES.md` in the component directory.
 
 This skill = **`tools-verify-kani` + explicit spec pairing + a documented-properties step.** Use
 `tools-verify-kani` for the create mechanics (stub unsafe/FFI, `kani::assume` mirroring production
@@ -25,12 +25,12 @@ guards, run/fix, its "core rule"). This skill adds spec-derived contracts and th
 4. **Validate (anti-vacuity).** Fault-inject (a contract-violating change) and confirm the harness
    **FAILS**; if it still passes, it isn't bound to the real code — fix it. Then revert.
    (`--harness` substring-matches; use `--exact` with `module::name` to run one in isolation.)
-5. **Document → `components/<name>/verified_properties.md`** (see shape below): for each verified
+5. **Document → `components/<name>/PROPERTIES.md`** (see shape below): for each verified
    property, the operation, the property in **plain English**, its **spec source**, and the **evidence**
    (harness name; Kani result). State the **bounded scope**: Kani proves over the full input domain
    within `#[kani::unwind(N)]`, symbolically (not by sampling).
 
-## `verified_properties.md` shape
+## `PROPERTIES.md` shape
 ```
 # Verified properties — <component> (Kani)
 Verified from spec `specs/<...>/spec.md` against code `src/<...>`. Harnesses: `#[cfg(kani)] mod verification`.

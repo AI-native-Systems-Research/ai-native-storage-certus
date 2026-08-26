@@ -523,43 +523,17 @@ def new_request_offloading_context():
     return _lazy_base_attr("RequestOffloadingContext")()
 
 
-def lookup_result(state):
-    """Return the shape ``OffloadingManager.lookup`` must yield for this version,
-    given a certus-server Check state (``ring.CHECK_MISS`` / ``CHECK_RESIDENT`` /
-    ``CHECK_PENDING`` — see ``ring.check_states``).
+def lookup_result(exists: bool):
+    """Return the shape ``OffloadingManager.lookup`` must yield for this version.
 
     * **0.26+** (``CAPS.lookup_returns_enum``): a ``LookupResult`` enum —
-<<<<<<<< HEAD:certus-grpc-connector/certus_grpc_connector/compat.py
       ``HIT`` when the key is present, ``MISS`` otherwise.
     * **≤0.24**: a plain ``bool``.
-========
-      ``MISS`` / ``HIT`` / ``HIT_PENDING``. ``HIT_PENDING`` tells the scheduler a
-      store is in flight: the block is coming, so defer the lookup rather than
-      recompute. (``RETRY`` — pure backpressure with no reservation — is never
-      produced; the blocking client absorbs that case.)
-    * **≤0.24** (``bool | None``): ``False`` / ``True`` / ``None``. ``None`` is
-      the legacy "delay this request and retry", the faithful pre-enum
-      equivalent of pending — never ``True``, since a pending key is not yet
-      loadable on versions whose load path does not independently re-check.
-
-    A plain ``bool`` is still accepted for callers not yet threading the tri-state
-    (``True`` → resident, ``False`` → miss).
->>>>>>>> origin/unstable:certus-shmq-connector/certus_shmq_connector/compat.py
     """
-    from .ring import CHECK_MISS, CHECK_PENDING, CHECK_RESIDENT
-
-    # bool is an int subclass, so normalize it before the int-keyed maps below.
-    if isinstance(state, bool):
-        state = CHECK_RESIDENT if state else CHECK_MISS
-
     if CAPS.lookup_returns_enum:
         LookupResult = _lazy_base_attr("LookupResult")
-        return {
-            CHECK_MISS: LookupResult.MISS,
-            CHECK_RESIDENT: LookupResult.HIT,
-            CHECK_PENDING: LookupResult.HIT_PENDING,
-        }[state]
-    return {CHECK_MISS: False, CHECK_RESIDENT: True, CHECK_PENDING: None}[state]
+        return LookupResult.HIT if exists else LookupResult.MISS
+    return bool(exists)
 
 
 def lookup_result_pending():

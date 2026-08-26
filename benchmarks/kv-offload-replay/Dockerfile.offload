@@ -6,11 +6,11 @@
 #
 #   NoOffload    -e OFFLOAD_MODE=none
 #                GPU-only baseline: no kv_transfer_config, evicted KV recomputed.
-#   CPUOffload   (default; OFFLOAD_MODE unset, DISK_DIR empty)
+#   CPUOffload   (default; OFFLOAD_MODE unset, SECONDARY_TIER empty)
 #                vLLM OffloadingConnector + CPUOffloadingSpec -> pinned host RAM.
-#   Tiered-CPU-FS -e DISK_DIR=/path
+#   Tiered-CPU-FS -e SECONDARY_TIER=fs  (or -e DISK_DIR=/path)
 #                OffloadingConnector + TieringOffloadingSpec: CPU primary (host RAM
-#                via /dev/shm) + "fs" disk secondary rooted at DISK_DIR.
+#                via /dev/shm) + "fs" disk secondary (FileSystemTierManager).
 #
 # All three are self-contained: a single vLLM process, NO separate server, NO
 # gRPC, NO CUDA IPC (so no --ipc=host, no CERTUS_SERVER). They run the same
@@ -28,14 +28,15 @@
 #   podman run --rm --device nvidia.com/gpu=all -e CPU_BYTES=17179869184 \
 #       -v $HOME/.cache/huggingface:/root/.cache/huggingface certus-offload-bench
 #   # Tiered CPU+FS (CPU tier is a /dev/shm mmap -> --shm-size >= CPU_BYTES; bind
-#   # a host dir for the fs tier so it hits real disk, then point DISK_DIR at it)
+#   # a host dir for the fs tier so it hits real disk)
 #   podman run --rm --device nvidia.com/gpu=all --shm-size 36g \
-#       -e CPU_BYTES=34359738368 -e DISK_DIR=/workspace/kv-fs-tier \
+#       -e SECONDARY_TIER=fs -e CPU_BYTES=34359738368 \
+#       -e FS_ROOT_DIR=/mnt/fs-tier/kv-tier \
 #       -v /mnt/certus1/hf-cache:/root/.cache/huggingface:z \
-#       -v /mnt/certus1/kv-fs-tier:/workspace/kv-fs-tier:z certus-offload-bench
+#       -v /mnt/certus1/kv-fs-tier:/mnt/fs-tier:z certus-offload-bench
 #   # docker equivalent of --device nvidia.com/gpu=all: --gpus all
 
-# Tiering (DISK_DIR set) requires vLLM 0.26+ (the tiering.fs framework does
+# Tiering (SECONDARY_TIER=fs) requires vLLM 0.26+ (the tiering.fs framework does
 # not exist earlier); NoOffload / CPUOffload work on older bases too. Default to
 # 0.26.0 so all three modes are available from one image. Override with
 #   podman build --build-arg VLLM_VERSION=<x.y.z> ...
@@ -59,9 +60,16 @@ WORKDIR /workspace
 # TRACE_OFFLOAD=1), plus the shared dataset (paths relative to the repo-root build
 # context). torch/numpy/vllm come from the base image; no extra pip deps.
 COPY benchmarks/kv-offload-replay/run_multiturn_offloading.py /workspace/bench/
+# Shared workload modules the driver imports: run_multiturn_common (batched loop +
+# engine/telemetry setup, imported at top) and run_multiturn_async (async
+# per-conversation model, imported only on WORKLOAD_MODE=async). Both must be
+# present or the driver ModuleNotFound's.
+COPY benchmarks/kv-offload-replay/run_multiturn_common.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_multiturn_sync_batched.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/tracing_offloading_connector.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/tracing_offloading_manager.py /workspace/bench/
-COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
+COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 COPY benchmarks/kv-offload-replay/docker-entrypoint-offload.sh /usr/local/bin/offload-entrypoint
 RUN chmod +x /usr/local/bin/offload-entrypoint
@@ -69,14 +77,14 @@ RUN chmod +x /usr/local/bin/offload-entrypoint
 # Defaults match the 450x12 runbook (RUNBOOK-cpu-and-sharedstorage.md). DATASET_PATH
 # + NUM_CONVS are set explicitly so the container runs the 450x12 workload
 # regardless of the driver's baked-in default. The mode defaults to CPUOffload
-# (OFFLOAD_MODE empty, DISK_DIR empty); set OFFLOAD_MODE=none for the baseline or
-# DISK_DIR=/path for tiering at run time. CPU_BYTES is the pinned host-RAM offload
-# tier — must fit free RAM (Tiered also needs --shm-size >= it).
+# (OFFLOAD_MODE empty, SECONDARY_TIER empty); set OFFLOAD_MODE=none for the
+# baseline or SECONDARY_TIER=fs for tiering at run time. CPU_BYTES is the pinned
+# host-RAM offload tier — must fit free RAM (Tiered also needs --shm-size >= it).
 # PYTHONPATH lets vLLM import the two connector modules by name when TRACE_OFFLOAD=1.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/workspace/bench \
     MODEL=NousResearch/Meta-Llama-3-8B \
-    DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
+    DATASET_PATH=/workspace/data/sharegpt_12turn_450.json \
     NUM_CONVS=450 \
     MAX_MODEL_LEN=8192 \
     OUTPUT_TOKENS=150 \
@@ -84,7 +92,8 @@ ENV PYTHONUNBUFFERED=1 \
     GPU_MEM_UTIL=0.90 \
     CPU_BYTES=17179869184 \
     OFFLOAD_MODE= \
-    DISK_DIR= \
+    SECONDARY_TIER= \
+    FS_ROOT_DIR=/mnt/fs-tier/kv-tier \
     TRACE_OFFLOAD=0 \
     HF_HUB_OFFLINE=1 \
     WORKLOAD=/workspace/bench/run_multiturn_offloading.py
