@@ -1243,20 +1243,23 @@ table.data td.num{{font-family:'JetBrains Mono',monospace;text-align:right}}
 <h1>Certus Storage Performance Report</h1>
 <p class="subtitle">Generated {datetime.now().strftime('%Y-%m-%d %H:%M')} &middot; 4 NVMe (NUMA 0) &middot; 4 GiB memory tier &middot; shmq</p>
 
-<div class="stat-row">
-  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_serial_store']:.1f}</div><div class="stat-label">GB/s serial store (bs=1)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--store)">{analysis['peak_batched_store']:.1f}</div><div class="stat-label">GB/s batched store (bs=64+)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--load)">{analysis['peak_warm_load']:.1f}</div><div class="stat-label">GB/s warm load (DRAM&rarr;GPU)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--load);opacity:0.8">{analysis['cold_serial']:.1f}</div><div class="stat-label">GB/s cold load serial (bs=1)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--load)">{analysis['cold_batched']:.1f}</div><div class="stat-label">GB/s cold load batched (bs=64+)</div></div>
-  <div class="stat"><div class="stat-value" style="color:var(--contend)">{analysis['peak_contended']:.1f}</div><div class="stat-label">GB/s under contention</div></div>
+<h2>Key Results (5 MiB objects, Llama-70B)</h2>
+<div class="chart-box">
+<table class="data">
+<tr><th>Test</th><th>Path</th><th>bs</th><th>GB/s</th></tr>
+<tr><td>Serial store</td><td style="color:var(--store)">GPU&rarr;DRAM</td><td class="num">1</td><td class="num" style="color:var(--store)">{analysis['peak_serial_store']:.1f}</td></tr>
+<tr><td>Batched store</td><td style="color:var(--store)">GPU&rarr;DRAM</td><td class="num">64</td><td class="num" style="color:var(--store)">{analysis['peak_batched_store']:.1f}</td></tr>
+<tr><td>Warm load</td><td style="color:var(--load)">DRAM&rarr;GPU</td><td class="num">64</td><td class="num" style="color:var(--load)">{analysis['peak_warm_load']:.1f}</td></tr>
+<tr><td>Cold load serial</td><td style="color:var(--contend)">SSD&rarr;GPU</td><td class="num">1</td><td class="num" style="color:var(--contend)">{analysis['cold_serial']:.1f}</td></tr>
+<tr><td>Cold load batched</td><td style="color:var(--load)">SSD&rarr;GPU</td><td class="num">64</td><td class="num" style="color:var(--load)">{analysis['cold_batched']:.1f}</td></tr>
+<tr><td>Under contention</td><td style="color:var(--contend)">mixed</td><td class="num">1</td><td class="num" style="color:var(--contend)">{analysis['peak_contended']:.1f}</td></tr>
+</table>
 </div>
 
 <h2>Optimization Findings</h2>
 <div id="findings"></div>
 
-<h2>Throughput by Pattern (5 MiB objects, serial bs=1)</h2>
-<p>Per-operation baseline throughput. See batch sensitivity table below for how batching improves each path.</p>
+<h2>Throughput by Pattern (5 MiB objects)</h2>
 <div class="chart-box"><table class="data" id="main-table"></table></div>
 
 <h2>Batch Size Sensitivity (5 MiB objects)</h2>
@@ -1288,10 +1291,9 @@ FINDINGS.forEach(f => {{
   findingsEl.innerHTML += `<div class="finding ${{cls}}"><div class="finding-title">${{f.title}}</div><div class="finding-detail">${{f.detail}}</div><div class="finding-impact">${{f.impact}}</div></div>`;
 }});
 
-// Main table: 5M objects, bs=1 (natural)
+// Main table: 5M objects, show peak throughput per pattern+phase (best batch size)
 const mainTable = document.getElementById('main-table');
-const main5m = DATA.filter(r => r.object_size.includes('5M') && r.batch_size === 1 && r.throughput_gbps > 0.01);
-// Cold patterns (SSD path) - identified by precondition absent_from_local_cache
+const all5m = DATA.filter(r => r.object_size.includes('5M') && r.throughput_gbps > 0.01);
 const COLD_PATTERNS = ['hot_vs_cold_load_paths','selective_kv_retrieval','tier_promotion_and_prefetch','cache_aware_routing_and_remote_hit_migration'];
 function getPath(r) {{
   const op = r.phase_op.split('/')[1];
@@ -1304,7 +1306,17 @@ function getPath(r) {{
   return '';
 }}
 
-mainTable.innerHTML = '<tr><th>Pattern</th><th>Phase</th><th>Path</th><th style="min-width:150px">GB/s</th><th style="min-width:130px">p50 (us)</th></tr>';
+// For each pattern+phase_op, pick the batch_size with highest throughput
+const bestByKey = {{}};
+all5m.forEach(r => {{
+  const key = r.pattern + '|' + r.phase_op;
+  if (!bestByKey[key] || r.throughput_gbps > bestByKey[key].throughput_gbps) {{
+    bestByKey[key] = r;
+  }}
+}});
+const main5m = Object.values(bestByKey);
+
+mainTable.innerHTML = '<tr><th>Pattern</th><th>Op</th><th>Path</th><th>bs</th><th style="min-width:130px">GB/s</th><th style="min-width:100px">p50 (us)</th><th>Err</th></tr>';
 const byPattern = {{}};
 main5m.forEach(r => {{
   if (!byPattern[r.pattern]) byPattern[r.pattern] = [];
@@ -1316,29 +1328,29 @@ const patternOrder = Object.entries(byPattern).sort((a,b) => {{
   return maxB - maxA;
 }});
 const maxTp = Math.max(...main5m.map(r => r.throughput_gbps));
-const maxP50 = Math.max(...main5m.map(r => r.p50_us));
 patternOrder.forEach(([pat, rows]) => {{
   rows.sort((a,b) => b.throughput_gbps - a.throughput_gbps);
   rows.forEach((r, idx) => {{
     const op = r.phase_op.split('/')[1];
-    const phase = r.phase_op.split('/')[0];
     const path = getPath(r);
     const color = op === 'store' ? 'var(--store)' : op === 'load' ? 'var(--load)' : 'var(--text-3)';
     const pathColor = path.includes('SSD') ? 'var(--contend)' : color;
     const tpPct = (r.throughput_gbps / maxTp * 100).toFixed(0);
-    const latPct = (r.p50_us / maxP50 * 100).toFixed(0);
-    const patLabel = idx === 0 ? pat.replace(/_/g,' ').replace('_and_', ' & ').replace('_or_', ' | ') : '';
+    const patLabel = idx === 0 ? pat.replace(/_/g,' ') : '';
     const patStyle = idx === 0 ? 'font-weight:500;font-size:.8rem' : 'color:var(--text-3);font-size:.72rem;padding-left:.5rem';
+    const errStr = r.errors > 0 ? r.errors : '';
     mainTable.innerHTML += `<tr>
       <td style="${{patStyle}}">${{patLabel}}</td>
-      <td style="font-size:.72rem;color:var(--text-3)">${{phase}}</td>
+      <td style="font-size:.75rem">${{op}}</td>
       <td style="color:${{pathColor}};font-size:.75rem;white-space:nowrap">${{path}}</td>
+      <td class="num">${{r.batch_size}}</td>
       <td class="num"><span style="margin-right:6px">${{r.throughput_gbps.toFixed(1)}}</span><div class="bar" style="display:inline-block;width:${{tpPct}}px;max-width:80px;background:${{color}};opacity:0.5;vertical-align:middle"></div></td>
-      <td class="num"><span style="margin-right:6px">${{r.p50_us.toFixed(0)}}</span><div class="bar" style="display:inline-block;width:${{latPct}}px;max-width:80px;background:var(--warning);opacity:0.4;vertical-align:middle"></div></td>
+      <td class="num">${{r.p50_us.toFixed(0)}}</td>
+      <td class="num" style="color:var(--critical)">${{errStr}}</td>
     </tr>`;
   }});
   if (rows.length > 1) {{
-    mainTable.innerHTML += `<tr><td colspan="5" style="height:3px;padding:0"></td></tr>`;
+    mainTable.innerHTML += `<tr><td colspan="7" style="height:3px;padding:0"></td></tr>`;
   }}
 }});
 
