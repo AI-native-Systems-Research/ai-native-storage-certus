@@ -28,7 +28,9 @@ the (heavy) engine import happens.
 import glob
 import json
 import os
+import random
 import sys
+import tempfile
 
 
 # ── Named workloads ─────────────────────────────────────────────────────────
@@ -124,6 +126,128 @@ def _sharegpt_num_convs(has_explicit_path=False):
     return _SHAREGPT_CORPUS_CONVS
 
 
+# ── long-doc-QA synthetic workload ──────────────────────────────────────────
+# A KV-cache-stress variant of the multi-turn replay. Each "conversation" is one
+# long synthetic document followed by short follow-up questions: turn 0's prompt
+# is (document + first question) — a large, per-document-UNIQUE prefix that the
+# accumulating-context loop caches once on turn 0 and every later turn reuses. So
+# the distinct working set is ~num_docs × doc_tokens of KV, sized to overflow the
+# GPU cache and drive the offload tier. (Contrast upstream benchmarks/long-doc-qa,
+# whose docs are an identical "hi hi …" string differing only by a leading index —
+# those prefixes dedup at the KV-block layer and store almost nothing across docs;
+# here each document's filler is drawn independently so the blocks are distinct.)
+#
+# The three shape parameters are env-tunable; defaults are chosen so a document
+# plus all its turns fits the DEFAULT 8192 window (budget MAX_MODEL_LEN -
+# OUTPUT_TOKENS, ~7992). The document is big enough to build sizeable KV yet
+# leaves room for the accumulated follow-ups + generations, so a plain run does
+# NOT retire every conversation on turn 0. Raise LONGDOC_DOC_TOKENS together with
+# --max-model-len for a larger reused prefix (a bigger doc than the window holds
+# would trip the loop's nt > prompt_budget guard and drop the conversation).
+#   LONGDOC_DOC_TOKENS  approx document length, tokens ≈ words  (default 5000)
+#   LONGDOC_QUESTIONS   human turns per document (doc+Q1, then follow-ups) (default 8)
+#   LONGDOC_NUM_DOCS    documents in the generated corpus        (default 1000)
+#   LONGDOC_SEED        RNG seed for a reproducible corpus        (default 1234)
+
+# Short, common, mostly-single-token words: joined with spaces, the token count of
+# the filler tracks the word count closely, so LONGDOC_DOC_TOKENS reads as tokens.
+_LONGDOC_WORDS = (
+    "the of and to in a is that for it as with on was by at from or an be this "
+    "which we can has more not but their they will one all would there her when "
+    "who them been its into time some these may then two other than up out only "
+    "over most also after first well way even new want because any day most us "
+    "system data model memory cache block layer token value store read write page "
+    "buffer stream index record region offset pointer thread queue signal frame"
+).split()
+
+# Generic follow-up questions, cycled after the first. Content is immaterial (the
+# document is random filler); they only need to be short and distinct enough to
+# advance the turn. Question 1 rides on turn 0 with the document.
+_LONGDOC_QUESTIONS = [
+    "Summarize the key points of the document above.",
+    "What is the main topic being discussed?",
+    "List any entities mentioned in the text.",
+    "What conclusion does the document reach?",
+    "Are there any contradictions in the passage?",
+    "Explain the most important detail in your own words.",
+    "What would a reader remember from this document?",
+    "Identify the section that carries the most information.",
+]
+
+
+def _int_env(name, default):
+    """int() of an env var, treating unset OR empty (``NAME=``) as the default.
+
+    Orchestrators forward tuning knobs as ``-e NAME=${NAME:-}``, so an unset knob
+    arrives as an empty string; ``int("")`` would raise. This collapses both to
+    the default."""
+    v = os.environ.get(name, "")
+    return int(v) if v.strip() else default
+
+
+def _longdoc_params():
+    """(doc_tokens, questions, num_docs, seed) for the long-doc-qa workload."""
+    return (
+        _int_env("LONGDOC_DOC_TOKENS", 5000),
+        max(2, _int_env("LONGDOC_QUESTIONS", 8)),  # loader needs >= 2 human turns
+        _int_env("LONGDOC_NUM_DOCS", 1000),
+        _int_env("LONGDOC_SEED", 1234),
+    )
+
+
+def _longdoc_generate(has_explicit_path=False):
+    """Generate (once) a ShareGPT-format json of synthetic long-doc-QA convs and
+    return its path.
+
+    Deterministic for a given (doc_tokens, questions, num_docs, seed): the
+    filename encodes the params, so an unchanged config reuses the file and a
+    changed one writes a fresh sibling — no stale reuse across differently-shaped
+    runs. The file goes under the system temp dir, so generation needs no writable
+    spot in the repo tree and leaves no git artifact (consistent with not
+    committing bench data); it is regenerated per container, which is cheap.
+
+    ``has_explicit_path`` is accepted for the WORKLOADS callable protocol but
+    ignored — an explicit ``DATASET_PATH`` still wins in ``resolve_workload``
+    (it is applied after the workload's dataset), so we always produce the file."""
+    doc_tokens, questions, num_docs, seed = _longdoc_params()
+    fname = f"longdoc_qa_d{doc_tokens}_q{questions}_n{num_docs}_s{seed}.json"
+    path = os.path.join(tempfile.gettempdir(), fname)
+    if os.path.exists(path):
+        return path
+
+    rng = random.Random(seed)
+    pool = _LONGDOC_WORDS
+    data = []
+    for i in range(num_docs):
+        # Lead each document with its own id so even same-length docs differ from
+        # the very first token; the rest is independently sampled filler.
+        words = [f"doc{i:06d}"]
+        words += [pool[rng.randrange(len(pool))] for _ in range(doc_tokens)]
+        document = " ".join(words)
+        # Human-only turns; load_convs reads only from=="human" turns, so gpt
+        # placeholders are unnecessary. Turn 0 carries the document + Q1.
+        turns = [{"from": "human",
+                  "value": f"{document}\n\n{_LONGDOC_QUESTIONS[0]}"}]
+        for q in range(1, questions):
+            turns.append({"from": "human",
+                          "value": _LONGDOC_QUESTIONS[q % len(_LONGDOC_QUESTIONS)]})
+        data.append({"id": f"longdoc-{i:06d}", "conversations": turns})
+
+    # Write via a temp sibling + rename so a concurrent reader never sees a
+    # partial file (and two racing generators converge on the same bytes).
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+    return path
+
+
+def _longdoc_num_convs(has_explicit_path=False):
+    """Default conversation cap for long-doc-qa: the whole generated corpus
+    (LONGDOC_NUM_DOCS). ``NUM_CONVS`` still overrides via ``resolve_workload``."""
+    return _longdoc_params()[2]
+
+
 # name -> {dataset: path|callable, num_convs: int, desc: str}. A callable dataset
 # is resolved at selection time (so per-run env like SHAREGPT_MIN_TURNS is
 # honored) and may return None to defer to an explicit DATASET_PATH. Add entries
@@ -141,6 +265,19 @@ WORKLOADS = {
         "desc": "ShareGPT multi-turn workload by human-turn count "
                 "(SHAREGPT_MIN_TURNS/MAX_TURNS: 12/12 = 450-conv subset, "
                 "1/1 = full 94,145-conv corpus)",
+    },
+    "long-doc-qa": {
+        # Synthetic long-document QA (see _longdoc_generate): a large per-document
+        # unique prefix + short follow-ups, generated to a temp file at selection
+        # time. Both dataset and num_convs are callables resolved per run so the
+        # LONGDOC_* knobs take effect. Sized to build sizeable KV while fitting the
+        # default 8192 window; raise LONGDOC_DOC_TOKENS with --max-model-len to go
+        # bigger.
+        "dataset": _longdoc_generate,
+        "num_convs": _longdoc_num_convs,
+        "desc": "Synthetic long-document QA: per-doc-unique ~LONGDOC_DOC_TOKENS-"
+                "token prefix + LONGDOC_QUESTIONS follow-ups × LONGDOC_NUM_DOCS "
+                "docs (KV-cache stress; all env-tunable)",
     },
 }
 
