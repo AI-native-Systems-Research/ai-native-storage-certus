@@ -11,10 +11,13 @@ Every conversation strictly alternates ``human`` -> ``gpt`` starting with ``huma
 (so ``human turns == len(conversations) // 2``), and has >= 2 human turns, matching
 what ``load_convs`` keeps.
 
-Each conversation is authored in a *single* structured-output API call (not one call
-per turn), which is ~M times cheaper and faster. Human-turn counts are drawn with a
-seeded RNG so a given ``--seed`` reproduces the same turn-count distribution (the
-model's text still varies unless the API itself is deterministic).
+Short conversations are authored in a single API call. Longer ones are *stitched*
+across several calls (``--chunk-turns`` human turns each): the model is shown a
+tail window of the most recent turns and asked to continue, so the conversation
+actually reaches the requested length instead of the model winding it down early —
+which single-call generation does well before ~30 turns. Human-turn counts are drawn
+with a seeded RNG so a given ``--seed`` reproduces the same turn-count distribution
+(the model's text still varies unless the API itself is deterministic).
 
 Examples
 --------
@@ -166,6 +169,34 @@ def build_user_prompt(topic: str, human_turns: int, nonce: str) -> str:
     )
 
 
+def build_continuation_prompt(topic: str, recent_turns: list[dict],
+                              want: int, nonce: str) -> str:
+    """Prompt to extend an in-progress conversation by `want` more human turns.
+
+    Only a tail window of the transcript is shown (see --context-turns), which keeps
+    per-call input cost roughly constant regardless of how long the conversation has
+    already grown. The model is told not to repeat earlier turns.
+    """
+    lines = []
+    for t in recent_turns:
+        who = "USER" if t["from"] == HUMAN else "ASSISTANT"
+        lines.append(f"{who}: {t['value']}")
+    transcript = "\n\n".join(lines)
+    return (
+        f"Below are the most recent turns of an ongoing conversation about {topic}:\n\n"
+        f"---\n{transcript}\n---\n\n"
+        f"Continue the SAME conversation naturally from where it left off. Produce the "
+        f"next {want} human turns, each followed by exactly one assistant turn "
+        f"({2 * want} turns total), strictly alternating and starting with the human. "
+        f"The human should build on what was already said — follow-ups, corrections, "
+        f"deeper questions, or related tangents — and must NOT repeat or restate any "
+        f"earlier turn. Vary assistant reply length naturally.\n\n"
+        f'Respond with ONLY the JSON object {{"turns": [...]}} described in the system '
+        f"prompt — no prose, no markdown fences. Diversity token: {nonce} "
+        f"(use it only to vary the conversation; do not mention it)."
+    )
+
+
 def parse_turns(text: str) -> list[dict]:
     """Extract the list of turn dicts from a model response, tolerantly.
 
@@ -249,51 +280,96 @@ def conv_max_tokens(human_turns: int, floor: int) -> int:
     return min(MAX_TOKENS_CAP, max(floor, need))
 
 
+async def _stream_message(client, model, max_tokens, user_content):
+    """One streamed messages call → the final Message.
+
+    Streaming is required: at high per-call max_tokens the SDK refuses a
+    non-streaming request (>10-min risk), and it avoids request timeouts on long
+    generations.
+    """
+    async with client.messages.stream(
+        model=model,
+        max_tokens=max_tokens,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_content}],
+    ) as stream:
+        return await stream.get_final_message()
+
+
 async def gen_one(client, sem, model, max_tokens_floor, topic, human_turns,
-                  conv_id, nonce, counts):
-    """Generate a single conversation; returns a ShareGPT record or None on failure."""
+                  conv_id, nonce, counts, chunk_turns, context_turns):
+    """Generate a single conversation, stitching across calls to reach the target.
+
+    A conversation needing more than `chunk_turns` human turns is built in chunks:
+    the first call seeds it, each later call is shown a tail window of the last
+    `context_turns` human turns and asked to continue. Returns a ShareGPT record, or
+    None if nothing usable was produced.
+    """
     async with sem:
-        try:
-            resp = await client.messages.create(
-                model=model,
-                max_tokens=conv_max_tokens(human_turns, max_tokens_floor),
-                system=SYSTEM_PROMPT,
-                messages=[{
-                    "role": "user",
-                    "content": build_user_prompt(topic, human_turns, nonce),
-                }],
-            )
-        except Exception as e:  # noqa: BLE001 - one bad conv shouldn't kill the run
-            counts["failed"] += 1
-            print(f"  [gen] FAILED id={conv_id}: {type(e).__name__}: {e}",
-                  file=sys.stderr)
-            return None
+        turns: list[dict] = []
+        stalls = 0
+        # Bound total calls so an under-producing model can't loop forever.
+        max_calls = math.ceil(human_turns / max(1, chunk_turns)) + 3
+        calls = 0
 
-        if resp.stop_reason == "refusal":
-            counts["refused"] += 1
-            print(f"  [gen] refused id={conv_id} topic={topic!r}", file=sys.stderr)
-            return None
+        while (len(turns) // 2) < human_turns and calls < max_calls:
+            calls += 1
+            want = min(chunk_turns, human_turns - len(turns) // 2)
+            if not turns:
+                user_content = build_user_prompt(topic, want, nonce)
+            else:
+                recent = turns[-2 * context_turns:]
+                user_content = build_continuation_prompt(
+                    topic, recent, want, f"{nonce}-{calls}")
 
-        # usage accounting
-        u = resp.usage
-        counts["in_tokens"] += getattr(u, "input_tokens", 0) or 0
-        counts["out_tokens"] += getattr(u, "output_tokens", 0) or 0
+            try:
+                resp = await _stream_message(
+                    client, model, conv_max_tokens(want, max_tokens_floor),
+                    user_content)
+            except Exception as e:  # noqa: BLE001 - one bad call shouldn't kill the run
+                if len(turns) >= 4:  # keep the partial conversation we already have
+                    print(f"  [gen] partial id={conv_id}: {type(e).__name__}: {e} "
+                          f"— keeping {len(turns) // 2} h-turns", file=sys.stderr)
+                    break
+                counts["failed"] += 1
+                print(f"  [gen] FAILED id={conv_id}: {type(e).__name__}: {e}",
+                      file=sys.stderr)
+                return None
 
-        text = next((b.text for b in resp.content if b.type == "text"), None)
-        if not text:
-            counts["failed"] += 1
-            print(f"  [gen] empty id={conv_id}", file=sys.stderr)
-            return None
+            if resp.stop_reason == "refusal":
+                if not turns:
+                    counts["refused"] += 1
+                    print(f"  [gen] refused id={conv_id} topic={topic!r}",
+                          file=sys.stderr)
+                    return None
+                break  # refused a continuation → keep what we have
 
-        # parse_turns salvages complete turns even if the response was truncated.
-        turns = normalize_turns(parse_turns(text), human_turns)
-        if resp.stop_reason == "max_tokens":
-            counts["truncated"] += 1  # kept, but shorter than requested
+            u = resp.usage
+            counts["in_tokens"] += getattr(u, "input_tokens", 0) or 0
+            counts["out_tokens"] += getattr(u, "output_tokens", 0) or 0
+            counts["api_calls"] += 1
+
+            text = next((b.text for b in resp.content if b.type == "text"), None)
+            # parse_turns salvages complete turns even if the response was truncated.
+            new = normalize_turns(parse_turns(text), want) if text else []
+            if resp.stop_reason == "max_tokens":
+                counts["truncated"] += 1
+
+            if not new:
+                stalls += 1
+                if stalls >= 2:  # two barren calls in a row → give up on this conv
+                    break
+                continue
+            stalls = 0
+            turns.extend(new)
+            # A short-but-nonempty chunk (the model commonly returns ~10 for a
+            # requested 12) is normal, not a wind-down signal: keep going until the
+            # target is reached, max_calls is hit, or two consecutive barren calls.
 
         if len(turns) < 4:  # < 2 human turns => load_convs would drop it
             counts["too_short"] += 1
-            print(f"  [gen] too short id={conv_id} "
-                  f"({len(turns)} turns, stop={resp.stop_reason})", file=sys.stderr)
+            print(f"  [gen] too short id={conv_id} ({len(turns)} turns)",
+                  file=sys.stderr)
             return None
 
         counts["ok"] += 1
@@ -325,6 +401,8 @@ def print_stats(counts, turn_counts, model, elapsed):
               "raise --max-tokens or lower -m)", file=sys.stderr)
     print(f"  requested mean h-turns {requested_mean:>8.2f}", file=sys.stderr)
     print(f"  realized  mean h-turns {realized_mean:>8.2f}", file=sys.stderr)
+    if counts.get("api_calls"):
+        print(f"  api calls             {counts['api_calls']:>8,}", file=sys.stderr)
     print(f"  input tokens          {counts['in_tokens']:>8,}", file=sys.stderr)
     print(f"  output tokens         {counts['out_tokens']:>8,}", file=sys.stderr)
     if model in PRICING:
@@ -363,15 +441,25 @@ async def run(args) -> int:
             bar = "#" * min(60, dist[k])
             print(f"  {k:>3} turns: {dist[k]:>5}  {bar}", file=sys.stderr)
         total_turns = sum(turn_counts)
-        # Very rough: ~250 output tokens/turn, ~500 input tokens/call (prompt).
+        # Account for chunked stitching: a conv of H human turns takes
+        # ceil(H / chunk_turns) calls; every call after the first re-sends a
+        # tail window of ~context_turns human turns as input context.
+        calls = sum(math.ceil(ht / max(1, args.chunk_turns)) for ht in turn_counts)
+        cont_calls = max(0, calls - args.num_convs)
+        # Very rough: ~250 output tokens/turn; ~500 input tokens of prompt/system
+        # per call, plus ~300 tokens per context message on continuation calls.
         est_out = total_turns * 250
-        est_in = args.num_convs * 500
+        est_in = calls * 500 + cont_calls * args.context_turns * 2 * 300
         note = ""
         if args.model in PRICING:
             pi, po = PRICING[args.model]
             note = f" → est. ${est_in/1e6*pi + est_out/1e6*po:.2f}"
+        print(f"[gen] ~{calls:,} API calls ({cont_calls:,} continuations), "
+              f"chunk={args.chunk_turns} h-turns/call", file=sys.stderr)
         print(f"[gen] rough token estimate: ~{est_in:,} in / ~{est_out:,} out{note}",
               file=sys.stderr)
+        print("[gen] NOTE: output-token estimate is rough; a small validation run "
+              "gives the real per-conv cost before a large batch.", file=sys.stderr)
         return 0
 
     try:
@@ -383,7 +471,8 @@ async def run(args) -> int:
     client = AsyncAnthropic()
     sem = asyncio.Semaphore(args.concurrency)
     counts = {"ok": 0, "failed": 0, "refused": 0, "too_short": 0, "truncated": 0,
-              "in_tokens": 0, "out_tokens": 0, "realized_human_turns": 0}
+              "api_calls": 0, "in_tokens": 0, "out_tokens": 0,
+              "realized_human_turns": 0}
 
     tasks = []
     for i, ht in enumerate(turn_counts):
@@ -391,7 +480,8 @@ async def run(args) -> int:
         nonce = f"{args.seed}-{i}"
         tasks.append(gen_one(
             client, sem, args.model, args.max_tokens,
-            topic, ht, gen_id(id_rng), nonce, counts))
+            topic, ht, gen_id(id_rng), nonce, counts,
+            args.chunk_turns, args.context_turns))
 
     print(f"[gen] generating {args.num_convs} conversations with {args.model} "
           f"(concurrency={args.concurrency}, mean h-turns={args.mean_turns}) …",
@@ -441,6 +531,14 @@ def main() -> int:
                          "minimum; conversations with fewer are dropped by load_convs)")
     ap.add_argument("--max-turns", type=int, default=40,
                     help="ceiling for human-turn count (default: 40)")
+    ap.add_argument("--chunk-turns", type=int, default=12,
+                    help="max human turns generated per API call (default: 12); "
+                         "conversations longer than this are stitched across "
+                         "multiple calls so they actually reach the target length")
+    ap.add_argument("--context-turns", type=int, default=3,
+                    help="how many recent human turns to re-send as context on each "
+                         "continuation call (default: 3); larger = more coherent but "
+                         "more input tokens")
     ap.add_argument("--seed", type=int, default=1234,
                     help="RNG seed for the turn-count distribution, ids, and topic "
                          "selection (default: 1234)")
