@@ -1291,7 +1291,7 @@ FINDINGS.forEach(f => {{
   findingsEl.innerHTML += `<div class="finding ${{cls}}"><div class="finding-title">${{f.title}}</div><div class="finding-detail">${{f.detail}}</div><div class="finding-impact">${{f.impact}}</div></div>`;
 }});
 
-// Main table: 5M objects, show peak throughput per pattern+phase (best batch size)
+// Main table: 5M objects at realistic batch sizes per pattern
 const mainTable = document.getElementById('main-table');
 const all5m = DATA.filter(r => r.object_size.includes('5M') && r.throughput_gbps > 0.01);
 const COLD_PATTERNS = ['hot_vs_cold_load_paths','selective_kv_retrieval','tier_promotion_and_prefetch','cache_aware_routing_and_remote_hit_migration'];
@@ -1306,11 +1306,24 @@ function getPath(r) {{
   return '';
 }}
 
-// For each pattern+phase_op, pick the batch_size with highest throughput
+// Natural batch sizes: serial ops (decode, contention) use bs=1,
+// batched ops (prefill, loads, disaggregated) use bs=64
+const SERIAL_OPS = {{'decode_block_store/store':1, 'bidirectional_store_load_contention/store':1,
+  'bidirectional_store_load_contention/load':1, 'continuous_batching_mix/store':1}};
+function naturalBs(r) {{
+  const key = r.pattern + '/' + r.phase_op.split('/')[1];
+  if (SERIAL_OPS[key] !== undefined) return SERIAL_OPS[key];
+  const op = r.phase_op.split('/')[1];
+  if (op === 'delete') return 1;
+  return 64;
+}}
+
+// For each pattern+phase_op, pick the row at its natural batch size
 const bestByKey = {{}};
 all5m.forEach(r => {{
   const key = r.pattern + '|' + r.phase_op;
-  if (!bestByKey[key] || r.throughput_gbps > bestByKey[key].throughput_gbps) {{
+  const target = naturalBs(r);
+  if (!bestByKey[key] || Math.abs(r.batch_size - target) < Math.abs(bestByKey[key].batch_size - target)) {{
     bestByKey[key] = r;
   }}
 }});
