@@ -41,6 +41,24 @@ _DATA_DIR = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data")
 )
 
+# Total conversations in the full ShareGPT corpus (all data/sharegpt/*.json
+# chunks). Used as the default conversation cap for the corpus (min-turns-1)
+# case — i.e. "draw from the whole corpus" — since load_convs' cap is what
+# bounds how much of the corpus is read.
+_SHAREGPT_CORPUS_CONVS = 94145
+
+
+def _sharegpt_turns():
+    """(min_turns, max_turns) for the ``sharegpt`` workload from the environment.
+
+    ``SHAREGPT_MIN_TURNS`` defaults to 12; ``SHAREGPT_MAX_TURNS`` defaults to
+    ``min`` when unset, so a bare ``--min-turns N`` selects the ``N/N`` config."""
+    min_env = os.environ.get("SHAREGPT_MIN_TURNS")
+    max_env = os.environ.get("SHAREGPT_MAX_TURNS")
+    min_turns = int(min_env) if min_env else 12
+    max_turns = int(max_env) if max_env else min_turns
+    return min_turns, max_turns
+
 
 def _sharegpt_dataset(has_explicit_path=False):
     """Dataset for the ``sharegpt`` workload, selected by human-turn count via
@@ -68,12 +86,7 @@ def _sharegpt_dataset(has_explicit_path=False):
     image). The other bench images flatten the layout, so the orchestrator
     overrides ``DATASET_PATH`` with the in-container mount point for the corpus
     case rather than relying on this path."""
-    min_env = os.environ.get("SHAREGPT_MIN_TURNS")
-    max_env = os.environ.get("SHAREGPT_MAX_TURNS")
-    min_turns = int(min_env) if min_env else 12
-    # max-turns defaults to min-turns so a bare --min-turns N selects config N;
-    # an explicitly-set max that disagrees is validated (and rejected) below.
-    max_turns = int(max_env) if max_env else min_turns
+    min_turns, max_turns = _sharegpt_turns()
     if min_turns == 12 and max_turns == 12:
         return os.path.join(_DATA_DIR, "sharegpt_12turn_450.json")
     if min_turns == 1 and max_turns == 1:
@@ -88,6 +101,19 @@ def _sharegpt_dataset(has_explicit_path=False):
     )
 
 
+def _sharegpt_num_convs(has_explicit_path=False):
+    """Default conversation cap for the ``sharegpt`` workload, by turn config.
+
+    The 450-conv cap is the default *only* for the 12/12 subset; every other
+    prepared config (i.e. min-turns 1) defaults to the whole corpus, so lowering
+    the turn threshold draws from all conversations rather than silently keeping
+    the 450-conv cap. ``NUM_CONVS`` still overrides either way."""
+    min_turns, max_turns = _sharegpt_turns()
+    if min_turns == 12 and max_turns == 12:
+        return 450
+    return _SHAREGPT_CORPUS_CONVS
+
+
 # name -> {dataset: path|callable, num_convs: int, desc: str}. A callable dataset
 # is resolved at selection time (so per-run env like SHAREGPT_MIN_TURNS is
 # honored) and may return None to defer to an explicit DATASET_PATH. Add entries
@@ -96,11 +122,12 @@ WORKLOADS = {
     "sharegpt": {
         # ShareGPT multi-turn workload, selected by human-turn count (see
         # _sharegpt_dataset): 12/12 = the baked 450-conv 12-turn subset; 1/1 =
-        # the full 94,145-conv corpus dir. num_convs defaults to the whole
-        # corpus; for the 450-conv file load_convs simply stops at its 450, and
-        # NUM_CONVS overrides either way.
+        # the full 94,145-conv corpus dir. Both dataset and num_convs are
+        # callables resolved from the turn config at selection time: the 450-conv
+        # cap is the default only for 12/12, otherwise the default is the whole
+        # corpus (see _sharegpt_num_convs). NUM_CONVS overrides either way.
         "dataset": _sharegpt_dataset,
-        "num_convs": 94145,
+        "num_convs": _sharegpt_num_convs,
         "desc": "ShareGPT multi-turn workload by human-turn count "
                 "(SHAREGPT_MIN_TURNS/MAX_TURNS: 12/12 = 450-conv subset, "
                 "1/1 = full 94,145-conv corpus)",
@@ -136,10 +163,13 @@ def resolve_workload(default_dataset, default_num_convs):
                 f"[run] unknown WORKLOAD_NAME={workload!r}; "
                 f"known: {', '.join(sorted(WORKLOADS)) or '(none)'}"
             )
-        num_convs = spec.get("num_convs", default_num_convs)
-        # A callable dataset is resolved now (so per-run env like
-        # SHAREGPT_MIN_TURNS is honored) and may return None to defer to an
-        # explicit DATASET_PATH rather than erroring on an unprepared range.
+        # Both dataset and num_convs may be callables, resolved now so per-run
+        # env like SHAREGPT_MIN_TURNS is honored (e.g. the default conv count
+        # tracks the turn config: 450 for 12/12, whole corpus otherwise). The
+        # dataset callable may return None to defer to an explicit DATASET_PATH
+        # rather than erroring on an unprepared range.
+        nc = spec.get("num_convs", default_num_convs)
+        num_convs = nc(bool(explicit_path)) if callable(nc) else nc
         ds = spec["dataset"]
         resolved = ds(bool(explicit_path)) if callable(ds) else ds
         if resolved is not None:
