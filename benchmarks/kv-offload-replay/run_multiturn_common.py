@@ -28,7 +28,9 @@ the (heavy) engine import happens.
 import glob
 import json
 import os
+import random
 import sys
+import tempfile
 
 
 # ── Named workloads ─────────────────────────────────────────────────────────
@@ -41,6 +43,24 @@ _DATA_DIR = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data")
 )
 
+# Total conversations in the full ShareGPT corpus (all data/sharegpt/*.json
+# chunks). Used as the default conversation cap for the corpus (min-turns-1)
+# case — i.e. "draw from the whole corpus" — since load_convs' cap is what
+# bounds how much of the corpus is read.
+_SHAREGPT_CORPUS_CONVS = 94145
+
+
+def _sharegpt_turns():
+    """(min_turns, max_turns) for the ``sharegpt`` workload from the environment.
+
+    ``SHAREGPT_MIN_TURNS`` defaults to 12; ``SHAREGPT_MAX_TURNS`` defaults to
+    ``min`` when unset, so a bare ``--min-turns N`` selects the ``N/N`` config."""
+    min_env = os.environ.get("SHAREGPT_MIN_TURNS")
+    max_env = os.environ.get("SHAREGPT_MAX_TURNS")
+    min_turns = int(min_env) if min_env else 12
+    max_turns = int(max_env) if max_env else min_turns
+    return min_turns, max_turns
+
 
 def _sharegpt_dataset(has_explicit_path=False):
     """Dataset for the ``sharegpt`` workload, selected by human-turn count via
@@ -51,41 +71,185 @@ def _sharegpt_dataset(has_explicit_path=False):
     * ``min==12`` and ``max==12`` -> ``data/sharegpt_12turn_450.json``: 450
       conversations, each with exactly 12 human turns (the set every bench image
       bakes as its ``DATASET_PATH``).
-    * ``min==1`` and ``max==1`` -> the ``data/sharegpt/`` directory: the FULL
+    * ``min==2`` and ``max==2`` -> the ``data/sharegpt/`` directory: the FULL
       ShareGPT corpus (all chunks, 94,145 conversations). ``load_convs`` reads
       every ``*.json`` chunk in order and caps at ``num_convs`` — so
-      ``min-turns 1`` means "draw from the whole corpus".
+      ``min-turns 2`` means "draw from the whole corpus".
 
-    ``max-turns`` defaults to ``min-turns`` when unset, so ``--min-turns 1`` and
+    ``2`` is the honest floor for the corpus: ``load_convs`` keeps only
+    conversations with ``>= 2`` human turns (a single-turn conversation has no
+    prior context for a multi-turn KV-reuse workload to reuse), so ``min-turns 1``
+    loads the identical set. ``1`` is therefore accepted as a back-compat alias
+    for ``2`` but ``2`` is the canonical value.
+
+    ``max-turns`` defaults to ``min-turns`` when unset, so ``--min-turns 2`` and
     ``--min-turns 12`` alone each select a prepared config. Any other pair — in
-    particular any ``max-turns`` value that is not ``1`` (with min 1) or ``12``
-    (with min 12) — is rejected: set ``DATASET_PATH`` to a custom turn-filtered
-    ShareGPT file instead. When ``DATASET_PATH`` is set this returns ``None`` so
-    that path takes over rather than erroring; otherwise it exits with the hint.
+    particular any ``max-turns`` value that does not mirror ``min`` (2 with min
+    2, 12 with min 12) — is rejected: set ``DATASET_PATH`` to a custom
+    turn-filtered ShareGPT file instead. When ``DATASET_PATH`` is set this returns
+    ``None`` so that path takes over rather than erroring; otherwise it exits with
+    the hint.
 
     Note the corpus directory is resolved ``__file__``-relative, which is only
     correct where the module keeps its repo layout (host runs, and the shmq
     image). The other bench images flatten the layout, so the orchestrator
     overrides ``DATASET_PATH`` with the in-container mount point for the corpus
     case rather than relying on this path."""
-    min_env = os.environ.get("SHAREGPT_MIN_TURNS")
-    max_env = os.environ.get("SHAREGPT_MAX_TURNS")
-    min_turns = int(min_env) if min_env else 12
-    # max-turns defaults to min-turns so a bare --min-turns N selects config N;
-    # an explicitly-set max that disagrees is validated (and rejected) below.
-    max_turns = int(max_env) if max_env else min_turns
+    min_turns, max_turns = _sharegpt_turns()
     if min_turns == 12 and max_turns == 12:
         return os.path.join(_DATA_DIR, "sharegpt_12turn_450.json")
-    if min_turns == 1 and max_turns == 1:
+    # min-turns 2 = the whole corpus (load_convs' own >=2 floor); 1 accepted as a
+    # legacy alias for 2 since it loads the identical set.
+    if min_turns in (1, 2) and max_turns == min_turns:
         return os.path.join(_DATA_DIR, "sharegpt")  # directory of corpus chunks
     if has_explicit_path:
         return None
     raise SystemExit(
-        "[run] WORKLOAD_NAME=sharegpt: only min-turns==max-turns==1 (the full "
-        "94,145-conv corpus) or min-turns==max-turns==12 (the 450-conv subset) "
-        f"are prepared, got min={min_turns} max={max_turns}. Set DATASET_PATH "
-        "to a custom turn-filtered ShareGPT dataset for other turn counts."
+        "[run] WORKLOAD_NAME=sharegpt: only min-turns==max-turns==2 (the full "
+        "94,145-conv corpus; 1 also accepted) or min-turns==max-turns==12 (the "
+        f"450-conv subset) are prepared, got min={min_turns} max={max_turns}. "
+        "Set DATASET_PATH to a custom turn-filtered ShareGPT dataset for other "
+        "turn counts."
     )
+
+
+def _sharegpt_num_convs(has_explicit_path=False):
+    """Default conversation cap for the ``sharegpt`` workload, by turn config.
+
+    The 450-conv cap is the default *only* for the 12/12 subset; every other
+    prepared config (i.e. min-turns 2) defaults to the whole corpus, so lowering
+    the turn threshold draws from all conversations rather than silently keeping
+    the 450-conv cap. ``NUM_CONVS`` still overrides either way."""
+    min_turns, max_turns = _sharegpt_turns()
+    if min_turns == 12 and max_turns == 12:
+        return 450
+    return _SHAREGPT_CORPUS_CONVS
+
+
+# ── long-doc-QA synthetic workload ──────────────────────────────────────────
+# A KV-cache-stress variant of the multi-turn replay. Each "conversation" is one
+# long synthetic document followed by short follow-up questions: turn 0's prompt
+# is (document + first question) — a large, per-document-UNIQUE prefix that the
+# accumulating-context loop caches once on turn 0 and every later turn reuses. So
+# the distinct working set is ~num_docs × doc_tokens of KV, sized to overflow the
+# GPU cache and drive the offload tier. (Contrast upstream benchmarks/long-doc-qa,
+# whose docs are an identical "hi hi …" string differing only by a leading index —
+# those prefixes dedup at the KV-block layer and store almost nothing across docs;
+# here each document's filler is drawn independently so the blocks are distinct.)
+#
+# The three shape parameters are env-tunable; defaults are chosen so a document
+# plus ALL of its accumulated turns fits the DEFAULT 8192 window (budget
+# MAX_MODEL_LEN - OUTPUT_TOKENS, as low as ~7992 at OUTPUT_TOKENS=200) with real
+# headroom. This matters because the loop's `nt > prompt_budget` guard RETIRES the
+# whole conversation on overflow (it does not truncate) — a too-large default
+# would silently drop every conversation and produce a near-empty run. By turn 7
+# the prompt is doc + 7 responses + the accumulated follow-ups; at a conservative
+# ~1.3 tokens/word a 4000-word doc lands near ~6.7k tokens, comfortably inside the
+# window even at OUTPUT_TOKENS=200. It is still large in aggregate: ~4000 tokens ×
+# 1000 docs of DISTINCT prefix KV, well past any GPU cache. Raise LONGDOC_DOC_TOKENS
+# together with --max-model-len for a bigger reused prefix.
+#   LONGDOC_DOC_TOKENS  approx document length, tokens ≈ words  (default 4000)
+#   LONGDOC_QUESTIONS   human turns per document (doc+Q1, then follow-ups) (default 8)
+#   LONGDOC_NUM_DOCS    documents in the generated corpus        (default 1000)
+#   LONGDOC_SEED        RNG seed for a reproducible corpus        (default 1234)
+
+# Short, common, mostly-single-token words: joined with spaces, the token count of
+# the filler tracks the word count closely, so LONGDOC_DOC_TOKENS reads as tokens.
+_LONGDOC_WORDS = (
+    "the of and to in a is that for it as with on was by at from or an be this "
+    "which we can has more not but their they will one all would there her when "
+    "who them been its into time some these may then two other than up out only "
+    "over most also after first well way even new want because any day most us "
+    "system data model memory cache block layer token value store read write page "
+    "buffer stream index record region offset pointer thread queue signal frame"
+).split()
+
+# Generic follow-up questions, cycled after the first. Content is immaterial (the
+# document is random filler); they only need to be short and distinct enough to
+# advance the turn. Question 1 rides on turn 0 with the document.
+_LONGDOC_QUESTIONS = [
+    "Summarize the key points of the document above.",
+    "What is the main topic being discussed?",
+    "List any entities mentioned in the text.",
+    "What conclusion does the document reach?",
+    "Are there any contradictions in the passage?",
+    "Explain the most important detail in your own words.",
+    "What would a reader remember from this document?",
+    "Identify the section that carries the most information.",
+]
+
+
+def _int_env(name, default):
+    """int() of an env var, treating unset OR empty (``NAME=``) as the default.
+
+    Orchestrators forward tuning knobs as ``-e NAME=${NAME:-}``, so an unset knob
+    arrives as an empty string; ``int("")`` would raise. This collapses both to
+    the default."""
+    v = os.environ.get(name, "")
+    return int(v) if v.strip() else default
+
+
+def _longdoc_params():
+    """(doc_tokens, questions, num_docs, seed) for the long-doc-qa workload."""
+    return (
+        _int_env("LONGDOC_DOC_TOKENS", 4000),
+        max(2, _int_env("LONGDOC_QUESTIONS", 8)),  # loader needs >= 2 human turns
+        _int_env("LONGDOC_NUM_DOCS", 1000),
+        _int_env("LONGDOC_SEED", 1234),
+    )
+
+
+def _longdoc_generate(has_explicit_path=False):
+    """Generate (once) a ShareGPT-format json of synthetic long-doc-QA convs and
+    return its path.
+
+    Deterministic for a given (doc_tokens, questions, num_docs, seed): the
+    filename encodes the params, so an unchanged config reuses the file and a
+    changed one writes a fresh sibling — no stale reuse across differently-shaped
+    runs. The file goes under the system temp dir, so generation needs no writable
+    spot in the repo tree and leaves no git artifact (consistent with not
+    committing bench data); it is regenerated per container, which is cheap.
+
+    ``has_explicit_path`` is accepted for the WORKLOADS callable protocol but
+    ignored — an explicit ``DATASET_PATH`` still wins in ``resolve_workload``
+    (it is applied after the workload's dataset), so we always produce the file."""
+    doc_tokens, questions, num_docs, seed = _longdoc_params()
+    fname = f"longdoc_qa_d{doc_tokens}_q{questions}_n{num_docs}_s{seed}.json"
+    path = os.path.join(tempfile.gettempdir(), fname)
+    if os.path.exists(path):
+        return path
+
+    rng = random.Random(seed)
+    pool = _LONGDOC_WORDS
+    data = []
+    for i in range(num_docs):
+        # Lead each document with its own id so even same-length docs differ from
+        # the very first token; the rest is independently sampled filler.
+        words = [f"doc{i:06d}"]
+        words += [pool[rng.randrange(len(pool))] for _ in range(doc_tokens)]
+        document = " ".join(words)
+        # Human-only turns; load_convs reads only from=="human" turns, so gpt
+        # placeholders are unnecessary. Turn 0 carries the document + Q1.
+        turns = [{"from": "human",
+                  "value": f"{document}\n\n{_LONGDOC_QUESTIONS[0]}"}]
+        for q in range(1, questions):
+            turns.append({"from": "human",
+                          "value": _LONGDOC_QUESTIONS[q % len(_LONGDOC_QUESTIONS)]})
+        data.append({"id": f"longdoc-{i:06d}", "conversations": turns})
+
+    # Write via a temp sibling + rename so a concurrent reader never sees a
+    # partial file (and two racing generators converge on the same bytes).
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+    return path
+
+
+def _longdoc_num_convs(has_explicit_path=False):
+    """Default conversation cap for long-doc-qa: the whole generated corpus
+    (LONGDOC_NUM_DOCS). ``NUM_CONVS`` still overrides via ``resolve_workload``."""
+    return _longdoc_params()[2]
 
 
 # name -> {dataset: path|callable, num_convs: int, desc: str}. A callable dataset
@@ -96,14 +260,28 @@ WORKLOADS = {
     "sharegpt": {
         # ShareGPT multi-turn workload, selected by human-turn count (see
         # _sharegpt_dataset): 12/12 = the baked 450-conv 12-turn subset; 1/1 =
-        # the full 94,145-conv corpus dir. num_convs defaults to the whole
-        # corpus; for the 450-conv file load_convs simply stops at its 450, and
-        # NUM_CONVS overrides either way.
+        # the full 94,145-conv corpus dir. Both dataset and num_convs are
+        # callables resolved from the turn config at selection time: the 450-conv
+        # cap is the default only for 12/12, otherwise the default is the whole
+        # corpus (see _sharegpt_num_convs). NUM_CONVS overrides either way.
         "dataset": _sharegpt_dataset,
-        "num_convs": 94145,
+        "num_convs": _sharegpt_num_convs,
         "desc": "ShareGPT multi-turn workload by human-turn count "
                 "(SHAREGPT_MIN_TURNS/MAX_TURNS: 12/12 = 450-conv subset, "
                 "1/1 = full 94,145-conv corpus)",
+    },
+    "long-doc-qa": {
+        # Synthetic long-document QA (see _longdoc_generate): a large per-document
+        # unique prefix + short follow-ups, generated to a temp file at selection
+        # time. Both dataset and num_convs are callables resolved per run so the
+        # LONGDOC_* knobs take effect. Sized to build sizeable KV while fitting the
+        # default 8192 window; raise LONGDOC_DOC_TOKENS with --max-model-len to go
+        # bigger.
+        "dataset": _longdoc_generate,
+        "num_convs": _longdoc_num_convs,
+        "desc": "Synthetic long-document QA: per-doc-unique ~LONGDOC_DOC_TOKENS-"
+                "token prefix + LONGDOC_QUESTIONS follow-ups × LONGDOC_NUM_DOCS "
+                "docs (KV-cache stress; all env-tunable)",
     },
 }
 
@@ -126,9 +304,24 @@ def resolve_workload(default_dataset, default_num_convs):
     entrypoint execs, so the two must not collide."""
     dataset = default_dataset
     num_convs = default_num_convs
-    explicit_path = os.environ.get("DATASET_PATH")
+    # An empty/whitespace DATASET_PATH counts as unset: the bench images bake
+    # DATASET_PATH=<450x12 sharegpt>, so an orchestrator selecting a self-generating
+    # workload (e.g. long-doc-qa) blanks it with `-e DATASET_PATH=` to stop the
+    # baked path winning here. Treat that as "no explicit path" so WORKLOAD_NAME wins.
+    explicit_path = (os.environ.get("DATASET_PATH") or "").strip() or None
 
     workload = os.environ.get("WORKLOAD_NAME", "").strip().lower()
+    # Turn bounds only mean anything for the sharegpt workload, so setting either
+    # without WORKLOAD_NAME implies it — otherwise SHAREGPT_MIN_TURNS is silently
+    # ignored and the driver keeps its baked 450x12 default (the "asked for the
+    # corpus, still got 450" trap the shell orchestrators already guard against).
+    # This also keeps the 450-conv default tied to the 12/12 config: any other
+    # turn setting now routes through _sharegpt_num_convs (whole corpus) instead
+    # of falling back to default_num_convs.
+    if not workload and (
+        os.environ.get("SHAREGPT_MIN_TURNS") or os.environ.get("SHAREGPT_MAX_TURNS")
+    ):
+        workload = "sharegpt"
     if workload:
         spec = WORKLOADS.get(workload)
         if spec is None:
@@ -136,10 +329,13 @@ def resolve_workload(default_dataset, default_num_convs):
                 f"[run] unknown WORKLOAD_NAME={workload!r}; "
                 f"known: {', '.join(sorted(WORKLOADS)) or '(none)'}"
             )
-        num_convs = spec.get("num_convs", default_num_convs)
-        # A callable dataset is resolved now (so per-run env like
-        # SHAREGPT_MIN_TURNS is honored) and may return None to defer to an
-        # explicit DATASET_PATH rather than erroring on an unprepared range.
+        # Both dataset and num_convs may be callables, resolved now so per-run
+        # env like SHAREGPT_MIN_TURNS is honored (e.g. the default conv count
+        # tracks the turn config: 450 for 12/12, whole corpus otherwise). The
+        # dataset callable may return None to defer to an explicit DATASET_PATH
+        # rather than erroring on an unprepared range.
+        nc = spec.get("num_convs", default_num_convs)
+        num_convs = nc(bool(explicit_path)) if callable(nc) else nc
         ds = spec["dataset"]
         resolved = ds(bool(explicit_path)) if callable(ds) else ds
         if resolved is not None:
