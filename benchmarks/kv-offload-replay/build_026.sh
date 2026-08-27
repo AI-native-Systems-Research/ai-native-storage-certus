@@ -21,6 +21,14 @@ build() {
 build offload \
   podman build "${BA[@]}" -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
 
+# Same image, but with the forked tiering fix baked in (VLLM_FIX_TIERING=1).
+# Used as the "patched" arm in the head-to-head vs the stock certus-offload-bench
+# (which reproduces the upstream _req_state KeyError crash). Pure-Python overlay,
+# so no vLLM source rebuild — see Dockerfile.offload + vllm-fix2/PROVENANCE.md.
+build offload-fix026 \
+  podman build "${BA[@]}" --build-arg VLLM_FIX_TIERING=1 \
+    -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench-fix026 .
+
 build sharedstorage \
   podman build "${BA[@]}" -f benchmarks/kv-offload-replay/Dockerfile.sharedstorage -t certus-sharedstorage-bench .
 
