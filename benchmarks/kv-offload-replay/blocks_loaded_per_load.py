@@ -28,7 +28,8 @@ Usage:
     python3 blocks_loaded_per_load.py TRACE.jsonl
     python3 blocks_loaded_per_load.py TRACE.jsonl --source matched
     python3 blocks_loaded_per_load.py TRACE.jsonl --per-request        # one line per load
-    python3 blocks_loaded_per_load.py TRACE.jsonl --csv loads.csv      # request_id,tokens,blocks
+    python3 blocks_loaded_per_load.py TRACE.jsonl --csv loads.csv      # request_id,elapsed_s,tokens,blocks
+    python3 blocks_loaded_per_load.py TRACE.jsonl --png loads.png      # distribution + over-time figure
     python3 blocks_loaded_per_load.py TRACE.jsonl --include-zero       # count no-load requests too
 """
 
@@ -44,10 +45,12 @@ _MATCHED_RE = re.compile(r"\(\s*(\d+)")
 
 
 def _load_events(path, source):
-    """Yield (request_id, tokens_loaded) for each load event in the trace.
+    """Yield (request_id, ts, tokens_loaded) for each load event in the trace.
 
-    Only requests with tokens_loaded > 0 are real loads; zero rows are yielded too
-    so callers can report the total request population (filter with include_zero).
+    ``ts`` is the record's raw perf-counter timestamp (seconds); callers rebase it
+    to run-relative. Only requests with tokens_loaded > 0 are real loads; zero rows
+    are yielded too so callers can report the total request population (filter with
+    include_zero).
     """
     want = (
         "update_state_after_alloc" if source == "alloc" else "get_num_new_matched_tokens"
@@ -64,6 +67,7 @@ def _load_events(path, source):
             if rec.get("method") != want:
                 continue
             req_id = (rec.get("summary", {}).get("request") or {}).get("request_id")
+            ts = rec.get("ts")
 
             if source == "alloc":
                 # update_state_after_alloc(request, blocks, num_external_tokens):
@@ -92,7 +96,7 @@ def _load_events(path, source):
                     continue
                 tokens = int(m.group(1))
 
-            yield req_id, tokens
+            yield req_id, ts, tokens
 
 
 def _gcd_all(values):
@@ -107,6 +111,70 @@ def _percentile(sorted_vals, q):
         return 0
     idx = min(len(sorted_vals) - 1, int(math.ceil(q * len(sorted_vals)) - 1))
     return sorted_vals[max(0, idx)]
+
+
+def _render_png(path, rows, source, block_size, bin_seconds):
+    """Two panels: (left) distribution of blocks/load, (right) blocks/load over
+    time — per-load points plus a binned-mean trend on one shared blocks axis."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    nz = [(el, b) for _, el, _, b in rows if b > 0]
+    timed = [(el, b) for el, b in nz if el is not None]
+    if not nz:
+        raise SystemExit("nothing to plot: no loads with blocks > 0")
+
+    blocks = [b for _, b in nz]
+    src_label = ("blocks actually loaded (num_external_tokens)" if source == "alloc"
+                 else "store-lookup match (get_num_new_matched_tokens)")
+
+    # binned mean of blocks/load over time
+    bins = {}
+    for el, b in timed:
+        k = int(el // bin_seconds)
+        bins.setdefault(k, []).append(b)
+    bin_centers = [(k + 0.5) * bin_seconds for k in sorted(bins)]
+    bin_means = [sum(bins[k]) / len(bins[k]) for k in sorted(bins)]
+
+    C_PT, C_LINE = "#4C78A8", "#E4572E"  # blue points, warm trend line
+    plt.rcParams.update({"axes.grid": True, "grid.alpha": 0.25,
+                         "axes.axisbelow": True, "font.size": 10})
+    fig, (axd, axt) = plt.subplots(1, 2, figsize=(13, 5))
+
+    # ── distribution ──
+    hi = max(blocks)
+    axd.hist(blocks, bins=range(1, hi + 2), color=C_PT, edgecolor="white", linewidth=0.3)
+    mean_b = sum(blocks) / len(blocks)
+    axd.axvline(mean_b, color=C_LINE, linewidth=2,
+                label=f"mean {mean_b:.1f}")
+    axd.set_xlabel("blocks loaded per load")
+    axd.set_ylabel("number of loads")
+    axd.set_title(f"Distribution  (n={len(blocks)} loads, {block_size} tok/block)")
+    axd.legend(frameon=False)
+
+    # ── over time ──
+    if timed:
+        xs = [el for el, _ in timed]
+        ys = [b for _, b in timed]
+        axt.scatter(xs, ys, s=6, color=C_PT, alpha=0.25, linewidths=0,
+                    label="per load")
+        axt.plot(bin_centers, bin_means, color=C_LINE, linewidth=2,
+                 label=f"mean / {bin_seconds:.0f}s")
+        axt.set_xlim(left=0)
+        axt.legend(frameon=False)
+    else:
+        axt.text(0.5, 0.5, "no timestamps in trace", ha="center", va="center",
+                 transform=axt.transAxes)
+    axt.set_ylim(bottom=0)
+    axt.set_xlabel("elapsed (s)")
+    axt.set_ylabel("blocks loaded per load")
+    axt.set_title("Over time")
+
+    fig.suptitle(f"KV blocks loaded per load — {src_label}", fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
 
 
 def main(argv=None):
@@ -124,6 +192,10 @@ def main(argv=None):
                     help="print one 'request_id tokens blocks' line per load")
     ap.add_argument("--csv", metavar="FILE",
                     help="write request_id,tokens,blocks rows to FILE")
+    ap.add_argument("--png", metavar="FILE",
+                    help="render a 2-panel figure (distribution + over time) to FILE")
+    ap.add_argument("--bin-seconds", type=float, default=30.0,
+                    help="time-bin width for the over-time trend line (default 30s)")
     args = ap.parse_args(argv)
 
     if args.block_size <= 0:
@@ -134,29 +206,37 @@ def main(argv=None):
         print(f"no {args.source} records found in {args.trace}", file=sys.stderr)
         return 1
 
-    all_tokens = [t for _, t in events]
+    all_tokens = [t for _, _, t in events]
     detected = _gcd_all(all_tokens)
     if detected and detected % args.block_size != 0 and args.block_size % detected != 0:
         print(f"warning: token counts look block-aligned to {detected}, not "
               f"--block-size {args.block_size}; blocks may be fractional",
               file=sys.stderr)
 
-    loads = [(rid, t) for rid, t in events if t > 0 or args.include_zero]
-    # blocks per load (ceil so a partial trailing block still counts as loaded)
-    rows = [(rid, t, math.ceil(t / args.block_size)) for rid, t in loads]
+    # run-relative time origin from the first event with a timestamp
+    ts0 = next((ts for _, ts, _ in events if ts is not None), 0.0)
+
+    loads = [(rid, ts, t) for rid, ts, t in events if t > 0 or args.include_zero]
+    # (request_id, elapsed_s, tokens, blocks); ceil so a partial trailing block counts
+    rows = [(rid, (ts - ts0) if ts is not None else None, t,
+             math.ceil(t / args.block_size)) for rid, ts, t in loads]
 
     if args.csv:
         with open(args.csv, "w") as out:
-            out.write("request_id,tokens,blocks\n")
-            for rid, t, b in rows:
-                out.write(f"{rid},{t},{b}\n")
+            out.write("request_id,elapsed_s,tokens,blocks\n")
+            for rid, el, t, b in rows:
+                out.write(f"{rid},{'' if el is None else f'{el:.3f}'},{t},{b}\n")
         print(f"wrote {len(rows)} rows -> {args.csv}", file=sys.stderr)
 
     if args.per_request:
-        for rid, t, b in rows:
-            print(f"{rid}\t{t}\t{b}")
+        for rid, el, t, b in rows:
+            print(f"{rid}\t{'' if el is None else f'{el:.1f}'}\t{t}\t{b}")
 
-    blocks = sorted(b for _, _, b in rows)
+    if args.png:
+        _render_png(args.png, rows, args.source, args.block_size, args.bin_seconds)
+        print(f"wrote figure -> {args.png}", file=sys.stderr)
+
+    blocks = sorted(b for _, _, _, b in rows)
     nz = [b for b in blocks if b > 0]
     total_reqs = len(events)
     n_loads = len(nz)
