@@ -418,8 +418,12 @@ async def run(args) -> int:
 
     # Load topic pool.
     if args.topics_file:
-        topics = [ln.strip() for ln in Path(args.topics_file).read_text(
-            encoding="utf-8").splitlines() if ln.strip()]
+        try:
+            text = Path(args.topics_file).read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"[gen] can't read --topics-file {args.topics_file}: {e}", file=sys.stderr)
+            return 1
+        topics = [ln.strip() for ln in text.splitlines() if ln.strip()]
         if not topics:
             print(f"[gen] no topics in {args.topics_file}", file=sys.stderr)
             return 1
