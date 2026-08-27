@@ -86,6 +86,12 @@ ENFORCE_EAGER=0
 # runs one vLLM coroutine per conversation (V1 AsyncLLM). --async flips it for
 # the whole run; --workload-mode <mode> sets it explicitly.
 WORKLOAD_MODE=batched
+# --trace-offload wraps the KV connector in the generic TracingConnector on the
+# Certus-SPDK/shmq path, capturing per-request offloaded/loaded block counts as
+# offloading_trace_<pid>.jsonl. When set, run-bench.sh bind-mounts TRACE_OUT
+# (pointed at this run's LOGDIR below) into the --rm container so the JSONL
+# survives. Off by default (adds a connector wrapper + trace-file writes).
+TRACE_OFFLOAD=0
 # Metrics are captured on every run: all five drivers default stats ON, so the
 # vllm: prometheus counters (+ the KV-offload connector stats) and, on the
 # Certus-SPDK/shmq path, the per-round SSD device I/O are always recorded. No
@@ -182,6 +188,10 @@ Flags (all optional; defaults shown):
                                --workload-mode async.
   --workload-mode <mode>       Execution model for all backends: batched (default)
                                or async. Forwarded as the WORKLOAD_MODE env var.
+  --trace-offload              Wrap the connector in the generic TracingConnector
+                               on the Certus-SPDK/shmq path; per-request block
+                               counts land in offloading_trace_<pid>.jsonl under
+                               <logdir>. [off]
   --workload <name>            Named dataset workload for all backends, forwarded as
                                WORKLOAD_NAME. Empty (default) = the baked 450x12
                                dataset. "sharegpt" = the ShareGPT multi-turn workload
@@ -252,6 +262,7 @@ while [[ $# -gt 0 ]]; do
         --enforce-eager)    ENFORCE_EAGER=1; shift;;
         --async)            WORKLOAD_MODE=async; shift;;
         --workload-mode)    WORKLOAD_MODE="$2"; shift 2;;
+        --trace-offload)    TRACE_OFFLOAD=1; shift;;
         --workload)         WORKLOAD_NAME="$2"; shift 2;;
         --min-turns)        SHAREGPT_MIN_TURNS="$2"; shift 2;;
         --max-turns)        SHAREGPT_MAX_TURNS="$2"; shift 2;;
@@ -987,6 +998,8 @@ if want certus-spdk; then
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
             ENFORCE_EAGER="$ENFORCE_EAGER" \
             WORKLOAD_MODE="$WORKLOAD_MODE" \
+            TRACE_OFFLOAD="$TRACE_OFFLOAD" \
+            TRACE_OUT="$LOGDIR" \
             WORKLOAD_NAME="$WORKLOAD_NAME" \
             SHAREGPT_MIN_TURNS="$SHAREGPT_MIN_TURNS" \
             SHAREGPT_MAX_TURNS="$SHAREGPT_MAX_TURNS" \
