@@ -60,6 +60,12 @@ HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 PROM_PORT="${PROM_PORT:-}"
 # LOG_STATS — forwarded to the workload.
 LOG_STATS="${LOG_STATS:-}"
+# TRACE_OFFLOAD — when set (non-"0"), the driver wraps the connector in the
+# generic TracingConnector, which writes offloading_trace_<pid>.jsonl. The
+# container is --rm, so the trace dir must be a host mount: TRACE_OUT (host dir,
+# default ./shmq-trace) is bind-mounted in and TRACE_DIR points the tracer at it.
+TRACE_OFFLOAD="${TRACE_OFFLOAD:-}"
+TRACE_OUT="${TRACE_OUT:-${SCRIPT_DIR}/shmq-trace}"
 # WORKLOAD_SRC — optional host path to run_multiturn_shmq_certus.py, bind-mounted
 # over the copy baked into the image. Lets a change to the workload take effect
 # WITHOUT rebuilding the image.
@@ -230,6 +236,20 @@ if [[ -n "${CONNECTOR_SRC}" ]]; then
     fi
 fi
 
+# ── Offload-trace passthrough (only if TRACE_OFFLOAD set) ──
+# The container runs --rm, so its offloading_trace_<pid>.jsonl would vanish on
+# exit. Bind-mount a host dir (TRACE_OUT) at a fixed container path and point the
+# tracer there via TRACE_DIR so the JSONL survives the run. :z relabels for
+# rootless SELinux; writable (no ,ro) because the tracer creates files in it.
+trace_flags=()
+if [[ -n "${TRACE_OFFLOAD}" && "${TRACE_OFFLOAD}" != "0" ]]; then
+    mkdir -p "${TRACE_OUT}"
+    trace_flags+=(-v "${TRACE_OUT}:/workspace/trace:z"
+                  -e "TRACE_OFFLOAD=${TRACE_OFFLOAD}"
+                  -e "TRACE_DIR=/workspace/trace")
+    echo "[run-bench] TRACE_OFFLOAD=${TRACE_OFFLOAD}: offload traces -> ${TRACE_OUT}" >&2
+fi
+
 # ── Named-workload passthrough (only if WORKLOAD_NAME set) ──
 # Forward the selector plus any human-turn bounds. 12/12 is exactly the image's
 # baked DATASET_PATH, so at 12/12 this is a no-op. min-turns 2 selects the FULL
@@ -278,6 +298,7 @@ exec command podman "${store_flags[@]}" run --rm \
     "${logstats_env[@]}" \
     "${workload_mount[@]}" \
     "${connector_mount[@]}" \
+    "${trace_flags[@]}" \
     "${workload_name_env[@]}" \
     "${cache_mount[@]}" \
     "${hf_env[@]}" \
