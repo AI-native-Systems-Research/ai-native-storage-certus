@@ -552,6 +552,28 @@ def main() -> int:
                          "estimate without calling the API")
     args = ap.parse_args()
 
+    if args.num_convs < 1:
+        print("[gen] --num-convs must be >= 1", file=sys.stderr)
+        return 1
+    if args.mean_turns <= 0:
+        print("[gen] --mean-turns must be > 0", file=sys.stderr)
+        return 1
+    if args.concurrency < 1:
+        print("[gen] --concurrency must be >= 1", file=sys.stderr)
+        return 1
+    if args.max_tokens < 1:
+        print("[gen] --max-tokens must be >= 1", file=sys.stderr)
+        return 1
+    if args.chunk_turns < 1:
+        print("[gen] --chunk-turns must be >= 1", file=sys.stderr)
+        return 1
+    if args.context_turns < 0:
+        print("[gen] --context-turns must be >= 0", file=sys.stderr)
+        return 1
+    if args.indent is not None and args.indent < 0:
+        print("[gen] --indent must be >= 0", file=sys.stderr)
+        return 1
+
     if args.min_turns < 2:
         print("[gen] --min-turns clamped to 2 (bench requires >= 2 human turns)",
               file=sys.stderr)
