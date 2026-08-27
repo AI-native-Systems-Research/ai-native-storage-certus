@@ -183,10 +183,13 @@ if __name__ == "__main__":
               file=sys.stderr)
     elif os.environ.get("TRACE_OFFLOAD", "0") == "1":
         KV_CONFIG = {
-            "kv_connector": "TracingOffloadingConnector",
-            "kv_connector_module_path": "tracing_offloading_connector",
+            "kv_connector": "TracingConnector",
+            "kv_connector_module_path": "tracing_connector",
             "kv_role": "kv_both",
             "kv_connector_extra_config": {
+                # TracingConnector wraps this inner (the default anyway); the
+                # manager/handler tracer is a SEPARATE layer selected by spec_name.
+                "traced_kv_connector": "OffloadingConnector",
                 "cpu_bytes_to_use": CPU_BYTES,
                 "spec_name": "TracingCPUOffloadingSpec",
                 "spec_module_path": "tracing_offloading_manager",

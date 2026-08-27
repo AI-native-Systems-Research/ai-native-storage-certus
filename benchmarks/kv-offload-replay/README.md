@@ -26,7 +26,7 @@ evictions without re-running the model.
 
 | File | Purpose |
 |---|---|
-| `tracing_offloading_connector.py` | Drop-in `KVConnectorBase_V1` that wraps vLLM's `OffloadingConnector`. Writes `offloading_trace_<pid>.jsonl` (connector-level calls). |
+| `tracing_connector.py` | Connector-agnostic `KVConnectorBase_V1` that wraps a **config-selected** inner connector (`traced_kv_connector` in `kv_connector_extra_config`, default `OffloadingConnector`) and traces every call to `offloading_trace_<pid>.jsonl`. Since the CPU-offload and shmq/certus paths both run `OffloadingConnector`, the default traces either. Set `TRACE_DIR` to redirect output (e.g. a container mount). |
 | `tracing_offloading_manager.py` | Drop-in `CPUOffloadingSpec` that wraps the underlying `OffloadingManager` + `OffloadingHandler`. Writes `offloading_mgr_<pid>.jsonl` (lookup/touch/prepare_store/…) and `offloading_handler_<pid>.jsonl` (GPU↔CPU transfer jobs). |
 | `run_sharegpt_offloading.py` | Driver: runs `vllm bench throughput` on ShareGPT with the tracing connectors attached. |
 | `run_multiturn_offloading.py` | Driver: the multi-turn 450×12 offload workload for head-to-head vs Certus, and the single driver behind the unified `Dockerfile.offload` image. Selects the backend from env: `OFFLOAD_MODE=none` → GPU-only baseline (no `kv_transfer_config`); default → built-in `OffloadingConnector` CPU-only offload; `SECONDARY_TIER=fs` / `DISK_DIR` → native CPU+FS tiering; `TRACE_OFFLOAD=1` → the tracing wrappers above. See [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md). |
@@ -328,7 +328,7 @@ Custom handler targets: pass `--handler-target module.path:ClassName`. The class
 Generate a sizeable trace with some reuse and eviction pressure, then replay it through the production Certus stack (both manager and handler):
 
 ```bash
-# 1. Generate: 500 ShareGPT conversations through vLLM + TracingOffloadingConnector
+# 1. Generate: 500 ShareGPT conversations through vLLM + TracingConnector
 PYTHONPATH=. python run_sharegpt_offloading.py --num-conversations 500 --num-prompts 500
 
 # 2a. Native run: manager + handler with real SPDK IO
