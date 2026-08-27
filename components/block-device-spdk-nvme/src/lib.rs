@@ -362,7 +362,12 @@ impl IBlockDeviceAdmin for BlockDeviceSpdkNvmeComponent {
     }
 
     fn signal_stop(&self) {
-        if let Some(handle) = self.actor_handle.lock().expect("actor_handle lock poisoned").as_mut() {
+        if let Some(handle) = self
+            .actor_handle
+            .lock()
+            .expect("actor_handle lock poisoned")
+            .as_mut()
+        {
             handle.signal_stop();
         }
     }
@@ -525,9 +530,7 @@ impl IBlockDevice for BlockDeviceSpdkNvmeComponent {
                 .lock()
                 .expect("telemetry lock poisoned");
             if let Some(any_arc) = stats_guard.as_ref() {
-                if let Some(stats) =
-                    any_arc.downcast_ref::<crate::telemetry::TelemetryStats>()
-                {
+                if let Some(stats) = any_arc.downcast_ref::<crate::telemetry::TelemetryStats>() {
                     return stats.read_write_stats();
                 }
             }

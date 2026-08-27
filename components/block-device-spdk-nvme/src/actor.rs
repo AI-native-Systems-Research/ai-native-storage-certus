@@ -34,6 +34,31 @@ use crate::telemetry::TelemetryStats;
 /// transient saturation into spurious Read/Write failures.
 const SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS: u64 = 1000;
 
+/// Debug-build-only diagnostic: report the size of each DMA data transfer
+/// issued to the NVMe controller.
+///
+/// Emits one line per successfully submitted read/write command to stderr:
+/// `[block-device-spdk-nvme][dma] <op> lba=<lba> blocks=<n> bytes=<n>`, where
+/// `bytes` is the host transfer size (blocks × sector size) handed to SPDK.
+///
+/// Gated on `#[cfg(debug_assertions)]`, so it expands to nothing in release
+/// builds — zero cost and no argument evaluation in optimized/production runs.
+///
+/// Note: SPDK may split a request larger than the controller's MDTS into
+/// multiple NVMe commands on the wire. This reports the size of the logical
+/// request as submitted by the driver, not the per-command split.
+macro_rules! log_dma_issue {
+    ($op:expr, $lba:expr, $num_blocks:expr, $bytes:expr) => {{
+        #[cfg(debug_assertions)]
+        {
+            eprintln!(
+                "[block-device-spdk-nvme][dma] {} lba={} blocks={} bytes={}",
+                $op, $lba, $num_blocks, $bytes
+            );
+        }
+    }};
+}
+
 /// Entry produced by async SPDK completion callbacks.
 pub(crate) struct AsyncCompletionEntry {
     /// Client that submitted the operation.
@@ -749,7 +774,7 @@ impl BlockDeviceHandler {
                 // timeout (capped) so transient saturation becomes brief
                 // backpressure instead of a spurious ReadFailed. The loop frees
                 // slots by polling completions, so it exits as soon as one frees.
-                let backpressure_ms = timeout_ms.min(SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS).max(1);
+                let backpressure_ms = timeout_ms.clamp(1, SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS);
                 let deadline = tsc.deadline_from_ms(tsc.now(), backpressure_ms);
 
                 loop {
@@ -797,6 +822,7 @@ impl BlockDeviceHandler {
                         )),
                     });
                 } else {
+                    log_dma_issue!("read-async", lba, num_blocks, buf_len);
                     let qp = controller
                         .qpairs
                         .get_mut(qp_idx)
@@ -868,7 +894,7 @@ impl BlockDeviceHandler {
                 // See the read path: retry on -ENOMEM up to the op's timeout
                 // (capped) instead of a fixed 1 ms, turning transient qpair
                 // saturation into brief backpressure rather than a WriteFailed.
-                let backpressure_ms = timeout_ms.min(SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS).max(1);
+                let backpressure_ms = timeout_ms.clamp(1, SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS);
                 let deadline = tsc.deadline_from_ms(tsc.now(), backpressure_ms);
 
                 loop {
@@ -916,6 +942,7 @@ impl BlockDeviceHandler {
                         )),
                     });
                 } else {
+                    log_dma_issue!("write-async", lba, num_blocks, buf.len() as u64);
                     let qp = controller
                         .qpairs
                         .get_mut(qp_idx)
@@ -1159,6 +1186,8 @@ impl BlockDeviceHandler {
             ));
         }
 
+        log_dma_issue!("read-sync", lba, num_blocks, buf_guard.len() as u64);
+
         Self::poll_sync_completion(qp, &completion, "read")
     }
 
@@ -1208,6 +1237,8 @@ impl BlockDeviceHandler {
             ));
         }
 
+        log_dma_issue!("write-sync", lba, num_blocks, buf.len() as u64);
+
         Self::poll_sync_completion(qp, &completion, "write")
     }
 
@@ -1215,10 +1246,7 @@ impl BlockDeviceHandler {
     /// via `spdk_nvme_ns_cmd_flush`. Blocks until the controller signals
     /// completion. Supports the extent-manager `volatile_write_cache`
     /// feature (spec FR-030).
-    fn do_sync_flush(
-        controller: &mut NvmeController,
-        ns_id: u32,
-    ) -> Result<(), NvmeBlockError> {
+    fn do_sync_flush(controller: &mut NvmeController, ns_id: u32) -> Result<(), NvmeBlockError> {
         // Validate the namespace exists; flush takes no LBA range.
         let _ns = namespace::validate_ns_id(&controller.namespaces, ns_id)?;
 
