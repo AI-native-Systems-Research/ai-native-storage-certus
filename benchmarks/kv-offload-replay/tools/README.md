@@ -109,3 +109,90 @@ write-only run or a non-Certus backend simply omits the counters it never emits.
 Variant colours are fixed (NoOffload blue, CPUOffload orange, Tiered-CPU-FS
 green, SharedStorage teal, Certus-SPDK gold) and the bar/legend order is
 canonical, so slides across runs stay visually comparable.
+
+## `gen_synthetic_sharegpt.py` — synthetic ShareGPT dataset generator
+
+Generates **N** synthetic conversations with a mean **human-turn** count of **M**,
+written in the exact ShareGPT schema the multi-turn bench consumes (a JSON array of
+`{"id", "conversations": [{"from": "human"|"gpt", "value": ...}]}` — see
+`../../../data/sharegpt/README.md`). Use it to produce controllable stand-ins for
+`data/sharegpt_12turn_450.json` at any size or turn distribution without pulling
+from the real corpus.
+
+Short conversations are authored in a **single** Claude API call returning a JSON
+object; longer ones are **stitched across several calls** (`--chunk-turns` human turns
+per call), because single-call generation reliably winds a conversation down well
+before ~30 turns regardless of what you ask for. Each continuation call is shown a tail
+window of the most recent turns (`--context-turns`) and asked to continue, so the
+conversation actually reaches the requested length. The response is parsed tolerantly —
+markdown fences, surrounding prose, and truncated output are all handled — so the tool
+works with older `anthropic` SDKs (0.x) and LiteLLM-style proxy gateways that don't
+support the structured-output API. Requests are **streamed** (`messages.stream`), which
+the SDK requires once per-call `max_tokens` is large, and which avoids request timeouts.
+Human-turn counts are drawn from a **Poisson(M)** distribution with a seeded RNG, so a
+given `--seed` reproduces the same turn-count distribution and ids. Output strictly
+alternates `human → gpt` starting with `human` (roles are re-asserted by position),
+always has an even turn count and ≥ 2 human turns, so every conversation is kept by
+`load_convs`.
+
+**Cost/quality trade-off:** stitching makes long conversations reach their target turn
+count, but generating M turns costs proportionally more output tokens — a mean-50 run
+costs several times a mean-12 run at the same N. The realized mean still runs a little
+below M (some chunks truncate, some conversations end a call short of the ceiling); the
+stats report `api calls`, a `truncated` count, and the realized mean. Lower `--chunk-turns`
+(fewer turns per call) reduces truncation at the cost of more calls; raise `--max-tokens`
+to give each chunk more room. **Always do a small validation run first** (e.g. `-n 25`)
+to measure the real per-conversation cost before launching a large batch — the dry-run
+token estimate is deliberately rough.
+
+### Setup
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY=...      # or: ant auth login
+```
+
+### Usage
+
+```bash
+# Mirror data/sharegpt_12turn_450.json: 450 convs, mean 12 human turns
+python tools/gen_synthetic_sharegpt.py -n 450 -m 12 -o data/synth_12turn_450.json
+
+# Preview the turn-count distribution + rough cost, no API calls
+python tools/gen_synthetic_sharegpt.py -n 450 -m 12 -o /tmp/x.json --dry-run
+
+# Larger, cheaper/faster bulk run
+python tools/gen_synthetic_sharegpt.py -n 2000 -m 8 \
+    --model claude-sonnet-5 --concurrency 12 -o data/synth.json
+
+# Long conversations (mean ~50): raise --max-turns so Poisson isn't clamped, and
+# validate on a small N first to measure the real cost before the full batch.
+python tools/gen_synthetic_sharegpt.py -n 25 -m 50 --max-turns 75 \
+    --model claude-sonnet-5 --concurrency 25 -o /tmp/validate.json
+```
+
+Point a driver at the result with `DATASET_PATH=data/synth_12turn_450.json` (see
+`../../../data/sharegpt/README.md`). Partial output is flushed on Ctrl-C or a
+mid-run error; failures/refusals before any usable turns are counted and skipped,
+while errors after partial generation keep the partial conversation.
+
+### Options
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-n`, `--num-convs` | — | Number of conversations to generate (N, required) |
+| `-m`, `--mean-turns` | — | Mean human-turn count (M); actual counts are Poisson-distributed (required) |
+| `-o`, `--out` | — | Output ShareGPT `.json` path (required) |
+| `--model` | `claude-opus-5` | Claude model id; `claude-sonnet-5` / `claude-haiku-4-5` are cheaper for bulk |
+| `--concurrency` | `8` | Max concurrent API requests |
+| `--max-tokens` | `16000` | Floor for max output tokens per conversation; auto-raised for high turn counts (capped at 64000) |
+| `--min-turns` | `2` | Floor for human-turn count (clamped to ≥ 2, the bench minimum) |
+| `--max-turns` | `40` | Ceiling for human-turn count (raise it — e.g. `75` — when `-m` is high, or Poisson draws pile up at the ceiling and the realized mean is capped) |
+| `--chunk-turns` | `12` | Max human turns generated per API call; longer conversations are stitched across multiple calls |
+| `--context-turns` | `3` | Recent human turns re-sent as context on each continuation call (larger = more coherent, more input tokens) |
+| `--seed` | `1234` | RNG seed for turn-count distribution, ids, and topic selection |
+| `--topics-file` | built-in | File of topics, one per line, for conversation diversity |
+| `--indent` | compact | Pretty-print with this indent (default matches the repo's compact sharegpt files) |
+| `--dry-run` | off | Print distribution + rough cost estimate, make no API calls |
+
+The only dependency is the `anthropic` SDK (system `python3` is fine).
