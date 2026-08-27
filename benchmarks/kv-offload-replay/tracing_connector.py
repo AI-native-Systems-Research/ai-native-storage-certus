@@ -152,25 +152,38 @@ def _block_ids_summary(block_ids) -> dict:
         return {"repr": _safe_repr(block_ids, 200)}
 
 
-# ── Worker-layer (submit_load / submit_store / transfer_async) tracing ──────────
+# ── Scheduler-layer (prepare_load / prepare_store) block accounting ─────────────
 #
-# These live BELOW the connector, inside the OffloadingConnector's worker: it
-# holds one or more OffloadingHandler objects (for the shmq/certus path, a
-# CertusShmqWorker) and calls handler.submit_load / submit_store (vLLM 0.26) or
-# handler.transfer_async (<=0.24) once per TRANSFER JOB. We reach them WITHOUT
-# knowing anything connector-specific: after the inner connector registers its
-# KV caches, we locate its OffloadingWorker by duck typing and swap each handler
-# for the proxy below, which logs the per-submit block/key counts and delegates.
-# Per-job (thousands over a run), NOT per-layer, so it does not reintroduce the
-# per-forward-pass overhead the connector-layer scope note (below) avoids.
+# The exact per-transfer block count lives on the scheduler-side OffloadingManager,
+# NOT on the worker threads. In vLLM's scheduler (offloading/scheduler.py):
+#
+#     src_spec = self.manager.prepare_load(keys_to_load, req_context)   # -> LoadSpec
+#     ...
+#     transfer_spec = (src_spec, dst_spec)                              # -> submit_load
+#
+# so prepare_load's RETURN is exactly the spec later handed to the worker's
+# submit_load, and its ``keys`` argument is one entry per KV-cache block to load
+# (1:1 with the GPU blocks). The store side is symmetric: prepare_store returns a
+# PrepareStoreOutput whose ``keys_to_store`` is the exact set of blocks actually
+# written (prefix hits already present are excluded — which is why this differs
+# from ``num_external_tokens ÷ 16``). Capturing both here, on the scheduler thread,
+# gets the real per-load/per-store block count WITHOUT instrumenting any worker
+# thread (see the TRACING SCOPE note below for why the worker/per-layer path is
+# deliberately left untraced). Duck-typed: knows nothing connector-specific.
+
+
+def _safe_len(x):
+    try:
+        return len(x)
+    except Exception:
+        return None
 
 
 def _spec_summary(spec) -> dict:
     """Connector-agnostic shape of a LoadStoreSpec: its medium plus whichever of
     the two block-count views it exposes — ``block_ids`` (the GPU side, one entry
     per KV-cache block = 16 tokens) and/or ``keys`` (the store side, one entry per
-    store object/slab). Capturing both is the whole point: they are the two
-    different "block" counts, side by side, per submit."""
+    store object/slab)."""
     out: dict[str, Any] = {}
     try:
         out["medium"] = spec.medium()
@@ -178,119 +191,15 @@ def _spec_summary(spec) -> dict:
         pass
     bids = getattr(spec, "block_ids", None)
     if bids is not None:
-        try:
-            out["num_blocks"] = len(bids)
-        except Exception:
-            pass
+        n = _safe_len(bids)
+        if n is not None:
+            out["num_blocks"] = n
     keys = getattr(spec, "keys", None)
     if keys is not None:
-        try:
-            out["num_keys"] = len(keys)
-        except Exception:
-            pass
+        n = _safe_len(keys)
+        if n is not None:
+            out["num_keys"] = n
     return out
-
-
-def _summarize_transfer(src, dst) -> tuple[dict, int | None, int | None]:
-    """(summary, gpu_blocks, store_keys) for a (src, dst) transfer pair.
-
-    ``gpu_blocks`` = block_ids on the GPU-medium side (the count that lines up
-    with ``num_external_tokens ÷ 16``); ``store_keys`` = keys on the store side
-    (the coarser store-object count). Either may be None if a side doesn't expose
-    it."""
-    ss, ds = _spec_summary(src), _spec_summary(dst)
-    gpu_blocks = None
-    for x in (ss, ds):
-        if x.get("medium") == "GPU" and "num_blocks" in x:
-            gpu_blocks = x["num_blocks"]
-    if gpu_blocks is None:  # fall back to any block_ids present
-        gpu_blocks = ss.get("num_blocks", ds.get("num_blocks"))
-    store_keys = ss.get("num_keys")
-    if store_keys is None:
-        store_keys = ds.get("num_keys")
-    return {"src": ss, "dst": ds}, gpu_blocks, store_keys
-
-
-class _TracingHandler:
-    """Delegating proxy around a vLLM ``OffloadingHandler``.
-
-    Wraps only the data-movement *submit* entry points (``submit_load`` /
-    ``submit_store`` on 0.26, ``transfer_async`` on <=0.24), logging the per-call
-    block/key counts; everything else (``get_finished``, ``wait``, ``shutdown``,
-    ``medium``, …) passes straight through untraced — those are per-step polls and
-    would flood the trace. Knows nothing about which connector built the handler."""
-
-    def __init__(self, inner, inner_name: str):
-        self._inner_handler = inner
-        self._inner_name = inner_name
-
-    def __getattr__(self, name):
-        # Fires only for attributes this proxy doesn't define (get_finished, wait,
-        # shutdown, medium, spec-specific extras) — delegate to the real handler.
-        return getattr(self.__dict__["_inner_handler"], name)
-
-    def _record(self, method: str, job_id, src, dst, t0, error, result):
-        summary, gpu_blocks, store_keys = _summarize_transfer(src, dst)
-        rec: dict[str, Any] = {
-            "pid": os.getpid(),
-            "ts": t0,
-            "elapsed": round(time.perf_counter() - t0, 9),
-            "role": "WORKER",
-            "layer": "worker",
-            "connector": "TracingConnector",
-            "inner": self._inner_name,
-            "method": method,
-            "job_id": int(job_id) if isinstance(job_id, int) else _safe_repr(job_id, 40),
-            "gpu_blocks": gpu_blocks,
-            "store_keys": store_keys,
-            "summary": summary,
-            "error": error,
-        }
-        if error is None:
-            rec["result"] = _safe_repr(result, 80)
-        _write(rec)
-
-    # 0.26 explicit-direction interface
-    def submit_load(self, job_id, src_spec, dst_spec) -> bool:
-        t0 = time.perf_counter()
-        error = result = None
-        try:
-            result = self._inner_handler.submit_load(job_id, src_spec, dst_spec)
-            return result
-        except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
-            raise
-        finally:
-            self._record("submit_load", job_id, src_spec, dst_spec, t0, error, result)
-
-    def submit_store(self, job_id, src_spec, dst_spec) -> bool:
-        t0 = time.perf_counter()
-        error = result = None
-        try:
-            result = self._inner_handler.submit_store(job_id, src_spec, dst_spec)
-            return result
-        except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
-            raise
-        finally:
-            self._record("submit_store", job_id, src_spec, dst_spec, t0, error, result)
-
-    # <=0.24 medium-pair interface: spec is (src, dst)
-    def transfer_async(self, job_id, spec) -> bool:
-        t0 = time.perf_counter()
-        error = result = None
-        try:
-            result = self._inner_handler.transfer_async(job_id, spec)
-            return result
-        except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
-            raise
-        finally:
-            try:
-                src, dst = spec
-            except Exception:
-                src = dst = None
-            self._record("transfer_async", job_id, src, dst, t0, error, result)
 
 
 def _trace(method_name: str, summarize_args=None):
@@ -420,6 +329,11 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
         self._inner_name, inner_cls = _resolve_inner_class(extra)
         self._inner = inner_cls(vllm_config, role, kv_cache_config)
         self._install_passthroughs()
+        # Scheduler-side manager exists as soon as the inner connector is built
+        # (only for the scheduler role); instrument prepare_load/prepare_store in
+        # place to capture the real per-transfer block count on the scheduler
+        # thread. No-op / best-effort on the worker role (no manager there).
+        self._wrap_scheduler_manager()
         logger.info(
             "TracingConnector initialized (pid=%d, role=%s) wrapping %s → %s",
             os.getpid(),
@@ -494,59 +408,51 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
     #   (1) scheduler-side, per-REQUEST: on_new_request,
     #       get_num_new_matched_tokens, update_state_after_alloc,
     #       request_finished[_all_groups] — ~5400 calls over a 450x12 run.
-    #   (2) worker-side, per-TRANSFER-JOB: the OffloadingWorker's handler
-    #       submit_load / submit_store / transfer_async, traced via the
-    #       _TracingHandler proxies installed in _wrap_worker_handlers() — same
-    #       order of magnitude as (1), and the ONLY place the exact per-submit
-    #       block/key count is visible. (This is the layer the user asked for.)
+    #   (2) scheduler-side, per-TRANSFER: the OffloadingManager's prepare_load /
+    #       prepare_store, instrumented in place by _wrap_scheduler_manager() —
+    #       same order of magnitude as (1), runs on the SAME scheduler thread, and
+    #       is where the exact per-load/per-store block count is visible
+    #       (prepare_load's return is submit_load's src_spec; prepare_store's
+    #       keys_to_store is the blocks actually written). No worker thread touched.
     #   (3) register_kv_caches / shutdown — once each.
     # Everything else is per-STEP or per-LAYER and is left as a plain UNTRACED
     # forwarder: save_kv_layer / wait_for_layer_load alone are called once per
     # layer inside the GPU forward pass, from multiple worker threads under
     # WORKLOAD_MODE=async, and were ~86k of ~147k records in a real run. Tracing
     # those funnels every forward-pass layer through the single _fh_lock + a
-    # line-buffered flush syscall, which stalled the engine. The handler
-    # get_finished / wait polls are per-step for the same reason, so the proxy
-    # leaves them untraced too. (The _connector_metadata plumbing on
-    # start_load_kv/wait_for_save is preserved.)
+    # line-buffered flush syscall, which stalled the engine. (The
+    # _connector_metadata plumbing on start_load_kv/wait_for_save is preserved.)
 
     @_trace("register_kv_caches")
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
-        result = self._inner.register_kv_caches(kv_caches)
-        # Handlers are created inside the inner connector's register — wrap them
-        # now so every subsequent submit_load/submit_store is traced.
-        self._wrap_worker_handlers()
-        return result
+        return self._inner.register_kv_caches(kv_caches)
 
     @_trace("register_cross_layers_kv_cache")
     def register_cross_layers_kv_cache(
         self, kv_cache: torch.Tensor, attn_backend: Any
     ):
-        result = self._inner.register_cross_layers_kv_cache(kv_cache, attn_backend)
-        # Cross-layer registration can (re)register handlers too — re-wrap
-        # (idempotent: already-wrapped handlers are left alone).
-        self._wrap_worker_handlers()
-        return result
+        return self._inner.register_cross_layers_kv_cache(kv_cache, attn_backend)
 
-    # ── Worker-handler wrapping (locate the OffloadingWorker, swap in proxies) ──
+    # ── Scheduler-manager wrapping (instrument prepare_load/prepare_store) ──────
 
-    @staticmethod
-    def _looks_like_offloading_worker(obj) -> bool:
-        return (
-            obj is not None
-            and hasattr(obj, "transfer_type_to_handler")
-            and hasattr(obj, "handlers")
-        )
+    def _find_offloading_manager(self):
+        """Locate the scheduler-side OffloadingManager without importing or naming
+        any connector-specific type. Tries vLLM's known path
+        (connector_scheduler.manager) first, then a bounded breadth-first walk of
+        the inner connector's attribute graph for anything exposing the manager's
+        prepare_load/prepare_store primitives."""
 
-    def _find_offloading_worker(self):
-        """Locate the inner connector's OffloadingWorker without importing or
-        naming any connector-specific type. Tries vLLM's known path
-        (connector_worker.worker) first, then a bounded breadth-first walk of the
-        inner connector's attribute graph for anything that quacks like one."""
-        cw = getattr(self._inner, "connector_worker", None)
-        w = getattr(cw, "worker", None)
-        if self._looks_like_offloading_worker(w):
-            return w
+        def looks_like_manager(obj):
+            return (
+                obj is not None
+                and callable(getattr(obj, "prepare_load", None))
+                and callable(getattr(obj, "prepare_store", None))
+            )
+
+        cs = getattr(self._inner, "connector_scheduler", None)
+        m = getattr(cs, "manager", None)
+        if looks_like_manager(m):
+            return m
 
         seen: set[int] = set()
         queue = [self._inner]
@@ -557,7 +463,7 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
             if id(obj) in seen:
                 continue
             seen.add(id(obj))
-            if self._looks_like_offloading_worker(obj):
+            if looks_like_manager(obj):
                 return obj
             d = getattr(obj, "__dict__", None)
             if isinstance(d, dict):
@@ -566,62 +472,120 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
                         queue.append(v)
         return None
 
-    def _wrap_worker_handlers(self) -> None:
-        """Replace each handler in the OffloadingWorker with a _TracingHandler
-        proxy, in BOTH the ``handlers`` set and the ``transfer_type_to_handler``
-        map (they alias the same objects). Idempotent and fully best-effort: any
-        failure is logged and left to not disturb the run."""
+    def _manager_record(self, method: str, fields: dict, t0: float, error, result):
         try:
-            worker = self._find_offloading_worker()
-            if worker is None:
+            role_str = self.role.name
+        except Exception:
+            role_str = "unknown"
+        rec: dict[str, Any] = {
+            "pid": os.getpid(),
+            "ts": t0,
+            "elapsed": round(time.perf_counter() - t0, 9),
+            "role": role_str,
+            "layer": "manager",
+            "connector": "TracingConnector",
+            "inner": self._inner_name,
+            "method": method,
+        }
+        rec.update(fields)
+        rec["error"] = error
+        if error is None:
+            rec["result"] = _safe_repr(result, 120)
+        _write(rec)
+
+    def _wrap_scheduler_manager(self) -> None:
+        """Instrument the OffloadingManager's ``prepare_load`` / ``prepare_store``
+        IN PLACE (instance-attribute shadows the bound method), on the scheduler
+        thread. prepare_load's return IS the src_spec later handed to the worker's
+        submit_load, and prepare_store's PrepareStoreOutput carries the exact
+        ``keys_to_store`` — so this captures the real per-transfer block count with
+        no worker-thread instrumentation. Best-effort and idempotent."""
+        try:
+            manager = self._find_offloading_manager()
+            if manager is None:
                 logger.info(
-                    "TracingConnector: no OffloadingWorker found under %s — "
-                    "worker-layer (submit_load/submit_store) tracing disabled",
+                    "TracingConnector: no OffloadingManager found under %s — "
+                    "scheduler-layer (prepare_load/prepare_store) tracing disabled "
+                    "(expected on the worker role)",
                     self._inner_name,
                 )
                 return
-            handlers = getattr(worker, "handlers", None)
-            ttoh = getattr(worker, "transfer_type_to_handler", None)
+            if getattr(manager, "_tracing_wrapped", False):
+                return  # idempotent
 
-            proxies: dict[int, _TracingHandler] = {}
+            orig_load = manager.prepare_load
+            orig_store = manager.prepare_store
+            record = self._manager_record
 
-            def proxy_for(h):
-                if isinstance(h, _TracingHandler):
-                    return h
-                p = proxies.get(id(h))
-                if p is None:
-                    p = _TracingHandler(h, self._inner_name)
-                    proxies[id(h)] = p
-                return p
-
-            # transfer_type_to_handler: rewrite values in place.
-            if isinstance(ttoh, dict):
-                for ttype, h in list(ttoh.items()):
-                    ttoh[ttype] = proxy_for(h)
-
-            # handlers: a set of the same objects — rebuild in place so the
-            # worker's reference to the set survives.
-            if isinstance(handlers, set):
-                wrapped = {proxy_for(h) for h in handlers}
-                handlers.clear()
-                handlers.update(wrapped)
-            elif isinstance(handlers, (list, tuple)):
-                new = [proxy_for(h) for h in handlers]
+            @functools.wraps(orig_load)
+            def traced_prepare_load(keys, req_context, *a, **k):
+                t0 = time.perf_counter()
+                error = spec = None
                 try:
-                    handlers[:] = new  # list, mutate in place
-                except TypeError:
-                    setattr(worker, "handlers", type(handlers)(new))
+                    spec = orig_load(keys, req_context, *a, **k)
+                    return spec
+                except Exception as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+                    raise
+                finally:
+                    # len(keys) = KV blocks to load, 1:1 with the GPU blocks; the
+                    # returned spec is submit_load's src_spec.
+                    record(
+                        "prepare_load",
+                        {
+                            "req_id": getattr(req_context, "req_id", None),
+                            "load_blocks": _safe_len(keys),
+                            "spec": _spec_summary(spec) if spec is not None else None,
+                        },
+                        t0,
+                        error,
+                        spec,
+                    )
 
-            if proxies:
-                logger.info(
-                    "TracingConnector: wrapped %d worker handler(s) for %s — "
-                    "submit_load/submit_store/transfer_async now traced",
-                    len(proxies),
-                    self._inner_name,
-                )
+            @functools.wraps(orig_store)
+            def traced_prepare_store(keys, req_context, *a, **k):
+                t0 = time.perf_counter()
+                error = out = None
+                try:
+                    out = orig_store(keys, req_context, *a, **k)
+                    return out
+                except Exception as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+                    raise
+                finally:
+                    # keys_to_store = blocks actually written (prefix hits already
+                    # present are excluded); this is the exact per-store count.
+                    fields = {
+                        "req_id": getattr(req_context, "req_id", None),
+                        "offer_blocks": _safe_len(keys),
+                    }
+                    if out is not None:
+                        fields["store_blocks"] = _safe_len(
+                            getattr(out, "keys_to_store", None)
+                        )
+                        fields["evicted"] = _safe_len(
+                            getattr(out, "evicted_keys", None)
+                        )
+                        fields["spec"] = _spec_summary(
+                            getattr(out, "store_spec", None)
+                        )
+                    else:
+                        # prepare_store returns None when blocks cannot be stored.
+                        fields["store_blocks"] = 0
+                    record("prepare_store", fields, t0, error, out)
+
+            manager.prepare_load = traced_prepare_load
+            manager.prepare_store = traced_prepare_store
+            manager._tracing_wrapped = True
+            logger.info(
+                "TracingConnector: instrumented OffloadingManager "
+                "prepare_load/prepare_store for %s (scheduler-thread block "
+                "accounting)",
+                self._inner_name,
+            )
         except Exception as e:  # never let tracing break the run
             logger.warning(
-                "TracingConnector: worker-handler wrap skipped (%r)", e
+                "TracingConnector: scheduler-manager wrap skipped (%r)", e
             )
 
     def bind_connector_metadata(self, connector_metadata: KVConnectorMetadata) -> None:
