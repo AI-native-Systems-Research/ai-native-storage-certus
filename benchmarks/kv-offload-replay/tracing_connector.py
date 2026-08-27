@@ -278,6 +278,7 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
             extra = {}
         self._inner_name, inner_cls = _resolve_inner_class(extra)
         self._inner = inner_cls(vllm_config, role, kv_cache_config)
+        self._install_passthroughs()
         logger.info(
             "TracingConnector initialized (pid=%d, role=%s) wrapping %s → %s",
             os.getpid(),
@@ -286,12 +287,64 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
             _trace_file(),
         )
 
-    # Anything not explicitly wrapped below is delegated verbatim to the inner
-    # connector — keeps the wrapper tolerant of connector- and version-specific
-    # methods without needing an edit here.
+    # ── Delegation of un-wrapped methods ──────────────────────────────────────
+    #
+    # There are TWO delegation mechanisms, because a wrapper subclassing
+    # ``KVConnectorBase_V1`` faces a subtle trap: ``__getattr__`` only fires for
+    # attribute *misses*, and a method the base class declares is NOT a miss — the
+    # tracer *inherits* it. So for any method the base defines as a default (no-op,
+    # ``False``, ``None``, …) but the real inner connector *overrides*, the tracer
+    # would silently run the base default instead of the inner's real behaviour.
+    # (This is exactly the bug that made vLLM 0.26's ``on_new_request`` a no-op on
+    # the tracer, so the inner's ``_req_status`` was never populated and the next
+    # ``get_num_new_matched_tokens`` raised ``KeyError``.)
+    #
+    #   * ``__getattr__``  — covers attributes the base does NOT declare (inner- or
+    #     version-specific extras). Fires on a genuine miss.
+    #   * ``_install_passthroughs`` — covers every PUBLIC base-declared instance
+    #     method the tracer doesn't itself define, by installing an instance-level
+    #     forwarder to ``self._inner`` (an instance-dict entry shadows the inherited
+    #     class method). These forwarders are deliberately *untraced*: they include
+    #     per-step hooks like ``has_pending_push_work`` that would flood the JSONL.
+    #     The methods worth tracing are wrapped explicitly below.
     def __getattr__(self, name: str):
         # __getattr__ only fires for misses; _inner itself is a real attribute.
         return getattr(self.__dict__["_inner"], name)
+
+    def _install_passthroughs(self) -> None:
+        import inspect
+
+        base = KVConnectorBase_V1
+        # Names the tracer (or a non-base ancestor) defines explicitly — those are
+        # handled/traced here, so they must NOT be overwritten by a passthrough.
+        explicit: set[str] = set()
+        for klass in type(self).__mro__:
+            if klass in (base, SupportsHMA, object):
+                continue
+            explicit.update(klass.__dict__.keys())
+        # The tracer deliberately keeps its OWN connector-metadata bookkeeping
+        # (bind/clear sync self._connector_metadata), so don't forward its reader.
+        explicit.add("has_connector_metadata")
+
+        for name, _fn in inspect.getmembers(base, predicate=inspect.isfunction):
+            if name.startswith("_") or name in explicit:
+                continue
+            # inspect.isfunction already excludes classmethods (bound) and
+            # properties (descriptors); guard anyway for safety across versions.
+            if isinstance(
+                inspect.getattr_static(base, name), (classmethod, staticmethod, property)
+            ):
+                continue
+            self.__dict__[name] = self._make_passthrough(name)
+
+    def _make_passthrough(self, name: str):
+        inner = self._inner
+
+        def passthrough(*args, **kwargs):
+            return getattr(inner, name)(*args, **kwargs)
+
+        passthrough.__name__ = name
+        return passthrough
 
     # ── Worker-side ───────────────────────────────────────────────────────────
 
@@ -366,6 +419,18 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
         return self._inner.shutdown()
 
     # ── Scheduler-side ────────────────────────────────────────────────────────
+
+    @_trace("on_new_request", summarize_args=[("request", _request_summary)])
+    def on_new_request(self, request: "Request") -> None:
+        # vLLM 0.26+ lifecycle hook: the inner connector records per-request state
+        # here (OffloadingConnector populates its scheduler's _req_status), which a
+        # later get_num_new_matched_tokens then reads. Forwarding this is REQUIRED —
+        # the base-class default is a no-op, so inheriting it silently breaks the
+        # inner's request bookkeeping. Guarded so it stays a no-op on older vLLM
+        # (<0.26) whose connectors don't define the hook.
+        if hasattr(self._inner, "on_new_request"):
+            return self._inner.on_new_request(request)
+        return None
 
     @_trace("get_num_new_matched_tokens",
             summarize_args=[("request", _request_summary)])
@@ -463,3 +528,13 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
         if hasattr(inner_cls, "get_required_kvcache_layout"):
             return inner_cls.get_required_kvcache_layout(vllm_config)
         return None
+
+    @classmethod
+    def requires_piecewise_for_cudagraph(cls, extra_config: dict[str, Any]) -> bool:
+        # Resolvable straight from extra_config (same dict the tracer reads its
+        # traced_kv_connector key from), so forward to the inner class's decision
+        # rather than inheriting the base default and mis-selecting cudagraph mode.
+        _name, inner_cls = _resolve_inner_class(extra_config)
+        if hasattr(inner_cls, "requires_piecewise_for_cudagraph"):
+            return inner_cls.requires_piecewise_for_cudagraph(extra_config)
+        return False
