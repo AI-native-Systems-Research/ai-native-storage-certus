@@ -5,7 +5,15 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-DS="${DS:-/home/dwaddington/certus/data/sharegpt_v3.json}"
+DS="${DS:-}"
+if [[ -z "$DS" ]]; then
+  echo "error: DS must be set to a host dataset JSON (e.g. /path/sharegpt_v3.json)" >&2
+  exit 1
+fi
+if [[ ! -f "$DS" ]]; then
+  echo "error: dataset not found: DS=$DS" >&2
+  exit 1
+fi
 STAMP="${STAMP:-$(date +%Y%m%d_%H%M%S)}"
 NUM_CONVS="${NUM_CONVS:-1000}"
 ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-60}"
