@@ -347,6 +347,21 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
         return passthrough
 
     # ── Worker-side ───────────────────────────────────────────────────────────
+    #
+    # TRACING SCOPE — deliberately narrow. The block-count data this trace exists
+    # to capture is per-REQUEST and lives entirely on the scheduler thread
+    # (on_new_request, get_num_new_matched_tokens, update_state_after_alloc,
+    # request_finished[_all_groups]) — ~5400 calls over a 450x12 run. Everything
+    # else is per-STEP or per-LAYER: save_kv_layer / wait_for_layer_load alone are
+    # called once per layer inside the GPU forward pass, from multiple worker
+    # threads under WORKLOAD_MODE=async, and were ~86k of ~147k records in a real
+    # run. Tracing those funnels every forward-pass layer through the single
+    # _fh_lock + a line-buffered flush syscall, stalling the engine — for data the
+    # plan explicitly says is NOT the target (per-request/allocation granularity,
+    # not per-layer submit calls). So the hot per-step/per-layer methods below are
+    # left as plain, UNTRACED forwarders (the _connector_metadata plumbing on
+    # start_load_kv/wait_for_save is preserved); only register/shutdown (once each)
+    # and the scheduler-side request-lifecycle methods keep @_trace.
 
     @_trace("register_kv_caches")
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
@@ -358,30 +373,24 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
     ):
         return self._inner.register_cross_layers_kv_cache(kv_cache, attn_backend)
 
-    @_trace("bind_connector_metadata")
     def bind_connector_metadata(self, connector_metadata: KVConnectorMetadata) -> None:
         self._inner.bind_connector_metadata(connector_metadata)
         self._connector_metadata = self._inner._connector_metadata
 
-    @_trace("clear_connector_metadata")
     def clear_connector_metadata(self) -> None:
         self._inner.clear_connector_metadata()
         self._connector_metadata = None
 
-    @_trace("handle_preemptions")
     def handle_preemptions(self, kv_connector_metadata: KVConnectorMetadata):
         return self._inner.handle_preemptions(kv_connector_metadata)
 
-    @_trace("start_load_kv")
     def start_load_kv(self, forward_context: "ForwardContext", **kwargs: Any) -> None:
         self._inner._connector_metadata = self._connector_metadata
         return self._inner.start_load_kv(forward_context, **kwargs)
 
-    @_trace("wait_for_layer_load")
     def wait_for_layer_load(self, layer_name: str) -> None:
         return self._inner.wait_for_layer_load(layer_name)
 
-    @_trace("save_kv_layer")
     def save_kv_layer(
         self,
         layer_name: str,
@@ -391,26 +400,21 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
     ) -> None:
         return self._inner.save_kv_layer(layer_name, kv_layer, attn_metadata, **kwargs)
 
-    @_trace("wait_for_save")
     def wait_for_save(self):
         self._inner._connector_metadata = self._connector_metadata
         return self._inner.wait_for_save()
 
-    @_trace("get_finished")
     def get_finished(
         self, finished_req_ids: set[str]
     ) -> tuple[set[str] | None, set[str] | None]:
         return self._inner.get_finished(finished_req_ids)
 
-    @_trace("build_connector_worker_meta")
     def build_connector_worker_meta(self) -> KVConnectorWorkerMetadata | None:
         return self._inner.build_connector_worker_meta()
 
-    @_trace("get_kv_connector_stats")
     def get_kv_connector_stats(self) -> "KVConnectorStats | None":
         return self._inner.get_kv_connector_stats()
 
-    @_trace("get_kv_connector_kv_cache_events")
     def get_kv_connector_kv_cache_events(self) -> "KVConnectorKVEvents | None":
         return self._inner.get_kv_connector_kv_cache_events()
 
@@ -452,13 +456,12 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
     ):
         return self._inner.update_state_after_alloc(request, blocks, num_external_tokens)
 
-    @_trace("build_connector_meta")
+    # Per-step, no per-request block data → untraced forwarders (see TRACING SCOPE).
     def build_connector_meta(
         self, scheduler_output: "SchedulerOutput"
     ) -> KVConnectorMetadata:
         return self._inner.build_connector_meta(scheduler_output)
 
-    @_trace("update_connector_output")
     def update_connector_output(self, connector_output: "KVConnectorOutput"):
         if hasattr(self._inner, "update_connector_output"):
             return self._inner.update_connector_output(connector_output)
@@ -490,7 +493,6 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
             merged.extend(group)
         return self._inner.request_finished(request, merged)
 
-    @_trace("take_events")
     def take_events(self):
         if hasattr(self._inner, "take_events"):
             return self._inner.take_events()
