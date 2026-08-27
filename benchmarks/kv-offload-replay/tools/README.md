@@ -173,8 +173,8 @@ python tools/gen_synthetic_sharegpt.py -n 25 -m 50 --max-turns 75 \
 
 Point a driver at the result with `DATASET_PATH=data/synth_12turn_450.json` (see
 `../../../data/sharegpt/README.md`). Partial output is flushed on Ctrl-C or a
-mid-run error; per-conversation failures and refusals are counted and skipped.
-A usage + estimated-cost summary is printed to stderr at the end.
+mid-run error; failures/refusals before any usable turns are counted and skipped,
+while errors after partial generation keep the partial conversation.
 
 ### Options
 
