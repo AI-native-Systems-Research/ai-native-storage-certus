@@ -26,7 +26,7 @@ Records the exact sequence of `lookup`, `touch`, `prepare_store`, `complete_stor
 
 ### How traces are collected
 
-1. `TracingOffloadingConnector` wraps vLLM's `OffloadingConnector` — intercepts every scheduler↔manager call
+1. `TracingConnector` wraps vLLM's `OffloadingConnector` (its default inner) — intercepts every scheduler↔manager call
 2. `TracingOffloadingManager` wraps the actual `OffloadingManager` — logs the 6 policy methods with full key lists as hex block hashes
 3. `TracingOffloadingHandler` wraps each `OffloadingHandler` — logs data movement shape (direction, block count, timing)
 4. Driver (`run_sharegpt_offloading.py`) runs `vllm bench throughput` with the tracing connectors attached
@@ -201,7 +201,7 @@ Agentic workloads are Certus's killer use case: 10-50 LLM calls per task, each a
 - Ephemeral leaves (tool results processed once, never reused)
 - Bursty arrivals (parallel tool calls within one agent step)
 
-No published KV-level traces exist yet. To produce them: run SWE-bench tasks through vLLM with TracingOffloadingConnector attached, or instrument a live agentic system.
+No published KV-level traces exist yet. To produce them: run SWE-bench tasks through vLLM with TracingConnector attached, or instrument a live agentic system.
 
 ---
 

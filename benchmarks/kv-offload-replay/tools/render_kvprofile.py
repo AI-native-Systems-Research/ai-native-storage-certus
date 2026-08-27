@@ -145,8 +145,8 @@ FAMILIES = [
         ("ssd_write_bytes",        "SSD write"),
     ]),
     ("KV tier movements — run total", "int", [
-        ("tier_promotions_to_memory",  "→DRAM"),
-        ("tier_promotions_to_gpu",     "→GPU"),
+        ("tier_promotions_to_memory",  "promotions to DRAM"),
+        ("tier_promotions_to_gpu",     "promotions to GPU"),
         ("tier_evictions_from_memory", "evict DRAM"),
         ("tier_evictions_from_ssd",    "evict SSD"),
     ]),
@@ -177,8 +177,10 @@ RATE_KEYS = {"prompt_tokens", "prompt_tokens_cached", "generation_tokens",
              "tier_promotions_to_memory", "tier_promotions_to_gpu",
              "tier_evictions_from_memory", "tier_evictions_from_ssd"}
 
-# Fixed colour per variant (normalised name -> hex); unknown variants draw from
-# FALLBACK in first-seen order.
+# Palette base: the canonical colour for each variant, in VARIANT_ORDER. Colours
+# are handed out one-per-series in display order (see build_series) — these
+# first, then FALLBACK — so a single run of each variant keeps its canonical
+# colour while repeated variants pick up distinct hues rather than sharing one.
 VARIANT_COLOR = {
     "nooffload":     "#2a78d6",  # blue
     "cpuoffload":    "#eb6834",  # orange
@@ -433,18 +435,33 @@ def fmt_bytes(v, _pos=None):
     return f"{v:.1f} {units[i]}"
 
 
-def fmt_rate(rate, funit):
-    """Per-second label for a run-total bar. Bytes families read as B/KiB/…-per
-    second; count families (tokens, tier movements) read as a compact count per
-    second, but keep one/two decimals below 10 so a sub-unit rate (e.g. 0.3
-    evictions/s) doesn't collapse to ``0/s`` under fmt_compact's integer floor."""
+def fmt_rate(rate, funit, stacked=False):
+    """Per-second label for a run-total bar. The value is rounded to a whole
+    number — bytes read as B/KiB/…-per second (``12 MiB/s``), counts (tokens,
+    tier movements) as a plain or compact count per second. The one exception is
+    a genuinely nonzero sub-unit rate (e.g. 0.3 evictions/s): it keeps a single
+    decimal so it doesn't round down to a misleading ``0/s``.
+
+    With ``stacked``, the value and its unit are returned on two lines
+    (``"12\\nMiB/s"``) so the horizontal label stays narrow — about as wide as
+    its longest single token — and doesn't spill into the neighbouring bar group
+    when several series share one group."""
     if funit == "bytes":
-        return fmt_bytes(rate) + "/s"
-    if rate < 1:
-        return f"{rate:.2f}/s"
-    if rate < 10:
-        return f"{rate:.1f}/s"
-    return fmt_compact(rate) + "/s"
+        v = float(rate)
+        units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        i = 0
+        while abs(v) >= 1024 and i < len(units) - 1:
+            v /= 1024.0
+            i += 1
+        val, unit = f"{v:.0f}", units[i] + "/s"
+    elif 0 < rate < 0.5:
+        val, unit = f"{rate:.1f}", "/s"   # keep a digit so a real rate isn't "0/s"
+    elif rate < 1000:
+        val, unit = f"{rate:.0f}", "/s"
+    else:
+        val, unit = fmt_compact(rate), "/s"
+    sep = "\n" if stacked else (" " if funit == "bytes" else "")
+    return f"{val}{sep}{unit}"
 
 
 def build_series(run_args):
@@ -453,32 +470,38 @@ def build_series(run_args):
     for tag, d in run_args:
         for s in load_run(d, tag):
             series.append(s)
-    # colour per variant
-    color_map, fb = {}, iter(FALLBACK)
-    for s in series:
-        nk = norm(s["variant"])
-        if nk not in color_map:
-            color_map[nk] = VARIANT_COLOR.get(nk, next(fb, "#666666"))
-    # linestyle per repeat of the same variant (stable in input order)
+    # linestyle per repeat of the same variant (kept as a secondary cue), and
+    # freeze input order for the stable sort below.
     seen = {}
-    for s in series:
+    for i, s in enumerate(series):
         nk = norm(s["variant"])
         idx = seen.get(nk, 0)
         s["style"] = STYLES[idx % len(STYLES)]
-        s["color"] = color_map[nk]
         s["dup"] = None  # filled below
+        s["_ord"] = i    # freeze input order before the sort empties the list
         seen[nk] = idx + 1
     dup_variants = {nk for nk, n in seen.items() if n > 1}
-    for i, s in enumerate(series):
+    for s in series:
         nk = norm(s["variant"])
         s["label"] = s["variant"] + (f" · {s['tag']}" if nk in dup_variants and s["tag"] else "")
-        s["_ord"] = i  # freeze input order before the sort empties the list
     # bar/legend order: canonical variant order, then input order
     def okey(s):
         nk = norm(s["variant"])
         return (VARIANT_ORDER.index(nk) if nk in VARIANT_ORDER else len(VARIANT_ORDER),
                 s["_ord"])
     series.sort(key=okey)
+    # One distinct colour PER SERIES, walked in display order from the palette we
+    # already have (the canonical variant colours in VARIANT_ORDER, then the
+    # FALLBACK hues). Colour now tracks the series, not its variant, so repeated
+    # variants — e.g. several Certus configs — are told apart by hue instead of
+    # all sharing one. A single run of each variant still lands on its canonical
+    # colour (display order matches the palette prefix); extra runs pick up the
+    # next unused hue. A per-run --color override still wins (applied later, in
+    # main). Grey once the palette is exhausted.
+    palette = list(dict.fromkeys([VARIANT_COLOR[k] for k in VARIANT_ORDER] + FALLBACK))
+    pit = iter(palette)
+    for s in series:
+        s["color"] = next(pit, "#666666")
     return series
 
 
@@ -765,7 +788,7 @@ def render(series, out_path, title, subtitle, dark, dpi):
                     if k in RATE_KEYS and hv:
                         secs = _active_seconds(s, k)
                         if secs:
-                            parts.append(fmt_rate(hv / secs, funit))
+                            parts.append(fmt_rate(hv / secs, funit, stacked=True))
                     if k in HIT_DENOM:
                         q = _total(s, HIT_DENOM[k])
                         if q:
@@ -775,6 +798,11 @@ def render(series, out_path, title, subtitle, dark, dpi):
                     # Clear the rotated count label first — its height grows with
                     # the string length ("860.3 MiB" is far taller than "1k").
                     off = 14 + len(fmt(hv)) * 4.5
+                    # Horizontal label, but the rate carries its unit on a second
+                    # line (fmt_rate(stacked=True)) so it stays about as wide as
+                    # its longest token instead of spilling into the neighbouring
+                    # bar group when several series share one — while reading far
+                    # easier than a rotated-vertical label.
                     tax.annotate("\n".join(parts), xy=(x, hv),
                                  xytext=(0, off), textcoords="offset points",
                                  ha="center", va="bottom", fontsize=7,
@@ -784,7 +812,11 @@ def render(series, out_path, title, subtitle, dark, dpi):
             tax.set_title(ftitle, loc="left", fontsize=10, fontweight="bold",
                           color=fg, pad=6)
             tax.yaxis.set_major_formatter(FuncFormatter(fmt))
-            tax.set_ylim(0, (vmax * (2.0 if has_deriv else 1.34)) or 1)
+            # The derived label sits above the rotated count label; a two-line
+            # rate (value + unit) or a two-line hit block needs a little more
+            # headroom above the tallest bar than a bare count (1.34x).
+            headroom = 2.2 if has_deriv else 1.34
+            tax.set_ylim(0, (vmax * headroom) or 1)
             tax.margins(x=0.08)
             for sp in ("top", "right"):
                 tax.spines[sp].set_visible(False)
