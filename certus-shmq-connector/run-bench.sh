@@ -66,6 +66,10 @@ LOG_STATS="${LOG_STATS:-}"
 # default ./shmq-trace) is bind-mounted in and TRACE_DIR points the tracer at it.
 TRACE_OFFLOAD="${TRACE_OFFLOAD:-}"
 TRACE_OUT="${TRACE_OUT:-${SCRIPT_DIR}/shmq-trace}"
+# TRACE_SUBMIT — worker-side per-transfer submit_load/submit_store block counts
+# (submit_trace_<pid>.jsonl), used to VERIFY the scheduler prepare_load counts.
+# Defaults ON whenever TRACE_OFFLOAD is set; set TRACE_SUBMIT=0 to skip it.
+TRACE_SUBMIT="${TRACE_SUBMIT:-1}"
 # WORKLOAD_SRC — optional host path to run_multiturn_shmq_certus.py, bind-mounted
 # over the copy baked into the image. Lets a change to the workload take effect
 # WITHOUT rebuilding the image.
@@ -259,8 +263,12 @@ if [[ -n "${TRACE_OFFLOAD}" && "${TRACE_OFFLOAD}" != "0" ]]; then
     mkdir -p "${TRACE_OUT}"
     trace_flags+=(-v "${TRACE_OUT}:/workspace/trace:z"
                   -e "TRACE_OFFLOAD=${TRACE_OFFLOAD}"
-                  -e "TRACE_DIR=/workspace/trace")
+                  -e "TRACE_DIR=/workspace/trace"
+                  -e "CERTUS_SHMQ_TRACE_SUBMIT=${TRACE_SUBMIT}")
     echo "[run-bench] TRACE_OFFLOAD=${TRACE_OFFLOAD}: offload traces -> ${TRACE_OUT}" >&2
+    if [[ "${TRACE_SUBMIT}" != "0" ]]; then
+        echo "[run-bench] TRACE_SUBMIT=${TRACE_SUBMIT}: worker submit counts -> ${TRACE_OUT}/submit_trace_<pid>.jsonl" >&2
+    fi
 fi
 
 # ── Named-workload passthrough (only if WORKLOAD_NAME set) ──
