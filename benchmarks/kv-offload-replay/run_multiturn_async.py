@@ -142,7 +142,9 @@ async def run_async(engine, convs, sampling_params, *, prompt_budget, max_rounds
     t_start = time.perf_counter()
     sampler_task = asyncio.create_task(sample_loop()) if sampler else None
     try:
-        if active_sessions and active_sessions > 0:
+        if active_sessions < 0:
+            raise ValueError(f"active_sessions must be >= 0, got {active_sessions}")
+        if active_sessions > 0:
             # Closed loop: a fixed pool of `active_sessions` workers. No await
             # between reading and advancing `nxt`, so a plain counter is safe
             # under the single-threaded event loop (no lock needed).
