@@ -126,8 +126,10 @@ def _render_png(path, rows, source, block_size, bin_seconds):
         raise SystemExit("nothing to plot: no loads with blocks > 0")
 
     blocks = [b for _, b in nz]
-    src_label = ("blocks actually loaded (num_external_tokens)" if source == "alloc"
-                 else "store-lookup match (get_num_new_matched_tokens)")
+    # Name the raw source field AND the conversion, so the axis ("blocks") is never
+    # mistaken for the token field it is derived from.
+    field = "num_external_tokens" if source == "alloc" else "get_num_new_matched_tokens"
+    src_label = f"{field} ÷ {block_size} tok/block"
 
     # binned mean of blocks/load over time
     bins = {}
@@ -148,9 +150,9 @@ def _render_png(path, rows, source, block_size, bin_seconds):
     mean_b = sum(blocks) / len(blocks)
     axd.axvline(mean_b, color=C_LINE, linewidth=2,
                 label=f"mean {mean_b:.1f}")
-    axd.set_xlabel("blocks loaded per load")
+    axd.set_xlabel(f"KV-cache blocks loaded per load ({block_size} tok each)")
     axd.set_ylabel("number of loads")
-    axd.set_title(f"Distribution  (n={len(blocks)} loads, {block_size} tok/block)")
+    axd.set_title(f"Distribution  (n={len(blocks)} loads)")
     axd.legend(frameon=False)
 
     # ── over time ──
@@ -168,10 +170,10 @@ def _render_png(path, rows, source, block_size, bin_seconds):
                  transform=axt.transAxes)
     axt.set_ylim(bottom=0)
     axt.set_xlabel("elapsed (s)")
-    axt.set_ylabel("blocks loaded per load")
+    axt.set_ylabel(f"KV-cache blocks loaded per load ({block_size} tok each)")
     axt.set_title("Over time")
 
-    fig.suptitle(f"KV blocks loaded per load — {src_label}", fontweight="bold")
+    fig.suptitle(f"KV-cache blocks loaded per load  ({src_label})", fontweight="bold")
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(path, dpi=130)
     plt.close(fig)
