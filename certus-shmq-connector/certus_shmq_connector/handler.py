@@ -16,6 +16,8 @@ gRPC handler for the ≤0.24 vs 0.26 interface split — unchanged here).
 
 from __future__ import annotations
 
+import json
+import os
 import threading
 import time
 from collections import deque
@@ -36,6 +38,55 @@ from .mediums import CertusLoadStoreSpec, ns_key
 # (dropped on 0.26); kept as the natural label for a job's direction either way.
 _STORE_TYPE = ("GPU", "Certus")
 _LOAD_TYPE = ("Certus", "GPU")
+
+# Optional per-transfer submit trace. Gated on CERTUS_SHMQ_TRACE_SUBMIT (default
+# off). When on, each submit_load/submit_store appends one JSONL record carrying
+# the transfer's GPU-block count and key count, so a TRACE_OFFLOAD run can PROVE
+# the worker's block count equals the scheduler's prepare_load ``load_blocks``:
+# per record ``num_blocks == num_keys`` confirms the 1:1 gpu-block↔key zip is
+# whole, and the multiset of ``num_blocks`` across submit records must equal the
+# multiset of ``load_blocks``/``store_blocks`` across the connector trace.
+#
+# This is a per-TRANSFER hook (~one call per request), NOT a per-LAYER one, so it
+# does not stall the engine the way tracing save_kv_layer would. Records go to
+# TRACE_DIR (shared with the connector tracer) under submit_trace_<pid>.jsonl so
+# a --rm container's host mount captures them; the worker pid differs from the
+# scheduler pid, so it never collides with offloading_trace_<pid>.jsonl.
+_SUBMIT_TRACE = os.environ.get("CERTUS_SHMQ_TRACE_SUBMIT", "0") not in (
+    "0", "", "false", "False",
+)
+_SUBMIT_TRACE_LOCK = threading.Lock()
+_SUBMIT_TRACE_FH = None
+
+
+def _submit_trace(method: str, job_id: int, num_blocks: int, num_keys: int) -> None:
+    """Append one submit-trace JSONL record (best-effort; never raises)."""
+    global _SUBMIT_TRACE_FH
+    try:
+        with _SUBMIT_TRACE_LOCK:
+            if _SUBMIT_TRACE_FH is None:
+                d = os.environ.get("TRACE_DIR") or os.path.dirname(
+                    os.path.abspath(__file__)
+                )
+                _SUBMIT_TRACE_FH = open(
+                    os.path.join(d, f"submit_trace_{os.getpid()}.jsonl"), "a"
+                )
+            _SUBMIT_TRACE_FH.write(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "method": method,
+                        "job_id": job_id,
+                        "num_blocks": num_blocks,  # len(gpu_block_ids) this transfer
+                        "num_keys": num_keys,  # len(keys); must equal num_blocks (1:1)
+                    }
+                )
+                + "\n"
+            )
+            _SUBMIT_TRACE_FH.flush()
+    except Exception:  # noqa: BLE001 - tracing must never break a transfer
+        pass
+
 
 # Diagnostic rate-limiter for CopyToStore failures. The ring transport returns
 # only a per-key ok/fail bool (no server-side error string, unlike gRPC's
@@ -188,6 +239,8 @@ def _build_worker_class():
         def submit_store(self, job_id: int, src_spec, dst_spec) -> bool:
             """Async GPU -> Certus (0.26). src=GPU spec, dst=Certus spec."""
             block_ids = gpu_block_ids(src_spec)
+            if _SUBMIT_TRACE:
+                _submit_trace("submit_store", job_id, len(block_ids), len(dst_spec.keys))
             return self._submit(
                 job_id, block_ids, dst_spec.keys, self._do_store, _STORE_TYPE
             )
@@ -195,6 +248,8 @@ def _build_worker_class():
         def submit_load(self, job_id: int, src_spec, dst_spec) -> bool:
             """Async Certus -> GPU (0.26). src=Certus spec, dst=GPU spec."""
             block_ids = gpu_block_ids(dst_spec)
+            if _SUBMIT_TRACE:
+                _submit_trace("submit_load", job_id, len(block_ids), len(src_spec.keys))
             return self._submit(
                 job_id, block_ids, src_spec.keys, self._do_load, _LOAD_TYPE
             )
