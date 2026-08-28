@@ -83,5 +83,31 @@ On a single A100 and a single NVMe device, the wall clock time is ~821s.
 On two A100s and 3 NVMe devices, the wall clock time is ~622s.
 
 ```bash
-[run] DONE rounds=52 generations=4401 elapsed=621.7s (7.1 gen/s)
+[run] DONE rounds=51 generations=4392 elapsed=621.3s (7.1 gen/s)
+```
+
+### Example: Running CPU-Tiering+FS plugin with synthetic data and patched/fixed vLLM, closed loop, with 2 GPUs.
+
+```bash
+[dwaddington@node0 kv-offload-replay]$ TENSOR_PARALLEL_SIZE=2 CHANNELS=64 WORKLOAD_MODE=async ACTIVE_SESSIONS=80 DATASET_HOST=/home/dwaddington/ai-native-storage-certus-internal/data/synth-1K-M50.json NUM_CONVS=100 MAX_NUM_SEQS=64 GPU_MEM_UTIL=0.95 MODEL=NousResearch/Meta-Llama-3-8B HF_HUB_OFFLINE=1 ./run-docker-cputier-patched.sh
+```
+
+On two A100s and single-device FS, the wall clock time is ~799s.
+
+```bash
+[run] done. wall=799.5s generations=4388 rounds=58
+```
+
+### Example: Running CPU-Tiering+FS plugin with synthetic data and patched/fixed vLLM, closed loop, with 2 GPUs.
+
+With 3-device RAID-0
+
+```bash
+[dwaddington@node0 kv-offload-replay]$ TENSOR_PARALLEL_SIZE=2 CHANNELS=64 DISK_DIR_HOST=/mnt/ssdraid0/data WORKLOAD_MODE=async ACTIVE_SESSIONS=80 DATASET_HOST=/home/dwaddington/ai-native-storage-certus-internal/data/synth-1K-M50.json NUM_CONVS=100 MAX_NUM_SEQS=64 GPU_MEM_UTIL=0.95 MODEL=NousResearch/Meta-Llama-3-8B HF_HUB_OFFLINE=1 ./run-docker-cputier-patched.sh
+```
+
+On two A100s and 3-device FS, the wall clock time is ~815s.
+
+```bash
+[run] done. wall=815.2s generations=4403 rounds=53
 ```
