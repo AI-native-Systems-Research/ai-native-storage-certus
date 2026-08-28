@@ -152,6 +152,56 @@ def _block_ids_summary(block_ids) -> dict:
         return {"repr": _safe_repr(block_ids, 200)}
 
 
+# ── Scheduler-layer (prepare_load / prepare_store) block accounting ─────────────
+#
+# The exact per-transfer block count lives on the scheduler-side OffloadingManager,
+# NOT on the worker threads. In vLLM's scheduler (offloading/scheduler.py):
+#
+#     src_spec = self.manager.prepare_load(keys_to_load, req_context)   # -> LoadSpec
+#     ...
+#     transfer_spec = (src_spec, dst_spec)                              # -> submit_load
+#
+# so prepare_load's RETURN is exactly the spec later handed to the worker's
+# submit_load, and its ``keys`` argument is one entry per KV-cache block to load
+# (1:1 with the GPU blocks). The store side is symmetric: prepare_store returns a
+# PrepareStoreOutput whose ``keys_to_store`` is the exact set of blocks actually
+# written (prefix hits already present are excluded — which is why this differs
+# from ``num_external_tokens ÷ 16``). Capturing both here, on the scheduler thread,
+# gets the real per-load/per-store block count WITHOUT instrumenting any worker
+# thread (see the TRACING SCOPE note below for why the worker/per-layer path is
+# deliberately left untraced). Duck-typed: knows nothing connector-specific.
+
+
+def _safe_len(x):
+    try:
+        return len(x)
+    except Exception:
+        return None
+
+
+def _spec_summary(spec) -> dict:
+    """Connector-agnostic shape of a LoadStoreSpec: its medium plus whichever of
+    the two block-count views it exposes — ``block_ids`` (the GPU side, one entry
+    per KV-cache block = 16 tokens) and/or ``keys`` (the store side, one entry per
+    store object/slab)."""
+    out: dict[str, Any] = {}
+    try:
+        out["medium"] = spec.medium()
+    except Exception:
+        pass
+    bids = getattr(spec, "block_ids", None)
+    if bids is not None:
+        n = _safe_len(bids)
+        if n is not None:
+            out["num_blocks"] = n
+    keys = getattr(spec, "keys", None)
+    if keys is not None:
+        n = _safe_len(keys)
+        if n is not None:
+            out["num_keys"] = n
+    return out
+
+
 def _trace(method_name: str, summarize_args=None):
     """Decorator: record call metadata + delegate to the wrapped method.
 
@@ -279,6 +329,11 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
         self._inner_name, inner_cls = _resolve_inner_class(extra)
         self._inner = inner_cls(vllm_config, role, kv_cache_config)
         self._install_passthroughs()
+        # Scheduler-side manager exists as soon as the inner connector is built
+        # (only for the scheduler role); instrument prepare_load/prepare_store in
+        # place to capture the real per-transfer block count on the scheduler
+        # thread. No-op / best-effort on the worker role (no manager there).
+        self._wrap_scheduler_manager()
         logger.info(
             "TracingConnector initialized (pid=%d, role=%s) wrapping %s → %s",
             os.getpid(),
@@ -347,6 +402,26 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
         return passthrough
 
     # ── Worker-side ───────────────────────────────────────────────────────────
+    #
+    # TRACING SCOPE — traced by frequency class, not by layer. Three groups are
+    # cheap enough to trace and carry the block-count data this trace exists for:
+    #   (1) scheduler-side, per-REQUEST: on_new_request,
+    #       get_num_new_matched_tokens, update_state_after_alloc,
+    #       request_finished[_all_groups] — ~5400 calls over a 450x12 run.
+    #   (2) scheduler-side, per-TRANSFER: the OffloadingManager's prepare_load /
+    #       prepare_store, instrumented in place by _wrap_scheduler_manager() —
+    #       same order of magnitude as (1), runs on the SAME scheduler thread, and
+    #       is where the exact per-load/per-store block count is visible
+    #       (prepare_load's return is submit_load's src_spec; prepare_store's
+    #       keys_to_store is the blocks actually written). No worker thread touched.
+    #   (3) register_kv_caches / shutdown — once each.
+    # Everything else is per-STEP or per-LAYER and is left as a plain UNTRACED
+    # forwarder: save_kv_layer / wait_for_layer_load alone are called once per
+    # layer inside the GPU forward pass, from multiple worker threads under
+    # WORKLOAD_MODE=async, and were ~86k of ~147k records in a real run. Tracing
+    # those funnels every forward-pass layer through the single _fh_lock + a
+    # line-buffered flush syscall, which stalled the engine. (The
+    # _connector_metadata plumbing on start_load_kv/wait_for_save is preserved.)
 
     @_trace("register_kv_caches")
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
@@ -358,30 +433,179 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
     ):
         return self._inner.register_cross_layers_kv_cache(kv_cache, attn_backend)
 
-    @_trace("bind_connector_metadata")
+    # ── Scheduler-manager wrapping (instrument prepare_load/prepare_store) ──────
+
+    def _find_offloading_manager(self):
+        """Locate the scheduler-side OffloadingManager without importing or naming
+        any connector-specific type. Tries vLLM's known path
+        (connector_scheduler.manager) first, then a bounded breadth-first walk of
+        the inner connector's attribute graph for anything exposing the manager's
+        prepare_load/prepare_store primitives."""
+
+        def looks_like_manager(obj):
+            return (
+                obj is not None
+                and callable(getattr(obj, "prepare_load", None))
+                and callable(getattr(obj, "prepare_store", None))
+            )
+
+        cs = getattr(self._inner, "connector_scheduler", None)
+        m = getattr(cs, "manager", None)
+        if looks_like_manager(m):
+            return m
+
+        seen: set[int] = set()
+        queue = [self._inner]
+        budget = 300
+        while queue and budget > 0:
+            budget -= 1
+            obj = queue.pop(0)
+            if id(obj) in seen:
+                continue
+            seen.add(id(obj))
+            if looks_like_manager(obj):
+                return obj
+            d = getattr(obj, "__dict__", None)
+            if isinstance(d, dict):
+                for v in d.values():
+                    if hasattr(v, "__dict__") and id(v) not in seen:
+                        queue.append(v)
+        return None
+
+    def _manager_record(self, method: str, fields: dict, t0: float, error, result):
+        try:
+            role_str = self.role.name
+        except Exception:
+            role_str = "unknown"
+        rec: dict[str, Any] = {
+            "pid": os.getpid(),
+            "ts": t0,
+            "elapsed": round(time.perf_counter() - t0, 9),
+            "role": role_str,
+            "layer": "manager",
+            "connector": "TracingConnector",
+            "inner": self._inner_name,
+            "method": method,
+        }
+        rec.update(fields)
+        rec["error"] = error
+        if error is None:
+            rec["result"] = _safe_repr(result, 120)
+        _write(rec)
+
+    def _wrap_scheduler_manager(self) -> None:
+        """Instrument the OffloadingManager's ``prepare_load`` / ``prepare_store``
+        IN PLACE (instance-attribute shadows the bound method), on the scheduler
+        thread. prepare_load's return IS the src_spec later handed to the worker's
+        submit_load, and prepare_store's PrepareStoreOutput carries the exact
+        ``keys_to_store`` — so this captures the real per-transfer block count with
+        no worker-thread instrumentation. Best-effort and idempotent."""
+        try:
+            manager = self._find_offloading_manager()
+            if manager is None:
+                logger.info(
+                    "TracingConnector: no OffloadingManager found under %s — "
+                    "scheduler-layer (prepare_load/prepare_store) tracing disabled "
+                    "(expected on the worker role)",
+                    self._inner_name,
+                )
+                return
+            if getattr(manager, "_tracing_wrapped", False):
+                return  # idempotent
+
+            orig_load = manager.prepare_load
+            orig_store = manager.prepare_store
+            record = self._manager_record
+
+            @functools.wraps(orig_load)
+            def traced_prepare_load(keys, req_context, *a, **k):
+                t0 = time.perf_counter()
+                error = spec = None
+                try:
+                    spec = orig_load(keys, req_context, *a, **k)
+                    return spec
+                except Exception as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+                    raise
+                finally:
+                    # len(keys) = KV blocks to load, 1:1 with the GPU blocks; the
+                    # returned spec is submit_load's src_spec.
+                    record(
+                        "prepare_load",
+                        {
+                            "req_id": getattr(req_context, "req_id", None),
+                            "load_blocks": _safe_len(keys),
+                            "spec": _spec_summary(spec) if spec is not None else None,
+                        },
+                        t0,
+                        error,
+                        spec,
+                    )
+
+            @functools.wraps(orig_store)
+            def traced_prepare_store(keys, req_context, *a, **k):
+                t0 = time.perf_counter()
+                error = out = None
+                try:
+                    out = orig_store(keys, req_context, *a, **k)
+                    return out
+                except Exception as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+                    raise
+                finally:
+                    # keys_to_store = blocks actually written (prefix hits already
+                    # present are excluded); this is the exact per-store count.
+                    fields = {
+                        "req_id": getattr(req_context, "req_id", None),
+                        "offer_blocks": _safe_len(keys),
+                    }
+                    if out is not None:
+                        fields["store_blocks"] = _safe_len(
+                            getattr(out, "keys_to_store", None)
+                        )
+                        fields["evicted"] = _safe_len(
+                            getattr(out, "evicted_keys", None)
+                        )
+                        fields["spec"] = _spec_summary(
+                            getattr(out, "store_spec", None)
+                        )
+                    else:
+                        # prepare_store returns None when blocks cannot be stored.
+                        fields["store_blocks"] = 0
+                    record("prepare_store", fields, t0, error, out)
+
+            manager.prepare_load = traced_prepare_load
+            manager.prepare_store = traced_prepare_store
+            manager._tracing_wrapped = True
+            logger.info(
+                "TracingConnector: instrumented OffloadingManager "
+                "prepare_load/prepare_store for %s (scheduler-thread block "
+                "accounting)",
+                self._inner_name,
+            )
+        except Exception as e:  # never let tracing break the run
+            logger.warning(
+                "TracingConnector: scheduler-manager wrap skipped (%r)", e
+            )
+
     def bind_connector_metadata(self, connector_metadata: KVConnectorMetadata) -> None:
         self._inner.bind_connector_metadata(connector_metadata)
         self._connector_metadata = self._inner._connector_metadata
 
-    @_trace("clear_connector_metadata")
     def clear_connector_metadata(self) -> None:
         self._inner.clear_connector_metadata()
         self._connector_metadata = None
 
-    @_trace("handle_preemptions")
     def handle_preemptions(self, kv_connector_metadata: KVConnectorMetadata):
         return self._inner.handle_preemptions(kv_connector_metadata)
 
-    @_trace("start_load_kv")
     def start_load_kv(self, forward_context: "ForwardContext", **kwargs: Any) -> None:
         self._inner._connector_metadata = self._connector_metadata
         return self._inner.start_load_kv(forward_context, **kwargs)
 
-    @_trace("wait_for_layer_load")
     def wait_for_layer_load(self, layer_name: str) -> None:
         return self._inner.wait_for_layer_load(layer_name)
 
-    @_trace("save_kv_layer")
     def save_kv_layer(
         self,
         layer_name: str,
@@ -391,26 +615,21 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
     ) -> None:
         return self._inner.save_kv_layer(layer_name, kv_layer, attn_metadata, **kwargs)
 
-    @_trace("wait_for_save")
     def wait_for_save(self):
         self._inner._connector_metadata = self._connector_metadata
         return self._inner.wait_for_save()
 
-    @_trace("get_finished")
     def get_finished(
         self, finished_req_ids: set[str]
     ) -> tuple[set[str] | None, set[str] | None]:
         return self._inner.get_finished(finished_req_ids)
 
-    @_trace("build_connector_worker_meta")
     def build_connector_worker_meta(self) -> KVConnectorWorkerMetadata | None:
         return self._inner.build_connector_worker_meta()
 
-    @_trace("get_kv_connector_stats")
     def get_kv_connector_stats(self) -> "KVConnectorStats | None":
         return self._inner.get_kv_connector_stats()
 
-    @_trace("get_kv_connector_kv_cache_events")
     def get_kv_connector_kv_cache_events(self) -> "KVConnectorKVEvents | None":
         return self._inner.get_kv_connector_kv_cache_events()
 
@@ -452,13 +671,12 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
     ):
         return self._inner.update_state_after_alloc(request, blocks, num_external_tokens)
 
-    @_trace("build_connector_meta")
+    # Per-step, no per-request block data → untraced forwarders (see TRACING SCOPE).
     def build_connector_meta(
         self, scheduler_output: "SchedulerOutput"
     ) -> KVConnectorMetadata:
         return self._inner.build_connector_meta(scheduler_output)
 
-    @_trace("update_connector_output")
     def update_connector_output(self, connector_output: "KVConnectorOutput"):
         if hasattr(self._inner, "update_connector_output"):
             return self._inner.update_connector_output(connector_output)
@@ -490,7 +708,6 @@ class TracingConnector(KVConnectorBase_V1, SupportsHMA):
             merged.extend(group)
         return self._inner.request_finished(request, merged)
 
-    @_trace("take_events")
     def take_events(self):
         if hasattr(self._inner, "take_events"):
             return self._inner.take_events()
