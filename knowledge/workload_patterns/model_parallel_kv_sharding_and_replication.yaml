@@ -1,0 +1,95 @@
+id: model-parallel-kv-sharding-and-replication
+kind: atomic
+name: Disaggregated PD KV Parallelism Resharding
+status: candidate
+parameters:
+  sequence_tokens:
+    type: integer
+    range:
+    - 128
+    - 131072
+    default: 4096
+  source_tp:
+    type: integer
+    range:
+    - 1
+    - 16
+    default: 4
+  dest_tp:
+    type: integer
+    range:
+    - 1
+    - 16
+    default: 8
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  source_shards:
+    cardinality: source_tp * ceil(sequence_tokens / block_size)
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer / source_tp
+    sharing: per_actor
+    disjoint_between_actors: true
+  dest_shards:
+    cardinality: dest_tp * ceil(sequence_tokens / block_size)
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer / dest_tp
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: source_shards
+  state: present_in_store
+  value: true
+- subject: dest_shards
+  state: absent_from_store
+  value: true
+phases:
+- id: load-source
+  actors:
+    count: source_tp
+    arrival: burst
+    concurrency: source_tp
+  operations:
+  - op: load
+    keys: source_shards
+    order: sequential
+    repeat: ceil(sequence_tokens / block_size)
+  barrier_after: true
+- id: store-dest
+  depends_on: load-source
+  actors:
+    count: dest_tp
+    arrival: burst
+    concurrency: dest_tp
+  operations:
+  - op: store
+    keys: dest_shards
+    order: sequential
+    repeat: ceil(sequence_tokens / block_size)
+measure:
+- phase: load-source
+  operation: load
+  metrics:
+  - throughput_MBps
+- phase: store-dest
+  operation: store
+  metrics:
+  - throughput_MBps
+  - latency_p99_ms
+expected_io:
+  stores: dest_tp * ceil(sequence_tokens / block_size)
+  loads: source_tp * ceil(sequence_tokens / block_size)

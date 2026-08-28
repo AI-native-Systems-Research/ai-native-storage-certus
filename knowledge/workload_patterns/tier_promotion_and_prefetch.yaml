@@ -1,0 +1,63 @@
+id: tier-promotion-and-prefetch
+kind: atomic
+name: Routing-Hint Prefetch From Lower Tier
+status: candidate
+parameters:
+  prefetch_blocks:
+    type: integer
+    range:
+    - 1
+    - 1024
+    default: 64
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  promotable_blocks:
+    cardinality: prefetch_blocks
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: global
+    disjoint_between_actors: false
+preconditions:
+- subject: promotable_blocks
+  state: present_in_store
+  value: true
+- subject: promotable_blocks
+  state: absent_from_local_cache
+  value: true
+phases:
+- id: prefetch-promote
+  actors:
+    count: 1
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: load
+    keys: promotable_blocks
+    order: sequential
+    repeat: prefetch_blocks
+    batch_size: prefetch_blocks
+measure:
+- phase: prefetch-promote
+  operation: load
+  metrics:
+  - throughput_MBps
+  - latency_p50_ms
+expected_io:
+  stores: '0'
+  loads: prefetch_blocks
