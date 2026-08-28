@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 run_sharegpt_offloading.py — drive vllm bench throughput on ShareGPT with
-TracingOffloadingConnector + TracingCPUOffloadingSpec, capturing:
+TracingConnector (wrapping OffloadingConnector) + TracingCPUOffloadingSpec,
+capturing:
 
   1. KVConnector-level trace (offloading_trace_<pid>.jsonl)
   2. OffloadingManager-level trace (offloading_mgr_<pid>.jsonl)
@@ -88,10 +89,12 @@ if __name__ == "__main__":
               file=sys.stderr)
 
     KV_CONFIG = {
-        "kv_connector": "TracingOffloadingConnector",
-        "kv_connector_module_path": "tracing_offloading_connector",
+        "kv_connector": "TracingConnector",
+        "kv_connector_module_path": "tracing_connector",
         "kv_role": "kv_both",
         "kv_connector_extra_config": {
+            # TracingConnector wraps this inner (also its default)
+            "traced_kv_connector": "OffloadingConnector",
             # 4 GiB of host RAM for the offload tier
             "cpu_bytes_to_use": 4 * (1 << 30),
             # Point OffloadingSpecFactory at our tracing spec

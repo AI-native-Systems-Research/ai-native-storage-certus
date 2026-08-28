@@ -76,6 +76,11 @@ if __name__ == "__main__":
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 150))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))
+    # ACTIVE_SESSIONS — WORKLOAD_MODE=async only. >0 = closed loop: keep this many
+    # conversations active, admitting the next as one finishes (steady-state
+    # concurrency); 0 (default) = open loop (all launched at once). Keep
+    # <= MAX_NUM_SEQS so the driver, not the engine queue, is the concurrency gate.
+    ACTIVE_SESSIONS = int(os.environ.get("ACTIVE_SESSIONS", 0))
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
     # Multi-GPU: shard each layer's weights/KV across TENSOR_PARALLEL_SIZE GPUs
     # (default 1 = single GPU). PIPELINE_PARALLEL_SIZE splits layers into stages
@@ -112,16 +117,35 @@ if __name__ == "__main__":
         file=sys.stderr,
     )
 
-    KV_CONFIG = {
-        "kv_connector": "OffloadingConnector",
-        "kv_role": "kv_both",
-        "kv_connector_extra_config": {
-            "spec_name": "CertusShmqOffloadingSpec",
-            "spec_module_path": "certus_shmq_connector.spec",
-            "shm_path": SHM_PATH,
-            "slab_size_bytes": SLAB_SIZE_BYTES,
-        },
+    _extra_config = {
+        "spec_name": "CertusShmqOffloadingSpec",
+        "spec_module_path": "certus_shmq_connector.spec",
+        "shm_path": SHM_PATH,
+        "slab_size_bytes": SLAB_SIZE_BYTES,
     }
+    # TRACE_OFFLOAD=1 slots the connector-agnostic TracingConnector ABOVE the
+    # OffloadingConnector (which still drives the CertusShmqOffloadingSpec below
+    # it, unchanged): every scheduler<->connector call is logged as
+    # offloading_trace_<pid>.jsonl, giving per-request offloaded/loaded block
+    # counts on the shmq path. tracing_connector.py lives in the benchmarks dir
+    # already on sys.path (_bench_dir above) and is COPY'd into the container
+    # image; set TRACE_DIR to a mounted path to export from a --rm container.
+    if os.environ.get("TRACE_OFFLOAD", "0") != "0":
+        _extra_config["traced_kv_connector"] = "OffloadingConnector"
+        KV_CONFIG = {
+            "kv_connector": "TracingConnector",
+            "kv_connector_module_path": "tracing_connector",
+            "kv_role": "kv_both",
+            "kv_connector_extra_config": _extra_config,
+        }
+        print("[run] TRACE_OFFLOAD=1: TracingConnector wrapping OffloadingConnector",
+              file=sys.stderr)
+    else:
+        KV_CONFIG = {
+            "kv_connector": "OffloadingConnector",
+            "kv_role": "kv_both",
+            "kv_connector_extra_config": _extra_config,
+        }
 
     convs = common.load_convs(DATASET_PATH, NUM_CONVS, CONV_MULTIPLIER)
     # load_convs returns the replicated set; report the base count first (as the
@@ -253,6 +277,7 @@ if __name__ == "__main__":
             disk_rw_bytes=io_rw_bytes,
             session_id_fn=_session_id_fn,
             skip_empty=True,
+            active_sessions=ACTIVE_SESSIONS,
             summary_base={
                 "model": MODEL, "shm_path": SHM_PATH,
                 "max_model_len": MAX_MODEL_LEN, "output_tokens": OUTPUT_TOKENS,

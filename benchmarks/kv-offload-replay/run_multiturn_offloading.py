@@ -69,6 +69,11 @@ if __name__ == "__main__":
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 200))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))
+    # ACTIVE_SESSIONS — WORKLOAD_MODE=async only. >0 = closed loop: keep this many
+    # conversations active, admitting the next as one finishes (steady-state
+    # concurrency). 0 (default) = open loop (all launched at once, max_num_seqs
+    # bounds the running batch). Keep <= MAX_NUM_SEQS so the driver is the gate.
+    ACTIVE_SESSIONS = int(os.environ.get("ACTIVE_SESSIONS", 0))
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
     CPU_BYTES = int(os.environ.get("CPU_BYTES", 4 * (1 << 30)))
     MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
@@ -183,10 +188,13 @@ if __name__ == "__main__":
               file=sys.stderr)
     elif os.environ.get("TRACE_OFFLOAD", "0") == "1":
         KV_CONFIG = {
-            "kv_connector": "TracingOffloadingConnector",
-            "kv_connector_module_path": "tracing_offloading_connector",
+            "kv_connector": "TracingConnector",
+            "kv_connector_module_path": "tracing_connector",
             "kv_role": "kv_both",
             "kv_connector_extra_config": {
+                # TracingConnector wraps this inner (the default anyway); the
+                # manager/handler tracer is a SEPARATE layer selected by spec_name.
+                "traced_kv_connector": "OffloadingConnector",
                 "cpu_bytes_to_use": CPU_BYTES,
                 "spec_name": "TracingCPUOffloadingSpec",
                 "spec_module_path": "tracing_offloading_manager",
@@ -306,6 +314,7 @@ if __name__ == "__main__":
             max_rounds=MAX_ROUNDS,
             capture_metrics=CAPTURE_METRICS,
             disk_rw_bytes=disk_rw_bytes,
+            active_sessions=ACTIVE_SESSIONS,
             summary_base={
                 "model": MODEL,
                 "max_model_len": MAX_MODEL_LEN,

@@ -6,7 +6,7 @@ SPDK-based NVMe block device component for the Certus project.
 
 This component provides direct userspace NVMe controller access via SPDK, wrapped in the Certus actor-based component model. Each instance owns a single NVMe controller identified by PCI address. IO is performed through zero-copy DMA buffers allocated from SPDK hugepages, with lock-free shared-memory channels connecting clients to the actor thread.
 
-Key capabilities include synchronous and asynchronous read/write, NVMe namespace management (probe, create, format, delete), batch IO submission, hardware TSC-based latency measurement, and optional compile-time telemetry for IO statistics.
+Key capabilities include synchronous and asynchronous read/write, NVMe namespace management (probe, create, format, delete), batch IO submission, hardware TSC-based latency measurement, optional compile-time telemetry for IO statistics, and debug-build-only logging of per-command DMA transfer sizes.
 
 ## Architecture
 
@@ -38,6 +38,23 @@ Clients call `connect_client()` to obtain a `ClientChannels` struct containing:
 - `completion_rx` -- SPSC receiver for asynchronous `Completion` notifications
 
 Channel capacity is 64 slots. Multiple clients can connect simultaneously; each gets an independent channel pair.
+
+### Debug Diagnostics
+
+In debug builds (`#[cfg(debug_assertions)]`), the actor emits one stderr line
+per successfully submitted read/write command reporting the size of the DMA
+data transfer issued to the controller:
+
+```
+[block-device-spdk-nvme][dma] <op> lba=<lba> blocks=<n> bytes=<n>
+```
+
+`<op>` is one of `read-sync`, `write-sync`, `read-async`, `write-async`;
+`bytes` is the host transfer size (blocks × sector size) handed to SPDK. This
+is the size of the logical request as submitted by the driver — SPDK may split
+a transfer larger than the controller's MDTS into multiple NVMe commands on the
+wire. The logging macro compiles out entirely in release builds (no argument
+evaluation, zero cost) and is independent of the `telemetry` feature.
 
 ### Module Layout
 
