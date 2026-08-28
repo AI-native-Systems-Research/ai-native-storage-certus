@@ -1,0 +1,78 @@
+id: compute-local-eviction-and-later-reload
+kind: atomic
+name: LRU Eviction to Memory Then Demand Reload
+status: candidate
+parameters:
+  evicted_blocks:
+    type: integer
+    range:
+    - 1
+    - 2048
+    default: 128
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  eviction_blocks:
+    cardinality: evicted_blocks
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: eviction_blocks
+  state: absent_from_store
+  value: true
+phases:
+- id: eviction-store
+  actors:
+    count: 1
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: store
+    keys: eviction_blocks
+    order: sequential
+    repeat: evicted_blocks
+    batch_size: 1
+  barrier_after: true
+- id: demand-reload
+  depends_on: eviction-store
+  actors:
+    count: 1
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: load
+    keys: eviction_blocks
+    order: sequential
+    repeat: evicted_blocks
+    batch_size: evicted_blocks
+measure:
+- phase: eviction-store
+  operation: store
+  metrics:
+  - throughput_MBps
+  - latency_p99_ms
+- phase: demand-reload
+  operation: load
+  metrics:
+  - throughput_MBps
+  - latency_p99_ms
+expected_io:
+  stores: evicted_blocks
+  loads: evicted_blocks

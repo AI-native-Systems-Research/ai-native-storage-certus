@@ -1,0 +1,66 @@
+id: priority-preemption-cascades
+kind: atomic
+name: Priority Preemption Repeated Swap Reload
+status: candidate
+parameters:
+  preemption_count:
+    type: integer
+    range:
+    - 1
+    - 10
+    default: 3
+  blocks_per_sequence:
+    type: integer
+    range:
+    - 1
+    - 4096
+    default: 256
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  preempted_blocks:
+    cardinality: blocks_per_sequence
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: preempted_blocks
+  state: present_in_store
+  value: true
+phases:
+- id: repeated-reload
+  actors:
+    count: 1
+    arrival: serial
+    concurrency: 1
+  operations:
+  - op: load
+    keys: preempted_blocks
+    order: sequential
+    repeat: blocks_per_sequence * preemption_count
+    batch_size: preempted_blocks
+measure:
+- phase: repeated-reload
+  operation: load
+  metrics:
+  - throughput_MBps
+  - latency_p99_ms
+expected_io:
+  stores: '0'
+  loads: blocks_per_sequence * preemption_count
