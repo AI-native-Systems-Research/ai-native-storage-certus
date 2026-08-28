@@ -30,7 +30,7 @@ from .compat import (
 )
 
 from .gpu import KvCacheIpc
-from .mediums import CertusLoadStoreSpec
+from .mediums import CertusLoadStoreSpec, ns_key
 
 # Direction tags. Only used to populate the ≤0.24 ``TransferResult.transfer_type``
 # (dropped on 0.26); kept as the natural label for a job's direction either way.
@@ -112,12 +112,20 @@ def _build_worker_class():
             kv_regions: list[KvCacheIpc],
             block_size_bytes: int,
             executor: ThreadPoolExecutor,
+            *,
+            rank: int = 0,
+            world_size: int = 1,
         ):
             self._ring = ring
             self._kv_regions = kv_regions
             self._block_size_bytes = int(block_size_bytes)
             self._executor = executor
             self._pending: deque[_PendingJob] = deque()
+            # TP shard rank folded into every server key so this worker's shard
+            # of a block never collides with another rank's identical logical key
+            # in the shared certus-server tier. Identity at world_size==1.
+            self._rank = int(rank)
+            self._world_size = int(world_size)
 
         # ── shared async plumbing ──
 
@@ -208,9 +216,13 @@ def _build_worker_class():
         # ── transport bodies (run on the pool; identical across versions) ──
 
         def _do_store(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
+            # Fold this worker's TP rank into every key: the manager Reserved the
+            # matching per-rank namespaced keys (see manager.prepare_store), so the
+            # store lands under the same key the pre-load Check/Pin will look up.
+            ns_keys = [ns_key(k, self._rank, self._world_size) for k in keys]
             entries = [
-                (key, _regions_for_block(self._kv_regions, block_id))
-                for block_id, key in zip(gpu_block_ids, keys)
+                (ns_k, _regions_for_block(self._kv_regions, block_id))
+                for block_id, ns_k in zip(gpu_block_ids, ns_keys)
             ]
             try:
                 results = self._ring.copy_to_store(entries)
@@ -220,11 +232,11 @@ def _build_worker_class():
                 # uncached.
                 print(
                     f"[certus-shmq] CopyToStore transport error: {e} — "
-                    f"aborting {len(keys)} keys",
+                    f"aborting {len(ns_keys)} keys",
                     flush=True,
                 )
                 try:
-                    self._ring.abort_store(keys)
+                    self._ring.abort_store(ns_keys)
                 except Exception:  # noqa: BLE001
                     pass
                 return True
@@ -237,15 +249,15 @@ def _build_worker_class():
             # CopyToStore -> CommitStore), we must roll back any key whose copy
             # failed, so the subsequent CommitStore can't publish an unpopulated
             # slot as a valid entry. Abort the failed keys; report success.
-            failed = [key for key, ok in zip(keys, results) if not ok]
+            failed = [ns_k for ns_k, ok in zip(ns_keys, results) if not ok]
             if failed:
                 # DIAGNOSTIC: the ring transport reports only a per-key bool, so we
                 # can't surface the server's reason string here (gRPC could). Log a
                 # bounded sample of the failed keys so a store-path regression isn't
                 # silent, then roll them back.
-                _log_copy_failure(failed, len(keys))
+                _log_copy_failure(failed, len(ns_keys))
                 print(
-                    f"[certus-shmq] CopyToStore failed for {len(failed)}/{len(keys)} "
+                    f"[certus-shmq] CopyToStore failed for {len(failed)}/{len(ns_keys)} "
                     f"blocks — aborting those reservations, leaving them uncached",
                     flush=True,
                 )
@@ -256,9 +268,11 @@ def _build_worker_class():
             return True
 
         def _do_load(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
+            # Same rank fold as the store path — load this worker's own shard.
+            ns_keys = [ns_key(k, self._rank, self._world_size) for k in keys]
             entries = [
-                (key, _regions_for_block(self._kv_regions, block_id))
-                for block_id, key in zip(gpu_block_ids, keys)
+                (ns_k, _regions_for_block(self._kv_regions, block_id))
+                for block_id, ns_k in zip(gpu_block_ids, ns_keys)
             ]
             results = self._ring.lookup(entries)
             # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
@@ -267,10 +281,10 @@ def _build_worker_class():
             # a key that lookup()/Check said was present. (The ring transport has no
             # per-key error string, unlike gRPC.)
             if not all(results):
-                for key, ok in zip(keys, results):
+                for ns_k, ok in zip(ns_keys, results):
                     if not ok:
                         print(
-                            f"[certus-shmq] LOAD FAILURE key={key} "
+                            f"[certus-shmq] LOAD FAILURE key={ns_k} "
                             f"(this key was Check-hit and Pinned in prepare_load)",
                             flush=True,
                         )

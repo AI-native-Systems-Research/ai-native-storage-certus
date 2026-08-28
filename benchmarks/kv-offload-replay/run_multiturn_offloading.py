@@ -289,6 +289,11 @@ if __name__ == "__main__":
         # ORTHOGONAL to cudagraph AND to WORKLOAD_MODE=async (that switches the
         # request-submission API, not the scheduler). Override with ASYNC_SCHED=1.
         async_scheduling=(os.environ.get("ASYNC_SCHED", "0") != "0"),
+        # TENSOR_PARALLEL_SIZE>1 spans the model + KV cache across N GPUs (vLLM
+        # handles the sharding). Default 1 = single-GPU (historical baseline).
+        # For the native tiering arm this is pure vLLM plumbing — the fix#2 patch
+        # is scheduler-side and already TP-aware (num_workers=world_size).
+        tensor_parallel_size=int(os.environ.get("TENSOR_PARALLEL_SIZE", "1")),
         kv_transfer_config=KV_CONFIG,
         disable_log_stats=not CAPTURE_METRICS,
         **_mfu_kwargs,
