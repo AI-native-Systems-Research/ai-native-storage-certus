@@ -65,6 +65,8 @@ FS_ROOT_DIR=${FS_ROOT_DIR:-/mnt/fs-tier/kv-tier}       # tiered fs secondary tie
 # FS_TIER_MOUNT. Empty FS_TIER_HOST = no mount (tier is container-ephemeral).
 FS_TIER_HOST=${FS_TIER_HOST:-}                         # tiered fs secondary: host dir to bind-mount
 FS_TIER_MOUNT=${FS_TIER_MOUNT:-/mnt/fs-tier}           # tiered fs secondary: in-container mount point
+FS_READ_THREADS=${FS_READ_THREADS:-16}                 # tiered fs secondary: FileSystemTierManager read threads
+FS_WRITE_THREADS=${FS_WRITE_THREADS:-16}               # tiered fs secondary: FileSystemTierManager write threads
 SHM_PATH=${SHM_PATH:-/dev/shm/certus-shmq}             # certus shmq mailbox
 SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES:-2097152}            # certus per-block slab (>= block stride; see CopyToStore size bug)
 
@@ -111,15 +113,25 @@ build_flags() {
         tiered)
             # CPU primary (cpu_bytes_to_use) + "fs" secondary at FS_ROOT_DIR.
             # TieringOffloadingSpec resolves "fs" to FileSystemTierManager (vLLM >= 0.26).
-            kv_cfg="{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":${CPU_BYTES},\"spec_name\":\"TieringOffloadingSpec\",\"spec_extra_config\":{\"tiers\":[{\"type\":\"fs\",\"root_dir\":\"${FS_ROOT_DIR}\"}]}}}"
+            # SCHEMA MUST MATCH the in-process driver (run_multiturn_offloading.py
+            # SECONDARY_TIER=fs branch) EXACTLY: the fs tier goes in a top-level
+            # `secondary_tiers` list under kv_connector_extra_config with per-tier
+            # thread counts, plus `eviction_policy`. An invented `spec_extra_config`
+            # wrapper (or a bare `tiers` key) is not a recognised field and makes
+            # vLLM's engine core crash at init ("Engine core initialization failed").
+            kv_cfg="{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":${CPU_BYTES},\"spec_name\":\"TieringOffloadingSpec\",\"eviction_policy\":\"lru\",\"secondary_tiers\":[{\"type\":\"fs\",\"root_dir\":\"${FS_ROOT_DIR}\",\"n_read_threads\":${FS_READ_THREADS},\"n_write_threads\":${FS_WRITE_THREADS}}]}}"
             server_extra_args+=(--kv-transfer-config "${kv_cfg}")
             server_extra_run+=(-e "FS_ROOT_DIR=${FS_ROOT_DIR}")
             # Persist the fs secondary tier on real storage when a host dir is given.
+            # The driver does os.makedirs(FS_ROOT_DIR); mirror that by creating the
+            # tier root itself on the host under the bind mount (not just the mount
+            # point), since FileSystemTierManager needs root_dir to already exist.
             if [ -n "${FS_TIER_HOST}" ]; then
-                mkdir -p "${FS_TIER_HOST}" 2>/dev/null || true
+                _fs_rel="${FS_ROOT_DIR#"${FS_TIER_MOUNT}"}"; _fs_rel="${_fs_rel#/}"
+                mkdir -p "${FS_TIER_HOST}/${_fs_rel}" 2>/dev/null || true
                 server_extra_run+=(-v "${FS_TIER_HOST}:${FS_TIER_MOUNT}:z")
             fi
-            log "Tiered-CPU-FS — TieringOffloadingSpec, cpu_bytes=${CPU_BYTES}, fs root=${FS_ROOT_DIR}${FS_TIER_HOST:+ (host ${FS_TIER_HOST} -> ${FS_TIER_MOUNT})}"
+            log "Tiered-CPU-FS — TieringOffloadingSpec, cpu_bytes=${CPU_BYTES}, fs root=${FS_ROOT_DIR} (rd=${FS_READ_THREADS} wr=${FS_WRITE_THREADS})${FS_TIER_HOST:+ (host ${FS_TIER_HOST} -> ${FS_TIER_MOUNT})}"
             ;;
         certus)
             # shmq OffloadingConnector: the host certus-server owns SHM_PATH and
@@ -177,12 +189,16 @@ start_server() {
     until curl -fsS --max-time 3 "http://localhost:${PORT}/v1/models" >/dev/null 2>&1; do
         if [ "${SECONDS}" -ge "${deadline}" ]; then
             log "ERROR: server not ready after ${READY_TIMEOUT}s; last logs:"
-            ${ENGINE} logs --tail 40 "${SERVER_NAME}" >&2 || true
+            ${ENGINE} logs --tail 120 "${SERVER_NAME}" >&2 || true
             return 1
         fi
         if ! ${ENGINE} ps --filter "name=${SERVER_NAME}" --filter status=running -q | grep -q .; then
-            log "ERROR: server container exited during startup; logs:"
-            ${ENGINE} logs --tail 60 "${SERVER_NAME}" >&2 || true
+            # Dump the FULL container log, not a tail: a vLLM engine-core crash
+            # ("Engine core initialization failed. See root cause above.") prints a
+            # ~50-line wrapper traceback AFTER the actual root cause, so any bounded
+            # tail scrolls the real error off the top.
+            log "ERROR: server container exited during startup; full container log:"
+            ${ENGINE} logs "${SERVER_NAME}" >&2 || true
             return 1
         fi
         sleep 3
