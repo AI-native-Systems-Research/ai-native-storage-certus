@@ -126,6 +126,15 @@ build_flags() {
             # vLLM's engine core crash at init ("Engine core initialization failed").
             kv_cfg="{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":${CPU_BYTES},\"spec_name\":\"TieringOffloadingSpec\",\"eviction_policy\":\"lru\",\"secondary_tiers\":[{\"type\":\"fs\",\"root_dir\":\"${FS_ROOT_DIR}\",\"n_read_threads\":${FS_READ_THREADS},\"n_write_threads\":${FS_WRITE_THREADS}}]}}"
             server_extra_args+=(--kv-transfer-config "${kv_cfg}")
+            # TieringOffloadingSpec's CPU primary tier is a SINGLE mmap in /dev/shm
+            # (/dev/shm/vllm_offload_*.mmap), sized to cpu_bytes_to_use and faulted in
+            # with MADV_POPULATE_WRITE. The container's default /dev/shm is 64 MiB, so
+            # populating a 16 GiB region dies at connector register with
+            # "OSError: [Errno 14] Bad address". Give /dev/shm the tier size + 2 GiB
+            # headroom. (Plain cpu / CPUOffloadingSpec uses a CUDA pinned buffer, not
+            # /dev/shm, so it needs no --shm-size.)
+            _tier_shm=$((CPU_BYTES + 2 * (1 << 30)))
+            server_extra_run+=(--shm-size="${_tier_shm}")
             server_extra_run+=(-e "FS_ROOT_DIR=${FS_ROOT_DIR}")
             # Persist the fs secondary tier on real storage when a host dir is given.
             # The driver does os.makedirs(FS_ROOT_DIR); mirror that by creating the
