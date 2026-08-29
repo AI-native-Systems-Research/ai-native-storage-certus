@@ -59,6 +59,12 @@ HF_OVERRIDES=${HF_OVERRIDES-$_def_hf_overrides}
 # ---- connector params -----------------------------------------------------
 CPU_BYTES=${CPU_BYTES:-17179869184}                    # cpu / tiered primary host-RAM tier
 FS_ROOT_DIR=${FS_ROOT_DIR:-/mnt/fs-tier/kv-tier}       # tiered fs secondary tier root (in-container path)
+# tiered: bind-mount a host dir so the fs secondary tier survives on real storage
+# (else it is written INSIDE the --rm container and vanishes at teardown, and never
+# touches the RAID/XFS group we mean to measure). FS_ROOT_DIR MUST live under
+# FS_TIER_MOUNT. Empty FS_TIER_HOST = no mount (tier is container-ephemeral).
+FS_TIER_HOST=${FS_TIER_HOST:-}                         # tiered fs secondary: host dir to bind-mount
+FS_TIER_MOUNT=${FS_TIER_MOUNT:-/mnt/fs-tier}           # tiered fs secondary: in-container mount point
 SHM_PATH=${SHM_PATH:-/dev/shm/certus-shmq}             # certus shmq mailbox
 SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES:-2097152}            # certus per-block slab (>= block stride; see CopyToStore size bug)
 
@@ -108,7 +114,12 @@ build_flags() {
             kv_cfg="{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":${CPU_BYTES},\"spec_name\":\"TieringOffloadingSpec\",\"spec_extra_config\":{\"tiers\":[{\"type\":\"fs\",\"root_dir\":\"${FS_ROOT_DIR}\"}]}}}"
             server_extra_args+=(--kv-transfer-config "${kv_cfg}")
             server_extra_run+=(-e "FS_ROOT_DIR=${FS_ROOT_DIR}")
-            log "Tiered-CPU-FS — TieringOffloadingSpec, cpu_bytes=${CPU_BYTES}, fs root=${FS_ROOT_DIR}"
+            # Persist the fs secondary tier on real storage when a host dir is given.
+            if [ -n "${FS_TIER_HOST}" ]; then
+                mkdir -p "${FS_TIER_HOST}" 2>/dev/null || true
+                server_extra_run+=(-v "${FS_TIER_HOST}:${FS_TIER_MOUNT}:z")
+            fi
+            log "Tiered-CPU-FS — TieringOffloadingSpec, cpu_bytes=${CPU_BYTES}, fs root=${FS_ROOT_DIR}${FS_TIER_HOST:+ (host ${FS_TIER_HOST} -> ${FS_TIER_MOUNT})}"
             ;;
         certus)
             # shmq OffloadingConnector: the host certus-server owns SHM_PATH and
