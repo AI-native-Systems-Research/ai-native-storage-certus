@@ -36,6 +36,45 @@ previews what will run, launches the orchestrator, and formats the result.
   `--dram`. `--build` to build missing images. `--only`/`--skip` to subset.
   `--logdir` for output (default `<model-fs>/kvprofile-<runid>`).
 
+## Workload (`--workload`)
+
+The default (no `--workload`) replays the baked 450×12 ShareGPT set **in
+process** (each variant embeds `AsyncLLM`). Other values: `sharegpt`
+(turn-count-selected corpus), `long-doc-qa` (synthetic long-doc QA), and
+`synthetic_agentic` (below).
+
+### `--workload synthetic_agentic` — server mode
+
+`synthetic_agentic` is the [inference-perf](https://github.com/lenadankin/inference-perf/tree/synthetic_data_enabled)
+agentic ReplayGraph DAG (tool loops, recursive sub-agent fan-out, mid-session
+context compaction, a shared system-prompt prefix). inference-perf is an
+**HTTP-only** load generator, so this workload **cannot** run through the
+in-process drivers. `profile_all.sh` instead runs each backend in **server
+mode**: one `vllm serve` (the KV backend is just its `--kv-transfer-config`
+connector arm, via `benchmarks/synthetic-agentic/serve_vllm.sh`) driven by the
+inference-perf client container over `:8000`. Workload ⟂ backend: the client only
+sees `BASE_URL`; the connector is chosen entirely server-side.
+
+- **Backend mapping:** NoOffload→`none`, CPUOffload→`cpu`, Tiered-CPU-FS→`tiered`,
+  Certus-SPDK→`certus` (reuses the same host SPDK server + `/dev/shm` mailbox, now
+  attached by `vllm serve` via `--ipc=host`). **SharedStorage has no serve_vllm
+  arm and records SKIPPED.** `--only`/`--skip` subset as usual.
+- **Determinism = fairness.** The workload is defined by
+  `benchmarks/synthetic-agentic/configs/synthetic_agentic.yaml`; its fixed `seed`
+  makes every backend replay a byte-identical request stream (no materialised
+  trace). Session count is `num_sessions` in that YAML, **not** `--num-convs`
+  (which is N/A here and reported as 0).
+- **Client image.** Needs `synthetic-agentic-client:latest`
+  (`benchmarks/synthetic-agentic/Dockerfile.inference-perf`). `--build`/`--rebuild`
+  builds it; otherwise a missing image SKIPs the backend with that reason.
+- **max-model-len.** Agentic sessions + compaction (trigger 8500) need
+  >8192; the server-mode path defaults to 32768 (serve_vllm applies Llama-3 RoPE
+  ×4), honouring a larger `--max-model-len`.
+- **Optional generate-first (audit only).**
+  `benchmarks/synthetic-agentic/generate_trace.sh` dumps a few deterministic
+  session graphs for inspection — it is **not** an input to the run (generation is
+  inline by seed). Skip it for a normal run; use it to diff exactly what replays.
+
 ## Steps for Claude
 
 1. **Collect inputs** from the invocation. If `--model` was NOT supplied, ask via
@@ -55,6 +94,11 @@ previews what will run, launches the orchestrator, and formats the result.
      `<model-fs>/llm-d-kv-cache/kv_connectors/llmd_fs_backend` (its location on this
      host), falling back to `$HOME/...`. Override with the `FS_BACKEND_DIR` env var.
      Offer to add `--build`.
+   - For `--workload synthetic_agentic`, also check the inference-perf client image
+     (`podman image exists synthetic-agentic-client:latest`) — missing ⇒ every
+     backend SKIPs unless `--build`/`--rebuild` is passed. Note SharedStorage will
+     SKIP (no serve_vllm arm), and Certus-SPDK still needs `--device-pci` + the
+     built `certus-server-yaml` (server mode reuses that same host SPDK server).
 
 3. **Launch** `benchmarks/kv-offload-replay/profile_all.sh` with the resolved
    flags. A full four-variant run takes ~15–60 min (each variant loads the model
@@ -68,6 +112,12 @@ previews what will run, launches the orchestrator, and formats the result.
    `--build`"; "check `<logdir>/server.log`"). `tokens_per_sec` is computed
    uniformly as `generations × output_tokens ÷ wall` so variants are comparable
    even though each driver prints a different native metric.
+   - **Server mode (`synthetic_agentic`)** differs: `generations`/`tokens_per_sec`
+     are null (a session-graph DAG has no flat per-round generation count), so
+     rank backends by `wall_s` and the `native_metric` throughput scraped from
+     inference-perf, and point at the full inference-perf report under `<logdir>`
+     (the richest comparable: throughput, TTFT, per-request latency). Per-backend
+     server logs are `<logdir>/serve-<connector>.log`.
 
 ## Notes / prerequisites (not automated)
 
