@@ -911,9 +911,17 @@ SA_SERVE="${SA_DIR}/serve_vllm.sh"
 SA_CLIENT_IMG="${SA_CLIENT_IMG:-synthetic-agentic-client:latest}"
 SA_PORT="${SA_PORT:-8000}"
 # synthetic-agentic sessions run long and compact mid-session above 8500 tokens, so
-# the 8192 in-process default is too small here. Decouple: default 32768 (serve_vllm
-# applies Llama-3 RoPE x4), but honour an explicit larger --max-model-len.
-SA_MAX_MODEL_LEN="${SA_MAX_MODEL_LEN:-32768}"
+# the 8192 in-process default is too small here (peak pre-compaction context is
+# ~8500 + one input turn ~= 11K). But max_model_len also sets a HARD GPU-KV floor:
+# vLLM's engine core refuses to start unless GPU KV cache can hold ONE request of
+# max_model_len (32768 -> 4.0 GiB for Llama-3-8B). On a constrained-KV offload run
+# (e.g. 24 GiB A30 @ 0.75 util: ~1.65 GiB KV after 15 GiB weights) 32768 exceeds
+# that floor and crashes init ("estimated maximum model length is 13504"). So the
+# default must clear the ~11K workload peak yet fit the floor: 12288 needs ~1.5 GiB
+# KV and exceeds the 8500 compaction trigger with headroom. Bigger GPU / higher util
+# can go larger via --max-model-len (or SA_MAX_MODEL_LEN); serve_vllm applies
+# Llama-3 RoPE x4 so any value up to 32768 is representable.
+SA_MAX_MODEL_LEN="${SA_MAX_MODEL_LEN:-12288}"
 [[ "$MAX_MODEL_LEN" -gt "$SA_MAX_MODEL_LEN" ]] && SA_MAX_MODEL_LEN="$MAX_MODEL_LEN"
 
 # Map a profile_all variant -> serve_vllm CONNECTOR arm (empty = unsupported).

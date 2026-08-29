@@ -39,7 +39,12 @@ DTYPE=${DTYPE:-bfloat16}
 LOAD_FORMAT=${LOAD_FORMAT:-auto}
 TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-1}
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.90}
-MAX_MODEL_LEN=${MAX_MODEL_LEN:-32768}    # > 8192 so agentic sessions + compaction fit (needs RoPE for Llama-3)
+# > 8192 so agentic sessions + compaction (trigger 8500, ~11K peak) fit, but small
+# enough that GPU KV can hold ONE request of this length -- vLLM refuses to start
+# otherwise. 32768 needs 4.0 GiB KV (Llama-3-8B) and OOMs the init check on a
+# constrained-KV offload run (24 GiB A30 @ 0.75 util leaves ~1.65 GiB KV); 12288
+# needs ~1.5 GiB. Raise on a bigger GPU / higher util (RoPE x4 below covers 32768).
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-12288}
 MAX_NUM_SEQS=${MAX_NUM_SEQS:-64}
 PYTHONHASHSEED=${PYTHONHASHSEED:-0}      # reproducible prefix-cache block hashing
 READY_TIMEOUT=${READY_TIMEOUT:-600}      # seconds to wait for model load
