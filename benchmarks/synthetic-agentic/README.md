@@ -1,4 +1,4 @@
-# synthetic_agentic KV-offload benchmark (inference-perf, server mode)
+# synthetic-agentic KV-offload benchmark (inference-perf, server mode)
 
 Runs the [inference-perf](https://github.com/lenadankin/inference-perf/tree/synthetic_data_enabled)
 `synthetic_agentic` workload — procedural agentic traffic (tool loops, recursive
@@ -47,11 +47,11 @@ The single entry point is the existing orchestrator, with the new workload value
 ./generate_trace.sh
 
 # 2. run all four backends over the same workload
-../kv-offload-replay/profile_all.sh --workload synthetic_agentic \
+../kv-offload-replay/profile_all.sh --workload synthetic-agentic \
     --logdir /mnt/certus1/agentic-$(date +%s)
 ```
 
-`profile_all.sh --workload synthetic_agentic` launches each selected backend as a
+`profile_all.sh --workload synthetic-agentic` launches each selected backend as a
 vLLM server (via `serve_vllm.sh`), drives it with the inference-perf client, scrapes
 `/metrics`, and records a row in the usual `results.json` schema (rendered by the
 `profile-kvoffload-replay-all` skill). `--only` / `--skip` subset the backends.

@@ -214,7 +214,7 @@ Flags (all optional; defaults shown):
                                LONGDOC_NUM_DOCS / LONGDOC_SEED (defaults 4000/8/1000);
                                NUM_CONVS defaults to LONGDOC_NUM_DOCS. Big docs need a
                                matching --max-model-len.
-                               "synthetic_agentic" = the inference-perf agentic
+                               "synthetic-agentic" = the inference-perf agentic
                                ReplayGraph DAG (tool loops, sub-agent fan-out, context
                                compaction). It is HTTP-only, so each backend is run in
                                SERVER mode: one vLLM serve (connector =
@@ -329,8 +329,8 @@ fi
 # in resolve_workload — masked the corpus default, so --min-turns 2 still ran 450
 # convs. An explicit --num-convs (NUM_CONVS non-empty) always wins.
 if [[ -z "$NUM_CONVS" ]]; then
-    if [[ "$WORKLOAD_NAME" == "synthetic_agentic" ]]; then
-        # synthetic_agentic is driven by inference-perf in SERVER mode; its session
+    if [[ "$WORKLOAD_NAME" == "synthetic-agentic" ]]; then
+        # synthetic-agentic is driven by inference-perf in SERVER mode; its session
         # count lives in the workload YAML (data.synthetic_agentic.num_sessions),
         # NOT in NUM_CONVS. Nothing here consumes NUM_CONVS on that path (the client
         # container isn't given it), so pin a neutral 0 = "not applicable; see the
@@ -859,11 +859,11 @@ workload_container_args() {  # -> prints podman args, one per line
 # Common container run for the three self-contained images (default podman store).
 run_container_bench() {  # variant image extra-args...
     local variant="$1" image="$2"; shift 2
-    # synthetic_agentic is HTTP-only (inference-perf), so it can't be driven in
+    # synthetic-agentic is HTTP-only (inference-perf), so it can't be driven in
     # process. Route this leaf to server mode instead; the caller's preflight/build/
     # reconfigure (which still ran) is exactly what serve mode needs — the offload
     # image this would have run in process is the same image serve_vllm serves.
-    if [[ "$WORKLOAD_NAME" == "synthetic_agentic" ]]; then
+    if [[ "$WORKLOAD_NAME" == "synthetic-agentic" ]]; then
         run_server_bench "$variant"
         return
     fi
@@ -896,8 +896,8 @@ run_container_bench() {  # variant image extra-args...
     finish_variant "$variant" "$rc" "$f"
 }
 
-# ── Server-mode workload runner (--workload synthetic_agentic) ────────────────
-# The synthetic_agentic workload is a ReplayGraph DAG driven by inference-perf, an
+# ── Server-mode workload runner (--workload synthetic-agentic) ────────────────
+# The synthetic-agentic workload is a ReplayGraph DAG driven by inference-perf, an
 # HTTP-only load generator, so it CANNOT run in-process like the ShareGPT/long-doc
 # drivers. Each backend is instead served as ONE vLLM server (serve_vllm.sh, where
 # the KV backend is just a --kv-transfer-config connector arm) and driven over
@@ -910,7 +910,7 @@ SA_DIR="${REPO_ROOT}/benchmarks/synthetic-agentic"
 SA_SERVE="${SA_DIR}/serve_vllm.sh"
 SA_CLIENT_IMG="${SA_CLIENT_IMG:-synthetic-agentic-client:latest}"
 SA_PORT="${SA_PORT:-8000}"
-# synthetic_agentic sessions run long and compact mid-session above 8500 tokens, so
+# synthetic-agentic sessions run long and compact mid-session above 8500 tokens, so
 # the 8192 in-process default is too small here. Decouple: default 32768 (serve_vllm
 # applies Llama-3 RoPE x4), but honour an explicit larger --max-model-len.
 SA_MAX_MODEL_LEN="${SA_MAX_MODEL_LEN:-32768}"
@@ -970,8 +970,8 @@ run_server_bench() {  # variant
     local connector; connector="$(sa_connector_for "$variant")"
     local f="${LOGDIR}/${variant}.log"
     if [[ -z "$connector" ]]; then
-        record "$variant" "SKIPPED" "" "" "" "" "" "synthetic_agentic has no serve_vllm connector arm for ${variant} (supported: NoOffload/CPUOffload/Tiered-CPU-FS/Certus-SPDK)" ""
-        warn "${variant} SKIPPED (synthetic_agentic): no serve_vllm connector arm"
+        record "$variant" "SKIPPED" "" "" "" "" "" "synthetic-agentic has no serve_vllm connector arm for ${variant} (supported: NoOffload/CPUOffload/Tiered-CPU-FS/Certus-SPDK)" ""
+        warn "${variant} SKIPPED (synthetic-agentic): no serve_vllm connector arm"
         return 0
     fi
     # The inference-perf client image (HTTP load generator, default store).
@@ -982,30 +982,30 @@ run_server_bench() {  # variant
                     -f "${SA_DIR}/Dockerfile.inference-perf" -t "$SA_CLIENT_IMG" "$SA_DIR" \
                     > "${LOGDIR}/build-inference-perf.log" 2>&1; then
                 record "$variant" "SKIPPED" "" "" "" "" "" "inference-perf client image build failed (see build-inference-perf.log)" ""
-                warn "${variant} SKIPPED (synthetic_agentic): client image build failed"
+                warn "${variant} SKIPPED (synthetic-agentic): client image build failed"
                 return 0
             fi
         else
             record "$variant" "SKIPPED" "" "" "" "" "" "client image ${SA_CLIENT_IMG} missing (pass --rebuild to build it, or build ${SA_DIR}/Dockerfile.inference-perf)" ""
-            warn "${variant} SKIPPED (synthetic_agentic): client image missing"
+            warn "${variant} SKIPPED (synthetic-agentic): client image missing"
             return 0
         fi
     fi
 
     local -a env_lines=(); mapfile -t env_lines < <(sa_serve_env "$connector")
     gpu_mark start "$variant"
-    log "${variant} (synthetic_agentic): serving vLLM (connector=${connector}) on :${SA_PORT}"
+    log "${variant} (synthetic-agentic): serving vLLM (connector=${connector}) on :${SA_PORT}"
     # Bring the server up detached; on failure record SKIPPED and bail (leave no
     # orphan — stop is idempotent).
     if ! env "${env_lines[@]}" bash "$SA_SERVE" up > "${LOGDIR}/serve-${connector}.log" 2>&1; then
         env "${env_lines[@]}" bash "$SA_SERVE" stop >/dev/null 2>&1 || true
         gpu_mark end "$variant"
         record "$variant" "SKIPPED" "" "" "" "" "" "vLLM server (connector=${connector}) failed to become ready (see serve-${connector}.log)" "${LOGDIR}/serve-${connector}.log"
-        warn "${variant} SKIPPED (synthetic_agentic): server not ready"
+        warn "${variant} SKIPPED (synthetic-agentic): server not ready"
         return 0
     fi
 
-    log "${variant} (synthetic_agentic): driving load with inference-perf -> ${f}"
+    log "${variant} (synthetic-agentic): driving load with inference-perf -> ${f}"
     local start="$SECONDS"
     command podman run --rm --network host \
         -e "BASE_URL=http://localhost:${SA_PORT}" \
@@ -1029,10 +1029,10 @@ run_server_bench() {  # variant
         # generations/tokens_per_sec aren't a clean fit for a session-graph workload;
         # keep wall (measured here) + inference-perf's throughput as native_metric.
         record "$variant" "OK" "$wall" "" "" "" "$native" "" "$f"
-        log "${variant} OK (synthetic_agentic): wall=${wall}s throughput=${native:-n/a} (see inference-perf report in ${LOGDIR})"
+        log "${variant} OK (synthetic-agentic): wall=${wall}s throughput=${native:-n/a} (see inference-perf report in ${LOGDIR})"
     else
         record "$variant" "FAILED" "$wall" "" "" "" "$native" "inference-perf exit=$rc (see $(basename "$f"))" "$f"
-        warn "${variant} FAILED (synthetic_agentic, exit=$rc); see $f"
+        warn "${variant} FAILED (synthetic-agentic, exit=$rc); see $f"
     fi
 }
 
@@ -1159,11 +1159,11 @@ if want certus-spdk; then
             record "Certus-SPDK" "SKIPPED" "" "" "" "" "" "server mailbox ${SHM_PATH} did not appear within ${SERVER_WAIT}s (see server.log)" "${LOGDIR}/server.log"
             warn "Certus-SPDK SKIPPED: server did not come up"
             stop_server
-        elif [[ "$WORKLOAD_NAME" == "synthetic_agentic" ]]; then
+        elif [[ "$WORKLOAD_NAME" == "synthetic-agentic" ]]; then
             # Server mode: the host Certus-SPDK server is up and owns the mailbox;
             # attach a vLLM serve (CertusShmqOffloadingSpec via --ipc=host) and drive
             # it with inference-perf instead of the in-process shmq client.
-            log "server serving, mailbox ${SHM_PATH} — synthetic_agentic via vLLM serve + inference-perf"
+            log "server serving, mailbox ${SHM_PATH} — synthetic-agentic via vLLM serve + inference-perf"
             run_server_bench "Certus-SPDK"
             stop_server
         else

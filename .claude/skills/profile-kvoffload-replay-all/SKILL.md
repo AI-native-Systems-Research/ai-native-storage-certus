@@ -41,11 +41,11 @@ previews what will run, launches the orchestrator, and formats the result.
 The default (no `--workload`) replays the baked 450×12 ShareGPT set **in
 process** (each variant embeds `AsyncLLM`). Other values: `sharegpt`
 (turn-count-selected corpus), `long-doc-qa` (synthetic long-doc QA), and
-`synthetic_agentic` (below).
+`synthetic-agentic` (below).
 
-### `--workload synthetic_agentic` — server mode
+### `--workload synthetic-agentic` — server mode
 
-`synthetic_agentic` is the [inference-perf](https://github.com/lenadankin/inference-perf/tree/synthetic_data_enabled)
+`synthetic-agentic` selects the [inference-perf](https://github.com/lenadankin/inference-perf/tree/synthetic_data_enabled)
 agentic ReplayGraph DAG (tool loops, recursive sub-agent fan-out, mid-session
 context compaction, a shared system-prompt prefix). inference-perf is an
 **HTTP-only** load generator, so this workload **cannot** run through the
@@ -94,7 +94,7 @@ sees `BASE_URL`; the connector is chosen entirely server-side.
      `<model-fs>/llm-d-kv-cache/kv_connectors/llmd_fs_backend` (its location on this
      host), falling back to `$HOME/...`. Override with the `FS_BACKEND_DIR` env var.
      Offer to add `--build`.
-   - For `--workload synthetic_agentic`, also check the inference-perf client image
+   - For `--workload synthetic-agentic`, also check the inference-perf client image
      (`podman image exists synthetic-agentic-client:latest`) — missing ⇒ every
      backend SKIPs unless `--build`/`--rebuild` is passed. Note SharedStorage will
      SKIP (no serve_vllm arm), and Certus-SPDK still needs `--device-pci` + the
@@ -112,7 +112,7 @@ sees `BASE_URL`; the connector is chosen entirely server-side.
    `--build`"; "check `<logdir>/server.log`"). `tokens_per_sec` is computed
    uniformly as `generations × output_tokens ÷ wall` so variants are comparable
    even though each driver prints a different native metric.
-   - **Server mode (`synthetic_agentic`)** differs: `generations`/`tokens_per_sec`
+   - **Server mode (`synthetic-agentic`)** differs: `generations`/`tokens_per_sec`
      are null (a session-graph DAG has no flat per-round generation count), so
      rank backends by `wall_s` and the `native_metric` throughput scraped from
      inference-perf, and point at the full inference-perf report under `<logdir>`
