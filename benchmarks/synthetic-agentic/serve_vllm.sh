@@ -134,7 +134,13 @@ build_flags() {
             exit 2
             ;;
     esac
-    [ "${ENFORCE_EAGER}" = "1" ] && server_extra_args+=(--enforce-eager)
+    # NB: keep this an `if`, not `[ ... ] && ...`. As the LAST statement of the
+    # function the `&&` form would make build_flags return the test's exit status,
+    # so with ENFORCE_EAGER=0 it returns non-zero and `set -e` aborts start_server
+    # right here (server never launches, caller sees "not ready").
+    if [ "${ENFORCE_EAGER}" = "1" ]; then
+        server_extra_args+=(--enforce-eager)
+    fi
 }
 
 start_server() {
