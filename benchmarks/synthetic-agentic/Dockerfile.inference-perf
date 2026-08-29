@@ -40,8 +40,24 @@ RUN chmod +x /usr/local/bin/inference-perf-entrypoint
 
 # HF cache for the tokenizer (mount the host cache to avoid a download). Offline
 # by default; unset HF_HUB_OFFLINE at run time if the tokenizer isn't cached.
+#
+# RAYON_NUM_THREADS=1: inference-perf's load generator forks ONE worker process
+# per host CPU, and each worker's first HF-tokenizers encode_batch() lazily builds
+# a rayon global thread pool sized to the CPU count. On a many-core box that is
+# ncpu x ncpu threads (64 x 64 ~= 4096 on this host), which blows past podman's
+# default --pids-limit (2048): rayon's build_global() then fails to spawn threads
+# with EAGAIN and the worker dies mid-run with
+#   pyo3_runtime.PanicException: The global thread pool has not been initialized.:
+#   ThreadPoolBuildError { kind: IOError(Os { code: 11 ... "Resource temporarily
+#   unavailable" }) }
+# Pin each worker's tokenizer pool to a single thread (tokenization is not the
+# load-gen bottleneck; the server inference is) so total thread demand is ~ncpu,
+# not ncpu^2. TOKENIZERS_PARALLELISM=false also quiets the fork-after-parallelism
+# path. (profile_all.sh additionally lifts --pids-limit on the client run.)
 ENV PYTHONUNBUFFERED=1 \
     HF_HUB_OFFLINE=1 \
+    RAYON_NUM_THREADS=1 \
+    TOKENIZERS_PARALLELISM=false \
     CONFIG_TMPL=/config/synthetic_agentic.yaml \
     RESULTS_DIR=/results \
     MODEL=NousResearch/Meta-Llama-3-8B \

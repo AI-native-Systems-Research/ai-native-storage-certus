@@ -1015,7 +1015,13 @@ run_server_bench() {  # variant
 
     log "${variant} (synthetic-agentic): driving load with inference-perf -> ${f}"
     local start="$SECONDS"
+    # --pids-limit=0 (unlimited): the load generator forks one worker process per
+    # host CPU and each worker's HF-tokenizers pool wants ncpu threads; the default
+    # 2048 pids ceiling is hit on many-core boxes and workers die with a rayon
+    # ThreadPoolBuildError (EAGAIN). The client image also pins RAYON_NUM_THREADS=1
+    # to cut the demand; this lifts the ceiling as a belt-and-suspenders safety net.
     command podman run --rm --network host \
+        --pids-limit=0 \
         -e "BASE_URL=http://localhost:${SA_PORT}" \
         -e "MODEL=${MODEL}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
