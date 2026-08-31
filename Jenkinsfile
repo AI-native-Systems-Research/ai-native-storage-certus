@@ -52,7 +52,12 @@ pipeline {
               | sed 's#/specs$##' | sort -u
           }
 
+          # Select a component only when its *hashed inputs* changed — files under
+          # its src/ or specs/. Changes confined to sync scratch (.specify/sync/**),
+          # README, or Cargo.toml do not affect the content hash and must not
+          # demand a fresh stamp, so they are deliberately excluded here.
           changed="$(git diff --name-only "$mb" HEAD \
+                     | grep -oE '^(components|lib|tools)/[^/]+/(src|specs)/' \
                      | grep -oE '^(components|lib|tools)/[^/]+' | sort -u || true)"
 
           # Every component's hash folds in components/interfaces, so an
