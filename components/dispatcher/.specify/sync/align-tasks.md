@@ -1,20 +1,15 @@
-# Align Tasks — dispatcher (Phase B)
+# Align Tasks — dispatcher
 
-Generated: 2026-08-20
-Source: `drift-report.{json,md}` (3 drifted, 0 not-implemented, 1 unspecced group)
+Generated: 2026-08-31
 
-**No ALIGN tasks this run.**
+No ALIGN tasks this run.
 
-Every drift item was classified by reading the code at its `location`, and in every case the
-code is the working, intentional reality (spec-lag / doc-lag), not a behavioral bug:
+All drift resolved this cycle was BACKFILL (spec → matches the working, intentional code):
+the code/architecture is authoritative in every case (gRPC→shmq transport change in commit
+`97e26738`; the shipped tier-event counter subsystem). No code change is required.
 
-- **US-011 / FR-039** (per-thread queue depth) — code uses `queue_depth = 128` (`src/lib.rs:2217`),
-  which already matches FR-039 step (5) and FR-019. The stale text was in the User Story 11 narrative
-  and acceptance scenario 3 → resolved by **BACKFILL** to the spec.
-- **CLAUDE.md stale crate path** and **CLAUDE.md stale `-v2` names** — documentation-only drift; code
-  and build are correct → **BACKFILL** direction, but the target (`CLAUDE.md`) is outside this sync's
-  editable scope (`.specify/sync/` and `specs/` only), so they are recorded in `proposals.*` and
-  deferred to a follow-up doc pass, not applied.
-- **Unspecced DI/test hooks** — working public inherent API → **BACKFILL-UNSPECCED** (new FR-057 + SC-016).
+## Out-of-scope follow-ups (informational, not align tasks)
 
-No item genuinely violates a correct, agreed spec requirement, so no code-alignment task is required.
+- `src/lib.rs:2983`, `:3016` — reword the two residual "gRPC handler" code comments to
+  "shmq serve layer / null-stream caller". Source comments are outside this sync's editable
+  scope; handle in a normal code-comment pass.

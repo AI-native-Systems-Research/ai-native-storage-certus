@@ -1,58 +1,31 @@
 {
-  "project": "dispatcher-p2p",
-  "spec": "001-gpudirect-cold-path",
-  "applied": "2026-08-20",
-  "source": ".specify/sync/drift-report.json",
-  "backups": [
-    {
-      "spec": "specs/001-gpudirect-cold-path/spec.md",
-      "backup": ".specify/sync/backups/specs/001-gpudirect-cold-path/spec.md.bak"
-    }
-  ],
+  "applied": "2026-08-31",
+  "mode": "interactive",
+  "spec": "components/dispatcher-p2p/specs/001-gpudirect-cold-path/spec.md",
+  "backup": "components/dispatcher-p2p/.specify/sync/backups/specs/001-gpudirect-cold-path/spec.md.bak",
   "specs_updated": [
-    { "requirement": "SC-006", "change_type": "BACKFILL_REWORD" },
-    { "requirement": "FR-018", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-019", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-020", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-021", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-022", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-023", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "Key Entities", "change_type": "BACKFILL_UNSPECCED_ADD" },
-    { "requirement": "User Story 5", "change_type": "BACKFILL_UNSPECCED_ADD_SCENARIOS" },
-    { "requirement": "metadata:Last-Synced", "change_type": "METADATA" }
+    { "requirement": "header:Last-Synced", "change_type": "amend" },
+    { "requirement": "FR-008", "change_type": "amend", "note": "tier_event_stats() zeroed-stub + read_write_stats() interface-parity note" }
   ],
-  "align_tasks_generated": [
-    {
-      "requirement": "FR-017",
-      "severity": "moderate",
-      "summary": "Increment eviction_dropped at all live eviction publish sites so eviction_dropped_count() reflects reality; thread shared counter into background evictors.",
-      "files_to_modify": [
-        "components/dispatcher-p2p/src/lib.rs",
-        "components/dispatcher-p2p/src/background.rs"
-      ]
-    }
+  "new_specs_created": [],
+  "align_tasks_retained": [
+    { "requirement": "FR-017", "status": "open" }
   ],
+  "align_tasks_generated": 0,
   "unspecced_backfilled": [
-    { "feature": "ParallelBackgroundWriter", "location": "src/background.rs:154-219", "requirement": "FR-018" },
-    { "feature": "BackgroundEvictor", "location": "src/background.rs:303-488", "requirement": "FR-019" },
-    { "feature": "MemoryTierEvictor", "location": "src/background.rs:490-654", "requirement": "FR-020" },
-    { "feature": "clear_memory_tier()", "location": "src/lib.rs:2606-2637", "requirement": "FR-021" },
-    { "feature": "lookup_async()", "location": "src/lib.rs:2044-2110", "requirement": "FR-022" },
-    { "feature": "pins::PinnedKeys", "location": "src/pins.rs:26-57", "requirement": "FR-023" }
+    { "feature": "tier_event_stats() zeroed stub", "requirement_added": "FR-008 amendment (no new FR)" }
   ],
-  "resolved": [],
-  "human_decision": [
-    {
-      "item": "cold_staging_slots / cold_staging_buf_bytes",
-      "location": "components/interfaces/src/idispatcher.rs:81-87",
-      "reason": "Unreferenced anywhere in dispatcher-p2p/src/ (grep-verified). Dead config on this component's surface; 64-slot ring governed by FR-003. Not backfilled to avoid inventing behavior. Human to wire in or remove."
-    }
+  "human_decision_carried": [
+    { "item": "cold_staging_slots / cold_staging_buf_bytes", "status": "unresolved" }
   ],
-  "counts": {
-    "backfill_applied": 1,
-    "align_tasks": 1,
-    "unspecced_backfilled": 6,
-    "resolved": 0,
-    "human_decision": 1
-  }
+  "resolved_since_last_sync": [],
+  "not_applied": [
+    { "item": "FR-017 drop-count fix", "reason": "src/** edit outside sync editable scope" },
+    { "item": "cold_staging_* wire-in-or-remove", "reason": "interfaces/** + src/** change outside sync scope" },
+    { "item": "memcpy_batch_async MockGpuServices (src/lib.rs:3424+, #[cfg(test)])", "reason": "test-only mock keep-up (495c5acc); no requirement" },
+    { "item": "plan.md source-layout/bench-name staleness", "reason": "doc-refresh item, not requirement drift" }
+  ],
+  "active_requirement_count": "FR-001..FR-023; SC-001..SC-006",
+  "source_touched": false,
+  "cargo_run": false
 }

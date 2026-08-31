@@ -1,87 +1,56 @@
 {
-  "generated": "2026-08-20",
-  "phase": "B",
+  "generated": "2026-08-31",
   "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
+  "mode": "interactive",
   "drift_source": "components/dispatcher/.specify/sync/drift-report.json",
-  "classification_basis": "each drift item classified by reading the code at its location; code is the working/intentional reality in all cases (no ALIGN)",
+  "summary": {
+    "backfill": 2,
+    "backfill_unspecced": 1,
+    "align": 0,
+    "human_decision": 0,
+    "remove_from_spec": 0
+  },
   "proposals": [
     {
-      "id": "BACKFILL-US011",
-      "type": "backfill",
+      "id": "BACKFILL-FR040",
       "direction": "backfill",
-      "requirement": "User Story 11 (narrative + acceptance scenario 3) / FR-039",
-      "drift_ref": "US-011 / FR-039",
-      "severity": "moderate",
-      "location": "components/dispatcher/src/lib.rs:2217",
-      "title": "Batch cold-promotion per-thread queue depth (US-11 -> 128)",
-      "before": "US-11 narrative: 'Each thread uses a reduced NVMe pipeline depth (16 / num_queues) to share the drive's submission queue capacity without overflow.' Scenario 3: '...each processed by a separate thread with max_queue_depth = 8 (16/2), keeping total per-drive NVMe commands at <=16.'",
-      "after": "US-11 narrative: 'Each thread drives its cold promotions with a deep per-thread NVMe pipeline depth (max_queue_depth = 128, per FR-039 step (5) and FR-019) to saturate the drive's submission queue for maximum per-drive parallelism.' Scenario 3: '...each processed by a separate thread, and each thread drives its cold promotions with max_queue_depth = 128 (per FR-039 step (5) / FR-019) to saturate the drive's NVMe submission queue.'",
-      "rationale": "batch_lookup sets `let queue_depth = 128;` (lib.rs:2217) into pipelined_multi_object_zero_copy; deliberate and already stated by FR-039 step (5) and FR-019. The US-11 story text carried the older 16/num_queues wording, an intra-spec contradiction against the aligned FRs and the code. Spec-lag -> BACKFILL the story text.",
+      "requirement": "FR-040",
+      "location": "components/dispatcher/src/lib.rs:44",
+      "before": "The gRPC handler spawns this as a detached background task when BatchTouchRequest.promote = true.",
+      "after": "The shmq serve layer spawns this as a detached background task on the control-plane promote request (gRPC and the BatchTouchRequest message were removed in commit 97e26738; shm-queue is the sole control transport).",
+      "rationale": "gRPC removed (97e26738); control-plane arrives from shmq serve layer; BatchTouchRequest gone from source; promote_to_memory_tier unchanged.",
       "confidence": "high",
-      "applied": true,
-      "files": ["components/dispatcher/specs/001-dispatcher-cache-interface/spec.md"]
+      "approved": true,
+      "applied": true
     },
     {
-      "id": "BACKFILL-DOC-fwpath",
-      "type": "backfill",
+      "id": "BACKFILL-FR042",
       "direction": "backfill",
-      "requirement": "CLAUDE.md crate-location note",
-      "drift_ref": "CLAUDE.md (stale crate path)",
-      "severity": "minor",
-      "location": "components/dispatcher/CLAUDE.md:40",
-      "title": "CLAUDE.md stale component-framework path",
-      "before": "component-framework, component-core, component-macros - at ../../component-framework/crates/",
-      "after": "component-framework, component-core, component-macros - at ../../../lib/component-framework/crates/ (moved from components/ to lib/)",
-      "rationale": "component-framework now lives at lib/component-framework after the components/ -> lib/ move; components/component-framework absent. Cargo.toml uses workspace deps so build is unaffected; only the doc path is stale. Doc-lag -> BACKFILL direction.",
+      "requirement": "FR-042",
+      "location": "components/dispatcher/src/lib.rs:442",
+      "before": "This mechanism enables external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
+      "after": "This mechanism enables external consumers (the shmq serve layer's TakeEvents drain) to observe cache evictions without polling.",
+      "rationale": "Eviction channel now drained by shmq serve layer via TakeEvents (lib.rs:442); mechanism unchanged.",
       "confidence": "high",
-      "applied": false,
-      "not_applied_reason": "CLAUDE.md is outside this sync's editable scope (.specify/sync/ and specs/ only); deferred to a follow-up documentation pass.",
-      "files": []
+      "approved": true,
+      "applied": true
     },
     {
-      "id": "BACKFILL-DOC-v2names",
-      "type": "backfill",
-      "direction": "backfill",
-      "requirement": "CLAUDE.md dependency-crate names",
-      "drift_ref": "CLAUDE.md (stale crate names)",
-      "severity": "minor",
-      "location": "components/dispatcher/CLAUDE.md:43-44,53",
-      "title": "CLAUDE.md stale -v2 crate names",
-      "before": "references to block-device-spdk-nvme-v2 and extent-manager-v2",
-      "after": "block-device-spdk-nvme and extent-manager (no -v2 suffix; matches components/dispatcher/Cargo.toml:15)",
-      "rationale": "No -v2 suffix exists in the current workspace; the actual dependency crate is block-device-spdk-nvme. Documentation-only drift -> BACKFILL direction.",
-      "confidence": "high",
-      "applied": false,
-      "not_applied_reason": "CLAUDE.md is outside this sync's editable scope (.specify/sync/ and specs/ only); deferred to a follow-up documentation pass.",
-      "files": []
-    },
-    {
-      "id": "BACKFILL-UNSPECCED-057",
-      "type": "backfill-unspecced",
+      "id": "BACKFILL-UNSPECCED-058",
       "direction": "backfill-unspecced",
-      "requirement": "NEW FR-057 (+ SC-016)",
-      "drift_ref": "unspecced: set_block_device_factory / set_extent_manager_factory / set_pipeline_metrics",
-      "severity": "minor",
-      "location": "components/dispatcher/src/lib.rs:358-374",
-      "title": "Dependency-injection / test hooks",
-      "before": "No requirement. FR-043 covers the PipelineMetrics trait but not the injection setters; the block-device/extent-manager factory setters are entirely unspecced.",
-      "after": "Add FR-057 documenting the three inherent DispatcherComponent DI setters (set_block_device_factory(BlockDeviceFactory), set_extent_manager_factory(ExtentManagerFactory), set_pipeline_metrics(Arc<dyn PipelineMetrics>)) as the test/DI surface overriding internally-constructed dependencies, with fallback to the default hard-coded implementations when unset. Add SC-016 as the measurable outcome.",
-      "rationale": "Public inherent methods that ship and are used for hardware-free component testing; inherent on the concrete component, not IDispatcher trait methods (consistent with how FR-001 documents create_eviction_channel/eviction_dropped_count). Code is authoritative -> backfill a test/DI-surface requirement.",
+      "requirement": "FR-058",
+      "additional": ["SC-017", "FR-001 inventory amendment"],
+      "location": "components/interfaces/src/idispatcher.rs:564; components/dispatcher/src/lib.rs:111-159,3390",
+      "before": "No requirement; FR-001 inventory omits tier_event_stats.",
+      "after": "New FR-058 documents tier_event_stats() -> TierEventStats and the TierEventCounters subsystem (4 monotonic Arc-shared counters: promotions_to_memory, promotions_to_gpu, evictions_from_memory, evictions_from_ssd; snapshot() reads without reset; always populated). tier_event_stats added to FR-001 introspection inventory. SC-017 added as measurable outcome.",
+      "rationale": "Shipped/committed profiler telemetry feature (4659626b/3231f85c); recorded at ~11 sites; code authoritative.",
       "confidence": "high",
-      "applied": true,
-      "files": ["components/dispatcher/specs/001-dispatcher-cache-interface/spec.md"]
+      "approved": true,
+      "applied": true
     }
   ],
-  "counts": {
-    "backfill_applied": 1,
-    "backfill_recorded_not_applied": 2,
-    "backfill_unspecced_applied": 1,
-    "align_tasks": 0,
-    "resolved": 0,
-    "human_decision": 0
-  },
-  "deferred": [
-    "BACKFILL-DOC-fwpath",
-    "BACKFILL-DOC-v2names"
+  "out_of_scope_observations": [
+    "src/lib.rs:2983,3016 stale 'gRPC handler' code comments (out of sync scope)",
+    "components/dispatcher/verif/ untracked Creusot build state; no interface verification claim to reconcile"
   ]
 }

@@ -1,45 +1,47 @@
 {
-  "generated": "pending",
-  "project": "dispatch-map",
+  "generated": "2026-08-31",
+  "component": "components/dispatch-map",
+  "reanalysis": true,
+  "specs_analyzed": ["001-dispatch-map"],
+  "commits_since_last_sync": 0,
+  "note": "No commits touched components/dispatch-map/ or components/interfaces/src/idispatch_map.rs since 2026-08-20; implementation unchanged.",
   "summary": {
-    "specs_analyzed": 1,
-    "requirements_checked": 32,
-    "aligned": 30,
+    "requirements_checked": 35,
+    "aligned": 33,
     "drifted": 2,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced": 0
   },
-  "specs": [
+  "drifted": [
     {
-      "id": "001-dispatch-map",
-      "title": "Dispatch Map Component",
-      "aligned": 30,
-      "drifted": [
-        {
-          "requirement": "FR-012",
-          "spec_text": "On initialization, the IEvictionPolicy receptacle MUST be connected (returns an error if unbound).",
-          "actual": "initialize() calls get_pool_id() first, which does eviction_policy.get().unwrap(); an unbound eviction_policy panics before the graceful map_err(NotInitialized) path is reached. Same unwrap in create_memory_tier_entry, recover_extent, oldest_keys.",
-          "location": "src/lib.rs:55",
-          "severity": "moderate"
-        },
-        {
-          "requirement": "FR-003",
-          "spec_text": "US1/AS3 + Edge Cases: create_memory_tier_entry with a null pointer returns an error; no entry is recorded.",
-          "actual": "create_memory_tier_entry only validates size == 0 (InvalidSize); there is no null-pointer check, so a null pointer is accepted and an entry is recorded.",
-          "location": "src/lib.rs:381",
-          "severity": "moderate"
-        }
-      ],
-      "not_implemented": []
+      "requirement": "FR-012",
+      "severity": "moderate",
+      "direction": "align",
+      "status": "open",
+      "spec": "initialize must return NotInitialized (not panic) if IEvictionPolicy is unbound",
+      "actual": "get_pool_id() at src/lib.rs:55 does eviction_policy.get().unwrap(); called first in initialize (src/lib.rs:68) before the graceful guard at :69-71, so an unbound receptacle panics.",
+      "location": "src/lib.rs:55,68,392"
+    },
+    {
+      "requirement": "FR-003 / US1-AS3",
+      "severity": "moderate",
+      "direction": "align",
+      "status": "open",
+      "spec": "create_memory_tier_entry with a null pointer returns an error; no entry recorded",
+      "actual": "create_memory_tier_entry validates only size==0; no pointer.is_null() guard (grep null -> none); a null pointer is accepted and inserted.",
+      "location": "src/lib.rs:381-424"
     }
   ],
-  "unspecced": [
+  "resolved_since_last_sync": [
     {
-      "feature": "reuse_count AtomicU32 field on DispatchEntry, incremented on every lookup/take_read/downgrade_reference",
-      "location": "src/entry.rs, src/lib.rs",
-      "lines": "entry.rs:37; lib.rs:142-143,220-222,313-315",
-      "suggested_spec": "Either spec a per-entry read-hit counter with a query method, or remove the field (spec's Last Synced note already lists reuse_count removal as a pending code-side align)."
+      "requirement": "FR-029",
+      "was": "unspecced reuse_count: AtomicU32 field",
+      "now": "backfilled as FR-029 + Key Entities in the 2026-08-20 sync; aligned"
     }
   ],
-  "conflicts": []
+  "unspecced": [],
+  "out_of_scope": [
+    "components/dispatch-map/CLAUDE.md:35 stale path ../../component-framework/crates/ (should be ../../lib/component-framework/crates/)",
+    "FR-012 and FR-003 fixes require src/** edits, outside sync editable scope; tracked in align-tasks.md"
+  ]
 }

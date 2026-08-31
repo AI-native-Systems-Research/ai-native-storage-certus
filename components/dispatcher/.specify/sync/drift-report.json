@@ -1,11 +1,12 @@
 {
-  "generated": "pending",
+  "generated": "2026-08-31",
   "project": "dispatcher",
+  "spec": "specs/001-dispatcher-cache-interface/spec.md",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 65,
+    "requirements_checked": 67,
     "aligned": 65,
-    "drifted": 3,
+    "drifted": 2,
     "not_implemented": 0,
     "unspecced_features": 1
   },
@@ -13,28 +14,32 @@
     {
       "id": "001-dispatcher-cache-interface",
       "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
-      "aligned": 65,
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-023", "FR-024",
+        "FR-025", "FR-028", "FR-029", "FR-030", "FR-031", "FR-032", "FR-033",
+        "FR-034", "FR-035", "FR-036", "FR-037", "FR-038", "FR-039", "FR-041",
+        "FR-043", "FR-044", "FR-045", "FR-046", "FR-047", "FR-048", "FR-049",
+        "FR-050", "FR-051", "FR-052", "FR-053", "FR-054", "FR-055", "FR-056",
+        "FR-057"
+      ],
       "drifted": [
         {
-          "requirement": "US-011 / FR-039",
-          "spec_text": "User Story 11 narrative: 'Each thread uses a reduced NVMe pipeline depth (16 / num_queues)...'; scenario 3: 'each processed by a separate thread with max_queue_depth = 8 (16/2), keeping total per-drive NVMe commands at <=16.'",
-          "actual": "batch_lookup sets `let queue_depth = 128;` per queue thread and passes it into pipelined_multi_object_zero_copy. This is deliberate and matches FR-039 step (5) and FR-019 ('max_queue_depth = 128 per thread'). The US-11 acceptance/narrative text (16/num_queues, <=16 per drive) is stale and contradicts FR-039/FR-019 within the same spec. Code and the FRs are aligned; the user-story text is not.",
-          "location": "components/dispatcher/src/lib.rs:2217",
-          "severity": "moderate"
+          "requirement": "FR-040",
+          "spec_text": "The gRPC handler spawns this as a detached background task when BatchTouchRequest.promote = true.",
+          "actual": "gRPC removed (commit 97e26738); control-plane requests arrive from the shmq serve layer (src/lib.rs:5,44). BatchTouchRequest no longer exists in dispatcher source. promote_to_memory_tier itself unchanged (lib.rs:3060).",
+          "location": "components/dispatcher/src/lib.rs:44",
+          "severity": "moderate",
+          "direction": "backfill"
         },
         {
-          "requirement": "CLAUDE.md (stale crate path)",
-          "spec_text": "CLAUDE.md: 'component-framework, component-core, component-macros — at ../../component-framework/crates/'",
-          "actual": "component-framework now lives at lib/component-framework (verified present; components/component-framework absent). Cargo.toml uses workspace deps so build is unaffected, but the doc path is stale after the components/->lib/ move.",
-          "location": "components/dispatcher/CLAUDE.md:40",
-          "severity": "minor"
-        },
-        {
-          "requirement": "CLAUDE.md (stale crate names)",
-          "spec_text": "CLAUDE.md references block-device-spdk-nvme-v2 and extent-manager-v2.",
-          "actual": "The actual dependency crate is block-device-spdk-nvme (Cargo.toml:15); there is no -v2 suffix in the current workspace. Documentation-only drift.",
-          "location": "components/dispatcher/CLAUDE.md:43-44,53",
-          "severity": "minor"
+          "requirement": "FR-042",
+          "spec_text": "This mechanism enables external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
+          "actual": "eviction channel now drained by the shmq serve layer via TakeEvents (src/lib.rs:442). create_eviction_channel / eviction_dropped_count mechanism unchanged.",
+          "location": "components/dispatcher/src/lib.rs:442",
+          "severity": "minor",
+          "direction": "backfill"
         }
       ],
       "not_implemented": []
@@ -42,11 +47,20 @@
   ],
   "unspecced": [
     {
-      "feature": "Dependency-injection / test hooks: set_block_device_factory, set_extent_manager_factory, set_pipeline_metrics",
-      "location": "components/dispatcher/src/lib.rs",
-      "lines": "360-372",
-      "suggested_spec": "Public inherent methods on DispatcherComponent for injecting mock block-device/extent-manager factories and a PipelineMetrics impl. Not referenced by any FR (FR-043 covers the metrics trait but not the injection setter). Add a 'test/DI surface' note or gate them behind #[cfg(test)]."
+      "feature": "tier_event_stats() IDispatcher method + TierEventCounters subsystem",
+      "location": "components/interfaces/src/idispatcher.rs:564 (trait method), :191 (TierEventStats); components/dispatcher/src/lib.rs:111-159 (TierEventCounters), :3390 (impl)",
+      "lines": 60,
+      "suggested_spec": "FR-058 + SC-017; also add tier_event_stats to FR-001 introspection inventory",
+      "direction": "backfill-unspecced"
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "resolved_since_last_sync": [
+    "CLAUDE.md stale component-framework path (now ../../lib/component-framework/crates/)",
+    "CLAUDE.md stale -v2 crate names (now block-device-spdk-nvme, extent-manager)"
+  ],
+  "out_of_scope_observations": [
+    "Two stale 'gRPC handler' mentions in src/lib.rs code comments (:2983, :3016)",
+    "components/dispatcher/verif/ reappeared as untracked Creusot build state; interface makes no verification claims, so no spec reconciliation needed"
+  ]
 }

@@ -1,81 +1,49 @@
 {
-  "generated": "pending",
-  "project": "dispatcher-p2p",
+  "generated": "2026-08-31",
+  "component": "components/dispatcher-p2p",
+  "reanalysis": true,
+  "specs_analyzed": ["001-gpudirect-cold-path"],
+  "commits_since_last_sync": ["4659626b", "495c5acc", "3231f85c"],
   "summary": {
-    "specs_analyzed": 1,
-    "requirements_checked": 23,
-    "aligned": 21,
-    "drifted": 2,
+    "requirements_checked": 29,
+    "aligned": 27,
+    "drifted_open_align": 1,
     "not_implemented": 0,
-    "unspecced_features": 7
+    "unspecced": 1,
+    "human_decision_carried": 1
   },
-  "specs": [
+  "drifted": [
     {
-      "id": "001-gpudirect-cold-path",
-      "title": "GPUDirect Storage Cold Path",
-      "aligned": 21,
-      "drifted": [
-        {
-          "requirement": "FR-017",
-          "spec_text": "the event MUST be silently dropped AND counted, and the running drop count MUST be readable and reset via eviction_dropped_count().",
-          "actual": "The drop counter (eviction_dropped.fetch_add) lives ONLY inside emit_eviction, which is #[allow(dead_code)] with no call sites (lib.rs:228-236). The live eviction paths (evict_for_space_inner lib.rs:603-646; BackgroundEvictor::evictor_loop background.rs:415; MemoryTierEvictor::evictor_loop background.rs:612) all publish via `let _ = tx.try_send(...)`, discarding the Err without incrementing eviction_dropped. So eviction_dropped_count() (lib.rs:224-226) always returns 0. The channel/try_send/non-blocking parts of FR-017 are correct; only the drop-count guarantee is unmet.",
-          "location": "components/dispatcher-p2p/src/lib.rs:224-236,603-646; components/dispatcher-p2p/src/background.rs:415,612",
-          "severity": "moderate"
-        },
-        {
-          "requirement": "SC-006",
-          "spec_text": "Initialization panics with a clear diagnostic when P2P ring allocation fails (GDRCopy/BAR1 unavailable).",
-          "actual": "Initialization does NOT panic; it logs a non-fatal diagnostic ('P2P ring unavailable, cold reads use DRAM path', lib.rs:1209-1213). The panic is deferred to the first cold batch_lookup via .expect(...) (lib.rs:1752-1755). This matches FR-006 and User Story 2 AC-1, so the drift is between SC-006's wording and the rest of the spec, not a code defect. Recommend rewording SC-006.",
-          "location": "components/dispatcher-p2p/src/lib.rs:1209-1213,1752-1755",
-          "severity": "minor"
-        }
-      ],
-      "not_implemented": []
+      "requirement": "FR-017",
+      "severity": "moderate",
+      "direction": "align",
+      "status": "open_carried",
+      "spec": "dropped EvictionEvent must be counted; eviction_dropped_count() must reflect it",
+      "actual": "eviction_dropped.fetch_add only in emit_eviction (#[allow(dead_code)], no call sites); six live publish sites use bare `let _ = tx.try_send(...)`; count always 0.",
+      "location": "src/lib.rs:224-236,603-645; src/background.rs:415,612",
+      "in_sync_scope": false
     }
   ],
   "unspecced": [
     {
-      "feature": "MemoryTierEvictor — proactive background DRAM->SSD demotion sweep (config memory_tier_eviction_*)",
-      "location": "components/dispatcher-p2p/src/background.rs",
-      "lines": "490-654",
-      "suggested_spec": "Add FR for proactive memory-tier demotion; FR-017 only covers the event, not the sweep."
-    },
-    {
-      "feature": "BackgroundEvictor — SSD extent eviction at utilization threshold (config ssd_eviction_*)",
-      "location": "components/dispatcher-p2p/src/background.rs",
-      "lines": "303-488",
-      "suggested_spec": "Add FR for SSD capacity reclamation / watermarks."
-    },
-    {
-      "feature": "ParallelBackgroundWriter — write-through persistence memory-tier->SSD, one thread/drive",
-      "location": "components/dispatcher-p2p/src/background.rs",
-      "lines": "154-219",
-      "suggested_spec": "Spec the write/persistence path (spec is cold-read-only)."
-    },
-    {
-      "feature": "clear_memory_tier() — flush entire memory tier",
-      "location": "components/dispatcher-p2p/src/lib.rs",
-      "lines": "2606+",
-      "suggested_spec": "Add FR or note as admin/maintenance op."
-    },
-    {
-      "feature": "lookup_async() — returns GpuStream for caller-side pipelined hot-path sync",
-      "location": "components/dispatcher-p2p/src/lib.rs",
-      "lines": "2044-2110",
-      "suggested_spec": "Document async single-key contract in interface spec."
-    },
-    {
-      "feature": "pins::PinnedKeys — read-pin lifetime guard across async H2D copy (remote-lookup path)",
-      "location": "components/dispatcher-p2p/src/pins.rs",
-      "lines": "26-57",
-      "suggested_spec": "Note pin-lifetime correctness invariant in data-model."
-    },
-    {
-      "feature": "cold_staging_slots / cold_staging_buf_bytes config fields (appear unused by the P2P cold path)",
-      "location": "components/interfaces/src/idispatcher.rs",
-      "lines": "82-87",
-      "suggested_spec": "Confirm whether these apply to dispatcher-p2p or remove from its config surface."
+      "feature": "tier_event_stats() zeroed stub",
+      "location": "src/lib.rs:2665-2668",
+      "trait_method": "interfaces/src/idispatcher.rs:564",
+      "added_by": "4659626b",
+      "direction": "backfill",
+      "proposal": "amend FR-008 to note the IDispatcher interface now includes tier_event_stats(), satisfied by a zeroed stub (dispatcher-p2p does no tier-movement tracking)."
     }
   ],
-  "conflicts": []
+  "human_decision_carried": [
+    {
+      "item": "cold_staging_slots / cold_staging_buf_bytes",
+      "location": "interfaces/src/idispatcher.rs:84,87,109,110",
+      "status": "still dead on dispatcher-p2p surface; no src references; requires interfaces/** + src/** change; out of sync scope"
+    }
+  ],
+  "out_of_scope": [
+    "memcpy_batch_async in #[cfg(test)] MockGpuServices (src/lib.rs:3424+) — test mock keep-up with IGpuServices trait; no requirement needed",
+    "plan.md source-layout/bench-name staleness (minor, carried)"
+  ],
+  "already_backfilled_2026_08_20": ["SC-006 reword", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023"]
 }
