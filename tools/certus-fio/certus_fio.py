@@ -155,17 +155,30 @@ class PhaseResult:
         self.phase_id = phase_id
         self.operation = operation
         self.latencies = []
+        self.completed_ops = 0
         self.errors = 0
         self.total_bytes = 0
         self.wall_start = 0.0
         self.wall_end = 0.0
+        self.operation_intervals = []
+        self.operation_overlap = {}
         self._measured_elapsed = 0.0
         self._lock = threading.Lock()
 
-    def record(self, latency, nbytes):
+    def record(self, latency, nbytes, started_at=None, ended_at=None, nops=1):
         with self._lock:
             self.latencies.append(latency)
+            self.completed_ops += nops
             self.total_bytes += nbytes
+            if started_at is not None and ended_at is not None:
+                start = float(started_at)
+                end = float(ended_at)
+                if end >= start:
+                    self.operation_intervals.append((start, end))
+                    if self.wall_start == 0.0 or start < self.wall_start:
+                        self.wall_start = start
+                    if end > self.wall_end:
+                        self.wall_end = end
 
     def record_error(self):
         with self._lock:
@@ -296,6 +309,7 @@ class BenchRunner:
                     keys = self._get_keys(ks_name, 0, 1)
                     entries = [(k, [region]) for k in keys]
                     oks = self.ring.populate(entries)
+                    self._all_keys.update(keys)
                     if not all(oks):
                         print(f"  WARNING: {sum(1 for o in oks if not o)}/{len(oks)} populate failures in setup")
                 else:
@@ -304,6 +318,7 @@ class BenchRunner:
                         keys = self._get_keys(ks_name, aid, max_actors)
                         entries = [(k, [region]) for k in keys]
                         oks = self.ring.populate(entries)
+                        self._all_keys.update(keys)
                         if not all(oks):
                             print(f"  WARNING: populate failures for actor {aid}")
 
@@ -381,11 +396,23 @@ class BenchRunner:
                             oks = self.ring.populate(entries)
                             t1 = time.perf_counter()
                             if all(oks):
-                                result.record((t1 - t0) / len(batch_keys), object_bytes * len(batch_keys))
+                                result.record(
+                                    (t1 - t0) / len(batch_keys),
+                                    object_bytes * len(batch_keys),
+                                    t0,
+                                    t1,
+                                    nops=len(batch_keys),
+                                )
                             else:
                                 ok_count = sum(1 for o in oks if o)
                                 if ok_count:
-                                    result.record((t1 - t0) / len(batch_keys), object_bytes * ok_count)
+                                    result.record(
+                                        (t1 - t0) / len(batch_keys),
+                                        object_bytes * ok_count,
+                                        t0,
+                                        t1,
+                                        nops=ok_count,
+                                    )
                                 result.record_error()
                         except RingError:
                             result.record_error()
@@ -408,11 +435,23 @@ class BenchRunner:
                                 _libcudart.cudaDeviceSynchronize()
                                 t1 = time.perf_counter()
                                 if all(oks):
-                                    result.record((t1 - t0) / len(batch_keys), object_bytes * len(batch_keys))
+                                    result.record(
+                                        (t1 - t0) / len(batch_keys),
+                                        object_bytes * len(batch_keys),
+                                        t0,
+                                        t1,
+                                        nops=len(batch_keys),
+                                    )
                                 else:
                                     ok_count = sum(1 for o in oks if o)
                                     if ok_count:
-                                        result.record((t1 - t0) / len(batch_keys), object_bytes * ok_count)
+                                        result.record(
+                                            (t1 - t0) / len(batch_keys),
+                                            object_bytes * ok_count,
+                                            t0,
+                                            t1,
+                                            nops=ok_count,
+                                        )
                                     result.record_error()
                             except RingError:
                                 result.record_error()
@@ -428,7 +467,7 @@ class BenchRunner:
                                 _libcudart.cudaDeviceSynchronize()
                                 t1 = time.perf_counter()
                                 if oks and oks[0]:
-                                    result.record(t1 - t0, object_bytes)
+                                    result.record(t1 - t0, object_bytes, t0, t1)
                                 else:
                                     result.record_error()
                             except RingError:
@@ -443,7 +482,7 @@ class BenchRunner:
                         try:
                             self.ring.remove(batch_keys)
                             t1 = time.perf_counter()
-                            result.record(t1 - t0, 0)
+                            result.record(t1 - t0, 0, t0, t1, nops=len(batch_keys))
                         except RingError:
                             result.record_error()
         finally:
@@ -544,17 +583,52 @@ class BenchRunner:
         if len(ready_latch) < len(threads):
             print(f"  WARNING: only {len(ready_latch)}/{len(threads)} actors ready (timeout)")
 
-        wall_start = time.perf_counter()
-        for r in results:
-            r.wall_start = wall_start
         start_event.set()
 
         for t in threads:
             t.join()
-        wall_end = time.perf_counter()
-        for r in results:
-            r.wall_end = wall_end
+        self._record_operation_overlaps(results)
         return results
+
+    @staticmethod
+    def _interval_overlap(left_intervals, right_intervals):
+        """Return exact cross-operation overlap count and duration."""
+
+        left = sorted(left_intervals)
+        right = sorted(right_intervals)
+        left_index = 0
+        right_index = 0
+        count = 0
+        duration = 0.0
+        while left_index < len(left) and right_index < len(right):
+            left_start, left_end = left[left_index]
+            right_start, right_end = right[right_index]
+            overlap = min(left_end, right_end) - max(left_start, right_start)
+            if overlap > 0:
+                count += 1
+                duration += overlap
+            if left_end <= right_end:
+                left_index += 1
+            else:
+                right_index += 1
+        return count, duration
+
+    @classmethod
+    def _record_operation_overlaps(cls, results):
+        for left_index, left in enumerate(results):
+            for right in results[left_index + 1:]:
+                count, duration = cls._interval_overlap(
+                    left.operation_intervals,
+                    right.operation_intervals,
+                )
+                left.operation_overlap[right.operation] = {
+                    "count": count,
+                    "duration_s": duration,
+                }
+                right.operation_overlap[left.operation] = {
+                    "count": count,
+                    "duration_s": duration,
+                }
 
     def run(self) -> dict:
         print(f"\n{'='*70}")
@@ -621,9 +695,25 @@ class BenchRunner:
                     for j, new_r in enumerate(phase_results):
                         existing_r = all_results[phase_offset + j]
                         existing_r.latencies.extend(new_r.latencies)
+                        existing_r.completed_ops += new_r.completed_ops
                         existing_r.total_bytes += new_r.total_bytes
                         existing_r.errors += new_r.errors
                         existing_r._measured_elapsed += new_r.elapsed
+                        existing_r.operation_intervals.extend(new_r.operation_intervals)
+                        if new_r.wall_start and (
+                            not existing_r.wall_start
+                            or new_r.wall_start < existing_r.wall_start
+                        ):
+                            existing_r.wall_start = new_r.wall_start
+                        existing_r.wall_end = max(existing_r.wall_end, new_r.wall_end)
+                        for peer, overlap in new_r.operation_overlap.items():
+                            aggregate = existing_r.operation_overlap.setdefault(
+                                peer, {"count": 0, "duration_s": 0.0}
+                            )
+                            aggregate["count"] += int(overlap.get("count", 0))
+                            aggregate["duration_s"] += float(
+                                overlap.get("duration_s", 0.0)
+                            )
                         iter_elapsed += new_r.elapsed
                     phase_offset += len(phase_results)
                     if phase.get("barrier_after", False):
@@ -647,7 +737,7 @@ class BenchRunner:
                 s = sorted(r.latencies)
                 p99 = s[min(int(len(s) * 0.99), len(s) - 1)]
                 gbps = r.throughput_gbps
-                ops = len(r.latencies)
+                ops = r.completed_ops
                 print(f"  {r.phase_id}/{r.operation}:")
                 print(f"    ops={ops}  errors={r.errors}")
                 print(f"    avg={avg*1e6:.1f}us  p50={p50*1e6:.1f}us  p99={p99*1e6:.1f}us")
@@ -657,7 +747,14 @@ class BenchRunner:
                     "ops": ops, "errors": r.errors,
                     "avg_us": avg * 1e6, "p50_us": p50 * 1e6, "p99_us": p99 * 1e6,
                     "throughput_gbps": gbps, "total_bytes": r.total_bytes, "wall_s": r.elapsed,
+                    # Bounds come from real successful operation calls, not a
+                    # shared phase timestamp. ``operation_overlap`` is the
+                    # independent cross-direction concurrency proof.
+                    "wall_start_s": r.wall_start,
+                    "wall_end_s": r.wall_end,
+                    "operation_overlap": r.operation_overlap,
                 }
+            report["_metadata"] = {"iterations": iteration}
             return report
         finally:
             print(f"\n  Cleanup: removing {len(self._all_keys)} keys...")
