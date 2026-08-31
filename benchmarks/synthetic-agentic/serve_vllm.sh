@@ -76,8 +76,18 @@ HF_OVERRIDES=${HF_OVERRIDES-$_def_hf_overrides}
 # parser is MODEL-FAMILY-SPECIFIC. Default per family below; override with
 # TOOL_CALL_PARSER=<name>, or TOOL_CALL_PARSER="" to disable the flags entirely
 # (e.g. a non-tool workload driven through this same launcher).
+#
+# Llama-3 uses `hermes`, NOT `llama3_json`: the llama3_json parser hard-requires
+# the `<|python_tag|>` bot token, which exists only in Llama-3.1+ tokenizers, so
+# on Llama-3.0-Instruct it dies at request time with HTTP 500 ("Llama3JsonTool
+# Parser could not locate the bot token '<|python_tag|>'"). The hermes parser
+# only needs the tokenizer object (it matches <tool_call>...</tool_call> text),
+# so it initialises on the 3.0 tokenizer; for FORCED tool_choice=function vLLM
+# guided-decodes the output into that shape and hermes extracts it (verified:
+# forced call -> 200 with tool_calls populated). Set TOOL_CALL_PARSER=llama3_json
+# explicitly if you serve a Llama-3.1+ model.
 case "${MODEL}" in
-    *Llama-3*|*Meta-Llama-3*) _def_tool_parser='llama3_json' ;;
+    *Llama-3*|*Meta-Llama-3*) _def_tool_parser='hermes' ;;
     *granite*|*Granite*)      _def_tool_parser='granite' ;;
     *)                        _def_tool_parser='' ;;
 esac
