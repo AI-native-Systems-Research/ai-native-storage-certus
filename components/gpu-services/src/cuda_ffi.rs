@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use std::ffi::c_void;
-use std::os::raw::{c_char, c_int, c_uint};
+use std::os::raw::{c_char, c_int};
 
 /// CUDA error codes (subset).
 pub type cudaError_t = c_int;
@@ -70,9 +70,6 @@ pub const CUDA_MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
 pub const CUDA_HOST_ALLOC_DEFAULT: c_int = 0;
 pub const CUDA_HOST_ALLOC_MAPPED: c_int = 2;
 
-/// cudaStreamCreateWithFlags flags.
-pub const CUDA_STREAM_NON_BLOCKING: c_uint = 0x01;
-
 /// Opaque CUDA stream handle.
 pub type CudaStream = *mut c_void;
 
@@ -117,7 +114,6 @@ extern "C" {
     pub fn cudaDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, device: c_int)
         -> cudaError_t;
     pub fn cudaStreamCreate(stream: *mut CudaStream) -> cudaError_t;
-    pub fn cudaStreamCreateWithFlags(stream: *mut CudaStream, flags: c_uint) -> cudaError_t;
     pub fn cudaStreamQuery(stream: CudaStream) -> cudaError_t;
     pub fn cudaStreamSynchronize(stream: CudaStream) -> cudaError_t;
     pub fn cudaStreamDestroy(stream: CudaStream) -> cudaError_t;
