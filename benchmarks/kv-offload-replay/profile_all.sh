@@ -924,6 +924,16 @@ SA_PORT="${SA_PORT:-8000}"
 SA_MAX_MODEL_LEN="${SA_MAX_MODEL_LEN:-12288}"
 [[ "$MAX_MODEL_LEN" -gt "$SA_MAX_MODEL_LEN" ]] && SA_MAX_MODEL_LEN="$MAX_MODEL_LEN"
 
+# synthetic-agentic is a chat + tool-calling workload, so its server needs a model
+# with a chat template AND tool support. The suite's default base
+# NousResearch/Meta-Llama-3-8B has neither (vLLM 400s on the chat template and on
+# forced tool_choice), so this arm defaults to the -Instruct variant. It shares
+# the base tokenizer/vocab, so the deterministic replay DAG (sized by token count)
+# is unchanged; only the served model differs. An explicit --model wins; force the
+# base model here with SA_MODEL=NousResearch/Meta-Llama-3-8B if you really want it.
+SA_MODEL="${SA_MODEL:-$MODEL}"
+[[ "$SA_MODEL" == "NousResearch/Meta-Llama-3-8B" ]] && SA_MODEL="NousResearch/Meta-Llama-3-8B-Instruct"
+
 # Map a profile_all variant -> serve_vllm CONNECTOR arm (empty = unsupported).
 sa_connector_for() {
     case "$1" in
@@ -942,7 +952,7 @@ sa_serve_env() {  # connector -> prints NAME=VALUE lines
     local connector="$1"
     printf '%s\n' \
         "CONNECTOR=${connector}" \
-        "MODEL=${MODEL}" \
+        "MODEL=${SA_MODEL}" \
         "PORT=${SA_PORT}" \
         "GPU=${GPU}" \
         "MAX_MODEL_LEN=${SA_MAX_MODEL_LEN}" \
@@ -1023,7 +1033,7 @@ run_server_bench() {  # variant
     command podman run --rm --network host \
         --pids-limit=0 \
         -e "BASE_URL=http://localhost:${SA_PORT}" \
-        -e "MODEL=${MODEL}" \
+        -e "MODEL=${SA_MODEL}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         -v "${LOGDIR}:/results:z" \
         "$SA_CLIENT_IMG" run 2>&1 | tee "$f"

@@ -32,7 +32,15 @@ set -euo pipefail
 CONNECTOR=${CONNECTOR:-none}
 
 # ---- model / server params (defaults match the rest of the KV-offload suite) --
-MODEL=${MODEL:-NousResearch/Meta-Llama-3-8B}
+# synthetic_agentic is a chat + tool-calling workload (api.type=chat, sessions
+# issue forced tool_choice=function calls), so the served model MUST have a chat
+# template and be servable with a tool-call parser. The BASE NousResearch/
+# Meta-Llama-3-8B has NO chat template (vLLM 400s: "default chat template is no
+# longer allowed") and no tool support, so default to the -Instruct variant. It
+# shares the base tokenizer/vocab, so token-count sizing (and the deterministic
+# replay DAG) is identical; only the served model differs. (The ShareGPT / long-
+# doc-qa in-process arms keep the base model — they use the completions path.)
+MODEL=${MODEL:-NousResearch/Meta-Llama-3-8B-Instruct}
 PORT=${PORT:-8000}
 GPU=${GPU:-all}                          # podman CDI device selector (all | 0 | ...)
 DTYPE=${DTYPE:-bfloat16}
@@ -60,6 +68,20 @@ case "${MODEL}" in
     *)                              _def_hf_overrides='' ;;
 esac
 HF_OVERRIDES=${HF_OVERRIDES-$_def_hf_overrides}
+
+# Tool-call parser: synthetic_agentic sessions issue forced tool calls
+# (tool_choice=function "..."). vLLM rejects those with HTTP 400
+# ("tool_choice=function ... requires --tool-call-parser to be set") unless the
+# server is launched with a tool-call parser AND --enable-auto-tool-choice. The
+# parser is MODEL-FAMILY-SPECIFIC. Default per family below; override with
+# TOOL_CALL_PARSER=<name>, or TOOL_CALL_PARSER="" to disable the flags entirely
+# (e.g. a non-tool workload driven through this same launcher).
+case "${MODEL}" in
+    *Llama-3*|*Meta-Llama-3*) _def_tool_parser='llama3_json' ;;
+    *granite*|*Granite*)      _def_tool_parser='granite' ;;
+    *)                        _def_tool_parser='' ;;
+esac
+TOOL_CALL_PARSER=${TOOL_CALL_PARSER-$_def_tool_parser}
 
 # ---- connector params -----------------------------------------------------
 CPU_BYTES=${CPU_BYTES:-17179869184}                    # cpu / tiered primary host-RAM tier
@@ -190,6 +212,7 @@ start_server() {
         --load-format "${LOAD_FORMAT}" \
         --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}" \
         ${HF_OVERRIDES:+--hf-overrides "${HF_OVERRIDES}"} \
+        ${TOOL_CALL_PARSER:+--enable-auto-tool-choice --tool-call-parser "${TOOL_CALL_PARSER}"} \
         --max-model-len "${MAX_MODEL_LEN}" \
         --max-num-seqs "${MAX_NUM_SEQS}" \
         --gpu-memory-utilization "${GPU_MEM_UTIL}" \

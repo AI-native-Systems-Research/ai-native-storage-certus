@@ -11,7 +11,7 @@
 # Run a workload against an already-running server (host networking so localhost
 # reaches a --network host vLLM server):
 #   podman run --rm --network host \
-#       -e BASE_URL=http://localhost:8000 -e MODEL=NousResearch/Meta-Llama-3-8B \
+#       -e BASE_URL=http://localhost:8000 -e MODEL=NousResearch/Meta-Llama-3-8B-Instruct \
 #       -v $HOME/.cache/huggingface:/root/.cache/huggingface:z \
 #       -v $PWD/results:/results:z \
 #       synthetic-agentic-client:latest run
@@ -60,7 +60,7 @@ ENV PYTHONUNBUFFERED=1 \
     TOKENIZERS_PARALLELISM=false \
     CONFIG_TMPL=/config/synthetic_agentic.yaml \
     RESULTS_DIR=/results \
-    MODEL=NousResearch/Meta-Llama-3-8B \
+    MODEL=NousResearch/Meta-Llama-3-8B-Instruct \
     BASE_URL=http://localhost:8000
 
 ENTRYPOINT ["/usr/local/bin/inference-perf-entrypoint"]
