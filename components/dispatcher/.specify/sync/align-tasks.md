@@ -1,20 +1,20 @@
-# Align Tasks — dispatcher (Phase B)
+# Align Tasks — dispatcher (code-side follow-ups)
+Generated: 2026-08-31 (sync on branch `sync-tmp`)
 
-Generated: 2026-08-20
-Source: `drift-report.{json,md}` (3 drifted, 0 not-implemented, 1 unspecced group)
+This sync produced **no ALIGN items** (all six findings were code-authoritative
+BACKFILL/BACKFILL-UNSPECCED, resolved by `specs/**` edits). The item below is a
+documentation-only source cleanup that is outside this sync's editable scope
+(`.specify/sync/**` + `specs/**`), recorded here for a follow-up source pass.
 
-**No ALIGN tasks this run.**
+## T1 — Remove stale "gRPC handler" source comments — priority: low
 
-Every drift item was classified by reading the code at its `location`, and in every case the
-code is the working, intentional reality (spec-lag / doc-lag), not a behavioral bug:
-
-- **US-011 / FR-039** (per-thread queue depth) — code uses `queue_depth = 128` (`src/lib.rs:2217`),
-  which already matches FR-039 step (5) and FR-019. The stale text was in the User Story 11 narrative
-  and acceptance scenario 3 → resolved by **BACKFILL** to the spec.
-- **CLAUDE.md stale crate path** and **CLAUDE.md stale `-v2` names** — documentation-only drift; code
-  and build are correct → **BACKFILL** direction, but the target (`CLAUDE.md`) is outside this sync's
-  editable scope (`.specify/sync/` and `specs/` only), so they are recorded in `proposals.*` and
-  deferred to a follow-up doc pass, not applied.
-- **Unspecced DI/test hooks** — working public inherent API → **BACKFILL-UNSPECCED** (new FR-057 + SC-016).
-
-No item genuinely violates a correct, agreed spec requirement, so no code-alignment task is required.
+- **File**: `components/dispatcher/src/lib.rs` (~line 2983, the null-stream branch of
+  `copy_gpu_to_memory_async`; check for a second occurrence nearby).
+- **What**: Two comments still say "e.g. gRPC handler" when describing the caller that
+  passes a null stream. gRPC was removed in `97e26738` (shm-queue is the sole control
+  transport). Reword to "e.g. the shm-queue control handler" or drop the transport-specific
+  example.
+- **Why**: Keeps source comments consistent with FR-040 / FR-042 (now shm-queue) and the
+  `97e26738` transport change. No behavior impact.
+- **Scope note**: Not applied by this sync — source files are outside the sync editing
+  scope. Do in a normal source edit / PR.
