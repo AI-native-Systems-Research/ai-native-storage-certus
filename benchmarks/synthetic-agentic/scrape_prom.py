@@ -14,8 +14,13 @@ on an interval and writes the exact same ``[prom] round N: k=v …`` lines (valu
 are per-interval DELTAS, which render sums to whole-run totals — see its
 ``_active_seconds`` / family-rollup logic). The metric→key mapping is identical
 to run_multiturn_async._prom_key (drop the ``vllm:`` prefix and a trailing
-``_total``), and only the renderer's curated counter keys are emitted, so the
-output is byte-compatible with what the batched/async drivers produce.
+``_total``), so the output is byte-compatible with what the batched/async drivers
+produce.
+
+We deliberately keep NO curated counter list here (nothing to drift): every vLLM
+``*_total`` counter is emitted, and render_kvprofile's parser already keeps only
+the keys it plots (``if k in COUNTER_KEYS`` — tools/render_kvprofile.py) and
+ignores the rest. Histograms/gauges are skipped by the ``_total`` filter.
 
 A baseline is taken at startup and NOT emitted, so the summed deltas equal
 (final − baseline) = the movement during the driven window, excluding server
@@ -34,25 +39,6 @@ import signal
 import sys
 import time
 import urllib.request
-
-# The renderer's curated counter keys (tools/render_kvprofile.py COUNTERS), in the
-# bare form after _prom_key normalisation. Keep in sync with that list; anything
-# else on /metrics is ignored. Tier-movement counters (tier_*) are NOT here — they
-# come from the certus-server's own log, not vLLM /metrics.
-COUNTER_KEYS = {
-    "prompt_tokens",
-    "prompt_tokens_cached",
-    "generation_tokens",
-    "prefix_cache_queries",
-    "prefix_cache_hits",
-    "external_prefix_cache_queries",
-    "external_prefix_cache_hits",
-    "kv_offload_store_bytes",
-    "kv_offload_load_bytes",
-    "ssd_read_bytes",
-    "ssd_write_bytes",
-    "num_preemptions",
-}
 
 # A Prometheus exposition sample line: `name{labels} value` (labels optional).
 # vLLM prefixes every metric with `vllm:`; counters carry a `_total` suffix.
@@ -73,11 +59,13 @@ def _prom_key(name: str) -> str:
 
 
 def scrape(url: str, timeout: float) -> dict:
-    """Fetch /metrics once and return {curated_key: summed_value}.
+    """Fetch /metrics once and return {key: summed_value} for every counter.
 
-    Sums across label sets (a metric may appear once per model/engine), keeping
-    only keys the renderer plots. A failed fetch returns {} so a transient blip
-    (server busy, mid-teardown) just skips a tick instead of killing the poll."""
+    Keeps only ``*_total`` samples (the Prometheus counter convention — this drops
+    histogram buckets/sums and gauges) and sums each metric across its label sets
+    (a metric may appear once per model/engine/finish-reason). No curation beyond
+    that: render_kvprofile filters to the keys it plots. A failed fetch returns {}
+    so a transient blip (server busy, mid-teardown) just skips a tick."""
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             text = resp.read().decode("utf-8", "replace")
@@ -91,13 +79,14 @@ def scrape(url: str, timeout: float) -> dict:
         m = _SAMPLE_RE.match(line)
         if not m:
             continue
-        key = _prom_key(m.group(1))
-        if key not in COUNTER_KEYS:
+        raw = m.group(1)
+        if not raw.endswith("_total"):    # counters only; skip histograms/gauges
             continue
         try:
             val = float(m.group(3))
         except ValueError:
             continue
+        key = _prom_key(raw)
         out[key] = out.get(key, 0.0) + val
     return out
 
