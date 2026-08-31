@@ -921,6 +921,13 @@ SA_PORT="${SA_PORT:-8000}"
 # SERVER (they belong to the connector, not the HTTP client), hence the scrape.
 SA_PROM="${SA_DIR}/scrape_prom.py"
 SA_PROM_INTERVAL="${SA_PROM_INTERVAL:-10}"
+# Companion host sampler for the Tiered-CPU-FS arm: vLLM's /metrics carries the
+# connector's LOGICAL byte movement but not physical device I/O, so ssd_read_bytes/
+# ssd_write_bytes stay empty. This diffs /proc/diskstats for the FS-tier device and
+# emits those two keys as [prom] lines (same interval, folded into the variant log).
+# FS-tier only — the certus arm's SPDK device bypasses the kernel block layer and is
+# invisible to diskstats (use tools/certus-iostat-poll.py / GetIoStats there).
+SA_DISK="${SA_DIR}/sample_diskstats.py"
 # synthetic-agentic sessions run long and compact mid-session above 8500 tokens, so
 # the 8192 in-process default is too small here (peak pre-compaction context is
 # ~8500 + one input turn ~= 11K). But max_model_len also sets a HARD GPU-KV floor:
@@ -1075,6 +1082,21 @@ run_server_bench() {  # variant
         warn "${variant} (synthetic-agentic): no ${SA_PROM} or python3 — /metrics NOT scraped (render_kvprofile will have no counters)"
     fi
 
+    # Physical device I/O for the FS-tier arm (not on vLLM /metrics — see SA_DISK).
+    # Diffs /proc/diskstats for the device backing $SHARED_FS and emits
+    # ssd_read_bytes/ssd_write_bytes [prom] lines, folded into $f alongside the
+    # /metrics rounds. tiered-only; certus SPDK I/O is invisible to diskstats.
+    local disk_sidecar="${LOGDIR}/${variant}.disk.log"
+    local disk_pid=""
+    if [[ "$connector" == "tiered" && -f "$SA_DISK" ]] && command -v python3 >/dev/null 2>&1; then
+        : > "$disk_sidecar"
+        python3 "$SA_DISK" \
+            --mount "$SHARED_FS" \
+            --interval "$SA_PROM_INTERVAL" \
+            --out "$disk_sidecar" >> "${LOGDIR}/iostat-${connector}.log" 2>&1 &
+        disk_pid="$!"
+    fi
+
     log "${variant} (synthetic-agentic): driving load with inference-perf -> ${f}"
     local start="$SECONDS"
     # --pids-limit=0 (unlimited): the load generator forks one worker process per
@@ -1105,6 +1127,17 @@ run_server_bench() {  # variant
             log "${variant} (synthetic-agentic): folded $(grep -c '^\[prom\]' "$prom_sidecar" 2>/dev/null || echo 0) /metrics rounds into $(basename "$f")"
         else
             warn "${variant} (synthetic-agentic): /metrics scrape produced no rounds (see scrape-${connector}.log)"
+        fi
+    fi
+    # Fold the FS-tier disk sampler (ssd_read_bytes/ssd_write_bytes) the same way.
+    if [[ -n "$disk_pid" ]]; then
+        kill -TERM "$disk_pid" 2>/dev/null || true
+        wait "$disk_pid" 2>/dev/null || true
+        if [[ -s "$disk_sidecar" ]]; then
+            cat "$disk_sidecar" >> "$f"
+            log "${variant} (synthetic-agentic): folded $(grep -c '^\[prom\]' "$disk_sidecar" 2>/dev/null || echo 0) diskstats rounds into $(basename "$f")"
+        else
+            warn "${variant} (synthetic-agentic): diskstats sampler produced no rounds (see iostat-${connector}.log)"
         fi
     fi
 
