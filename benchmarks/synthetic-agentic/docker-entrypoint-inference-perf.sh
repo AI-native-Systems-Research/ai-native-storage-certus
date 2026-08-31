@@ -21,12 +21,19 @@ BASE_URL=${BASE_URL:-http://localhost:8000}
 # overflowing the GPU KV budget, in which case the offload tier stays cold and all
 # backends look alike — keep N large enough to spill when comparing backends.
 NUM_SESSIONS=${NUM_SESSIONS:-200}
+# Per-session turn range (data.synthetic_agentic.turns_per_session = uniform(min,max)).
+# profile_all maps its --min-turns/--max-turns onto these; default to the committed
+# 3..8 when unset so a bare container run matches the checked-in config.
+SA_TURNS_MIN=${SA_TURNS_MIN:-3}
+SA_TURNS_MAX=${SA_TURNS_MAX:-8}
 
 mkdir -p "${RESULTS_DIR}"
 rendered="${RESULTS_DIR}/effective-config.yaml"
 # Substitute ONLY our placeholders (leave any other $... in the yaml intact).
 BASE_URL="${BASE_URL}" MODEL="${MODEL}" NUM_SESSIONS="${NUM_SESSIONS}" \
-    envsubst '${BASE_URL} ${MODEL} ${NUM_SESSIONS}' < "${CONFIG_TMPL}" > "${rendered}"
+    SA_TURNS_MIN="${SA_TURNS_MIN}" SA_TURNS_MAX="${SA_TURNS_MAX}" \
+    envsubst '${BASE_URL} ${MODEL} ${NUM_SESSIONS} ${SA_TURNS_MIN} ${SA_TURNS_MAX}' \
+        < "${CONFIG_TMPL}" > "${rendered}"
 
 mode=${1:-run}
 case "${mode}" in

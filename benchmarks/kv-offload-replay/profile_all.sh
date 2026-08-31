@@ -227,13 +227,15 @@ Flags (all optional; defaults shown):
                                fixed seed = the fairness guarantee; num_sessions there,
                                NOT --num-convs). Needs the client image (--rebuild builds
                                it) and MAX_MODEL_LEN>8192 (defaults to 32768 here).
-  --min-turns <n>              Min human turns for the sharegpt workload; 2 selects the
-                               full corpus (the loader's >=2-turn floor; 1 = legacy
-                               alias), 12 the 450x12 subset. Implies --workload
-                               sharegpt. Forwarded as SHAREGPT_MIN_TURNS. [default 12]
-  --max-turns <n>              Max human turns; must match --min-turns (2 or 12). Implies
-                               --workload sharegpt; empty mirrors --min-turns.
-                               Forwarded as SHAREGPT_MAX_TURNS. [default = --min-turns]
+  --min-turns <n>              sharegpt: min human turns; 2 selects the full corpus (the
+                               loader's >=2-turn floor; 1 = legacy alias), 12 the 450x12
+                               subset; implies --workload sharegpt. synthetic-agentic:
+                               min of the per-session turn range (turns_per_session),
+                               any value. Forwarded as SHAREGPT_MIN_TURNS. [sharegpt 12; SA yaml 3]
+  --max-turns <n>              sharegpt: max human turns, must match --min-turns (2 or 12);
+                               implies --workload sharegpt. synthetic-agentic: max of the
+                               per-session turn range (may differ from --min-turns). Empty
+                               mirrors --min-turns. Forwarded as SHAREGPT_MAX_TURNS. [= --min-turns; SA yaml 8]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -956,6 +958,16 @@ if [[ -z "$SA_NUM_SESSIONS" ]]; then
     if [[ "${NUM_CONVS:-0}" -gt 0 ]]; then SA_NUM_SESSIONS="$NUM_CONVS"; else SA_NUM_SESSIONS=200; fi
 fi
 
+# synthetic-agentic reuses --min-turns/--max-turns as the PER-SESSION turn range.
+# SA's turns_per_session is a uniform(min,max), so the two flags map straight onto
+# it — and, unlike the ShareGPT corpus selectors, they may legitimately differ. Axis
+# split: --num-convs = how many sessions, --min/--max-turns = how long each one is.
+# Unset => the yaml default uniform(3,8); max mirrors min when only --min-turns is
+# given (matches the ShareGPT mirroring). The 12/12|2/2 constraint is sharegpt-only
+# (guarded above), so SA accepts any min<=max.
+SA_TURNS_MIN="${SHAREGPT_MIN_TURNS:-3}"
+SA_TURNS_MAX="${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-8}}"
+
 # Map a profile_all variant -> serve_vllm CONNECTOR arm (empty = unsupported).
 sa_connector_for() {
     case "$1" in
@@ -1075,6 +1087,8 @@ run_server_bench() {  # variant
         -e "BASE_URL=http://localhost:${SA_PORT}" \
         -e "MODEL=${SA_MODEL}" \
         -e "NUM_SESSIONS=${SA_NUM_SESSIONS}" \
+        -e "SA_TURNS_MIN=${SA_TURNS_MIN}" \
+        -e "SA_TURNS_MAX=${SA_TURNS_MAX}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         -v "${LOGDIR}:/results:z" \
         "$SA_CLIENT_IMG" run 2>&1 | tee "$f"
