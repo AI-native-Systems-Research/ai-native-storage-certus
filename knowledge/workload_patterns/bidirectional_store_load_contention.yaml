@@ -15,6 +15,10 @@ parameters:
     type: integer
     range: [8, 256]
     default: 64
+  batch_size:
+    type: integer
+    range: [1, 256]
+    default: 16
   block_size:
     type: integer
     range: [1, 64]
@@ -59,10 +63,12 @@ phases:
         keys: store_targets
         order: sequential
         repeat: objects_per_actor
+        batch_size: batch_size
       - op: load
         keys: load_sources
         order: sequential
         repeat: objects_per_actor
+        batch_size: batch_size
     barrier_after: false
 measure:
   - phase: concurrent-bidir
