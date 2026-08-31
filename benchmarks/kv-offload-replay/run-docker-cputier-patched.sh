@@ -15,7 +15,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
 IMAGE="${IMAGE:-certus-offload-bench-fix026}"
 CPU_BYTES="${CPU_BYTES:-$((8 * (1 << 30)))}"
-SHM_BYTES="${SHM_BYTES:-$((CPU_BYTES + 4 * (1 << 30)))}"
+# Under TP>1 each of the N in-container workers allocates its own CPU-tier region
+# in /dev/shm, so the shm mount must hold N copies (+headroom) or the entrypoint's
+# populate fails with "Errno 14 Bad address". CPU_BYTES stays per-worker.
+SHM_BYTES="${SHM_BYTES:-$(( CPU_BYTES * ${TENSOR_PARALLEL_SIZE:-1} + 4 * (1 << 30) ))}"
 DISK_DIR_HOST="${DISK_DIR_HOST:-/mnt/certus1/kv-fs-tier}"
 DISK_DIR_CTR="/workspace/kv-fs-tier"
 DISK_READ_THREADS="${DISK_READ_THREADS:-16}"

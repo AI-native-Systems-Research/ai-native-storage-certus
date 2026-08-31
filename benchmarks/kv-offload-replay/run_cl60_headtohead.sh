@@ -18,6 +18,14 @@ STAMP="${STAMP:-$(date +%Y%m%d_%H%M%S)}"
 NUM_CONVS="${NUM_CONVS:-1000}"
 ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-60}"
 MAX_ROUNDS="${MAX_ROUNDS:-0}"
+# TENSOR_PARALLEL_SIZE spans each vLLM engine across N GPUs. Default 1 reproduces
+# the 1-GPU run in project_kvoffload_closedloop_60sess_1000conv exactly; set it to
+# 2 to span both GPUs (the only variable changed vs that run). The shmq arm needs
+# more server channels under TP: TP=2 → 3 mailbox slots (scheduler + 2 workers),
+# so pass CHANNELS=64 alongside TENSOR_PARALLEL_SIZE=2 (gives each slot ~21, >> the
+# ~5 threads/slot actually used). CHANNELS defaults to 32 to match the baseline.
+TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
+CHANNELS="${CHANNELS:-32}"
 
 CPUTIER_OUT="cl60-cputier-${STAMP}"
 SHMQ_OUT="cl60-shmq-${STAMP}"
@@ -26,6 +34,7 @@ echo "H2H_START $(date -Is)  num_convs=${NUM_CONVS}  active_sessions=${ACTIVE_SE
 echo "H2H_START cputier -> ${CPUTIER_OUT}"
 RUNS=1 NUM_CONVS="$NUM_CONVS" MAX_ROUNDS="$MAX_ROUNDS" \
   WORKLOAD_MODE=async ACTIVE_SESSIONS="$ACTIVE_SESSIONS" \
+  TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
   DATASET_HOST="$DS" \
   bash ./run_cputier_patched_stability.sh "$CPUTIER_OUT"
 echo "H2H_MID cputier done rc=$?  $(date -Is)"
@@ -35,6 +44,7 @@ sleep 5
 echo "H2H_START shmq -> ${SHMQ_OUT}"
 RUNS=1 NUM_CONVS="$NUM_CONVS" MAX_ROUNDS="$MAX_ROUNDS" \
   WORKLOAD_MODE=async ACTIVE_SESSIONS="$ACTIVE_SESSIONS" \
+  TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" CHANNELS="$CHANNELS" \
   DATASET_HOST="$DS" \
   bash ./run_certus_stability.sh "$SHMQ_OUT"
 echo "H2H_DONE shmq done rc=$?  $(date -Is)"

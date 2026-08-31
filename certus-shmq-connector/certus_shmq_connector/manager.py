@@ -30,7 +30,7 @@ from .compat import (
     PrepareStoreOutput,
 )
 
-from .mediums import BlockLocation, CertusLoadStoreSpec
+from .mediums import BlockLocation, CertusLoadStoreSpec, denamespace_key, ns_key
 from .ring import REASON_REMOVED
 
 
@@ -70,9 +70,17 @@ def _session_id_to_u64(req_context) -> int:
 class ShmqCertusOffloadingManager(OffloadingManager):
     """Manager delegating to a remote certus-server via a shared-memory ring."""
 
-    def __init__(self, ring, block_size_bytes: int):
+    def __init__(self, ring, block_size_bytes: int, world_size: int = 1):
         self._ring = ring
         self._block_size_bytes = int(block_size_bytes)
+        # Number of TP shards. Under TP>1 each logical vLLM block is physically W
+        # separate per-rank entries in the shared server (one head-shard each,
+        # under keys namespaced by rank — see mediums.ns_key). This scheduler-side
+        # manager mirrors what the W workers store: every server op expands a
+        # logical key K into {ns_key(K, r) : r in range(W)}, and residency is
+        # AND-across-ranks (a block is loadable only if EVERY shard is present).
+        # W==1 → ns_key is identity and each expansion is [K] → exact baseline.
+        self._world_size = max(1, int(world_size))
         # Cumulative count of blocks we could not offload because the server's
         # memory tier was saturated (Reserve failed). Logged in throttled
         # summaries rather than per-request, so a persistently-full tier does
@@ -100,6 +108,29 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         resolve it). Reserve sizes are per-call, so changing this affects only
         subsequent stores."""
         self._block_size_bytes = int(block_size_bytes)
+
+    # ── per-rank key expansion (TP>1) ──
+
+    def _ns_all(self, logical_key: int) -> list[int]:
+        """The W physical per-rank server keys for one logical block. At W==1
+        this is ``[logical_key]`` (ns_key is identity) → exact baseline."""
+        return [ns_key(logical_key, r, self._world_size) for r in range(self._world_size)]
+
+    def _check_all_present(self, logical_keys: list[int]) -> dict[int, bool]:
+        """Batched Check over every per-rank key. A logical block is present iff
+        ALL W of its shards are present — a load needs every shard, so partial
+        residency (some ranks evicted) must read as a MISS. One batched Check
+        RPC covers the whole expanded list; flags return in expansion order."""
+        w = self._world_size
+        if not logical_keys:
+            return {}
+        expanded = [nk for k in logical_keys for nk in self._ns_all(k)]
+        flags = self._ring.check(expanded)
+        out: dict[int, bool] = {}
+        for i, k in enumerate(logical_keys):
+            chunk = flags[i * w:(i + 1) * w]
+            out[k] = len(chunk) == w and all(chunk)
+        return out
 
     # ── request lifecycle ──
 
@@ -133,8 +164,8 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # Check — correctness is never traded for the batch, only latency.
         cached = self._lookup_cache.get(int_key)
         if cached is None:
-            exists = self._ring.check([int_key])
-            cached = bool(exists and exists[0])
+            # AND across all W shards — a load needs every rank's shard present.
+            cached = self._check_all_present([int_key]).get(int_key, False)
         return lookup_result(cached)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
@@ -147,15 +178,15 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
-        self._ring.touch(int_keys, promote=False)
+        # Touch every per-rank key so all W shards' LRU positions advance.
+        expanded = [nk for k in int_keys for nk in self._ns_all(k)]
+        self._ring.touch(expanded, promote=False)
         # Batch the existence probe for the whole key list here, where we
         # already hold it, so the scheduler's subsequent per-key lookup loop
         # (offloading/scheduler.py::_maximal_prefix_lookup) is served from this
-        # map instead of firing one Check RPC per key.
-        flags = self._ring.check(int_keys)
-        self._lookup_cache.update(
-            (k, bool(f)) for k, f in zip(int_keys, flags)
-        )
+        # map instead of firing one Check RPC per key. AND-across-ranks per
+        # logical key (a block is a hit only if all shards are present).
+        self._lookup_cache.update(self._check_all_present(int_keys))
 
     # ── store ──
 
@@ -167,9 +198,10 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         session_id = _session_id_to_u64(req_context)
 
         # Filter out keys already cached (consecutive dedup is vLLM's concern;
-        # here we just avoid re-storing existing entries).
-        exists_flags = self._ring.check(int_keys)
-        exists = {k: e for k, e in zip(int_keys, exists_flags)}
+        # here we just avoid re-storing existing entries). "Already cached" means
+        # ALL W shards present; a partially-resident block (some ranks evicted)
+        # is re-stored so every shard is repopulated together.
+        exists = self._check_all_present(int_keys)
         to_store_pairs = [
             (orig, k) for orig, k in zip(keys_list, int_keys) if not exists.get(k, False)
         ]
@@ -195,10 +227,34 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # every scheduler step, each logging "cannot store blocks" — a warning
         # storm under sustained pressure. Storing the subset that fits advances
         # the index and offloads what it can.
-        reserved_flags = self._ring.reserve(
-            [(k, self._block_size_bytes, session_id) for k in to_store_ints]
-        )
-        reserved_ok = {k for k, ok in zip(to_store_ints, reserved_flags) if ok}
+        # Reserve ALL W per-rank shards of each block. A logical block is storable
+        # only if EVERY shard reserves (else a load — which needs all W — could
+        # never succeed): all-or-nothing per block. One batched Reserve covers the
+        # expanded list; flags return in expansion order.
+        w = self._world_size
+        reserve_reqs = [
+            (nk, self._block_size_bytes, session_id)
+            for k in to_store_ints
+            for nk in self._ns_all(k)
+        ]
+        reserved_flags = self._ring.reserve(reserve_reqs)
+        reserved_ok: set[int] = set()
+        orphan_aborts: list[int] = []  # partial reserves to roll back
+        for i, k in enumerate(to_store_ints):
+            chunk = reserved_flags[i * w:(i + 1) * w]
+            if len(chunk) == w and all(chunk):
+                reserved_ok.add(k)
+            else:
+                # Some shards reserved, some didn't: abort the ones that DID so a
+                # half-reserved block can't leak or later publish as a false hit.
+                for r, ok in enumerate(chunk):
+                    if ok:
+                        orphan_aborts.append(ns_key(k, r, w))
+        if orphan_aborts:
+            try:
+                self._ring.abort_store(orphan_aborts)
+            except Exception:  # noqa: BLE001 - best-effort rollback
+                pass
 
         # Keep reserved keys in the original offload order (the scheduler
         # positionally zips src GPU block ids with dst keys, deriving src order
@@ -210,10 +266,6 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         dropped = len(to_store_pairs) - len(stored_pairs)
         if dropped:
             self._note_store_drops(dropped)
-
-        # Keys that reserved but that we are not going to store this round would
-        # leak a reservation; here every reserved key IS kept (we only drop keys
-        # whose Reserve failed, which allocated nothing), so no rollback needed.
 
         if not stored_pairs:
             # Nothing fit. Return an empty (non-None) result so vLLM advances
@@ -256,15 +308,21 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
+        # Commit/abort every per-rank shard the W workers stored under this key.
+        expanded = [nk for k in int_keys for nk in self._ns_all(k)]
         if success:
-            self._ring.commit_store(int_keys)
+            self._ring.commit_store(expanded)
         else:
-            self._ring.abort_store(int_keys)
+            self._ring.abort_store(expanded)
 
     # ── load ──
 
     def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
         int_keys = _keys_to_u64s(keys)
+        # Pin every per-rank shard: each of the W workers loads its own shard, so
+        # all W must be eviction-protected for the duration of the load. The
+        # returned spec carries LOGICAL keys — each worker folds in its own rank.
+        pin_keys = [nk for k in int_keys for nk in self._ns_all(k)]
         # Pin (promote=FALSE) only takes the eviction-protecting read-ref. We must
         # NOT ask Pin to promote: Pin's promote is async/fire-and-forget, and the
         # Lookup that immediately follows (in the load handler) already promotes
@@ -273,15 +331,15 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # surfaced as ALLOCATION_FAILED, which fails the load and crashes vLLM
         # (worker asserts transfer success). Lookup is self-sufficient: it serves
         # MemoryTier hits directly and promotes BlockDevice misses in one path.
-        pin_ok = self._ring.pin(int_keys, promote=False)
+        pin_ok = self._ring.pin(pin_keys, promote=False)
         # Diagnostic: vLLM only reaches here for keys lookup()/Check reported as
         # present, and cannot drop keys from the returned spec (dst block ids are
         # positionally zipped). So a Pin failure here is the earliest signal that
-        # a Check-hit entry vanished — log which key.
-        for key, ok in zip(int_keys, pin_ok):
+        # a Check-hit entry vanished — log which (namespaced) key.
+        for nk, ok in zip(pin_keys, pin_ok):
             if not ok:
                 print(
-                    f"[certus-shmq] PIN FAILURE key={key} "
+                    f"[certus-shmq] PIN FAILURE key={nk} "
                     f"(Check said present, Pin says gone — eviction race)",
                     flush=True,
                 )
@@ -290,7 +348,8 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     def complete_load(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         int_keys = _keys_to_u64s(keys)
         if int_keys:
-            self._ring.unpin(int_keys)
+            expanded = [nk for k in int_keys for nk in self._ns_all(k)]
+            self._ring.unpin(expanded)
 
     # ── events / shutdown ──
 
@@ -305,10 +364,23 @@ class ShmqCertusOffloadingManager(OffloadingManager):
             )
         # Only REMOVED means the key is no longer accessible. DEMOTED entries
         # stay on SSD and remain loadable, so they are not eviction events for
-        # vLLM's accounting.
-        removed = [
-            key.to_bytes(8, "big") for key, reason in events if reason == REASON_REMOVED
-        ]
+        # vLLM's accounting. Under TP>1 each logical block is W per-rank keys;
+        # map each REMOVED key back to its logical key and dedup so vLLM sees one
+        # eviction per logical block. This is conservative-safe: emitting a
+        # logical eviction when ANY shard is removed matches lookup()'s AND
+        # semantics (a block with a missing shard already reads as a MISS), and
+        # the authoritative pre-load Check prevents loading a partially-evicted
+        # block regardless — so no reverse map from logical→rank is needed.
+        seen: set[int] = set()
+        removed: list[bytes] = []
+        for key, reason in events:
+            if reason != REASON_REMOVED:
+                continue
+            logical = denamespace_key(key, self._world_size)
+            if logical in seen:
+                continue
+            seen.add(logical)
+            removed.append(logical.to_bytes(8, "big"))
         if removed:
             yield OffloadingEvent(
                 keys=removed,

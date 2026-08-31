@@ -17,6 +17,7 @@ the ring and shares CUDA IPC handles for its KV-cache blocks.
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Iterator
 
@@ -43,13 +44,60 @@ _RING_LOCK = threading.Lock()
 _RING_SINGLETONS: dict[str, Ring] = {}
 
 
-def _get_or_create_ring(shm_path: str) -> Ring:
+def _get_or_create_ring(shm_path: str, claim_slot: int, claim_slots: int) -> Ring:
     with _RING_LOCK:
         ring = _RING_SINGLETONS.get(shm_path)
         if ring is None:
-            ring = Ring(shm_path)
+            ring = Ring(shm_path, claim_slot=claim_slot, claim_slots=claim_slots)
             _RING_SINGLETONS[shm_path] = ring
         return ring
+
+
+def _resolve_world_size() -> int:
+    """TP world size — the uniform source across all connector processes.
+
+    The benchmark exports ``TENSOR_PARALLEL_SIZE`` and every vLLM subprocess
+    (engine-core + each TP worker) inherits it, so it is readable in all three
+    processes before vLLM's own distributed state exists. Default 1 = single-GPU
+    baseline (no namespacing, one channel slot)."""
+    try:
+        return max(1, int(os.environ.get("TENSOR_PARALLEL_SIZE", "1")))
+    except ValueError:
+        return 1
+
+
+def _resolve_tp_rank() -> int:
+    """This worker's TP shard rank. KV heads are sharded by exactly this rank, so
+    it MUST be vLLM's real tensor-parallel rank — used to namespace store keys.
+
+    Primary: ``vllm.distributed`` TP rank (authoritative). Fallbacks (only if the
+    distributed group isn't initialised yet): the CUDA device index — equal to
+    the TP rank under the standard single-node one-GPU-per-rank mapping — then the
+    ``LOCAL_RANK``/``RANK`` env, then 0."""
+    try:
+        from vllm.distributed import get_tensor_model_parallel_rank
+
+        return int(get_tensor_model_parallel_rank())
+    except Exception:  # noqa: BLE001 - group not init'd yet / import path moved
+        pass
+    try:
+        from vllm.distributed import parallel_state
+
+        return int(parallel_state.get_tensor_model_parallel_rank())
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return int(current_device())
+    except Exception:  # noqa: BLE001
+        pass
+    for _var in ("LOCAL_RANK", "RANK"):
+        _v = os.environ.get(_var)
+        if _v is not None:
+            try:
+                return int(_v)
+            except ValueError:
+                pass
+    return 0
 
 
 class CertusShmqOffloadingSpec(OffloadingSpec):
@@ -98,13 +146,24 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
 
         self._shm_path = str(self.extra_config.get("shm_path", "/dev/shm/certus-shmq"))
 
+        # TP topology. world_size is uniform across all processes (env); the
+        # per-worker rank is resolved lazily in _ensure_worker (only the worker
+        # role needs its own rank — the scheduler-role manager operates over ALL
+        # ranks). channel-claim slots: W==1 → 1 (single-process baseline); W>1 →
+        # W+1 (scheduler slot 0 + one slot per worker rank), because TP>1 uses
+        # MultiprocExecutor and the engine-core + W workers share the mailbox.
+        self._world_size = _resolve_world_size()
+        self._claim_slots = 1 if self._world_size <= 1 else self._world_size + 1
+
         self._ring = None
         self._manager: ShmqCertusOffloadingManager | None = None
         self._worker = None
 
-    def _get_ring(self):
+    def _get_ring(self, claim_slot: int = 0):
         if self._ring is None:
-            self._ring = _get_or_create_ring(self._shm_path)
+            self._ring = _get_or_create_ring(
+                self._shm_path, claim_slot, self._claim_slots
+            )
         return self._ring
 
     def get_manager(self) -> OffloadingManager:
@@ -115,8 +174,12 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             # >= the copy size). get_handlers() corrects the manager once the
             # stride is known.
             size = self._block_bytes if self._block_bytes is not None else self._slab_size_bytes
+            # Scheduler role → channel slot 0. The manager mirrors what all W
+            # workers physically store, so it operates over every per-rank key.
             self._manager = ShmqCertusOffloadingManager(
-                self._get_ring(), block_size_bytes=size
+                self._get_ring(claim_slot=0),
+                block_size_bytes=size,
+                world_size=self._world_size,
             )
         return self._manager
 
@@ -129,7 +192,12 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
         if self._worker is not None:
             return self._worker
 
-        ring = self._get_ring()
+        # Worker role → resolve this process's TP shard rank and claim channel
+        # slot rank+1 (slot 0 belongs to the scheduler/manager process). At W==1
+        # slots==1 so the slot is ignored (full-range baseline).
+        rank = _resolve_tp_rank() if self._world_size > 1 else 0
+        claim_slot = (rank + 1) if self._world_size > 1 else 0
+        ring = self._get_ring(claim_slot=claim_slot)
         # 0.23+ splits a block into N per-layer tensors, each a separate GPU
         # allocation; 0.20/0.22 present one coalesced tensor (N==1). We open one
         # IPC handle per region and store/load the block as N colocated regions in
@@ -169,11 +237,15 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             f"[certus-shmq] KV {len(kv_regions)} region(s) block_bytes={block_bytes} "
             f"slab_size_bytes={self._slab_size_bytes} "
             f"device={kv_regions[0].gpu_device_id} "
+            f"tp_rank={rank}/{self._world_size} "
             f"per-region strides={[r.stride_bytes for r in kv_regions]}",
             flush=True,
         )
         executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="certus-shmq")
-        self._worker = worker_class()(ring, kv_regions, block_bytes, executor)
+        self._worker = worker_class()(
+            ring, kv_regions, block_bytes, executor,
+            rank=rank, world_size=self._world_size,
+        )
         return self._worker
 
     def get_worker(self, kv_caches):
