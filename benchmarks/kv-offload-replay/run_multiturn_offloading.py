@@ -293,7 +293,7 @@ if __name__ == "__main__":
         # handles the sharding). Default 1 = single-GPU (historical baseline).
         # For the native tiering arm this is pure vLLM plumbing — the fix#2 patch
         # is scheduler-side and already TP-aware (num_workers=world_size).
-        tensor_parallel_size=int(os.environ.get("TENSOR_PARALLEL_SIZE", "1")),
+        tensor_parallel_size=(max(1, int(tp)) if (tp := os.environ.get("TENSOR_PARALLEL_SIZE", "1").strip()).isdigit() else 1),
         kv_transfer_config=KV_CONFIG,
         disable_log_stats=not CAPTURE_METRICS,
         **_mfu_kwargs,
