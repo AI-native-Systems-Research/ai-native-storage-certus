@@ -331,10 +331,10 @@ fi
 if [[ -z "$NUM_CONVS" ]]; then
     if [[ "$WORKLOAD_NAME" == "synthetic-agentic" ]]; then
         # synthetic-agentic is driven by inference-perf in SERVER mode; its session
-        # count lives in the workload YAML (data.synthetic_agentic.num_sessions),
-        # NOT in NUM_CONVS. Nothing here consumes NUM_CONVS on that path (the client
-        # container isn't given it), so pin a neutral 0 = "not applicable; see the
-        # rendered effective-config.yaml" rather than inheriting the ShareGPT 450.
+        # count lives in the workload YAML (data.synthetic_agentic.num_sessions) and
+        # is set via SA_NUM_SESSIONS / NUM_SESSIONS, NOT the ShareGPT 450 default. An
+        # explicit --num-convs N is honoured (mapped to SA_NUM_SESSIONS below); when
+        # it is NOT passed, pin a neutral 0 here so nothing inherits the 450.
         NUM_CONVS=0
     elif [[ "$WORKLOAD_NAME" == "long-doc-qa" ]]; then
         # Draw the whole generated corpus; the workload's own default is
@@ -934,6 +934,19 @@ SA_MAX_MODEL_LEN="${SA_MAX_MODEL_LEN:-12288}"
 SA_MODEL="${SA_MODEL:-$MODEL}"
 [[ "$SA_MODEL" == "NousResearch/Meta-Llama-3-8B" ]] && SA_MODEL="NousResearch/Meta-Llama-3-8B-Instruct"
 
+# How many sessions the inference-perf client generates + replays (the workload's
+# "how many" knob; renders data.synthetic_agentic.num_sessions). Precedence:
+# SA_NUM_SESSIONS wins; else an explicit --num-convs N (NUM_CONVS>0) maps to it so
+# the documented "how many" flag Just Works here too; else the config default 200.
+# A short run replays sessions 0..N-1 = a byte-identical prefix of the full run
+# (determinism is per (seed, session_index)); good for a smoke, but too small an N
+# may not overflow GPU KV, leaving the offload tier cold — keep it large to compare
+# backends fairly.
+SA_NUM_SESSIONS="${SA_NUM_SESSIONS:-}"
+if [[ -z "$SA_NUM_SESSIONS" ]]; then
+    if [[ "${NUM_CONVS:-0}" -gt 0 ]]; then SA_NUM_SESSIONS="$NUM_CONVS"; else SA_NUM_SESSIONS=200; fi
+fi
+
 # Map a profile_all variant -> serve_vllm CONNECTOR arm (empty = unsupported).
 sa_connector_for() {
     case "$1" in
@@ -1034,6 +1047,7 @@ run_server_bench() {  # variant
         --pids-limit=0 \
         -e "BASE_URL=http://localhost:${SA_PORT}" \
         -e "MODEL=${SA_MODEL}" \
+        -e "NUM_SESSIONS=${SA_NUM_SESSIONS}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         -v "${LOGDIR}:/results:z" \
         "$SA_CLIENT_IMG" run 2>&1 | tee "$f"

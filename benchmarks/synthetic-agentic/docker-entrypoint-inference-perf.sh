@@ -13,12 +13,20 @@ CONFIG_TMPL=${CONFIG_TMPL:-/config/synthetic_agentic.yaml}
 RESULTS_DIR=${RESULTS_DIR:-/results}
 MODEL=${MODEL:-NousResearch/Meta-Llama-3-8B}
 BASE_URL=${BASE_URL:-http://localhost:8000}
+# How many sessions to (deterministically) generate + replay. Default 200; lower
+# it for a quick smoke. Because all randomness derives from (seed, session_index),
+# NUM_SESSIONS=N replays sessions 0..N-1 — a byte-identical PREFIX of the full run
+# (session 0 of a 10-run == session 0 of a 200-run), so a short run is a faithful
+# subset. NB a small N shrinks the aggregate KV working set and may stop it
+# overflowing the GPU KV budget, in which case the offload tier stays cold and all
+# backends look alike — keep N large enough to spill when comparing backends.
+NUM_SESSIONS=${NUM_SESSIONS:-200}
 
 mkdir -p "${RESULTS_DIR}"
 rendered="${RESULTS_DIR}/effective-config.yaml"
-# Substitute ONLY our two placeholders (leave any other $... in the yaml intact).
-BASE_URL="${BASE_URL}" MODEL="${MODEL}" \
-    envsubst '${BASE_URL} ${MODEL}' < "${CONFIG_TMPL}" > "${rendered}"
+# Substitute ONLY our placeholders (leave any other $... in the yaml intact).
+BASE_URL="${BASE_URL}" MODEL="${MODEL}" NUM_SESSIONS="${NUM_SESSIONS}" \
+    envsubst '${BASE_URL} ${MODEL} ${NUM_SESSIONS}' < "${CONFIG_TMPL}" > "${rendered}"
 
 mode=${1:-run}
 case "${mode}" in

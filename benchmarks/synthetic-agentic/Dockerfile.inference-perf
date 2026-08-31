@@ -61,7 +61,8 @@ ENV PYTHONUNBUFFERED=1 \
     CONFIG_TMPL=/config/synthetic_agentic.yaml \
     RESULTS_DIR=/results \
     MODEL=NousResearch/Meta-Llama-3-8B-Instruct \
-    BASE_URL=http://localhost:8000
+    BASE_URL=http://localhost:8000 \
+    NUM_SESSIONS=200
 
 ENTRYPOINT ["/usr/local/bin/inference-perf-entrypoint"]
 CMD ["run"]

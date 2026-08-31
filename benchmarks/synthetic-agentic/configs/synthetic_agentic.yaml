@@ -25,7 +25,7 @@ api:
 data:
   type: synthetic_agentic
   synthetic_agentic:
-    num_sessions: 200
+    num_sessions: ${NUM_SESSIONS}                     # rendered by the entrypoint (default 200); lower it for a quick smoke
     seed: 42                                          # determinism / replayability across backends
     shared_system_prompt_len: 2000                    # large shared prefix (prefix-cache + offload pressure)
     turns_per_session:          {type: uniform, min: 3, max: 8}
