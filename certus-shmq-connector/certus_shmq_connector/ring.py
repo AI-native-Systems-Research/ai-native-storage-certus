@@ -268,6 +268,8 @@ def decode_take_events(payload: bytes) -> tuple[list[tuple[int, int]], int]:
     guard turns any residual capacity mismatch into the already-handled lossy path
     instead of a crash."""
     buf_len = len(payload)
+    if buf_len < 4:
+        return [], 0
     off = 0
     (n,) = struct.unpack_from("<I", payload, off)
     off += 4
@@ -284,6 +286,8 @@ def decode_take_events(payload: bytes) -> tuple[list[tuple[int, int]], int]:
         # by records, so it can't be read. Report the events we could not decode
         # as dropped (best-effort) rather than crash the engine.
         return events, n - decodable
+    if buf_len < off + 8:
+        return events, 0
     (dropped,) = struct.unpack_from("<Q", payload, off)
     return events, dropped
 
