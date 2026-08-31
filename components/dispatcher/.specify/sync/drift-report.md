@@ -1,115 +1,108 @@
+---
+spec_sync_component: dispatcher
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-08-31T20:43:50Z
+spec_sync_git_commit: 5bac8686
+spec_sync_inputs_sha256: 1dd4ccc5158f01d0712e78d7aa778e716e67539f062d4714ca94508f0e01025f
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
 # Spec Drift Report — dispatcher
 
 Generated: pending
 Project: dispatcher (spec: specs/001-dispatcher-cache-interface/spec.md)
+Mode: Read-only drift analysis (no build, no source modification).
+Branch: `sync-tmp`
 
 ## Summary
 
 | Category | Count |
 |----------|-------|
 | Specs Analyzed | 1 |
-| Requirements Checked (51 active FR + 14 active SC) | 65 |
-| ✓ Aligned | 65 |
-| ⚠️ Drifted | 3 |
+| Requirements Checked (52 active FR + 15 active SC) | 67 |
+| ✓ Aligned | 61 |
+| ⚠️ Drifted | 5 |
 | ✗ Not Implemented | 0 |
-| 🆕 Unspecced Code | 1 group |
+| 🆕 Unspecced Code | 1 (tier-event stats) |
 
 Removed/superseded and therefore excluded from the active count: FR-020, FR-021,
 FR-022 (prepare/commit/cancel_store direct-write workflow), FR-026, FR-027 (block
 device / extent manager version selection), SC-008, and User Story 6.
 
-The 2026-08-07 sync sweep resolved the three API-signature drifts that the prior
-report flagged (FR-001 method inventory, FR-039 `Vec<IpcHandle>` signature, FR-042
-`capacity` argument), backfilled the reserve/copy/complete/pin/unpin/flush/stats
-primitives as FR-056, extended FR-033 with the partition-size and `backfill_delay_ms`
-fields, and softened the nonexistent-Creusot-`verif/` claim in `idispatcher.rs`. All
-of those are now aligned. Every active functional-requirement data path, eviction
-path, lifecycle step, and success criterion is present and matches code. The residual
-drift is (a) an **internal spec contradiction** on the batch cold-promotion queue
-depth (User Story 11 narrative vs FR-039 / code), and (b) two stale path/name
-references in the component `CLAUDE.md` after the `components/ → lib/` crate move.
+This sweep re-analyzes the dispatcher after three post-2026-08-20 changes on this
+branch: (1) `97e26738` removed gRPC and made the shm-queue the sole control
+transport; (2) `995596e4` split the per-device warm CUDA stream into `warm_load`
+(H2D) and `warm_store` (D2H) so both directions overlap on the PCIe bus; and
+(3) `d8c26d58` moved the warm memory-tier↔GPU copies onto the batched
+`IGpuServices::memcpy_batch_async` (`cuMemcpyBatchAsync`) API. A fourth change,
+`4659626b`, added the `IDispatcher::tier_event_stats()` telemetry method, which
+the dispatcher implements with a full `TierEventCounters` subsystem but which no
+requirement covers.
+
+Prior-report items that are **now aligned**: the User Story 11 queue-depth
+intra-spec contradiction was fixed in the 2026-08-20 sync (`max_queue_depth = 128`
+per thread throughout); the two `CLAUDE.md` path/`-v2` drifts are corrected in the
+current tree (`../../lib/component-framework/crates/`, `block-device-spdk-nvme`);
+and the dependency-injection / test surface is now specced as FR-057 / SC-016.
 
 ## Detailed Findings
 
 ### ⚠️ Drifted
 
-- **User Story 11 (Parallel Batch Cold Promotion) — per-thread queue depth** — severity: moderate.
-  US11 narrative states: *"Each thread uses a reduced NVMe pipeline depth (`16 / num_queues`) to
-  share the drive's submission queue capacity without overflow"*, and scenario 3 states
-  *"each processed by a separate thread with `max_queue_depth = 8` (16/2), keeping total per-drive
-  NVMe commands at ≤16."*
-  Actual: `batch_lookup` sets `let queue_depth = 128;` per queue thread
-  (`components/dispatcher/src/lib.rs:2217`) and passes it into `pipelined_multi_object_zero_copy`
-  (`lib.rs:2318,2345`). This is a *deliberate* value — FR-039 step (5) and FR-019 both correctly
-  say *"`max_queue_depth = 128` per thread"*. So US11's "16/num_queues (=8), ≤16 per drive" text is
-  stale and directly contradicts FR-039/FR-019 within the same spec. The requirement (FR-039) is
-  aligned; the user-story acceptance text is not.
+- **FR-037 (warm stream: single → dual load/store; H2D copy API)** — severity: moderate.
+  - Spec: "pre-allocate a **single warm CUDA stream** … used by `lookup_async` and
+    `batch_lookup` for **`memcpy_h2d_async`** on raw memory-tier pointers … the per-device
+    warm stream from `DEVICE_STREAMS`".
+  - Actual: `DeviceStreams` now holds **two** warm streams per device — `warm_load`
+    (memory-tier→GPU H2D) and `warm_store` (GPU→memory-tier D2H) — "Separate from
+    `warm_load` so H2D and D2H DMA can overlap on the PCIe bus"
+    (`src/lib.rs:335-345`); `device_streams_for` creates both plus the pipeline pair
+    (`src/lib.rs:371-378`). The memory-tier→GPU H2D copy is issued via
+    `IGpuServices::memcpy_batch_async` (`src/lib.rs:1127`), not `memcpy_h2d_async`
+    (which now exists only in the test mock, `src/lib.rs:4193,4260`, and one test
+    assertion, `:5244`). The `AtomicU64` `warm_stream` fallback is retained.
+  - Location: `src/lib.rs:335-345,371-378,885,1127,2133,2740`.
 
-- **CLAUDE.md stale crate path (`component-framework`)** — severity: minor.
-  `components/dispatcher/CLAUDE.md:40` says *"`component-framework`, `component-core`,
-  `component-macros` — at `../../component-framework/crates/`"*. After the repo move,
-  component-framework now lives at `lib/component-framework` (verified: `lib/component-framework`
-  exists, `components/component-framework` does not). The Cargo.toml no longer uses a literal path
-  (`component-framework.workspace = true`, `components/dispatcher/Cargo.toml:9`), so the build is
-  unaffected, but the doc path is wrong. `CLAUDE.md:41-42` (`../../interfaces`, `../../spdk-env`)
-  remain correct (both still under `components/`).
+- **FR-052 (per-device stream inventory)** — severity: minor.
+  - Spec: "one warm stream plus one pipeline stream pair per device".
+  - Actual: each device now has **two** warm streams (`warm_load`, `warm_store`) plus the
+    pipeline pair (`DeviceStreams { warm_load, warm_store, pipe: [u64; 2] }`,
+    `src/lib.rs:339-345`). The device-resolution / fallback-on-`-1` semantics FR-052
+    describes are otherwise unchanged.
+  - Location: `src/lib.rs:339-345`.
 
-- **CLAUDE.md stale crate names (`-v2` suffix)** — severity: minor.
-  `components/dispatcher/CLAUDE.md:43-44,53` reference `block-device-spdk-nvme-v2` and
-  `extent-manager-v2`. The actual dependency crate is `block-device-spdk-nvme`
-  (`components/dispatcher/Cargo.toml:15`); there is no `-v2` suffix in the current workspace.
-  Documentation-only drift.
+- **FR-006 / FR-039 step (2) / FR-056 `copy_gpu_to_memory_async` / Implementation Notes
+    (warm-path copy API)** — severity: moderate.
+  - Spec: warm-path H2D uses `IGpuServices::memcpy_h2d_async` (FR-006, FR-039(2),
+    Implementation-Notes line 374); `copy_gpu_to_memory_async` "issues asynchronous
+    GPU→host DMA … on the supplied CUDA stream" (FR-056, line 319); populate D2H uses
+    `dma_copy_to_host`.
+  - Actual: both warm directions now use the batched `memcpy_batch_async`
+    (`cuMemcpyBatchAsync`) multi-region API. The memory-tier→GPU **scatter** (one DRAM
+    slot → N client GPU regions) is a single `memcpy_batch_async` on the `warm_load`
+    stream (`src/lib.rs:1116-1127`); the GPU→memory-tier **gather** in
+    `copy_gpu_to_memory_async` (N client regions → one DRAM slot) is a single
+    `memcpy_batch_async` on the `warm_store` stream (`src/lib.rs:2998-3009`). No
+    production call site uses `memcpy_h2d_async` any more.
+  - Location: `src/lib.rs:1116-1127,2984-3009`.
 
-### ✓ Aligned (representative evidence; all other active FR/SC verified present)
+- **FR-040 (stale gRPC reference)** — severity: minor (doc/reference).
+  - Spec: "The **gRPC handler** spawns this as a detached background task when
+    `BatchTouchRequest.promote = true`."
+  - Actual: gRPC was removed entirely and the shm-queue is now the sole control
+    transport (`97e26738` — "Remove gRPC; make shm-queue the sole control transport").
+    The `promote_to_memory_tier` API (`src/lib.rs:3060`) is unchanged; only the
+    transport that invokes it changed. The sentence names a transport that no longer
+    exists.
+  - Location: spec FR-040; transport change `97e26738`.
 
-- FR-001 full `IDispatcher` inventory — `components/interfaces/src/idispatcher.rs:211-680` (all
-  listed lifecycle/read/write/lifecycle-primitive/introspection methods present); note
-  `create_eviction_channel`/`eviction_dropped_count` correctly documented as inherent methods on
-  `DispatcherComponent` (`lib.rs:378,388`), not trait methods.
-- FR-002 `DispatcherError` (7 variants) — `idispatcher.rs:151-167`.
-- FR-003/004/005 populate + `IMemoryTier::insert`/`peek` write-through + slot retention —
-  `lib.rs:2770`; write-through worker in `background.rs`.
-- FR-006/007 lookup MemoryTier/BlockDevice + miss; warm-stream H2D — `lib.rs:1982` delegating to
-  `lookup_async` (`lib.rs:2625`); per-device resolve via `set_batch_device` (`lib.rs:2653`).
-- FR-008 check (`lib.rs:2702`); FR-009 remove (`lib.rs:2723`); FR-018 non-blocking remove.
-- FR-010 `define_component!`; FR-011 receptacles incl. `IRemoteLookup` (`(key, size)` batch,
-  `lib.rs:4209`) + `poller_base_cpu` → `set_actor_cpu`; FR-012 initialize validates
-  dispatch_map+memory_tier (`lib.rs:1642`).
-- FR-014 shutdown drain + extent-manager `checkpoint()` (`lib.rs:1892`); FR-015/016 N drives + N
-  extent managers + FormatParams.
-- FR-017 silent write-through drop; FR-019 MDTS + `max_queue_depth`; single-entry `promote_and_serve`
-  uses `16` (`lib.rs:673-682`), `batch_lookup` uses `128` (`lib.rs:2217`).
-- FR-023 touch (`lib.rs:3042`); FR-024 pin-safe `evict_for_space`/`evict_one_clean` +
-  `MAX_SCAN` + `evict_and_insert` fallback (`lib.rs:849,889,942`); `target_key` unused.
-- FR-025 `format_on_init` recovery via `for_each_extent`/`recover_extent` (`lib.rs:1642` block).
-- FR-028 promotion re-register; FR-029..033 SSD evictor + all `DispatcherConfig` fields incl.
-  `metadata_partition_size`, `extended_metadata_partition_size`, `backfill_delay_ms`
-  (`idispatcher.rs:26-113`).
-- FR-034 `register_host_memory` + per-drive `ChannelPool`/`checkout`/`ChannelLease`
-  (`lib.rs:124,139,159`); FR-035 `unregister_host_memory` (shutdown, `lib.rs:1933` region).
-- FR-036 `lookup_async` → `GpuStream`; FR-037 `warm_stream` `AtomicU64` (`lib.rs:253`) +
-  `DEVICE_STREAMS`/`device_streams_for` (`lib.rs:287,294`).
-- FR-038 `clear_memory_tier` (`lib.rs:3208`); FR-040 `promote_to_memory_tier` (`lib.rs:3060`);
-  FR-041 `pipelined_ssd_to_dram_only`/`pipelined_multi_ssd_to_dram_only`
-  (`pipeline.rs:784,897`).
-- FR-042 `create_eviction_channel(capacity)` + `emit_eviction`/`eviction_dropped_count` +
-  bounded `try_send` drop-count (`lib.rs:378,392-396`); emitted from `evict_one_clean`
-  (`lib.rs:859,868`).
-- FR-043 `PipelineMetrics` trait (`metrics.rs:12`) + injectable `set_pipeline_metrics`;
-  FR-044 `ColdReadPool` (`cold_pool.rs:45`); FR-045 remote-lookup merge (`remote_probe.rs`).
-- FR-046..050 memory-tier evictor + quadratic pressure + `try_evict_to_block` + `EvictionEvent`
-  (`background.rs:425` region, `lib.rs:859,868`).
-- FR-051 `serve_concurrently_promoted` (`lib.rs:1107`); FR-052 per-device streams +
-  `device_of_ptr`/`set_batch_device` (`lib.rs:294,328`), `ColdReadRequest.gpu_device`
-  (`cold_pool.rs:28,189`).
-- FR-053 `StagingPool`/`StagingLease`/`serve_cold_staged` (`pipeline.rs:75,141`, `lib.rs:718`);
-  staging fallback in `promote_and_serve` (`lib.rs:588-606`).
-- FR-054 drain-all/no-early-break + `stop_submitting` (`pipeline.rs`); FR-055 `EXPECTED_PARTITIONS`
-  guard (`lib.rs:1531-1535`).
-- FR-056 reserve/copy/complete/release/pin/unpin + flush/stats — `lib.rs:2817,2862,2913,2995,3010,3027,3241,3256`.
-- SC-001..015 (excl. SC-008) exercised by tests in `lib.rs`
-  (`populate_*`, `lookup_*`, `remove_*`, `evict_for_space_*`, `populate_triggers_eviction_on_full_pool`,
-  `batch_lookup_recovers_from_concurrent_promotion_race:4892`) and `tests/{integration,lazy_migration,reserve_memory_tests}.rs`.
+- **FR-042 (stale gRPC reference)** — severity: minor (doc/reference).
+  - Spec: "external consumers (e.g., **gRPC TakeEvents stream**) to observe cache
+    evictions without polling."
+  - Actual: same as FR-040 — the eviction-event channel
+    (`create_eviction_channel` / `EvictionEvent`, `src/lib.rs:378,392-396`) is
+    unchanged, but the example consumer named (gRPC TakeEvents) was removed in
+    `97e26738`; the shm-queue transport is now the consumer.
+  - Location: spec FR-042; transport change `97e26738`.
 
 ### ✗ Not Implemented
 
@@ -119,14 +112,25 @@ None. All active requirements have corresponding implementation.
 
 | Feature | Location | Lines | Suggested spec |
 |---------|----------|-------|----------------|
-| Dependency-injection / test hooks: `set_block_device_factory`, `set_extent_manager_factory`, `set_pipeline_metrics` | `components/dispatcher/src/lib.rs` | 360-372 | Public inherent methods on `DispatcherComponent` for injecting mock block-device / extent-manager factories and a `PipelineMetrics` impl. Not referenced by any FR (FR-043 covers the metrics *trait* but not the injection setter). Add a short "test/DI surface" note, or mark them `#[cfg(test)]`-only if not intended as public API. |
+| `tier_event_stats() -> TierEventStats` — cumulative tier-transition counters (promotions, demotions, cold serves, staged serves, remote fills, etc.) exposed on `IDispatcher`, backed by a lock-free `TierEventCounters` subsystem incremented on every tier transition. Commit `4659626b`. | `components/dispatcher/src/lib.rs` (impl) + `components/interfaces/src/idispatcher.rs` (trait) | lib.rs:111-160 (`TierEventCounters`, `snapshot`), 317 (`tier_counters` field), 3390 (trait impl); idispatcher.rs:189-210 (`TierEventStats`), 564 (`fn tier_event_stats`) | New **FR-058** (tier-event counters, always-on, unlike telemetry-gated `read_write_stats`) + **SC-017** (counters observable and monotonic across a populate/lookup/evict cycle). |
+| Dependency-injection / test hooks `set_block_device_factory`, `set_extent_manager_factory`, `set_pipeline_metrics` | `components/dispatcher/src/lib.rs` | 360-372 | Already specced as **FR-057 / SC-016** (2026-08-20). No action. |
+
+## Out-of-Scope Notes (not fixed by this sync)
+
+- Two **source** comments still say "gRPC handler" (`src/lib.rs` ~2983, the
+  null-stream comment near `copy_gpu_to_memory_async`). Source files are outside this
+  sync's editable scope (`.specify/sync/**` and `specs/**` only); flagged for a
+  follow-up source-comment cleanup with the same `97e26738` rationale.
 
 ## Recommendations
 
-1. Fix the intra-spec contradiction: update User Story 11's narrative and scenario 3 to
-   `max_queue_depth = 128` per thread (matching FR-039 / FR-019 and `lib.rs:2217`), or delete the
-   stale "16 / num_queues" / "≤16 per drive" wording.
-2. Update `components/dispatcher/CLAUDE.md:40` to `lib/component-framework` and correct the
-   `-v2` crate names (`block-device-spdk-nvme`, `extent-manager`) at lines 43-44, 53.
-3. Optionally add a one-line FR (or note under FR-043) covering the three DI/test factory hooks, or
-   gate them behind `#[cfg(test)]`.
+1. **FR-037 / FR-052 (backfill)**: update the warm-stream description to the shipped
+   two-stream-per-device model (`warm_load` H2D + `warm_store` D2H, split for PCIe
+   bidirectional overlap) and correct FR-052's per-device stream inventory.
+2. **FR-006 / FR-039 / FR-056 / Impl-Notes (backfill)**: replace the
+   `memcpy_h2d_async` / `dma_copy_to_host` warm-path references with the batched
+   `memcpy_batch_async` (`cuMemcpyBatchAsync`) scatter/gather that ships today.
+3. **FR-040 / FR-042 (backfill)**: replace the two stale gRPC references with the
+   shm-queue control transport (`97e26738`).
+4. **FR-058 + SC-017 (backfill-unspecced)**: document `tier_event_stats()` and its
+   `TierEventCounters` subsystem.

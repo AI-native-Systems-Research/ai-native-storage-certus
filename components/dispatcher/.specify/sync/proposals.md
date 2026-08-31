@@ -1,114 +1,99 @@
-# Spec Sync Proposals — dispatcher (Phase B)
+# Spec Sync Proposals
+Generated: 2026-08-31
+Project: dispatcher
+Spec: 001-dispatcher-cache-interface
+Source: `.specify/sync/drift-report.json`
+Branch: `sync-tmp`
 
-Generated: 2026-08-20
-Spec: components/dispatcher/specs/001-dispatcher-cache-interface/spec.md
-Drift source: components/dispatcher/.specify/sync/drift-report.{json,md} (3 drifted, 0 not-implemented, 1 unspecced group)
-
-Each drift item was classified by reading the code at its `location`. The code is the
-working, intentional reality in every case; no code change is proposed (no ALIGN items).
-Two of the three drift items are documentation drift in the component `CLAUDE.md`, which is
-outside this sync's editable scope (edits are restricted to `.specify/sync/` and `specs/`);
-those are recorded as BACKFILL proposals but deferred to a follow-up doc pass.
+Summary: 6 BACKFILL (5 drifted requirements + 1 unspecced), all APPROVED interactively. No ALIGN, no HUMAN_DECISION. Editing scope: `specs/**` only (source untouched).
 
 ---
 
-## BACKFILL-US011 — Batch cold-promotion per-thread queue depth (US-11 → 128)
+## Proposal 1 — FR-037 (single warm stream → dual per-device load/store) [APPROVED]
 
-- **Direction**: BACKFILL (spec → matches code)
-- **Requirement**: User Story 11 (narrative + acceptance scenario 3) / FR-039
-- **Drift ref**: US-011 / FR-039 (moderate)
-- **Location**: components/dispatcher/src/lib.rs:2217
-
-**Before** —
-- Narrative: *"Each thread uses a reduced NVMe pipeline depth (`16 / num_queues`) to share the drive's submission queue capacity without overflow."*
-- Scenario 3: *"...each processed by a separate thread with `max_queue_depth = 8` (16/2), keeping total per-drive NVMe commands at ≤16."*
-
-**After** —
-- Narrative: *"Each thread drives its cold promotions with a deep per-thread NVMe pipeline depth (`max_queue_depth = 128`, per FR-039 step (5) and FR-019) to saturate the drive's submission queue for maximum per-drive parallelism."*
-- Scenario 3: *"...each processed by a separate thread, and each thread drives its cold promotions with `max_queue_depth = 128` (per FR-039 step (5) / FR-019) to saturate the drive's NVMe submission queue."*
-
-**Rationale** — `batch_lookup` sets `let queue_depth = 128;` (`src/lib.rs:2217`) and passes it into
-`pipelined_multi_object_zero_copy`. This is deliberate and already correctly stated by FR-039 step (5)
-and FR-019 ("`max_queue_depth = 128` per thread"). The User Story 11 narrative and scenario 3 carried
-the older "16 / num_queues (=8), ≤16 per drive" wording, an intra-spec contradiction against the FRs
-and the code. Spec-lag in the user-story text → BACKFILL the story text to match the aligned FRs/code.
+- **Direction**: BACKFILL (code authoritative — spec wording stale)
+- **Requirement**: FR-037 (+ FR-052 stream inventory)
+- **Commit**: `995596e4`
+- **Rationale**: `DeviceStreams` now holds two warm streams per device — `warm_load` (H2D)
+  and `warm_store` (D2H) — split so H2D and D2H DMA overlap on the PCIe bus
+  (`src/lib.rs:335-345`); `device_streams_for` creates both plus the pipeline pair
+  (`:371-378`). The spec described "a single warm CUDA stream".
+- **Before**: "pre-allocate a single warm CUDA stream … used … for `memcpy_h2d_async` … the per-device warm stream from `DEVICE_STREAMS`".
+- **After**: per-device `warm_load` (H2D) + `warm_store` (D2H) streams, split for PCIe bidirectional overlap; H2D via `memcpy_batch_async` on `warm_load`, D2H on `warm_store`; `warm_stream` AtomicU64 fallback retained.
 
 ---
 
-## BACKFILL-DOC-fwpath — CLAUDE.md stale component-framework path (RECORDED, NOT APPLIED)
+## Proposal 2 — FR-052 (per-device stream inventory) [APPROVED]
 
-- **Direction**: BACKFILL (doc → matches reality)
-- **Requirement**: CLAUDE.md crate-location note
-- **Drift ref**: CLAUDE.md (stale crate path) (minor)
-- **Location**: components/dispatcher/CLAUDE.md:40
-
-**Before** — *"`component-framework`, `component-core`, `component-macros` — at `../../component-framework/crates/`"*
-
-**After (proposed)** — *"`component-framework`, `component-core`, `component-macros` — at `../../../lib/component-framework/crates/` (moved from `components/` to `lib/`)"*
-
-**Rationale** — After the repo move, `component-framework` lives at `lib/component-framework`
-(`components/component-framework` no longer exists). `Cargo.toml` uses workspace deps
-(`component-framework.workspace = true`), so the build is unaffected; only the doc path is stale.
-Doc-lag → BACKFILL direction.
-
-**Application status** — **NOT APPLIED.** `CLAUDE.md` is outside this sync's editable scope
-(`.specify/sync/` and `specs/` only). Recorded here for a follow-up documentation pass.
+- **Direction**: BACKFILL (code authoritative)
+- **Requirement**: FR-052
+- **Commit**: `995596e4`
+- **Rationale**: `DeviceStreams { warm_load, warm_store, pipe: [u64; 2] }` (`src/lib.rs:339-345`)
+  is two warm streams + a pipeline pair per device, not "one warm stream plus one pipeline
+  stream pair".
+- **Before**: "one warm stream plus one pipeline stream pair per device".
+- **After**: "two warm streams (`warm_load` for H2D and `warm_store` for D2H, FR-037) plus one pipeline stream pair per device".
 
 ---
 
-## BACKFILL-DOC-v2names — CLAUDE.md stale `-v2` crate names (RECORDED, NOT APPLIED)
+## Proposal 3 — FR-006 / FR-039(2) / FR-056 / Implementation Notes (warm-path copy API) [APPROVED]
 
-- **Direction**: BACKFILL (doc → matches reality)
-- **Requirement**: CLAUDE.md dependency-crate names
-- **Drift ref**: CLAUDE.md (stale crate names) (minor)
-- **Location**: components/dispatcher/CLAUDE.md:43-44,53
-
-**Before** — references to `block-device-spdk-nvme-v2` and `extent-manager-v2`.
-
-**After (proposed)** — `block-device-spdk-nvme` and `extent-manager` (no `-v2` suffix; matching
-`components/dispatcher/Cargo.toml:15`).
-
-**Rationale** — There is no `-v2` suffix in the current workspace; the actual dependency crate is
-`block-device-spdk-nvme`. Documentation-only drift → BACKFILL direction.
-
-**Application status** — **NOT APPLIED.** `CLAUDE.md` is outside this sync's editable scope. Recorded
-for a follow-up documentation pass.
+- **Direction**: BACKFILL (code authoritative)
+- **Requirement**: FR-006, FR-039 step (2), FR-056 (`copy_gpu_to_memory_async`), Implementation Notes
+- **Commit**: `d8c26d58`
+- **Rationale**: Both warm directions now use the batched `IGpuServices::memcpy_batch_async`
+  (`cuMemcpyBatchAsync`) multi-region API: memory-tier→GPU scatter (1 slot → N regions) on
+  `warm_load` (`src/lib.rs:1116-1127`); GPU→memory-tier gather (N regions → 1 slot) in
+  `copy_gpu_to_memory_async` on `warm_store` (`src/lib.rs:2998-3009`). `memcpy_h2d_async`
+  survives only in the test mock (`src/lib.rs:4193,4260`) and one assertion (`:5244`).
+- **Before**: warm-path H2D via `memcpy_h2d_async`; `copy_gpu_to_memory_async` "issues asynchronous GPU→host DMA on the supplied stream".
+- **After**: batched `memcpy_batch_async` scatter (H2D on `warm_load`) / gather (D2H on `warm_store`).
 
 ---
 
-## BACKFILL-UNSPECCED-057 — Dependency-injection / test hooks (new FR-057 + SC-016)
+## Proposal 4 — FR-040 (stale gRPC reference) [APPROVED]
 
-- **Direction**: BACKFILL-UNSPECCED (add new requirement to existing spec)
-- **Requirement**: NEW FR-057 (+ SC-016)
-- **Drift ref**: unspecced (`set_block_device_factory`, `set_extent_manager_factory`, `set_pipeline_metrics`)
-- **Location**: components/dispatcher/src/lib.rs:358-374 (types at :203, :224; fields at :254-255)
-
-**Before** — No requirement. FR-043 covers the `PipelineMetrics` *trait* but not the injection
-setters; the block-device / extent-manager factory setters are entirely unspecced.
-
-**After** — Add FR-057 documenting the three inherent `DispatcherComponent` DI setters
-(`set_block_device_factory(BlockDeviceFactory)`, `set_extent_manager_factory(ExtentManagerFactory)`,
-`set_pipeline_metrics(Arc<dyn PipelineMetrics>)`) as the test/DI surface that overrides the
-internally-constructed dependencies, with fallback to the default hard-coded implementations when a
-factory is not set. Add SC-016 as its measurable outcome (exercise the data path and observe pipeline
-timings with mocks injected, no NVMe hardware).
-
-**Rationale** — These public inherent methods ship and are used for hardware-free component testing
-(the factories back the `MockBlockDevice`/mock extent-manager test paths; `set_pipeline_metrics` backs
-telemetry capture). They are inherent methods on the concrete component, not `IDispatcher` trait
-methods, matching how FR-001 already documents `create_eviction_channel`/`eviction_dropped_count`.
-Code is authoritative → backfill a "test/DI surface" requirement rather than gate the methods behind
-`#[cfg(test)]` (they are used as a public injection API).
+- **Direction**: BACKFILL (code authoritative)
+- **Requirement**: FR-040
+- **Commit**: `97e26738`
+- **Rationale**: gRPC removed entirely; shm-queue is the sole control transport. The
+  `promote_to_memory_tier` API is unchanged — only the invoking transport changed.
+- **Before**: "The gRPC handler spawns this as a detached background task when `BatchTouchRequest.promote = true`."
+- **After**: "The shm-queue control transport (the sole control transport since gRPC was removed) spawns this as a detached background task when a batch-touch request sets `promote = true`."
 
 ---
 
-## Summary
+## Proposal 5 — FR-042 (stale gRPC reference) [APPROVED]
 
-| Proposal | Direction | Applied |
-|---|---|---|
-| BACKFILL-US011 | BACKFILL | Yes (spec.md) |
-| BACKFILL-DOC-fwpath | BACKFILL | No — CLAUDE.md out of scope |
-| BACKFILL-DOC-v2names | BACKFILL | No — CLAUDE.md out of scope |
-| BACKFILL-UNSPECCED-057 | BACKFILL-UNSPECCED | Yes (spec.md: FR-057 + SC-016) |
+- **Direction**: BACKFILL (code authoritative)
+- **Requirement**: FR-042
+- **Commit**: `97e26738`
+- **Rationale**: The eviction-event channel is unchanged; the named example consumer
+  (gRPC TakeEvents) was removed. The shm-queue transport is now the consumer.
+- **Before**: "external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling."
+- **After**: "external consumers (e.g., the shm-queue TakeEvents stream) to observe cache evictions without polling."
 
-No ALIGN, RESOLVED, or HUMAN_DECISION items this run.
+---
+
+## Proposal 6 — FR-058 + SC-017 (tier_event_stats) [APPROVED]
+
+- **Direction**: BACKFILL-UNSPECCED (new FR + SC)
+- **Requirement**: new FR-058, new SC-017
+- **Commit**: `4659626b`
+- **Rationale**: `IDispatcher::tier_event_stats() -> TierEventStats` (`idispatcher.rs:564`;
+  struct `:189-210`) is implemented with a lock-free `TierEventCounters` subsystem
+  (`src/lib.rs:111-160`, `tier_counters` field `:317`, trait impl `:3390`) but no
+  requirement covers it. Four monotonic `u64` counters: `promotions_to_memory`,
+  `promotions_to_gpu`, `evictions_from_memory`, `evictions_from_ssd`. Always-on (unlike
+  telemetry-gated `read_write_stats`); non-tiering variants return zeros.
+- **Before**: (none — feature unspecced)
+- **After**: New **FR-058** (tier-event counters) + **SC-017** (counters zero at startup, monotonic, delta = tier events in window; non-tiering variant returns zeros).
+
+---
+
+## Not proposed (already resolved / out of scope)
+
+- **US11 queue-depth contradiction** — resolved in the 2026-08-20 sync (`max_queue_depth = 128` throughout). Aligned.
+- **CLAUDE.md path / `-v2` names** — already corrected in the current tree; also outside editing scope. Aligned.
+- **DI/test surface** — already specced as FR-057 / SC-016 (2026-08-20). No action.
+- **Two `src/lib.rs` "gRPC handler" source comments** — source is outside this sync's editable scope; flagged for a follow-up source-comment cleanup with the `97e26738` rationale.
