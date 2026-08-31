@@ -27,10 +27,6 @@ parameters:
     type: integer
     range: [256, 16384]
     default: 4096
-  duration_s:
-    type: integer
-    range: [5, 120]
-    default: 30
 keyspaces:
   store_targets:
     cardinality: objects_per_actor
@@ -62,9 +58,11 @@ phases:
       - op: store
         keys: store_targets
         order: sequential
+        repeat: objects_per_actor
       - op: load
         keys: load_sources
         order: sequential
+        repeat: objects_per_actor
     barrier_after: false
 measure:
   - phase: concurrent-bidir

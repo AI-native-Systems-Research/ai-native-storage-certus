@@ -54,7 +54,7 @@ phases:
     keys: chunk_blocks
     order: sequential
     repeat: ceil(total_prompt_tokens / block_size)
-    batch_size: ceil(chunk_tokens / block_size)
+    batch_size: ceil(chunk_size / block_size)
 measure:
 - phase: iterative-chunk-store
   operation: store
