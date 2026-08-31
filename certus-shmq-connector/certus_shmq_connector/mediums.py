@@ -35,7 +35,15 @@ def ns_key(key: int, rank: int, world_size: int) -> int:
     """
     if world_size <= 1:
         return key
-    return (key & _KEY_MASK) | (rank << _RANK_SHIFT)
+
+    rank_bits = 64 - _RANK_SHIFT
+    max_ranks = 1 << rank_bits
+    if not (0 <= rank < max_ranks):
+        raise ValueError(f"tp rank {rank} out of range (expected 0..{max_ranks - 1})")
+    if world_size > max_ranks:
+        raise ValueError(f"world_size {world_size} exceeds max supported {max_ranks}")
+
+    return (key & _KEY_MASK) | ((rank & (max_ranks - 1)) << _RANK_SHIFT)
 
 
 def denamespace_key(key: int, world_size: int) -> int:
