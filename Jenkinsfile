@@ -47,8 +47,11 @@ pipeline {
           mb="$(git merge-base "$base" HEAD 2>/dev/null || echo "$base")"
 
           # Every directory that carries specs (a component under the gate).
+          # Scope is components/ only — lib/ and tools/ crates are not gated
+          # (their source layout differs from the components/<name>/src model the
+          # hash tool assumes).
           all_spec_dirs() {
-            find components lib tools -maxdepth 2 -type d -name specs 2>/dev/null \
+            find components -maxdepth 2 -type d -name specs 2>/dev/null \
               | sed 's#/specs$##' | sort -u
           }
 
@@ -57,8 +60,8 @@ pipeline {
           # README, or Cargo.toml do not affect the content hash and must not
           # demand a fresh stamp, so they are deliberately excluded here.
           changed="$(git diff --name-only "$mb" HEAD \
-                     | grep -oE '^(components|lib|tools)/[^/]+/(src|specs)/' \
-                     | grep -oE '^(components|lib|tools)/[^/]+' | sort -u || true)"
+                     | grep -oE '^components/[^/]+/(src|specs)/' \
+                     | grep -oE '^components/[^/]+' | sort -u || true)"
 
           # Every component's hash folds in components/interfaces, so an
           # interface change can stale reports of components whose own files did
