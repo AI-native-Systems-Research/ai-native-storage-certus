@@ -1,4 +1,9 @@
 //! Internal synchronization state for the dispatch map.
+//!
+//! The map is split into [`N_SHARDS`] independent shards, each with its own
+//! `Mutex<Inner>` and `Condvar`. Operations route to a shard via
+//! `key as usize % N_SHARDS`, so threads operating on different keys rarely
+//! contend on the same lock.
 
 use std::collections::HashMap;
 use std::sync::{Condvar, Mutex, MutexGuard};
@@ -8,49 +13,37 @@ use interfaces::{CacheKey, PoolId};
 
 use crate::entry::DispatchEntry;
 
-/// Protected inner state behind the Mutex.
+/// Number of independent shards. Must be a power of two for fast modular
+/// arithmetic (the compiler turns `% N` into `& (N-1)` when N is a power of 2).
+pub const N_SHARDS: usize = 64;
+
+/// Protected inner state behind each shard's Mutex.
 pub(crate) struct Inner {
     pub entries: HashMap<CacheKey, DispatchEntry>,
 }
 
-/// Thread-safe dispatch map state with blocking support.
-pub struct DispatchMapState {
+/// One independent shard of the dispatch map.
+pub struct Shard {
     pub(crate) inner: Mutex<Inner>,
     pub(crate) condvar: Condvar,
-    pub(crate) pool_id: Mutex<Option<PoolId>>,
 }
 
-impl Default for DispatchMapState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DispatchMapState {
-    pub fn new() -> Self {
+impl Shard {
+    fn new() -> Self {
         Self {
             inner: Mutex::new(Inner {
                 entries: HashMap::new(),
             }),
             condvar: Condvar::new(),
-            pool_id: Mutex::new(None),
         }
     }
 
     /// Block until `predicate` returns `true`, or until `timeout` expires, and
     /// hand back the lock still held.
     ///
-    /// Returning the guard is what makes the wait-then-act sequence atomic. If
-    /// this released the lock and let the caller re-acquire it, the predicate it
-    /// waited for could be falsified in the gap — two callers could both observe
-    /// `write_ref == 0` and both go on to claim the write reference, and a reader
-    /// could take a reference on an entry a writer had just claimed. Keeping the
-    /// guard means whatever the predicate established still holds when the caller
-    /// acts on it.
-    ///
+    /// Returning the guard is what makes the wait-then-act sequence atomic.
     /// The returned `bool` is `true` if the predicate was satisfied, `false` on
-    /// timeout. On `false` the guard is still valid, so the caller can inspect the
-    /// entry to build its error.
+    /// timeout. On `false` the guard is still valid.
     pub(crate) fn wait_for<F>(
         &self,
         timeout: Duration,
@@ -75,5 +68,36 @@ impl DispatchMapState {
                 return (false, guard);
             }
         }
+    }
+}
+
+/// Thread-safe sharded dispatch map state.
+pub struct DispatchMapState {
+    pub(crate) shards: Vec<Shard>,
+    pub(crate) pool_id: Mutex<Option<PoolId>>,
+}
+
+impl Default for DispatchMapState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DispatchMapState {
+    pub fn new() -> Self {
+        let mut shards = Vec::with_capacity(N_SHARDS);
+        for _ in 0..N_SHARDS {
+            shards.push(Shard::new());
+        }
+        Self {
+            shards,
+            pool_id: Mutex::new(None),
+        }
+    }
+
+    /// Return the shard that owns `key`.
+    #[inline]
+    pub(crate) fn shard_for(&self, key: CacheKey) -> &Shard {
+        &self.shards[key as usize % N_SHARDS]
     }
 }

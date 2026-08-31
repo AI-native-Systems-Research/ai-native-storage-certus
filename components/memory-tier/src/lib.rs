@@ -1,15 +1,13 @@
 //! Memory-tier component for the Certus storage system.
 //!
 //! Provides a DRAM-resident cache pool with pluggable eviction (delegated to a
-//! bound `IEvictionPolicy`). Objects are
-//! allocated from a contiguous pre-allocated pool and tracked by key.
-//! The pool uses a first-fit free-list allocator with 4 KiB alignment.
+//! bound `IEvictionPolicy`). Objects are allocated from a contiguous
+//! pre-allocated pool and tracked by key.
 //!
-//! Uses a single `RwLock<Pool>` for concurrency: read operations (`get`,
-//! `peek`, `batch_touch`, `contains`) take a shared lock while mutations
-//! (`insert`, `remove`, `evict`) take an exclusive lock. Eviction-order touches
-//! are performed after releasing the pool lock (the eviction policy has its
-//! own internal synchronization).
+//! The pool is **sharded** into 16 independent sub-pools, each with its own
+//! `RwLock`. Keys are routed to shards via `key % 16`. This eliminates
+//! cross-shard contention: a store actor inserting into shard 3 does not block
+//! a load actor reading from shard 7.
 //!
 //! Provides the [`IMemoryTier`] interface with receptacles for [`ILogger`]
 //! and [`IEvictionPolicy`].
@@ -32,6 +30,11 @@ use crate::allocator::FreeList;
 
 /// Default memory-tier pool size (256 MiB).
 pub const DEFAULT_POOL_SIZE: usize = 256 * 1024 * 1024;
+
+/// Number of independent sub-pools. Each shard has its own RwLock, allocator,
+/// and slots map. With 8 concurrent actors (4 store + 4 load), 16 shards
+/// reduce the probability of two operations hitting the same shard to ~6%.
+const N_SHARDS: usize = 16;
 
 /// Telemetry counters for the memory-tier (zero-cost when `telemetry` feature is disabled).
 #[cfg(feature = "telemetry")]
@@ -73,7 +76,7 @@ struct Slot {
     eviction_handle: EvictionHandle,
 }
 
-struct Pool {
+struct ShardPool {
     allocator: FreeList,
     slots: HashMap<CacheKey, Slot>,
 }
@@ -82,7 +85,7 @@ struct MemoryTierState {
     pool_ptr: *mut u8,
     pool_size: usize,
     pool_id: PoolId,
-    pool: RwLock<Pool>,
+    shards: Vec<RwLock<ShardPool>>,
     initialized: AtomicBool,
     spdk_allocated: bool,
     #[cfg(feature = "telemetry")]
@@ -90,21 +93,31 @@ struct MemoryTierState {
 }
 
 // SAFETY: pool_ptr points to mmap'd or SPDK-allocated memory accessible from any thread.
-// RwLock<Pool> serializes access. Immutable fields (pool_ptr, pool_size, spdk_allocated)
-// are only written during initialize() which is protected by the outer RwLock on the component.
+// Per-shard RwLocks serialize access within each shard. Immutable fields (pool_ptr,
+// pool_size, spdk_allocated) are only written during initialize() which is protected by
+// the outer RwLock on the component.
 unsafe impl Send for MemoryTierState {}
 unsafe impl Sync for MemoryTierState {}
 
+fn shard_for(key: CacheKey) -> usize {
+    key as usize % N_SHARDS
+}
+
 impl Default for MemoryTierState {
     fn default() -> Self {
+        let shards: Vec<RwLock<ShardPool>> = (0..N_SHARDS)
+            .map(|_| {
+                RwLock::new(ShardPool {
+                    allocator: FreeList::new(0),
+                    slots: HashMap::new(),
+                })
+            })
+            .collect();
         Self {
             pool_ptr: std::ptr::null_mut(),
             pool_size: 0,
             pool_id: 0,
-            pool: RwLock::new(Pool {
-                allocator: FreeList::new(0),
-                slots: HashMap::new(),
-            }),
+            shards,
             initialized: AtomicBool::new(false),
             spdk_allocated: false,
             #[cfg(feature = "telemetry")]
@@ -182,8 +195,14 @@ impl MemoryTierComponent {
         if !state.initialized.load(Ordering::Acquire) {
             return 0;
         }
-        let pool = state.pool.read().unwrap();
-        pool.allocator.capacity() - pool.allocator.used()
+        state
+            .shards
+            .iter()
+            .map(|s| {
+                let pool = s.read().unwrap();
+                pool.allocator.capacity() - pool.allocator.used()
+            })
+            .sum()
     }
 
     /// Fallback pool allocation via mmap (used when SPDK is unavailable).
@@ -307,19 +326,38 @@ impl IMemoryTier for MemoryTierComponent {
 
         let pool_id = ep.create_pool();
 
+        // Partition the pool into N_SHARDS contiguous regions. Each shard gets
+        // an equal slice; the last shard absorbs any remainder from rounding.
+        // Shard capacity is aligned down to 4 KiB (allocator alignment) so that
+        // shard boundaries don't split an allocation.
+        let shard_capacity_base = (pool_size / N_SHARDS) & !0xFFF; // align down to 4 KiB
+        let mut shards: Vec<RwLock<ShardPool>> = Vec::with_capacity(N_SHARDS);
+        for i in 0..N_SHARDS {
+            let base_offset = i * shard_capacity_base;
+            let cap = if i == N_SHARDS - 1 {
+                // Last shard gets the remainder.
+                pool_size - base_offset
+            } else {
+                shard_capacity_base
+            };
+            shards.push(RwLock::new(ShardPool {
+                allocator: FreeList::with_base(base_offset, cap),
+                slots: HashMap::new(),
+            }));
+        }
+
         state.pool_ptr = ptr;
         state.pool_size = pool_size;
         state.pool_id = pool_id;
-        state.pool = RwLock::new(Pool {
-            allocator: FreeList::new(pool_size),
-            slots: HashMap::new(),
-        });
+        state.shards = shards;
         state.spdk_allocated = spdk_allocated;
         state.initialized.store(true, Ordering::Release);
 
         self.log_info(&format!(
-            "memory-tier: initialized with {} MiB pool",
-            pool_size / (1024 * 1024)
+            "memory-tier: initialized with {} MiB pool ({} shards × {} MiB)",
+            pool_size / (1024 * 1024),
+            N_SHARDS,
+            shard_capacity_base / (1024 * 1024),
         ));
 
         Ok(())
@@ -338,20 +376,21 @@ impl IMemoryTier for MemoryTierComponent {
         }
 
         let ep = self.eviction_policy.get().unwrap();
+        let shard_idx = shard_for(key);
 
         #[cfg(feature = "telemetry")]
-        let mut pool = match state.pool.try_write() {
+        let mut pool = match state.shards[shard_idx].try_write() {
             Ok(guard) => guard,
             Err(_) => {
                 state
                     .telemetry
                     .write_lock_contentions
                     .fetch_add(1, Ordering::Relaxed);
-                state.pool.write().unwrap()
+                state.shards[shard_idx].write().unwrap()
             }
         };
         #[cfg(not(feature = "telemetry"))]
-        let mut pool = state.pool.write().unwrap();
+        let mut pool = state.shards[shard_idx].write().unwrap();
 
         if pool.slots.contains_key(&key) {
             return Err(MemoryTierError::AlreadyExists(key));
@@ -385,20 +424,21 @@ impl IMemoryTier for MemoryTierComponent {
         }
 
         let ep = self.eviction_policy.get().unwrap();
+        let shard_idx = shard_for(key);
 
         #[cfg(feature = "telemetry")]
-        let pool = match state.pool.try_read() {
+        let pool = match state.shards[shard_idx].try_read() {
             Ok(guard) => guard,
             Err(_) => {
                 state
                     .telemetry
                     .read_lock_contentions
                     .fetch_add(1, Ordering::Relaxed);
-                state.pool.read().unwrap()
+                state.shards[shard_idx].read().unwrap()
             }
         };
         #[cfg(not(feature = "telemetry"))]
-        let pool = state.pool.read().unwrap();
+        let pool = state.shards[shard_idx].read().unwrap();
 
         let slot = pool.slots.get(&key)?;
         let ptr = unsafe { state.pool_ptr.add(slot.offset) };
@@ -415,7 +455,8 @@ impl IMemoryTier for MemoryTierComponent {
             return None;
         }
 
-        let pool = state.pool.read().unwrap();
+        let shard_idx = shard_for(key);
+        let pool = state.shards[shard_idx].read().unwrap();
         let slot = pool.slots.get(&key)?;
         let ptr = unsafe { state.pool_ptr.add(slot.offset) };
         Some((ptr, slot.size))
@@ -439,19 +480,21 @@ impl IMemoryTier for MemoryTierComponent {
 
         let ep = self.eviction_policy.get().unwrap();
         if let Some(key) = ep.identify_next_to_evict(state.pool_id) {
+            let shard_idx = shard_for(key);
+
             #[cfg(feature = "telemetry")]
-            let mut pool = match state.pool.try_write() {
+            let mut pool = match state.shards[shard_idx].try_write() {
                 Ok(guard) => guard,
                 Err(_) => {
                     state
                         .telemetry
                         .write_lock_contentions
                         .fetch_add(1, Ordering::Relaxed);
-                    state.pool.write().unwrap()
+                    state.shards[shard_idx].write().unwrap()
                 }
             };
             #[cfg(not(feature = "telemetry"))]
-            let mut pool = state.pool.write().unwrap();
+            let mut pool = state.shards[shard_idx].write().unwrap();
 
             if let Some(slot) = pool.slots.remove(&key) {
                 pool.allocator.deallocate(slot.offset, slot.size as usize);
@@ -478,20 +521,21 @@ impl IMemoryTier for MemoryTierComponent {
         }
 
         let ep = self.eviction_policy.get().unwrap();
+        let shard_idx = shard_for(key);
 
         #[cfg(feature = "telemetry")]
-        let mut pool = match state.pool.try_write() {
+        let mut pool = match state.shards[shard_idx].try_write() {
             Ok(guard) => guard,
             Err(_) => {
                 state
                     .telemetry
                     .write_lock_contentions
                     .fetch_add(1, Ordering::Relaxed);
-                state.pool.write().unwrap()
+                state.shards[shard_idx].write().unwrap()
             }
         };
         #[cfg(not(feature = "telemetry"))]
-        let mut pool = state.pool.write().unwrap();
+        let mut pool = state.shards[shard_idx].write().unwrap();
 
         let slot = pool
             .slots
@@ -509,7 +553,8 @@ impl IMemoryTier for MemoryTierComponent {
         }
 
         let ep = self.eviction_policy.get().unwrap();
-        let pool = state.pool.read().unwrap();
+        let shard_idx = shard_for(key);
+        let pool = state.shards[shard_idx].read().unwrap();
         if let Some(slot) = pool.slots.get(&key) {
             let handle = slot.eviction_handle;
             drop(pool);
@@ -530,27 +575,32 @@ impl IMemoryTier for MemoryTierComponent {
             Err(_) => return,
         };
 
-        #[cfg(feature = "telemetry")]
-        let pool = match state.pool.try_read() {
-            Ok(guard) => guard,
-            Err(_) => {
-                state
-                    .telemetry
-                    .read_lock_contentions
-                    .fetch_add(1, Ordering::Relaxed);
-                state.pool.read().unwrap()
-            }
-        };
-        #[cfg(not(feature = "telemetry"))]
-        let pool = state.pool.read().unwrap();
-
+        // Collect handles from each shard. We read-lock each shard only once
+        // (keys are naturally grouped by shard when the caller iterates sequentially,
+        // but out-of-order keys just cause the same shard to be read-locked multiple
+        // times — harmless since read locks are reentrant in terms of shared access).
         let mut handles = Vec::with_capacity(keys.len());
         for &key in keys {
+            let shard_idx = shard_for(key);
+
+            #[cfg(feature = "telemetry")]
+            let pool = match state.shards[shard_idx].try_read() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    state
+                        .telemetry
+                        .read_lock_contentions
+                        .fetch_add(1, Ordering::Relaxed);
+                    state.shards[shard_idx].read().unwrap()
+                }
+            };
+            #[cfg(not(feature = "telemetry"))]
+            let pool = state.shards[shard_idx].read().unwrap();
+
             if let Some(slot) = pool.slots.get(&key) {
                 handles.push(slot.eviction_handle);
             }
         }
-        drop(pool);
         let _ = ep.batch_touch(&handles);
     }
 
@@ -560,7 +610,8 @@ impl IMemoryTier for MemoryTierComponent {
             return false;
         }
 
-        let pool = state.pool.read().unwrap();
+        let shard_idx = shard_for(key);
+        let pool = state.shards[shard_idx].read().unwrap();
         pool.slots.contains_key(&key)
     }
 
@@ -569,8 +620,11 @@ impl IMemoryTier for MemoryTierComponent {
         if !state.initialized.load(Ordering::Acquire) {
             return 0;
         }
-        let pool = state.pool.read().unwrap();
-        pool.allocator.capacity()
+        state
+            .shards
+            .iter()
+            .map(|s| s.read().unwrap().allocator.capacity())
+            .sum()
     }
 
     fn used(&self) -> usize {
@@ -578,8 +632,11 @@ impl IMemoryTier for MemoryTierComponent {
         if !state.initialized.load(Ordering::Acquire) {
             return 0;
         }
-        let pool = state.pool.read().unwrap();
-        pool.allocator.used()
+        state
+            .shards
+            .iter()
+            .map(|s| s.read().unwrap().allocator.used())
+            .sum()
     }
 
     fn pool_info(&self) -> Option<(*mut u8, usize)> {
@@ -599,12 +656,23 @@ impl IMemoryTier for MemoryTierComponent {
             ));
         }
         let ep = self.eviction_policy.get().unwrap();
-        let mut pool = state.pool.write().unwrap();
-        let count = pool.slots.len();
-        pool.slots.clear();
-        pool.allocator = FreeList::new(state.pool_size);
+
+        let mut total_count = 0;
+        let shard_capacity_base = (state.pool_size / N_SHARDS) & !0xFFF;
+        for (i, shard) in state.shards.iter().enumerate() {
+            let mut pool = shard.write().unwrap();
+            total_count += pool.slots.len();
+            pool.slots.clear();
+            let base_offset = i * shard_capacity_base;
+            let cap = if i == N_SHARDS - 1 {
+                state.pool_size - base_offset
+            } else {
+                shard_capacity_base
+            };
+            pool.allocator = FreeList::with_base(base_offset, cap);
+        }
         ep.clear_pool(state.pool_id);
-        Ok(count)
+        Ok(total_count)
     }
 
     fn is_dma_capable(&self) -> bool {
@@ -649,7 +717,8 @@ mod tests {
         let c = MemoryTierComponent::new(RwLock::new(MemoryTierState::default()));
         c.eviction_policy.connect(ep).unwrap();
         let mt = query_interface!(c, IMemoryTier).unwrap();
-        mt.initialize(64 * 4096, None).unwrap();
+        // Use a pool size that's a clean multiple of N_SHARDS × 4096.
+        mt.initialize(N_SHARDS * 64 * 4096, None).unwrap();
         c
     }
 
@@ -713,18 +782,23 @@ mod tests {
     fn pool_full_returns_error() {
         let c = setup();
         let mt = query_interface!(c, IMemoryTier).unwrap();
-        // Pool is 64 * 4096 = 256 KiB. Fill it completely.
-        let total = 64 * 4096;
-        mt.insert(0, total as u32).unwrap();
-        // Next insert should fail.
-        assert!(matches!(mt.insert(1, 4096), Err(MemoryTierError::PoolFull)));
+        // Fill the shard for key 0 completely. Shard 0 gets (total / 16) bytes.
+        let shard_capacity = (N_SHARDS * 64 * 4096) / N_SHARDS; // 64 * 4096 = 256 KiB
+        // Insert one large object that fills the entire shard.
+        mt.insert(0, shard_capacity as u32).unwrap();
+        // Next insert to the same shard should fail.
+        // Key 0 + N_SHARDS maps to the same shard.
+        assert!(matches!(
+            mt.insert(N_SHARDS as u64, 4096),
+            Err(MemoryTierError::PoolFull)
+        ));
     }
 
     #[test]
     fn capacity_and_used() {
         let c = setup();
         let mt = query_interface!(c, IMemoryTier).unwrap();
-        assert_eq!(mt.capacity(), 64 * 4096);
+        assert_eq!(mt.capacity(), N_SHARDS * 64 * 4096);
         assert_eq!(mt.used(), 0);
         mt.insert(1, 4096).unwrap();
         assert_eq!(mt.used(), 4096);
@@ -771,5 +845,19 @@ mod tests {
         mt.insert(0, 4096).unwrap();
         let result = mt.peek(0);
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn cross_shard_keys_independent() {
+        let c = setup();
+        let mt = query_interface!(c, IMemoryTier).unwrap();
+        // Keys 0 and 1 are in different shards; both should succeed independently.
+        mt.insert(0, 4096).unwrap();
+        mt.insert(1, 4096).unwrap();
+        assert!(mt.contains(0));
+        assert!(mt.contains(1));
+        mt.remove(0).unwrap();
+        assert!(!mt.contains(0));
+        assert!(mt.contains(1));
     }
 }

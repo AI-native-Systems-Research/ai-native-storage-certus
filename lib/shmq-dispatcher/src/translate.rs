@@ -639,17 +639,35 @@ impl Translator {
 
         let (resolved, opened_keys) = self.open_handle_table(&batch.handles);
 
+        // Build a flat batch of (key, IpcHandle) for batch_populate. Entries
+        // with != 1 region are rejected upfront (populate is single-handle).
+        let mut batch_entries: Vec<(u64, IpcHandle)> = Vec::with_capacity(batch.entries.len());
+        let mut rejected: Vec<usize> = Vec::new();
+        for (i, (key, entry_regions)) in batch.entries.iter().enumerate() {
+            if entry_regions.len() != 1 {
+                rejected.push(i);
+                continue;
+            }
+            match Self::regions_of(entry_regions, &resolved) {
+                None => { rejected.push(i); }
+                Some(regions) => { batch_entries.push((*key, regions[0])); }
+            }
+        }
+
+        // Single batched call: all D2H copies issued async, ONE sync, then register all.
+        let batch_results = self.dispatcher.batch_populate(&batch_entries);
+
+        // Map results back to the original entry order.
         let mut succeeded = 0u64;
         let mut w = Writer::with_capacity(batch.entries.len());
-        for (key, entry_regions) in &batch.entries {
-            let ok = if entry_regions.len() != 1 {
-                // populate is single-handle; a multi-region entry is a client bug.
+        let mut batch_idx = 0usize;
+        for i in 0..batch.entries.len() {
+            let ok = if rejected.contains(&i) {
                 false
             } else {
-                match Self::regions_of(entry_regions, &resolved) {
-                    None => false,
-                    Some(regions) => self.dispatcher.populate(*key, regions[0]).is_ok(),
-                }
+                let result = batch_results.get(batch_idx).map(|r| r.is_ok()).unwrap_or(false);
+                batch_idx += 1;
+                result
             };
             succeeded += ok as u64;
             w.u8(ok as u8);
@@ -770,6 +788,9 @@ mod tests {
         fn populate(&self, key: CacheKey, _h: IpcHandle) -> Result<(), DispatcherError> {
             self.resident.lock().unwrap().insert(key);
             Ok(())
+        }
+        fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+            entries.iter().map(|(k, h)| self.populate(*k, h.clone())).collect()
         }
         fn reserve_memory(
             &self,

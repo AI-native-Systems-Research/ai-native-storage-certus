@@ -687,6 +687,10 @@ impl IDispatcher for MockDispatcher {
         unimplemented!("mock: IDispatcher::populate not needed by remote-lookup tests")
     }
 
+    fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+        entries.iter().map(|(k, h)| self.populate(*k, h.clone())).collect()
+    }
+
     fn reserve_memory(
         &self,
         _key: CacheKey,

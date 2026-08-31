@@ -53,7 +53,9 @@ use interfaces::{
 use crate::io_segmenter;
 
 /// Number of GPU DMA copies before a periodic stream synchronization.
-pub const PIPELINE_RING_SIZE: usize = 8;
+/// Larger values reduce sync overhead at the cost of higher GPU-side memory
+/// pressure. 32 amortizes the ~50µs sync cost across more pipeline stages.
+pub const PIPELINE_RING_SIZE: usize = 32;
 
 /// Timeout for async NVMe read operations (ms).
 const READ_TIMEOUT_MS: u64 = 5000;
@@ -1055,6 +1057,6 @@ mod tests {
     fn pipeline_ring_size_is_reasonable() {
         let size = PIPELINE_RING_SIZE;
         assert!(size >= 2);
-        assert!(size <= 16);
+        assert!(size <= 64);
     }
 }

@@ -4,6 +4,9 @@
 //! memory-tier pointer or a block-device offset — with readers-writer
 //! reference counting for concurrent access.
 //!
+//! Internally sharded into [`state::N_SHARDS`] independent partitions to
+//! reduce lock contention under concurrent bidirectional workloads.
+//!
 //! Provides the [`IDispatchMap`] interface with receptacles for [`ILogger`]
 //! and [`IExtentManager`].
 
@@ -61,9 +64,6 @@ impl DispatchMapComponent {
 
 impl IDispatchMap for DispatchMapComponent {
     /// Recover dispatch map state from the extent manager's persisted extents.
-    /// Each extent is re-inserted as a BlockDevice location with zero reference
-    /// counts, restoring the map to a consistent view of committed storage.
-    /// If no extent manager is bound, starts with an empty map.
     fn initialize(&self) -> Result<(), DispatchMapError> {
         let pool_id = self.get_pool_id();
         let ep = self.eviction_policy.get().map_err(|_| {
@@ -84,7 +84,6 @@ impl IDispatchMap for DispatchMapComponent {
             logger.info("dispatch-map: beginning state recovery from extent manager");
         }
 
-        let mut inner = self.state.inner.lock().unwrap();
         let mut count: u64 = 0;
 
         em.for_each_extent(&mut |extent| {
@@ -103,6 +102,9 @@ impl IDispatchMap for DispatchMapComponent {
                 #[cfg(feature = "integrity-check")]
                 checksum: 0,
             };
+            // Route each recovered extent to the correct shard.
+            let shard = self.state.shard_for(extent.key);
+            let mut inner = shard.inner.lock().unwrap();
             inner.entries.insert(extent.key, entry);
             count += 1;
         });
@@ -116,14 +118,12 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
-        // The guard comes back held, so `write_ref == 0` still holds below: no
-        // writer can claim the entry between the wait and our read reference.
+        let shard = self.state.shard_for(key);
         let (satisfied, mut inner) =
-            self.state
-                .wait_for(DEFAULT_TIMEOUT, |inner| match inner.entries.get(&key) {
-                    None => true,
-                    Some(e) => e.write_ref == 0,
-                });
+            shard.wait_for(DEFAULT_TIMEOUT, |inner| match inner.entries.get(&key) {
+                None => true,
+                Some(e) => e.write_ref == 0,
+            });
 
         if !satisfied {
             return Err(DispatchMapError::Timeout(key));
@@ -164,7 +164,8 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn convert_to_storage(&self, key: CacheKey, offset: u64) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get_mut(&key)
@@ -192,15 +193,14 @@ impl IDispatchMap for DispatchMapComponent {
         }
 
         drop(inner);
-        self.state.condvar.notify_all();
+        shard.condvar.notify_all();
 
         Ok(())
     }
 
     fn take_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        // Guard held from the wait through the increment, so no writer can slip in
-        // between observing `write_ref == 0` and taking the read reference.
-        let (satisfied, mut inner) = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
+        let shard = self.state.shard_for(key);
+        let (satisfied, mut inner) = shard.wait_for(DEFAULT_TIMEOUT, |inner| {
             inner.entries.get(&key).map_or(true, |e| e.write_ref == 0)
         });
 
@@ -227,11 +227,8 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn take_write(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        // Mutual exclusion depends on holding the guard across both the wait and
-        // the assignment. Releasing it in between let two callers each observe an
-        // unreferenced entry and each set `write_ref = 1` — two writers on one key,
-        // invisible in the value because this is an assignment, not an increment.
-        let (satisfied, mut inner) = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
+        let shard = self.state.shard_for(key);
+        let (satisfied, mut inner) = shard.wait_for(DEFAULT_TIMEOUT, |inner| {
             inner
                 .entries
                 .get(&key)
@@ -255,7 +252,8 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn release_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get_mut(&key)
@@ -270,12 +268,13 @@ impl IDispatchMap for DispatchMapComponent {
             logger.debug(&format!("dispatch-map: release_read key {key}"));
         }
         drop(inner);
-        self.state.condvar.notify_all();
+        shard.condvar.notify_all();
         Ok(())
     }
 
     fn release_write(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get_mut(&key)
@@ -290,12 +289,13 @@ impl IDispatchMap for DispatchMapComponent {
             logger.debug(&format!("dispatch-map: release_write key {key}"));
         }
         drop(inner);
-        self.state.condvar.notify_all();
+        shard.condvar.notify_all();
         Ok(())
     }
 
     fn downgrade_reference(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get_mut(&key)
@@ -317,12 +317,13 @@ impl IDispatchMap for DispatchMapComponent {
             logger.debug(&format!("dispatch-map: downgrade_reference key {key}"));
         }
         drop(inner);
-        self.state.condvar.notify_all();
+        shard.condvar.notify_all();
         Ok(())
     }
 
     fn remove(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get(&key)
@@ -347,7 +348,8 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn touch(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get(&key)
@@ -361,7 +363,8 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
-        let inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get(&key)
@@ -391,7 +394,8 @@ impl IDispatchMap for DispatchMapComponent {
         let pool_id = self.get_pool_id();
         let ep = self.eviction_policy.get().unwrap();
 
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         if inner.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
@@ -424,7 +428,8 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get_mut(&key)
@@ -459,7 +464,7 @@ impl IDispatchMap for DispatchMapComponent {
         }
 
         drop(inner);
-        self.state.condvar.notify_all();
+        shard.condvar.notify_all();
 
         Ok(())
     }
@@ -474,7 +479,8 @@ impl IDispatchMap for DispatchMapComponent {
             return Err(DispatchMapError::InvalidSize);
         }
 
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get_mut(&key)
@@ -482,9 +488,6 @@ impl IDispatchMap for DispatchMapComponent {
 
         match &entry.location {
             Location::BlockDevice { offset } => {
-                // In-place flip: keep the eviction handle and all refs (the
-                // entry may be pinned by an in-flight load). Retain the SSD
-                // offset so the promoted entry stays demotable without a reread.
                 let offset = *offset;
                 entry.location = Location::MemoryTier {
                     pointer,
@@ -507,13 +510,14 @@ impl IDispatchMap for DispatchMapComponent {
         }
 
         drop(inner);
-        self.state.condvar.notify_all();
+        shard.condvar.notify_all();
 
         Ok(())
     }
 
     fn is_evictable(&self, key: CacheKey) -> bool {
-        let inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let inner = shard.inner.lock().unwrap();
         match inner.entries.get(&key) {
             Some(entry) => {
                 entry.read_ref == 0
@@ -531,7 +535,8 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get_mut(&key)
@@ -572,7 +577,8 @@ impl IDispatchMap for DispatchMapComponent {
         let pool_id = self.get_pool_id();
         let ep = self.eviction_policy.get().unwrap();
 
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         if inner.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
@@ -593,7 +599,8 @@ impl IDispatchMap for DispatchMapComponent {
 
     #[cfg(feature = "integrity-check")]
     fn set_checksum(&self, key: CacheKey, checksum: u32) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
+        let shard = self.state.shard_for(key);
+        let mut inner = shard.inner.lock().unwrap();
         let entry = inner
             .entries
             .get_mut(&key)
@@ -604,9 +611,8 @@ impl IDispatchMap for DispatchMapComponent {
 
     #[cfg(feature = "integrity-check")]
     fn get_checksum(&self, key: CacheKey) -> Option<u32> {
-        let inner = self.state.inner.lock().unwrap();
-        // A recorded checksum of 0 is treated as "not set" — the caller skips
-        // verification rather than comparing against a sentinel.
+        let shard = self.state.shard_for(key);
+        let inner = shard.inner.lock().unwrap();
         inner
             .entries
             .get(&key)
@@ -874,7 +880,6 @@ mod tests {
         let mut buf = [0u8; 4096];
         dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 4096)
             .unwrap();
-        // Should be visible via lookup (blocks until write ref released).
         dm.release_write(1).unwrap();
         let result = dm.lookup(1).unwrap();
         match result {
@@ -905,9 +910,7 @@ mod tests {
         let mut buf = [0u8; 4096];
         dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 4096)
             .unwrap();
-        // convert_to_storage sets ssd_offset but keeps it as MemoryTier.
         dm.convert_to_storage(1, 8192).unwrap();
-        // Still shows as MemoryTier on lookup (not BlockDevice).
         dm.release_write(1).unwrap();
         let result = dm.lookup(1).unwrap();
         assert!(matches!(result, LookupResult::MemoryTier { .. }));

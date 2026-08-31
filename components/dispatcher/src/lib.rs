@@ -336,8 +336,12 @@ unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
 /// local GPUs, and CUDA streams are process-wide resources. Entries are created
 /// lazily on first use for each device and live until the process exits.
 pub(crate) struct DeviceStreams {
-    /// Warm-path stream for memory-tier <-> GPU async copies.
+    /// Warm-path stream for memory-tier -> GPU (H2D) async copies (load path).
     warm: u64,
+    /// Dedicated stream for GPU -> memory-tier (D2H) async copies (store path).
+    /// Separating D2H from H2D allows the GPU's two copy engines to run
+    /// concurrently, enabling PCIe full-duplex under bidirectional load.
+    store: u64,
     /// Dual streams for the pipelined SSD -> GPU cold path.
     pub(crate) pipe: [u64; 2],
 }
@@ -359,20 +363,24 @@ pub(crate) fn device_streams_for(gpu: &dyn IGpuServices, device: i32) -> Option<
     if let Some(s) = guard.get(&device) {
         return Some(DeviceStreams {
             warm: s.warm,
+            store: s.store,
             pipe: s.pipe,
         });
     }
     // Create all streams on the target device (streams inherit the current device).
     gpu.set_device(device).ok()?;
     let warm = gpu.create_stream().ok()?;
+    let store_s = gpu.create_stream().ok()?;
     let pipe_a = gpu.create_stream().ok()?;
     let pipe_b = gpu.create_stream().ok()?;
     let entry = DeviceStreams {
         warm: warm.0 as u64,
+        store: store_s.0 as u64,
         pipe: [pipe_a.0 as u64, pipe_b.0 as u64],
     };
     let ret = DeviceStreams {
         warm: entry.warm,
+        store: entry.store,
         pipe: entry.pipe,
     };
     guard.insert(device, entry);
@@ -1863,7 +1871,7 @@ impl IDispatcher for DispatcherComponent {
                 dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
             };
             if !pool_drives.is_empty() {
-                const COLD_POOL_QUEUES_PER_DRIVE: usize = 2;
+                const COLD_POOL_QUEUES_PER_DRIVE: usize = 1;
                 match cold_pool::ColdReadPool::new(&pool_drives, &gpu, COLD_POOL_QUEUES_PER_DRIVE) {
                     Ok(pool) => {
                         self.log_info(&format!(
@@ -2233,7 +2241,7 @@ impl IDispatcher for DispatcherComponent {
         // Each thread gets its own NVMe queue pair and CUDA streams, enabling
         // concurrent reads on the same physical drive.
         if !cold_entries.is_empty() {
-            const MAX_QUEUES_PER_DRIVE: usize = 2;
+            const MAX_QUEUES_PER_DRIVE: usize = 1;
 
             let chunk_size = {
                 let ring_guard = self.pipeline_ring.read();
@@ -2894,6 +2902,94 @@ impl IDispatcher for DispatcherComponent {
         }
 
         Ok(())
+    }
+
+    /// Batch populate: issue all D2H copies asynchronously on a dedicated store
+    /// stream, synchronize once, then register all entries in the dispatch-map.
+    fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        if let Err(e) = self.ensure_initialized() {
+            return entries.iter().map(|_| Err(e.clone())).collect();
+        }
+
+        let gpu = match self.gpu_services.get() {
+            Ok(g) => g,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("gpu_services not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+        };
+
+        let t_total = std::time::Instant::now();
+        let mut results: Vec<Option<Result<(), DispatcherError>>> = vec![None; entries.len()];
+
+        // Resolve batch device and pick the dedicated store stream up front.
+        // All entries in one RPC come from a single rank → a single device.
+        let batch_device = entries
+            .iter()
+            .flat_map(|(_, h)| std::iter::once(h.address))
+            .find(|a| !a.is_null())
+            .map_or(-1, |addr| set_batch_device(&*gpu, addr));
+        let store_raw = device_streams_for(&*gpu, batch_device).map_or(0, |s| s.store);
+        let store_stream = GpuStream(store_raw as *mut std::ffi::c_void);
+
+        // Interleaved reserve + DMA: for each key, reserve a slot and immediately
+        // issue the async D2H copy. This pipelines memory-tier allocation with GPU
+        // DMA — early keys' transfers overlap with later keys' allocation.
+        let mut submitted: Vec<(usize, CacheKey, u32)> = Vec::with_capacity(entries.len());
+        for (i, (key, ipc_handle)) in entries.iter().enumerate() {
+            if ipc_handle.size == 0 {
+                results[i] = Some(Err(DispatcherError::InvalidParameter(
+                    "IPC handle size must be > 0".into(),
+                )));
+                continue;
+            }
+            match self.reserve_memory(*key, ipc_handle.size, 0) {
+                Ok(_) => {
+                    // Slot reserved — immediately issue async D2H copy.
+                    match self.copy_gpu_to_memory_async(*key, std::slice::from_ref(ipc_handle), store_stream) {
+                        Ok(()) => submitted.push((i, *key, ipc_handle.size)),
+                        Err(e) => {
+                            let _ = self.release_memory(*key);
+                            results[i] = Some(Err(e));
+                        }
+                    }
+                }
+                Err(e) => { results[i] = Some(Err(e)); }
+            }
+        }
+
+        if submitted.is_empty() {
+            return results.into_iter().map(|r| r.unwrap()).collect();
+        }
+
+        // Phase 4: ONE stream_synchronize for the entire batch.
+        // This guarantees all D2H copies have landed before any registration.
+        if let Err(e) = gpu.stream_synchronize(store_stream) {
+            // Sync failed — none of these entries can be safely registered.
+            for &(i, key, _) in &submitted {
+                let _ = self.release_memory(key);
+                results[i] = Some(Err(DispatcherError::IoError(format!(
+                    "batch store stream_synchronize failed: {e}"
+                ))));
+            }
+            return results.into_iter().map(|r| r.unwrap()).collect();
+        }
+
+        // Phase 5: Register all entries in dispatch-map and enqueue write-through.
+        for &(i, key, size) in &submitted {
+            results[i] = Some(self.copy_gpu_to_memory_completed(key, size));
+        }
+
+        if let Some(ref m) = *self.pipeline_metrics.read() {
+            let elapsed = t_total.elapsed().as_micros() as f64;
+            m.record_populate_total(elapsed);
+        }
+
+        results.into_iter().map(|r| r.unwrap()).collect()
     }
 
     fn reserve_memory(

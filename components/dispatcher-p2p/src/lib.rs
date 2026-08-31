@@ -2236,6 +2236,10 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
+    fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+        entries.iter().map(|(k, h)| self.populate(*k, h.clone())).collect()
+    }
+
     fn reserve_memory(
         &self,
         key: CacheKey,

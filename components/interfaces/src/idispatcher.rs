@@ -415,6 +415,17 @@ component_macros::define_interface! {
         /// ```
         fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
 
+        /// Batch-populate multiple cache entries from GPU memory.
+        ///
+        /// Semantically equivalent to calling [`populate`] for each entry, but
+        /// amortizes the GPU stream synchronization across the entire batch:
+        /// all D2H copies are submitted asynchronously, a single
+        /// `stream_synchronize` waits for the batch, then all entries are
+        /// registered in the dispatch-map and enqueued for SSD write-through.
+        ///
+        /// Returns one `Result` per entry, in the same order as `entries`.
+        fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>;
+
         /// Reserve a memory-tier slot for the given key, evicting if necessary.
         ///
         /// Allocates `size` bytes in DRAM keyed by `key`. The returned pointer
