@@ -1,6 +1,6 @@
 # Spec Sync: Align Tasks
 
-Generated: 2026-08-20 (Phase B) · Reconfirmed: 2026-08-31 (both tasks still open — code unchanged since 2026-08-20, verified: `src/lib.rs:55` still `unwrap()`s eviction_policy before the guard; `create_memory_tier_entry` still has no `is_null` check)
+Generated: 2026-08-20 (Phase B)
 Based on: `components/dispatch-map/.specify/sync/drift-report.json`
 Policy: `.specify/sync/PHASE_B_POLICY.md`
 

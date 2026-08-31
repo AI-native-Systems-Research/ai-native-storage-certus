@@ -1,25 +1,73 @@
 {
-  "applied": "2026-08-31",
-  "mode": "interactive",
-  "spec": "components/dispatch-map/specs/001-dispatch-map/spec.md",
-  "backup": null,
-  "backup_reason": "no spec.md edit made; backup not needed",
-  "specs_updated": [],
-  "new_specs_created": [],
-  "align_tasks_retained": [
-    { "requirement": "FR-012", "status": "open" },
-    { "requirement": "FR-003 / US1-AS3", "status": "open" }
+  "generated": "2026-08-20",
+  "phase": "B",
+  "based_on": "components/dispatch-map/.specify/sync/drift-report.json",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "backups": [
+    ".specify/sync/backups/specs/001-dispatch-map/spec.md.bak"
   ],
-  "align_tasks_generated": 0,
-  "unspecced_backfilled": [],
-  "resolved_since_last_sync": [
-    "reuse_count: AtomicU32 backfilled as FR-029 (2026-08-20); no longer drift"
+  "specs_updated": [
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "FR-029",
+      "change_type": "added",
+      "detail": "BACKFILL-UNSPECCED: per-entry reuse_count (AtomicU32) read-hit counter described as built (init 0; +1 relaxed on lookup/take_read/downgrade_reference; internal Debug-only, no IDispatchMap accessor)."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "Key Entities / Dispatch Entry",
+      "change_type": "modified",
+      "detail": "Added the reuse_count (AtomicU32) field to the entry layout description."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "US2/AS6",
+      "change_type": "added",
+      "detail": "lookup success increments reuse_count (internal, Debug-observable)."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "US4/AS9",
+      "change_type": "added",
+      "detail": "take_read/downgrade_reference increment reuse_count; take_write/release_read/release_write do not."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "header/Last Synced",
+      "change_type": "modified",
+      "detail": "Updated Last Synced to 2026-08-20 (Phase B)."
+    }
   ],
-  "not_applied": [
-    { "item": "FR-012 panic->error and FR-003 null-guard code changes", "reason": "src/** and interfaces/** edits outside sync editable scope; retained as align-tasks" },
-    { "item": "components/dispatch-map/CLAUDE.md:35 stale path ../../component-framework/crates/", "reason": "CLAUDE.md outside sync editable scope" }
+  "align_tasks_generated": [
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "FR-012",
+      "location": "src/lib.rs:55",
+      "summary": "initialize() must return Err(NotInitialized) instead of panicking (eviction_policy.get().unwrap()) when IEvictionPolicy is unbound."
+    },
+    {
+      "spec": "001-dispatch-map",
+      "requirement": "FR-003/US1-AS3",
+      "location": "src/lib.rs:381",
+      "summary": "Add a null-pointer guard to create_memory_tier_entry (new DispatchMapError::NullPointer variant); reject nulls before recording an entry."
+    }
   ],
-  "active_requirement_count": "FR-001..FR-029 (FR-019 removed, FR-021 merged); SC-001..SC-006",
-  "source_touched": false,
-  "cargo_run": false
+  "unspecced_backfilled": [
+    {
+      "feature": "reuse_count: AtomicU32 per-entry read-hit counter",
+      "location": "src/entry.rs:37; src/lib.rs:142-143, 220-222, 313-315",
+      "resolution": "Backfilled as FR-029 + Key Entities update + US2/AS6 & US4/AS9 acceptance scenarios."
+    }
+  ],
+  "resolved": [],
+  "human_decision": [],
+  "counts": {
+    "backfill_applied": 0,
+    "backfill_unspecced_applied": 1,
+    "align_tasks": 2,
+    "resolved": 0,
+    "human_decision": 0,
+    "spec_md_files_edited": 1,
+    "spec_md_files_backed_up": 1
+  }
 }

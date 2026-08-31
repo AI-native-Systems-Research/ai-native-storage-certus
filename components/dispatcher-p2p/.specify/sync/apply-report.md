@@ -1,57 +1,62 @@
 # Spec Sync — Apply Report
 Project: dispatcher-p2p
 Spec: 001-gpudirect-cold-path
-Applied: 2026-08-31
-Mode: interactive (the single spec-editing proposal was approved by the user)
-Source: `.specify/sync/drift-report.{json,md}`, `.specify/sync/proposals.{json,md}`
+Applied: 2026-08-20 (Spec-Sync Phase B)
+Source: `.specify/sync/drift-report.json`, resolved per `.specify/sync/PHASE_B_POLICY.md`
 
 ## Backup
 
-- `specs/001-gpudirect-cold-path/spec.md` → `.specify/sync/backups/specs/001-gpudirect-cold-path/spec.md.bak` (re-taken pre-edit this run)
-- Prior backups retained under `.specify/sync/backups/`.
+- `specs/001-gpudirect-cold-path/spec.md` → `.specify/sync/backups/specs/001-gpudirect-cold-path/spec.md.bak`
+
+(Prior backups from earlier cycles retained under `.specify/sync/backups/`:
+`spec.md.bak`, `spec.md.20260722T232132Z.bak`, `data-model.md.20260722T232132Z.bak`.)
 
 ## Specs Updated
 
-| Requirement / Section | Change Type | Notes |
-|---|---|---|
-| FR-008 | BACKFILL (amend) | Appended interface-parity note: the `IDispatcher` telemetry methods now include `tier_event_stats()` (commit `4659626b`), satisfied by a zeroed `TierEventStats::default()` stub since dispatcher-p2p does no tier-movement tracking (counters live in dispatcher FR-058); `read_write_stats()` aggregated from per-drive block-device counters. |
-| Header — Last-Synced | metadata | Added the 2026-08-31 sync line (FR-008 amend; carried FR-017 ALIGN and `cold_staging_*` HUMAN_DECISION; `memcpy_batch_async` mock keep-up noted as test-only). |
+| Requirement | Change Type | Notes |
+|-------------|-------------|-------|
+| SC-006 | BACKFILL (reword) | Init logs non-fatal diagnostic + continues; panic deferred to first cold `batch_lookup`; single-key `lookup()` falls back to DRAM. Now consistent with FR-006/FR-007/US2 AC-1. |
+| FR-018 | BACKFILL-UNSPECCED (new FR) | ParallelBackgroundWriter — per-drive write-through persistence. |
+| FR-019 | BACKFILL-UNSPECCED (new FR) | BackgroundEvictor — SSD capacity reclamation at watermarks. |
+| FR-020 | BACKFILL-UNSPECCED (new FR) | MemoryTierEvictor — proactive DRAM→SSD demotion sweep. |
+| FR-021 | BACKFILL-UNSPECCED (new FR) | clear_memory_tier() admin flush. |
+| FR-022 | BACKFILL-UNSPECCED (new FR) | lookup_async() — caller-side pipelined GpuStream. |
+| FR-023 | BACKFILL-UNSPECCED (new FR) | PinnedKeys — read-pin lifetime guard across async copy. |
+| Key Entities | BACKFILL-UNSPECCED (add) | Added ParallelBackgroundWriter, BackgroundEvictor, MemoryTierEvictor, PinnedKeys. |
+| User Story 5 | BACKFILL-UNSPECCED (add) | "Automatic Tier Capacity Management" — 5 acceptance scenarios for FR-018..FR-022. |
+| Status/Last-Synced | metadata | Added Last-Synced 2026-08-20 line. |
 
-## Align Tasks
+## Align Tasks Generated
 
-| Requirement | Severity | Status |
-|---|---|---|
-| FR-017 — increment `eviction_dropped` on all live eviction publish sites | Moderate | **Open, retained** — code-side; `src/**` + `src/background.rs` edits outside sync scope. Full task in `align-tasks.md` (unchanged, reconfirmed 2026-08-31). |
+| Requirement | Severity | Task |
+|-------------|----------|------|
+| FR-017 | Moderate | Increment `eviction_dropped` at all live eviction publish sites (lib.rs:602-645; background.rs:414-419,611-616) so `eviction_dropped_count()` reflects reality; thread shared counter into background evictors. See `align-tasks.md`. |
 
 ## Unspecced Backfilled
 
-| Feature | Source | Requirement |
-|---|---|---|
-| `tier_event_stats()` zeroed stub | `src/lib.rs:2665-2668` | Documented via FR-008 amendment (not a new FR — it is interface-parity behavior, not a new capability). |
+| Feature | Source | New Requirement |
+|---------|--------|-----------------|
+| ParallelBackgroundWriter (per-drive write-through) | background.rs:154-219 | FR-018 |
+| BackgroundEvictor (SSD reclamation) | background.rs:303-488 | FR-019 |
+| MemoryTierEvictor (DRAM→SSD demotion) | background.rs:490-654 | FR-020 |
+| clear_memory_tier() | lib.rs:2606-2637 | FR-021 |
+| lookup_async() | lib.rs:2044-2110 | FR-022 |
+| pins::PinnedKeys | pins.rs:26-57 | FR-023 |
 
-## Human Decision (carried, unresolved)
+## Resolved
+
+_None._ (No items in this drift cycle were pre-fixed on the main thread.)
+
+## Human Decision
 
 | Item | Source | Reason |
-|---|---|---|
-| `cold_staging_slots` / `cold_staging_buf_bytes` | `../interfaces/src/idispatcher.rs:84,87` | Still unreferenced in `dispatcher-p2p/src/` (grep-verified). The 64-slot ring is governed by FR-003. Not backfilled (would invent behavior). Resolution needs an `interfaces/**` + `src/**` change — outside sync scope. Human to wire in or remove. |
-
-## Not Applied / Deferred (out of scope)
-
-| Item | Reason |
-|---|---|
-| FR-017 drop-count fix | `src/**` edit outside sync editable scope (`.specify/sync/**`, `specs/**` only). |
-| `cold_staging_*` wire-in-or-remove | `interfaces/**` + `src/**` change outside sync scope. |
-| `memcpy_batch_async` MockGpuServices (`src/lib.rs:3424+`, `#[cfg(test)]`) | Test-only mock keep-up (commit `495c5acc`); no requirement to reconcile. |
-| `plan.md` source-layout / bench-name staleness | Doc-refresh item; not a requirement drift. |
+|------|--------|--------|
+| cold_staging_slots / cold_staging_buf_bytes | interfaces/src/idispatcher.rs:81-87 | Config fields unreferenced anywhere in dispatcher-p2p/src/ (grep-verified). Dead config on this component's surface; the 64-slot ring is governed by FR-003. Not backfilled (would invent behavior). Human to wire in or remove from config surface. |
 
 ## Counts
 
-- BACKFILL applied (spec amend): 1 (FR-008)
-- BACKFILL-UNSPECCED (new FR/SC): 0
-- ALIGN tasks retained: 1 (FR-017)
-- HUMAN_DECISION carried: 1 (`cold_staging_*`)
-- RESOLVED since last sync: 0
-
-## Notes
-
-- Only Markdown under `specs/**` and `.specify/sync/**` was modified. No `src/**` was touched and `cargo` was not run.
+- BACKFILL applied (drifted req): 1 (SC-006)
+- ALIGN tasks: 1 (FR-017)
+- UNSPECCED backfilled: 6 (FR-018..FR-023)
+- RESOLVED: 0
+- HUMAN_DECISION: 1 (cold_staging_* config fields)

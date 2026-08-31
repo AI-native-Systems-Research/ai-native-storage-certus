@@ -1,46 +1,56 @@
-# Spec Sync Apply Report — dispatch-map
+# Sync Apply Report — Phase B
 
-Generated: 2026-08-31
-Mode: interactive
-Spec: components/dispatch-map/specs/001-dispatch-map/spec.md
-Drift source: components/dispatch-map/.specify/sync/drift-report.{json,md}
-
-## Result: no spec changes applied
-
-The implementation is unchanged since the 2026-08-20 sync (no commits to `components/dispatch-map/` or `components/interfaces/src/idispatch_map.rs`). The spec is correct and current — the previously-unspecced `reuse_count` is already covered by FR-029 + Key Entities. The only two drift items are code-side ALIGN tasks, which this sync does not apply to source. Therefore **no edit to `spec.md` was made and no backup was needed.**
+**Date**: 2026-08-20
+Based on: `components/dispatch-map/.specify/sync/drift-report.json`
+Policy: `.specify/sync/PHASE_B_POLICY.md`
+Backups: `.specify/sync/backups/specs/001-dispatch-map/spec.md.bak`
 
 ## Specs Updated
 
-None.
+| Spec | Requirement | Change Type |
+|------|-------------|-------------|
+| 001-dispatch-map | FR-029 | Added (BACKFILL-UNSPECCED) — per-entry `reuse_count` (`AtomicU32`) read-hit counter described as built: init 0 at creation; +1 (relaxed) on `lookup`/`take_read`/`downgrade_reference`; internal-only (Debug), no `IDispatchMap` accessor. |
+| 001-dispatch-map | Key Entities → Dispatch Entry | Modified — added the `reuse_count` (`AtomicU32`) field to the entry layout. |
+| 001-dispatch-map | User Story 2 / AS6 | Added — `lookup` success increments `reuse_count`. |
+| 001-dispatch-map | User Story 4 / AS9 | Added — `take_read`/`downgrade_reference` increment `reuse_count`; other ref ops do not. |
+| 001-dispatch-map | Header metadata | Modified — updated **Last Synced** to 2026-08-20 (Phase B). |
 
-## Align Tasks
+## Align Tasks Generated
 
-| Task | Requirement | Status |
-|---|---|---|
-| Unbound `IEvictionPolicy` must error, not panic | FR-012 | Retained (open) — see `align-tasks.md` |
-| Null-pointer guard in `create_memory_tier_entry` | FR-003 / US1-AS3 | Retained (open) — see `align-tasks.md` |
+Written to `.specify/sync/align-tasks.md` (2 tasks — code changes NOT applied here):
 
-Both require `src/**` (and, for FR-003, `interfaces/**` + contract) edits, which are outside this sync's editable scope. Hand to a `speckit-implement` code pass.
+| Requirement | Location | Summary |
+|-------------|----------|---------|
+| FR-012 | `src/lib.rs:55` (`:68`, `:392`, `:573`) | `initialize()` must return `Err(NotInitialized)` instead of panicking (`eviction_policy.get().unwrap()`) when `IEvictionPolicy` is unbound. |
+| FR-003 · US1-AS3 | `src/lib.rs:381` | Add a null-pointer guard to `create_memory_tier_entry` (new `DispatchMapError::NullPointer` variant); reject nulls before recording an entry. |
 
 ## Unspecced Backfilled
 
-None. (`reuse_count` was backfilled as FR-029 in the 2026-08-20 sync.)
+| Feature | Location | Resolution |
+|---------|----------|------------|
+| `reuse_count: AtomicU32` per-entry read-hit counter | `src/entry.rs:37`; `src/lib.rs:142-143, 220-222, 313-315` | Backfilled as FR-029 + Key Entities update + US2/AS6 & US4/AS9 acceptance scenarios. |
 
-## Resolved Since Last Sync (no action needed)
+## Resolved (already fixed on main thread)
 
-| Item | Status |
-|---|---|
-| Unspecced `reuse_count: AtomicU32` field | Now specced as FR-029 + Key Entities (2026-08-20). No longer drift. |
+None for this component.
 
-## Not Applied / Deferred (out of scope)
+## Human Decision
 
-| Item | Reason |
-|---|---|
-| FR-012 panic→error and FR-003 null-guard code changes | `src/**` / `interfaces/**` edits are outside sync editable scope (`.specify/sync/**`, `specs/**` only). Retained as align-tasks. |
-| `components/dispatch-map/CLAUDE.md:35` stale crate path (`../../component-framework/crates/`) | CLAUDE.md is outside sync editable scope. Fix in a normal doc pass (mirror the dispatcher CLAUDE.md correction to `../../lib/component-framework/crates/`). |
+None — both drift items and the unspecced feature were resolvable per policy after reading the referenced source.
 
-## Notes
+## Counts
 
-- No Markdown under `specs/**` was modified this run; only `.specify/sync/**` artifacts were refreshed.
-- No `src/**` source was touched and `cargo` was not run.
-- Active requirement count: FR-001..FR-029 (FR-019 removed, FR-021 merged) and SC-001..SC-006 — unchanged.
+| Category | Count |
+|----------|-------|
+| BACKFILL applied (drifted requirements) | 0 |
+| BACKFILL-UNSPECCED applied | 1 |
+| ALIGN tasks | 2 |
+| RESOLVED | 0 |
+| HUMAN_DECISION | 0 |
+| spec.md files edited (all backed up) | 1 |
+
+## Next Steps
+
+1. Review the updated spec: `components/dispatch-map/specs/001-dispatch-map/spec.md` (FR-029 + Key Entities + US2/AS6, US4/AS9).
+2. Implement the 2 code-side ALIGN tasks in `.specify/sync/align-tasks.md` (e.g. via `/speckit-implement`), then re-run `/speckit-sync-analyze` to confirm the drift closes.
+3. Commit on a feature branch (never directly to `unstable`).

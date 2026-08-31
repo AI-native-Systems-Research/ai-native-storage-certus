@@ -1,7 +1,6 @@
 # Spec Sync — Align Tasks
 Project: dispatcher-p2p
 Source drift cycle: `drift-report.json` / `drift-report.md` (Spec-Sync Phase B, 2026-08-20)
-Reconfirmed: 2026-08-31 — FR-017 still open. Verified `emit_eviction` is still `#[allow(dead_code)]` (`src/lib.rs:229`) with no call sites, and all six live publish sites still use bare `let _ = tx.try_send(...)` (`src/lib.rs:603,619,634,641`; `src/background.rs:415,612`). No code change since 2026-08-20 on this path.
 
 Items below are real code-vs-spec defects: the spec requirement is correct and agreed,
 the code does not meet it. Per Phase B policy these are resolved by an ALIGN task (fix the
