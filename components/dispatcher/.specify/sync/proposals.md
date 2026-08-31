@@ -1,94 +1,99 @@
-# Spec Sync Proposals — dispatcher
-
+# Spec Sync Proposals
 Generated: 2026-08-31
-Spec: components/dispatcher/specs/001-dispatcher-cache-interface/spec.md
-Drift source: components/dispatcher/.specify/sync/drift-report.{json,md} (2 drifted, 0 not-implemented, 1 unspecced)
-Mode: --interactive (all three proposals approved by the user)
+Project: dispatcher
+Spec: 001-dispatcher-cache-interface
+Source: `.specify/sync/drift-report.json`
+Branch: `sync-tmp`
 
-Every drift item was classified by reading the code at its `location`. The code is
-the working, intentional reality in every case; no code change is proposed (no ALIGN
-items). All three are BACKFILL (spec → matches code).
+Summary: 6 BACKFILL (5 drifted requirements + 1 unspecced), all APPROVED interactively. No ALIGN, no HUMAN_DECISION. Editing scope: `specs/**` only (source untouched).
 
 ---
 
-## BACKFILL-FR040 — gRPC → shmq control transport
+## Proposal 1 — FR-037 (single warm stream → dual per-device load/store) [APPROVED]
 
-- **Direction**: BACKFILL (spec → matches code)
+- **Direction**: BACKFILL (code authoritative — spec wording stale)
+- **Requirement**: FR-037 (+ FR-052 stream inventory)
+- **Commit**: `995596e4`
+- **Rationale**: `DeviceStreams` now holds two warm streams per device — `warm_load` (H2D)
+  and `warm_store` (D2H) — split so H2D and D2H DMA overlap on the PCIe bus
+  (`src/lib.rs:335-345`); `device_streams_for` creates both plus the pipeline pair
+  (`:371-378`). The spec described "a single warm CUDA stream".
+- **Before**: "pre-allocate a single warm CUDA stream … used … for `memcpy_h2d_async` … the per-device warm stream from `DEVICE_STREAMS`".
+- **After**: per-device `warm_load` (H2D) + `warm_store` (D2H) streams, split for PCIe bidirectional overlap; H2D via `memcpy_batch_async` on `warm_load`, D2H on `warm_store`; `warm_stream` AtomicU64 fallback retained.
+
+---
+
+## Proposal 2 — FR-052 (per-device stream inventory) [APPROVED]
+
+- **Direction**: BACKFILL (code authoritative)
+- **Requirement**: FR-052
+- **Commit**: `995596e4`
+- **Rationale**: `DeviceStreams { warm_load, warm_store, pipe: [u64; 2] }` (`src/lib.rs:339-345`)
+  is two warm streams + a pipeline pair per device, not "one warm stream plus one pipeline
+  stream pair".
+- **Before**: "one warm stream plus one pipeline stream pair per device".
+- **After**: "two warm streams (`warm_load` for H2D and `warm_store` for D2H, FR-037) plus one pipeline stream pair per device".
+
+---
+
+## Proposal 3 — FR-006 / FR-039(2) / FR-056 / Implementation Notes (warm-path copy API) [APPROVED]
+
+- **Direction**: BACKFILL (code authoritative)
+- **Requirement**: FR-006, FR-039 step (2), FR-056 (`copy_gpu_to_memory_async`), Implementation Notes
+- **Commit**: `d8c26d58`
+- **Rationale**: Both warm directions now use the batched `IGpuServices::memcpy_batch_async`
+  (`cuMemcpyBatchAsync`) multi-region API: memory-tier→GPU scatter (1 slot → N regions) on
+  `warm_load` (`src/lib.rs:1116-1127`); GPU→memory-tier gather (N regions → 1 slot) in
+  `copy_gpu_to_memory_async` on `warm_store` (`src/lib.rs:2998-3009`). `memcpy_h2d_async`
+  survives only in the test mock (`src/lib.rs:4193,4260`) and one assertion (`:5244`).
+- **Before**: warm-path H2D via `memcpy_h2d_async`; `copy_gpu_to_memory_async` "issues asynchronous GPU→host DMA on the supplied stream".
+- **After**: batched `memcpy_batch_async` scatter (H2D on `warm_load`) / gather (D2H on `warm_store`).
+
+---
+
+## Proposal 4 — FR-040 (stale gRPC reference) [APPROVED]
+
+- **Direction**: BACKFILL (code authoritative)
 - **Requirement**: FR-040
-- **Drift ref**: FR-040 (moderate)
-- **Location**: components/dispatcher/src/lib.rs:44 (module doc), :3060 (`promote_to_memory_tier`)
-- **Approval**: APPROVED
-
-**Before** — *"The gRPC handler spawns this as a detached background task when `BatchTouchRequest.promote = true`."*
-
-**After** — *"The shmq serve layer spawns this as a detached background task on the control-plane promote request (gRPC and the `BatchTouchRequest` message were removed in commit `97e26738`; shm-queue is the sole control transport)."*
-
-**Rationale** — gRPC was removed ("Remove gRPC; make shm-queue the sole control transport",
-`97e26738`, 2026-08-18). Control-plane requests now arrive from the shmq serve layer
-(`src/lib.rs:5`, `:44`), and `BatchTouchRequest` no longer exists in the dispatcher source.
-The `promote_to_memory_tier` method itself is unchanged. Spec-lag → BACKFILL.
+- **Commit**: `97e26738`
+- **Rationale**: gRPC removed entirely; shm-queue is the sole control transport. The
+  `promote_to_memory_tier` API is unchanged — only the invoking transport changed.
+- **Before**: "The gRPC handler spawns this as a detached background task when `BatchTouchRequest.promote = true`."
+- **After**: "The shm-queue control transport (the sole control transport since gRPC was removed) spawns this as a detached background task when a batch-touch request sets `promote = true`."
 
 ---
 
-## BACKFILL-FR042 — gRPC TakeEvents → shmq serve layer
+## Proposal 5 — FR-042 (stale gRPC reference) [APPROVED]
 
-- **Direction**: BACKFILL (spec → matches code)
+- **Direction**: BACKFILL (code authoritative)
 - **Requirement**: FR-042
-- **Drift ref**: FR-042 (minor)
-- **Location**: components/dispatcher/src/lib.rs:442
-- **Approval**: APPROVED
-
-**Before** — *"This mechanism enables external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling."*
-
-**After** — *"This mechanism enables external consumers (the shmq serve layer's `TakeEvents` drain) to observe cache evictions without polling."*
-
-**Rationale** — The eviction channel is now drained by the shmq serve layer via `TakeEvents`
-(`src/lib.rs:442`: "Returns the receiver that the shmq serve layer should drain via `TakeEvents`").
-The `create_eviction_channel` / `eviction_dropped_count` mechanism is unchanged. Spec-lag → BACKFILL.
+- **Commit**: `97e26738`
+- **Rationale**: The eviction-event channel is unchanged; the named example consumer
+  (gRPC TakeEvents) was removed. The shm-queue transport is now the consumer.
+- **Before**: "external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling."
+- **After**: "external consumers (e.g., the shm-queue TakeEvents stream) to observe cache evictions without polling."
 
 ---
 
-## BACKFILL-UNSPECCED-058 — Tier-event counters (new FR-058 + SC-017)
+## Proposal 6 — FR-058 + SC-017 (tier_event_stats) [APPROVED]
 
-- **Direction**: BACKFILL-UNSPECCED (add new requirement to existing spec)
-- **Requirement**: NEW FR-058 (+ SC-017); FR-001 inventory amended
-- **Drift ref**: unspecced (`tier_event_stats` / `TierEventCounters`)
-- **Location**: components/interfaces/src/idispatcher.rs:564 (trait method), :191 (`TierEventStats`);
-  components/dispatcher/src/lib.rs:111-159 (`TierEventCounters`), :3390 (impl)
-- **Approval**: APPROVED
-
-**Before** — No requirement. FR-001's introspection inventory lists `read_write_stats` but not
-`tier_event_stats`; no FR covers the tier-event counter subsystem.
-
-**After** — Add FR-058 documenting the `tier_event_stats() -> TierEventStats` `IDispatcher` method
-and the `TierEventCounters` subsystem: four monotonic (cumulative-since-process-start) counters —
-promotions SSD→DRAM (`promotions_to_memory`), lookups served→GPU (`promotions_to_gpu`), memory-tier
-evictions (`evictions_from_memory`), and SSD-extent evictions (`evictions_from_ssd`) — shared behind
-an `Arc` so foreground dispatcher paths and background evictor threads bump the same counters;
-`snapshot()` reads without reset (callers derive per-interval deltas by subtracting successive
-snapshots); always populated (unlike telemetry-gated `read_write_stats`). Add `tier_event_stats` to
-FR-001's durability/introspection method list. Add SC-017 as its measurable outcome.
-
-**Rationale** — The method and counter subsystem ship and are committed (profiler telemetry:
-"emit KV tier-event counts for the profiler", `4659626b`/`3231f85c`). Counters are recorded at
-~11 sites across `lib.rs` and `background.rs`. Code is authoritative → backfill.
+- **Direction**: BACKFILL-UNSPECCED (new FR + SC)
+- **Requirement**: new FR-058, new SC-017
+- **Commit**: `4659626b`
+- **Rationale**: `IDispatcher::tier_event_stats() -> TierEventStats` (`idispatcher.rs:564`;
+  struct `:189-210`) is implemented with a lock-free `TierEventCounters` subsystem
+  (`src/lib.rs:111-160`, `tier_counters` field `:317`, trait impl `:3390`) but no
+  requirement covers it. Four monotonic `u64` counters: `promotions_to_memory`,
+  `promotions_to_gpu`, `evictions_from_memory`, `evictions_from_ssd`. Always-on (unlike
+  telemetry-gated `read_write_stats`); non-tiering variants return zeros.
+- **Before**: (none — feature unspecced)
+- **After**: New **FR-058** (tier-event counters) + **SC-017** (counters zero at startup, monotonic, delta = tier events in window; non-tiering variant returns zeros).
 
 ---
 
-## Summary
+## Not proposed (already resolved / out of scope)
 
-| Proposal | Direction | Approved | Applied |
-|---|---|---|---|
-| BACKFILL-FR040 | BACKFILL | Yes | Yes (spec.md) |
-| BACKFILL-FR042 | BACKFILL | Yes | Yes (spec.md) |
-| BACKFILL-UNSPECCED-058 | BACKFILL-UNSPECCED | Yes | Yes (spec.md: FR-058 + SC-017, FR-001 amended) |
-
-No ALIGN, RESOLVED, or HUMAN_DECISION items this run.
-
-## Out-of-scope observations (recorded, not proposed as spec edits)
-
-- Two stale "gRPC handler" mentions remain in `src/lib.rs` code comments (`:2983`, `:3016`) —
-  source comments, outside this sync's editable scope. Suggested follow-up: reword to "shmq serve
-  layer / null-stream caller".
-- `components/dispatcher/verif/` reappeared as untracked Creusot build state; the interface makes
-  no verification claims, so there is nothing to reconcile.
+- **US11 queue-depth contradiction** — resolved in the 2026-08-20 sync (`max_queue_depth = 128` throughout). Aligned.
+- **CLAUDE.md path / `-v2` names** — already corrected in the current tree; also outside editing scope. Aligned.
+- **DI/test surface** — already specced as FR-057 / SC-016 (2026-08-20). No action.
+- **Two `src/lib.rs` "gRPC handler" source comments** — source is outside this sync's editable scope; flagged for a follow-up source-comment cleanup with the `97e26738` rationale.

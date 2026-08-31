@@ -1,45 +1,65 @@
 {
-  "generated": "2026-08-31",
+  "generated": "pending",
   "project": "dispatcher",
-  "spec": "specs/001-dispatcher-cache-interface/spec.md",
+  "branch": "sync-tmp",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 67,
-    "aligned": 65,
-    "drifted": 2,
+    "aligned": 61,
+    "drifted": 5,
     "not_implemented": 0,
     "unspecced_features": 1
   },
   "specs": [
     {
       "id": "001-dispatcher-cache-interface",
-      "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-023", "FR-024",
-        "FR-025", "FR-028", "FR-029", "FR-030", "FR-031", "FR-032", "FR-033",
-        "FR-034", "FR-035", "FR-036", "FR-037", "FR-038", "FR-039", "FR-041",
-        "FR-043", "FR-044", "FR-045", "FR-046", "FR-047", "FR-048", "FR-049",
-        "FR-050", "FR-051", "FR-052", "FR-053", "FR-054", "FR-055", "FR-056",
-        "FR-057"
-      ],
+      "title": "Dispatcher Cache Interface",
+      "aligned": 61,
       "drifted": [
+        {
+          "requirement": "FR-037",
+          "spec_text": "pre-allocate a single warm CUDA stream ... used by lookup_async and batch_lookup for memcpy_h2d_async on raw memory-tier pointers ... per-device warm stream from DEVICE_STREAMS.",
+          "actual": "DeviceStreams now holds two warm streams per device: warm_load (H2D) and warm_store (D2H), split so H2D and D2H DMA overlap on the PCIe bus (lib.rs:335-345); device_streams_for creates both plus the pipeline pair (lib.rs:371-378). The H2D memory-tier->GPU copy is issued via memcpy_batch_async (lib.rs:1127), not memcpy_h2d_async (mock-only now, lib.rs:4193,4260,5244). warm_stream AtomicU64 fallback retained.",
+          "location": "components/dispatcher/src/lib.rs:335-345,371-378,885,1127,2133,2740",
+          "commit": "995596e4",
+          "direction": "BACKFILL",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-052",
+          "spec_text": "one warm stream plus one pipeline stream pair per device.",
+          "actual": "Each device now has two warm streams (warm_load, warm_store) plus the pipeline pair: DeviceStreams { warm_load, warm_store, pipe: [u64; 2] } (lib.rs:339-345). Device-resolution / fallback-on-(-1) semantics unchanged.",
+          "location": "components/dispatcher/src/lib.rs:339-345",
+          "commit": "995596e4",
+          "direction": "BACKFILL",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-006 / FR-039(2) / FR-056 / Implementation-Notes",
+          "spec_text": "warm-path H2D uses IGpuServices::memcpy_h2d_async; copy_gpu_to_memory_async issues asynchronous GPU->host DMA on the supplied stream; populate D2H uses dma_copy_to_host.",
+          "actual": "Both warm directions now use the batched memcpy_batch_async (cuMemcpyBatchAsync) multi-region API. Memory-tier->GPU scatter (1 slot -> N regions) is a single memcpy_batch_async on warm_load (lib.rs:1116-1127); GPU->memory-tier gather in copy_gpu_to_memory_async (N regions -> 1 slot) is a single memcpy_batch_async on warm_store (lib.rs:2998-3009). No production call site uses memcpy_h2d_async.",
+          "location": "components/dispatcher/src/lib.rs:1116-1127,2984-3009",
+          "commit": "d8c26d58",
+          "direction": "BACKFILL",
+          "severity": "moderate"
+        },
         {
           "requirement": "FR-040",
           "spec_text": "The gRPC handler spawns this as a detached background task when BatchTouchRequest.promote = true.",
-          "actual": "gRPC removed (commit 97e26738); control-plane requests arrive from the shmq serve layer (src/lib.rs:5,44). BatchTouchRequest no longer exists in dispatcher source. promote_to_memory_tier itself unchanged (lib.rs:3060).",
-          "location": "components/dispatcher/src/lib.rs:44",
-          "severity": "moderate",
-          "direction": "backfill"
+          "actual": "gRPC removed entirely; shm-queue is the sole control transport (97e26738). promote_to_memory_tier API unchanged (lib.rs:3060); only the calling transport changed. Sentence names a transport that no longer exists.",
+          "location": "spec FR-040",
+          "commit": "97e26738",
+          "direction": "BACKFILL",
+          "severity": "minor"
         },
         {
           "requirement": "FR-042",
-          "spec_text": "This mechanism enables external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
-          "actual": "eviction channel now drained by the shmq serve layer via TakeEvents (src/lib.rs:442). create_eviction_channel / eviction_dropped_count mechanism unchanged.",
-          "location": "components/dispatcher/src/lib.rs:442",
-          "severity": "minor",
-          "direction": "backfill"
+          "spec_text": "external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
+          "actual": "Eviction-event channel (create_eviction_channel / EvictionEvent, lib.rs:378,392-396) unchanged, but the named example consumer (gRPC TakeEvents) was removed in 97e26738; shm-queue transport is now the consumer.",
+          "location": "spec FR-042",
+          "commit": "97e26738",
+          "direction": "BACKFILL",
+          "severity": "minor"
         }
       ],
       "not_implemented": []
@@ -47,20 +67,26 @@
   ],
   "unspecced": [
     {
-      "feature": "tier_event_stats() IDispatcher method + TierEventCounters subsystem",
-      "location": "components/interfaces/src/idispatcher.rs:564 (trait method), :191 (TierEventStats); components/dispatcher/src/lib.rs:111-159 (TierEventCounters), :3390 (impl)",
-      "lines": 60,
-      "suggested_spec": "FR-058 + SC-017; also add tier_event_stats to FR-001 introspection inventory",
-      "direction": "backfill-unspecced"
+      "feature": "tier_event_stats() -> TierEventStats: cumulative tier-transition counters on IDispatcher, backed by a lock-free TierEventCounters subsystem incremented on every tier transition. Always-on (unlike telemetry-gated read_write_stats).",
+      "location": "components/dispatcher/src/lib.rs (impl) + components/interfaces/src/idispatcher.rs (trait)",
+      "lines": "lib.rs:111-160,317,3390; idispatcher.rs:189-210,564",
+      "commit": "4659626b",
+      "suggested_spec": "New FR-058 (tier-event counters) + SC-017 (counters observable and monotonic across a populate/lookup/evict cycle)."
+    },
+    {
+      "feature": "DI/test hooks set_block_device_factory / set_extent_manager_factory / set_pipeline_metrics",
+      "location": "components/dispatcher/src/lib.rs",
+      "lines": "360-372",
+      "suggested_spec": "Already specced as FR-057 / SC-016 (2026-08-20). No action."
     }
   ],
-  "conflicts": [],
-  "resolved_since_last_sync": [
-    "CLAUDE.md stale component-framework path (now ../../lib/component-framework/crates/)",
-    "CLAUDE.md stale -v2 crate names (now block-device-spdk-nvme, extent-manager)"
+  "resolved_since_prior_report": [
+    "User Story 11 queue-depth intra-spec contradiction (fixed 2026-08-20; max_queue_depth = 128 per thread throughout).",
+    "CLAUDE.md stale component-framework path and -v2 crate names (corrected in current tree; also out of sync editing scope).",
+    "DI/test surface now specced as FR-057 / SC-016."
   ],
-  "out_of_scope_observations": [
-    "Two stale 'gRPC handler' mentions in src/lib.rs code comments (:2983, :3016)",
-    "components/dispatcher/verif/ reappeared as untracked Creusot build state; interface makes no verification claims, so no spec reconciliation needed"
-  ]
+  "out_of_scope_notes": [
+    "Two source comments still say 'gRPC handler' (src/lib.rs ~2983, null-stream comment near copy_gpu_to_memory_async). Source files are outside sync editable scope (.specify/sync/** and specs/** only); flagged for a follow-up source-comment cleanup."
+  ],
+  "conflicts": []
 }

@@ -1,30 +1,26 @@
 {
   "applied": "2026-08-31",
-  "mode": "interactive",
-  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
-  "backup": "components/dispatcher/.specify/sync/backups/specs/001-dispatcher-cache-interface/spec.md.bak",
-  "specs_updated": [
-    { "requirement": "header:Last Synced", "change_type": "amend" },
-    { "requirement": "FR-001", "change_type": "amend", "note": "added tier_event_stats to introspection inventory" },
-    { "requirement": "FR-040", "change_type": "amend", "note": "gRPC handler -> shmq serve layer" },
-    { "requirement": "FR-042", "change_type": "amend", "note": "gRPC TakeEvents -> shmq serve layer TakeEvents drain" },
-    { "requirement": "FR-058", "change_type": "add", "note": "tier_event_stats() + TierEventCounters subsystem" },
-    { "requirement": "SC-017", "change_type": "add", "note": "measurable outcome for FR-058" }
+  "project": "dispatcher",
+  "spec": "001-dispatcher-cache-interface",
+  "branch": "sync-tmp",
+  "backup": ".specify/sync/backups/specs/001-dispatcher-cache-interface/spec.md.bak",
+  "edits": [
+    { "requirement": "FR-006", "direction": "BACKFILL", "result": "applied", "note": "H2D warm-path copy -> memcpy_batch_async on warm_load (scatter)" },
+    { "requirement": "FR-037", "direction": "BACKFILL", "result": "applied", "note": "single warm stream -> per-device warm_load (H2D) + warm_store (D2H)" },
+    { "requirement": "FR-039(2)", "direction": "BACKFILL", "result": "applied", "note": "MemoryTier-hit H2D -> batched memcpy_batch_async on warm_load" },
+    { "requirement": "FR-040", "direction": "BACKFILL", "result": "applied", "note": "gRPC handler -> shm-queue control transport" },
+    { "requirement": "FR-042", "direction": "BACKFILL", "result": "applied", "note": "gRPC TakeEvents -> shm-queue TakeEvents" },
+    { "requirement": "FR-052", "direction": "BACKFILL", "result": "applied", "note": "stream inventory -> two warm streams + pipeline pair per device" },
+    { "requirement": "FR-056", "direction": "BACKFILL", "result": "applied", "note": "copy_gpu_to_memory_async -> batched memcpy_batch_async gather on warm_store" },
+    { "requirement": "Implementation-Notes", "direction": "BACKFILL", "result": "applied", "note": "warm-path APIs -> memcpy_batch_async scatter/gather; warm_load/warm_store split" },
+    { "requirement": "FR-058", "direction": "BACKFILL-UNSPECCED", "result": "applied", "note": "new: tier_event_stats() + TierEventCounters" },
+    { "requirement": "SC-017", "direction": "BACKFILL-UNSPECCED", "result": "applied", "note": "new: counters zero at startup, monotonic, delta = tier events" },
+    { "requirement": "Last-Synced", "direction": "bookkeeping", "result": "applied", "note": "2026-08-31 sync note appended" }
   ],
-  "new_specs_created": [],
-  "align_tasks_generated": 0,
-  "unspecced_backfilled": [
-    { "feature": "tier_event_stats() + TierEventCounters", "requirement_added": "FR-058 + SC-017" }
+  "source_files_modified": [],
+  "cargo_run": false,
+  "deferred_out_of_scope": [
+    "Two src/lib.rs 'gRPC handler' source comments (~lib.rs:2983) — code-side follow-up in align-tasks.md; source outside editing scope."
   ],
-  "resolved_since_last_sync": [
-    "CLAUDE.md stale component-framework path (corrected to ../../lib/component-framework/crates/)",
-    "CLAUDE.md stale -v2 crate names (corrected to block-device-spdk-nvme, extent-manager)"
-  ],
-  "not_applied": [
-    { "item": "src/lib.rs:2983,3016 stale 'gRPC handler' code comments", "reason": "source comments outside sync editable scope" },
-    { "item": "components/dispatcher/verif/ untracked Creusot build state", "reason": "not committed; interface makes no verification claims" }
-  ],
-  "active_requirement_count": "FR-001..FR-058 (5 removed: 020,021,022,026,027); SC-001..SC-017 (1 removed: 008)",
-  "source_touched": false,
-  "cargo_run": false
+  "drift_status": "clean"
 }

@@ -1,56 +1,78 @@
 {
   "generated": "2026-08-31",
-  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
-  "mode": "interactive",
-  "drift_source": "components/dispatcher/.specify/sync/drift-report.json",
+  "project": "dispatcher",
+  "spec": "001-dispatcher-cache-interface",
+  "branch": "sync-tmp",
+  "source": ".specify/sync/drift-report.json",
+  "editing_scope": ["specs/**"],
   "summary": {
-    "backfill": 2,
-    "backfill_unspecced": 1,
     "align": 0,
+    "backfill": 5,
+    "backfill_unspecced": 1,
+    "resolved": 0,
     "human_decision": 0,
-    "remove_from_spec": 0
+    "approved": 6
   },
   "proposals": [
     {
-      "id": "BACKFILL-FR040",
-      "direction": "backfill",
+      "requirement": "FR-037",
+      "direction": "BACKFILL",
+      "commit": "995596e4",
+      "status": "APPROVED",
+      "rationale": "DeviceStreams now holds two warm streams per device: warm_load (H2D) + warm_store (D2H), split for PCIe overlap (lib.rs:335-345); device_streams_for creates both plus pipeline pair (:371-378). Spec said 'single warm CUDA stream'.",
+      "before": "pre-allocate a single warm CUDA stream ... used ... for memcpy_h2d_async ... the per-device warm stream from DEVICE_STREAMS.",
+      "after": "per-device warm_load (H2D) + warm_store (D2H) streams split for PCIe bidirectional overlap; H2D via memcpy_batch_async on warm_load; warm_stream AtomicU64 fallback retained."
+    },
+    {
+      "requirement": "FR-052",
+      "direction": "BACKFILL",
+      "commit": "995596e4",
+      "status": "APPROVED",
+      "rationale": "DeviceStreams { warm_load, warm_store, pipe: [u64;2] } (lib.rs:339-345): two warm streams + pipeline pair per device.",
+      "before": "one warm stream plus one pipeline stream pair per device.",
+      "after": "two warm streams (warm_load for H2D and warm_store for D2H, FR-037) plus one pipeline stream pair per device."
+    },
+    {
+      "requirement": "FR-006 / FR-039(2) / FR-056 / Implementation-Notes",
+      "direction": "BACKFILL",
+      "commit": "d8c26d58",
+      "status": "APPROVED",
+      "rationale": "Both warm directions now use batched memcpy_batch_async (cuMemcpyBatchAsync): H2D scatter on warm_load (lib.rs:1116-1127); D2H gather in copy_gpu_to_memory_async on warm_store (lib.rs:2998-3009). memcpy_h2d_async is mock-only now (lib.rs:4193,4260,5244).",
+      "before": "warm-path H2D via memcpy_h2d_async; copy_gpu_to_memory_async issues asynchronous GPU->host DMA on the supplied stream.",
+      "after": "batched memcpy_batch_async scatter (H2D on warm_load) / gather (D2H on warm_store)."
+    },
+    {
       "requirement": "FR-040",
-      "location": "components/dispatcher/src/lib.rs:44",
+      "direction": "BACKFILL",
+      "commit": "97e26738",
+      "status": "APPROVED",
+      "rationale": "gRPC removed; shm-queue sole control transport. promote_to_memory_tier API unchanged; only the invoking transport changed.",
       "before": "The gRPC handler spawns this as a detached background task when BatchTouchRequest.promote = true.",
-      "after": "The shmq serve layer spawns this as a detached background task on the control-plane promote request (gRPC and the BatchTouchRequest message were removed in commit 97e26738; shm-queue is the sole control transport).",
-      "rationale": "gRPC removed (97e26738); control-plane arrives from shmq serve layer; BatchTouchRequest gone from source; promote_to_memory_tier unchanged.",
-      "confidence": "high",
-      "approved": true,
-      "applied": true
+      "after": "The shm-queue control transport (the sole control transport since gRPC was removed) spawns this as a detached background task when a batch-touch request sets promote = true."
     },
     {
-      "id": "BACKFILL-FR042",
-      "direction": "backfill",
       "requirement": "FR-042",
-      "location": "components/dispatcher/src/lib.rs:442",
-      "before": "This mechanism enables external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
-      "after": "This mechanism enables external consumers (the shmq serve layer's TakeEvents drain) to observe cache evictions without polling.",
-      "rationale": "Eviction channel now drained by shmq serve layer via TakeEvents (lib.rs:442); mechanism unchanged.",
-      "confidence": "high",
-      "approved": true,
-      "applied": true
+      "direction": "BACKFILL",
+      "commit": "97e26738",
+      "status": "APPROVED",
+      "rationale": "Eviction-event channel unchanged; named example consumer (gRPC TakeEvents) removed. shm-queue transport is now the consumer.",
+      "before": "external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
+      "after": "external consumers (e.g., the shm-queue TakeEvents stream) to observe cache evictions without polling."
     },
     {
-      "id": "BACKFILL-UNSPECCED-058",
-      "direction": "backfill-unspecced",
-      "requirement": "FR-058",
-      "additional": ["SC-017", "FR-001 inventory amendment"],
-      "location": "components/interfaces/src/idispatcher.rs:564; components/dispatcher/src/lib.rs:111-159,3390",
-      "before": "No requirement; FR-001 inventory omits tier_event_stats.",
-      "after": "New FR-058 documents tier_event_stats() -> TierEventStats and the TierEventCounters subsystem (4 monotonic Arc-shared counters: promotions_to_memory, promotions_to_gpu, evictions_from_memory, evictions_from_ssd; snapshot() reads without reset; always populated). tier_event_stats added to FR-001 introspection inventory. SC-017 added as measurable outcome.",
-      "rationale": "Shipped/committed profiler telemetry feature (4659626b/3231f85c); recorded at ~11 sites; code authoritative.",
-      "confidence": "high",
-      "approved": true,
-      "applied": true
+      "requirement": "FR-058 + SC-017",
+      "direction": "BACKFILL-UNSPECCED",
+      "commit": "4659626b",
+      "status": "APPROVED",
+      "rationale": "IDispatcher::tier_event_stats() -> TierEventStats (idispatcher.rs:564; struct :189-210) implemented via lock-free TierEventCounters (lib.rs:111-160, tier_counters field :317, trait impl :3390); no requirement covered it. Four monotonic u64 counters: promotions_to_memory, promotions_to_gpu, evictions_from_memory, evictions_from_ssd. Always-on; non-tiering variants return zeros.",
+      "before": "(none - feature unspecced)",
+      "after": "New FR-058 (tier-event counters) + SC-017 (zero at startup, monotonic, delta = tier events in window; non-tiering variant returns zeros)."
     }
   ],
-  "out_of_scope_observations": [
-    "src/lib.rs:2983,3016 stale 'gRPC handler' code comments (out of sync scope)",
-    "components/dispatcher/verif/ untracked Creusot build state; no interface verification claim to reconcile"
+  "not_proposed": [
+    "US11 queue-depth contradiction: resolved 2026-08-20 (max_queue_depth = 128). Aligned.",
+    "CLAUDE.md path/-v2 names: corrected in current tree + out of editing scope. Aligned.",
+    "DI/test surface: already specced as FR-057/SC-016 (2026-08-20).",
+    "Two src/lib.rs 'gRPC handler' source comments: source out of editing scope; follow-up cleanup."
   ]
 }
