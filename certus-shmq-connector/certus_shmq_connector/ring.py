@@ -354,8 +354,12 @@ class Ring:
         # word), so two processes could otherwise grab the same channel. Each
         # slot scans a disjoint channel slice. claim_slots=1 (the default, and
         # TP=1's single-process UniProcExecutor) → full range = exact baseline.
-        self._claim_slot = int(claim_slot)
         self._claim_slots = max(1, int(claim_slots))
+        self._claim_slot = int(claim_slot)
+        if not (0 <= self._claim_slot < self._claim_slots):
+            raise ValueError(
+                f"claim_slot {self._claim_slot} out of range for claim_slots={self._claim_slots}"
+            )
 
         self._fd = -1
         self._mm = None
