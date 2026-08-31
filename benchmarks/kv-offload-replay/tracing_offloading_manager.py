@@ -5,16 +5,17 @@ tracing_offloading_manager.py
 Instruments the vLLM OffloadingManager layer with JSONL tracing.
 Every call to lookup / touch / prepare_load / complete_load / prepare_store /
 complete_store / take_events is logged. Works in conjunction with the
-OffloadingConnector (or TracingOffloadingConnector wrapping it).
+OffloadingConnector (or TracingConnector wrapping it).
 
 The module exports `TracingCPUOffloadingSpec` — a drop-in replacement for
 CPUOffloadingSpec that wraps the returned manager. Select via kv_transfer_config:
 
     {
-        "kv_connector": "TracingOffloadingConnector",
-        "kv_connector_module_path": "tracing_offloading_connector",
+        "kv_connector": "TracingConnector",
+        "kv_connector_module_path": "tracing_connector",
         "kv_role": "kv_both",
         "kv_connector_extra_config": {
+            "traced_kv_connector": "OffloadingConnector",
             "cpu_bytes_to_use": 4294967296,
             "spec_name": "TracingCPUOffloadingSpec",
             "spec_module_path": "tracing_offloading_manager"

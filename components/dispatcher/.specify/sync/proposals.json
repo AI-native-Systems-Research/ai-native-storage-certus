@@ -1,87 +1,78 @@
 {
-  "generated": "2026-08-20",
-  "phase": "B",
-  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
-  "drift_source": "components/dispatcher/.specify/sync/drift-report.json",
-  "classification_basis": "each drift item classified by reading the code at its location; code is the working/intentional reality in all cases (no ALIGN)",
+  "generated": "2026-08-31",
+  "project": "dispatcher",
+  "spec": "001-dispatcher-cache-interface",
+  "branch": "sync-tmp",
+  "source": ".specify/sync/drift-report.json",
+  "editing_scope": ["specs/**"],
+  "summary": {
+    "align": 0,
+    "backfill": 5,
+    "backfill_unspecced": 1,
+    "resolved": 0,
+    "human_decision": 0,
+    "approved": 6
+  },
   "proposals": [
     {
-      "id": "BACKFILL-US011",
-      "type": "backfill",
-      "direction": "backfill",
-      "requirement": "User Story 11 (narrative + acceptance scenario 3) / FR-039",
-      "drift_ref": "US-011 / FR-039",
-      "severity": "moderate",
-      "location": "components/dispatcher/src/lib.rs:2217",
-      "title": "Batch cold-promotion per-thread queue depth (US-11 -> 128)",
-      "before": "US-11 narrative: 'Each thread uses a reduced NVMe pipeline depth (16 / num_queues) to share the drive's submission queue capacity without overflow.' Scenario 3: '...each processed by a separate thread with max_queue_depth = 8 (16/2), keeping total per-drive NVMe commands at <=16.'",
-      "after": "US-11 narrative: 'Each thread drives its cold promotions with a deep per-thread NVMe pipeline depth (max_queue_depth = 128, per FR-039 step (5) and FR-019) to saturate the drive's submission queue for maximum per-drive parallelism.' Scenario 3: '...each processed by a separate thread, and each thread drives its cold promotions with max_queue_depth = 128 (per FR-039 step (5) / FR-019) to saturate the drive's NVMe submission queue.'",
-      "rationale": "batch_lookup sets `let queue_depth = 128;` (lib.rs:2217) into pipelined_multi_object_zero_copy; deliberate and already stated by FR-039 step (5) and FR-019. The US-11 story text carried the older 16/num_queues wording, an intra-spec contradiction against the aligned FRs and the code. Spec-lag -> BACKFILL the story text.",
-      "confidence": "high",
-      "applied": true,
-      "files": ["components/dispatcher/specs/001-dispatcher-cache-interface/spec.md"]
+      "requirement": "FR-037",
+      "direction": "BACKFILL",
+      "commit": "995596e4",
+      "status": "APPROVED",
+      "rationale": "DeviceStreams now holds two warm streams per device: warm_load (H2D) + warm_store (D2H), split for PCIe overlap (lib.rs:335-345); device_streams_for creates both plus pipeline pair (:371-378). Spec said 'single warm CUDA stream'.",
+      "before": "pre-allocate a single warm CUDA stream ... used ... for memcpy_h2d_async ... the per-device warm stream from DEVICE_STREAMS.",
+      "after": "per-device warm_load (H2D) + warm_store (D2H) streams split for PCIe bidirectional overlap; H2D via memcpy_batch_async on warm_load; warm_stream AtomicU64 fallback retained."
     },
     {
-      "id": "BACKFILL-DOC-fwpath",
-      "type": "backfill",
-      "direction": "backfill",
-      "requirement": "CLAUDE.md crate-location note",
-      "drift_ref": "CLAUDE.md (stale crate path)",
-      "severity": "minor",
-      "location": "components/dispatcher/CLAUDE.md:40",
-      "title": "CLAUDE.md stale component-framework path",
-      "before": "component-framework, component-core, component-macros - at ../../component-framework/crates/",
-      "after": "component-framework, component-core, component-macros - at ../../../lib/component-framework/crates/ (moved from components/ to lib/)",
-      "rationale": "component-framework now lives at lib/component-framework after the components/ -> lib/ move; components/component-framework absent. Cargo.toml uses workspace deps so build is unaffected; only the doc path is stale. Doc-lag -> BACKFILL direction.",
-      "confidence": "high",
-      "applied": false,
-      "not_applied_reason": "CLAUDE.md is outside this sync's editable scope (.specify/sync/ and specs/ only); deferred to a follow-up documentation pass.",
-      "files": []
+      "requirement": "FR-052",
+      "direction": "BACKFILL",
+      "commit": "995596e4",
+      "status": "APPROVED",
+      "rationale": "DeviceStreams { warm_load, warm_store, pipe: [u64;2] } (lib.rs:339-345): two warm streams + pipeline pair per device.",
+      "before": "one warm stream plus one pipeline stream pair per device.",
+      "after": "two warm streams (warm_load for H2D and warm_store for D2H, FR-037) plus one pipeline stream pair per device."
     },
     {
-      "id": "BACKFILL-DOC-v2names",
-      "type": "backfill",
-      "direction": "backfill",
-      "requirement": "CLAUDE.md dependency-crate names",
-      "drift_ref": "CLAUDE.md (stale crate names)",
-      "severity": "minor",
-      "location": "components/dispatcher/CLAUDE.md:43-44,53",
-      "title": "CLAUDE.md stale -v2 crate names",
-      "before": "references to block-device-spdk-nvme-v2 and extent-manager-v2",
-      "after": "block-device-spdk-nvme and extent-manager (no -v2 suffix; matches components/dispatcher/Cargo.toml:15)",
-      "rationale": "No -v2 suffix exists in the current workspace; the actual dependency crate is block-device-spdk-nvme. Documentation-only drift -> BACKFILL direction.",
-      "confidence": "high",
-      "applied": false,
-      "not_applied_reason": "CLAUDE.md is outside this sync's editable scope (.specify/sync/ and specs/ only); deferred to a follow-up documentation pass.",
-      "files": []
+      "requirement": "FR-006 / FR-039(2) / FR-056 / Implementation-Notes",
+      "direction": "BACKFILL",
+      "commit": "d8c26d58",
+      "status": "APPROVED",
+      "rationale": "Both warm directions now use batched memcpy_batch_async (cuMemcpyBatchAsync): H2D scatter on warm_load (lib.rs:1116-1127); D2H gather in copy_gpu_to_memory_async on warm_store (lib.rs:2998-3009). memcpy_h2d_async is mock-only now (lib.rs:4193,4260,5244).",
+      "before": "warm-path H2D via memcpy_h2d_async; copy_gpu_to_memory_async issues asynchronous GPU->host DMA on the supplied stream.",
+      "after": "batched memcpy_batch_async scatter (H2D on warm_load) / gather (D2H on warm_store)."
     },
     {
-      "id": "BACKFILL-UNSPECCED-057",
-      "type": "backfill-unspecced",
-      "direction": "backfill-unspecced",
-      "requirement": "NEW FR-057 (+ SC-016)",
-      "drift_ref": "unspecced: set_block_device_factory / set_extent_manager_factory / set_pipeline_metrics",
-      "severity": "minor",
-      "location": "components/dispatcher/src/lib.rs:358-374",
-      "title": "Dependency-injection / test hooks",
-      "before": "No requirement. FR-043 covers the PipelineMetrics trait but not the injection setters; the block-device/extent-manager factory setters are entirely unspecced.",
-      "after": "Add FR-057 documenting the three inherent DispatcherComponent DI setters (set_block_device_factory(BlockDeviceFactory), set_extent_manager_factory(ExtentManagerFactory), set_pipeline_metrics(Arc<dyn PipelineMetrics>)) as the test/DI surface overriding internally-constructed dependencies, with fallback to the default hard-coded implementations when unset. Add SC-016 as the measurable outcome.",
-      "rationale": "Public inherent methods that ship and are used for hardware-free component testing; inherent on the concrete component, not IDispatcher trait methods (consistent with how FR-001 documents create_eviction_channel/eviction_dropped_count). Code is authoritative -> backfill a test/DI-surface requirement.",
-      "confidence": "high",
-      "applied": true,
-      "files": ["components/dispatcher/specs/001-dispatcher-cache-interface/spec.md"]
+      "requirement": "FR-040",
+      "direction": "BACKFILL",
+      "commit": "97e26738",
+      "status": "APPROVED",
+      "rationale": "gRPC removed; shm-queue sole control transport. promote_to_memory_tier API unchanged; only the invoking transport changed.",
+      "before": "The gRPC handler spawns this as a detached background task when BatchTouchRequest.promote = true.",
+      "after": "The shm-queue control transport (the sole control transport since gRPC was removed) spawns this as a detached background task when a batch-touch request sets promote = true."
+    },
+    {
+      "requirement": "FR-042",
+      "direction": "BACKFILL",
+      "commit": "97e26738",
+      "status": "APPROVED",
+      "rationale": "Eviction-event channel unchanged; named example consumer (gRPC TakeEvents) removed. shm-queue transport is now the consumer.",
+      "before": "external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
+      "after": "external consumers (e.g., the shm-queue TakeEvents stream) to observe cache evictions without polling."
+    },
+    {
+      "requirement": "FR-058 + SC-017",
+      "direction": "BACKFILL-UNSPECCED",
+      "commit": "4659626b",
+      "status": "APPROVED",
+      "rationale": "IDispatcher::tier_event_stats() -> TierEventStats (idispatcher.rs:564; struct :189-210) implemented via lock-free TierEventCounters (lib.rs:111-160, tier_counters field :317, trait impl :3390); no requirement covered it. Four monotonic u64 counters: promotions_to_memory, promotions_to_gpu, evictions_from_memory, evictions_from_ssd. Always-on; non-tiering variants return zeros.",
+      "before": "(none - feature unspecced)",
+      "after": "New FR-058 (tier-event counters) + SC-017 (zero at startup, monotonic, delta = tier events in window; non-tiering variant returns zeros)."
     }
   ],
-  "counts": {
-    "backfill_applied": 1,
-    "backfill_recorded_not_applied": 2,
-    "backfill_unspecced_applied": 1,
-    "align_tasks": 0,
-    "resolved": 0,
-    "human_decision": 0
-  },
-  "deferred": [
-    "BACKFILL-DOC-fwpath",
-    "BACKFILL-DOC-v2names"
+  "not_proposed": [
+    "US11 queue-depth contradiction: resolved 2026-08-20 (max_queue_depth = 128). Aligned.",
+    "CLAUDE.md path/-v2 names: corrected in current tree + out of editing scope. Aligned.",
+    "DI/test surface: already specced as FR-057/SC-016 (2026-08-20).",
+    "Two src/lib.rs 'gRPC handler' source comments: source out of editing scope; follow-up cleanup."
   ]
 }

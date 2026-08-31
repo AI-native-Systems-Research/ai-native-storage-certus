@@ -44,6 +44,48 @@ ARG VLLM_VERSION=0.26.0
 FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
 ENTRYPOINT []
 
+# ── Optional: bake in the forked tiering fix (default OFF) ───────────────────
+# The stock base image ships upstream vLLM 0.26.0, whose tiering plugin
+# (OffloadingConnector -> TieringOffloadingSpec) crashes at scale with a
+# _req_state KeyError -> EngineDeadError (0/10 completions @ 450 convs). Our fork
+# fix/tiering-deferred-finalize-v0.26.0 (@5e20aeb5, cut from the v0.26.0 tag) is
+# a pure-Python 3-file patch that fixes it (10/10). We COPY those vendored files
+# over the prebuilt base rather than pip-installing from git — the base already
+# has vLLM's compiled extensions, so a source rebuild would be slow and needless.
+#
+#   default (stock, as-shipped / crashing arm):   VLLM_FIX_TIERING=0
+#   patched arm:  podman build --build-arg VLLM_FIX_TIERING=1 -t certus-offload-bench-fix026 ...
+#
+# See benchmarks/kv-offload-replay/vllm-fix2/PROVENANCE.md for source + sync.
+ARG VLLM_FIX_TIERING=0
+# Re-declare VLLM_VERSION inside the build stage so the RUN below can read it
+# (an ARG declared before FROM is not visible after FROM; a valueless re-declare
+# inherits the pre-FROM default, or the --build-arg value when one is passed).
+ARG VLLM_VERSION
+# Stage the vendored patch unconditionally (COPY cannot be conditional); the
+# RUN below applies it only when the build-arg is on, and only onto a 0.26 base.
+COPY benchmarks/kv-offload-replay/vllm-fix2/ /tmp/vllm-fix2/
+RUN set -eux; \
+    if [ "${VLLM_FIX_TIERING}" = "1" ]; then \
+      case "${VLLM_VERSION}" in \
+        0.26*) : ;; \
+        *) echo "ERROR: VLLM_FIX_TIERING=1 is only valid for a 0.26.x base, got ${VLLM_VERSION}" >&2; exit 1 ;; \
+      esac; \
+      D=/usr/local/lib/python3.12/dist-packages/vllm; \
+      cp /tmp/vllm-fix2/manager.py   "$D/v1/kv_offload/tiering/manager.py"; \
+      cp /tmp/vllm-fix2/scheduler.py "$D/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py"; \
+      cp /tmp/vllm-fix2/base.py      "$D/v1/kv_offload/base.py"; \
+      python3 -c "import py_compile,sys; [py_compile.compile(f, doraise=True) for f in sys.argv[1:]]" \
+        "$D/v1/kv_offload/tiering/manager.py" \
+        "$D/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py" \
+        "$D/v1/kv_offload/base.py"; \
+      echo "[Dockerfile.offload] baked tiering fix (fork fix/tiering-deferred-finalize-v0.26.0 @5e20aeb5)"; \
+    else \
+      echo "[Dockerfile.offload] stock vLLM ${VLLM_VERSION} (tiering fix NOT applied)"; \
+    fi; \
+    rm -rf /tmp/vllm-fix2
+LABEL org.certus.vllm-fix-tiering="${VLLM_FIX_TIERING}"
+
 # GPU is REQUIRED at run time (vLLM loads the model on the GPU). WHICH GPU is a
 # run-time choice — select it on the run command, not here (do NOT bake
 # NVIDIA_VISIBLE_DEVICES into the image):
@@ -56,9 +98,11 @@ LABEL org.certus.gpu-required="true" \
 
 WORKDIR /workspace
 
-# The unified driver + its two in-process connector modules (only imported when
-# TRACE_OFFLOAD=1), plus the shared dataset (paths relative to the repo-root build
-# context). torch/numpy/vllm come from the base image; no extra pip deps.
+# The unified driver + its in-process tracer modules (only imported when
+# TRACE_OFFLOAD=1: the generic connector-layer tracing_connector and the
+# manager-layer tracing_offloading_manager), plus the shared dataset (paths
+# relative to the repo-root build context). torch/numpy/vllm come from the base
+# image; no extra pip deps.
 COPY benchmarks/kv-offload-replay/run_multiturn_offloading.py /workspace/bench/
 # Shared workload modules the driver imports: run_multiturn_common (batched loop +
 # engine/telemetry setup, imported at top) and run_multiturn_async (async
@@ -67,7 +111,7 @@ COPY benchmarks/kv-offload-replay/run_multiturn_offloading.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/run_multiturn_common.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/run_multiturn_sync_batched.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/bench/
-COPY benchmarks/kv-offload-replay/tracing_offloading_connector.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/tracing_connector.py /workspace/bench/
 COPY benchmarks/kv-offload-replay/tracing_offloading_manager.py /workspace/bench/
 COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
@@ -80,7 +124,7 @@ RUN chmod +x /usr/local/bin/offload-entrypoint
 # (OFFLOAD_MODE empty, SECONDARY_TIER empty); set OFFLOAD_MODE=none for the
 # baseline or SECONDARY_TIER=fs for tiering at run time. CPU_BYTES is the pinned
 # host-RAM offload tier — must fit free RAM (Tiered also needs --shm-size >= it).
-# PYTHONPATH lets vLLM import the two connector modules by name when TRACE_OFFLOAD=1.
+# PYTHONPATH lets vLLM import the tracer modules by name when TRACE_OFFLOAD=1.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/workspace/bench \
     MODEL=NousResearch/Meta-Llama-3-8B \

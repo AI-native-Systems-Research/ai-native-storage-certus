@@ -47,7 +47,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 MODEL="NousResearch/Meta-Llama-3-8B"
 MODEL_FS="/mnt/certus1"
 declare -a DEVICE_PCI=()
-NUM_CONVS=450
+NUM_CONVS=""           # empty = default by turn config (450 only for 12/12, whole corpus otherwise); --num-convs overrides
 MAX_ROUNDS=0           # 0 = replay all turns; N caps every backend at N rounds/turns
 OUTPUT_TOKENS=150
 MAX_MODEL_LEN=8192
@@ -86,6 +86,17 @@ ENFORCE_EAGER=0
 # runs one vLLM coroutine per conversation (V1 AsyncLLM). --async flips it for
 # the whole run; --workload-mode <mode> sets it explicitly.
 WORKLOAD_MODE=batched
+# --trace-offload wraps the KV connector in the generic TracingConnector on the
+# Certus-SPDK/shmq path, capturing per-request offloaded/loaded block counts as
+# offloading_trace_<pid>.jsonl. When set, run-bench.sh bind-mounts TRACE_OUT
+# (pointed at this run's LOGDIR below) into the --rm container so the JSONL
+# survives. Off by default (adds a connector wrapper + trace-file writes).
+TRACE_OFFLOAD=0
+# --trace-offload also captures the worker-side per-transfer submit_load/
+# submit_store block counts (submit_trace_<pid>.jsonl) so the run can VERIFY the
+# scheduler prepare_load counts against the worker's. On by default whenever
+# --trace-offload is set; --no-trace-submit disables just this half.
+TRACE_SUBMIT=1
 # Metrics are captured on every run: all five drivers default stats ON, so the
 # vllm: prometheus counters (+ the KV-offload connector stats) and, on the
 # Certus-SPDK/shmq path, the per-round SSD device I/O are always recorded. No
@@ -96,13 +107,22 @@ WORKLOAD_MODE=batched
 # (the 450x12 dataset). "sharegpt" selects the ShareGPT multi-turn workload by
 # human-turn count via SHAREGPT_MIN_TURNS/SHAREGPT_MAX_TURNS. Exactly two configs
 # are accepted: 12/12 (default) = the 450-conv, 12-turn set every image bakes as
-# its DATASET_PATH (so at 12/12 the container variants are a no-op); 1/1 = the
+# its DATASET_PATH (so at 12/12 the container variants are a no-op); 2/2 = the
 # FULL 94,145-conv corpus (data/sharegpt/*.json), which is mounted in and capped
-# by --num-convs. Any other pair errors; use an explicit DATASET_PATH instead.
-# Passing --min-turns/--max-turns implies --workload sharegpt (see below).
+# by --num-convs. (2 is the loader's own >=2-turn floor; 1 is accepted as a
+# legacy alias for 2.) Any other pair errors; use an explicit DATASET_PATH
+# instead. Passing --min-turns/--max-turns implies --workload sharegpt (see below).
 WORKLOAD_NAME=""
-SHAREGPT_MIN_TURNS=""  # min human turns; 1 = full corpus, 12 = 450x12 subset. empty = default (12)
+SHAREGPT_MIN_TURNS=""  # min human turns; 2 = full corpus (1 = alias), 12 = 450x12 subset. empty = default (12)
 SHAREGPT_MAX_TURNS=""  # max human turns; empty = mirrors --min-turns (so --min-turns alone works)
+# long-doc-qa (--workload long-doc-qa) shape knobs. Empty = the workload's baked
+# defaults (5000 tok / 8 turns / 1000 docs); set via the environment to tune. All
+# forwarded to every backend; only read when WORKLOAD_NAME=long-doc-qa. Declared
+# here (with :- fallbacks) so `set -u` doesn't trip on an unset knob.
+LONGDOC_DOC_TOKENS="${LONGDOC_DOC_TOKENS:-}"
+LONGDOC_QUESTIONS="${LONGDOC_QUESTIONS:-}"
+LONGDOC_NUM_DOCS="${LONGDOC_NUM_DOCS:-}"
+LONGDOC_SEED="${LONGDOC_SEED:-}"
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
 DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
@@ -173,18 +193,32 @@ Flags (all optional; defaults shown):
                                --workload-mode async.
   --workload-mode <mode>       Execution model for all backends: batched (default)
                                or async. Forwarded as the WORKLOAD_MODE env var.
+  --trace-offload              Wrap the connector in the generic TracingConnector
+                               on the Certus-SPDK/shmq path; per-request block
+                               counts land in offloading_trace_<pid>.jsonl under
+                               <logdir>. Also emits worker submit_trace_<pid>.jsonl
+                               (per-transfer submit counts) to verify them. [off]
+  --no-trace-submit            With --trace-offload, skip the worker submit_trace
+                               (keep only the scheduler offloading_trace). [on]
   --workload <name>            Named dataset workload for all backends, forwarded as
                                WORKLOAD_NAME. Empty (default) = the baked 450x12
                                dataset. "sharegpt" = the ShareGPT multi-turn workload
                                selected by human-turn count (--min-turns/--max-turns).
-                               12/12 (default) = that baked 450x12 set; --min-turns 1
+                               12/12 (default) = that baked 450x12 set; --min-turns 2
                                = the FULL 94,145-conv corpus (data/sharegpt/*.json,
                                mounted in, capped by --num-convs). Any other pair errors;
                                use an explicit DATASET_PATH instead.
-  --min-turns <n>              Min human turns for the sharegpt workload; 1 selects the
-                               full corpus, 12 the 450x12 subset. Implies --workload
+                               "long-doc-qa" = synthetic long-document QA (a large
+                               per-doc-unique prefix + follow-ups; KV-cache stress).
+                               Shape via env LONGDOC_DOC_TOKENS / LONGDOC_QUESTIONS /
+                               LONGDOC_NUM_DOCS / LONGDOC_SEED (defaults 4000/8/1000);
+                               NUM_CONVS defaults to LONGDOC_NUM_DOCS. Big docs need a
+                               matching --max-model-len.
+  --min-turns <n>              Min human turns for the sharegpt workload; 2 selects the
+                               full corpus (the loader's >=2-turn floor; 1 = legacy
+                               alias), 12 the 450x12 subset. Implies --workload
                                sharegpt. Forwarded as SHAREGPT_MIN_TURNS. [default 12]
-  --max-turns <n>              Max human turns; must match --min-turns (1 or 12). Implies
+  --max-turns <n>              Max human turns; must match --min-turns (2 or 12). Implies
                                --workload sharegpt; empty mirrors --min-turns.
                                Forwarded as SHAREGPT_MAX_TURNS. [default = --min-turns]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
@@ -236,6 +270,8 @@ while [[ $# -gt 0 ]]; do
         --enforce-eager)    ENFORCE_EAGER=1; shift;;
         --async)            WORKLOAD_MODE=async; shift;;
         --workload-mode)    WORKLOAD_MODE="$2"; shift 2;;
+        --trace-offload)    TRACE_OFFLOAD=1; shift;;
+        --no-trace-submit)  TRACE_SUBMIT=0; shift;;
         --workload)         WORKLOAD_NAME="$2"; shift 2;;
         --min-turns)        SHAREGPT_MIN_TURNS="$2"; shift 2;;
         --max-turns)        SHAREGPT_MAX_TURNS="$2"; shift 2;;
@@ -256,17 +292,40 @@ if [[ -z "$WORKLOAD_NAME" && ( -n "$SHAREGPT_MIN_TURNS" || -n "$SHAREGPT_MAX_TUR
     WORKLOAD_NAME="sharegpt"
 fi
 
-# Only two sharegpt turn configs are prepared: 12/12 (450x12 subset) and 1/1
-# (full corpus). Reject anything else here, so the corpus bind-mount below (keyed
-# on min-turns 1) can't pair with a bogus max and force an unvalidated DATASET_PATH.
-# max-turns mirrors min-turns when unset, so --min-turns 1|12 alone is valid.
+# Only two sharegpt turn configs are prepared: 12/12 (450x12 subset) and 2/2
+# (full corpus; the loader's own >=2-turn floor, so 1 is accepted as a legacy
+# alias for 2). Reject anything else here, so the corpus bind-mount below (keyed
+# on min-turns 1|2) can't pair with a bogus max and force an unvalidated
+# DATASET_PATH. max-turns mirrors min-turns when unset, so --min-turns 2|12 alone
+# is valid.
 if [[ "$WORKLOAD_NAME" == "sharegpt" ]]; then
     _mn="${SHAREGPT_MIN_TURNS:-12}"; _mx="${SHAREGPT_MAX_TURNS:-$_mn}"
-    if ! { [[ "$_mn" == "12" && "$_mx" == "12" ]] || [[ "$_mn" == "1" && "$_mx" == "1" ]]; }; then
+    if ! { [[ "$_mn" == "12" && "$_mx" == "12" ]] || \
+           { [[ "$_mn" == "1" || "$_mn" == "2" ]] && [[ "$_mx" == "$_mn" ]]; }; }; then
         echo "error: --workload sharegpt accepts only 12/12 (the 450-conv subset)" >&2
-        echo "       or 1/1 (the full 94,145-conv corpus); got min=${_mn} max=${_mx}." >&2
+        echo "       or 2/2 (the full 94,145-conv corpus; 1 also accepted); got min=${_mn} max=${_mx}." >&2
         echo "       Use an explicit DATASET_PATH for other turn counts." >&2
         exit 2
+    fi
+fi
+
+# Default the conversation count from the turn config (mirrors
+# run_multiturn_common._sharegpt_num_convs): 450 ONLY for the exactly-12/12
+# subset, the whole corpus for every other turn config. Without this the
+# hardcoded 450 default was forwarded as NUM_CONVS and — being the final override
+# in resolve_workload — masked the corpus default, so --min-turns 2 still ran 450
+# convs. An explicit --num-convs (NUM_CONVS non-empty) always wins.
+if [[ -z "$NUM_CONVS" ]]; then
+    if [[ "$WORKLOAD_NAME" == "long-doc-qa" ]]; then
+        # Draw the whole generated corpus; the workload's own default is
+        # LONGDOC_NUM_DOCS (also 1000), and load_convs caps at NUM_CONVS. Kept as
+        # a literal here (not read from the workload) so the sharegpt-shaped
+        # defaulting below stays untouched for that workload.
+        NUM_CONVS="${LONGDOC_NUM_DOCS:-1000}"
+    elif [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
+        NUM_CONVS=450     # exactly-12/12 subset
+    else
+        NUM_CONVS=94145   # everything else -> whole corpus (= _SHAREGPT_CORPUS_CONVS; load_convs caps here)
     fi
 fi
 
@@ -747,7 +806,7 @@ build_offload() {  # image
 # is set it forwards WORKLOAD_NAME plus any SHAREGPT_MIN_TURNS/MAX_TURNS.
 #
 # The 12/12 sharegpt set is baked into every image (as DATASET_PATH), so at
-# 12/12 this just forwards env and is a harmless no-op. min-turns 1 selects the
+# 12/12 this just forwards env and is a harmless no-op. min-turns 2 selects the
 # FULL corpus, which is NOT baked: the images differ in where their
 # __file__-relative data dir resolves (offload/sharedstorage flatten the
 # layout), so instead of trusting that path we bind-mount data/sharegpt
@@ -759,14 +818,21 @@ workload_container_args() {  # -> prints podman args, one per line
     printf '%s\n' "-e" "WORKLOAD_NAME=${WORKLOAD_NAME}"
     [[ -n "$SHAREGPT_MIN_TURNS" ]] && printf '%s\n' "-e" "SHAREGPT_MIN_TURNS=${SHAREGPT_MIN_TURNS}"
     [[ -n "$SHAREGPT_MAX_TURNS" ]] && printf '%s\n' "-e" "SHAREGPT_MAX_TURNS=${SHAREGPT_MAX_TURNS}"
-    if [[ "$WORKLOAD_NAME" == "sharegpt" && "$SHAREGPT_MIN_TURNS" == "1" ]]; then
+    if [[ "$WORKLOAD_NAME" == "sharegpt" && ( "$SHAREGPT_MIN_TURNS" == "2" || "$SHAREGPT_MIN_TURNS" == "1" ) ]]; then
         if [[ -d "${REPO_ROOT}/data/sharegpt" ]]; then
             printf '%s\n' \
                 "-v" "${REPO_ROOT}/data/sharegpt:/workspace/data/sharegpt:ro,z" \
                 "-e" "DATASET_PATH=/workspace/data/sharegpt"
         else
-            warn "min-turns 1 needs the full corpus at ${REPO_ROOT}/data/sharegpt (data/sharegpt/*.json) — not found; run will fall back to the baked 450x12 set"
+            warn "min-turns ${SHAREGPT_MIN_TURNS} needs the full corpus at ${REPO_ROOT}/data/sharegpt (data/sharegpt/*.json) — not found; run will fall back to the baked 450x12 set"
         fi
+    elif [[ "$WORKLOAD_NAME" != "sharegpt" ]]; then
+        # A self-generating workload (e.g. long-doc-qa builds its own dataset in
+        # the container). Every image bakes DATASET_PATH=<450x12 sharegpt>, and an
+        # explicit DATASET_PATH WINS over WORKLOAD_NAME in resolve_workload — so
+        # unless we blank it, the named workload is silently ignored and the baked
+        # 450-conv ShareGPT set runs instead. An empty value reads as unset there.
+        printf '%s\n' "-e" "DATASET_PATH="
     fi
 }
 
@@ -789,6 +855,10 @@ run_container_bench() {  # variant image extra-args...
         -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
         -e "ENFORCE_EAGER=${ENFORCE_EAGER}" \
         -e "WORKLOAD_MODE=${WORKLOAD_MODE}" \
+        -e "LONGDOC_DOC_TOKENS=${LONGDOC_DOC_TOKENS}" \
+        -e "LONGDOC_QUESTIONS=${LONGDOC_QUESTIONS}" \
+        -e "LONGDOC_NUM_DOCS=${LONGDOC_NUM_DOCS}" \
+        -e "LONGDOC_SEED=${LONGDOC_SEED}" \
         -e "HF_HUB_OFFLINE=0" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${wl[@]}" \
@@ -937,9 +1007,16 @@ if want certus-spdk; then
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
             ENFORCE_EAGER="$ENFORCE_EAGER" \
             WORKLOAD_MODE="$WORKLOAD_MODE" \
+            TRACE_OFFLOAD="$TRACE_OFFLOAD" \
+            TRACE_SUBMIT="$TRACE_SUBMIT" \
+            TRACE_OUT="$LOGDIR" \
             WORKLOAD_NAME="$WORKLOAD_NAME" \
             SHAREGPT_MIN_TURNS="$SHAREGPT_MIN_TURNS" \
             SHAREGPT_MAX_TURNS="$SHAREGPT_MAX_TURNS" \
+            LONGDOC_DOC_TOKENS="$LONGDOC_DOC_TOKENS" \
+            LONGDOC_QUESTIONS="$LONGDOC_QUESTIONS" \
+            LONGDOC_NUM_DOCS="$LONGDOC_NUM_DOCS" \
+            LONGDOC_SEED="$LONGDOC_SEED" \
             HF_CACHE="$HF_CACHE" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \

@@ -62,6 +62,11 @@ COPY certus-shmq-connector/ /workspace/certus-shmq-connector/
 COPY benchmarks/kv-offload-replay/run_multiturn_common.py /workspace/benchmarks/kv-offload-replay/
 COPY benchmarks/kv-offload-replay/run_multiturn_sync_batched.py /workspace/benchmarks/kv-offload-replay/
 COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/benchmarks/kv-offload-replay/
+# TRACE_OFFLOAD=1 wraps the connector in the generic tracer (tracing_connector.py).
+# vLLM resolves kv_connector_module_path="tracing_connector" via importlib in the
+# scheduler AND each worker subprocess; those spawned procs do NOT inherit the
+# driver's runtime sys.path insert, so the module dir is put on PYTHONPATH below.
+COPY benchmarks/kv-offload-replay/tracing_connector.py /workspace/benchmarks/kv-offload-replay/
 COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
 
 RUN pip install --no-cache-dir -e /workspace/certus-shmq-connector
@@ -70,6 +75,7 @@ COPY certus-shmq-connector/docker-entrypoint.sh /usr/local/bin/certus-entrypoint
 RUN chmod +x /usr/local/bin/certus-entrypoint
 
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/workspace/benchmarks/kv-offload-replay \
     SHM_PATH=/dev/shm/certus-shmq \
     NUM_CONVS=450 \
     MODEL=ibm-granite/granite-4.1-8b \

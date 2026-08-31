@@ -34,7 +34,11 @@ fn wire_components() -> (
         .expect("failed to bind spdk_env receptacle");
     bind(&*logger, "ILogger", &*block_dev, "logger").expect("failed to bind logger receptacle");
 
-    (block_dev, spdk_env, logger as Arc<dyn ILogger + Send + Sync>)
+    (
+        block_dev,
+        spdk_env,
+        logger as Arc<dyn ILogger + Send + Sync>,
+    )
 }
 
 /// Result of a successful SPDK hardware initialization.
@@ -129,10 +133,9 @@ fn get_spdk_context() -> Option<&'static SpdkHardwareContext> {
             func: spdk_addr.func,
         };
 
-        let admin = query::<dyn interfaces::iblock_device::IBlockDeviceAdmin + Send + Sync>(
-            &*block_dev,
-        )
-        .expect("IBlockDeviceAdmin query");
+        let admin =
+            query::<dyn interfaces::iblock_device::IBlockDeviceAdmin + Send + Sync>(&*block_dev)
+                .expect("IBlockDeviceAdmin query");
         admin.set_pci_address(addr);
 
         // Initialize the block device (probe controller, start actor).
@@ -366,9 +369,7 @@ fn write_read_roundtrip() {
 
     let completion = channels.completion_rx.recv().expect("recv failed");
     match completion {
-        block_device_spdk_nvme::Completion::ReadDone { result, .. } => {
-            result.expect("read failed")
-        }
+        block_device_spdk_nvme::Completion::ReadDone { result, .. } => result.expect("read failed"),
         other => panic!("expected ReadDone, got {other:?}"),
     }
 
@@ -528,9 +529,7 @@ fn write_on_one_client_read_on_another() {
         .expect("send ReadSync failed");
 
     match client_b.completion_rx.recv().expect("recv failed") {
-        block_device_spdk_nvme::Completion::ReadDone { result, .. } => {
-            result.expect("read failed")
-        }
+        block_device_spdk_nvme::Completion::ReadDone { result, .. } => result.expect("read failed"),
         other => panic!("expected ReadDone, got {other:?}"),
     }
 
@@ -773,7 +772,7 @@ fn multi_client_independent_streams() {
                             lba,
                             buf: Arc::clone(&arbuf),
                             timeout_ms: 5000,
-            tag: 0,
+                            tag: 0,
                         })
                         .expect("send ReadAsync failed");
 

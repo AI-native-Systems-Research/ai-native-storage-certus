@@ -26,7 +26,7 @@ evictions without re-running the model.
 
 | File | Purpose |
 |---|---|
-| `tracing_offloading_connector.py` | Drop-in `KVConnectorBase_V1` that wraps vLLM's `OffloadingConnector`. Writes `offloading_trace_<pid>.jsonl` (connector-level calls). |
+| `tracing_connector.py` | Connector-agnostic `KVConnectorBase_V1` that wraps a **config-selected** inner connector (`traced_kv_connector` in `kv_connector_extra_config`, default `OffloadingConnector`) and traces every call to `offloading_trace_<pid>.jsonl`. Since the CPU-offload and shmq/certus paths both run `OffloadingConnector`, the default traces either. Set `TRACE_DIR` to redirect output (e.g. a container mount). |
 | `tracing_offloading_manager.py` | Drop-in `CPUOffloadingSpec` that wraps the underlying `OffloadingManager` + `OffloadingHandler`. Writes `offloading_mgr_<pid>.jsonl` (lookup/touch/prepare_store/…) and `offloading_handler_<pid>.jsonl` (GPU↔CPU transfer jobs). |
 | `run_sharegpt_offloading.py` | Driver: runs `vllm bench throughput` on ShareGPT with the tracing connectors attached. |
 | `run_multiturn_offloading.py` | Driver: the multi-turn 450×12 offload workload for head-to-head vs Certus, and the single driver behind the unified `Dockerfile.offload` image. Selects the backend from env: `OFFLOAD_MODE=none` → GPU-only baseline (no `kv_transfer_config`); default → built-in `OffloadingConnector` CPU-only offload; `SECONDARY_TIER=fs` / `DISK_DIR` → native CPU+FS tiering; `TRACE_OFFLOAD=1` → the tracing wrappers above. See [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md). |
@@ -328,7 +328,7 @@ Custom handler targets: pass `--handler-target module.path:ClassName`. The class
 Generate a sizeable trace with some reuse and eviction pressure, then replay it through the production Certus stack (both manager and handler):
 
 ```bash
-# 1. Generate: 500 ShareGPT conversations through vLLM + TracingOffloadingConnector
+# 1. Generate: 500 ShareGPT conversations through vLLM + TracingConnector
 PYTHONPATH=. python run_sharegpt_offloading.py --num-conversations 500 --num-prompts 500
 
 # 2a. Native run: manager + handler with real SPDK IO
@@ -419,10 +419,37 @@ variants run the same thing:
 | Flag | Env forwarded | Meaning |
 |------|---------------|---------|
 | `--workload-mode <batched\|async>` (or `--async`) | `WORKLOAD_MODE` | Execution model. `batched` (default) runs the synchronous per-round `generate()` loop; `async` runs one vLLM coroutine per conversation on a V1 `AsyncLLM` (`max_num_seqs` bounds the running batch, the rest queue). Same engine config either way; in async mode `--max-rounds` becomes a per-conversation turn cap. |
-| `--workload <name>` | `WORKLOAD_NAME` | Named dataset. Empty (default) = each driver's baked 450×12 dataset. `sharegpt` selects the ShareGPT multi-turn workload by human-turn count (see below). |
+| `--workload <name>` | `WORKLOAD_NAME` | Named dataset. Empty (default) = each driver's baked 450×12 dataset. `sharegpt` selects the ShareGPT multi-turn workload by human-turn count (see below). `long-doc-qa` selects the synthetic long-document QA workload (see below). |
 | `--min-turns <n>` / `--max-turns <n>` | `SHAREGPT_MIN_TURNS` / `SHAREGPT_MAX_TURNS` | Human-turn window for the `sharegpt` workload — **passing either implies `--workload sharegpt`**. Only two configs are prepared: `12`/`12` (default) = the baked 450×12 subset (the container variants are then a no-op), and `1`/`1` = the **full 94,145-conversation corpus** (`data/sharegpt/*.json`, mounted read-only and capped by `--num-convs`). Any other pair errors — use an explicit `DATASET_PATH` for other turn counts. `--max-turns` mirrors `--min-turns` when unset. |
 
 The corpus itself is documented in [`../../data/sharegpt/README.md`](../../data/sharegpt/README.md).
+
+### `long-doc-qa` — synthetic long-document QA (KV-cache stress)
+
+`--workload long-doc-qa` swaps the ShareGPT content for a synthetic long-document
+workload while keeping **everything else the same** — same drivers, same
+`profile_all.sh`, same execution models (`--workload-mode batched|async`), same
+render tools. Each conversation is one long, **per-document-unique** document
+followed by short follow-up questions: turn 0's prompt is `document + Q1`, a large
+reused prefix the accumulating-context loop caches once and every later turn
+reuses. The distinct working set is therefore ≈ `num_docs × doc_tokens` of KV,
+sized to overflow the GPU cache and drive the offload tier. (Unlike upstream
+[`../long-doc-qa`](../long-doc-qa), whose documents are an identical `"hi hi …"`
+string — those dedup at the KV-block layer — each document here draws its filler
+independently, so the blocks are distinct and actually occupy the tier.)
+
+The dataset is generated deterministically to a temp file at selection time (no
+committed artifact, regenerated per container), so no driver changes are needed.
+Shape knobs (all env, forwarded to every backend):
+
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `LONGDOC_DOC_TOKENS` | `4000` | Approx document length (tokens ≈ words). The default fits the default 8192 window with all 8 turns and headroom; **raise it together with `--max-model-len`** or later turns overflow the budget and the conversation is retired (the loop drops on overflow, it does not truncate). |
+| `LONGDOC_QUESTIONS` | `8` | Human turns per document (turn 0 = doc + Q1, then follow-ups). |
+| `LONGDOC_NUM_DOCS` | `1000` | Documents in the generated corpus. `--num-convs` caps this at run time and defaults to it for this workload. |
+| `LONGDOC_SEED` | `1234` | RNG seed for a reproducible corpus. |
+
+Example: `LONGDOC_DOC_TOKENS=12000 ./profile_all.sh --workload long-doc-qa --max-model-len 16384 …`
 The same selection works outside `profile_all.sh`: any driver honours
 `WORKLOAD_NAME` / `WORKLOAD_MODE` / `DATASET_PATH` / `NUM_CONVS` directly (see
 `run_multiturn_common.resolve_workload`).
@@ -440,6 +467,99 @@ Per run: `<logdir>/<variant>.log` (per-backend stdout/stderr),
 a `--only` subset), `<logdir>/results.json` (aggregate), and the comparison table on
 stdout. Wrapping the invocation in `time` (as above) captures total wall-clock across
 all selected phases including the host reconfiguration.
+
+## Closed-loop head-to-head by hand (cputier-fixed vs certus-shmq)
+
+`profile_all.sh` above is the automated all-backends sweep. The two stability
+scripts below are the manual path for the **closed-loop** live comparison used
+for the fixed-concurrency head-to-head: **cputier-fixed** (vLLM 0.26.0 native
+CPU+fs tiering with the baked tiering fix — image `certus-offload-bench-fix026`)
+vs **certus-shmq** (host `certus-server` over SPDK NVMe + shmq client container).
+
+### Open-loop vs closed-loop
+
+The workload driver has two modes, selected by `ACTIVE_SESSIONS`:
+
+- `ACTIVE_SESSIONS=0` (default) — **open-loop**: every conversation is launched
+  up front and the driver waits for all to finish (historical `gather`-all).
+- `ACTIVE_SESSIONS=N` — **closed-loop**: a fixed pool of `N` worker coroutines
+  keeps exactly `N` conversations in flight; each finishing conversation admits
+  the next from a shared counter (admit-on-finish). This holds a steady
+  concurrency level regardless of how many total conversations (`NUM_CONVS`) are
+  queued, which is what makes the two arms comparable. Requires
+  `WORKLOAD_MODE=async`.
+
+For a fair steady-state comparison, `MAX_NUM_SEQS` must be `>= ACTIVE_SESSIONS`
+(otherwise vLLM's own WAITING queue, not the driver's session pool, becomes the
+concurrency gate).
+
+### Step 1 — (shmq only) rebuild the client image first
+
+The shmq image bakes the driver **and** its three helper modules
+(`run_multiturn_common.py`, `run_multiturn_sync_batched.py`,
+`run_multiturn_async.py`) via `COPY` lines in `certus-shmq-connector/Dockerfile`.
+An older image can predate those lines and be missing
+`/workspace/benchmarks/kv-offload-replay/` entirely, which surfaces at runtime as
+`ModuleNotFoundError: No module named 'run_multiturn_common'`. Rebuild so the
+image is self-consistent (build context is the repo root):
+
+```bash
+podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
+    build --build-arg VLLM_VERSION=0.26.0 \
+    -f certus-shmq-connector/Dockerfile -t certus-shmq-bench .
+```
+
+> **After rebuilding, do NOT pass `WORKLOAD_SRC` or `ASYNC_SRC`.** Those single-file
+> bind-mounts exist only as an emergency override. Mounting one file into the
+> `/workspace/benchmarks/kv-offload-replay/` dir when that dir does *not* already
+> exist in the image makes podman create a fresh dir containing **only** that file,
+> shadowing the baked siblings and re-triggering the `ModuleNotFoundError`. With a
+> current image all the helpers are baked, so leave both variables unset.
+
+The shmq arm also needs (not done by these scripts — they require `sudo`; see
+`certus-shmq-connector/setup-host.sh` or `tools/configure-bench.sh`): the
+`certus-server` binary built (`cargo build --release -p certus-server`), NVMe
+devices `0000:{61,62,63,64}:00.0` bound to `vfio-pci`, and 1G hugepages reserved
+on NUMA node 0.
+
+### Step 2 — run each arm
+
+Both scripts take an output-dir name as `$1` and write `<out>/progress.log` with a
+`RUN_DONE … gens=… elapsed=… gen_per_s=…` line per run. Use `RUNS=1` for a single
+timed run (raise it for stability/CoV sampling). Matched-tier fairness: the
+cputier `CPU_BYTES` must equal the shmq `MEM_TIER_SIZE` (both `13G` for the
+head-to-head).
+
+```bash
+cd benchmarks/kv-offload-replay
+
+# Arm 1 — cputier-fixed (native CPU+fs tiering, patched image)
+RUNS=1 NUM_CONVS=1000 MAX_ROUNDS=0 WORKLOAD_MODE=async ACTIVE_SESSIONS=60 \
+    DATASET_HOST=/home/dwaddington/certus/data/sharegpt_v3.json \
+    bash ./run_cputier_patched_stability.sh cl60-cputier-$(date +%Y%m%d_%H%M%S)
+
+# Arm 2 — certus-shmq (SPDK NVMe + shmq client)   [image rebuilt in Step 1]
+RUNS=1 NUM_CONVS=1000 MAX_ROUNDS=0 WORKLOAD_MODE=async ACTIVE_SESSIONS=60 \
+    DATASET_HOST=/home/dwaddington/certus/data/sharegpt_v3.json \
+    bash ./run_certus_stability.sh cl60-shmq-$(date +%Y%m%d_%H%M%S)
+```
+
+`MAX_ROUNDS=0` replays every human turn in each conversation; set a positive value
+to cap turns per conversation.
+
+### Step 3 (optional) — both arms back-to-back
+
+`run_cl60_headtohead.sh` runs cputier then shmq sequentially (they share the GPU,
+so they must not overlap), stamping both output dirs with one timestamp:
+
+```bash
+NUM_CONVS=1000 ACTIVE_SESSIONS=60 bash ./run_cl60_headtohead.sh
+```
+
+Overridable env: `NUM_CONVS`, `ACTIVE_SESSIONS`, `MAX_ROUNDS`, `DS` (dataset path),
+`STAMP`. It does **not** rebuild the shmq image — do Step 1 first if the image is
+stale. Compare the two `RUN_DONE … gen_per_s=…` lines in
+`cl60-cputier-<stamp>/progress.log` and `cl60-shmq-<stamp>/progress.log`.
 
 ## Other datasets
 

@@ -83,6 +83,15 @@ def test_framing() -> bool:
     assert events == [(111, 1), (222, 0)] and dropped == 9, (events, dropped)
     _ok("decode_take_events round-trip")
 
+    events, dropped = ring.decode_take_events(b"")
+    assert events == [] and dropped == 0, (events, dropped)
+    _ok("decode_take_events handles short header")
+
+    blob = struct.pack("<I", 0)
+    events, dropped = ring.decode_take_events(blob)
+    assert events == [] and dropped == 0, (events, dropped)
+    _ok("decode_take_events handles missing trailer")
+
     # HandleBatch: two blocks sharing the SAME two handles → table has 2 rows.
     h0 = b"\x11" * 64
     h1 = b"\x22" * 64

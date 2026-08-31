@@ -39,15 +39,39 @@ COMMON_RUN_ARGS=(
   -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}"
   -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}"
   -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}"
+  # TENSOR_PARALLEL_SIZE spans each vLLM engine across N GPUs (TP). Podman does
+  # not inherit host env, so this -e is the only path that delivers it into the
+  # container. Default 1 = single-GPU baseline. GPU=all already exposes both.
+  -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-1}"
   # enforce_eager MUST be identical across every backend or the comparison is a
   # confound (eager disables CUDA graphs + torch.compile). All drivers read this
   # env with the same "0" default; forward it here so it applies uniformly to
   # every containerized backend (podman does NOT inherit host env — only -e vars
   # reach the container).
   -e "ENFORCE_EAGER=${ENFORCE_EAGER:-0}"
+  # WORKLOAD_MODE selects the execution model (batched rounds vs async
+  # per-conversation); ACTIVE_SESSIONS>0 makes the async model a closed loop
+  # holding that many conversations active (admit-on-finish). Defaults preserve
+  # the historical batched behavior; podman does not inherit host env, so both
+  # must be forwarded explicitly here to reach the containerized driver.
+  -e "WORKLOAD_MODE=${WORKLOAD_MODE:-batched}"
+  -e "ACTIVE_SESSIONS=${ACTIVE_SESSIONS:-0}"
   -e "HF_HUB_OFFLINE=0"
   -v "${HF_CACHE}:/root/.cache/huggingface:z"
 )
+
+# Optional dataset override: mount a host dataset json read-only and point
+# DATASET_PATH at it, instead of the image's baked sharegpt_12turn_450.json.
+# Lets a run use a different/larger conversation set (e.g. 10000 convs from
+# sharegpt_v3.json) without rebuilding the image. Default (unset) = baked file.
+DATASET_HOST="${DATASET_HOST:-}"
+if [[ -n "$DATASET_HOST" ]]; then
+  [[ -f "$DATASET_HOST" ]] || { echo "error: DATASET_HOST not found: $DATASET_HOST" >&2; exit 1; }
+  COMMON_RUN_ARGS+=(
+    -v "${DATASET_HOST}:/workspace/data/replay-dataset.json:ro"
+    -e "DATASET_PATH=/workspace/data/replay-dataset.json"
+  )
+fi
 
 # stamp — a HHMMSS suffix for default log names (date is fine in a real shell).
 stamp() { date +%H%M%S; }

@@ -109,9 +109,9 @@ pub(crate) unsafe fn create(
     let rc = spdk_sys::spdk_nvme_ctrlr_attach_ns(ctrlr_ptr, ns_id, &mut ctrlr_list);
     if rc != 0 {
         let _ = spdk_sys::spdk_nvme_ctrlr_delete_ns(ctrlr_ptr, ns_id);
-        return Err(NvmeBlockError::NotSupported(
-            format!("spdk_nvme_ctrlr_attach_ns(ns_id={ns_id}) failed with rc={rc}"),
-        ));
+        return Err(NvmeBlockError::NotSupported(format!(
+            "spdk_nvme_ctrlr_attach_ns(ns_id={ns_id}) failed with rc={rc}"
+        )));
     }
 
     Ok(ns_id)

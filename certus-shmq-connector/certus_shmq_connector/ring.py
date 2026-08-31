@@ -252,15 +252,42 @@ def decode_states(payload: bytes, n: int) -> list[int]:
 
 
 def decode_take_events(payload: bytes) -> tuple[list[tuple[int, int]], int]:
-    """`{ n:u32, [key:u64, reason:u32]*n, dropped:u64 }` → (events, dropped)."""
+    """`{ n:u32, [key:u64, reason:u32]*n, dropped:u64 }` → (events, dropped).
+
+    Defensive against a truncated response. The server serializes events into the
+    fixed ``cap_resp`` response slot; a drain that produces more bytes than that
+    slot holds is truncated by the transport while the header count ``n`` still
+    claims the full number, so a blind ``n``-record read walks off the end
+    (``struct.error`` — which surfaces as an engine-killing EngineDeadError). We
+    decode only the records the buffer physically contains and fold any
+    claimed-but-absent remainder into ``dropped``. This is safe because the
+    connector's ``lookup()``/Check is authoritative and live: a missed eviction
+    event only costs vLLM some stale bookkeeping, never a wrong load (a
+    fully/partially-evicted block reads as a MISS at load time). ``take_events()``
+    now bounds ``max_events`` so this truncation path should not trigger, but the
+    guard turns any residual capacity mismatch into the already-handled lossy path
+    instead of a crash."""
+    buf_len = len(payload)
+    if buf_len < 4:
+        return [], 0
     off = 0
     (n,) = struct.unpack_from("<I", payload, off)
     off += 4
+    # Records that fit after the u32 header, leaving room for the u64 trailer.
+    max_fit = max(0, (buf_len - 4 - 8) // 12)
+    decodable = min(n, max_fit)
     events = []
-    for _ in range(n):
+    for _ in range(decodable):
         key, reason = struct.unpack_from("<QI", payload, off)
         off += 12
         events.append((key, reason))
+    if decodable < n:
+        # Buffer was truncated: the trailing u64 dropped counter was overwritten
+        # by records, so it can't be read. Report the events we could not decode
+        # as dropped (best-effort) rather than crash the engine.
+        return events, n - decodable
+    if buf_len < off + 8:
+        return events, 0
     (dropped,) = struct.unpack_from("<Q", payload, off)
     return events, dropped
 
@@ -313,6 +340,8 @@ class Ring:
         attempt_timeout: float = 0.05,
         deadline: float = 30.0,
         log=None,
+        claim_slot: int = 0,
+        claim_slots: int = 1,
     ):
         _require_x86_64()
         self._path = path
@@ -320,6 +349,21 @@ class Ring:
         self._attempt_timeout = float(attempt_timeout)
         self._deadline = float(deadline)
         self._log = log or (lambda msg: print(f"[certus-shmq] {msg}", file=sys.stderr, flush=True))
+
+        # Channel-claim partitioning for the TP>1 multi-process case. Under
+        # MultiprocExecutor (TP=2) three processes share this one mailbox —
+        # engine-core (scheduler/manager, slot 0) plus one worker per rank
+        # (slots 1..W) — and ``_claim_channel``'s owner-word claim is only
+        # process-locally locked (a non-atomic read-then-write on the shared
+        # word), so two processes could otherwise grab the same channel. Each
+        # slot scans a disjoint channel slice. claim_slots=1 (the default, and
+        # TP=1's single-process UniProcExecutor) → full range = exact baseline.
+        self._claim_slots = max(1, int(claim_slots))
+        self._claim_slot = int(claim_slot)
+        if not (0 <= self._claim_slot < self._claim_slots):
+            raise ValueError(
+                f"claim_slot {self._claim_slot} out of range for claim_slots={self._claim_slots}"
+            )
 
         self._fd = -1
         self._mm = None
@@ -461,13 +505,23 @@ class Ring:
         # claim (the server never touches the owner word), so a Python-lock-
         # guarded read-then-write is a correct claim among them.
         tid = (threading.get_ident() * 2654435761) & 0xFFFFFFFF or 1
+        # Restrict this process's claims to its slot's disjoint channel slice so
+        # the non-atomic owner-word claim can't collide with another process's
+        # (TP>1). The last slot absorbs the remainder so no channel is stranded;
+        # claim_slots==1 → [0, num_channels) = the full-range baseline.
+        per = max(1, self._num_channels // self._claim_slots)
+        lo = self._claim_slot * per
+        hi = self._num_channels if self._claim_slot == self._claim_slots - 1 else lo + per
         with self._claim_lock:
-            for ch in range(self._num_channels):
+            for ch in range(lo, hi):
                 owner_off = self._channel_base(ch) + OFF_OWNER
                 if self._rd_u32(owner_off) == 0:
                     self._wr_u32(owner_off, tid)
                     return ch
-        raise RingError(f"no free shmq channel (all {self._num_channels} in use)")
+        raise RingError(
+            f"no free shmq channel in slot {self._claim_slot}/{self._claim_slots} "
+            f"range [{lo},{hi}) of {self._num_channels}"
+        )
 
     def _my_channel(self) -> int:
         ch = getattr(self._tls, "channel", None)
@@ -663,6 +717,19 @@ class Ring:
         return results
 
     def take_events(self, max_events: int = 0) -> tuple[list[tuple[int, int]], int]:
+        # The response is serialized into the fixed cap_resp slot as
+        # { n:u32, [key:u64, reason:u32]*n, dropped:u64 }. An unlimited drain
+        # (max_events=0) can produce more events than that slot holds: the server
+        # writes the true count but the transport truncates the bytes to cap_resp,
+        # and the decoder then reads past the end. Bound an unlimited (or too-large)
+        # request to the number of 12-byte event records that provably fit. The
+        # server honors the cap (translate.rs op_take_events) and leaves the
+        # remainder QUEUED for the next drain — lossless, not counted as dropped.
+        # Under TP>1 each logical block is W per-rank keys, so evictions multiply
+        # and routinely exceed the slot; this bound is what keeps the engine alive.
+        fit = max(1, (self._cap_resp - 4 - 8) // 12)
+        if max_events <= 0 or max_events > fit:
+            max_events = fit
         payload = self._dispatch(OP_TAKE_EVENTS, struct.pack("<I", max_events & 0xFFFFFFFF))
         return decode_take_events(payload)
 

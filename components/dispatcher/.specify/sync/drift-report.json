@@ -1,39 +1,64 @@
 {
   "generated": "pending",
   "project": "dispatcher",
+  "branch": "sync-tmp",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 65,
-    "aligned": 65,
-    "drifted": 3,
+    "requirements_checked": 67,
+    "aligned": 61,
+    "drifted": 5,
     "not_implemented": 0,
     "unspecced_features": 1
   },
   "specs": [
     {
       "id": "001-dispatcher-cache-interface",
-      "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
-      "aligned": 65,
+      "title": "Dispatcher Cache Interface",
+      "aligned": 61,
       "drifted": [
         {
-          "requirement": "US-011 / FR-039",
-          "spec_text": "User Story 11 narrative: 'Each thread uses a reduced NVMe pipeline depth (16 / num_queues)...'; scenario 3: 'each processed by a separate thread with max_queue_depth = 8 (16/2), keeping total per-drive NVMe commands at <=16.'",
-          "actual": "batch_lookup sets `let queue_depth = 128;` per queue thread and passes it into pipelined_multi_object_zero_copy. This is deliberate and matches FR-039 step (5) and FR-019 ('max_queue_depth = 128 per thread'). The US-11 acceptance/narrative text (16/num_queues, <=16 per drive) is stale and contradicts FR-039/FR-019 within the same spec. Code and the FRs are aligned; the user-story text is not.",
-          "location": "components/dispatcher/src/lib.rs:2217",
+          "requirement": "FR-037",
+          "spec_text": "pre-allocate a single warm CUDA stream ... used by lookup_async and batch_lookup for memcpy_h2d_async on raw memory-tier pointers ... per-device warm stream from DEVICE_STREAMS.",
+          "actual": "DeviceStreams now holds two warm streams per device: warm_load (H2D) and warm_store (D2H), split so H2D and D2H DMA overlap on the PCIe bus (lib.rs:335-345); device_streams_for creates both plus the pipeline pair (lib.rs:371-378). The H2D memory-tier->GPU copy is issued via memcpy_batch_async (lib.rs:1127), not memcpy_h2d_async (mock-only now, lib.rs:4193,4260,5244). warm_stream AtomicU64 fallback retained.",
+          "location": "components/dispatcher/src/lib.rs:335-345,371-378,885,1127,2133,2740",
+          "commit": "995596e4",
+          "direction": "BACKFILL",
           "severity": "moderate"
         },
         {
-          "requirement": "CLAUDE.md (stale crate path)",
-          "spec_text": "CLAUDE.md: 'component-framework, component-core, component-macros — at ../../component-framework/crates/'",
-          "actual": "component-framework now lives at lib/component-framework (verified present; components/component-framework absent). Cargo.toml uses workspace deps so build is unaffected, but the doc path is stale after the components/->lib/ move.",
-          "location": "components/dispatcher/CLAUDE.md:40",
+          "requirement": "FR-052",
+          "spec_text": "one warm stream plus one pipeline stream pair per device.",
+          "actual": "Each device now has two warm streams (warm_load, warm_store) plus the pipeline pair: DeviceStreams { warm_load, warm_store, pipe: [u64; 2] } (lib.rs:339-345). Device-resolution / fallback-on-(-1) semantics unchanged.",
+          "location": "components/dispatcher/src/lib.rs:339-345",
+          "commit": "995596e4",
+          "direction": "BACKFILL",
           "severity": "minor"
         },
         {
-          "requirement": "CLAUDE.md (stale crate names)",
-          "spec_text": "CLAUDE.md references block-device-spdk-nvme-v2 and extent-manager-v2.",
-          "actual": "The actual dependency crate is block-device-spdk-nvme (Cargo.toml:15); there is no -v2 suffix in the current workspace. Documentation-only drift.",
-          "location": "components/dispatcher/CLAUDE.md:43-44,53",
+          "requirement": "FR-006 / FR-039(2) / FR-056 / Implementation-Notes",
+          "spec_text": "warm-path H2D uses IGpuServices::memcpy_h2d_async; copy_gpu_to_memory_async issues asynchronous GPU->host DMA on the supplied stream; populate D2H uses dma_copy_to_host.",
+          "actual": "Both warm directions now use the batched memcpy_batch_async (cuMemcpyBatchAsync) multi-region API. Memory-tier->GPU scatter (1 slot -> N regions) is a single memcpy_batch_async on warm_load (lib.rs:1116-1127); GPU->memory-tier gather in copy_gpu_to_memory_async (N regions -> 1 slot) is a single memcpy_batch_async on warm_store (lib.rs:2998-3009). No production call site uses memcpy_h2d_async.",
+          "location": "components/dispatcher/src/lib.rs:1116-1127,2984-3009",
+          "commit": "d8c26d58",
+          "direction": "BACKFILL",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-040",
+          "spec_text": "The gRPC handler spawns this as a detached background task when BatchTouchRequest.promote = true.",
+          "actual": "gRPC removed entirely; shm-queue is the sole control transport (97e26738). promote_to_memory_tier API unchanged (lib.rs:3060); only the calling transport changed. Sentence names a transport that no longer exists.",
+          "location": "spec FR-040",
+          "commit": "97e26738",
+          "direction": "BACKFILL",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-042",
+          "spec_text": "external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
+          "actual": "Eviction-event channel (create_eviction_channel / EvictionEvent, lib.rs:378,392-396) unchanged, but the named example consumer (gRPC TakeEvents) was removed in 97e26738; shm-queue transport is now the consumer.",
+          "location": "spec FR-042",
+          "commit": "97e26738",
+          "direction": "BACKFILL",
           "severity": "minor"
         }
       ],
@@ -42,11 +67,26 @@
   ],
   "unspecced": [
     {
-      "feature": "Dependency-injection / test hooks: set_block_device_factory, set_extent_manager_factory, set_pipeline_metrics",
+      "feature": "tier_event_stats() -> TierEventStats: cumulative tier-transition counters on IDispatcher, backed by a lock-free TierEventCounters subsystem incremented on every tier transition. Always-on (unlike telemetry-gated read_write_stats).",
+      "location": "components/dispatcher/src/lib.rs (impl) + components/interfaces/src/idispatcher.rs (trait)",
+      "lines": "lib.rs:111-160,317,3390; idispatcher.rs:189-210,564",
+      "commit": "4659626b",
+      "suggested_spec": "New FR-058 (tier-event counters) + SC-017 (counters observable and monotonic across a populate/lookup/evict cycle)."
+    },
+    {
+      "feature": "DI/test hooks set_block_device_factory / set_extent_manager_factory / set_pipeline_metrics",
       "location": "components/dispatcher/src/lib.rs",
       "lines": "360-372",
-      "suggested_spec": "Public inherent methods on DispatcherComponent for injecting mock block-device/extent-manager factories and a PipelineMetrics impl. Not referenced by any FR (FR-043 covers the metrics trait but not the injection setter). Add a 'test/DI surface' note or gate them behind #[cfg(test)]."
+      "suggested_spec": "Already specced as FR-057 / SC-016 (2026-08-20). No action."
     }
+  ],
+  "resolved_since_prior_report": [
+    "User Story 11 queue-depth intra-spec contradiction (fixed 2026-08-20; max_queue_depth = 128 per thread throughout).",
+    "CLAUDE.md stale component-framework path and -v2 crate names (corrected in current tree; also out of sync editing scope).",
+    "DI/test surface now specced as FR-057 / SC-016."
+  ],
+  "out_of_scope_notes": [
+    "Two source comments still say 'gRPC handler' (src/lib.rs ~2983, null-stream comment near copy_gpu_to_memory_async). Source files are outside sync editable scope (.specify/sync/** and specs/** only); flagged for a follow-up source-comment cleanup."
   ],
   "conflicts": []
 }
