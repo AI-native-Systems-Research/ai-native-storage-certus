@@ -29,6 +29,85 @@ pipeline {
         script { freeNvmeDevice() }
       }
     }
+    stage('Spec-Sync Gate') {
+      // Fail fast, before any build, if a changed component's spec-sync
+      // drift-report.md is missing, still shows unresolved drift, or went stale
+      // (its src/specs — or the shared interfaces — changed after the last
+      // /component-sync-specs run). This runs NO Claude: the analysis happens on
+      // the developer's machine, and CI only verifies the committed freshness
+      // stamp against a recomputed content hash.
+      steps {
+        sh '''
+          set -eu
+
+          # Diff base: the PR target on multibranch PR builds, else unstable.
+          # (On the mainline itself the merge-base is HEAD, so nothing is checked.)
+          base="origin/${CHANGE_TARGET:-unstable}"
+          git fetch -q origin "${CHANGE_TARGET:-unstable}" || true
+          mb="$(git merge-base "$base" HEAD 2>/dev/null || echo "$base")"
+
+          # Every directory that carries specs (a component under the gate).
+          # Scope is components/ only — lib/ and tools/ crates are not gated
+          # (their source layout differs from the components/<name>/src model the
+          # hash tool assumes).
+          all_spec_dirs() {
+            find components -maxdepth 2 -type d -name specs 2>/dev/null \
+              | sed 's#/specs$##' | sort -u
+          }
+
+          # Select a component only when its *hashed inputs* changed — files under
+          # its src/ or specs/. Changes confined to sync scratch (.specify/sync/**),
+          # README, or Cargo.toml do not affect the content hash and must not
+          # demand a fresh stamp, so they are deliberately excluded here.
+          changed="$(git diff --name-only "$mb" HEAD \
+                     | grep -oE '^components/[^/]+/(src|specs)/' \
+                     | grep -oE '^components/[^/]+' | sort -u || true)"
+
+          # Every component's hash folds in components/interfaces, so an
+          # interface change can stale reports of components whose own files did
+          # not change and would be missed by diff selection. Expand to all.
+          if echo "$changed" | grep -qx 'components/interfaces'; then
+            echo "interfaces changed → checking all spec'd components"
+            targets="$(all_spec_dirs)"
+          else
+            targets="$changed"
+          fi
+
+          [ -n "$targets" ] || { echo "Spec-Sync Gate: no spec'd components changed; nothing to verify."; exit 0; }
+
+          rc=0
+          for d in $targets; do
+            [ -d "$d/specs" ] || continue          # only dirs with specs are gated
+            rpt="$d/.specify/sync/drift-report.md"
+
+            if [ ! -f "$rpt" ]; then
+              echo "FAIL $d: missing $rpt — run '/component-sync-specs $(basename "$d")' and commit it."
+              rc=1; continue
+            fi
+
+            status="$(grep -m1 '^spec_sync_drift_status:' "$rpt" | awk '{print $2}' || true)"
+            if [ "$status" != "clean" ]; then
+              echo "FAIL $d: spec_sync_drift_status='${status:-<unset>}' (expected 'clean') — resolve drift via /component-sync-specs."
+              rc=1; continue
+            fi
+
+            want="$(grep -m1 '^spec_sync_inputs_sha256:' "$rpt" | awk '{print $2}' || true)"
+            have="$(scripts/spec-sync-hash.sh "$d")"
+            if [ "$want" != "$have" ]; then
+              echo "FAIL $d: stale report — src/specs (or interfaces) changed after last sync."
+              echo "         stamped=$want recomputed=$have"
+              echo "         re-run '/component-sync-specs $(basename "$d")' and commit the updated drift-report.md."
+              rc=1; continue
+            fi
+
+            echo "ok   $d"
+          done
+
+          [ "$rc" -eq 0 ] || { echo "Spec-Sync Gate failed."; exit 1; }
+          echo "Spec-Sync Gate passed."
+        '''
+      }
+    }
     stage('Build Server') {
       steps {
           sh 'pwd'
