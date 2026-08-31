@@ -910,6 +910,15 @@ SA_DIR="${REPO_ROOT}/benchmarks/synthetic-agentic"
 SA_SERVE="${SA_DIR}/serve_vllm.sh"
 SA_CLIENT_IMG="${SA_CLIENT_IMG:-synthetic-agentic-client:latest}"
 SA_PORT="${SA_PORT:-8000}"
+# Poll the served vLLM's /metrics on this cadence during the client run so the SA
+# arm captures the SAME vLLM Prometheus offload counters the in-process drivers
+# emit (prefix-cache queries/hits, external/offload-tier queries/hits, kv_offload
+# store/load bytes). The scraper writes render_kvprofile's `[prom] round N: k=v`
+# lines (values are per-interval deltas), which get folded into the variant log so
+# tools/render_kvprofile.py renders an SA run with no changes. Counters live on the
+# SERVER (they belong to the connector, not the HTTP client), hence the scrape.
+SA_PROM="${SA_DIR}/scrape_prom.py"
+SA_PROM_INTERVAL="${SA_PROM_INTERVAL:-10}"
 # synthetic-agentic sessions run long and compact mid-session above 8500 tokens, so
 # the 8192 in-process default is too small here (peak pre-compaction context is
 # ~8500 + one input turn ~= 11K). But max_model_len also sets a HARD GPU-KV floor:
@@ -1036,6 +1045,24 @@ run_server_bench() {  # variant
         return 0
     fi
 
+    # Scrape the server's vLLM /metrics for the whole client run so the SA arm
+    # records the same offload counters the in-process drivers do. It writes
+    # `[prom] round N: k=delta` lines to a sidecar; we fold that into $f afterwards
+    # (below) so render_kvprofile — which parses the variant log — needs no change.
+    # Runs on the HOST against localhost:${SA_PORT} (the server is --network host).
+    local prom_sidecar="${LOGDIR}/${variant}.prom.log"
+    local prom_pid=""
+    if [[ -f "$SA_PROM" ]] && command -v python3 >/dev/null 2>&1; then
+        : > "$prom_sidecar"
+        python3 "$SA_PROM" \
+            --url "http://localhost:${SA_PORT}/metrics" \
+            --interval "$SA_PROM_INTERVAL" \
+            --out "$prom_sidecar" >> "${LOGDIR}/scrape-${connector}.log" 2>&1 &
+        prom_pid="$!"
+    else
+        warn "${variant} (synthetic-agentic): no ${SA_PROM} or python3 — /metrics NOT scraped (render_kvprofile will have no counters)"
+    fi
+
     log "${variant} (synthetic-agentic): driving load with inference-perf -> ${f}"
     local start="$SECONDS"
     # --pids-limit=0 (unlimited): the load generator forks one worker process per
@@ -1053,6 +1080,19 @@ run_server_bench() {  # variant
         "$SA_CLIENT_IMG" run 2>&1 | tee "$f"
     local rc="${PIPESTATUS[0]}"
     local wall=$((SECONDS - start))
+
+    # Stop the scraper BEFORE server teardown so its final /metrics sample (taken on
+    # SIGTERM) still hits a live server, then fold the counter lines into $f.
+    if [[ -n "$prom_pid" ]]; then
+        kill -TERM "$prom_pid" 2>/dev/null || true
+        wait "$prom_pid" 2>/dev/null || true
+        if [[ -s "$prom_sidecar" ]]; then
+            cat "$prom_sidecar" >> "$f"
+            log "${variant} (synthetic-agentic): folded $(grep -c '^\[prom\]' "$prom_sidecar" 2>/dev/null || echo 0) /metrics rounds into $(basename "$f")"
+        else
+            warn "${variant} (synthetic-agentic): /metrics scrape produced no rounds (see scrape-${connector}.log)"
+        fi
+    fi
 
     env "${env_lines[@]}" bash "$SA_SERVE" stop >/dev/null 2>&1 || true
     gpu_mark end "$variant"
