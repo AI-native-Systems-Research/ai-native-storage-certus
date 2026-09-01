@@ -3102,22 +3102,38 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
+        // Null-stream callers (e.g. the shm-queue CopyToStore handler) need the
+        // copy to be complete on return — they have no stream handle to sync on.
+        // Resolve the device's `store` stream so the copy runs on a real stream,
+        // then synchronize before returning.
+        let (effective_stream, needs_sync) = if stream.0.is_null() {
+            let device = regions
+                .first()
+                .map_or(-1, |r| set_batch_device(&*gpu, r.address));
+            let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.store);
+            (GpuStream(store_raw as *mut std::ffi::c_void), true)
+        } else {
+            (stream, false)
+        };
+
         let mut off: usize = 0;
         for region in regions {
-            // Raw-dst D2H: source is the GPU region, destination is the slot at
-            // the running offset. No DmaBuffer wrap needed (memcpy_d2h_async
-            // takes a raw pinned host pointer, which the slot is).
             gpu.memcpy_d2h_async(
                 region.address as *const std::ffi::c_void,
                 (mem_ptr as usize + off) as *mut std::ffi::c_void,
                 region.size as usize,
-                stream,
+                effective_stream,
             )
             .map_err(|e| {
                 let _ = mt.remove(key);
                 DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
             })?;
             off += region.size as usize;
+        }
+        if needs_sync {
+            gpu.stream_synchronize(effective_stream).map_err(|e| {
+                DispatcherError::IoError(format!("store stream_synchronize failed: {e}"))
+            })?;
         }
         Ok(())
     }

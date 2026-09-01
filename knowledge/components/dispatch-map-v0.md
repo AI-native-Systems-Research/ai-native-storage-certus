@@ -6,9 +6,9 @@
 
 ## Description
 
-In-memory dispatch map that tracks where each extent's data currently lives — either in the DRAM memory-tier pool or at a committed byte offset on the block device (SSD). Implements readers-writer reference counting with blocking (`Condvar`) semantics and 2-second timeout. Delegates eviction ordering to an `IEvictionPolicy` receptacle.
+In-memory sharded dispatch map that tracks where each extent's data currently lives — either in the DRAM memory-tier pool or at a committed byte offset on the block device (SSD). Internally split into 64 independent shards (`key % N_SHARDS`), each with its own `Mutex<Inner>` + `Condvar`, to reduce lock contention under concurrent bidirectional workloads. Implements readers-writer reference counting with blocking semantics and 2-second timeout. Delegates eviction ordering to an `IEvictionPolicy` receptacle.
 
-On `initialize`, recovers all committed extents from the bound `IExtentManager` into the map (if extent_manager is connected).
+On `initialize`, recovers all committed extents from the bound `IExtentManager` into the map (if extent_manager is connected), routing each extent to the correct shard.
 
 ## Component Definition
 
@@ -47,13 +47,14 @@ define_interface! {
         fn is_evictable(&self, key: CacheKey) -> bool;
         fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>;
         fn recover_extent(&self, key: CacheKey, offset: u64, size_blocks: u32) -> Result<(), DispatchMapError>;
+        // With `integrity-check` feature:
+        fn set_checksum(&self, key: CacheKey, checksum: u32) -> Result<(), DispatchMapError>;
+        fn get_checksum(&self, key: CacheKey) -> Option<u32>;
     }
 }
 ```
 
-## Verified Properties
-
-The following invariants are formally proved with Creusot (see `components/dispatch-map/verif/`):
+## Design Invariants
 
 | ID | Name | Description |
 |----|------|-------------|
@@ -68,8 +69,6 @@ The following invariants are formally proved with Creusot (see `components/dispa
 | P9 | lookup-increments-read | successful lookup increments read_ref by exactly 1 |
 | P10 | convert-requires-ssd-offset | `convert_memory_tier_to_block` requires ssd_offset present |
 
-Total: 10 properties, 24 verification conditions discharged by SMT solvers.
-
 ## Receptacles
 
 | Name | Interface | Required | Purpose |
@@ -83,9 +82,11 @@ Total: 10 properties, 24 verification conditions discharged by SMT solvers.
 - `CacheKey = u64`
 - `LookupResult` — `NotExist`, `MismatchSize`, `BlockDevice { offset: u64 }`, `MemoryTier { pointer: *mut u8, size: u32 }`
 - `DispatchMapError` — `KeyNotFound`, `AlreadyExists`, `ActiveReferences`, `Timeout`, `AllocationFailed`, `InvalidSize`, `NotInitialized`, `RefCountUnderflow`, `RefCountOverflow`, `NoWriteReference`, `InvalidState`
+- `DispatchEntry` — per-entry record with location, size_blocks, read_ref, write_ref, EvictionHandle, and `reuse_count` (AtomicU32 read-hit counter). Under `integrity-check` feature, also carries a CRC-32 `checksum` field.
 
 ## Key Design Decisions
 
+- **Sharded storage**: 64 independent shards (`key % N_SHARDS`), each with its own `Mutex<Inner>` + `Condvar`. Threads on different keys rarely contend.
 - **Two-tier location model**: `Location::BlockDevice { offset }` or `Location::MemoryTier { pointer, size, ssd_offset }`. The `ssd_offset` field tracks whether write-through to SSD completed (prerequisite for eviction).
-- **Atomic eviction**: `try_evict_to_block` checks evictability and transitions under single lock hold (no TOCTOU).
+- **Atomic eviction**: `try_evict_to_block` checks evictability and transitions under single shard lock hold (no TOCTOU).
 - **Entry lifecycle**: `create_memory_tier_entry` → `convert_to_storage` (marks SSD offset) → `convert_memory_tier_to_block` (flips to BlockDevice). Reverse: `promote_block_to_memory_tier`.
