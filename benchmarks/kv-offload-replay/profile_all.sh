@@ -1505,7 +1505,10 @@ json="${LOGDIR}/results.json"
 {
     echo "{"
     echo "  \"vllm_version\": $([[ -n "$VLLM_VERSION" ]] && echo "\"${VLLM_VERSION}\"" || echo null),"
-    echo "  \"model\": \"${MODEL}\","
+    # Record the model actually SERVED. The synthetic-agentic arm serves the
+    # -Instruct variant (SA_MODEL) rather than the base --model, so the slide
+    # subtitle must name that, not ${MODEL}.
+    echo "  \"model\": \"$([[ "$WORKLOAD_NAME" == "synthetic-agentic" ]] && echo "${SA_MODEL}" || echo "${MODEL}")\","
     echo "  \"num_convs\": ${NUM_CONVS},"
     echo "  \"max_rounds\": ${MAX_ROUNDS},"
     echo "  \"output_tokens\": ${OUTPUT_TOKENS},"
@@ -1525,7 +1528,7 @@ json="${LOGDIR}/results.json"
 # ── Human table ───────────────────────────────────────────────────────────────
 echo ""
 echo "=============================== KV-Offload Profile ==============================="
-echo "model=${MODEL}  num_convs=${NUM_CONVS}  output_tokens=${OUTPUT_TOKENS}${VLLM_VERSION:+  vllm=${VLLM_VERSION}}"
+echo "model=$([[ "$WORKLOAD_NAME" == "synthetic-agentic" ]] && echo "${SA_MODEL}" || echo "${MODEL}")  num_convs=${NUM_CONVS}  output_tokens=${OUTPUT_TOKENS}${VLLM_VERSION:+  vllm=${VLLM_VERSION}}"
 echo "logdir=${LOGDIR}"
 echo ""
 printf "%-15s %-10s %10s %7s %8s %10s\n" "Variant" "Status" "wall(s)" "rounds" "gens" "tokens/s"
