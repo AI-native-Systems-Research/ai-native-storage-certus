@@ -2916,11 +2916,11 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
         // D2H source is on the GPU (ipc_handle.address); make that device current
-        // and use its warm stream so cudaMemcpyAsync doesn't reject a cross-GPU
-        // stream under tensor parallelism.
+        // and use its dedicated store stream so D2H doesn't serialize with H2D
+        // loads on the warm stream (PCIe full-duplex).
         let device = set_batch_device(&*gpu, ipc_handle.address);
-        let warm_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.warm);
-        let stream = GpuStream(warm_raw as *mut std::ffi::c_void);
+        let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.store);
+        let stream = GpuStream(store_raw as *mut std::ffi::c_void);
         self.copy_gpu_to_memory_async(key, std::slice::from_ref(&ipc_handle), stream)?;
         gpu.stream_synchronize(stream)
             .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
