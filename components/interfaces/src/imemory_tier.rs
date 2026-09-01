@@ -93,13 +93,6 @@ component_macros::define_interface! {
         /// Peek at the N oldest keys without removing them.
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
 
-        /// Peek at the oldest keys that belong to the same shard as `key`.
-        ///
-        /// Returns up to `n` candidates whose shard matches `shard_for(key)`.
-        /// Read-only — does not evict or free anything. The caller is responsible
-        /// for the eviction lifecycle (dispatch-map transition → remove).
-        fn oldest_keys_for_shard(&self, key: CacheKey, n: usize) -> Vec<CacheKey>;
-
         /// Remove a specific entry, freeing its slot.
         fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError>;
 

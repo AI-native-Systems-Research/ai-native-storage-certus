@@ -14,16 +14,9 @@ pub(crate) struct FreeList {
 
 impl FreeList {
     pub fn new(capacity: usize) -> Self {
-        Self::with_base(0, capacity)
-    }
-
-    /// Create a free-list managing `capacity` bytes starting at `base_offset`.
-    /// Returned offsets are absolute (include the base), so callers can use
-    /// them directly as pool-relative offsets without adjustment.
-    pub fn with_base(base_offset: usize, capacity: usize) -> Self {
         let mut free_regions = BTreeMap::new();
         if capacity > 0 {
-            free_regions.insert(base_offset, capacity);
+            free_regions.insert(0, capacity);
         }
         Self {
             free_regions,
