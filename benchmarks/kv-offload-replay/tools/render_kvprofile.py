@@ -145,22 +145,21 @@ FAMILIES = [
         ("ssd_write_bytes",        "SSD write"),
     ]),
     ("KV tier movements — run total", "int", [
-        ("tier_promotions_to_memory",  "promotions to DRAM"),
-        ("tier_promotions_to_gpu",     "promotions to GPU"),
+        ("tier_promotions_to_memory",  "→DRAM"),
+        ("tier_promotions_to_gpu",     "→GPU"),
         ("tier_evictions_from_memory", "evict DRAM"),
         ("tier_evictions_from_ssd",    "evict SSD"),
     ]),
 ]
 
-# Small-multiples grid layout: each COLUMN is one semantic group of per-round/
-# time counters, stacked top→bottom in the order given, and the columns sit
-# side-by-side. So a group reads as a vertical strip (tokens+preemptions /
-# cache queries+hits / bytes moved / tier movements) — the same grouping the
+# Small-multiples grid layout: each of the three vLLM groups is a COLUMN of
+# per-round/time counters, stacked top→bottom in the order given, and the
+# columns sit side-by-side. So a group reads as a vertical strip (tokens+
+# preemptions / cache queries+hits / bytes moved) — the same grouping the
 # run-total FAMILIES bars use. Each small-multiple has its OWN y-axis, so a
 # column's panels needn't share a unit. Counters absent from a run are dropped
 # (shortening that column); a fully-empty column is skipped. For the common vLLM
-# run this is a tidy 4×3 (three groups of four down); a Certus-SPDK run adds the
-# tier-movements column.
+# run this is a tidy 4×3 (three groups of four down).
 SMALLMULT_COLS = [
     ["prompt_tokens", "prompt_tokens_cached", "generation_tokens",
      "num_preemptions"],
@@ -168,8 +167,15 @@ SMALLMULT_COLS = [
      "external_prefix_cache_queries", "external_prefix_cache_hits"],
     ["kv_offload_store_bytes", "kv_offload_load_bytes",
      "ssd_read_bytes", "ssd_write_bytes"],
-    ["tier_promotions_to_memory", "tier_promotions_to_gpu",
-     "tier_evictions_from_memory", "tier_evictions_from_ssd"],
+]
+# The Certus-SPDK tier-movement counters don't belong to any vLLM column; they
+# are appended BELOW the 4×3 block as full-width trailing row(s), row-major
+# across the columns (a Certus run with promotions→DRAM, promotions→GPU and one
+# demotion active fills a single fifth row of three). Only the Certus-SPDK
+# variant has a certus-server, so this is empty for every other run.
+SMALLMULT_TIER = [
+    "tier_promotions_to_memory", "tier_promotions_to_gpu",
+    "tier_evictions_from_memory", "tier_evictions_from_ssd",
 ]
 
 # Hit counters that have a matching query counter: on the run-total bars the hit
@@ -550,19 +556,25 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     active = [c for c in COUNTERS + TIER_COUNTERS
               if any(any(v != 0 for v in s["data"].get(c[0], [])) for s in series)]
     active_keys = {c[0] for c in active}
-    # The per-round/time small multiples are grouped into semantic COLUMNS
-    # (SMALLMULT_COLS): one family per column, stacked top→bottom, active counters
-    # only. This is the block that lives in the RIGHT region of the landscape
-    # layout below. Columns may differ in length (ragged bottom) — a shorter
-    # column just leaves its lowest cells empty.
+    # Build the RIGHT-region small-multiples as a 2D matrix `grid[r][c]` (each
+    # cell a counter-meta tuple or None). The three vLLM groups are COLUMNS
+    # (SMALLMULT_COLS transposed → up to 4 rows × 3 cols); the Certus tier
+    # counters (SMALLMULT_TIER) are appended BELOW as full-width trailing rows,
+    # row-major across those columns — so a Certus run's promotions/demotion
+    # charts land on a fifth row rather than a fourth column.
     _meta = {c[0]: c for c in COUNTERS + TIER_COUNTERS}
-    grid_cols = []
-    for col_keys in SMALLMULT_COLS:
-        col = [_meta[k] for k in col_keys if k in active_keys]
-        if col:
-            grid_cols.append(col)
-    grid_ncol = len(grid_cols)
-    grid_nrow = max((len(c) for c in grid_cols), default=0)
+    main_cols = [[_meta[k] for k in col_keys if k in active_keys]
+                 for col_keys in SMALLMULT_COLS]
+    main_cols = [c for c in main_cols if c]
+    grid_ncol = len(main_cols)
+    grid_cells = []
+    for r in range(max((len(c) for c in main_cols), default=0)):
+        grid_cells.append([(c[r] if r < len(c) else None) for c in main_cols])
+    tier_active = [_meta[k] for k in SMALLMULT_TIER if k in active_keys]
+    for i in range(0, len(tier_active), max(grid_ncol, 1)):
+        chunk = tier_active[i:i + grid_ncol]
+        grid_cells.append(chunk + [None] * (grid_ncol - len(chunk)))
+    grid_nrow = len(grid_cells)
 
     # Curated counters that are all-zero but WERE measured are a real result (e.g.
     # a write-only run: the offload tier is queried but hit 0×, nothing is loaded
@@ -652,11 +664,15 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     # its window). Only when at least one series carries the raw per-tick series.
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
     gpu_ts_h = 2.0 if has_gpu_ts else 0.0
-    # Family run-total bars live in the (narrower) LEFT column, so size their
-    # columns to the left width (target ~2.8" per family panel) and prefer FEWER
-    # rows so the left stack stays short enough to balance the right grid.
-    fam_ncol = (max(1, min(len(active_fams), round(left_usable / 2.8)))
-                if active_fams else 0)
+    # Family run-total bars live in the (narrower) LEFT column. With the tier
+    # totals there can be 4 families; lay those out as a 2x2 grid so the left
+    # stack stays short enough to balance the right grid, and keep <=3 families
+    # on a single row (each panel targets ~2.8" of left width).
+    if active_fams:
+        fam_ncol = 2 if len(active_fams) >= 4 else len(active_fams)
+        fam_ncol = min(fam_ncol, max(1, round(left_usable / 2.8)))
+    else:
+        fam_ncol = 0
     fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if fam_ncol else 0
     totals_h = 4.2 * fam_nrow
     # note band = the wrapped text lines, plus a fixed gap above them that clears
@@ -911,13 +927,12 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     x_is_seconds = bool(series) and all(s.get("async") for s in series)
 
     # ── per-round small multiples (RIGHT region) ──────────────────────────────
-    # Columns are the semantic groups (SMALLMULT_COLS: tokens+preemptions /
-    # cache queries+hits / bytes moved / tier movements); each group reads as a
-    # vertical strip. The grid spans the full figure height in the right region,
-    # balancing the left summary stack. Drawn row-by-row (each row its own
-    # single-row gridspec so the inter-row gap can clear titles), looking the
-    # panel up by column; a column shorter than the tallest just leaves its
-    # lowest cells empty.
+    # The three vLLM groups are columns (tokens+preemptions / cache queries+hits
+    # / bytes moved), each reading as a vertical strip; the Certus tier charts
+    # trail below on their own full-width row(s). The grid spans the full figure
+    # height, balancing the left summary stack, drawn row-by-row (each row its own
+    # single-row gridspec so the inter-row gap can clear titles). An empty matrix
+    # cell (ragged column bottom, or a short trailing row) is just skipped.
     if grid_nrow:
         row_frac = (grid_top - grid_bottom) / grid_nrow
         for r in range(grid_nrow):
@@ -925,10 +940,11 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
             row_bot = row_top - row_frac + (GRID_ROW_GAP / fig_h)  # clear titles
             gs_row = fig.add_gridspec(1, grid_ncol, left=RIGHT_L, right=RIGHT_R,
                                       top=row_top, bottom=row_bot, wspace=0.28)
-            for c, col in enumerate(grid_cols):
-                if r >= len(col):
-                    continue  # ragged column bottom — no panel in this cell
-                key, ctitle, unit = col[r]
+            for c in range(grid_ncol):
+                cell = grid_cells[r][c]
+                if cell is None:
+                    continue  # empty matrix cell — no panel here
+                key, ctitle, unit = cell
                 cax = fig.add_subplot(gs_row[0, c])
                 for s in series:
                     vals = s["data"].get(key)
