@@ -926,8 +926,14 @@ SA_PROM_INTERVAL="${SA_PROM_INTERVAL:-10}"
 # ssd_write_bytes stay empty. This diffs /proc/diskstats for the FS-tier device and
 # emits those two keys as [prom] lines (same interval, folded into the variant log).
 # FS-tier only — the certus arm's SPDK device bypasses the kernel block layer and is
-# invisible to diskstats (use tools/certus-iostat-poll.py / GetIoStats there).
+# invisible to diskstats (SA_CERTUS_IOSTAT below covers it via GetIoStats instead).
 SA_DISK="${SA_DIR}/sample_diskstats.py"
+# Same idea for the Certus-SPDK arm: its SPDK NVMe extent tier is invisible to
+# /proc/diskstats, so ssd_read_bytes/ssd_write_bytes would stay empty for Certus too.
+# This poller reads the certus-server's own GetIoStats shmq op (device read/write
+# bytes) off the mailbox at $SHM_PATH and emits the same two [prom] keys, folded into
+# the variant log exactly like the FS-tier disk sidecar.
+SA_CERTUS_IOSTAT="${SA_DIR}/sample_certus_iostat.py"
 # synthetic-agentic sessions run long and compact mid-session above 8500 tokens, so
 # the 8192 in-process default is too small here (peak pre-compaction context is
 # ~8500 + one input turn ~= 11K). But max_model_len also sets a HARD GPU-KV floor:
@@ -1082,16 +1088,25 @@ run_server_bench() {  # variant
         warn "${variant} (synthetic-agentic): no ${SA_PROM} or python3 — /metrics NOT scraped (render_kvprofile will have no counters)"
     fi
 
-    # Physical device I/O for the FS-tier arm (not on vLLM /metrics — see SA_DISK).
-    # Diffs /proc/diskstats for the device backing $SHARED_FS and emits
-    # ssd_read_bytes/ssd_write_bytes [prom] lines, folded into $f alongside the
-    # /metrics rounds. tiered-only; certus SPDK I/O is invisible to diskstats.
+    # Physical device I/O (not on vLLM /metrics — see SA_DISK / SA_CERTUS_IOSTAT).
+    # Both samplers emit the same ssd_read_bytes/ssd_write_bytes [prom] lines, folded
+    # into $f alongside the /metrics rounds; only the source differs per connector:
+    #   tiered → diff /proc/diskstats for the device backing $SHARED_FS
+    #   certus → certus-server GetIoStats over the shmq mailbox at $SHM_PATH
+    #            (the SPDK NVMe extent tier is invisible to /proc/diskstats)
     local disk_sidecar="${LOGDIR}/${variant}.disk.log"
     local disk_pid=""
     if [[ "$connector" == "tiered" && -f "$SA_DISK" ]] && command -v python3 >/dev/null 2>&1; then
         : > "$disk_sidecar"
         python3 "$SA_DISK" \
             --mount "$SHARED_FS" \
+            --interval "$SA_PROM_INTERVAL" \
+            --out "$disk_sidecar" >> "${LOGDIR}/iostat-${connector}.log" 2>&1 &
+        disk_pid="$!"
+    elif [[ "$connector" == "certus" && -f "$SA_CERTUS_IOSTAT" ]] && command -v python3 >/dev/null 2>&1; then
+        : > "$disk_sidecar"
+        python3 "$SA_CERTUS_IOSTAT" \
+            --shm-path "$SHM_PATH" \
             --interval "$SA_PROM_INTERVAL" \
             --out "$disk_sidecar" >> "${LOGDIR}/iostat-${connector}.log" 2>&1 &
         disk_pid="$!"
@@ -1129,15 +1144,16 @@ run_server_bench() {  # variant
             warn "${variant} (synthetic-agentic): /metrics scrape produced no rounds (see scrape-${connector}.log)"
         fi
     fi
-    # Fold the FS-tier disk sampler (ssd_read_bytes/ssd_write_bytes) the same way.
+    # Fold the device-I/O sampler (ssd_read_bytes/ssd_write_bytes) the same way —
+    # diskstats for tiered, GetIoStats for certus (see the launch branch above).
     if [[ -n "$disk_pid" ]]; then
         kill -TERM "$disk_pid" 2>/dev/null || true
         wait "$disk_pid" 2>/dev/null || true
         if [[ -s "$disk_sidecar" ]]; then
             cat "$disk_sidecar" >> "$f"
-            log "${variant} (synthetic-agentic): folded $(grep -c '^\[prom\]' "$disk_sidecar" 2>/dev/null || echo 0) diskstats rounds into $(basename "$f")"
+            log "${variant} (synthetic-agentic): folded $(grep -c '^\[prom\]' "$disk_sidecar" 2>/dev/null || echo 0) device-I/O rounds into $(basename "$f")"
         else
-            warn "${variant} (synthetic-agentic): diskstats sampler produced no rounds (see iostat-${connector}.log)"
+            warn "${variant} (synthetic-agentic): device-I/O sampler produced no rounds (see iostat-${connector}.log)"
         fi
     fi
 

@@ -24,7 +24,8 @@ device) happens before the server is ready, i.e. before our baseline, and is
 excluded. NB this is WHOLE-DEVICE I/O: any other traffic to the device during the
 run (the results/log writes into the same mount) is counted too, but the KV tier
 dominates. SPDK devices (the certus arm) bypass the kernel block layer and never
-appear in /proc/diskstats — use tools/certus-iostat-poll.py (GetIoStats) there.
+appear in /proc/diskstats — the sibling sample_certus_iostat.py emits the same two
+[prom] keys for that arm from the certus-server's GetIoStats shmq op instead.
 
 Usage:
   sample_diskstats.py --mount /mnt/fs-backend-bench --interval 10 --out run.disk.log
