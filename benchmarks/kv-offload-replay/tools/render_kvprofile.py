@@ -152,6 +152,23 @@ FAMILIES = [
     ]),
 ]
 
+# Small-multiples grid layout: each ROW is one semantic group of per-round/time
+# counters, laid out left→right in the order given — the same grouping the
+# run-total FAMILIES use for the bars (tokens, cache queries/hits, bytes, tier
+# movements), with engine preemptions riding the tokens row. Counters absent from
+# a run are dropped (shortening that row); a fully-empty row is skipped. Row order
+# is top→bottom. For the common vLLM run this is a tidy 3×4: tokens+preemptions /
+# queries+hits / bytes; a Certus-SPDK run adds the tier-movements row.
+SMALLMULT_ROWS = [
+    ["prompt_tokens", "prompt_tokens_cached", "generation_tokens", "num_preemptions"],
+    ["prefix_cache_queries", "prefix_cache_hits",
+     "external_prefix_cache_queries", "external_prefix_cache_hits"],
+    ["kv_offload_store_bytes", "kv_offload_load_bytes",
+     "ssd_read_bytes", "ssd_write_bytes"],
+    ["tier_promotions_to_memory", "tier_promotions_to_gpu",
+     "tier_evictions_from_memory", "tier_evictions_from_ssd"],
+]
+
 # Hit counters that have a matching query counter: on the run-total bars the hit
 # bar is annotated with its hit rate (hits / queries) so the raw count reads
 # alongside the ratio that actually matters for cache effectiveness.
@@ -505,7 +522,7 @@ def build_series(run_args):
     return series
 
 
-def render(series, out_path, title, subtitle, dark, dpi, width=19.0, cols=0):
+def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -529,15 +546,18 @@ def render(series, out_path, title, subtitle, dark, dpi, width=19.0, cols=0):
     # first, then the Certus-server tier-movement counters)
     active = [c for c in COUNTERS + TIER_COUNTERS
               if any(any(v != 0 for v in s["data"].get(c[0], [])) for s in series)]
-    # Landscape sizing: the figure is `width` inches wide (usable = width*(R-L),
-    # R-L=0.9) and the two dense panel grids take as many columns as fit at a
-    # target panel width, so a wider canvas means FEWER rows → shorter figure,
-    # not just a stretched one. Each grid row is a fixed height (2.5"/3.0"), so
-    # dropping rows is the only lever that actually flattens the aspect ratio.
-    # `--cols` pins the small-multiples column count; 0 = auto from width.
-    usable_in = width * 0.9
-    ncol = cols if cols > 0 else max(3, round(usable_in / 3.8))  # ~3.8" per panel
-    nrow = (len(active) + ncol - 1) // ncol if active else 0
+    active_keys = {c[0] for c in active}
+    # The per-round/time small multiples are grouped into semantic rows
+    # (SMALLMULT_ROWS): one family per row, active counters only, left→right. This
+    # is the block that lives in the RIGHT column of the landscape layout below.
+    _meta = {c[0]: c for c in COUNTERS + TIER_COUNTERS}
+    grid_rows = []
+    for row_keys in SMALLMULT_ROWS:
+        row = [_meta[k] for k in row_keys if k in active_keys]
+        if row:
+            grid_rows.append(row)
+    grid_nrow = len(grid_rows)
+    grid_ncol = max((len(r) for r in grid_rows), default=0)
 
     # Curated counters that are all-zero but WERE measured are a real result (e.g.
     # a write-only run: the offload tier is queried but hit 0×, nothing is loaded
@@ -598,11 +618,24 @@ def render(series, out_path, title, subtitle, dark, dpi, width=19.0, cols=0):
     active_fams = [f for f in FAMILIES
                    if any(_total(s, k) for s in series for k, _lab in f[2])]
 
-    # ── vertical band layout ──────────────────────────────────────────────────
-    # The figure is a stack of bands: header, total-wall-time bar, run-total
-    # family bars (2 cols), per-round small multiples (3 cols), and the zero-note.
-    # Each drawn band is its own gridspec positioned by figure fraction so their
-    # column counts can differ; the note occupies [0, note_h] at the very bottom.
+    # ── two-region landscape layout ─────────────────────────────────────────────
+    # LEFT column  = the summary bands stacked top→bottom (header+legend, total
+    #                wall-time bars, GPU-util bars, GPU-util-over-time, run-total
+    #                family bars).
+    # RIGHT column = the per-round/time small multiples, one semantic family per
+    #                row (grid_rows), spanning the full figure height.
+    # This lays the slide out landscape for a widescreen monitor. The figure is as
+    # tall as the taller of the two columns; the note band spans the full width
+    # beneath both. When there are no per-round panels the left column widens to
+    # the full page (no right region).
+    if grid_nrow:
+        LEFT_L, LEFT_R = 0.05, 0.40
+        RIGHT_L, RIGHT_R = 0.44, 0.985
+    else:
+        LEFT_L, LEFT_R = 0.05, 0.975
+        RIGHT_L, RIGHT_R = 0.0, 0.0
+    left_usable = (LEFT_R - LEFT_L) * width
+
     legend_rows = (len(series) + 4) // 5
     hdr_h = 1.1 + 0.32 * legend_rows
     bar_h = max(1.6, 0.42 * len(series) + 0.8)
@@ -614,44 +647,56 @@ def render(series, out_path, title, subtitle, dark, dpi, width=19.0, cols=0):
     # its window). Only when at least one series carries the raw per-tick series.
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
     gpu_ts_h = 2.9 if has_gpu_ts else 0.0
-    # Totals panels carry rotated value-labels + a derived line, so they need more
-    # width than the small multiples — target ~5.5" each (still scales with width).
-    fam_ncol = max(2, round(usable_in / 5.5))
-    fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if active_fams else 0
+    # Family run-total bars live in the (narrower) LEFT column, so size their
+    # columns to the left width (target ~2.8" per family panel) and prefer FEWER
+    # rows so the left stack stays short enough to balance the right grid.
+    fam_ncol = (max(1, min(len(active_fams), round(left_usable / 2.8)))
+                if active_fams else 0)
+    fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if fam_ncol else 0
     totals_h = 3.0 * fam_nrow
-    grid_h = 2.5 * nrow
     # note band = the wrapped text lines, plus a fixed gap above them that clears
-    # the last counter row's x-axis tick labels + "round" label (~0.5in), plus a
+    # the last panel row's x-axis tick labels + "round" label (~0.5in), plus a
     # small bottom margin.
     note_text_h = 0.22 * len(note_lines)
     note_h = (note_text_h + 0.55) if note_lines else 0.0
 
-    # Gap between stacked bands must clear BOTH the lower band's title (drawn
-    # above its axes) and the upper band's x-axis tick + label (drawn below its
-    # axes) — otherwise the wall-bar's xlabel lands on the totals titles and the
-    # totals x-ticks land on the grid titles.
+    # LEFT stack: gaps must clear BOTH the lower band's title (drawn above its
+    # axes) and the upper band's x-axis tick + label (drawn below its axes). The
+    # header is the exception — no x-axis, legend already near its bottom — so it
+    # gets a small gap rather than opening a void before the wall bars.
     GAP = 0.9
-    bands = [("hdr", hdr_h), ("bar", bar_h)]
+    HDR_GAP = 0.15
+    left_bands = [("hdr", hdr_h), ("bar", bar_h)]
     if has_gpu:
-        bands.append(("gpu", gpu_h))
+        left_bands.append(("gpu", gpu_h))
     if has_gpu_ts:
-        bands.append(("gputs", gpu_ts_h))
+        left_bands.append(("gputs", gpu_ts_h))
     if totals_h:
-        bands.append(("totals", totals_h))
-    if grid_h:
-        bands.append(("grid", grid_h))
-    fig_h = sum(h for _, h in bands) + note_h + GAP * (len(bands) - 1)
+        left_bands.append(("totals", totals_h))
+    gap_below = lambda name: HDR_GAP if name == "hdr" else GAP  # noqa: E731
+    left_h = (sum(h for _, h in left_bands)
+              + sum(gap_below(left_bands[j][0]) for j in range(len(left_bands) - 1)))
+
+    # RIGHT grid natural height: one family per row, ~3.0" incl. its inter-row gap.
+    GRID_ROW_H = 3.0
+    right_h = grid_nrow * GRID_ROW_H
+
+    fig_h = max(left_h, right_h) + note_h
     fig = plt.figure(figsize=(width, fig_h), dpi=dpi)
 
-    pos, cur = {}, fig_h  # (bottom_frac, top_frac) per band, stacked top→bottom
-    for j, (name, h) in enumerate(bands):
+    # LEFT bands: (bottom_frac, top_frac) each, stacked top→bottom from the top.
+    pos, cur = {}, fig_h
+    for j, (name, h) in enumerate(left_bands):
         pos[name] = ((cur - h) / fig_h, cur / fig_h)
         cur -= h
-        if j < len(bands) - 1:
-            cur -= GAP
-    # By construction cur == note_h now, so the grid's bottom sits exactly on the
-    # note band (matching the footnote's reserved height below).
-    L, R = 0.075, 0.975
+        if j < len(left_bands) - 1:
+            cur -= gap_below(name)
+    # RIGHT grid spans (nearly) the full height: a top margin clears the first
+    # row's panel titles, a bottom margin (above the note) clears the last row's
+    # x-tick + "round" labels.
+    grid_top = (fig_h - 0.55) / fig_h
+    grid_bottom = (note_h + 0.35) / fig_h
+    L, R = LEFT_L, LEFT_R  # left bands draw within the left column
 
     # ── title band + legend: title / subtitle / legend stacked, none overlap ──
     gs_hdr = fig.add_gridspec(1, 1, left=L, right=R,
@@ -840,41 +885,51 @@ def render(series, out_path, title, subtitle, dark, dpi, width=19.0, cols=0):
     # tier panels keep their own "telemetry tick" x regardless (server.log cadence).
     x_is_seconds = bool(series) and all(s.get("async") for s in series)
 
-    # ── per-counter small multiples ──────────────────────────────────────────
-    gs_grid = (fig.add_gridspec(nrow, ncol, left=L, right=R,
-                                top=pos["grid"][1], bottom=pos["grid"][0],
-                                hspace=0.85, wspace=0.28)
-               if grid_h else None)
-    for i, (key, ctitle, unit) in enumerate(active):
-        r, c = divmod(i, ncol)
-        cax = fig.add_subplot(gs_grid[r, c])
-        for s in series:
-            vals = s["data"].get(key)
-            if not vals or all(v == 0 for v in vals):
-                continue
-            xs = list(range(1, len(vals) + 1))
-            cax.plot(xs, vals, color=s["color"], linestyle=s["style"], lw=1.8)
-        is_tier = key in TIER_KEYS
-        cax.set_title(ctitle, loc="left", fontsize=10, fontweight="bold", color=fg,
-                      pad=20)
-        src = ("certus-server:" + key[len("tier_"):]) if is_tier else ("vllm:" + key)
-        cax.text(0, 1.012, src, transform=cax.transAxes, fontsize=7.5,
-                 va="bottom", ha="left", color=mut, family="monospace")
-        cax.yaxis.set_major_formatter(FuncFormatter(fmt_bytes if unit == "bytes"
-                                                    else fmt_compact))
-        if is_tier:
-            cax.set_xlabel("telemetry tick", color=mut, fontsize=8)
-        elif x_is_seconds:
-            cax.set_xlabel("elapsed (s)", color=mut, fontsize=8)
-            cax.set_ylabel("per second", color=mut, fontsize=8)
-        else:
-            cax.set_xlabel("round", color=mut, fontsize=8)
-        cax.margins(x=0.02)
-        cax.set_ylim(bottom=0)
-        for sp in ("top", "right"):
-            cax.spines[sp].set_visible(False)
-        cax.grid(axis="y", color=grid, lw=0.6)
-        cax.tick_params(labelsize=8)
+    # ── per-round small multiples (RIGHT column) ──────────────────────────────
+    # One SMALLMULT_ROWS family per grid row (tokens+preemptions / prefix-cache
+    # queries+hits / bytes moved / tier movements), each panel a per-round (or
+    # per-second) time series. The grid spans the full figure height in the right
+    # region, balancing the left summary stack. Rows may differ in length, so each
+    # is its own single-row gridspec across the right column (a ragged last row
+    # left-aligns rather than stretching its panels full width).
+    if grid_nrow:
+        row_frac = (grid_top - grid_bottom) / grid_nrow
+        for r, row in enumerate(grid_rows):
+            row_top = grid_top - r * row_frac
+            row_bot = row_top - row_frac + (0.55 / fig_h)  # inter-row gap for titles
+            gs_row = fig.add_gridspec(1, grid_ncol, left=RIGHT_L, right=RIGHT_R,
+                                      top=row_top, bottom=row_bot, wspace=0.28)
+            for c, (key, ctitle, unit) in enumerate(row):
+                cax = fig.add_subplot(gs_row[0, c])
+                for s in series:
+                    vals = s["data"].get(key)
+                    if not vals or all(v == 0 for v in vals):
+                        continue
+                    xs = list(range(1, len(vals) + 1))
+                    cax.plot(xs, vals, color=s["color"], linestyle=s["style"],
+                             lw=1.8)
+                is_tier = key in TIER_KEYS
+                cax.set_title(ctitle, loc="left", fontsize=10, fontweight="bold",
+                              color=fg, pad=20)
+                src = (("certus-server:" + key[len("tier_"):]) if is_tier
+                       else ("vllm:" + key))
+                cax.text(0, 1.012, src, transform=cax.transAxes, fontsize=7.5,
+                         va="bottom", ha="left", color=mut, family="monospace")
+                cax.yaxis.set_major_formatter(
+                    FuncFormatter(fmt_bytes if unit == "bytes" else fmt_compact))
+                if is_tier:
+                    cax.set_xlabel("telemetry tick", color=mut, fontsize=8)
+                elif x_is_seconds:
+                    cax.set_xlabel("elapsed (s)", color=mut, fontsize=8)
+                    cax.set_ylabel("per second", color=mut, fontsize=8)
+                else:
+                    cax.set_xlabel("round", color=mut, fontsize=8)
+                cax.margins(x=0.02)
+                cax.set_ylim(bottom=0)
+                for sp in ("top", "right"):
+                    cax.spines[sp].set_visible(False)
+                cax.grid(axis="y", color=grid, lw=0.6)
+                cax.tick_params(labelsize=8)
 
     # ── footnote: curated counters that were measured but stayed zero ─────────
     if note_lines:
@@ -883,7 +938,7 @@ def render(series, out_path, title, subtitle, dark, dpi, width=19.0, cols=0):
         # is what clears the last panel row's hanging x-axis tick + "round" labels.
         y = (note_text_h + 0.08) / fig_h
         for ln in note_lines:
-            fig.text(0.075, y, ln, fontsize=8, va="top", ha="left", color=mut)
+            fig.text(LEFT_L, y, ln, fontsize=8, va="top", ha="left", color=mut)
             y -= 0.22 / fig_h
 
     # bbox_inches="tight" expands the saved bbox to enclose EVERY artist, not just
@@ -918,11 +973,10 @@ def main(argv=None):
                          "of a shared variant stand out from its same-coloured kin.")
     ap.add_argument("--dark", action="store_true", help="dark theme")
     ap.add_argument("--dpi", type=int, default=200)
-    ap.add_argument("--width", type=float, default=19.0,
-                    help="figure width in inches [19.0]; wider = more landscape, "
-                         "the panel grids reflow to more columns / fewer rows")
-    ap.add_argument("--cols", type=int, default=0,
-                    help="small-multiples column count [0 = auto from --width]")
+    ap.add_argument("--width", type=float, default=24.0,
+                    help="figure width in inches [24.0]; the layout is two columns "
+                         "(left summary stack, right per-round grid) — wider widens "
+                         "both regions for a more landscape slide")
     args = ap.parse_args(argv)
 
     # parse RUN args (TAG=DIR or DIR); default tag = trailing token of basename
@@ -982,7 +1036,7 @@ def main(argv=None):
         subtitle = " · ".join(bits)
 
     render(series, args.out, args.title, subtitle, args.dark, args.dpi,
-           width=args.width, cols=args.cols)
+           width=args.width)
     print(f"wrote {args.out}  ({len(series)} series, "
           f"{sum(1 for s in series if s['data'])} with per-round data)")
 
