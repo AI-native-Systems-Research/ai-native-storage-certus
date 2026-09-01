@@ -152,21 +152,23 @@ FAMILIES = [
     ]),
 ]
 
-# Small-multiples grid layout: each ROW is one semantic group of per-round/time
-# counters, laid out left→right in the order given — the same grouping the
-# run-total FAMILIES use for the bars (tokens, cache queries/hits, bytes, tier
-# movements), with engine preemptions riding the tokens row. Counters absent from
-# a run are dropped (shortening that row); a fully-empty row is skipped. Row order
-# is top→bottom. For the common vLLM run this is a tidy 3×4: tokens+preemptions /
-# queries+hits / bytes; a Certus-SPDK run adds the tier-movements row.
+# Small-multiples grid layout: each ROW is a group of per-round/time counters,
+# laid out left→right in the order given. Three per row keeps the panels
+# landscape (wider than tall) rather than squeezed into a portrait box. Unlike
+# the run-total FAMILIES bars, each small-multiple has its OWN y-axis, so a row
+# may mix units (a count next to a byte panel) without breaking the one-axis
+# rule. Counters absent from a run are dropped (shortening that row); a
+# fully-empty row is skipped. Row order is top→bottom. For the common vLLM run
+# this is a tidy 4×3 (tokens / GPU-cache+preemptions / offload-tier+store /
+# load+device-I/O); a Certus-SPDK run adds two tier-movement rows.
 SMALLMULT_ROWS = [
-    ["prompt_tokens", "prompt_tokens_cached", "generation_tokens", "num_preemptions"],
-    ["prefix_cache_queries", "prefix_cache_hits",
-     "external_prefix_cache_queries", "external_prefix_cache_hits"],
-    ["kv_offload_store_bytes", "kv_offload_load_bytes",
-     "ssd_read_bytes", "ssd_write_bytes"],
-    ["tier_promotions_to_memory", "tier_promotions_to_gpu",
-     "tier_evictions_from_memory", "tier_evictions_from_ssd"],
+    ["prompt_tokens", "prompt_tokens_cached", "generation_tokens"],
+    ["prefix_cache_queries", "prefix_cache_hits", "num_preemptions"],
+    ["external_prefix_cache_queries", "external_prefix_cache_hits",
+     "kv_offload_store_bytes"],
+    ["kv_offload_load_bytes", "ssd_read_bytes", "ssd_write_bytes"],
+    ["tier_promotions_to_memory", "tier_promotions_to_gpu"],
+    ["tier_evictions_from_memory", "tier_evictions_from_ssd"],
 ]
 
 # Hit counters that have a matching query counter: on the run-total bars the hit
@@ -646,14 +648,14 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     # GPU-utilization-over-time band: one line per series (util% vs elapsed within
     # its window). Only when at least one series carries the raw per-tick series.
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
-    gpu_ts_h = 2.9 if has_gpu_ts else 0.0
+    gpu_ts_h = 2.0 if has_gpu_ts else 0.0
     # Family run-total bars live in the (narrower) LEFT column, so size their
     # columns to the left width (target ~2.8" per family panel) and prefer FEWER
     # rows so the left stack stays short enough to balance the right grid.
     fam_ncol = (max(1, min(len(active_fams), round(left_usable / 2.8)))
                 if active_fams else 0)
     fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if fam_ncol else 0
-    totals_h = 3.0 * fam_nrow
+    totals_h = 4.2 * fam_nrow
     # note band = the wrapped text lines, plus a fixed gap above them that clears
     # the last panel row's x-axis tick labels + "round" label (~0.5in), plus a
     # small bottom margin.
@@ -677,8 +679,11 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     left_h = (sum(h for _, h in left_bands)
               + sum(gap_below(left_bands[j][0]) for j in range(len(left_bands) - 1)))
 
-    # RIGHT grid natural height: one family per row, ~3.0" incl. its inter-row gap.
-    GRID_ROW_H = 3.0
+    # RIGHT grid natural height: one group per row. Each row needs its panel plus
+    # an inter-row gap that clears BOTH the upper row's x-tick + "round" label
+    # (~0.5") and this row's title + source-key line (~0.5"), so ~3.4" per row.
+    GRID_ROW_H = 3.4
+    GRID_ROW_GAP = 1.05  # inches reserved at the bottom of each row's slot
     right_h = grid_nrow * GRID_ROW_H
 
     fig_h = max(left_h, right_h) + note_h
@@ -754,12 +759,19 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
             avg = g["util_avg"] if g else 0.0
             gax.barh(y, avg, color=s["color"], height=0.62, zorder=3)
             if g:
-                lab = (f"{avg:.0f}%  ·  p95 {g['util_p95']:.0f}%  ·  "
+                lab = (f"{avg:.0f}%   ·   p95 {g['util_p95']:.0f}%   ·   "
                        f"peak {g['util_max']:.0f}%")
             else:
                 lab = "n/a"
-            gax.text(avg if g else 0, y, "  " + lab, va="center", ha="left",
-                     fontsize=9.5, fontweight="bold", color=fg)
+            # In the narrow left column the stats overran the bar and spilled past
+            # the column edge. When the bar is long enough (util is typically
+            # ~90%+) draw them INSIDE the bar in white; only fall back to a label
+            # to the right of a short bar (where they wouldn't fit inside).
+            inside = bool(g) and avg >= 45
+            gax.text(1.5 if inside else (avg if g else 0), y,
+                     (" " if inside else "  ") + lab, va="center", ha="left",
+                     fontsize=9.5, fontweight="bold",
+                     color=("#ffffff" if inside else fg), zorder=4)
         gax.set_yticks(gys)
         gax.set_yticklabels([s["label"] for s in series], fontsize=9.5, color=fg)
         gax.set_xlabel("mean GPU processor utilization — nvidia-smi util.gpu, "
@@ -886,9 +898,10 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     x_is_seconds = bool(series) and all(s.get("async") for s in series)
 
     # ── per-round small multiples (RIGHT column) ──────────────────────────────
-    # One SMALLMULT_ROWS family per grid row (tokens+preemptions / prefix-cache
-    # queries+hits / bytes moved / tier movements), each panel a per-round (or
-    # per-second) time series. The grid spans the full figure height in the right
+    # One SMALLMULT_ROWS group per grid row (3 panels wide: tokens / GPU-cache+
+    # preemptions / offload-tier+store / load+device-I/O, plus tier rows for a
+    # Certus run), each panel a per-round (or per-second) time series. The grid
+    # spans the full figure height in the right
     # region, balancing the left summary stack. Rows may differ in length, so each
     # is its own single-row gridspec across the right column (a ragged last row
     # left-aligns rather than stretching its panels full width).
@@ -896,7 +909,7 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         row_frac = (grid_top - grid_bottom) / grid_nrow
         for r, row in enumerate(grid_rows):
             row_top = grid_top - r * row_frac
-            row_bot = row_top - row_frac + (0.55 / fig_h)  # inter-row gap for titles
+            row_bot = row_top - row_frac + (GRID_ROW_GAP / fig_h)  # clear titles
             gs_row = fig.add_gridspec(1, grid_ncol, left=RIGHT_L, right=RIGHT_R,
                                       top=row_top, bottom=row_bot, wspace=0.28)
             for c, (key, ctitle, unit) in enumerate(row):
