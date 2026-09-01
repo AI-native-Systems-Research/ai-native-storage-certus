@@ -641,8 +641,9 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
 
     # ── two-region landscape layout ─────────────────────────────────────────────
     # LEFT column  = the summary bands stacked top→bottom (header+legend, total
-    #                wall-time bars, GPU-util bars, GPU-util-over-time, run-total
-    #                family bars).
+    #                wall-time bars, GPU-util bars, then a half-width grid holding
+    #                the GPU-util-over-time line, preemptions bars, and the
+    #                run-total family bars, 2 to a row).
     # RIGHT column = the per-round/time small multiples, one semantic family per
     #                row (grid_rows), spanning the full figure height.
     # This lays the slide out landscape for a widescreen monitor. The figure is as
@@ -664,24 +665,26 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     # wall-time band. Only drawn when at least one series carries GPU telemetry.
     has_gpu = any(s.get("gpu") for s in series)
     gpu_h = max(1.0, 0.26 * len(series) + 0.45) if has_gpu else 0.0
-    # GPU-utilization-over-time band: one line per series (util% vs elapsed within
-    # its window). Shares its row with the Engine-preemptions run-total bars (drawn
-    # to its right) — an engine-health pairing — so the band is present when EITHER
-    # the GPU timeseries OR any preemption is available.
+    # The LEFT summary grid holds heterogeneous half-width panels that flow
+    # row-major, 2 to a row: the GPU-util-over-time line, the Engine-preemptions
+    # run-total bars, and one panel per run-total family. Each is a tagged cell so
+    # the drawing loop dispatches by type — no special bands, no split gridspecs.
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
     has_preempt = any(any(v for v in (s["data"].get("num_preemptions") or []))
                       for s in series)
-    gpu_ts_h = 2.0 if (has_gpu_ts or has_preempt) else 0.0
-    # Family run-total bars live in the (narrower) LEFT column. With the tier
-    # totals there can be 4 families; lay those out as a 2x2 grid so the left
-    # stack stays short enough to balance the right grid, and keep <=3 families
-    # on a single row (each panel targets ~2.8" of left width).
-    if active_fams:
-        fam_ncol = 2 if len(active_fams) >= 4 else len(active_fams)
+    left_cells = []
+    if has_gpu_ts:
+        left_cells.append(("gputs", None))
+    if has_preempt:
+        left_cells.append(("preempt", None))
+    left_cells += [("fam", f) for f in active_fams]
+    # 2 to a row (each panel targets ~2.8" of width); a single cell takes the row.
+    if left_cells:
+        fam_ncol = 2 if len(left_cells) >= 2 else 1
         fam_ncol = min(fam_ncol, max(1, round(left_usable / 2.8)))
     else:
         fam_ncol = 0
-    fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if fam_ncol else 0
+    fam_nrow = (len(left_cells) + fam_ncol - 1) // fam_ncol if fam_ncol else 0
     totals_h = 4.2 * fam_nrow
     # note band = the wrapped text lines, plus a fixed gap above them that clears
     # the last panel row's x-axis tick labels + "round" label (~0.5in), plus a
@@ -698,8 +701,6 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     left_bands = [("hdr", hdr_h), ("bar", bar_h)]
     if has_gpu:
         left_bands.append(("gpu", gpu_h))
-    if has_gpu_ts or has_preempt:
-        left_bands.append(("gputs", gpu_ts_h))
     if totals_h:
         left_bands.append(("totals", totals_h))
     gap_below = lambda name: HDR_GAP if name == "hdr" else GAP  # noqa: E731
@@ -819,156 +820,151 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         gax.tick_params(left=False)
         gax.grid(axis="x", color=grid, lw=0.7, zorder=0)
 
-    # ── GPU processor utilization over time (one line per variant) ──────────────
-    # The raw util.gpu series bounces 0↔100 tick-to-tick (it is a per-interval busy
-    # flag), so plot a short moving average to show the trend. x = elapsed within
-    # each variant's window, so the sequentially-run variants overlay from t=0.
-    if has_gpu_ts or has_preempt:
-        def _smooth(ys, w=5):
-            if len(ys) < 2:
-                return ys
-            half = w // 2
-            return [sum(ys[max(0, i - half):min(len(ys), i + half + 1)])
-                    / (min(len(ys), i + half + 1) - max(0, i - half))
-                    for i in range(len(ys))]
+    # ── LEFT summary grid: GPU-util-over-time line, preemptions bars, family bars
+    # All are half-width cells flowing row-major (2 to a row) in one gridspec; the
+    # loop dispatches by cell kind. No per-panel bands or split gridspecs. ───────
+    def _smooth(ys, w=5):
+        if len(ys) < 2:
+            return ys
+        half = w // 2
+        return [sum(ys[max(0, i - half):min(len(ys), i + half + 1)])
+                / (min(len(ys), i + half + 1) - max(0, i - half))
+                for i in range(len(ys))]
 
-        # This band pairs the GPU-util-over-time line (left) with the Engine
-        # preemptions run-total bars (right). Split into two columns only when
-        # both are present; otherwise the sole panel takes the full width. The
-        # line gets the wider share — it carries a per-tick trend, the bars one
-        # number per series.
-        split = has_gpu_ts and has_preempt
-        gs_gt = fig.add_gridspec(1, 2 if split else 1, left=L, right=R,
-                                 top=pos["gputs"][1], bottom=pos["gputs"][0],
-                                 width_ratios=[1.7, 1] if split else None,
-                                 wspace=0.26)
-        ci = 0
-        if has_gpu_ts:
-            gtx = fig.add_subplot(gs_gt[0, ci]); ci += 1
-            for s in series:
-                ser = (s.get("gpu") or {}).get("series")
-                if not ser:
-                    continue
-                xs = [t for t, _u in ser]
-                ys = _smooth([u for _t, u in ser])
-                gtx.plot(xs, ys, color=s["color"], linestyle=s["style"], lw=1.8)
-            gtx.set_ylim(0, 105)
-            gtx.set_yticks([0, 25, 50, 75, 100])
-            gtx.set_xlabel("elapsed within variant window (s)", color=mut, fontsize=9)
-            gtx.set_ylabel("GPU util % (10 s moving avg)", color=mut, fontsize=9)
-            gtx.set_title("GPU processor utilization over time", loc="left",
-                          fontsize=11, fontweight="bold", color=fg, pad=6)
-            gtx.margins(x=0.02)
-            for sp in ("top", "right"):
-                gtx.spines[sp].set_visible(False)
-            gtx.grid(color=grid, lw=0.6)
-            gtx.tick_params(labelsize=8)
+    def _draw_gputs(ax):
+        # The raw util.gpu series bounces 0↔100 tick-to-tick (a per-interval busy
+        # flag), so plot a short moving average. x = elapsed within each variant's
+        # window, so the sequentially-run variants overlay from t=0.
+        for s in series:
+            ser = (s.get("gpu") or {}).get("series")
+            if not ser:
+                continue
+            ax.plot([t for t, _u in ser], _smooth([u for _t, u in ser]),
+                    color=s["color"], linestyle=s["style"], lw=1.8)
+        ax.set_ylim(0, 105)
+        ax.set_yticks([0, 25, 50, 75, 100])
+        ax.set_xlabel("elapsed within variant window (s)", color=mut, fontsize=9)
+        ax.set_ylabel("GPU util % (10 s moving avg)", color=mut, fontsize=9)
+        ax.set_title("GPU processor utilization over time", loc="left",
+                     fontsize=10, fontweight="bold", color=fg, pad=6)
+        ax.margins(x=0.02)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        ax.grid(color=grid, lw=0.6)
+        ax.tick_params(labelsize=8)
 
-        # ── Engine preemptions — run total (one column per series, rate atop) ────
+    def _draw_preempt(ax):
         # Preemptions are per-round deltas (scrape_prom emits the counter's
         # movement each round), so the run total is their sum; the rate is that
         # total over the counter's active window (see _active_seconds). Series are
         # told apart by colour (the header legend), same as the family bars.
-        if has_preempt:
-            pax = fig.add_subplot(gs_gt[0, ci])
-            xs = list(range(len(series)))
-            vmax = 0.0
-            for x, s in zip(xs, series):
-                tot = _total(s, "num_preemptions")
-                vmax = max(vmax, tot)
-                bars = pax.bar(x, tot, width=0.72, color=s["color"], zorder=3)
-                pax.bar_label(bars, labels=[fmt_compact(tot)], padding=2,
-                              fontsize=8, color=mut)
-                secs = _active_seconds(s, "num_preemptions")
-                if tot and secs:
-                    pax.annotate(fmt_rate(tot / secs, "int", stacked=True),
-                                 xy=(x, tot), xytext=(0, 15),
-                                 textcoords="offset points", ha="center",
-                                 va="bottom", fontsize=7.5, fontweight="bold",
-                                 color=fg, zorder=4)
-            pax.set_xticks(xs)
-            pax.set_xticklabels([], fontsize=8)
-            pax.set_title("Engine preemptions — run total", loc="left",
-                          fontsize=11, fontweight="bold", color=fg, pad=6)
-            pax.yaxis.set_major_formatter(FuncFormatter(fmt_compact))
-            pax.set_ylim(0, (vmax * 1.5) or 1)   # headroom for the count + rate stack
-            pax.margins(x=0.12)
-            for sp in ("top", "right"):
-                pax.spines[sp].set_visible(False)
-            pax.tick_params(left=True, bottom=False, labelsize=8)
-            pax.grid(axis="y", color=grid, lw=0.6, zorder=0)
+        xs = list(range(len(series)))
+        vmax = 0.0
+        for x, s in zip(xs, series):
+            tot = _total(s, "num_preemptions")
+            vmax = max(vmax, tot)
+            bars = ax.bar(x, tot, width=0.72, color=s["color"], zorder=3)
+            ax.bar_label(bars, labels=[fmt_compact(tot)], padding=2,
+                         fontsize=8, color=mut)
+            secs = _active_seconds(s, "num_preemptions")
+            if tot and secs:
+                ax.annotate(fmt_rate(tot / secs, "int", stacked=True),
+                            xy=(x, tot), xytext=(0, 15),
+                            textcoords="offset points", ha="center",
+                            va="bottom", fontsize=7.5, fontweight="bold",
+                            color=fg, zorder=4)
+        ax.set_xticks(xs)
+        ax.set_xticklabels([])
+        ax.set_title("Engine preemptions — run total", loc="left",
+                     fontsize=10, fontweight="bold", color=fg, pad=6)
+        ax.yaxis.set_major_formatter(FuncFormatter(fmt_compact))
+        ax.set_ylim(0, (vmax * 1.5) or 1)   # headroom for the count + rate stack
+        ax.margins(x=0.12)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        ax.tick_params(left=True, bottom=False, labelsize=8)
+        ax.grid(axis="y", color=grid, lw=0.6, zorder=0)
 
-    # ── run-total family bars (2-col band): related counters share one axis, one
-    # group per counter, one bar per series (coloured like the legend). ─────────
-    if active_fams:
+    def _draw_fam(ax, fam):
+        # Related counters share one axis, one group per counter, one bar per
+        # series (coloured like the legend).
+        ftitle, funit, metrics = fam
+        fmt = fmt_bytes if funit == "bytes" else fmt_compact
+        n_m = len(metrics)
+        # Some bars carry a derived number above the count label (hit rate on hit
+        # bars, throughput on SSD bars); that stack needs extra headroom.
+        has_deriv = any(k in HIT_DENOM or k in RATE_KEYS for k, _lab in metrics)
+        gw = 0.8                       # width one counter's bar-group spans
+        bw = gw / max(len(series), 1)  # per-series bar width within a group
+        vmax = 0.0
+        for si, s in enumerate(series):
+            offs = -gw / 2 + bw * (si + 0.5)
+            xs = [m + offs for m in range(n_m)]
+            vals = [_total(s, k) for k, _lab in metrics]
+            vmax = max([vmax] + vals)
+            bars = ax.bar(xs, vals, width=bw * 0.9, color=s["color"], zorder=3)
+            ax.bar_label(bars, labels=[fmt(v) for v in vals], padding=2,
+                         fontsize=6.5, rotation=90, color=mut)
+            # Derived number(s) atop the bar, above the (vertical) count label: a
+            # per-second average (RATE_KEYS) and/or a hit rate (HIT_DENOM). A hit
+            # bar carries both — stacked, rate on top, hit% nearest the bar (last
+            # line, va="bottom" grows the block upward from here).
+            for (k, _lab), x, hv in zip(metrics, xs, vals):
+                parts = []
+                if k in RATE_KEYS and hv:
+                    secs = _active_seconds(s, k)
+                    if secs:
+                        parts.append(fmt_rate(hv / secs, funit, stacked=True))
+                if k in HIT_DENOM:
+                    q = _total(s, HIT_DENOM[k])
+                    if q:
+                        parts.append(f"{hv / q * 100:.0f}%")
+                if not parts:
+                    continue
+                # Clear the rotated count label first — its height grows with the
+                # string length ("860.3 MiB" is far taller than "1k").
+                off = 14 + len(fmt(hv)) * 4.5
+                # Horizontal label, but the rate carries its unit on a second line
+                # (fmt_rate(stacked=True)) so it stays about as wide as its longest
+                # token instead of spilling into the neighbouring bar group when
+                # several series share one — while reading far easier than a
+                # rotated-vertical label.
+                ax.annotate("\n".join(parts), xy=(x, hv),
+                            xytext=(0, off), textcoords="offset points",
+                            ha="center", va="bottom", fontsize=7,
+                            fontweight="bold", color=fg, zorder=4)
+        ax.set_xticks(range(n_m))
+        ax.set_xticklabels([lab for _k, lab in metrics], fontsize=8)
+        # These panels are narrow (2 to a row), so wrap the long family titles
+        # ("Prefix-cache queries & hits — run total") onto multiple lines instead
+        # of letting them run into the neighbour.
+        ax.set_title(textwrap.fill(ftitle, width=26), loc="left", fontsize=10,
+                     fontweight="bold", color=fg, pad=6)
+        ax.yaxis.set_major_formatter(FuncFormatter(fmt))
+        # The derived label sits above the rotated count label; a two-line rate
+        # (value + unit) or a two-line hit block needs a little more headroom
+        # above the tallest bar than a bare count (1.34x).
+        headroom = 2.2 if has_deriv else 1.34
+        ax.set_ylim(0, (vmax * headroom) or 1)
+        ax.margins(x=0.08)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        ax.grid(axis="y", color=grid, lw=0.6, zorder=0)
+        ax.tick_params(labelsize=8)
+
+    if left_cells:
         gs_tot = fig.add_gridspec(fam_nrow, fam_ncol, left=L, right=R,
                                   top=pos["totals"][1], bottom=pos["totals"][0],
-                                  hspace=0.3, wspace=0.18)
-        for fi, (ftitle, funit, metrics) in enumerate(active_fams):
-            r, c = divmod(fi, fam_ncol)
-            tax = fig.add_subplot(gs_tot[r, c])
-            fmt = fmt_bytes if funit == "bytes" else fmt_compact
-            n_m = len(metrics)
-            # Some bars carry a derived number above the count label (hit rate on
-            # hit bars, throughput on SSD bars); that stack needs extra headroom.
-            has_deriv = any(k in HIT_DENOM or k in RATE_KEYS for k, _lab in metrics)
-            gw = 0.8                       # width one counter's bar-group spans
-            bw = gw / max(len(series), 1)  # per-series bar width within a group
-            vmax = 0.0
-            for si, s in enumerate(series):
-                offs = -gw / 2 + bw * (si + 0.5)
-                xs = [m + offs for m in range(n_m)]
-                vals = [_total(s, k) for k, _lab in metrics]
-                vmax = max([vmax] + vals)
-                bars = tax.bar(xs, vals, width=bw * 0.9, color=s["color"], zorder=3)
-                tax.bar_label(bars, labels=[fmt(v) for v in vals], padding=2,
-                              fontsize=6.5, rotation=90, color=mut)
-                # Derived number(s) atop the bar, above the (vertical) count label:
-                # a per-second average (RATE_KEYS) and/or a hit rate (HIT_DENOM).
-                # A hit bar carries both — stacked, rate on top, hit% nearest the
-                # bar (last line, va="bottom" grows the block upward from here).
-                for (k, _lab), x, hv in zip(metrics, xs, vals):
-                    parts = []
-                    if k in RATE_KEYS and hv:
-                        secs = _active_seconds(s, k)
-                        if secs:
-                            parts.append(fmt_rate(hv / secs, funit, stacked=True))
-                    if k in HIT_DENOM:
-                        q = _total(s, HIT_DENOM[k])
-                        if q:
-                            parts.append(f"{hv / q * 100:.0f}%")
-                    if not parts:
-                        continue
-                    # Clear the rotated count label first — its height grows with
-                    # the string length ("860.3 MiB" is far taller than "1k").
-                    off = 14 + len(fmt(hv)) * 4.5
-                    # Horizontal label, but the rate carries its unit on a second
-                    # line (fmt_rate(stacked=True)) so it stays about as wide as
-                    # its longest token instead of spilling into the neighbouring
-                    # bar group when several series share one — while reading far
-                    # easier than a rotated-vertical label.
-                    tax.annotate("\n".join(parts), xy=(x, hv),
-                                 xytext=(0, off), textcoords="offset points",
-                                 ha="center", va="bottom", fontsize=7,
-                                 fontweight="bold", color=fg, zorder=4)
-            tax.set_xticks(range(n_m))
-            tax.set_xticklabels([lab for _k, lab in metrics], fontsize=8)
-            # These panels are narrow (3 to a column in the left region), so wrap
-            # the long family titles ("Prefix-cache queries & hits — run total")
-            # onto multiple lines instead of letting them run into the neighbour.
-            tax.set_title(textwrap.fill(ftitle, width=26), loc="left", fontsize=10,
-                          fontweight="bold", color=fg, pad=6)
-            tax.yaxis.set_major_formatter(FuncFormatter(fmt))
-            # The derived label sits above the rotated count label; a two-line
-            # rate (value + unit) or a two-line hit block needs a little more
-            # headroom above the tallest bar than a bare count (1.34x).
-            headroom = 2.2 if has_deriv else 1.34
-            tax.set_ylim(0, (vmax * headroom) or 1)
-            tax.margins(x=0.08)
-            for sp in ("top", "right"):
-                tax.spines[sp].set_visible(False)
-            tax.grid(axis="y", color=grid, lw=0.6, zorder=0)
-            tax.tick_params(labelsize=8)
+                                  hspace=0.45, wspace=0.18)
+        for i, (kind, payload) in enumerate(left_cells):
+            r, c = divmod(i, fam_ncol)
+            cell_ax = fig.add_subplot(gs_tot[r, c])
+            if kind == "gputs":
+                _draw_gputs(cell_ax)
+            elif kind == "preempt":
+                _draw_preempt(cell_ax)
+            else:
+                _draw_fam(cell_ax, payload)
 
     # Axis semantics of the vLLM/SSD counter panels depend on how the run was
     # driven. Batched: each [prom] point is one workload round's total, x = round.
