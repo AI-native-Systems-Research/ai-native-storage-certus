@@ -93,6 +93,19 @@ case "${MODEL}" in
 esac
 TOOL_CALL_PARSER=${TOOL_CALL_PARSER-$_def_tool_parser}
 
+# Decode temperature (deterministic-by-default). inference-perf NEVER sends a
+# per-request `temperature` (its chat payload omits the field on every path), so
+# vLLM falls back to its server default generation config — whose built-in
+# temperature is 1.0, i.e. STOCHASTIC decode. That makes the synthetic_agentic
+# replay non-reproducible and unfair to compare across backends (each backend
+# samples a different token stream). Force greedy by seeding the server's default
+# generation temperature to 0 via --override-generation-config: since the request
+# omits temperature, `to_sampling_params` resolves it from this default (verified
+# vLLM 0.26 chat_completion/protocol.py -> get_diff_sampling_param applies the
+# override). Set GEN_TEMPERATURE=<v> to use a different default, or GEN_TEMPERATURE=""
+# to leave vLLM's own 1.0 default untouched.
+GEN_TEMPERATURE=${GEN_TEMPERATURE-0}
+
 # ---- connector params -----------------------------------------------------
 CPU_BYTES=${CPU_BYTES:-17179869184}                    # cpu / tiered primary host-RAM tier
 FS_ROOT_DIR=${FS_ROOT_DIR:-/mnt/fs-tier/kv-tier}       # tiered fs secondary tier root (in-container path)
@@ -198,6 +211,11 @@ build_flags() {
     # right here (server never launches, caller sees "not ready").
     if [ "${ENFORCE_EAGER}" = "1" ]; then
         server_extra_args+=(--enforce-eager)
+    fi
+    # Deterministic decode default (see GEN_TEMPERATURE above): applies to every
+    # connector arm so all backends replay the same greedy token stream.
+    if [ -n "${GEN_TEMPERATURE}" ]; then
+        server_extra_args+=(--override-generation-config "{\"temperature\": ${GEN_TEMPERATURE}}")
     fi
 }
 
