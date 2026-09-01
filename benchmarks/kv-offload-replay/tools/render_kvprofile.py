@@ -152,23 +152,24 @@ FAMILIES = [
     ]),
 ]
 
-# Small-multiples grid layout: each ROW is a group of per-round/time counters,
-# laid out left→right in the order given. Three per row keeps the panels
-# landscape (wider than tall) rather than squeezed into a portrait box. Unlike
-# the run-total FAMILIES bars, each small-multiple has its OWN y-axis, so a row
-# may mix units (a count next to a byte panel) without breaking the one-axis
-# rule. Counters absent from a run are dropped (shortening that row); a
-# fully-empty row is skipped. Row order is top→bottom. For the common vLLM run
-# this is a tidy 4×3 (tokens / GPU-cache+preemptions / offload-tier+store /
-# load+device-I/O); a Certus-SPDK run adds two tier-movement rows.
-SMALLMULT_ROWS = [
-    ["prompt_tokens", "prompt_tokens_cached", "generation_tokens"],
-    ["prefix_cache_queries", "prefix_cache_hits", "num_preemptions"],
-    ["external_prefix_cache_queries", "external_prefix_cache_hits",
-     "kv_offload_store_bytes"],
-    ["kv_offload_load_bytes", "ssd_read_bytes", "ssd_write_bytes"],
-    ["tier_promotions_to_memory", "tier_promotions_to_gpu"],
-    ["tier_evictions_from_memory", "tier_evictions_from_ssd"],
+# Small-multiples grid layout: each COLUMN is one semantic group of per-round/
+# time counters, stacked top→bottom in the order given, and the columns sit
+# side-by-side. So a group reads as a vertical strip (tokens+preemptions /
+# cache queries+hits / bytes moved / tier movements) — the same grouping the
+# run-total FAMILIES bars use. Each small-multiple has its OWN y-axis, so a
+# column's panels needn't share a unit. Counters absent from a run are dropped
+# (shortening that column); a fully-empty column is skipped. For the common vLLM
+# run this is a tidy 4×3 (three groups of four down); a Certus-SPDK run adds the
+# tier-movements column.
+SMALLMULT_COLS = [
+    ["prompt_tokens", "prompt_tokens_cached", "generation_tokens",
+     "num_preemptions"],
+    ["prefix_cache_queries", "prefix_cache_hits",
+     "external_prefix_cache_queries", "external_prefix_cache_hits"],
+    ["kv_offload_store_bytes", "kv_offload_load_bytes",
+     "ssd_read_bytes", "ssd_write_bytes"],
+    ["tier_promotions_to_memory", "tier_promotions_to_gpu",
+     "tier_evictions_from_memory", "tier_evictions_from_ssd"],
 ]
 
 # Hit counters that have a matching query counter: on the run-total bars the hit
@@ -549,17 +550,19 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     active = [c for c in COUNTERS + TIER_COUNTERS
               if any(any(v != 0 for v in s["data"].get(c[0], [])) for s in series)]
     active_keys = {c[0] for c in active}
-    # The per-round/time small multiples are grouped into semantic rows
-    # (SMALLMULT_ROWS): one family per row, active counters only, left→right. This
-    # is the block that lives in the RIGHT column of the landscape layout below.
+    # The per-round/time small multiples are grouped into semantic COLUMNS
+    # (SMALLMULT_COLS): one family per column, stacked top→bottom, active counters
+    # only. This is the block that lives in the RIGHT region of the landscape
+    # layout below. Columns may differ in length (ragged bottom) — a shorter
+    # column just leaves its lowest cells empty.
     _meta = {c[0]: c for c in COUNTERS + TIER_COUNTERS}
-    grid_rows = []
-    for row_keys in SMALLMULT_ROWS:
-        row = [_meta[k] for k in row_keys if k in active_keys]
-        if row:
-            grid_rows.append(row)
-    grid_nrow = len(grid_rows)
-    grid_ncol = max((len(r) for r in grid_rows), default=0)
+    grid_cols = []
+    for col_keys in SMALLMULT_COLS:
+        col = [_meta[k] for k in col_keys if k in active_keys]
+        if col:
+            grid_cols.append(col)
+    grid_ncol = len(grid_cols)
+    grid_nrow = max((len(c) for c in grid_cols), default=0)
 
     # Curated counters that are all-zero but WERE measured are a real result (e.g.
     # a write-only run: the offload tier is queried but hit 0×, nothing is loaded
@@ -897,22 +900,25 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     # tier panels keep their own "telemetry tick" x regardless (server.log cadence).
     x_is_seconds = bool(series) and all(s.get("async") for s in series)
 
-    # ── per-round small multiples (RIGHT column) ──────────────────────────────
-    # One SMALLMULT_ROWS group per grid row (3 panels wide: tokens / GPU-cache+
-    # preemptions / offload-tier+store / load+device-I/O, plus tier rows for a
-    # Certus run), each panel a per-round (or per-second) time series. The grid
-    # spans the full figure height in the right
-    # region, balancing the left summary stack. Rows may differ in length, so each
-    # is its own single-row gridspec across the right column (a ragged last row
-    # left-aligns rather than stretching its panels full width).
+    # ── per-round small multiples (RIGHT region) ──────────────────────────────
+    # Columns are the semantic groups (SMALLMULT_COLS: tokens+preemptions /
+    # cache queries+hits / bytes moved / tier movements); each group reads as a
+    # vertical strip. The grid spans the full figure height in the right region,
+    # balancing the left summary stack. Drawn row-by-row (each row its own
+    # single-row gridspec so the inter-row gap can clear titles), looking the
+    # panel up by column; a column shorter than the tallest just leaves its
+    # lowest cells empty.
     if grid_nrow:
         row_frac = (grid_top - grid_bottom) / grid_nrow
-        for r, row in enumerate(grid_rows):
+        for r in range(grid_nrow):
             row_top = grid_top - r * row_frac
             row_bot = row_top - row_frac + (GRID_ROW_GAP / fig_h)  # clear titles
             gs_row = fig.add_gridspec(1, grid_ncol, left=RIGHT_L, right=RIGHT_R,
                                       top=row_top, bottom=row_bot, wspace=0.28)
-            for c, (key, ctitle, unit) in enumerate(row):
+            for c, col in enumerate(grid_cols):
+                if r >= len(col):
+                    continue  # ragged column bottom — no panel in this cell
+                key, ctitle, unit = col[r]
                 cax = fig.add_subplot(gs_row[0, c])
                 for s in series:
                     vals = s["data"].get(key)
