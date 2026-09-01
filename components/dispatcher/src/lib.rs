@@ -740,19 +740,33 @@ impl DispatcherComponent {
                 ring_ref.streams
             }
         };
-        unsafe {
-            pipeline::pipelined_ssd_to_gpu_zero_copy(
-                &*block_dev,
-                &**gpu,
-                &streams,
-                lease.channels(),
+        // Use pipelined_multi_object_zero_copy with a single job — this is the
+        // same pipeline the cold-pool worker uses, with coalesced H2D (one
+        // memcpy_h2d_async per object after all NVMe reads complete) and no
+        // per-segment DmaBuffer mutex overhead. Empirically matches the cold
+        // pool path's p50 performance.
+        {
+            let job = pipeline::ColdReadJob {
                 mem_ptr,
-                ipc_handle.address as *mut std::ffi::c_void,
+                gpu_dst: ipc_handle.address as *mut std::ffi::c_void,
                 start_lba,
                 total_bytes,
-                chunk_size,
-                16,
-            )?;
+            };
+            let results = unsafe {
+                pipeline::pipelined_multi_object_zero_copy(
+                    &*block_dev,
+                    &**gpu,
+                    &streams,
+                    lease.channels(),
+                    &[job],
+                    chunk_size,
+                    128,
+                    None,
+                )
+            };
+            if let Some(Err(e)) = results.into_iter().next() {
+                return Err(e);
+            }
         }
         drop(lease);
         drop(drives);
@@ -2240,7 +2254,27 @@ impl IDispatcher for DispatcherComponent {
         // Promote cold entries in parallel — multiple queue threads per drive.
         // Each thread gets its own NVMe queue pair and CUDA streams, enabling
         // concurrent reads on the same physical drive.
-        if !cold_entries.is_empty() {
+        //
+        // Fast path: for a single cold entry with one region (bs=1), bypass the
+        // cold pool thread hop and call promote_and_serve inline. This eliminates
+        // two context switches (dispatcher → pool worker → dispatcher) that add
+        // scheduling latency to every single-key cold load.
+        if cold_entries.len() == 1 && cold_entries[0].regions.len() == 1 {
+            let entry = &cold_entries[0];
+            let res = self.promote_and_serve(
+                entry.key,
+                entry.offset,
+                &entry.regions[0],
+                &gpu,
+                &dm,
+                &mt,
+                batch_device,
+            );
+            if res.is_ok() {
+                self.tier_counters.record_promotion_to_gpu();
+            }
+            results[entry.idx] = Some(res);
+        } else if !cold_entries.is_empty() {
             const MAX_QUEUES_PER_DRIVE: usize = 1;
 
             let chunk_size = {
