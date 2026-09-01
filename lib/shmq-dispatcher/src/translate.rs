@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use gpu_services::cuda_ffi;
-use interfaces::{GpuStream, IDispatcher, IpcHandle};
+use interfaces::{IDispatcher, IpcHandle};
 
 use crate::wire::{self, op, Reader, Writer};
 
@@ -536,14 +536,30 @@ impl Translator {
 
         let (resolved, opened_keys) = self.open_handle_table(&batch.handles);
 
+        // Build the batch of (key, regions) for entries whose handles resolved.
+        // Entries with failed handle resolution are marked as rejected upfront.
+        let mut batch_entries: Vec<(u64, Vec<IpcHandle>)> = Vec::with_capacity(batch.entries.len());
+        let mut rejected: Vec<usize> = Vec::new();
+        for (i, (key, entry_regions)) in batch.entries.iter().enumerate() {
+            match Self::regions_of(entry_regions, &resolved) {
+                None => { rejected.push(i); }
+                Some(regions) => { batch_entries.push((*key, regions)); }
+            }
+        }
+
+        // Single batched call: ONE device resolve, all D2H copies async, ONE sync.
+        let batch_results = self.dispatcher.batch_copy_gpu_to_memory(&batch_entries);
+
+        // Map results back to the original entry order.
         let mut w = Writer::with_capacity(batch.entries.len());
-        for (key, entry_regions) in &batch.entries {
-            let ok = match Self::regions_of(entry_regions, &resolved) {
-                None => false,
-                Some(regions) => self
-                    .dispatcher
-                    .copy_gpu_to_memory_async(*key, &regions, GpuStream(std::ptr::null_mut()))
-                    .is_ok(),
+        let mut batch_idx = 0usize;
+        for i in 0..batch.entries.len() {
+            let ok = if rejected.contains(&i) {
+                false
+            } else {
+                let result = batch_results.get(batch_idx).map(|r| r.is_ok()).unwrap_or(false);
+                batch_idx += 1;
+                result
             };
             w.u8(ok as u8);
         }
@@ -823,6 +839,12 @@ mod tests {
             _stream: GpuStream,
         ) -> Result<(), DispatcherError> {
             Ok(())
+        }
+        fn batch_copy_gpu_to_memory(
+            &self,
+            entries: &[(CacheKey, Vec<IpcHandle>)],
+        ) -> Vec<Result<(), DispatcherError>> {
+            entries.iter().map(|_| Ok(())).collect()
         }
         fn copy_gpu_to_memory_completed(
             &self,

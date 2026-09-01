@@ -712,6 +712,13 @@ impl IDispatcher for MockDispatcher {
         )
     }
 
+    fn batch_copy_gpu_to_memory(
+        &self,
+        entries: &[(CacheKey, Vec<IpcHandle>)],
+    ) -> Vec<Result<(), DispatcherError>> {
+        entries.iter().map(|(k, r)| self.copy_gpu_to_memory_async(*k, r, GpuStream(std::ptr::null_mut()))).collect()
+    }
+
     fn copy_gpu_to_memory_completed(
         &self,
         _key: CacheKey,

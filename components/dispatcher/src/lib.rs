@@ -3138,6 +3138,100 @@ impl IDispatcher for DispatcherComponent {
         Ok(())
     }
 
+    fn batch_copy_gpu_to_memory(
+        &self,
+        entries: &[(CacheKey, Vec<IpcHandle>)],
+    ) -> Vec<Result<(), DispatcherError>> {
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        let mut results: Vec<Result<(), DispatcherError>> = Vec::with_capacity(entries.len());
+
+        let gpu = match self.gpu_services.get() {
+            Ok(g) => g,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("gpu_services not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+        };
+        let mt = match self.memory_tier.get() {
+            Ok(m) => m,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("memory_tier not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+        };
+
+        // Resolve device + store stream ONCE from the first non-null address.
+        let batch_device = entries
+            .iter()
+            .flat_map(|(_, regions)| regions.iter().map(|r| r.address))
+            .find(|a| !a.is_null())
+            .map_or(-1, |addr| set_batch_device(&*gpu, addr));
+        let store_raw = device_streams_for(&*gpu, batch_device).map_or(0, |s| s.store);
+        let store_stream = GpuStream(store_raw as *mut std::ffi::c_void);
+
+        // Issue all D2H copies async on the store stream.
+        let mut any_issued = false;
+        for (key, regions) in entries {
+            let (mem_ptr, slot_size) = match mt.get(*key) {
+                Some(v) => v,
+                None => {
+                    results.push(Err(DispatcherError::KeyNotFound(*key)));
+                    continue;
+                }
+            };
+
+            let total: usize = regions.iter().map(|r| r.size as usize).sum();
+            if total > slot_size as usize {
+                results.push(Err(DispatcherError::InvalidParameter(format!(
+                    "regions total {total} bytes exceeds reserved slot {slot_size} for key {key}"
+                ))));
+                continue;
+            }
+
+            let mut off: usize = 0;
+            let mut ok = true;
+            for region in regions {
+                if let Err(e) = gpu.memcpy_d2h_async(
+                    region.address as *const std::ffi::c_void,
+                    (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                    region.size as usize,
+                    store_stream,
+                ) {
+                    let _ = mt.remove(*key);
+                    results.push(Err(DispatcherError::IoError(format!(
+                        "GPU async DMA copy failed for key {key}: {e}"
+                    ))));
+                    ok = false;
+                    break;
+                }
+                off += region.size as usize;
+            }
+            if ok {
+                any_issued = true;
+                results.push(Ok(()));
+            }
+        }
+
+        // ONE stream_synchronize for the entire batch.
+        if any_issued {
+            if let Err(e) = gpu.stream_synchronize(store_stream) {
+                // Sync failed — all issued copies are suspect.
+                for r in &mut results {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(format!(
+                            "batch store stream_synchronize failed: {e}"
+                        )));
+                    }
+                }
+            }
+        }
+
+        results
+    }
+
     fn copy_gpu_to_memory_completed(
         &self,
         key: CacheKey,

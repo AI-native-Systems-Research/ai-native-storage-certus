@@ -459,6 +459,16 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
         fn copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream) -> Result<(), DispatcherError>;
 
+        /// Batch D2H copy: issue all copies on a single CUDA stream and synchronize once.
+        ///
+        /// Each entry is a (key, regions) pair where the key has an already-reserved
+        /// memory-tier slot (from a prior `reserve_memory` call). Resolves the GPU
+        /// device once from the first entry, issues all `memcpy_d2h_async` calls on
+        /// the store stream, then one `stream_synchronize`.
+        ///
+        /// Returns per-entry results in the same order as the input.
+        fn batch_copy_gpu_to_memory(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<Result<(), DispatcherError>>;
+
         /// Finalize a populated memory-tier slot: register in the dispatch-map
         /// and enqueue background write-through to SSD.
         ///
