@@ -150,6 +150,13 @@ FAMILIES = [
         ("tier_evictions_from_memory", "evict DRAM"),
         ("tier_evictions_from_ssd",    "evict SSD"),
     ]),
+    # Preemptions are a count in the tens — orders of magnitude below the token
+    # counts — so they get a standalone one-bar family with their own axis rather
+    # than sharing the tokens axis (where they'd render invisible). All-zero across
+    # every series → the whole family is dropped, so it shows only when it matters.
+    ("Engine preemptions — run total", "int", [
+        ("num_preemptions", "preempt"),
+    ]),
 ]
 
 # Small-multiples grid layout: each of the three vLLM groups is a COLUMN of
