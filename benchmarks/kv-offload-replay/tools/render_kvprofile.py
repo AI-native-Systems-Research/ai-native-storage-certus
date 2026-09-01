@@ -685,7 +685,7 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     # RIGHT grid natural height: one group per row. Each row needs its panel plus
     # an inter-row gap that clears BOTH the upper row's x-tick + "round" label
     # (~0.5") and this row's title + source-key line (~0.5"), so ~3.4" per row.
-    GRID_ROW_H = 3.4
+    GRID_ROW_H = 3.75
     GRID_ROW_GAP = 1.05  # inches reserved at the bottom of each row's slot
     right_h = grid_nrow * GRID_ROW_H
 
@@ -693,12 +693,19 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     fig = plt.figure(figsize=(width, fig_h), dpi=dpi)
 
     # LEFT bands: (bottom_frac, top_frac) each, stacked top→bottom from the top.
+    # When the right grid makes the figure taller than the natural left stack,
+    # spread the surplus across the inter-band gaps so the left column fills the
+    # height instead of leaving a void below the family bars — but keep the
+    # header→wall gap tight (its whole point), so distribute only over the others.
+    slack = max(0.0, (fig_h - note_h) - left_h)
+    elig = [j for j in range(len(left_bands) - 1) if left_bands[j][0] != "hdr"]
+    extra_gap = slack / len(elig) if elig else 0.0
     pos, cur = {}, fig_h
     for j, (name, h) in enumerate(left_bands):
         pos[name] = ((cur - h) / fig_h, cur / fig_h)
         cur -= h
         if j < len(left_bands) - 1:
-            cur -= gap_below(name)
+            cur -= gap_below(name) + (extra_gap if name != "hdr" else 0.0)
     # RIGHT grid spans (nearly) the full height: a top margin clears the first
     # row's panel titles, a bottom margin (above the note) clears the last row's
     # x-tick + "round" labels.
@@ -878,8 +885,11 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
                                  fontweight="bold", color=fg, zorder=4)
             tax.set_xticks(range(n_m))
             tax.set_xticklabels([lab for _k, lab in metrics], fontsize=8)
-            tax.set_title(ftitle, loc="left", fontsize=10, fontweight="bold",
-                          color=fg, pad=6)
+            # These panels are narrow (3 to a column in the left region), so wrap
+            # the long family titles ("Prefix-cache queries & hits — run total")
+            # onto multiple lines instead of letting them run into the neighbour.
+            tax.set_title(textwrap.fill(ftitle, width=26), loc="left", fontsize=10,
+                          fontweight="bold", color=fg, pad=6)
             tax.yaxis.set_major_formatter(FuncFormatter(fmt))
             # The derived label sits above the rotated count label; a two-line
             # rate (value + unit) or a two-line hit block needs a little more
