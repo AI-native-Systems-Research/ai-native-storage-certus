@@ -877,7 +877,15 @@ def render(series, out_path, title, subtitle, dark, dpi):
             fig.text(0.075, y, ln, fontsize=8, va="top", ha="left", color=mut)
             y -= 0.22 / fig_h
 
-    fig.savefig(out_path, dpi=dpi)
+    # bbox_inches="tight" expands the saved bbox to enclose EVERY artist, not just
+    # the [0,1] figure rectangle. Without it two families of artist get clipped:
+    # the bottom panel row's x-tick labels + "round"/"elapsed" xlabel hang below the
+    # axes box, which sits at y=0 when there's no footnote band (note_h==0), so they
+    # fall off the canvas; and the wall/totals bar value-labels (drawn ha="left" at
+    # the bar tip, or rotated atop a bar) can overrun R=0.975 off the right edge. The
+    # manual gridspec positions are untouched — tight only grows the crop. The pad
+    # keeps a small margin; savefig.facecolor (set in rcParams) fills it in-theme.
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight", pad_inches=0.3)
     plt.close(fig)
 
 
