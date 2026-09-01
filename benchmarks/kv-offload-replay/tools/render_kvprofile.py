@@ -150,14 +150,11 @@ FAMILIES = [
         ("tier_evictions_from_memory", "evict DRAM"),
         ("tier_evictions_from_ssd",    "evict SSD"),
     ]),
-    # Preemptions are a count in the tens — orders of magnitude below the token
-    # counts — so they get a standalone one-bar family with their own axis rather
-    # than sharing the tokens axis (where they'd render invisible). All-zero across
-    # every series → the whole family is dropped, so it shows only when it matters.
-    ("Engine preemptions — run total", "int", [
-        ("num_preemptions", "preempt"),
-    ]),
 ]
+# num_preemptions gets its OWN run-total panel (one column per series, the rate
+# atop each) beside the GPU-util-over-time chart rather than a FAMILIES entry: its
+# magnitude (tens) is orders below the token counts so it can't share their axis,
+# and it pairs naturally with GPU utilization as an engine-health signal.
 
 # Small-multiples grid layout: each of the three vLLM groups is a COLUMN of
 # per-round/time counters, stacked top→bottom in the order given, and the
@@ -668,9 +665,13 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     has_gpu = any(s.get("gpu") for s in series)
     gpu_h = max(1.0, 0.26 * len(series) + 0.45) if has_gpu else 0.0
     # GPU-utilization-over-time band: one line per series (util% vs elapsed within
-    # its window). Only when at least one series carries the raw per-tick series.
+    # its window). Shares its row with the Engine-preemptions run-total bars (drawn
+    # to its right) — an engine-health pairing — so the band is present when EITHER
+    # the GPU timeseries OR any preemption is available.
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
-    gpu_ts_h = 2.0 if has_gpu_ts else 0.0
+    has_preempt = any(any(v for v in (s["data"].get("num_preemptions") or []))
+                      for s in series)
+    gpu_ts_h = 2.0 if (has_gpu_ts or has_preempt) else 0.0
     # Family run-total bars live in the (narrower) LEFT column. With the tier
     # totals there can be 4 families; lay those out as a 2x2 grid so the left
     # stack stays short enough to balance the right grid, and keep <=3 families
@@ -697,7 +698,7 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     left_bands = [("hdr", hdr_h), ("bar", bar_h)]
     if has_gpu:
         left_bands.append(("gpu", gpu_h))
-    if has_gpu_ts:
+    if has_gpu_ts or has_preempt:
         left_bands.append(("gputs", gpu_ts_h))
     if totals_h:
         left_bands.append(("totals", totals_h))
@@ -822,7 +823,7 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     # The raw util.gpu series bounces 0↔100 tick-to-tick (it is a per-interval busy
     # flag), so plot a short moving average to show the trend. x = elapsed within
     # each variant's window, so the sequentially-run variants overlay from t=0.
-    if has_gpu_ts:
+    if has_gpu_ts or has_preempt:
         def _smooth(ys, w=5):
             if len(ys) < 2:
                 return ys
@@ -831,27 +832,71 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
                     / (min(len(ys), i + half + 1) - max(0, i - half))
                     for i in range(len(ys))]
 
-        gs_gt = fig.add_gridspec(1, 1, left=L, right=R,
-                                 top=pos["gputs"][1], bottom=pos["gputs"][0])
-        gtx = fig.add_subplot(gs_gt[0, 0])
-        for s in series:
-            ser = (s.get("gpu") or {}).get("series")
-            if not ser:
-                continue
-            xs = [t for t, _u in ser]
-            ys = _smooth([u for _t, u in ser])
-            gtx.plot(xs, ys, color=s["color"], linestyle=s["style"], lw=1.8)
-        gtx.set_ylim(0, 105)
-        gtx.set_yticks([0, 25, 50, 75, 100])
-        gtx.set_xlabel("elapsed within variant window (s)", color=mut, fontsize=9)
-        gtx.set_ylabel("GPU util % (10 s moving avg)", color=mut, fontsize=9)
-        gtx.set_title("GPU processor utilization over time", loc="left",
-                      fontsize=11, fontweight="bold", color=fg, pad=6)
-        gtx.margins(x=0.02)
-        for sp in ("top", "right"):
-            gtx.spines[sp].set_visible(False)
-        gtx.grid(color=grid, lw=0.6)
-        gtx.tick_params(labelsize=8)
+        # This band pairs the GPU-util-over-time line (left) with the Engine
+        # preemptions run-total bars (right). Split into two columns only when
+        # both are present; otherwise the sole panel takes the full width. The
+        # line gets the wider share — it carries a per-tick trend, the bars one
+        # number per series.
+        split = has_gpu_ts and has_preempt
+        gs_gt = fig.add_gridspec(1, 2 if split else 1, left=L, right=R,
+                                 top=pos["gputs"][1], bottom=pos["gputs"][0],
+                                 width_ratios=[1.7, 1] if split else None,
+                                 wspace=0.26)
+        ci = 0
+        if has_gpu_ts:
+            gtx = fig.add_subplot(gs_gt[0, ci]); ci += 1
+            for s in series:
+                ser = (s.get("gpu") or {}).get("series")
+                if not ser:
+                    continue
+                xs = [t for t, _u in ser]
+                ys = _smooth([u for _t, u in ser])
+                gtx.plot(xs, ys, color=s["color"], linestyle=s["style"], lw=1.8)
+            gtx.set_ylim(0, 105)
+            gtx.set_yticks([0, 25, 50, 75, 100])
+            gtx.set_xlabel("elapsed within variant window (s)", color=mut, fontsize=9)
+            gtx.set_ylabel("GPU util % (10 s moving avg)", color=mut, fontsize=9)
+            gtx.set_title("GPU processor utilization over time", loc="left",
+                          fontsize=11, fontweight="bold", color=fg, pad=6)
+            gtx.margins(x=0.02)
+            for sp in ("top", "right"):
+                gtx.spines[sp].set_visible(False)
+            gtx.grid(color=grid, lw=0.6)
+            gtx.tick_params(labelsize=8)
+
+        # ── Engine preemptions — run total (one column per series, rate atop) ────
+        # Preemptions are per-round deltas (scrape_prom emits the counter's
+        # movement each round), so the run total is their sum; the rate is that
+        # total over the counter's active window (see _active_seconds). Series are
+        # told apart by colour (the header legend), same as the family bars.
+        if has_preempt:
+            pax = fig.add_subplot(gs_gt[0, ci])
+            xs = list(range(len(series)))
+            vmax = 0.0
+            for x, s in zip(xs, series):
+                tot = _total(s, "num_preemptions")
+                vmax = max(vmax, tot)
+                bars = pax.bar(x, tot, width=0.72, color=s["color"], zorder=3)
+                pax.bar_label(bars, labels=[fmt_compact(tot)], padding=2,
+                              fontsize=8, color=mut)
+                secs = _active_seconds(s, "num_preemptions")
+                if tot and secs:
+                    pax.annotate(fmt_rate(tot / secs, "int", stacked=True),
+                                 xy=(x, tot), xytext=(0, 15),
+                                 textcoords="offset points", ha="center",
+                                 va="bottom", fontsize=7.5, fontweight="bold",
+                                 color=fg, zorder=4)
+            pax.set_xticks(xs)
+            pax.set_xticklabels([], fontsize=8)
+            pax.set_title("Engine preemptions — run total", loc="left",
+                          fontsize=11, fontweight="bold", color=fg, pad=6)
+            pax.yaxis.set_major_formatter(FuncFormatter(fmt_compact))
+            pax.set_ylim(0, (vmax * 1.5) or 1)   # headroom for the count + rate stack
+            pax.margins(x=0.12)
+            for sp in ("top", "right"):
+                pax.spines[sp].set_visible(False)
+            pax.tick_params(left=True, bottom=False, labelsize=8)
+            pax.grid(axis="y", color=grid, lw=0.6, zorder=0)
 
     # ── run-total family bars (2-col band): related counters share one axis, one
     # group per counter, one bar per series (coloured like the legend). ─────────
