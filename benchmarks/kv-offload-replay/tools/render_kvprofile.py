@@ -505,7 +505,7 @@ def build_series(run_args):
     return series
 
 
-def render(series, out_path, title, subtitle, dark, dpi):
+def render(series, out_path, title, subtitle, dark, dpi, width=19.0, cols=0):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -529,7 +529,14 @@ def render(series, out_path, title, subtitle, dark, dpi):
     # first, then the Certus-server tier-movement counters)
     active = [c for c in COUNTERS + TIER_COUNTERS
               if any(any(v != 0 for v in s["data"].get(c[0], [])) for s in series)]
-    ncol = 3
+    # Landscape sizing: the figure is `width` inches wide (usable = width*(R-L),
+    # R-L=0.9) and the two dense panel grids take as many columns as fit at a
+    # target panel width, so a wider canvas means FEWER rows → shorter figure,
+    # not just a stretched one. Each grid row is a fixed height (2.5"/3.0"), so
+    # dropping rows is the only lever that actually flattens the aspect ratio.
+    # `--cols` pins the small-multiples column count; 0 = auto from width.
+    usable_in = width * 0.9
+    ncol = cols if cols > 0 else max(3, round(usable_in / 3.8))  # ~3.8" per panel
     nrow = (len(active) + ncol - 1) // ncol if active else 0
 
     # Curated counters that are all-zero but WERE measured are a real result (e.g.
@@ -607,7 +614,9 @@ def render(series, out_path, title, subtitle, dark, dpi):
     # its window). Only when at least one series carries the raw per-tick series.
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
     gpu_ts_h = 2.9 if has_gpu_ts else 0.0
-    fam_ncol = 2
+    # Totals panels carry rotated value-labels + a derived line, so they need more
+    # width than the small multiples — target ~5.5" each (still scales with width).
+    fam_ncol = max(2, round(usable_in / 5.5))
     fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if active_fams else 0
     totals_h = 3.0 * fam_nrow
     grid_h = 2.5 * nrow
@@ -632,7 +641,7 @@ def render(series, out_path, title, subtitle, dark, dpi):
     if grid_h:
         bands.append(("grid", grid_h))
     fig_h = sum(h for _, h in bands) + note_h + GAP * (len(bands) - 1)
-    fig = plt.figure(figsize=(12.5, fig_h), dpi=dpi)
+    fig = plt.figure(figsize=(width, fig_h), dpi=dpi)
 
     pos, cur = {}, fig_h  # (bottom_frac, top_frac) per band, stacked top→bottom
     for j, (name, h) in enumerate(bands):
@@ -909,6 +918,11 @@ def main(argv=None):
                          "of a shared variant stand out from its same-coloured kin.")
     ap.add_argument("--dark", action="store_true", help="dark theme")
     ap.add_argument("--dpi", type=int, default=200)
+    ap.add_argument("--width", type=float, default=19.0,
+                    help="figure width in inches [19.0]; wider = more landscape, "
+                         "the panel grids reflow to more columns / fewer rows")
+    ap.add_argument("--cols", type=int, default=0,
+                    help="small-multiples column count [0 = auto from --width]")
     args = ap.parse_args(argv)
 
     # parse RUN args (TAG=DIR or DIR); default tag = trailing token of basename
@@ -967,7 +981,8 @@ def main(argv=None):
                     + ("s" if len(run_args) != 1 else ""))
         subtitle = " · ".join(bits)
 
-    render(series, args.out, args.title, subtitle, args.dark, args.dpi)
+    render(series, args.out, args.title, subtitle, args.dark, args.dpi,
+           width=args.width, cols=args.cols)
     print(f"wrote {args.out}  ({len(series)} series, "
           f"{sum(1 for s in series if s['data'])} with per-round data)")
 
