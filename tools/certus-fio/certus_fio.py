@@ -916,7 +916,7 @@ QUICK_PATTERNS = [
     ("compute_local_eviction_and_later_reload", 16),
     ("hot_vs_cold_load_paths", 1),
     ("hot_vs_cold_load_paths", 16),
-    ("bidirectional_store_load_contention", 1),
+    ("bidirectional_store_load_contention", 16),
 ]
 
 
@@ -983,10 +983,10 @@ def cmd_quick(args):
         _row("Cold load serial (bs=1)", "SSD→GPU", results[("hot_vs_cold_load_paths", 1)], "hot-load/load")
     if ("hot_vs_cold_load_paths", 16) in results:
         _row("Cold load batched (bs=16)", "SSD→GPU", results[("hot_vs_cold_load_paths", 16)], "hot-load/load")
-    if ("bidirectional_store_load_contention", 1) in results:
-        r = results[("bidirectional_store_load_contention", 1)]
-        _row("Contended store (bs=1)", "GPU→DRAM", r, "concurrent-bidir/store")
-        _row("Contended load (bs=1)", "SSD→GPU", r, "concurrent-bidir/load")
+    if ("bidirectional_store_load_contention", 16) in results:
+        r = results[("bidirectional_store_load_contention", 16)]
+        _row("Contended store (bs=16)", "GPU→DRAM", r, "concurrent-bidir/store")
+        _row("Contended load (bs=16)", "SSD→GPU", r, "concurrent-bidir/load")
 
     print(f"{'='*75}")
 
