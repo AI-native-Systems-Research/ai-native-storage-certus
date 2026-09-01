@@ -599,6 +599,10 @@ impl IMemoryTier for MockMemoryTier {
         unimplemented!("mock: IMemoryTier::oldest_keys not needed by remote-lookup tests")
     }
 
+    fn oldest_keys_for_shard(&self, _key: CacheKey, _n: usize) -> Vec<CacheKey> {
+        unimplemented!("mock: IMemoryTier::oldest_keys_for_shard not needed by remote-lookup tests")
+    }
+
     fn touch(&self, _key: CacheKey) {
         unimplemented!("mock: IMemoryTier::touch not needed by remote-lookup tests")
     }

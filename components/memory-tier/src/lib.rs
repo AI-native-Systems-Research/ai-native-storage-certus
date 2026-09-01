@@ -509,7 +509,34 @@ impl IMemoryTier for MemoryTierComponent {
     }
 
     fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        // Deprecated stub — use oldest_keys_for_shard + the dispatcher's pin-safe
+        // eviction pattern (dm transition → mt.remove) instead.
         self.evict_next()
+    }
+
+    fn oldest_keys_for_shard(&self, key: CacheKey, n: usize) -> Vec<CacheKey> {
+        let state = self.state.read().unwrap();
+        if !state.initialized.load(Ordering::Acquire) || n == 0 {
+            return Vec::new();
+        }
+
+        let ep = self.eviction_policy.get().unwrap();
+        let target_shard = shard_for(key);
+
+        // Scan LRU candidates for entries in the same shard as `key`. Widen the
+        // scan to account for uniform distribution across N_SHARDS — on average
+        // only 1/N_SHARDS candidates match, so scan N * N_SHARDS entries.
+        let scan = n.saturating_mul(N_SHARDS).min(4096);
+        let mut result = Vec::with_capacity(n);
+        for cand in ep.get_eviction_candidates(state.pool_id, scan) {
+            if shard_for(cand) == target_shard {
+                result.push(cand);
+                if result.len() >= n {
+                    break;
+                }
+            }
+        }
+        result
     }
 
     fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {

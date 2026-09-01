@@ -1035,7 +1035,6 @@ impl DispatcherComponent {
         size: u32,
         max_attempts: usize,
     ) -> Result<*mut u8, DispatcherError> {
-        const MAX_SCAN: usize = 4;
         let mut attempts = 0usize;
         loop {
             self.evict_for_space(dm, mt, size, key, max_attempts.saturating_sub(attempts))?;
@@ -1048,13 +1047,36 @@ impl DispatcherComponent {
                             "memory-tier pool full (fragmentation after eviction)".into(),
                         ));
                     }
-                    // Force-evict one more pin-safe victim to relieve shard
-                    // fragmentation. If nothing is evictable (all pinned or
-                    // unpersisted), fail rather than blind-free a slot an
-                    // in-flight load still points at.
-                    if !self.evict_one_clean(dm, mt, MAX_SCAN * attempts) {
+                    // Evict from the SAME SHARD as the target key. The memory-tier
+                    // shards inserts by key, so freeing space in a different shard
+                    // doesn't help — the target shard stays full.
+                    //
+                    // Pin-safe order: dispatch-map transition BEFORE mt.remove.
+                    // This prevents a concurrent load from DMAing from freed DRAM.
+                    // oldest_keys_for_shard is read-only (no mutation) — the
+                    // dispatcher owns the full eviction lifecycle.
+                    let shard_candidates = mt.oldest_keys_for_shard(key, 4 * attempts);
+                    let mut freed = false;
+                    for cand in shard_candidates {
+                        if dm.try_evict_to_block(cand).is_ok() {
+                            let _ = mt.remove(cand);
+                            self.emit_eviction(cand, EvictionReason::Demoted);
+                            self.tier_counters.record_eviction_from_memory();
+                            freed = true;
+                            break;
+                        }
+                        if dm.remove(cand).is_ok() {
+                            let _ = mt.remove(cand);
+                            self.emit_eviction(cand, EvictionReason::Removed);
+                            self.tier_counters.record_eviction_from_memory();
+                            freed = true;
+                            break;
+                        }
+                        // Candidate is pinned — try next same-shard candidate.
+                    }
+                    if !freed {
                         return Err(DispatcherError::AllocationFailed(
-                            "memory-tier full: no evictable (unpinned, persisted) entry to relieve fragmentation"
+                            "memory-tier full: no evictable (unpinned) entry in target shard"
                                 .into(),
                         ));
                     }
@@ -3614,6 +3636,18 @@ mod tests {
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
             let inner = self.inner.lock().unwrap();
             inner.slots.keys().take(n).copied().collect()
+        }
+
+        fn oldest_keys_for_shard(&self, key: CacheKey, n: usize) -> Vec<CacheKey> {
+            let target_shard = key as usize % 16;
+            let inner = self.inner.lock().unwrap();
+            inner
+                .slots
+                .keys()
+                .filter(|&&k| k as usize % 16 == target_shard)
+                .take(n)
+                .copied()
+                .collect()
         }
 
         fn evict_next(&self) -> Option<CacheKey> {

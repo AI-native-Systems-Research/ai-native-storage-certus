@@ -2799,6 +2799,10 @@ mod tests {
             inner.slots.keys().take(n).copied().collect()
         }
 
+        fn oldest_keys_for_shard(&self, _key: CacheKey, _n: usize) -> Vec<CacheKey> {
+            Vec::new()
+        }
+
         fn evict_next(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
             let key = inner.slots.keys().next().copied()?;
