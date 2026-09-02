@@ -18,12 +18,18 @@ build() {
 
 # NoOffload + CPUOffload + Tiered all share one image (run_multiturn_offloading.py
 # drives all three; backend picked at run time by OFFLOAD_MODE / SECONDARY_TIER).
+# NB: Dockerfile.offload now bakes the tiering fix BY DEFAULT. This arm is the
+# deliberate STOCK/crashing baseline for the head-to-head below, so it opts OUT
+# explicitly (--build-arg VLLM_FIX_TIERING=0) to reproduce the upstream
+# _req_state KeyError crash. (Everything that isn't this baseline should just
+# take the default and get the fix.)
 build offload \
-  podman build "${BA[@]}" -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
+  podman build "${BA[@]}" --build-arg VLLM_FIX_TIERING=0 \
+    -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
 
-# Same image, but with the forked tiering fix baked in (VLLM_FIX_TIERING=1).
-# Used as the "patched" arm in the head-to-head vs the stock certus-offload-bench
-# (which reproduces the upstream _req_state KeyError crash). Pure-Python overlay,
+# Same image with the forked tiering fix baked in (VLLM_FIX_TIERING=1 — now the
+# Dockerfile default; passed explicitly here for clarity). The "patched" arm in
+# the head-to-head vs the stock certus-offload-bench above. Pure-Python overlay,
 # so no vLLM source rebuild — see Dockerfile.offload + vllm-fix2/PROVENANCE.md.
 build offload-fix026 \
   podman build "${BA[@]}" --build-arg VLLM_FIX_TIERING=1 \

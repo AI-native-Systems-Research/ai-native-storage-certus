@@ -44,7 +44,7 @@ ARG VLLM_VERSION=0.26.0
 FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
 ENTRYPOINT []
 
-# ── Optional: bake in the forked tiering fix (default OFF) ───────────────────
+# ── Bake in the forked tiering fix (default ON) ──────────────────────────────
 # The stock base image ships upstream vLLM 0.26.0, whose tiering plugin
 # (OffloadingConnector -> TieringOffloadingSpec) crashes at scale with a
 # _req_state KeyError -> EngineDeadError (0/10 completions @ 450 convs). Our fork
@@ -53,11 +53,17 @@ ENTRYPOINT []
 # over the prebuilt base rather than pip-installing from git — the base already
 # has vLLM's compiled extensions, so a source rebuild would be slow and needless.
 #
-#   default (stock, as-shipped / crashing arm):   VLLM_FIX_TIERING=0
-#   patched arm:  podman build --build-arg VLLM_FIX_TIERING=1 -t certus-offload-bench-fix026 ...
+# The fix is applied BY DEFAULT so the tiered arm survives at scale out of the
+# box (a plain build, profile_all.sh, and serve_vllm.sh all get it). The patch
+# only exists for a 0.26.x base:
+#   default (patched):  VLLM_FIX_TIERING=1  — applied on 0.26.x, skipped elsewhere
+#   stock/crashing arm: podman build --build-arg VLLM_FIX_TIERING=0 ...  (opt out,
+#                       e.g. build_026.sh's head-to-head baseline)
+# On a non-0.26 base the patch does not apply and the build proceeds on stock vLLM
+# (warn + skip) rather than failing, so cross-version builds keep working.
 #
 # See benchmarks/kv-offload-replay/vllm-fix2/PROVENANCE.md for source + sync.
-ARG VLLM_FIX_TIERING=0
+ARG VLLM_FIX_TIERING=1
 # Re-declare VLLM_VERSION inside the build stage so the RUN below can read it
 # (an ARG declared before FROM is not visible after FROM; a valueless re-declare
 # inherits the pre-FROM default, or the --build-arg value when one is passed).
@@ -66,11 +72,7 @@ ARG VLLM_VERSION
 # RUN below applies it only when the build-arg is on, and only onto a 0.26 base.
 COPY benchmarks/kv-offload-replay/vllm-fix2/ /tmp/vllm-fix2/
 RUN set -eux; \
-    if [ "${VLLM_FIX_TIERING}" = "1" ]; then \
-      case "${VLLM_VERSION}" in \
-        0.26*) : ;; \
-        *) echo "ERROR: VLLM_FIX_TIERING=1 is only valid for a 0.26.x base, got ${VLLM_VERSION}" >&2; exit 1 ;; \
-      esac; \
+    if [ "${VLLM_FIX_TIERING}" = "1" ] && case "${VLLM_VERSION}" in 0.26*) true ;; *) false ;; esac; then \
       D=/usr/local/lib/python3.12/dist-packages/vllm; \
       cp /tmp/vllm-fix2/manager.py   "$D/v1/kv_offload/tiering/manager.py"; \
       cp /tmp/vllm-fix2/scheduler.py "$D/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py"; \
@@ -80,8 +82,10 @@ RUN set -eux; \
         "$D/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py" \
         "$D/v1/kv_offload/base.py"; \
       echo "[Dockerfile.offload] baked tiering fix (fork fix/tiering-deferred-finalize-v0.26.0 @5e20aeb5)"; \
+    elif [ "${VLLM_FIX_TIERING}" = "1" ]; then \
+      echo "[Dockerfile.offload] WARNING: tiering fix requested but base is vLLM ${VLLM_VERSION} (fix is 0.26.x-only) — proceeding on STOCK vLLM"; \
     else \
-      echo "[Dockerfile.offload] stock vLLM ${VLLM_VERSION} (tiering fix NOT applied)"; \
+      echo "[Dockerfile.offload] stock vLLM ${VLLM_VERSION} (tiering fix opted out, VLLM_FIX_TIERING=0)"; \
     fi; \
     rm -rf /tmp/vllm-fix2
 LABEL org.certus.vllm-fix-tiering="${VLLM_FIX_TIERING}"

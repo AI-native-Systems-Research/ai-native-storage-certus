@@ -145,11 +145,41 @@ FAMILIES = [
         ("ssd_write_bytes",        "SSD write"),
     ]),
     ("KV tier movements — run total", "int", [
-        ("tier_promotions_to_memory",  "promotions to DRAM"),
-        ("tier_promotions_to_gpu",     "promotions to GPU"),
+        ("tier_promotions_to_memory",  "→DRAM"),
+        ("tier_promotions_to_gpu",     "→GPU"),
         ("tier_evictions_from_memory", "evict DRAM"),
         ("tier_evictions_from_ssd",    "evict SSD"),
     ]),
+]
+# num_preemptions gets its OWN run-total panel (one column per series, the rate
+# atop each) beside the GPU-util-over-time chart rather than a FAMILIES entry: its
+# magnitude (tens) is orders below the token counts so it can't share their axis,
+# and it pairs naturally with GPU utilization as an engine-health signal.
+
+# Small-multiples grid layout: each of the three vLLM groups is a COLUMN of
+# per-round/time counters, stacked top→bottom in the order given, and the
+# columns sit side-by-side. So a group reads as a vertical strip (tokens+
+# preemptions / cache queries+hits / bytes moved) — the same grouping the
+# run-total FAMILIES bars use. Each small-multiple has its OWN y-axis, so a
+# column's panels needn't share a unit. Counters absent from a run are dropped
+# (shortening that column); a fully-empty column is skipped. For the common vLLM
+# run this is a tidy 4×3 (three groups of four down).
+SMALLMULT_COLS = [
+    ["prompt_tokens", "prompt_tokens_cached", "generation_tokens",
+     "num_preemptions"],
+    ["prefix_cache_queries", "prefix_cache_hits",
+     "external_prefix_cache_queries", "external_prefix_cache_hits"],
+    ["kv_offload_store_bytes", "kv_offload_load_bytes",
+     "ssd_read_bytes", "ssd_write_bytes"],
+]
+# The Certus-SPDK tier-movement counters don't belong to any vLLM column; they
+# are appended BELOW the 4×3 block as full-width trailing row(s), row-major
+# across the columns (a Certus run with promotions→DRAM, promotions→GPU and one
+# demotion active fills a single fifth row of three). Only the Certus-SPDK
+# variant has a certus-server, so this is empty for every other run.
+SMALLMULT_TIER = [
+    "tier_promotions_to_memory", "tier_promotions_to_gpu",
+    "tier_evictions_from_memory", "tier_evictions_from_ssd",
 ]
 
 # Hit counters that have a matching query counter: on the run-total bars the hit
@@ -505,7 +535,7 @@ def build_series(run_args):
     return series
 
 
-def render(series, out_path, title, subtitle, dark, dpi):
+def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -529,8 +559,26 @@ def render(series, out_path, title, subtitle, dark, dpi):
     # first, then the Certus-server tier-movement counters)
     active = [c for c in COUNTERS + TIER_COUNTERS
               if any(any(v != 0 for v in s["data"].get(c[0], [])) for s in series)]
-    ncol = 3
-    nrow = (len(active) + ncol - 1) // ncol if active else 0
+    active_keys = {c[0] for c in active}
+    # Build the RIGHT-region small-multiples as a 2D matrix `grid[r][c]` (each
+    # cell a counter-meta tuple or None). The three vLLM groups are COLUMNS
+    # (SMALLMULT_COLS transposed → up to 4 rows × 3 cols); the Certus tier
+    # counters (SMALLMULT_TIER) are appended BELOW as full-width trailing rows,
+    # row-major across those columns — so a Certus run's promotions/demotion
+    # charts land on a fifth row rather than a fourth column.
+    _meta = {c[0]: c for c in COUNTERS + TIER_COUNTERS}
+    main_cols = [[_meta[k] for k in col_keys if k in active_keys]
+                 for col_keys in SMALLMULT_COLS]
+    main_cols = [c for c in main_cols if c]
+    grid_ncol = len(main_cols)
+    grid_cells = []
+    for r in range(max((len(c) for c in main_cols), default=0)):
+        grid_cells.append([(c[r] if r < len(c) else None) for c in main_cols])
+    tier_active = [_meta[k] for k in SMALLMULT_TIER if k in active_keys]
+    for i in range(0, len(tier_active), max(grid_ncol, 1)):
+        chunk = tier_active[i:i + grid_ncol]
+        grid_cells.append(chunk + [None] * (grid_ncol - len(chunk)))
+    grid_nrow = len(grid_cells)
 
     # Curated counters that are all-zero but WERE measured are a real result (e.g.
     # a write-only run: the offload tier is queried but hit 0×, nothing is loaded
@@ -591,11 +639,25 @@ def render(series, out_path, title, subtitle, dark, dpi):
     active_fams = [f for f in FAMILIES
                    if any(_total(s, k) for s in series for k, _lab in f[2])]
 
-    # ── vertical band layout ──────────────────────────────────────────────────
-    # The figure is a stack of bands: header, total-wall-time bar, run-total
-    # family bars (2 cols), per-round small multiples (3 cols), and the zero-note.
-    # Each drawn band is its own gridspec positioned by figure fraction so their
-    # column counts can differ; the note occupies [0, note_h] at the very bottom.
+    # ── two-region landscape layout ─────────────────────────────────────────────
+    # LEFT column  = the summary bands stacked top→bottom (header+legend, total
+    #                wall-time bars, GPU-util bars, then a half-width grid holding
+    #                the GPU-util-over-time line, preemptions bars, and the
+    #                run-total family bars, 2 to a row).
+    # RIGHT column = the per-round/time small multiples, one semantic family per
+    #                row (grid_rows), spanning the full figure height.
+    # This lays the slide out landscape for a widescreen monitor. The figure is as
+    # tall as the taller of the two columns; the note band spans the full width
+    # beneath both. When there are no per-round panels the left column widens to
+    # the full page (no right region).
+    if grid_nrow:
+        LEFT_L, LEFT_R = 0.05, 0.40
+        RIGHT_L, RIGHT_R = 0.44, 0.985
+    else:
+        LEFT_L, LEFT_R = 0.05, 0.975
+        RIGHT_L, RIGHT_R = 0.0, 0.0
+    left_usable = (LEFT_R - LEFT_L) * width
+
     legend_rows = (len(series) + 4) // 5
     hdr_h = 1.1 + 0.32 * legend_rows
     bar_h = max(1.6, 0.42 * len(series) + 0.8)
@@ -603,46 +665,78 @@ def render(series, out_path, title, subtitle, dark, dpi):
     # wall-time band. Only drawn when at least one series carries GPU telemetry.
     has_gpu = any(s.get("gpu") for s in series)
     gpu_h = max(1.0, 0.26 * len(series) + 0.45) if has_gpu else 0.0
-    # GPU-utilization-over-time band: one line per series (util% vs elapsed within
-    # its window). Only when at least one series carries the raw per-tick series.
+    # The LEFT summary grid holds heterogeneous half-width panels that flow
+    # row-major, 2 to a row: the GPU-util-over-time line, the Engine-preemptions
+    # run-total bars, and one panel per run-total family. Each is a tagged cell so
+    # the drawing loop dispatches by type — no special bands, no split gridspecs.
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
-    gpu_ts_h = 2.9 if has_gpu_ts else 0.0
-    fam_ncol = 2
-    fam_nrow = (len(active_fams) + fam_ncol - 1) // fam_ncol if active_fams else 0
-    totals_h = 3.0 * fam_nrow
-    grid_h = 2.5 * nrow
+    has_preempt = any(any(v for v in (s["data"].get("num_preemptions") or []))
+                      for s in series)
+    left_cells = []
+    if has_gpu_ts:
+        left_cells.append(("gputs", None))
+    if has_preempt:
+        left_cells.append(("preempt", None))
+    left_cells += [("fam", f) for f in active_fams]
+    # 2 to a row (each panel targets ~2.8" of width); a single cell takes the row.
+    if left_cells:
+        fam_ncol = 2 if len(left_cells) >= 2 else 1
+        fam_ncol = min(fam_ncol, max(1, round(left_usable / 2.8)))
+    else:
+        fam_ncol = 0
+    fam_nrow = (len(left_cells) + fam_ncol - 1) // fam_ncol if fam_ncol else 0
+    totals_h = 4.2 * fam_nrow
     # note band = the wrapped text lines, plus a fixed gap above them that clears
-    # the last counter row's x-axis tick labels + "round" label (~0.5in), plus a
+    # the last panel row's x-axis tick labels + "round" label (~0.5in), plus a
     # small bottom margin.
     note_text_h = 0.22 * len(note_lines)
     note_h = (note_text_h + 0.55) if note_lines else 0.0
 
-    # Gap between stacked bands must clear BOTH the lower band's title (drawn
-    # above its axes) and the upper band's x-axis tick + label (drawn below its
-    # axes) — otherwise the wall-bar's xlabel lands on the totals titles and the
-    # totals x-ticks land on the grid titles.
+    # LEFT stack: gaps must clear BOTH the lower band's title (drawn above its
+    # axes) and the upper band's x-axis tick + label (drawn below its axes). The
+    # header is the exception — no x-axis, legend already near its bottom — so it
+    # gets a small gap rather than opening a void before the wall bars.
     GAP = 0.9
-    bands = [("hdr", hdr_h), ("bar", bar_h)]
+    HDR_GAP = 0.15
+    left_bands = [("hdr", hdr_h), ("bar", bar_h)]
     if has_gpu:
-        bands.append(("gpu", gpu_h))
-    if has_gpu_ts:
-        bands.append(("gputs", gpu_ts_h))
+        left_bands.append(("gpu", gpu_h))
     if totals_h:
-        bands.append(("totals", totals_h))
-    if grid_h:
-        bands.append(("grid", grid_h))
-    fig_h = sum(h for _, h in bands) + note_h + GAP * (len(bands) - 1)
-    fig = plt.figure(figsize=(12.5, fig_h), dpi=dpi)
+        left_bands.append(("totals", totals_h))
+    gap_below = lambda name: HDR_GAP if name == "hdr" else GAP  # noqa: E731
+    left_h = (sum(h for _, h in left_bands)
+              + sum(gap_below(left_bands[j][0]) for j in range(len(left_bands) - 1)))
 
-    pos, cur = {}, fig_h  # (bottom_frac, top_frac) per band, stacked top→bottom
-    for j, (name, h) in enumerate(bands):
+    # RIGHT grid natural height: one group per row. Each row needs its panel plus
+    # an inter-row gap that clears BOTH the upper row's x-tick + "round" label
+    # (~0.5") and this row's title + source-key line (~0.5"), so ~3.4" per row.
+    GRID_ROW_H = 3.75
+    GRID_ROW_GAP = 1.05  # inches reserved at the bottom of each row's slot
+    right_h = grid_nrow * GRID_ROW_H
+
+    fig_h = max(left_h, right_h) + note_h
+    fig = plt.figure(figsize=(width, fig_h), dpi=dpi)
+
+    # LEFT bands: (bottom_frac, top_frac) each, stacked top→bottom from the top.
+    # When the right grid makes the figure taller than the natural left stack,
+    # spread the surplus across the inter-band gaps so the left column fills the
+    # height instead of leaving a void below the family bars — but keep the
+    # header→wall gap tight (its whole point), so distribute only over the others.
+    slack = max(0.0, (fig_h - note_h) - left_h)
+    elig = [j for j in range(len(left_bands) - 1) if left_bands[j][0] != "hdr"]
+    extra_gap = slack / len(elig) if elig else 0.0
+    pos, cur = {}, fig_h
+    for j, (name, h) in enumerate(left_bands):
         pos[name] = ((cur - h) / fig_h, cur / fig_h)
         cur -= h
-        if j < len(bands) - 1:
-            cur -= GAP
-    # By construction cur == note_h now, so the grid's bottom sits exactly on the
-    # note band (matching the footnote's reserved height below).
-    L, R = 0.075, 0.975
+        if j < len(left_bands) - 1:
+            cur -= gap_below(name) + (extra_gap if name != "hdr" else 0.0)
+    # RIGHT grid spans (nearly) the full height: a top margin clears the first
+    # row's panel titles, a bottom margin (above the note) clears the last row's
+    # x-tick + "round" labels.
+    grid_top = (fig_h - 0.55) / fig_h
+    grid_bottom = (note_h + 0.35) / fig_h
+    L, R = LEFT_L, LEFT_R  # left bands draw within the left column
 
     # ── title band + legend: title / subtitle / legend stacked, none overlap ──
     gs_hdr = fig.add_gridspec(1, 1, left=L, right=R,
@@ -700,12 +794,19 @@ def render(series, out_path, title, subtitle, dark, dpi):
             avg = g["util_avg"] if g else 0.0
             gax.barh(y, avg, color=s["color"], height=0.62, zorder=3)
             if g:
-                lab = (f"{avg:.0f}%  ·  p95 {g['util_p95']:.0f}%  ·  "
+                lab = (f"{avg:.0f}%   ·   p95 {g['util_p95']:.0f}%   ·   "
                        f"peak {g['util_max']:.0f}%")
             else:
                 lab = "n/a"
-            gax.text(avg if g else 0, y, "  " + lab, va="center", ha="left",
-                     fontsize=9.5, fontweight="bold", color=fg)
+            # In the narrow left column the stats overran the bar and spilled past
+            # the column edge. When the bar is long enough (util is typically
+            # ~90%+) draw them INSIDE the bar in white; only fall back to a label
+            # to the right of a short bar (where they wouldn't fit inside).
+            inside = bool(g) and avg >= 45
+            gax.text(1.5 if inside else (avg if g else 0), y,
+                     (" " if inside else "  ") + lab, va="center", ha="left",
+                     fontsize=9.5, fontweight="bold",
+                     color=("#ffffff" if inside else fg), zorder=4)
         gax.set_yticks(gys)
         gax.set_yticklabels([s["label"] for s in series], fontsize=9.5, color=fg)
         gax.set_xlabel("mean GPU processor utilization — nvidia-smi util.gpu, "
@@ -719,109 +820,151 @@ def render(series, out_path, title, subtitle, dark, dpi):
         gax.tick_params(left=False)
         gax.grid(axis="x", color=grid, lw=0.7, zorder=0)
 
-    # ── GPU processor utilization over time (one line per variant) ──────────────
-    # The raw util.gpu series bounces 0↔100 tick-to-tick (it is a per-interval busy
-    # flag), so plot a short moving average to show the trend. x = elapsed within
-    # each variant's window, so the sequentially-run variants overlay from t=0.
-    if has_gpu_ts:
-        def _smooth(ys, w=5):
-            if len(ys) < 2:
-                return ys
-            half = w // 2
-            return [sum(ys[max(0, i - half):min(len(ys), i + half + 1)])
-                    / (min(len(ys), i + half + 1) - max(0, i - half))
-                    for i in range(len(ys))]
+    # ── LEFT summary grid: GPU-util-over-time line, preemptions bars, family bars
+    # All are half-width cells flowing row-major (2 to a row) in one gridspec; the
+    # loop dispatches by cell kind. No per-panel bands or split gridspecs. ───────
+    def _smooth(ys, w=5):
+        if len(ys) < 2:
+            return ys
+        half = w // 2
+        return [sum(ys[max(0, i - half):min(len(ys), i + half + 1)])
+                / (min(len(ys), i + half + 1) - max(0, i - half))
+                for i in range(len(ys))]
 
-        gs_gt = fig.add_gridspec(1, 1, left=L, right=R,
-                                 top=pos["gputs"][1], bottom=pos["gputs"][0])
-        gtx = fig.add_subplot(gs_gt[0, 0])
+    def _draw_gputs(ax):
+        # The raw util.gpu series bounces 0↔100 tick-to-tick (a per-interval busy
+        # flag), so plot a short moving average. x = elapsed within each variant's
+        # window, so the sequentially-run variants overlay from t=0.
         for s in series:
             ser = (s.get("gpu") or {}).get("series")
             if not ser:
                 continue
-            xs = [t for t, _u in ser]
-            ys = _smooth([u for _t, u in ser])
-            gtx.plot(xs, ys, color=s["color"], linestyle=s["style"], lw=1.8)
-        gtx.set_ylim(0, 105)
-        gtx.set_yticks([0, 25, 50, 75, 100])
-        gtx.set_xlabel("elapsed within variant window (s)", color=mut, fontsize=9)
-        gtx.set_ylabel("GPU util % (10 s moving avg)", color=mut, fontsize=9)
-        gtx.set_title("GPU processor utilization over time", loc="left",
-                      fontsize=11, fontweight="bold", color=fg, pad=6)
-        gtx.margins(x=0.02)
+            ax.plot([t for t, _u in ser], _smooth([u for _t, u in ser]),
+                    color=s["color"], linestyle=s["style"], lw=1.8)
+        ax.set_ylim(0, 105)
+        ax.set_yticks([0, 25, 50, 75, 100])
+        ax.set_xlabel("elapsed within variant window (s)", color=mut, fontsize=9)
+        ax.set_ylabel("GPU util % (10 s moving avg)", color=mut, fontsize=9)
+        ax.set_title("GPU processor utilization over time", loc="left",
+                     fontsize=10, fontweight="bold", color=fg, pad=6)
+        ax.margins(x=0.02)
         for sp in ("top", "right"):
-            gtx.spines[sp].set_visible(False)
-        gtx.grid(color=grid, lw=0.6)
-        gtx.tick_params(labelsize=8)
+            ax.spines[sp].set_visible(False)
+        ax.grid(color=grid, lw=0.6)
+        ax.tick_params(labelsize=8)
 
-    # ── run-total family bars (2-col band): related counters share one axis, one
-    # group per counter, one bar per series (coloured like the legend). ─────────
-    if active_fams:
+    def _draw_preempt(ax):
+        # Preemptions are per-round deltas (scrape_prom emits the counter's
+        # movement each round), so the run total is their sum; the rate is that
+        # total over the counter's active window (see _active_seconds). Series are
+        # told apart by colour (the header legend), same as the family bars.
+        xs = list(range(len(series)))
+        vmax = 0.0
+        for x, s in zip(xs, series):
+            tot = _total(s, "num_preemptions")
+            vmax = max(vmax, tot)
+            bars = ax.bar(x, tot, width=0.72, color=s["color"], zorder=3)
+            ax.bar_label(bars, labels=[fmt_compact(tot)], padding=2,
+                         fontsize=8, color=mut)
+            secs = _active_seconds(s, "num_preemptions")
+            if tot and secs:
+                ax.annotate(fmt_rate(tot / secs, "int", stacked=True),
+                            xy=(x, tot), xytext=(0, 15),
+                            textcoords="offset points", ha="center",
+                            va="bottom", fontsize=7.5, fontweight="bold",
+                            color=fg, zorder=4)
+        ax.set_xticks(xs)
+        ax.set_xticklabels([])
+        ax.set_title("Engine preemptions — run total", loc="left",
+                     fontsize=10, fontweight="bold", color=fg, pad=6)
+        ax.yaxis.set_major_formatter(FuncFormatter(fmt_compact))
+        ax.set_ylim(0, (vmax * 1.5) or 1)   # headroom for the count + rate stack
+        ax.margins(x=0.12)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        ax.tick_params(left=True, bottom=False, labelsize=8)
+        ax.grid(axis="y", color=grid, lw=0.6, zorder=0)
+
+    def _draw_fam(ax, fam):
+        # Related counters share one axis, one group per counter, one bar per
+        # series (coloured like the legend).
+        ftitle, funit, metrics = fam
+        fmt = fmt_bytes if funit == "bytes" else fmt_compact
+        n_m = len(metrics)
+        # Some bars carry a derived number above the count label (hit rate on hit
+        # bars, throughput on SSD bars); that stack needs extra headroom.
+        has_deriv = any(k in HIT_DENOM or k in RATE_KEYS for k, _lab in metrics)
+        gw = 0.8                       # width one counter's bar-group spans
+        bw = gw / max(len(series), 1)  # per-series bar width within a group
+        vmax = 0.0
+        for si, s in enumerate(series):
+            offs = -gw / 2 + bw * (si + 0.5)
+            xs = [m + offs for m in range(n_m)]
+            vals = [_total(s, k) for k, _lab in metrics]
+            vmax = max([vmax] + vals)
+            bars = ax.bar(xs, vals, width=bw * 0.9, color=s["color"], zorder=3)
+            ax.bar_label(bars, labels=[fmt(v) for v in vals], padding=2,
+                         fontsize=6.5, rotation=90, color=mut)
+            # Derived number(s) atop the bar, above the (vertical) count label: a
+            # per-second average (RATE_KEYS) and/or a hit rate (HIT_DENOM). A hit
+            # bar carries both — stacked, rate on top, hit% nearest the bar (last
+            # line, va="bottom" grows the block upward from here).
+            for (k, _lab), x, hv in zip(metrics, xs, vals):
+                parts = []
+                if k in RATE_KEYS and hv:
+                    secs = _active_seconds(s, k)
+                    if secs:
+                        parts.append(fmt_rate(hv / secs, funit, stacked=True))
+                if k in HIT_DENOM:
+                    q = _total(s, HIT_DENOM[k])
+                    if q:
+                        parts.append(f"{hv / q * 100:.0f}%")
+                if not parts:
+                    continue
+                # Clear the rotated count label first — its height grows with the
+                # string length ("860.3 MiB" is far taller than "1k").
+                off = 14 + len(fmt(hv)) * 4.5
+                # Horizontal label, but the rate carries its unit on a second line
+                # (fmt_rate(stacked=True)) so it stays about as wide as its longest
+                # token instead of spilling into the neighbouring bar group when
+                # several series share one — while reading far easier than a
+                # rotated-vertical label.
+                ax.annotate("\n".join(parts), xy=(x, hv),
+                            xytext=(0, off), textcoords="offset points",
+                            ha="center", va="bottom", fontsize=7,
+                            fontweight="bold", color=fg, zorder=4)
+        ax.set_xticks(range(n_m))
+        ax.set_xticklabels([lab for _k, lab in metrics], fontsize=8)
+        # These panels are narrow (2 to a row), so wrap the long family titles
+        # ("Prefix-cache queries & hits — run total") onto multiple lines instead
+        # of letting them run into the neighbour.
+        ax.set_title(textwrap.fill(ftitle, width=26), loc="left", fontsize=10,
+                     fontweight="bold", color=fg, pad=6)
+        ax.yaxis.set_major_formatter(FuncFormatter(fmt))
+        # The derived label sits above the rotated count label; a two-line rate
+        # (value + unit) or a two-line hit block needs a little more headroom
+        # above the tallest bar than a bare count (1.34x).
+        headroom = 2.2 if has_deriv else 1.34
+        ax.set_ylim(0, (vmax * headroom) or 1)
+        ax.margins(x=0.08)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        ax.grid(axis="y", color=grid, lw=0.6, zorder=0)
+        ax.tick_params(labelsize=8)
+
+    if left_cells:
         gs_tot = fig.add_gridspec(fam_nrow, fam_ncol, left=L, right=R,
                                   top=pos["totals"][1], bottom=pos["totals"][0],
-                                  hspace=0.3, wspace=0.18)
-        for fi, (ftitle, funit, metrics) in enumerate(active_fams):
-            r, c = divmod(fi, fam_ncol)
-            tax = fig.add_subplot(gs_tot[r, c])
-            fmt = fmt_bytes if funit == "bytes" else fmt_compact
-            n_m = len(metrics)
-            # Some bars carry a derived number above the count label (hit rate on
-            # hit bars, throughput on SSD bars); that stack needs extra headroom.
-            has_deriv = any(k in HIT_DENOM or k in RATE_KEYS for k, _lab in metrics)
-            gw = 0.8                       # width one counter's bar-group spans
-            bw = gw / max(len(series), 1)  # per-series bar width within a group
-            vmax = 0.0
-            for si, s in enumerate(series):
-                offs = -gw / 2 + bw * (si + 0.5)
-                xs = [m + offs for m in range(n_m)]
-                vals = [_total(s, k) for k, _lab in metrics]
-                vmax = max([vmax] + vals)
-                bars = tax.bar(xs, vals, width=bw * 0.9, color=s["color"], zorder=3)
-                tax.bar_label(bars, labels=[fmt(v) for v in vals], padding=2,
-                              fontsize=6.5, rotation=90, color=mut)
-                # Derived number(s) atop the bar, above the (vertical) count label:
-                # a per-second average (RATE_KEYS) and/or a hit rate (HIT_DENOM).
-                # A hit bar carries both — stacked, rate on top, hit% nearest the
-                # bar (last line, va="bottom" grows the block upward from here).
-                for (k, _lab), x, hv in zip(metrics, xs, vals):
-                    parts = []
-                    if k in RATE_KEYS and hv:
-                        secs = _active_seconds(s, k)
-                        if secs:
-                            parts.append(fmt_rate(hv / secs, funit, stacked=True))
-                    if k in HIT_DENOM:
-                        q = _total(s, HIT_DENOM[k])
-                        if q:
-                            parts.append(f"{hv / q * 100:.0f}%")
-                    if not parts:
-                        continue
-                    # Clear the rotated count label first — its height grows with
-                    # the string length ("860.3 MiB" is far taller than "1k").
-                    off = 14 + len(fmt(hv)) * 4.5
-                    # Horizontal label, but the rate carries its unit on a second
-                    # line (fmt_rate(stacked=True)) so it stays about as wide as
-                    # its longest token instead of spilling into the neighbouring
-                    # bar group when several series share one — while reading far
-                    # easier than a rotated-vertical label.
-                    tax.annotate("\n".join(parts), xy=(x, hv),
-                                 xytext=(0, off), textcoords="offset points",
-                                 ha="center", va="bottom", fontsize=7,
-                                 fontweight="bold", color=fg, zorder=4)
-            tax.set_xticks(range(n_m))
-            tax.set_xticklabels([lab for _k, lab in metrics], fontsize=8)
-            tax.set_title(ftitle, loc="left", fontsize=10, fontweight="bold",
-                          color=fg, pad=6)
-            tax.yaxis.set_major_formatter(FuncFormatter(fmt))
-            # The derived label sits above the rotated count label; a two-line
-            # rate (value + unit) or a two-line hit block needs a little more
-            # headroom above the tallest bar than a bare count (1.34x).
-            headroom = 2.2 if has_deriv else 1.34
-            tax.set_ylim(0, (vmax * headroom) or 1)
-            tax.margins(x=0.08)
-            for sp in ("top", "right"):
-                tax.spines[sp].set_visible(False)
-            tax.grid(axis="y", color=grid, lw=0.6, zorder=0)
-            tax.tick_params(labelsize=8)
+                                  hspace=0.45, wspace=0.18)
+        for i, (kind, payload) in enumerate(left_cells):
+            r, c = divmod(i, fam_ncol)
+            cell_ax = fig.add_subplot(gs_tot[r, c])
+            if kind == "gputs":
+                _draw_gputs(cell_ax)
+            elif kind == "preempt":
+                _draw_preempt(cell_ax)
+            else:
+                _draw_fam(cell_ax, payload)
 
     # Axis semantics of the vLLM/SSD counter panels depend on how the run was
     # driven. Batched: each [prom] point is one workload round's total, x = round.
@@ -831,41 +974,55 @@ def render(series, out_path, title, subtitle, dark, dpi):
     # tier panels keep their own "telemetry tick" x regardless (server.log cadence).
     x_is_seconds = bool(series) and all(s.get("async") for s in series)
 
-    # ── per-counter small multiples ──────────────────────────────────────────
-    gs_grid = (fig.add_gridspec(nrow, ncol, left=L, right=R,
-                                top=pos["grid"][1], bottom=pos["grid"][0],
-                                hspace=0.85, wspace=0.28)
-               if grid_h else None)
-    for i, (key, ctitle, unit) in enumerate(active):
-        r, c = divmod(i, ncol)
-        cax = fig.add_subplot(gs_grid[r, c])
-        for s in series:
-            vals = s["data"].get(key)
-            if not vals or all(v == 0 for v in vals):
-                continue
-            xs = list(range(1, len(vals) + 1))
-            cax.plot(xs, vals, color=s["color"], linestyle=s["style"], lw=1.8)
-        is_tier = key in TIER_KEYS
-        cax.set_title(ctitle, loc="left", fontsize=10, fontweight="bold", color=fg,
-                      pad=20)
-        src = ("certus-server:" + key[len("tier_"):]) if is_tier else ("vllm:" + key)
-        cax.text(0, 1.012, src, transform=cax.transAxes, fontsize=7.5,
-                 va="bottom", ha="left", color=mut, family="monospace")
-        cax.yaxis.set_major_formatter(FuncFormatter(fmt_bytes if unit == "bytes"
-                                                    else fmt_compact))
-        if is_tier:
-            cax.set_xlabel("telemetry tick", color=mut, fontsize=8)
-        elif x_is_seconds:
-            cax.set_xlabel("elapsed (s)", color=mut, fontsize=8)
-            cax.set_ylabel("per second", color=mut, fontsize=8)
-        else:
-            cax.set_xlabel("round", color=mut, fontsize=8)
-        cax.margins(x=0.02)
-        cax.set_ylim(bottom=0)
-        for sp in ("top", "right"):
-            cax.spines[sp].set_visible(False)
-        cax.grid(axis="y", color=grid, lw=0.6)
-        cax.tick_params(labelsize=8)
+    # ── per-round small multiples (RIGHT region) ──────────────────────────────
+    # The three vLLM groups are columns (tokens+preemptions / cache queries+hits
+    # / bytes moved), each reading as a vertical strip; the Certus tier charts
+    # trail below on their own full-width row(s). The grid spans the full figure
+    # height, balancing the left summary stack, drawn row-by-row (each row its own
+    # single-row gridspec so the inter-row gap can clear titles). An empty matrix
+    # cell (ragged column bottom, or a short trailing row) is just skipped.
+    if grid_nrow:
+        row_frac = (grid_top - grid_bottom) / grid_nrow
+        for r in range(grid_nrow):
+            row_top = grid_top - r * row_frac
+            row_bot = row_top - row_frac + (GRID_ROW_GAP / fig_h)  # clear titles
+            gs_row = fig.add_gridspec(1, grid_ncol, left=RIGHT_L, right=RIGHT_R,
+                                      top=row_top, bottom=row_bot, wspace=0.28)
+            for c in range(grid_ncol):
+                cell = grid_cells[r][c]
+                if cell is None:
+                    continue  # empty matrix cell — no panel here
+                key, ctitle, unit = cell
+                cax = fig.add_subplot(gs_row[0, c])
+                for s in series:
+                    vals = s["data"].get(key)
+                    if not vals or all(v == 0 for v in vals):
+                        continue
+                    xs = list(range(1, len(vals) + 1))
+                    cax.plot(xs, vals, color=s["color"], linestyle=s["style"],
+                             lw=1.8)
+                is_tier = key in TIER_KEYS
+                cax.set_title(ctitle, loc="left", fontsize=10, fontweight="bold",
+                              color=fg, pad=20)
+                src = (("certus-server:" + key[len("tier_"):]) if is_tier
+                       else ("vllm:" + key))
+                cax.text(0, 1.012, src, transform=cax.transAxes, fontsize=7.5,
+                         va="bottom", ha="left", color=mut, family="monospace")
+                cax.yaxis.set_major_formatter(
+                    FuncFormatter(fmt_bytes if unit == "bytes" else fmt_compact))
+                if is_tier:
+                    cax.set_xlabel("telemetry tick", color=mut, fontsize=8)
+                elif x_is_seconds:
+                    cax.set_xlabel("elapsed (s)", color=mut, fontsize=8)
+                    cax.set_ylabel("per second", color=mut, fontsize=8)
+                else:
+                    cax.set_xlabel("round", color=mut, fontsize=8)
+                cax.margins(x=0.02)
+                cax.set_ylim(bottom=0)
+                for sp in ("top", "right"):
+                    cax.spines[sp].set_visible(False)
+                cax.grid(axis="y", color=grid, lw=0.6)
+                cax.tick_params(labelsize=8)
 
     # ── footnote: curated counters that were measured but stayed zero ─────────
     if note_lines:
@@ -874,10 +1031,18 @@ def render(series, out_path, title, subtitle, dark, dpi):
         # is what clears the last panel row's hanging x-axis tick + "round" labels.
         y = (note_text_h + 0.08) / fig_h
         for ln in note_lines:
-            fig.text(0.075, y, ln, fontsize=8, va="top", ha="left", color=mut)
+            fig.text(LEFT_L, y, ln, fontsize=8, va="top", ha="left", color=mut)
             y -= 0.22 / fig_h
 
-    fig.savefig(out_path, dpi=dpi)
+    # bbox_inches="tight" expands the saved bbox to enclose EVERY artist, not just
+    # the [0,1] figure rectangle. Without it two families of artist get clipped:
+    # the bottom panel row's x-tick labels + "round"/"elapsed" xlabel hang below the
+    # axes box, which sits at y=0 when there's no footnote band (note_h==0), so they
+    # fall off the canvas; and the wall/totals bar value-labels (drawn ha="left" at
+    # the bar tip, or rotated atop a bar) can overrun R=0.975 off the right edge. The
+    # manual gridspec positions are untouched — tight only grows the crop. The pad
+    # keeps a small margin; savefig.facecolor (set in rcParams) fills it in-theme.
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight", pad_inches=0.3)
     plt.close(fig)
 
 
@@ -901,6 +1066,10 @@ def main(argv=None):
                          "of a shared variant stand out from its same-coloured kin.")
     ap.add_argument("--dark", action="store_true", help="dark theme")
     ap.add_argument("--dpi", type=int, default=200)
+    ap.add_argument("--width", type=float, default=24.0,
+                    help="figure width in inches [24.0]; the layout is two columns "
+                         "(left summary stack, right per-round grid) — wider widens "
+                         "both regions for a more landscape slide")
     args = ap.parse_args(argv)
 
     # parse RUN args (TAG=DIR or DIR); default tag = trailing token of basename
@@ -959,7 +1128,8 @@ def main(argv=None):
                     + ("s" if len(run_args) != 1 else ""))
         subtitle = " · ".join(bits)
 
-    render(series, args.out, args.title, subtitle, args.dark, args.dpi)
+    render(series, args.out, args.title, subtitle, args.dark, args.dpi,
+           width=args.width)
     print(f"wrote {args.out}  ({len(series)} series, "
           f"{sum(1 for s in series if s['data'])} with per-round data)")
 
