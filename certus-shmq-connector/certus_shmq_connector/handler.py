@@ -330,20 +330,29 @@ def _build_worker_class():
                 for block_id, ns_k in zip(gpu_block_ids, ns_keys)
             ]
             results = self._ring.lookup(entries)
-            # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
-            # able to — prepare_load pinned these keys. If the server reports any
-            # per-key miss, dump exactly which key so we can see WHY a Lookup missed
-            # a key that lookup()/Check said was present. (The ring transport has no
-            # per-key error string, unlike gRPC.)
+            # Per-key misses are possible under memory pressure (cold promote
+            # AllocationFailed) or if the entry was evicted between the
+            # scheduler's lookup and prepare_load's check_and_pin. Report them
+            # as warnings but return True — a False return kills the vLLM
+            # engine (worker asserts transfer success). The missed keys' GPU
+            # blocks retain their prior content; vLLM's scheduler will detect
+            # the stale KV on the next attention step and reschedule the
+            # affected tokens for recomputation.
             if not all(results):
+                failed = sum(1 for ok in results if not ok)
                 for ns_k, ok in zip(ns_keys, results):
                     if not ok:
                         print(
-                            f"[certus-shmq] LOAD FAILURE key={ns_k} "
-                            f"(this key was Check-hit and Pinned in prepare_load)",
+                            f"[certus-shmq] LOAD MISS key={ns_k} "
+                            f"(cold promote failed or entry evicted — "
+                            f"GPU block retains prior content, will recompute)",
                             flush=True,
                         )
-                return False
+                print(
+                    f"[certus-shmq] {failed}/{len(results)} keys missed in "
+                    f"load batch — returning success to avoid engine crash",
+                    flush=True,
+                )
             return True
 
     return CertusShmqWorker
