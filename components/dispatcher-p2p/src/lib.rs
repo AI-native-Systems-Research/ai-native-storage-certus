@@ -2432,6 +2432,24 @@ impl IDispatcher for DispatcherP2pComponent {
         })
     }
 
+    fn check_and_pin(&self, key: CacheKey) -> Result<bool, DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        match dm.lookup(key) {
+            Ok(result) => {
+                use interfaces::LookupResult;
+                let exists = !matches!(result, LookupResult::NotExist);
+                Ok(exists)
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
     fn unpin(&self, key: CacheKey) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
