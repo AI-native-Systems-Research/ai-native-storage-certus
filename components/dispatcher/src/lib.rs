@@ -946,17 +946,23 @@ impl DispatcherComponent {
                 self.tier_counters.record_eviction_from_memory();
                 return true;
             }
-            // Fallback: write-through incomplete so it can't be demoted. Drop it
-            // entirely — but only if unpinned. `dm.remove` returns an error for
-            // pinned entries, so a success means no in-flight load points at it;
-            // only then is it safe to free the DRAM slot.
-            if dm.remove(cand).is_ok() {
-                let _ = mt.remove(cand);
-                self.emit_eviction(cand, EvictionReason::Removed);
-                self.tier_counters.record_eviction_from_memory();
-                return true;
-            }
-            // Pinned by an in-flight load — leave it and try the next candidate.
+            // Write-through incomplete (no ssd_offset) so it can't be demoted.
+            // Do NOT full-remove it: `dm.remove` returns NotExist for the key,
+            // which is UNRECOVERABLE. Under the Check→Pin race a connector may
+            // have already Checked this key resident and be about to load it; a
+            // just-Checked-but-not-yet-Pinned entry has read_ref==0, so dm.remove
+            // would succeed and silently drop it → the subsequent load misses →
+            // forwarded to remote-lookup → fatal IoError in the vLLM connector
+            // (assert transfer_result.success → EngineDeadError). Demotion is
+            // safe because it leaves the key resolvable (BlockDevice), but a full
+            // remove is not. So skip this candidate and try the next one; the
+            // widening scan in `evict_for_space` will reach a persisted (thus
+            // demotable) entry. If the whole tier is unpersisted we return false
+            // → AllocationFailed → the caller serves uncached (staging on load,
+            // dropped-from-store-set on save), never a fatal miss. The entry
+            // becomes demotable as soon as its write-through lands.
+            //
+            // Pinned by an in-flight load — also skip and try the next candidate.
         }
         false
     }
@@ -2175,7 +2181,37 @@ impl IDispatcher for DispatcherComponent {
             let key = *key;
             // Σ of the per-region sizes = the reserved slot's byte length.
             let total_size: u32 = regions.iter().map(|r| r.size).sum();
-            match dm.lookup(key) {
+
+            // A `dm.lookup` that returns Err means *timeout* waiting for a
+            // transient write_ref (a concurrent store-commit / promote) to
+            // clear, NOT a missing key: dispatch-map entries survive demotion
+            // (in-place flip to BlockDevice) and are removed only by the
+            // ssd-evictor / explicit remove. Collapsing that Err into
+            // `KeyNotFound` would forward a live key to remote-lookup, whose
+            // miss becomes a FATAL LOAD failure in the vLLM connector
+            // (EngineDeadError) — the remote-forward path has no graceful
+            // degrade. Retry the local lookup a few times so a writer holding
+            // write_ref past a single 2 s wait clears before we give up.
+            //
+            // Defensive: under the crash-repro workload this retry does not fire
+            // (write_ref windows are sub-millisecond with integrity gating off,
+            // so the first lookup already succeeds). The observed graceful
+            // degrade is restored by the two removal/allocation-path fixes
+            // (`evict_one_clean` no longer full-removes unpersisted victims; cold
+            // loads no longer take the no-staging inline fast path). This guards
+            // the one remaining fatal classification — Err(Timeout) misread as
+            // KeyNotFound — should lock contention ever widen that window.
+            const LOOKUP_RETRIES: u32 = 5;
+            let lookup = {
+                let mut lk = dm.lookup(key);
+                let mut retries = 0u32;
+                while matches!(lk, Err(_)) && retries < LOOKUP_RETRIES {
+                    retries += 1;
+                    lk = dm.lookup(key);
+                }
+                lk
+            };
+            match lookup {
                 Ok(lookup_result) => match lookup_result {
                     LookupResult::NotExist => {
                         results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
@@ -2255,26 +2291,15 @@ impl IDispatcher for DispatcherComponent {
         // Each thread gets its own NVMe queue pair and CUDA streams, enabling
         // concurrent reads on the same physical drive.
         //
-        // Fast path: for a single cold entry with one region (bs=1), bypass the
-        // cold pool thread hop and call promote_and_serve inline. This eliminates
-        // two context switches (dispatcher → pool worker → dispatcher) that add
-        // scheduling latency to every single-key cold load.
-        if cold_entries.len() == 1 && cold_entries[0].regions.len() == 1 {
-            let entry = &cold_entries[0];
-            let res = self.promote_and_serve(
-                entry.key,
-                entry.offset,
-                &entry.regions[0],
-                &gpu,
-                &dm,
-                &mt,
-                batch_device,
-            );
-            if res.is_ok() {
-                self.tier_counters.record_promotion_to_gpu();
-            }
-            results[entry.idx] = Some(res);
-        } else if !cold_entries.is_empty() {
+        // All cold entries — including a lone single-key load — go through the
+        // pooled path. It defers tier-saturation (`AllocationFailed`) to the
+        // staging post-pass so a cold load degrades to an uncached serve instead
+        // of failing. The single-key inline `promote_and_serve` fast path is
+        // intentionally NOT used here: it has no staging fallback, so under
+        // memory-tier pressure it turned a survivable cold miss into a fatal
+        // LOAD FAILURE (which crashes vLLM) — a regression vs unstable. The
+        // scheduling win is not worth reintroducing that failure mode.
+        if !cold_entries.is_empty() {
             const MAX_QUEUES_PER_DRIVE: usize = 1;
 
             let chunk_size = {
@@ -3737,16 +3762,6 @@ mod tests {
 
         fn set_mismatch_key(&self, key: CacheKey) {
             self.inner.lock().unwrap().mismatch_keys.insert(key);
-        }
-
-        /// Outstanding read pins on one key.
-        fn read_refs(&self, key: CacheKey) -> u32 {
-            self.inner
-                .lock()
-                .unwrap()
-                .entries
-                .get(&key)
-                .map_or(0, |e| e.read_refs)
         }
 
         /// Outstanding read pins across every entry — what a pin probe samples at
