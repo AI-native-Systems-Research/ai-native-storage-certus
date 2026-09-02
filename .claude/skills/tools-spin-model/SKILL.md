@@ -31,9 +31,10 @@ Present the full property menu and ask the user to choose. The user may also des
 1. **Reference-count balance** — Every read_ref increment has a matching decrement on all paths. No leaked refs (memory leak) or double-decrements (use-after-free).
 2. **Write-before-evict** — Models the dispatcher's populate → write-through → eviction lifecycle to verify that memory-tier eviction never produces dangling SSD references.
 3. **Cold-path promotion atomicity** — At most one thread succeeds in promoting a given key from SSD to memory-tier. No double-allocation or lost updates.
-4. **Populate-lookup linearizability** — After populate(key) returns Ok, a concurrent lookup(key) never observes KeyNotFound unless an explicit remove or eviction intervened.
+4. **Populate-lookup linearizability** — After populate(key) returns Ok, a concurrent lookup(key) never observes KeyNotFound unless an explicit remove or eviction intervened. ⚠️ The "unless … eviction intervened" clause deliberately *tolerates* an eviction-caused miss — this is the exact loophole through which the Check→Pin race shipped. If the client observes the key before loading it, that tolerance is unsafe: use **#12** instead (or in addition), which forbids removing a key any live client has observed.
 5. **Shutdown ordering** — No NVMe command is issued after its block device shuts down. Background writer drains before drives are torn down.
 6. **No lost extents** — Every reserve_extent is followed by either publish() or drop (abort). No extent is permanently allocated but uncommitted.
+12. **Observe→use resolvability under eviction (Check→Pin)** — Once a client (e.g. a vLLM connector) has *observed* a key resident in one RPC without pinning it, a later *pinned* load of that key in a separate RPC never observes NotExist. Concurrent eviction may **demote** the key (still resolvable) but must never **remove** it out from under the observing client. This is strictly stronger than #4: #4 permits an eviction-drop as a legitimate departure, whereas this property forbids removing a key any live client has observed. (This is the class of bug fixed by `evolve-dispatcher-dw`; see `modelling/spin/check-pin-eviction-race/`.)
 
 **Component-level properties** (scope: single component recommended):
 
@@ -43,7 +44,7 @@ Present the full property menu and ask the user to choose. The user may also des
 10. **Actor mailbox ordering** — Messages sent to a block-device actor are processed in FIFO order; no command reordering across the channel boundary. (Component: block-device-spdk-nvme)
 11. **Extent bitmap consistency** — Concurrent reserve/publish/remove never leave the bitmap in a state where an extent is both allocated and free. (Component: extent-manager)
 
-If the user provides a number (1-11), use that property. If they provide free text, treat it as a custom property description and ask for a short kebab-case name for the subdirectory.
+If the user provides a number (1-12), use that property. If they provide free text, treat it as a custom property description and ask for a short kebab-case name for the subdirectory.
 
 ## Steps
 
@@ -61,6 +62,7 @@ If the user provides a number (1-11), use that property. If they provide free te
    - 9 → `eviction-fairness`
    - 10 → `actor-mailbox-ordering`
    - 11 → `extent-bitmap-consistency`
+   - 12 → `check-pin-eviction-race`
    - Custom → ask user for a kebab-case name
 
 2. **Read the relevant source code** to understand the real synchronization protocol.
@@ -73,6 +75,7 @@ If the user provides a number (1-11), use that property. If they provide free te
    - 3: `components/dispatcher/src/lib.rs` (batch_lookup cold-path promotion, lines ~1045-1215)
    - 5: `components/dispatcher/src/lib.rs` (shutdown), `components/dispatcher/src/background.rs` (BackgroundWriter::shutdown), `apps/certus-server/src/main.rs` (shutdown sequence)
    - 6: `components/dispatcher/src/lib.rs` (prepare_store, commit_store, cancel_store, process_write_job)
+   - 12: `components/dispatcher/src/lib.rs` (`evict_one_clean` demote-vs-remove, `batch_lookup` classify→load, `dm.lookup`/`dm.remove`/`convert_to_storage`), plus the connector's Check RPC vs Load RPC split. Reference model: `modelling/spin/check-pin-eviction-race/check_pin_eviction_race.pml`.
 
    **Single-component scope** (read only the target component):
    - 7: `components/dispatcher/src/pipeline.rs` (PipelineRing, pipelined_ssd_to_gpu_zero_copy)
@@ -115,39 +118,60 @@ If the user provides a number (1-11), use that property. If they provide free te
    - Name the header comment "System-level model: <property-name>"
    - Document the component wiring in the header
 
-5. **Write the Makefile** `modelling/spin/<name>/Makefile`:
+   **Bug-finding conventions (whole system) — these are what make a model able to *catch* a race, not just pass:**
+
+   - **Model observe-then-act client flows as SEPARATE steps.** When a client learns something in one RPC and acts on it in a later RPC (e.g. a connector *Checks* a key resident, then *Pins+Loads* it in a separate call; or a store that prepares then commits), model the two as distinct steps with the intervening window left open to all other processes. Collapsing them into one atomic pin-on-hit hides exactly the races that live in the gap. Only the *use* step takes the read-ref/pin; the *observe* step must not pin. (This gap is where the Check→Pin eviction race lived.)
+   - **Distinguish eviction/removal OUTCOMES, not just "evicted."** A demote (`convert_to_storage`: entry flips to BlockDevice, still resolvable via cold-path promote) and a full remove (`dm.remove`: entry becomes NotExist) have completely different consequences for a client. Model them as separate transitions. Treat *removing a key that any live client has observed but not yet pinned* as a candidate hazard, and assert against it.
+   - **Inject the failure/error branches that make hazardous states reachable.** Many bugs are only reachable after a fallible op fails: a write-through that fails (`IoError`) releases the writer's pin while leaving the entry unpersisted; a `dm.lookup` that times out; an allocation that fails. Add nondeterministic failure branches (`if :: ok :: fail fi`) for every fallible cross-component op the property depends on. Without them the hazardous state (e.g. unpinned-AND-unpersisted) is unreachable and the model is *falsely green*.
+   - **Classify each terminal client outcome as FATAL or GRACEFUL, and assert no reachable path is fatal.** Map the modeled outcome back to the real consequence: a load miss forwarded to remote-lookup is *fatal* (IoError → `EngineDeadError` → vLLM crash); an `AllocationFailed` that serves uncached is *graceful*. The safety assertion should forbid reaching a fatal terminal, not merely "some error." (A property that lumps fatal and graceful misses together as "KeyNotFound is allowed" is too weak — that is exactly why property #4 tolerated this bug.)
+
+5. **Add a known-bad MUTANT and prove the model rejects it (MANDATORY).**
+
+   A model that only ever passes on the current code proves nothing about its power to *catch* a bug — it may simply be too weak. For every safety property, gate the suspected-hazardous behavior behind a Promela compile-time switch and prove the model **fails** on the mutant:
+
+   - Pick the hazard the property guards against and express its buggy variant behind `#ifdef INJECT_<HAZARD>` (e.g. `#ifdef BUGGY_DROP_FALLBACK` toggles a `dm.remove` of an unpinned unpersisted victim vs. skipping it). Keep the two branches minimal and directly mirror a real code path that either exists in history or is a plausible regression.
+   - **The fixed build (switch off) must verify with 0 errors; the mutant build (switch on) must produce an assertion violation.** If the mutant still passes, the property is too weak — strengthen the assertion (usually: make it forbid a *fatal* outcome, or assert on a finer-grained state) until the mutant fails, then confirm the fixed build still passes.
+   - Wrap the buggy-only `#ifdef` arms so that in the fixed build they are *pruned*, not left as dead unreached states. A branch that is deliberately unreachable in the fixed build (e.g. the fatal-miss arm) is expected and is itself evidence that the fatal path is dead — call it out in the README rather than forcing it reachable.
+   - **Gotcha:** `#define`/`#ifdef` in Promela are processed by `spin -a` (which runs the model through the C preprocessor), NOT by `cc`. Pass the switch as `spin -DINJECT_<HAZARD> -a model.pml`. The generated `pan.c` differs between builds, so each build must regenerate it. To replay a mutant trail you must pass the same `-D` to `spin -t`.
+
+   For a worked example see `modelling/spin/check-pin-eviction-race/` (`make` = fixed, 0 errors; `make buggy` = mutant, assertion violation + trail).
+
+6. **Write the Makefile** `modelling/spin/<name>/Makefile` (includes the mandatory `mutant` target — rename `INJECT_HAZARD` to your switch):
 
    ```makefile
    MODEL = <name_underscored>.pml
-   PAN   = pan
    CC    = cc
    CFLAGS = -O2
    DEPTH = 200000
+   MUTANT = INJECT_HAZARD
 
-   .PHONY: all safety liveness clean
+   .PHONY: all safety mutant liveness clean
 
+   # Default: verify the FIXED system. Expected: 0 errors, 0 unreached states.
    all: safety
 
-   safety: $(PAN)
-   	./$(PAN) -m$(DEPTH)
+   safety:
+   	spin -a $(MODEL)
+   	$(CC) $(CFLAGS) -DSAFETY -o pan pan.c
+   	./pan -m$(DEPTH)
 
-   liveness: $(PAN)-live
-   	./$(PAN)-live -a -m$(DEPTH)
+   # Known-bad mutant. Expected: an assertion violation + a .trail.
+   # The -D is a Promela (cpp) switch, so it goes to `spin -a`, not to cc.
+   mutant:
+   	spin -D$(MUTANT) -a $(MODEL)
+   	$(CC) $(CFLAGS) -DSAFETY -o pan-mutant pan.c
+   	./pan-mutant -m$(DEPTH)
 
-   $(PAN): pan.c
-   	$(CC) $(CFLAGS) -DSAFETY -o $@ $<
-
-   $(PAN)-live: pan.c
-   	$(CC) $(CFLAGS) -o $@ $<
-
-   pan.c: $(MODEL)
-   	spin -a $<
+   liveness:
+   	spin -a $(MODEL)
+   	$(CC) $(CFLAGS) -o pan-live pan.c
+   	./pan-live -a -m$(DEPTH)
 
    clean:
-   	rm -f $(PAN) $(PAN)-live pan.* *.trail
+   	rm -f pan pan-mutant pan-live pan.* *.trail
    ```
 
-6. **Write the README.md** `modelling/spin/<name>/README.md`:
+7. **Write the README.md** `modelling/spin/<name>/README.md`:
 
    Structure (follow the pattern in `modelling/spin/write-before-evict/README.md`):
    - Title: `# <Property Name>`
@@ -156,27 +180,29 @@ If the user provides a number (1-11), use that property. If they provide free te
    - **Properties Verified** table (ID, Property description, Type: Safety/Liveness)
    - **System Abstraction** table (Real component → Promela process)
    - **Assumptions / Stubs** section (for single-component scope: list what is abstracted away and how)
-   - **Running** section with shell commands
+   - **Mutant** section: name the known-bad switch, what it toggles, and the expected fixed-vs-mutant outcomes
+   - **Running** section with shell commands (including `make mutant` and the mutant trail replay)
    - **Tuning the Model** section explaining parameters
    - **Correspondence to Source Code** table (Model location → Source file → Line range)
 
-7. **Run the verification** by executing `make` in the new directory.
+8. **Run BOTH verifications** in the new directory: `make` (fixed) and `make mutant`.
 
    - If Spin is not installed, inform the user and skip this step.
-   - If verification fails with an assertion violation, analyze the trail (`spin -t -p <file>.pml`), fix the model, and re-run until it passes.
-   - Report: number of states explored, depth reached, errors found, coverage (unreached states).
+   - The fixed build (`make`) must report **0 errors**. The mutant build (`make mutant`) must report **≥1 assertion violation**; replay its trail with `spin -t -p -g -l -D<MUTANT> <file>.pml` and confirm the interleaving is the intended hazard.
+   - **If the fixed build fails**, first decide whether it is a real defect in the code (analyze the trail, report it to the user — do not silently weaken the model to make it green) or a modeling artifact (over-abstraction, a missing pin, wrong atomicity). Only relax the *model* when it is genuinely an artifact; a real counterexample against current code is a finding, not a bug in the model.
+   - **If the mutant build passes**, the property is too weak — strengthen it (per the bug-finding conventions above) until the mutant fails, then re-confirm the fixed build still passes.
 
-8. **Report results** to the user:
+9. **Report results** to the user:
    - Scope (single component or whole system)
    - Property being verified
-   - Pass/fail status
-   - State space size
-   - Coverage (target: 0 unreached states in all proctypes)
+   - Fixed build: pass/fail status, state space size, depth, coverage (target: 0 unreached in all proctypes, modulo deliberately-pruned mutant-only branches)
+   - Mutant: which hazard it injects, and confirmation the model catches it (violation + trail)
    - Path to the new model directory
 
 ## Notes
 
-- Spin must be installed at `/usr/local/bin/spin` (see `modelling/spin/write-before-evict/README.md` for install instructions).
+- **A model that only passes proves nothing.** The single most important discipline (step 5) is the known-bad mutant: a property is only as good as its ability to reject a buggy variant. If you cannot construct a plausible mutant that the model catches, the property is probably too weak to catch a real regression either. This is precisely why property #4 (populate-lookup linearizability) *passed* while the Check→Pin race shipped — it was written to tolerate the eviction-drop, and no mutant ever forced it to confront one.
+- Spin is installed at `~/.local/bin/spin` on this machine (run `modelling/spin/install-spin.sh --prefix $HOME/.local` and put `$HOME/.local/bin` on `PATH`; the older `/usr/local/bin/spin` location also works if present). The optional Tcl/Tk GUI is `ispin` (needs the `tk` package for `wish`).
 - Keep parameters small (2-3 clients, 2-4 keys, pool cap < key count) to maintain tractable state spaces (<10M states).
 - The model should be self-contained — no external dependencies beyond Spin and a C compiler.
 - Use the generation-counter technique from the write-before-evict model to handle key reuse without conflating lifecycles.
