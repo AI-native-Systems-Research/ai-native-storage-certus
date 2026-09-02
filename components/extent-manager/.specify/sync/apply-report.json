@@ -1,28 +1,39 @@
 {
-  "date": "2026-08-20",
+  "date": "2026-09-01T22:59:04Z",
   "component": "extent-manager",
-  "phase": "B",
-  "based_on": "proposals.json (Phase B); drift-report.json (2 drifted)",
+  "phase": "component-sync-specs",
+  "commit_pre_apply": "33bddaba",
+  "based_on": "proposals.json (2026-09-01); drift-report.json (1 spec drift + plan-doc)",
   "backups": [
-    ".specify/sync/backups/specs/001-extent-manager-v2/spec.md.bak",
-    ".specify/sync/backups/specs/001-extent-manager-v2/plan.md.bak"
+    ".specify/sync/backups/20260901T225904Z/spec.md",
+    ".specify/sync/backups/20260901T225904Z/plan.md",
+    ".specify/sync/backups/20260901T225904Z/tasks.md"
   ],
   "counts": {
     "backfill_applied": 2,
+    "plan_doc_fixes": 6,
     "align_tasks": 0,
     "unspecced_backfilled": 0,
-    "resolved": 0,
-    "human_decision": 0
+    "resolved": 1,
+    "human_decision": 1
   },
   "specs_updated": [
-    { "requirement": "FR-030", "file": "specs/001-extent-manager-v2/spec.md", "change_type": "modified", "detail": "Parenthetical status 'does not yet compile' -> 'implemented and building'; top Sync note refreshed (2026-08-20), stale drafted/queued/CI text removed." },
-    { "requirement": "plan.md-layout-refs", "file": "specs/001-extent-manager-v2/plan.md", "change_type": "modified", "detail": "Removed block_device data-device receptacle (Storage block + Component Structure); re-rooted source tree components/extent-manager/v2/ -> components/extent-manager/; added Last-Synced 2026-08-20 note." },
-    { "requirement": "header", "file": "specs/001-extent-manager-v2/spec.md", "change_type": "modified", "detail": "Updated date -> 2026-08-20." }
+    { "requirement": "header", "file": "specs/001-extent-manager-v2/spec.md", "change_type": "modified", "detail": "Updated date -> 2026-09-01; added Last Synced 2026-09-01 note block." },
+    { "requirement": "FR-030", "file": "specs/001-extent-manager-v2/spec.md", "change_type": "modified", "detail": "Removed '(and in the format path)' from prose; flush is checkpoint-path only (lib.rs:308-310), format() has no flush (lib.rs:496-498). User chose correct-prose over adding a format-path flush." },
+    { "requirement": "FR-016", "file": "specs/001-extent-manager-v2/spec.md", "change_type": "modified", "detail": "Replaced stale 'incorrectly state five minutes / should be corrected' note with a plain 30 s default statement; correction already landed (iextent_manager.rs:205, README.md:13)." },
+    { "requirement": "plan.md:59", "file": "specs/001-extent-manager-v2/plan.md", "change_type": "modified", "detail": "checkpoint_interval_ms: AtomicU64 (default 5000) -> checkpoint_timer_state: Arc<CheckpointTimerState> @ 30s." },
+    { "requirement": "plan.md:229", "file": "specs/001-extent-manager-v2/plan.md", "change_type": "modified", "detail": "superblock.rs (v5) -> (v6)." },
+    { "requirement": "tasks.md CERTUSV5/v5", "file": "specs/001-extent-manager-v2/tasks.md", "change_type": "modified", "detail": "v5/CERTUSV5 -> v6/CERTUSV4 at 3 sites (magic 0x...5634 = CERTUSV4, version 6)." },
+    { "requirement": "tasks.md open items", "file": "specs/001-extent-manager-v2/tasks.md", "change_type": "modified", "detail": "Marked runtime-configurable-interval decision resolved (set_checkpoint_interval, FR-027; CheckpointTimerState not AtomicU64). Fixed crate name extent-manager-v2 -> extent-manager." }
   ],
   "align_tasks_generated": [],
   "unspecced_backfilled": [],
-  "resolved": [],
-  "human_decision": [],
+  "resolved": [
+    { "item": "tasks.md open: runtime-configurable checkpoint interval", "detail": "Now exposed via IExtentManager::set_checkpoint_interval (FR-027)." }
+  ],
+  "human_decision": [
+    { "requirement": "FR-030", "decision": "correct-spec-prose", "detail": "User selected doc correction over adding a format-path flush (behavior change)." }
+  ],
   "source_modified": false,
   "cargo_run": false
 }

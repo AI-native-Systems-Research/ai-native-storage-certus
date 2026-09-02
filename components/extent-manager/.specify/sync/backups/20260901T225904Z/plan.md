@@ -55,9 +55,8 @@ ExtentManagerV2 (define_component!)
 │   └── checkpoint_coalesce: Mutex<CheckpointCoalesce> + Condvar
 ├── Background
 │   ├── checkpoint_thread: JoinHandle
-│   ├── checkpoint_timer_state: Arc<CheckpointTimerState>
-│   │     (Mutex<Option<Duration>> + Condvar + shutdown; default 30s)
-│   └── shutdown flag lives inside CheckpointTimerState
+│   ├── checkpoint_interval_ms: AtomicU64 (default 5000)
+│   └── shutdown: Arc<AtomicBool>
 └── Provides: IExtentManager
 ```
 
@@ -227,7 +226,7 @@ components/extent-manager/
 ├── src/
 │   ├── lib.rs            -- component definition, IExtentManager impl
 │   ├── error.rs          -- ExtentManagerError factory functions
-│   ├── superblock.rs     -- on-disk superblock serialize/deserialize (v6)
+│   ├── superblock.rs     -- on-disk superblock serialize/deserialize (v5)
 │   ├── checkpoint.rs     -- checkpoint write/read (contiguous regions)
 │   ├── recovery.rs       -- recover() from superblock + checkpoint
 │   ├── region.rs         -- RegionState, SharedState
