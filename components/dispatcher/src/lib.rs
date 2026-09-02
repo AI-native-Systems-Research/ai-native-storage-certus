@@ -5661,6 +5661,168 @@ mod tests {
         assert!(mt.contains(0), "entry should not be evicted");
     }
 
+    /// Regression test for the Check→Pin eviction race
+    /// ([[project_dispatcher_check_pin_eviction_race]]).
+    ///
+    /// A content-addressed key that a connector has Checked resident and is
+    /// about to Pin+Load must never be *silently dropped* from the dispatch
+    /// map by the evictor. The dangerous window is a resident memory-tier entry
+    /// whose write-through has not completed (`ssd_offset == None`) and that is
+    /// not yet pinned (`read_ref == 0`) — the just-Checked-but-not-yet-Pinned
+    /// state.
+    ///
+    /// Such a victim cannot be *demoted* (there is nothing on SSD to fall back
+    /// to). The buggy `evolve-dispatcher` `evict_one_clean` handled that by
+    /// `dm.remove`-ing it, which *succeeds* for an unpinned entry and turns the
+    /// key into `NotExist`. The racing load then misses, is forwarded to
+    /// remote-lookup, and on a single node returns a hard `IoError` — which the
+    /// vLLM connector asserts on (`transfer_result.success`), killing the
+    /// engine with `EngineDeadError`.
+    ///
+    /// The fix skips an unpersisted victim rather than removing it. This test
+    /// locks in the invariant that makes the crash impossible: eviction under
+    /// pressure against an all-unpersisted, all-unpinned tier frees nothing,
+    /// surfaces `AllocationFailed` (caller then serves uncached), and —
+    /// critically — leaves *every* key still resolvable, never `NotExist`.
+    ///
+    /// Reverting the fix (restoring the `dm.remove` fallback) fails this test:
+    /// `evict_for_space` returns `Ok`, `entry_count` drops, and the dropped
+    /// keys resolve to `NotExist`.
+    #[test]
+    fn evict_never_drops_unpersisted_unpinned_victim() {
+        let dm_concrete = Arc::new(MockDispatchMap::new());
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = dm_concrete.clone();
+        // Pool holds exactly 4 × 4 KiB entries; we fill it completely.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+
+        const N: u64 = 4;
+        for key in 0..N {
+            mt.insert(key, 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
+            // Release the write pin installed by create_memory_tier_entry so the
+            // entry is fully unpinned (read_ref == 0, write_ref == false): a
+            // resident, checkable key. Deliberately do NOT convert_to_storage —
+            // leaving ssd_offset == None means the entry is unpersisted and
+            // cannot be demoted to BlockDevice, only removed or skipped.
+            dm.release_write(key).unwrap();
+        }
+
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
+        );
+
+        // Pool is full (16384 used). Asking for one more slot forces eviction,
+        // but no candidate is demotable and none may be dropped.
+        let res = c.evict_for_space(&dm, &mt, 4096, 100, 512);
+        assert!(
+            matches!(res, Err(DispatcherError::AllocationFailed(_))),
+            "expected AllocationFailed when the whole tier is unpersisted, got {res:?}",
+        );
+
+        // The invariant that prevents the crash: nothing was silently dropped.
+        assert_eq!(
+            dm_concrete.entry_count(),
+            N as usize,
+            "an unpersisted, unpinned victim was removed → key becomes NotExist → fatal remote-forward",
+        );
+        for key in 0..N {
+            assert!(
+                !matches!(dm.lookup(key), Ok(LookupResult::NotExist)),
+                "key {key} resolved to NotExist after eviction — Check→Pin race regression",
+            );
+        }
+    }
+
+    /// Companion to [`evict_never_drops_unpersisted_unpinned_victim`]: the fix
+    /// must skip the racy unpersisted victim yet still make progress by
+    /// demoting a *persisted* neighbour, so eviction is not deadlocked.
+    ///
+    /// Mixed tier: three unpersisted, unpinned entries (each a just-Checked key
+    /// in the race window) plus one persisted, unpinned entry. The widening
+    /// scan in `evict_for_space` must reach the persisted entry, demote it to
+    /// BlockDevice (freeing the slot while keeping the key resolvable), and
+    /// leave the three racy keys untouched and still resolvable.
+    #[test]
+    fn evict_skips_unpersisted_victims_and_demotes_persisted_one() {
+        let dm_concrete = Arc::new(MockDispatchMap::new());
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = dm_concrete.clone();
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+
+        // Keys 0..3 unpersisted (no ssd_offset); key 3 persisted (demotable).
+        const N: u64 = 4;
+        const PERSISTED: u64 = 3;
+        for key in 0..N {
+            mt.insert(key, 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
+            dm.release_write(key).unwrap();
+            if key == PERSISTED {
+                // Complete write-through: gives it an ssd_offset so it can be
+                // demoted (MemoryTier → BlockDevice) instead of dropped.
+                dm.convert_to_storage(key, key * 4096).unwrap();
+            }
+        }
+
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
+        );
+
+        // One demotion frees exactly one slot, which is enough.
+        c.evict_for_space(&dm, &mt, 4096, 100, 512)
+            .expect("demoting the persisted neighbour should free space");
+
+        assert!(
+            mt.used() + 4096 <= mt.capacity(),
+            "a slot should have been freed by demotion",
+        );
+        // No entry was dropped from the dispatch map (demotion keeps the key).
+        assert_eq!(dm_concrete.entry_count(), N as usize, "no key should be removed");
+        // The persisted neighbour was demoted and is now resolvable on SSD.
+        assert!(
+            matches!(dm.lookup(PERSISTED), Ok(LookupResult::BlockDevice { .. })),
+            "persisted victim should be demoted to BlockDevice, still resolvable",
+        );
+        // The three racy unpersisted keys survive, still resolvable (not dropped).
+        for key in 0..N {
+            if key == PERSISTED {
+                continue;
+            }
+            assert!(
+                !matches!(dm.lookup(key), Ok(LookupResult::NotExist)),
+                "unpersisted key {key} must survive eviction of its neighbour",
+            );
+        }
+    }
+
     #[test]
     fn populate_triggers_eviction_on_full_pool() {
         let dm = Arc::new(MockDispatchMap::new());
