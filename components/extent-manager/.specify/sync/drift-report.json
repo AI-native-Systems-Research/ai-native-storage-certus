@@ -1,11 +1,12 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-01T22:59:04Z",
   "project": "extent-manager",
+  "commit": "33bddaba",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 43,
-    "aligned": 41,
-    "drifted": 2,
+    "aligned": 42,
+    "drifted": 1,
     "not_implemented": 0,
     "unspecced_features": 0
   },
@@ -16,29 +17,45 @@
       "aligned": [
         "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
         "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
+        "FR-015", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
         "FR-022", "FR-023", "FR-024", "FR-025", "FR-026", "FR-027", "FR-028",
         "FR-029", "FR-031", "FR-032", "FR-033", "FR-034", "FR-035", "FR-036",
         "FR-037",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-006"
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
       ],
       "drifted": [
         {
           "requirement": "FR-030",
-          "spec_text": "volatile_write_cache feature does not yet compile - BlockDeviceClient::flush() missing; Command::FlushSync/Completion::FlushDone absent from interfaces crate.",
-          "actual": "flush() exists using Command::FlushSync/Completion::FlushDone; interfaces defines FlushSync (iblock_device.rs:411) and FlushDone (:501); run_checkpoint calls flush() under the feature. Spec status note is stale.",
-          "location": "components/extent-manager/src/block_io.rs:168; components/extent-manager/src/lib.rs:308-310; components/interfaces/src/iblock_device.rs:411,501",
-          "severity": "moderate"
+          "spec_text": "the component issues a BlockDeviceClient::flush() to the metadata device after checkpoint writes (and in the format path)",
+          "actual": "flush() is implemented (block_io.rs:167-180, Command::FlushSync/Completion::FlushDone) but is called ONLY from the checkpoint path (lib.rs:308-310, gated by the feature). format() writes the superblock at lib.rs:496-498 with no flush. README.md:66 and Cargo.toml:24-27 also describe checkpoint-only flush. The '(and in the format path)' prose over-claims.",
+          "location": "components/extent-manager/src/lib.rs:308-310,496-498; components/extent-manager/src/block_io.rs:167-180; components/extent-manager/README.md:66",
+          "severity": "moderate",
+          "resolution": "correct-spec-prose"
         },
         {
-          "requirement": "plan.md-layout-refs",
-          "spec_text": "plan.md references a block_device receptacle and a components/extent-manager/v2/ source path.",
-          "actual": "Component has only metadata_device + logger receptacles and a flat src/; no v2/ path. spec.md top note flags this as informational.",
-          "location": "components/extent-manager/specs/001-extent-manager-v2/plan.md:25,39,213",
-          "severity": "minor"
+          "requirement": "FR-016",
+          "spec_text": "both the IExtentManager interface doc comment and this component's README.md incorrectly state \"five minutes\" ... These are stale doc strings that should be corrected to reference the true 30-second default.",
+          "actual": "The correction has already landed: iextent_manager.rs:205 and README.md:13 both state 30 seconds. The remediation note now describes a defect that no longer exists.",
+          "location": "components/interfaces/src/iextent_manager.rs:205; components/extent-manager/README.md:13",
+          "severity": "minor",
+          "resolution": "correct-spec-prose"
         }
       ],
       "not_implemented": []
+    }
+  ],
+  "plan_doc_drift": [
+    {
+      "location": "components/extent-manager/specs/001-extent-manager-v2/plan.md:59",
+      "spec_text": "checkpoint_interval_ms: AtomicU64 (default 5000)",
+      "actual": "checkpoint_timer_state: Arc<CheckpointTimerState> (Mutex<Option<Duration>> + Condvar + shutdown), default 30s (lib.rs:62-79,95,112)",
+      "severity": "minor"
+    },
+    {
+      "location": "components/extent-manager/specs/001-extent-manager-v2/plan.md:229",
+      "spec_text": "superblock.rs -- on-disk superblock serialize/deserialize (v5)",
+      "actual": "FORMAT_VERSION = 6 (superblock.rs:6)",
+      "severity": "minor"
     }
   ],
   "unspecced": [],
