@@ -26,6 +26,13 @@ because `handler`/`receiver` were already consumed by `Option::take()` on the fi
 **Required Change**: Replace the two `.expect(...)` calls with a typed error return, e.g. a new `ActorError::AlreadyConsumed` (or reuse `AlreadyActive` with updated docs) returned from `activate()` before spawning the thread, so that calling `activate()` twice on the same `Actor` instance (even across a deactivate cycle) fails gracefully with `Result::Err` instead of panicking. No spec change is required — both FR-004 (003) and FR-001 (005) already describe the intended single-use semantics and error-not-panic pattern; only the implementation needs to catch up.
 
 **Files to Modify**:
-- `components/component-framework/crates/component-core/src/actor.rs` (lines ~604-617, `Actor::activate()`; possibly the `ActorError` enum definition near line 24)
+- `lib/component-framework/crates/component-core/src/actor.rs` (lines ~589-617, `Actor::activate()` — the `.expect(...)` calls at lines 610 and 617; possibly the `ActorError` enum definition near line 22)
+
+**Status**: OPEN. Re-confirmed still open by the 2026-09-02 spec-sync run
+(git 2fc1cd3c). `Actor::activate` still takes `&self` (actor.rs:589) and the two
+`.expect(...)` panics remain at actor.rs:610 (receiver) and actor.rs:617
+(handler). No test exercises re-activation, so the panic is only reachable on a
+misuse path. (Path prefix in this task updated from the pre-relocation
+`components/component-framework/...` to `lib/component-framework/...`.)
 
 ---

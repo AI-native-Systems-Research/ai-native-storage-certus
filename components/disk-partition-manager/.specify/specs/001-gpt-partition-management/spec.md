@@ -4,7 +4,7 @@
 **Created**: 2026-07-01
 **Status**: Backfilled
 **Source**: Generated from existing implementation
-**Last Synced**: 2026-08-20 — Phase B spec-sync. FR-003 re-classified from ALIGN (2026-08-07) to **BACKFILL**: the backup-fallback-on-signature-corruption fix is now present in `read_gpt` (`src/gpt.rs:66-96`), so the requirement is resolved by describing the implemented behavior rather than a pending code task. PR-002 remains backfilled to the actual per-sector read behavior. Read-path LBA-2 assumption, GUID zero-fallback, and any-sector-size behavior documented in Implementation Notes. (Supersedes the 2026-08-07 drift sweep on branch `sync/spec-drift-sweep-20260807`.)
+**Last Synced**: 2026-09-02 — Re-verified against current `src/gpt.rs` + `src/lib.rs`: all 11 FR, 3 IR, 2 PR, and 4 SC are aligned with the implementation; no actionable drift remains (the FR-003 signature-fallback fix is present at `src/gpt.rs:66-96`). Residual known gap: SC-001/SC-002/SC-003 and the FR-003 signature-recovery scenario have no automated tests (`[dev-dependencies]` empty). Prior sync — 2026-08-20 — Phase B spec-sync. FR-003 re-classified from ALIGN (2026-08-07) to **BACKFILL**: the backup-fallback-on-signature-corruption fix is now present in `read_gpt` (`src/gpt.rs:66-96`), so the requirement is resolved by describing the implemented behavior rather than a pending code task. PR-002 remains backfilled to the actual per-sector read behavior. Read-path LBA-2 assumption, GUID zero-fallback, and any-sector-size behavior documented in Implementation Notes. (Supersedes the 2026-08-07 drift sweep on branch `sync/spec-drift-sweep-20260807`.)
 
 ## Backfill Notice
 

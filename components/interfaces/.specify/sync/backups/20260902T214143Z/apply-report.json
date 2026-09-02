@@ -1,0 +1,37 @@
+{
+  "generated": "2026-08-20",
+  "phase": "B",
+  "project": "interfaces",
+  "spec": "components/interfaces/specs/001-interfaces/spec.md",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "summary": {
+    "backfill_applied": 0,
+    "align_tasks": 0,
+    "unspecced_backfilled": 0,
+    "resolved": 2,
+    "human_decision": 0
+  },
+  "specs_updated": [],
+  "align_tasks_generated": [],
+  "unspecced_backfilled": [],
+  "resolved": [
+    {
+      "requirement": "FR-014",
+      "spec_id": "001-interfaces",
+      "title": "IExtendedMetadataStore Interface",
+      "fix_location": "src/lib.rs:77 (mod iextended_metadata_store;), src/lib.rs:99 (pub use ...IExtendedMetadataStore)",
+      "verified": true,
+      "note": "Module now declared and re-exported (ungated); trait defined at src/iextended_metadata_store.rs:30. Spec unchanged."
+    },
+    {
+      "requirement": "FR-025",
+      "spec_id": "001-interfaces",
+      "title": "Supporting Types - ExtendedMetadataStoreError",
+      "fix_location": "src/iextended_metadata_store.rs:5-15 (enum), src/lib.rs:99 (pub use ExtendedMetadataStoreError)",
+      "verified": true,
+      "note": "4-variant enum (NotFound, StorageError, CapacityExhausted, ValueTooLarge) now exported. Spec unchanged."
+    }
+  ],
+  "spec_backups": [],
+  "specs_edited": []
+}

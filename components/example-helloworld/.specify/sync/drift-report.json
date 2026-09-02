@@ -1,6 +1,14 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T21:28:34Z",
   "project": "Certus — components/example-helloworld",
+  "spec_sync": {
+    "component": "example-helloworld",
+    "drift_status": "clean",
+    "synced_at": "2026-09-02T21:28:34Z",
+    "git_commit": "2fc1cd3c",
+    "inputs_sha256": "e70f6f8916c8214c3bcb5c9659b59d8edd8f499399154506c4b98c14a950dbe6",
+    "hash_tool": "scripts/spec-sync-hash.sh"
+  },
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 10,
@@ -20,10 +28,12 @@
         "FR-4: GreetRequest has name: String (src/lib.rs:49-52)",
         "FR-5: GreeterHandler ActorHandler with lifecycle hooks (src/lib.rs:84-109)",
         "FR-6: handle() increments counter, prints numbered greeting (src/lib.rs:92-98)",
-        "FR-7: optional ILogger logs start/greeting/stop (src/lib.rs:85-108)",
+        "FR-7: optional ILogger logs start/greeting/stop via info (src/lib.rs:85-108)",
         "NFR-1: module doc with runnable Quick start example (src/lib.rs:1-17)",
         "NFR-2: Default delegates to new(); no lint issues (src/lib.rs:78-82)",
-        "NFR-3: no unsafe code (grep clean)"
+        "NFR-3: no unsafe code (grep clean)",
+        "US1: activate/send/deactivate flow (src/lib.rs:8-17, apps/helloworld-mainline/src/main.rs:26-38)",
+        "US2: with_logger accepts Arc<dyn ILogger + Send + Sync>, works with/without logger (src/lib.rs:62-75)"
       ],
       "drifted": [],
       "not_implemented": []

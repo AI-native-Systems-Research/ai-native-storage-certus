@@ -1,34 +1,36 @@
-# Spec-Sync Phase B — Apply Report: eviction-policy-session-lists
+# Spec-Sync — Apply Report: eviction-policy-session-lists
 
-**Applied**: 2026-08-20
-**Policy**: `.specify/sync/PHASE_B_POLICY.md`
-**Source**: `.specify/sync/drift-report.{json,md}` (2026-08-20; 23 aligned, 1 drifted, 0 not_implemented, 0 unspecced)
+**Applied**: 2026-09-02
+**Source**: `.specify/sync/drift-report.{json,md}` (2026-09-02; 23 aligned, 1 drifted, 0 not_implemented, 0 unspecced)
 **Proposals**: `.specify/sync/proposals.{md,json}`
 
-Component is effectively CLEAN. The single drift (SC-001) is a
-spec-acknowledged, downgraded design goal — not an implementation divergence.
-Classified as **BACKFILL** (spec-lag / aspirational goal), not ALIGN: the
-eviction code is correct and intentional; only the benchmark scope (hot-path
-throughput, no comparative hit-rate harness) fails to verify the ≥15% target.
+The component's eviction implementation is **CLEAN** against every functional
+and behavioural requirement (FR-001..FR-018, SC-002..SC-006). The one drift is
+SC-001, and this pass **corrects** it rather than reaffirming the prior
+(incorrect) wording: the comparative trace-replay harness that SC-001 said did
+not exist **does** exist — `apps/eviction-replay-benchmark`, present since the
+component's introducing commit `c247b890` (2026-08-04) — and was missed by both
+prior syncs. Classified as **BACKFILL** (stale/incorrect spec text vs. correct
+code), not ALIGN.
 
 ## Specs Updated
 
 | Spec | Requirement | Change type |
 |------|-------------|-------------|
-| 001-session-list-eviction | SC-001 | BACKFILL — re-verified against `benches/session_list_benchmark.rs`; sharpened to name the four Criterion benches (`track`, `touch`, `batch_touch`, `identify_next_to_evict`), state SC-001 is explicitly not a measured outcome, and point to align-tasks.md Task 1 as the tracked follow-up. |
-| 001-session-list-eviction | (metadata) | BACKFILL — added `**Last-Synced**: 2026-08-20` line under `Status`. |
+| 001-session-list-eviction | SC-001 | BACKFILL — corrected: names `apps/eviction-replay-benchmark` as the existing comparative session-lists-vs-LRU hit-rate harness; states it has existed since the introducing commit and was overlooked by the 2026-08-07/2026-08-20 syncs; reports that the measured effect is workload/cache-size dependent and does **not** reach the ≥15% target on sampled runs; recasts ≥15% as measurable-but-unmet rather than unverifiable. |
+| 001-session-list-eviction | (metadata) | BACKFILL — `**Last-Synced**` line updated to `2026-09-02` with the correction note. |
 
 ## Align Tasks Generated
 
 | Task | Status |
 |------|--------|
-| (none new this pass) | — |
+| (none new) | — |
 
-No new ALIGN task. The pre-existing `align-tasks.md` Task 1 (build the
-comparative session-lists-vs-`eviction-policy-lru` prefix-reload trace-replay
-harness to eventually verify/retire the ≥15% target) remains valid and is
-carried forward unchanged. It is a verification follow-up, not a behavioral-bug
-alignment.
+`align-tasks.md` Task 1 was **re-scoped in place** (not code): it previously
+asked to *build* the comparative harness. That harness already exists, so the
+"build/report" acceptance criteria are checked off and Task 1 now reads "Pin
+SC-001 to a measured operating point" — the only remaining criterion is
+rewriting SC-001 to a concrete measured figure using `apps/eviction-replay-benchmark`.
 
 ## Unspecced Backfilled
 
@@ -36,30 +38,40 @@ alignment.
 |---------|--------|
 | (none) | — |
 
-The startup-announcement log was already backfilled into the spec's
-`Observability` section on 2026-08-07; still present, no action.
+The startup-announcement log remains documented in the spec's `Observability`
+section (backfilled 2026-08-07); no action. `apps/eviction-replay-benchmark` is
+a separate application, not part of this component's `src/`, so it is not
+"unspecced component code" — it is referenced from SC-001 as the verification
+vehicle.
 
 ## Resolved
 
 | Item | Status |
 |------|--------|
-| (none) | — |
+| align-tasks.md Task 1 "build the harness" portion | Recognised as already satisfied by `apps/eviction-replay-benchmark`; criteria checked off. |
 
 ## Backups
 
-- `specs/001-session-list-eviction/spec.md` → `.specify/sync/backups/specs/001-session-list-eviction/spec.md.bak`
+- `specs/001-session-list-eviction/spec.md` →
+  `.specify/sync/backups/20260902T212933Z/specs/001-session-list-eviction/spec.md`
 
 ## Verification
 
-- All edits confined to `specs/001-session-list-eviction/spec.md` and files
-  under `.specify/sync/`. No `.rs` source modified. No cargo run.
+- Edits confined to `components/eviction-policy-session-lists/`:
+  `specs/001-session-list-eviction/spec.md` and files under `.specify/sync/`
+  (`align-tasks.md`, reports, backup). No `.rs` source modified. No
+  `components/interfaces/**` touched. No cargo run. No git add/commit.
+- `spec_sync_inputs_sha256` recomputed **after** the spec edit via
+  `scripts/spec-sync-hash.sh` and stamped into `drift-report.md`.
 
 ## History
 
-- **2026-08-07** (`apply-report` superseded by this file; see
-  `proposals-20260807.json`): first apply pass. SC-001 fork resolved by
-  maintainer → "Downgrade to design goal (backfill)"; startup-announcement log
-  backfilled as a non-normative `Observability` section; harness queued as
-  align-tasks.md Task 1.
-- **2026-08-20** (this pass): re-sync re-verified SC-001 against current code;
-  reaffirmed and sharpened the BACKFILL; added Last-Synced metadata.
+- **2026-08-07**: first apply pass. SC-001 downgraded to a design goal;
+  startup-announcement log backfilled; harness queued as align-tasks.md Task 1.
+- **2026-08-20**: re-sync; reaffirmed + sharpened SC-001 BACKFILL, added
+  Last-Synced metadata. **(Both passes incorrectly asserted no comparative
+  harness exists.)**
+- **2026-09-02** (this pass): discovered `apps/eviction-replay-benchmark`
+  already provides the comparative session-lists-vs-LRU hit-rate harness;
+  corrected SC-001's factual claim, recast ≥15% as measurable-but-unmet, and
+  re-scoped align-tasks.md Task 1.

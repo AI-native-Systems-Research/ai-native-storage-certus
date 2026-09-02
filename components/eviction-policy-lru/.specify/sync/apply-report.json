@@ -1,41 +1,55 @@
 {
-  "applied_at": "2026-06-19T00:00:00Z",
+  "applied_at": "2026-09-02T21:32:00Z",
+  "backup": ".specify/sync/backups/2026-09-02T21:29:45Z/",
   "changes": {
     "specs_updated": [
       {
         "spec": "001-lru-eviction-policy",
+        "file": "spec.md",
         "requirement": "FR-009",
         "change_type": "modified",
         "proposal": "P1",
-        "before": "Operations on an invalid PoolId MUST return EvictionPolicyError::InvalidPool",
-        "after": "Methods returning Result (track, touch, remove) MUST return EvictionPolicyError::InvalidPool when given a non-existent pool. Methods returning Option or scalar (pop_oldest, peek_oldest, len, clear_pool) MUST gracefully degrade: returning None, empty collection, 0, or no-op respectively."
+        "before": "Methods returning Result (track, touch, remove) MUST return EvictionPolicyError::InvalidPool when given a non-existent pool.",
+        "after": "Methods returning Result (track, touch, remove, batch_touch) MUST return EvictionPolicyError::InvalidPool when given a non-existent pool."
       },
       {
         "spec": "001-lru-eviction-policy",
-        "requirement": "FR-010",
+        "file": "spec.md",
+        "requirement": "Dependencies",
         "change_type": "modified",
         "proposal": "P2",
-        "before": "remove and move_to_back on an already-removed entry MUST be idempotent (no panic, no effect)",
-        "after": "touch and remove on an already-removed handle MUST be idempotent (no panic, no effect)."
+        "before": "Consumers: dispatch-map, memory-tier, dispatcher, dispatcher-p2p, certus-connector, certus-server, certus-server-yaml",
+        "after": "Consumers: ... , certus-server-yaml, eviction-replay-benchmark"
       },
       {
         "spec": "001-lru-eviction-policy",
-        "requirement": "SC-001",
+        "file": "plan.md",
+        "requirement": "ConsumerGraph+Testing",
         "change_type": "modified",
-        "proposal": "P4",
-        "before": "All 8 unit tests in lib.rs and 12 unit tests in lru_list.rs pass",
-        "after": "All tests in lib.rs and lru_list.rs pass (cargo test -p eviction-policy-lru)."
+        "proposal": "P2",
+        "before": "7 consumers; lru_list 12 tests, lib.rs 8 tests",
+        "after": "added eviction-replay-benchmark; lru_list 13 tests, lib.rs 9 tests"
       }
     ],
     "new_specs": [],
     "align_tasks": [
       {
         "proposal": "P3",
-        "requirement": "NFR-004",
-        "description": "Add trace-level logging for create_pool and error paths",
+        "requirement": "FR-012",
+        "description": "Add dedicated batch_touch tests (same-pool amortization, multi-pool relock, empty slice, invalid pool).",
         "effort": "small"
+      }
+    ],
+    "human_decisions": [
+      {
+        "proposal": "P4",
+        "requirement": "FR-002",
+        "description": "Interface documents idempotent re-registration; LRU always push_back. Decide implement-dedup vs relax-interface-doc. Interfaces out of scope."
       }
     ]
   },
-  "backup": ".specify/sync/backups/spec.md.2026-06-19.bak"
+  "interfaces_modified": false,
+  "code_modified": false,
+  "inputs_sha256": "8ac701c74b3a28225ef0c213d5be14640a4cee215900b57365eae2ca880ba81a",
+  "inputs_sha256_note": "Unchanged by spec/plan edits; hash tool does not walk .specify/specs/ (spec-location quirk)."
 }

@@ -1,65 +1,36 @@
-# Spec-Sync Phase B Proposals — `interfaces`
+# Sync Proposals: interfaces
 
-**Generated**: 2026-08-20 (Phase B)
+**Project**: interfaces
 **Spec**: `components/interfaces/specs/001-interfaces/spec.md`
-**Policy**: `.specify/sync/PHASE_B_POLICY.md`
-**Drift source**: `.specify/sync/drift-report.json` (2 drifted requirements, 0 not_implemented, 0 unspecced)
+**Source of truth for backfill**: the trait/type definitions in `components/interfaces/src/`.
 
-## Summary
+Each proposal is classified **BACKFILL** (code is correct → update spec), **ALIGN**
+(spec is correct → code must change; recorded as a task, no `.rs` edited here), or
+**HUMAN_DECISION** (intent unclear → leave for a human).
 
-| Direction | Count |
-|-----------|-------|
-| BACKFILL (spec → code) | 0 |
-| ALIGN (task, no code change) | 0 |
-| RESOLVED (code already fixed) | 2 |
-| BACKFILL-UNSPECCED | 0 |
-| HUMAN_DECISION | 0 |
+## BACKFILL (spec → matches code) — `approved: true`
 
-Both drift items were the same orphaned-module defect (`IExtendedMetadataStore` /
-`ExtendedMetadataStoreError` defined but never wired into `lib.rs`). Per the Phase B
-per-component note for `interfaces`, this defect was **already fixed on the main
-development thread**. Both items are verified present in the current source and marked
-**RESOLVED**. The spec's FR-014/FR-025 text already describes the implemented trait, so
-**no spec backfill is required and no spec.md is edited**.
+All of these are cases where the trait/type definitions are the authoritative,
+shipping behaviour and the spec text has simply fallen behind. Confident to apply.
 
----
+- **P1 — FR-008 `batch_lookup` signature.** Update spec.md:175 to `batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<Result<(), DispatcherError>>` and note the one-or-more-regions scatter semantics. Evidence: `src/idispatcher.rs:338-341`.
+- **P2 — FR-008 `copy_gpu_to_memory_async` signature.** Update spec.md:180 to `copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream)` with the contiguous-gather note. Evidence: `src/idispatcher.rs:460`.
+- **P3 — FR-008 add `batch_populate`.** Add method entry to FR-008. Evidence: `src/idispatcher.rs:427`.
+- **P4 — FR-008 add `tier_event_stats`.** Add method entry to FR-008. Evidence: `src/idispatcher.rs:575`.
+- **P5 — FR-018 add `TierEventStats`.** Add supporting-type entry (Copy+Default+PartialEq+Eq, 4 u64 fields). Evidence: `src/idispatcher.rs:190-202`, `src/lib.rs:33`.
+- **P6 — FR-017 `Command` 12 → 13 variants (add `FlushSync`).** Evidence: `src/iblock_device.rs:322,411`.
+- **P7 — FR-017 `Completion` 11 → 12 variants (add `FlushDone`).** Evidence: `src/iblock_device.rs:439,501`.
+- **P8 — FR-017 `ReadWriteStats` histograms + `IO_SIZE_BUCKETS`.** Document `read_size_buckets`/`write_size_buckets`, the `IO_SIZE_BUCKETS = 25` const (re-exported `src/lib.rs:94`), and the `size_bucket`/`bucket_lower_bound`/`merge_from` helpers. Evidence: `src/iblock_device.rs:139,159-161,177,193,218`.
+- **P9 — FR-021 `FormatParams` "10-field" → "9-field".** Correct the count and enumerate the 9 fields. Evidence: `src/iextent_manager.rs:42-67`.
+- **P10 — FR-023 `LookupConfig` "10-field" → "12-field".** Correct the count; add `caller_wait` and `connection_teardown_timeout`. Evidence: `src/iremote_lookup.rs:29,50,57`.
+- **P11 — FR-014/FR-025 refresh stale note.** The top-of-file "Last Synced 2026-08-07 … Deferred (not applied)" note claims `IExtendedMetadataStore` is still an orphaned module. It is now wired in (`src/lib.rs:78,100`). Rewrite the note to record the resolution. Evidence: `src/lib.rs:78,100`, `src/iextended_metadata_store.rs:5,30`.
+- **P12 — New FR-035 for `IIpcServer` (unspecced backfill).** Add an FR documenting the interface (initialize/serve/shutdown/metrics_snapshot) and its supporting types (`IpcServerConfig` 4-field, `IpcError` 4-variant, `IpcMetricsSnapshot` 5-field), **with an explicit orphaned-module caveat** noting it is not yet declared/re-exported in `src/lib.rs` and that the `ipc-component` consumer is a latent build break until it is (see ALIGN-IFACE-001). Evidence: `src/iipc.rs:40-192`. This mirrors how FR-014 was historically documented while orphaned.
 
-## Proposal 1 — FR-014 `IExtendedMetadataStore` Interface
+## ALIGN (code → matches spec) — recorded as task, `approved: true` for the task, no `.rs` edited
 
-- **Direction**: RESOLVED (code already fixed on main thread)
-- **Reported drift**: Trait defined in `src/iextended_metadata_store.rs` but the module
-  was never declared (`mod`) or re-exported (`pub use`) in `src/lib.rs`, so it was not part
-  of the compiled crate (major; would break the `extended-metadata-store` consumer, masked
-  only because that crate was out-of-workspace).
-- **Verification (current source)**:
-  - `src/lib.rs:77` — `mod iextended_metadata_store;` (ungated) ✓
-  - `src/lib.rs:99` — `pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};` (ungated) ✓
-  - Trait defined at `src/iextended_metadata_store.rs:30` with `put`/`get`/`delete`/`iterate_all`/`force_flush`.
-- **Rationale**: The trait is now compiled into and exported from the crate exactly as
-  FR-014 describes. Spec text is already accurate.
-- **before / after**: n/a (no spec edit).
+- **P13 — ALIGN-IFACE-001: wire `iipc` into `src/lib.rs`.** The intended contract (evidenced by the fully-documented interface, its tests, and a real consumer) is that `IIpcServer` et al. are part of the exported `interfaces` API. The code defect is the missing `mod iipc;` + `pub use`. Fixing it is a `.rs` change, which this sync must not make, so it is appended to `align-tasks.md`. Evidence: `src/lib.rs` (missing decl), `src/iipc.rs`, `components/ipc-component/src/lib.rs:33`.
 
----
+## HUMAN_DECISION
 
-## Proposal 2 — FR-025 Supporting Types: `ExtendedMetadataStoreError`
-
-- **Direction**: RESOLVED (code already fixed on main thread)
-- **Reported drift**: 4-variant enum existed but lived in the undeclared module, so it was
-  not exported. Same orphaned-module root cause as FR-014.
-- **Verification (current source)**:
-  - Enum with exactly `NotFound`, `StorageError`, `CapacityExhausted`, `ValueTooLarge` at
-    `src/iextended_metadata_store.rs:5-15` ✓
-  - Re-exported via the ungated `pub use` at `src/lib.rs:99` ✓
-- **Rationale**: The enum is now exported with exactly the 4 variants FR-025 requires. Spec
-  text is already accurate.
-- **before / after**: n/a (no spec edit).
-
----
-
-## Note (informational, no action taken)
-
-The spec header's `Last Synced 2026-08-07` block (`spec.md:17-22`) still carries a stale
-"**Deferred (not applied):** FR-014/FR-025 ... remains an orphaned module" note that
-predates the main-thread fix. Per the Phase B policy for `interfaces` ("Spec needs no
-change"), the spec is **left untouched** this pass. Refreshing that historical sync note is
-optional cleanup for a future edit and is out of scope for this RESOLVED-only pass.
+- None. All findings are unambiguous documentation-vs-shipping-code drift or a clear
+  orphaned-module code defect with a single obvious fix.

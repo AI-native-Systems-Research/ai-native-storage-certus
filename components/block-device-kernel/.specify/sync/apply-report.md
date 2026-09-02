@@ -223,3 +223,74 @@ None this run.
 1. Review the corrected header note and new FR-027 in
    `specs/001-block-device-kernel/spec.md`.
 2. Implement the one-line async-latency fix per `align-tasks.md` (small effort).
+
+---
+
+# 2026-09-02 Re-verify (Spec-Sync)
+
+Component: `block-device-kernel`
+
+Mode: Spec-Sync re-verify (single component)
+
+Applied: 2026-09-02T21:28:14Z
+
+Source: `.specify/sync/drift-report.{json,md}` (regenerated 2026-09-02 against
+HEAD `2fc1cd3c` — 44 requirements checked, 42 aligned, 2 drifted,
+0 not-implemented, 0 unspecced).
+
+Pre-edit spec backup: `.specify/sync/backups/20260902T212814Z/spec.md`.
+
+**No `.rs` source was modified and no cargo command was run by this sync.**
+
+## Key finding
+
+The async-path telemetry-latency defect is **unchanged** at HEAD: `src/actor.rs:776`
+still calls `self.telemetry.record_op(0, op.bytes)`, so async `ReadAsync`/`WriteAsync`
+ops record 0 ns latency and FR-021/SC-006 do not hold for async IO. The FlushSync
+backfill (FR-027) from 2026-08-20 is confirmed landed in the spec and aligned in
+code — it is no longer unspecced, so the requirement count rose 43→44 and unspecced
+dropped 1→0.
+
+## Changes Made
+
+### Specs Updated
+
+| Spec | Requirement | Change Type | Direction |
+|------|-------------|-------------|-----------|
+| 001-block-device-kernel | Header `Last Synced` note | Modified (metadata) — recorded 2026-09-02 re-verification against HEAD `2fc1cd3c`, confirming the residual async defect is unchanged | metadata |
+
+No FR/SC requirement text was changed. FR-021/SC-006 remain correct as written;
+the defect is in code (ALIGN, not BACKFILL).
+
+### Align Tasks Generated
+
+1 task re-affirmed in `.specify/sync/align-tasks.md` ("2026-09-02 re-verify"
+section):
+
+- **FR-021 & SC-006 (moderate)** — `harvest_completions()` (`src/actor.rs:776`)
+  records 0 ns latency for async ops despite `InflightOp.start: Instant` being
+  populated. STILL OPEN — re-affirms the 2026-08-20 Phase B task. Suggested fix:
+  pass `op.start.elapsed().as_nanos() as u64`, mirroring the correct site at `:718`.
+
+### Unspecced Backfilled
+
+None this run (FlushSync/FR-027 already landed 2026-08-20).
+
+### Resolved / Human Decision
+
+None this run.
+
+## Counts
+
+| Category | Count |
+|----------|-------|
+| BACKFILL applied (drifted requirement) | 0 |
+| UNSPECCED backfilled | 0 |
+| ALIGN tasks | 1 (FR-021 + SC-006, re-affirmed / still open) |
+| RESOLVED | 0 |
+| HUMAN_DECISION | 0 |
+
+## Next Steps
+
+1. Implement the one-line async-latency fix per `align-tasks.md` (small effort),
+   then re-run spec-sync to clear FR-021/SC-006 to `clean`.

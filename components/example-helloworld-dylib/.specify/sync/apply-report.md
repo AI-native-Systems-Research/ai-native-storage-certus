@@ -113,3 +113,36 @@ FR-4 is spec→code drift: the spec is correct and behavior satisfies it, but th
 
 ## Verification
 - Edits confined to `.specify/sync/` (`proposals.md`, `proposals.json`, `apply-report.md`, `apply-report.json`, `align-tasks.md` note). No `specs/**` files changed (spec already correct). No `.rs` source modified; no cargo run.
+
+---
+
+# 2026-09-02 Re-analysis / Apply (HEAD 2fc1cd3c)
+
+**Mode**: spec-sync re-run (single component, 1 drift).
+**Based on**: `.specify/sync/drift-report.{json,md}` (2026-09-02T21:39:11Z regeneration) — 7 checked, 6 aligned, 1 drifted (FR-4, moderate), 0 not-implemented, 0 unspecced.
+**Inputs sha256**: `877b58eaa2d0cdd0761fb044882642ce04fa46eebe46261b9aac29f2e0a9fed1`
+
+## Specs Updated
+
+| Requirement | Change Type |
+|-------------|-------------|
+| (none) | — |
+
+No `spec.md` edited: FR-4 / Overview are already correct (static-rlib-embedding mechanism; no shared `.so`), so no BACKFILL was warranted.
+
+## Align Tasks
+
+| Spec | Requirement | Task | Severity | Status |
+|------|-------------|------|----------|--------|
+| 001-example-helloworld-dylib | FR-4 / Overview | `align-tasks.md` Task 2 — correct stale module doc comment `src/lib.rs:4-7` | Moderate | Open (re-confirmed 2026-09-02) |
+| 001-example-helloworld-dylib | plan.md Testing | `align-tasks.md` Task 1 — add automated dylib-loading integration test | Low | Open (re-confirmed 2026-09-02) |
+
+FR-4 is spec→code drift: the spec is correct and behavior satisfies it, but `src/lib.rs:4-7` still claims "dynamically link the same shared libraries". Classified ALIGN (not spec-lag). Per workflow constraints the `.rs` source is not edited; the doc fix stays queued.
+
+## Backups
+
+- **Spec `.md` files edited this run: 0 ⇒ no new backups required.** Pre-existing backups from the 2026-07-22 backfill remain: `backups/spec.md.bak`, `backups/plan.md.bak`, `backups/tasks.md.bak`.
+
+## Verification
+- Edits confined to `.specify/sync/` (`drift-report.{md,json}`, `proposals.{md,json}`, `apply-report.{md,json}`, `align-tasks.md`). No `specs/**` changed (spec already correct). No `.rs` source modified; no cargo run. Never touched `components/interfaces/**`.
+- **drift_status: drift** — actionable spec→code drift (FR-4) remains, queued as an ALIGN task and not auto-resolvable without a code edit.

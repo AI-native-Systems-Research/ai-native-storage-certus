@@ -1,57 +1,36 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Spec-Sync Phase B",
   "component": "block-device-kernel",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "drift_source": ".specify/sync/drift-report.{json,md} (regenerated 2026-08-20)",
+  "generated": "2026-09-02T21:28:14Z",
+  "mode": "Spec-Sync re-verify",
+  "git_commit": "2fc1cd3c",
+  "source": ".specify/sync/drift-report.{json,md} (regenerated 2026-09-02)",
+  "spec_backup": ".specify/sync/backups/20260902T212814Z/spec.md",
   "source_modified": false,
   "cargo_run": false,
-  "spec_backups": [
-    ".specify/sync/backups/001-block-device-kernel.spec.md.20260820T171219Z.bak"
-  ],
   "specs_updated": [
     {
       "spec": "001-block-device-kernel",
-      "requirement": "FR-027 (new)",
-      "change_type": "added",
-      "direction": "BACKFILL-UNSPECCED",
-      "detail": "FlushSync validated no-op (O_DIRECT|O_DSYNC durability); ns_id!=1 -> InvalidNamespace"
-    },
-    {
-      "spec": "001-block-device-kernel",
-      "requirement": "US2 acceptance scenario 5 (new)",
-      "change_type": "added",
-      "direction": "BACKFILL-UNSPECCED",
-      "detail": "FlushSync{ns_id:1} -> FlushDone(Ok); ns_id!=1 -> InvalidNamespace"
-    },
-    {
-      "spec": "001-block-device-kernel",
       "requirement": "Header Last-Synced note",
-      "change_type": "modified",
+      "change_type": "metadata",
       "direction": "metadata",
-      "detail": "Corrected the 2026-08-07 'telemetry defect fully fixed' claim to 'partial: sync paths + wait_for_cqe fixed, harvest_completions still records 0 ns for async ops; FR-021/SC-006 do not hold for async IO'"
+      "detail": "Recorded 2026-09-02 re-verification against HEAD 2fc1cd3c; confirmed the residual async telemetry-latency defect (src/actor.rs:776) is unchanged. No FR/SC text changed."
     }
   ],
-  "align_tasks_generated": [
+  "align_tasks": [
     {
-      "requirement": "FR-021 & SC-006",
+      "requirement": "FR-021 / SC-006",
       "severity": "moderate",
       "location": "src/actor.rs:776",
-      "detail": "harvest_completions() records 0 ns latency for async ops despite InflightOp.start:Instant being populated; single task covers both requirements (same root cause). Suggested fix mirrors the correct site at src/actor.rs:718."
+      "status": "open",
+      "detail": "harvest_completions() records 0 ns latency for async ops despite InflightOp.start: Instant being populated. Re-affirms the 2026-08-20 Phase B task. Fix: pass op.start.elapsed().as_nanos() as u64, mirroring the correct wait_for_cqe site at :718."
     }
   ],
-  "unspecced_backfilled": [
-    {
-      "feature": "Command::FlushSync handler",
-      "location": "src/actor.rs:233-247",
-      "backfilled_as": "FR-027 + US2 acceptance scenario 5"
-    }
-  ],
+  "unspecced_backfilled": [],
   "resolved": [],
   "human_decision": [],
   "counts": {
-    "backfill_drifted_applied": 0,
-    "unspecced_backfilled": 1,
+    "backfill_applied": 0,
+    "unspecced_backfilled": 0,
     "align_tasks": 1,
     "resolved": 0,
     "human_decision": 0

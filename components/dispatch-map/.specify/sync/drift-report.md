@@ -3,7 +3,7 @@ spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
 spec_sync_synced_at: 2026-09-02T20:45:00Z
 spec_sync_git_commit: 787b8263
-spec_sync_inputs_sha256: 2dbb7666aa9c2fce3bdfda40d947ddbb498f6dbd7c925015bffb300f66944b74
+spec_sync_inputs_sha256: 0aa8a860884245c2b347e583fae6388a2137e57cc1c6373266cf044aebd42ab1
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Dispatch-Map — Spec ↔ Implementation Drift Report

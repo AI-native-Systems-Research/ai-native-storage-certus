@@ -129,3 +129,60 @@ deleted, preserving the archival record while flagging them as non-authoritative
 2. Consider fully retiring spec-001 to an archive path (Recommendation 1) — the
    in-place annotations are the interim mitigation.
 3. Commit on the branch only — never to `unstable`.
+
+---
+
+# 2026-09-02 Re-analysis Apply Report
+
+Applied: 2026-09-02T21:46:01Z
+Component: remote-lookup-rdma-initiator
+Git commit: 2fc1cd3c
+Inputs sha256: 5f0bd4af9625e093efa50899b01081b2c33e96551f1671c2cd0644dde395a610 (stamp-time value; see the drift report's concurrency caveat — a parallel interfaces sync was in flight)
+Source: `.specify/sync/drift-report.{json,md}` (regenerated 2026-09-02T21:46:01Z)
+Mode: verify-and-reclassify (Markdown-only; no code edits)
+
+## Headline
+
+Spec-002 shipped behavior is fully aligned (22/23 FRs/SCs verified at
+`file:line`; component `src/` unchanged since 2026-07-30). The remaining item is
+the SC-004 benchmark doc-comment ALIGN task, still open — so this pass reports
+`drift_status: drift` honestly, correcting the 2026-08-07 "clean" headline that
+had folded the same still-open task under it.
+
+## Changes Made
+
+### Specs Updated (BACKFILL)
+
+_None._ Spec-002 text is accurate against the implementation; the SC-004 drift is
+code→spec (a stale comment), so there is nothing to backfill into the spec.
+
+### Code
+
+_None._ The only actionable item is a `.rs` doc-comment fix, out of scope for a
+Markdown-only apply.
+
+### Align Tasks
+
+Appended a `2026-09-02 Re-analysis` section to `align-tasks.md` re-confirming
+Task A (SC-004 bench header comment) as still open and carried forward. No new
+align work surfaced.
+
+## Backups
+
+None created this pass — no spec `.md` file was modified. (Pre-existing backups:
+`.specify/sync/backups/001-spec.md.bak`, `002-spec.md.bak`.)
+
+## Not Applied / Deferred
+
+| Item | Reason |
+|------|--------|
+| SC-004 bench-comment fix (`benches/push_telemetry.rs:1-18`) | `.rs` file — out of scope for Markdown-only apply; queued in align-tasks.md Task A |
+| Spec-001's 23 superseded FRs/SCs | By design — role wholesale-replaced by spec-002; stale FR-014/FR-015 self-annotations already annotated in place |
+
+## Next Steps
+
+1. Land align-task A (bench header comment reword) as an ordinary code change.
+2. Consider retiring spec-001 to an archive path (in-place annotations are the
+   interim mitigation).
+3. Re-run the hash tool if `src/`, `specs/`, or the interface change after this
+   report.

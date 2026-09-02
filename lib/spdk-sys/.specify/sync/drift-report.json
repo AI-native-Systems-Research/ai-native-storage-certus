@@ -1,13 +1,17 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T21:47:19Z",
   "project": "spdk-sys",
+  "component_dir": "lib/spdk-sys",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "93d8f87d4d729a816123bbb98f692785da1c957d5cad70a72ed7c641e956c3d4",
+  "drift_status": "drift",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 18,
     "aligned": 18,
-    "drifted": 2,
+    "drifted": 1,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced_features": 0
   },
   "specs": [
     {
@@ -16,29 +20,28 @@
       "aligned": 18,
       "drifted": [
         {
-          "requirement": "Post-relocation path reference",
-          "spec_text": "Crate relocated to lib/spdk-sys",
-          "actual": "align-tasks.md references old components/spdk-sys spec, drift-report, and tasks paths",
-          "location": "lib/spdk-sys/.specify/sync/align-tasks.md:11,14,29",
-          "severity": "minor"
-        },
-        {
-          "requirement": "Post-relocation path reference",
-          "spec_text": "Crate relocated to lib/spdk-sys",
-          "actual": "apply-report.md references old components/spdk-sys drift-report/spec/scope/backups paths",
-          "location": "lib/spdk-sys/.specify/sync/apply-report.md:4-7,11",
-          "severity": "minor"
+          "requirement": "Success Criteria (sanity-test coverage) + FR-3/FR-4/FR-5",
+          "spec_text": "cargo test -p spdk-sys passes all sanity tests (type sizes, field access, function pointer existence)",
+          "actual": "Sanity suite covers only spdk_env_opts, spdk_pci_addr, spdk_pci_id, spdk_pci_device and env/PCI fn-pointers; no P1 NVMe type or NVMe fn-pointer is exercised",
+          "location": "lib/spdk-sys/tests/bindings_sanity.rs:9-97",
+          "severity": "medium",
+          "resolution": "ALIGN (code-side test gap; open align-task, not resolved by weakening spec)"
         }
       ],
       "not_implemented": []
     }
   ],
-  "unspecced": [
+  "unspecced": [],
+  "resolved_this_run": [
     {
-      "feature": "spdk_nvme_ctrlr_cmd_abort_ext and spdk_nvme_ctrlr_get_max_xfer_size bindings",
-      "location": "lib/spdk-sys/build.rs",
-      "lines": "197, 220",
-      "suggested_spec": "Plausibly covered by FR-4 controller/admin ops but not named; consider an explicit FR for abort-in-flight and MDTS-derived max-transfer-size bindings used by the block-device actor."
+      "item": "Stale components/spdk-sys path references in align-tasks.md",
+      "location": "lib/spdk-sys/.specify/sync/align-tasks.md:11,14,29",
+      "resolution": "BACKFILL (paths corrected to lib/spdk-sys/...)"
+    },
+    {
+      "item": "spdk_nvme_ctrlr_cmd_abort_ext and spdk_nvme_ctrlr_get_max_xfer_size allowlisted but unnamed by any FR",
+      "location": "lib/spdk-sys/build.rs:197,220",
+      "resolution": "BACKFILL (named explicitly in FR-4)"
     }
   ],
   "conflicts": []

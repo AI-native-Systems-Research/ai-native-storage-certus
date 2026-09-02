@@ -1,58 +1,47 @@
 {
   "project": "dispatcher-p2p",
   "spec": "001-gpudirect-cold-path",
-  "applied": "2026-08-20",
-  "source": ".specify/sync/drift-report.json",
+  "applied": "2026-09-02T21:32:13Z",
+  "source": ".specify/sync/proposals.json",
   "backups": [
     {
-      "spec": "specs/001-gpudirect-cold-path/spec.md",
-      "backup": ".specify/sync/backups/specs/001-gpudirect-cold-path/spec.md.bak"
+      "artifacts": "prior drift-report/proposals/apply-report (.md + .json)",
+      "backup": ".specify/sync/backups/20260902T213213Z/"
     }
   ],
-  "specs_updated": [
-    { "requirement": "SC-006", "change_type": "BACKFILL_REWORD" },
-    { "requirement": "FR-018", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-019", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-020", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-021", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-022", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "FR-023", "change_type": "BACKFILL_UNSPECCED_NEW_FR" },
-    { "requirement": "Key Entities", "change_type": "BACKFILL_UNSPECCED_ADD" },
-    { "requirement": "User Story 5", "change_type": "BACKFILL_UNSPECCED_ADD_SCENARIOS" },
-    { "requirement": "metadata:Last-Synced", "change_type": "METADATA" }
-  ],
+  "specs_updated": [],
   "align_tasks_generated": [
     {
       "requirement": "FR-017",
       "severity": "moderate",
-      "summary": "Increment eviction_dropped at all live eviction publish sites so eviction_dropped_count() reflects reality; thread shared counter into background evictors.",
+      "status": "pre-existing (2026-08-20), re-verified 2026-09-02",
+      "summary": "Increment eviction_dropped at all live eviction publish sites (lib.rs:603-645; background.rs:414-419,611-616) so eviction_dropped_count() reflects reality; thread shared Arc<AtomicU64> into background evictors.",
       "files_to_modify": [
         "components/dispatcher-p2p/src/lib.rs",
         "components/dispatcher-p2p/src/background.rs"
       ]
     }
   ],
-  "unspecced_backfilled": [
-    { "feature": "ParallelBackgroundWriter", "location": "src/background.rs:154-219", "requirement": "FR-018" },
-    { "feature": "BackgroundEvictor", "location": "src/background.rs:303-488", "requirement": "FR-019" },
-    { "feature": "MemoryTierEvictor", "location": "src/background.rs:490-654", "requirement": "FR-020" },
-    { "feature": "clear_memory_tier()", "location": "src/lib.rs:2606-2637", "requirement": "FR-021" },
-    { "feature": "lookup_async()", "location": "src/lib.rs:2044-2110", "requirement": "FR-022" },
-    { "feature": "pins::PinnedKeys", "location": "src/pins.rs:26-57", "requirement": "FR-023" }
-  ],
+  "unspecced_backfilled": [],
   "resolved": [],
   "human_decision": [
     {
       "item": "cold_staging_slots / cold_staging_buf_bytes",
-      "location": "components/interfaces/src/idispatcher.rs:81-87",
-      "reason": "Unreferenced anywhere in dispatcher-p2p/src/ (grep-verified). Dead config on this component's surface; 64-slot ring governed by FR-003. Not backfilled to avoid inventing behavior. Human to wire in or remove."
+      "location": "components/interfaces/src/idispatcher.rs:84,87",
+      "reason": "Unreferenced anywhere in dispatcher-p2p/src/ (grep-verified). Ring size governed by FR-003 P2P_RING_SLOTS=64. Out of scope for this sync (interfaces not editable). Human to wire in or remove."
+    },
+    {
+      "item": "FR-022 vs FR-023 lookup_async pin lifetime",
+      "location": "components/dispatcher-p2p/src/lib.rs:2100",
+      "reason": "lookup_async releases the read pin at submission before caller sync; FR-023 says the pin must outlive completion for the local hot-path async copy. Code matches FR-022's caller-sync contract; FR-023 scope claim in tension. Human to confirm intent (narrow FR-023) or treat as latent race (code ALIGN)."
     }
   ],
   "counts": {
-    "backfill_applied": 1,
+    "backfill_applied": 0,
     "align_tasks": 1,
-    "unspecced_backfilled": 6,
+    "unspecced_backfilled": 0,
     "resolved": 0,
-    "human_decision": 1
-  }
+    "human_decision": 2
+  },
+  "drift_status": "drift"
 }

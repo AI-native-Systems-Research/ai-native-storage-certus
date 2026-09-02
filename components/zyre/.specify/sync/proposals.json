@@ -1,137 +1,20 @@
 {
-  "generated": "2026-07-14T19:52:47Z",
-  "based_on": "2026-07-14T19:52:47Z",
+  "generated": "2026-09-02T21:46:22Z",
+  "based_on": "2026-09-02T21:46:22Z",
   "mode": "batch",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "7a057ebf8cfbae964be24a2265f94f6b8af446ee3ecb18d3c317d1281b959d9c",
   "notes": [
-    "Prior P1 (drop _multi) and P3 (document ZyreEvent accessors) were genuinely applied and are now resolved.",
-    "Prior P2 (rewrite tasks.md) was recorded applied:true but only partially landed — task bodies still reference deleted files. Re-opened as P2 below.",
-    "plan.md staleness is a new item not covered by the 2026-07-09 run."
+    "Clean run: spec 001-zyre-bindings is fully aligned with the implementation. No BACKFILL, ALIGN, or HUMAN_DECISION items.",
+    "Prior backfills (plan.md rewrite, ZyreEvent accessor docs, _multi removal) already landed in the current spec bundle."
   ],
   "summary": {
-    "backfill": 4,
+    "backfill": 0,
     "align": 0,
-    "human_decision": 1,
+    "human_decision": 0,
     "new_specs": 0,
     "remove_from_spec": 0,
-    "follow_ups": 3
+    "follow_ups": 0
   },
-  "proposals": [
-    {
-      "id": "P1",
-      "spec": "001-zyre-bindings",
-      "requirement": "plan.md architecture (builder + module layout)",
-      "direction": "BACKFILL",
-      "status": "pending",
-      "confidence": "HIGH",
-      "spec_text": "plan.md:8 'builder configuration'; plan.md:34 '6 focused modules (node, event, builder, error, peer, ffi)'; plan.md:57-70 source tree lists event.rs/builder.rs/error.rs/peer.rs and only integration.rs.",
-      "actual": "No builder (public-fields NodeConfig + Default); zyre crate has lib.rs/node.rs/ffi.rs; value types + IZyre/IZyreNode traits live in interfaces/src/izyre.rs; tests are integration.rs + api_safety.rs.",
-      "resolution": {
-        "spec_changes": [
-          "plan.md:8 — drop 'builder configuration'; describe public-field config structs validated at create_node; factory returns Box<dyn IZyreNode>",
-          "plan.md:34 — rewrite module note to lib.rs/node.rs/ffi.rs + types in interfaces crate",
-          "plan.md:57-70 — replace source tree (remove event.rs/builder.rs/error.rs/peer.rs; add api_safety.rs; show interfaces/src/izyre.rs)",
-          "plan.md:82 — add Structure Decision sentence on interfaces-crate type location and crate-private ZyreNode"
-        ]
-      },
-      "rationale": "Documentation catch-up to shipped code and reviewed spec artifacts; no code impact. Highest value because CLAUDE.md points contributors at plan.md.",
-      "resolves": ["D-1 (plan.md)"]
-    },
-    {
-      "id": "P2",
-      "spec": "001-zyre-bindings",
-      "requirement": "tasks.md task bodies (D-2)",
-      "direction": "BACKFILL",
-      "status": "pending",
-      "reopened_from": "2026-07-09 P2 (marked applied but body edits did not land)",
-      "confidence": "HIGH",
-      "spec_text": "Task bodies reference src/event.rs, src/builder.rs, src/error.rs, src/peer.rs and 'builder pattern' (T015:67, goal:89/91, T027:95, T028:96, T031-T033:102-104, T043:143, T046:149, notes:218/233/237).",
-      "actual": "Types + traits in interfaces/src/izyre.rs; component glue in zyre/src/{lib,node,ffi}.rs; NodeConfig is public-fields + Default, validated by create_node.",
-      "resolution": {
-        "spec_changes": [
-          "Replace event.rs/builder.rs/error.rs/peer.rs references with interfaces/src/izyre.rs and zyre/src/{lib,node,ffi}.rs",
-          "Replace 'builder pattern'/'builder validates config' with public-field NodeConfig + Default validated by create_node",
-          "Leave the :39-44 superseded-design note and the T050 strike as-is"
-        ],
-        "corrections": [
-          "Update prior proposals.json P2 status from applied:true to partially_applied/re-opened"
-        ]
-      },
-      "rationale": "Completes the catch-up the prior P2 claimed but did not fully apply; no code impact.",
-      "resolves": ["D-2 (tasks.md)"]
-    },
-    {
-      "id": "P3",
-      "spec": "001-zyre-bindings",
-      "requirement": "FR-008 wording",
-      "direction": "BACKFILL",
-      "status": "pending",
-      "confidence": "HIGH",
-      "spec_text": "spec.md:94 — 'thin wrapper over zyre_recv'",
-      "actual": "recv() uses zyre_event_new/zyre_event_destroy (node.rs:180-191); internally receives via zyre_recv.",
-      "resolution": {
-        "spec_changes": [
-          "spec.md:94 — reword parenthetical to 'wraps zyre_event_new, the typed-event API, which internally receives via zyre_recv'"
-        ]
-      },
-      "rationale": "Code choice (typed parsing) is correct; only the spec wording is imprecise."
-    },
-    {
-      "id": "P4",
-      "spec": "001-zyre-bindings",
-      "requirement": "research.md:84 stale phrasing",
-      "direction": "BACKFILL",
-      "status": "pending",
-      "confidence": "HIGH",
-      "spec_text": "research.md:84 — 'InvalidConfig(String) — builder validation failure'",
-      "actual": "No builder; validation is NodeConfig::validate invoked by create_node.",
-      "resolution": {
-        "spec_changes": [
-          "research.md:84 — 'InvalidConfig(String) — config validation failure (from NodeConfig::validate)'"
-        ]
-      },
-      "rationale": "One-word correction consistent with the no-builder decision at research.md:56."
-    },
-    {
-      "id": "P5",
-      "spec": "001-zyre-bindings",
-      "requirement": "ZyreEvent::Stop reachability",
-      "direction": "HUMAN_DECISION",
-      "status": "resolved",
-      "decision": "B (make STOP observable) — implemented 2026-07-14 after tracing the zyre C source: STOP is a graceful end-of-stream sentinel the actor enqueues on stop() (zyre_node.c:337-339), not an internal-only artifact.",
-      "confidence": "MEDIUM",
-      "spec_text": "ZyreEvent::Stop documented as 'the local node has stopped'.",
-      "actual": "recv/try_recv return NotStarted once stop() flips started (node.rs:114-119 vs :180-183), so Stop is undeliverable through the public API.",
-      "options": [
-        { "id": "A", "summary": "Document STOP as internal-only (not surfaced via recv); smallest change." },
-        { "id": "B", "summary": "Make STOP observable: don't gate recv immediately / drain the pending STOP before flipping started; needs a test." }
-      ],
-      "questions": [
-        "Is any consumer expected to observe ZyreEvent::Stop via recv, or is STOP purely a C-layer artifact the binding can hide?",
-        "If hidden, should the Stop variant stay in the public enum (completeness/SC-004) or be removed?"
-      ],
-      "leaning": "A (superseded — C-source trace showed STOP is a real end-of-stream sentinel, so B is the faithful mapping)",
-      "resolution": {
-        "code_changes": [
-          "interfaces/src/izyre.rs — add ZyreError::Stopped + Display; document terminal Stop on ZyreEvent::Stop / IZyreNode::{stop,recv,try_recv}",
-          "zyre/src/node.rs — replace bool started with Cell<State>{Created,Running,Draining,Done}; stop() -> Draining; recv() drains then -> Done on Stop; try_recv() Ok(None) when Done; ensure_running() guard for join/leave/shout/whisper"
-        ],
-        "spec_changes": [
-          "contracts/izyre.md — fixed consumer example (stop-then-drain) + receive-lifecycle paragraph",
-          "data-model.md — state field + Created/Running/Draining/Done transitions + Stop-sentinel invariant"
-        ],
-        "tests": [
-          "zyre/src/node.rs — recv_before_start_is_not_started (unit)",
-          "zyre/tests/integration.rs — stop_delivers_terminal_stop_event (drain + Stopped/Ok(None))"
-        ]
-      },
-      "applied": true,
-      "applied_at": "2026-07-14"
-    }
-  ],
-  "follow_ups": [
-    { "sc": "SC-001", "status": "resolved", "applied_at": "2026-07-14", "note": "added round_trip_within_two_seconds asserting A->B->A within 2s; discovery/whisper tests resend-in-loop; ZYRE_TEST_TIMEOUT_SCALE knob for valgrind" },
-    { "sc": "SC-003", "status": "resolved", "applied_at": "2026-07-14", "note": "from-scratch cargo build -p zyre incl. bindgen = 2.27s (<5min); C-deps build separate" },
-    { "sc": "SC-005", "status": "resolved", "applied_at": "2026-07-14", "note": "valgrind harness run-valgrind.sh + valgrind.supp; memcheck over lib+integration = 0 errors/0 bytes lost attributable to bindings; Miri inapplicable (FFI)" },
-    { "sc": "fire-and-forget", "status": "resolved", "applied_at": "2026-07-14", "note": "whisper_to_departed_peer_is_fire_and_forget: A discovers B, B departs, A's whisper to the departed UUID returns Ok (spec.md:81)" }
-  ]
+  "proposals": []
 }

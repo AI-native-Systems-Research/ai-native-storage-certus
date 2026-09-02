@@ -1,36 +1,26 @@
 {
-  "generated": "2026-08-20",
-  "phase": "B",
+  "generated": "2026-09-02T21:52:26Z",
   "project": "interfaces",
   "spec": "components/interfaces/specs/001-interfaces/spec.md",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
   "summary": {
-    "backfill": 0,
-    "align": 0,
-    "resolved": 2,
-    "backfill_unspecced": 0,
+    "backfill": 11,
+    "backfill_unspecced": 1,
+    "align": 1,
     "human_decision": 0
   },
   "proposals": [
-    {
-      "requirement": "FR-014",
-      "spec_id": "001-interfaces",
-      "title": "IExtendedMetadataStore Interface",
-      "direction": "RESOLVED",
-      "rationale": "Reported as a major defect: the IExtendedMetadataStore trait was defined in src/iextended_metadata_store.rs but the module was never declared or re-exported in src/lib.rs, so it was not part of the compiled crate. Per Phase B policy this defect was ALREADY FIXED on the main development thread. Verified in current source: src/lib.rs:77 declares `mod iextended_metadata_store;` (ungated) and src/lib.rs:99 has `pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};` (ungated). The trait (put/get/delete/iterate_all/force_flush) is defined at src/iextended_metadata_store.rs:30 and is now exported. Spec FR-014 text already correctly describes the implemented trait, so no spec change is required.",
-      "location": "src/lib.rs:77 (mod), src/lib.rs:99 (pub use); definition src/iextended_metadata_store.rs:30",
-      "before": null,
-      "after": null
-    },
-    {
-      "requirement": "FR-025",
-      "spec_id": "001-interfaces",
-      "title": "Supporting Types - Extended Metadata Store (ExtendedMetadataStoreError)",
-      "direction": "RESOLVED",
-      "rationale": "Same orphaned-module root cause as FR-014: the 4-variant ExtendedMetadataStoreError enum (NotFound, StorageError, CapacityExhausted, ValueTooLarge) existed but was not exported because its module was undeclared. Per Phase B policy this was ALREADY FIXED on the main thread. Verified: the enum with exactly those 4 variants is defined at src/iextended_metadata_store.rs:5-15 and is re-exported by the ungated `pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};` at src/lib.rs:99. Spec FR-025 text already matches the implementation, so no spec change is required.",
-      "location": "src/iextended_metadata_store.rs:5 (enum); src/lib.rs:99 (pub use)",
-      "before": null,
-      "after": null
-    }
+    { "id": "P1", "requirement": "FR-008", "title": "batch_lookup signature", "direction": "BACKFILL", "approved": true, "location": "src/idispatcher.rs:338-341", "rationale": "Spec &[(CacheKey, IpcHandle)] -> actual &[(CacheKey, Vec<IpcHandle>)]; per-key one-or-more GPU regions." },
+    { "id": "P2", "requirement": "FR-008", "title": "copy_gpu_to_memory_async signature", "direction": "BACKFILL", "approved": true, "location": "src/idispatcher.rs:460", "rationale": "Spec ipc_handle: IpcHandle -> actual regions: &[IpcHandle]; N regions gathered contiguously into one slot." },
+    { "id": "P3", "requirement": "FR-008", "title": "add batch_populate", "direction": "BACKFILL", "approved": true, "location": "src/idispatcher.rs:427", "rationale": "Method exists in code, absent from spec." },
+    { "id": "P4", "requirement": "FR-008", "title": "add tier_event_stats", "direction": "BACKFILL", "approved": true, "location": "src/idispatcher.rs:575", "rationale": "Method exists in code, absent from spec." },
+    { "id": "P5", "requirement": "FR-018", "title": "add TierEventStats supporting type", "direction": "BACKFILL", "approved": true, "location": "src/idispatcher.rs:190-202", "rationale": "Copy+Default+PartialEq+Eq, 4 u64 fields; re-exported src/lib.rs:33; not in FR-018." },
+    { "id": "P6", "requirement": "FR-017", "title": "Command 12 -> 13 variants (FlushSync)", "direction": "BACKFILL", "approved": true, "location": "src/iblock_device.rs:322,411", "rationale": "Adds FlushSync { ns_id: u32 }." },
+    { "id": "P7", "requirement": "FR-017", "title": "Completion 11 -> 12 variants (FlushDone)", "direction": "BACKFILL", "approved": true, "location": "src/iblock_device.rs:439,501", "rationale": "Adds FlushDone { handle, result }." },
+    { "id": "P8", "requirement": "FR-017", "title": "ReadWriteStats histograms + IO_SIZE_BUCKETS", "direction": "BACKFILL", "approved": true, "location": "src/iblock_device.rs:139,159-161,177,193,218", "rationale": "read/write size histograms, IO_SIZE_BUCKETS=25 const (re-exported lib.rs:94), size_bucket/bucket_lower_bound/merge_from helpers." },
+    { "id": "P9", "requirement": "FR-021", "title": "FormatParams 10-field -> 9-field", "direction": "BACKFILL", "approved": true, "location": "src/iextent_manager.rs:42-67", "rationale": "Actual has 9 fields; correct count and enumerate." },
+    { "id": "P10", "requirement": "FR-023", "title": "LookupConfig 10-field -> 12-field", "direction": "BACKFILL", "approved": true, "location": "src/iremote_lookup.rs:29,50,57", "rationale": "Adds caller_wait: Option<Duration> and connection_teardown_timeout: Duration." },
+    { "id": "P11", "requirement": "FR-014/FR-025", "title": "refresh stale orphaned-module note", "direction": "BACKFILL", "approved": true, "location": "src/lib.rs:78,100", "rationale": "IExtendedMetadataStore is now declared and re-exported; the 2026-08-07 'Deferred (not applied)' note is stale." },
+    { "id": "P12", "requirement": "FR-035 (new)", "title": "IIpcServer + IpcServerConfig/IpcError/IpcMetricsSnapshot (unspecced)", "direction": "BACKFILL", "approved": true, "location": "src/iipc.rs:40-192", "rationale": "Unspecced interface; document with orphaned-module caveat (not yet declared/re-exported in lib.rs; ipc-component consumer is a latent build break until wired). Mirrors historical FR-014 handling." },
+    { "id": "P13", "requirement": "ALIGN-IFACE-001", "title": "wire mod iipc; + pub use into src/lib.rs", "direction": "ALIGN", "approved": true, "location": "src/lib.rs (missing decl), src/iipc.rs, components/ipc-component/src/lib.rs:33", "rationale": "Code defect: IIpcServer et al. intended to be exported but module is undeclared. Fix is a .rs change; recorded in align-tasks.md, not applied by this sync." }
   ]
 }

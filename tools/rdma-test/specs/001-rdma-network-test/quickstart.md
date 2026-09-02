@@ -71,7 +71,7 @@ rdma-test client -a 10.0.0.1 -t latency -s 64 -n 100000
 ### JSON Output (for CI)
 
 ```bash
-rdma-test client -a 10.0.0.1 --output json | jq .results.throughput.bandwidth_gbps
+rdma-test client -a 10.0.0.1 --output json | jq .results.write.bandwidth_gbps
 ```
 
 ### Remote Launch via SSH

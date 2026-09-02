@@ -5,6 +5,15 @@
   "source": ".specify/sync/drift-report.{json,md}",
   "no_source_modified": true,
   "cargo_run": false,
+  "last_verified": {
+    "at": "2026-09-02T21:39:18Z",
+    "mode": "re-verification+stamp",
+    "git_commit": "2fc1cd3c",
+    "inputs_sha256": "44b753dd84f804f5678b32c34f6c26da2595b73203fc4cb56d8097f6b4302c5f",
+    "drift_status": "drift",
+    "result": "All 2026-08-20 findings re-confirmed against source; FR-018 logging ALIGN item still open; no new spec/code changes applied; drift report stamped.",
+    "open_align_items": ["002-remote-lookup-rdma/FR-018 (logging on both on_wire drop arms)", "US7 zyre-Exit mesh test (tasks.md T025)"]
+  },
   "summary": {
     "backfill_applied": 5,
     "align_tasks": 1,

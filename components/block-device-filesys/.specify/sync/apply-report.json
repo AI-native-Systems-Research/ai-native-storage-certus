@@ -1,42 +1,66 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Phase B spec-sync",
+  "generated": "2026-09-02",
+  "phase": "spec-sync re-run",
   "component": "block-device-filesys",
-  "spec_edited": "specs/001-block-device-filesys/spec.md",
-  "backup": ".specify/sync/backups/specs/001-block-device-filesys/spec.md.bak",
+  "specs_edited": [
+    "specs/001-block-device-filesys/spec.md",
+    "specs/001-block-device-filesys/data-model.md"
+  ],
+  "backup": ".specify/sync/backups/20260902T212901Z/",
   "source_changed": false,
   "cargo_run": false,
   "counts": {
-    "backfill_applied": 1,
-    "backfill_unspecced": 1,
+    "backfill_applied": 6,
+    "backfill_unspecced": 0,
     "align_tasks": 0,
     "resolved": 0,
     "human_decision": 0
   },
   "specs_updated": [
     {
-      "requirement": "FR-015",
+      "item": "EDGE-SQ-FULL",
+      "artifact": "spec.md",
       "change_type": "BACKFILL",
-      "description": "Softened claim: create()'s doc example is intentionally ```ignore (illustrative-only); only DeviceConfig::new is runnable/compiled. Added 2026-08-20 correction note."
+      "description": "Edge case rewritten: SQ-full surfaces an error Completion to the caller (matches FR-002/code), not back-pressure-by-waiting."
     },
     {
-      "requirement": "FR-023",
-      "change_type": "BACKFILL-UNSPECCED",
-      "description": "New FR documenting reserved pub(crate) config mutators set_file_path/set_block_size/set_num_blocks as intentional, non-public, outside the functional contract."
+      "item": "DM-FILE-PATH-TYPE",
+      "artifact": "data-model.md",
+      "change_type": "BACKFILL",
+      "description": "file_path RwLock -> Mutex."
     },
     {
-      "requirement": "metadata:Last Synced",
+      "item": "DM-PROVIDES",
+      "artifact": "data-model.md",
+      "change_type": "BACKFILL",
+      "description": "Provides [IBlockDevice] -> [IBlockDevice, IBlockDeviceAdmin]."
+    },
+    {
+      "item": "DM-RING-TYPE",
+      "artifact": "data-model.md",
+      "change_type": "BACKFILL",
+      "description": "ring IoUring -> Option<IoUring>; added shutdown_requested and feature-gated telemetry; noted struct is FilesysHandler."
+    },
+    {
+      "item": "DM-INFLIGHT-START",
+      "artifact": "data-model.md",
+      "change_type": "BACKFILL",
+      "description": "start_ns (stale defect) -> start: Instant recorded on completion; removed obsolete align-task/defect reference (FR-019 fix)."
+    },
+    {
+      "item": "DM-CONFIGURED-STATE",
+      "artifact": "data-model.md",
+      "change_type": "BACKFILL",
+      "description": "Configured lifecycle step reworded to create(...); set_* noted as reserved dead code (FR-023)."
+    },
+    {
+      "item": "metadata:Last Synced",
+      "artifact": "spec.md",
       "change_type": "METADATA",
-      "description": "Updated to 2026-08-20 Phase B; prior 2026-08-07 note retained."
+      "description": "Recorded the 2026-09-02 re-run; prior notes retained."
     }
   ],
   "align_tasks_generated": [],
-  "unspecced_backfilled": [
-    {
-      "feature": "set_file_path / set_block_size / set_num_blocks internal setters (pub(crate), #[allow(dead_code)])",
-      "location": "src/lib.rs:95-109",
-      "disposition": "Backfilled as FR-023 (reserved internal mutators; not public API; no acceptance scenario)."
-    }
-  ],
+  "unspecced_backfilled": [],
   "resolved": []
 }

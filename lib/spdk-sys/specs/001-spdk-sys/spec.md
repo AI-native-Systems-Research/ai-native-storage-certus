@@ -49,7 +49,7 @@ This crate is consumed by higher-level safe wrappers (`spdk-env`, `block-device-
 | FR-1 | Generate Rust bindings for SPDK environment API (`spdk_env_opts_init`, `spdk_env_init`, `spdk_env_fini`) | P1 |
 | FR-2 | Generate bindings for PCI enumeration and device accessor functions (`spdk_pci_*`) | P1 |
 | FR-3 | Generate bindings for NVMe probe/attach/detach lifecycle | P1 |
-| FR-4 | Generate bindings for NVMe controller operations (namespace mgmt, qpair alloc, admin commands) | P1 |
+| FR-4 | Generate bindings for NVMe controller operations (namespace mgmt, qpair alloc, admin commands, in-flight command abort via `spdk_nvme_ctrlr_cmd_abort_ext`, MDTS-derived max transfer size via `spdk_nvme_ctrlr_get_max_xfer_size`) | P1 |
 | FR-5 | Generate bindings for NVMe I/O operations (read, write, write_zeroes, flush, completion processing) | P1 |
 | FR-6 | Generate bindings for DMA memory allocation (`spdk_dma_zmalloc`, `spdk_dma_free`, `spdk_zmalloc`, `spdk_free`) | P1 |
 | FR-7 | Export all necessary SPDK/DPDK/system linker directives | P1 |

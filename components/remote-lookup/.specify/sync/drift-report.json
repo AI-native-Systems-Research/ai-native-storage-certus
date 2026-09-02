@@ -1,5 +1,8 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T21:39:18Z",
+  "spec_sync_drift_status": "drift",
+  "spec_sync_git_commit": "2fc1cd3c",
+  "spec_sync_inputs_sha256": "44b753dd84f804f5678b32c34f6c26da2595b73203fc4cb56d8097f6b4302c5f",
   "project": "remote-lookup",
   "summary": {
     "specs_analyzed": 2,

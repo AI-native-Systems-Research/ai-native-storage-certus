@@ -1,33 +1,27 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T21:32:13Z",
   "project": "dispatcher-p2p",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 23,
-    "aligned": 21,
-    "drifted": 2,
+    "requirements_checked": 29,
+    "aligned": 28,
+    "drifted": 1,
     "not_implemented": 0,
-    "unspecced_features": 7
+    "unspecced_features": 1
   },
   "specs": [
     {
       "id": "001-gpudirect-cold-path",
       "title": "GPUDirect Storage Cold Path",
-      "aligned": 21,
+      "aligned": 28,
       "drifted": [
         {
           "requirement": "FR-017",
           "spec_text": "the event MUST be silently dropped AND counted, and the running drop count MUST be readable and reset via eviction_dropped_count().",
-          "actual": "The drop counter (eviction_dropped.fetch_add) lives ONLY inside emit_eviction, which is #[allow(dead_code)] with no call sites (lib.rs:228-236). The live eviction paths (evict_for_space_inner lib.rs:603-646; BackgroundEvictor::evictor_loop background.rs:415; MemoryTierEvictor::evictor_loop background.rs:612) all publish via `let _ = tx.try_send(...)`, discarding the Err without incrementing eviction_dropped. So eviction_dropped_count() (lib.rs:224-226) always returns 0. The channel/try_send/non-blocking parts of FR-017 are correct; only the drop-count guarantee is unmet.",
-          "location": "components/dispatcher-p2p/src/lib.rs:224-236,603-646; components/dispatcher-p2p/src/background.rs:415,612",
-          "severity": "moderate"
-        },
-        {
-          "requirement": "SC-006",
-          "spec_text": "Initialization panics with a clear diagnostic when P2P ring allocation fails (GDRCopy/BAR1 unavailable).",
-          "actual": "Initialization does NOT panic; it logs a non-fatal diagnostic ('P2P ring unavailable, cold reads use DRAM path', lib.rs:1209-1213). The panic is deferred to the first cold batch_lookup via .expect(...) (lib.rs:1752-1755). This matches FR-006 and User Story 2 AC-1, so the drift is between SC-006's wording and the rest of the spec, not a code defect. Recommend rewording SC-006.",
-          "location": "components/dispatcher-p2p/src/lib.rs:1209-1213,1752-1755",
-          "severity": "minor"
+          "actual": "The drop counter (eviction_dropped.fetch_add) lives ONLY inside emit_eviction, which is #[allow(dead_code)] with no call sites (lib.rs:228-236). Every live eviction publish site uses a bare `let _ = tx.try_send(...)` that discards the Err without incrementing: evict_for_space_* inline (lib.rs:603-607,619-623,634-645); BackgroundEvictor::evictor_loop (background.rs:414-419); MemoryTierEvictor::evictor_loop (background.rs:611-616). So eviction_dropped_count() (lib.rs:224-226) always returns 0. Channel/try_send/non-blocking/silent-drop parts are correct; only the drop-count guarantee is unmet.",
+          "location": "components/dispatcher-p2p/src/lib.rs:224-236,602-648; components/dispatcher-p2p/src/background.rs:414-419,611-616",
+          "severity": "moderate",
+          "resolution": "ALIGN (code fix, tracked in align-tasks.md; not applied by sync)"
         }
       ],
       "not_implemented": []
@@ -35,47 +29,17 @@
   ],
   "unspecced": [
     {
-      "feature": "MemoryTierEvictor — proactive background DRAM->SSD demotion sweep (config memory_tier_eviction_*)",
-      "location": "components/dispatcher-p2p/src/background.rs",
-      "lines": "490-654",
-      "suggested_spec": "Add FR for proactive memory-tier demotion; FR-017 only covers the event, not the sweep."
-    },
-    {
-      "feature": "BackgroundEvictor — SSD extent eviction at utilization threshold (config ssd_eviction_*)",
-      "location": "components/dispatcher-p2p/src/background.rs",
-      "lines": "303-488",
-      "suggested_spec": "Add FR for SSD capacity reclamation / watermarks."
-    },
-    {
-      "feature": "ParallelBackgroundWriter — write-through persistence memory-tier->SSD, one thread/drive",
-      "location": "components/dispatcher-p2p/src/background.rs",
-      "lines": "154-219",
-      "suggested_spec": "Spec the write/persistence path (spec is cold-read-only)."
-    },
-    {
-      "feature": "clear_memory_tier() — flush entire memory tier",
-      "location": "components/dispatcher-p2p/src/lib.rs",
-      "lines": "2606+",
-      "suggested_spec": "Add FR or note as admin/maintenance op."
-    },
-    {
-      "feature": "lookup_async() — returns GpuStream for caller-side pipelined hot-path sync",
-      "location": "components/dispatcher-p2p/src/lib.rs",
-      "lines": "2044-2110",
-      "suggested_spec": "Document async single-key contract in interface spec."
-    },
-    {
-      "feature": "pins::PinnedKeys — read-pin lifetime guard across async H2D copy (remote-lookup path)",
-      "location": "components/dispatcher-p2p/src/pins.rs",
-      "lines": "26-57",
-      "suggested_spec": "Note pin-lifetime correctness invariant in data-model."
-    },
-    {
-      "feature": "cold_staging_slots / cold_staging_buf_bytes config fields (appear unused by the P2P cold path)",
+      "feature": "cold_staging_slots / cold_staging_buf_bytes config fields (unused by dispatcher-p2p cold path; ring size governed by FR-003 P2P_RING_SLOTS=64)",
       "location": "components/interfaces/src/idispatcher.rs",
-      "lines": "82-87",
-      "suggested_spec": "Confirm whether these apply to dispatcher-p2p or remove from its config surface."
+      "lines": "84,87",
+      "suggested_spec": "HUMAN_DECISION — fields live on shared interfaces config (out of scope for this component's sync); wire in or remove from the config surface."
     }
   ],
-  "conflicts": []
+  "conflicts": [
+    {
+      "requirements": ["FR-022", "FR-023"],
+      "severity": "low",
+      "note": "lookup_async (FR-022) releases the read pin at submission (lib.rs:2100) before the caller synchronizes, while FR-023 declares the pin must outlive copy completion 'for both the local hot-path async copy and the remote-lookup delivery path'. The batch_lookup hot path (sync at lib.rs:1659 before release at 1697) and the remote PinnedKeys path (sync at lib.rs:2026) uphold FR-023; lookup_async matches FR-022's explicit caller-synchronization contract. Flagged for human confirmation (intentional vs latent demote-during-copy race)."
+    }
+  ]
 }

@@ -1,31 +1,27 @@
 {
-  "generated": "2026-08-20T00:00:00Z",
+  "generated": "2026-09-02T21:46:08Z",
   "based_on": "components/spdk-env/.specify/sync/drift-report.json",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
   "summary": {
-    "backfill": 1,
+    "backfill": 0,
     "align": 0,
     "backfill_unspecced": 0,
-    "resolved": 0,
-    "human_decision": 0,
+    "resolved": 1,
+    "human_decision": 1,
     "not_implemented_handled": 1
   },
   "proposals": [
     {
       "id": 1,
       "spec_id": "002-spdk-env-vfio-init",
-      "requirement": "stale-crate-paths",
-      "direction": "BACKFILL",
-      "severity": "minor",
-      "rationale": "Spec-lag, not a behavioral bug. Verified layout: spdk-sys is at lib/spdk-sys and component-framework at lib/component-framework; old components/ paths do not exist; spdk-env remains at components/spdk-env. Code/layout is intended reality, supporting docs are stale.",
-      "location": "components/spdk-env/specs/002-spdk-env-vfio-init/tasks.md:22,24,34,35,36; spec.md:6 (spec.md:99,188 are crate-name refs, still valid, no edit)",
-      "before": "tasks.md T001/T003/T004/T005/T006 cite components/spdk-sys/...; spec.md:6 Input quote cites ../component-framework",
-      "after": "tasks.md now cites lib/spdk-sys/... (components/spdk-env retained); spec.md:6 historical quote preserved with bracketed note that component-framework moved to ../../lib/component-framework (crate name unchanged); spec.md:99/188 unchanged.",
-      "files_edited": [
-        "specs/002-spdk-env-vfio-init/tasks.md",
-        "specs/002-spdk-env-vfio-init/spec.md"
-      ],
-      "status": "applied"
+      "requirement": "SC-001 (also US1 narrative + Clarifications) device-type scope",
+      "direction": "HUMAN_DECISION",
+      "severity": "medium",
+      "rationale": "SC-001/US1/Clarifications promise all SPDK-supported device types; code enumerates NVMe-only (env.rs:164-181), matching FR-006. Both a spec-vs-code gap and an internal spec contradiction (FR-006 vs SC-001/US1/Clarifications). Resolution is a scope decision: extend code to enumerate more drivers, or narrow SC-001/US1/Clarifications to NVMe-only. Not auto-backfilled because narrowing a recorded clarification/product decision to match a partial implementation is out of scope for a confident text backfill.",
+      "location": "components/spdk-env/src/env.rs:164-181; spec.md SC-001 (174), US1 narrative (22), Clarifications (12)",
+      "before": null,
+      "after": null,
+      "align_task": "Task 1",
+      "approved": false
     },
     {
       "id": 2,
@@ -33,12 +29,24 @@
       "requirement": "FR-015",
       "direction": "NOT_IMPLEMENTED_LEAVE_NOTE",
       "severity": "n/a",
-      "rationale": "Genuinely intended future behavior from a recorded clarification decision; spec already self-flags '(Future: not yet implemented)'. Not obsolete (not never-built mandated structure) and not a code bug (enumeration uses a non-attach callback per FR-006, so no probe/claim step exists to skip). Per policy: leave and note, do not invent, no ALIGN task.",
-      "location": "components/spdk-env/src/env.rs (enumerate_devices has no skip/warn path); spec.md FR-015 and User Story 1 Acceptance Scenario 4 / Edge Case",
+      "rationale": "Genuinely intended future behavior from a recorded clarification; spec already self-flags '(Future: not yet implemented)'. enumerate_devices uses a non-attach callback (FR-006), so no probe/claim step exists to skip. Leave and note, do not invent, no ALIGN code task.",
+      "location": "components/spdk-env/src/env.rs:115-185 (no skip/warn path); spec.md FR-015, User Story 1 Acceptance Scenario 4 / Edge Case",
       "before": null,
       "after": null,
-      "note": "Carried-forward inconsistency (not resolved here): User Story 1 AS4 and its Edge Case still describe skip-and-warn in present tense vs FR-015's future caveat; previously tracked as align-tasks.md Task 4.",
-      "status": "noted"
+      "note": "Residual present-tense wording in User Story 1 AS4 / its Edge Case vs FR-015's future caveat remains tracked as align-tasks.md Task 4.",
+      "approved": false
+    },
+    {
+      "id": 3,
+      "spec_id": "002-spdk-env-vfio-init",
+      "requirement": "stale-crate-paths",
+      "direction": "RESOLVED",
+      "severity": "minor",
+      "rationale": "Backfilled 2026-08-20 (tasks.md T001/T004/T005/T006 -> lib/spdk-sys, tasks.md:10 dated note; spec.md:6 bracketed note). Verified still present this run. spec.md:99,188 are crate-name refs, still valid, correctly unedited.",
+      "location": "components/spdk-env/specs/002-spdk-env-vfio-init/tasks.md:10,24,36,37,38; spec.md:6",
+      "before": null,
+      "after": null,
+      "approved": true
     }
   ]
 }

@@ -341,3 +341,55 @@ cosmetic; the numbers are correct.
 |---|---|---|
 | 002/FR-026 (BD-4) | Low | ALIGN (cosmetic format-string defect, `main.rs:423`) |
 | 001/FR-005 (BD-1) | — | RESOLVED (abort contract implemented in mainline) |
+
+# 2026-09-02 Sweep (Spec-Sync re-sync)
+
+Drift source: `.specify/sync/drift-report.{json,md}` (generated 2026-09-02):
+3 drifted requirements (all spec-lag → BACKFILL, applied to spec 001 FR-005/FR-030/FR-031)
++ 1 unspecced feature (`ReadWriteStats` histograms → backfilled into FR-030) + 1 genuine
+code defect filed as an ALIGN task below. No `.rs` source was modified in this pass.
+
+## Task BD-5 (OPEN, Medium) — telemetry tests use stale `record()` signature (spec 001 FR-011/FR-030)
+
+**Severity**: Medium (breaks the telemetry test build)
+
+**Spec Requirement**: FR-011 (aggregate telemetry) and FR-030 (`read_write_stats`,
+including the per-transfer-size histograms backfilled 2026-09-02). The `TelemetryStats`
+collector now routes each op to the read or write side and increments a size histogram.
+
+**Current Code**: `TelemetryStats::record` has signature
+`record(&self, latency_ns: u64, bytes: u64, is_read: bool)` (`src/telemetry.rs:67`), but the
+`#[cfg(feature = "telemetry")]` unit tests still call it with the old 2-arg form
+`stats.record(1000, 4096)` at `src/telemetry.rs:218` and `:230-232`. Consequently
+`cargo test -p block-device-spdk-nvme --features telemetry` fails to compile, so the
+telemetry test suite cannot build — a gap against the constitution's "Comprehensive
+Testing" mandate whenever the feature is exercised.
+
+**Required Change**: Update the three (four call-site) test invocations to pass `is_read`
+(e.g. `stats.record(1000, 4096, true)` / `false`); optionally extend the assertions to
+cover the new per-direction and per-size-bucket counters exposed by `read_write_stats()`.
+No production code change is required.
+
+**Files to Modify**: `src/telemetry.rs:218,230,231,232`
+
+### Acceptance Criteria
+
+- [ ] `cargo build -p block-device-spdk-nvme --features telemetry` is clean.
+- [ ] `cargo test -p block-device-spdk-nvme --features telemetry` compiles and passes.
+- [ ] Test assertions remain valid for the 3-arg `record()` (min/max/mean latency, total ops).
+- [ ] `cargo clippy --features telemetry -- -D warnings` remains clean.
+
+## Status update to prior tasks
+
+- **Task BD-2 (real device NUMA / identify data)** — STILL OPEN, unchanged.
+- **Task BD-3 (iops-benchmark telemetry cross-check, SC-006)** — STILL OPEN, unchanged.
+- **Task BD-4 (per-device summary format string, `main.rs:423`)** — STILL OPEN, unchanged
+  (spec-sync-hash.sh does not cover `apps/iops-benchmark/src`, so this remains manual).
+
+## Summary Table (2026-09-02)
+
+| Spec-ID/ID | Severity | Classification |
+|---|---|---|
+| 001/FR-011,FR-030 (BD-5) | Medium | ALIGN (telemetry tests call `record()` with old 2-arg signature — `src/telemetry.rs:218,230-232`) |
+| 001/FR-030 | Moderate | BACKFILL applied (histograms documented + refs corrected) |
+| 001/FR-005, FR-031 | Minor | BACKFILL applied (stale `src/actor.rs` refs corrected) |

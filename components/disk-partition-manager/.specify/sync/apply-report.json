@@ -1,59 +1,32 @@
 {
-  "generated": "2026-08-20T00:00:00Z",
-  "component": "disk-partition-manager",
-  "phase": "B",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "based_on_drift_report": "2026-08-07T15:30:30Z",
+  "generated": "2026-09-02T21:27:23Z",
+  "project": "disk-partition-manager",
   "spec": "001-gpt-partition-management",
-  "supersedes": "2026-08-07 sync run (branch sync/spec-drift-sweep-20260807)",
+  "drift_status": "clean",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "9f54b7a0d8339961a150ee2aa80bc937928ae2afa157cfd6378bf559af447299",
   "counts": {
-    "backfill_applied": 2,
+    "backfill_requirement": 0,
+    "backfill_metadata": 1,
     "backfill_unspecced": 2,
+    "resolved": 20,
     "align_tasks": 0,
-    "resolved": 0,
     "human_decision": 0,
-    "new_specs": 0
+    "new_specs": 0,
+    "source_files_modified": 0
   },
   "specs_updated": [
-    {
-      "requirement": "FR-003",
-      "change_type": "BACKFILL",
-      "edit": "Rewrote the requirement note from 'fix drafted on branch / see align-tasks.md' to 'implemented in read_gpt (src/gpt.rs:66-96) - backup attempted on both CorruptTable and NoPartitionTable'. Added US2 acceptance scenario 4 (signature-damaged primary + valid backup recovers, no reformat)."
-    },
-    {
-      "requirement": "PR-002",
-      "change_type": "BACKFILL (no-op; already reflected)",
-      "edit": "Current spec text already describes the actual per-sector read (~33 round-trips, O(1) in device size); no edit needed this run."
-    },
-    {
-      "requirement": "Metadata: Last Synced",
-      "change_type": "metadata",
-      "edit": "Updated Last-Synced line to 2026-08-20 and recorded FR-003 re-classification ALIGN -> BACKFILL."
-    }
+    {"requirement": "metadata:Last Synced", "change_type": "metadata", "summary": "Prepended 2026-09-02 re-verification note; all requirements aligned; residual test gap noted; prior 2026-08-20 note preserved."}
   ],
-  "align_tasks_generated": [],
+  "align_tasks": [],
   "unspecced_backfilled": [
-    {
-      "item": "Hardcoded primary entry LBA on read (src/gpt.rs:68)",
-      "change_type": "BACKFILL-UNSPECCED (documented in Implementation Notes)",
-      "status": "already reflected in spec.md"
-    },
-    {
-      "item": "generate_guid silent zero-fallback on /dev/urandom failure (src/gpt.rs:564-574)",
-      "change_type": "BACKFILL-UNSPECCED (documented in Implementation Notes)",
-      "status": "already reflected in spec.md"
-    }
+    {"item": "hardcoded primary entry LBA on read", "location": "src/gpt.rs:68", "status": "already-reflected"},
+    {"item": "generate_guid zero-fallback", "location": "src/gpt.rs:564-569", "status": "already-reflected"}
   ],
-  "resolved": [],
-  "human_decision": [],
   "backups": [
-    {
-      "spec": "001-gpt-partition-management/spec.md",
-      "backup": ".specify/sync/backups/.specify/specs/001-gpt-partition-management/spec.md.bak"
-    }
+    {"edited": ".specify/specs/001-gpt-partition-management/spec.md", "backup": ".specify/sync/backups/20260902T212723Z/spec.md"}
   ],
-  "notes": [
-    "No .rs source was modified; cargo was not run.",
-    "Known coverage gap (not an ALIGN item): SC-001/SC-002/SC-003 and the FR-003 signature-recovery scenario have no automated tests; [dev-dependencies] is empty (drift-report conflicts, tasks.md)."
-  ]
+  "interfaces_modified": false,
+  "cargo_run": false,
+  "notes": "Spec-kit tree under component (not specs/), so spec-sync-hash.sh hashes src + interfaces only; expected. Known test-coverage gap for SC-001/002/003 and FR-003 signature-recovery scenario (dev-dependencies empty)."
 }

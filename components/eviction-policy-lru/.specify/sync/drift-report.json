@@ -1,12 +1,20 @@
 {
-  "generated": "2026-08-07T15:28:26Z",
+  "generated": "2026-09-02T21:32:00Z",
   "project": "eviction-policy-lru",
+  "spec_location_quirk": "Spec lives under .specify/specs/ (not top-level specs/); spec-sync-hash.sh walks only src + interfaces, so the digest is invariant to spec/plan edits — expected.",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "8ac701c74b3a28225ef0c213d5be14640a4cee215900b57365eae2ca880ba81a",
   "summary": {
-    "aligned": 20,
-    "drifted": 0,
+    "aligned": 18,
+    "drifted": 2,
     "not_implemented": 0,
-    "unspecced": 0,
-    "result": "clean"
+    "unspecced": 1,
+    "result": "drift"
+  },
+  "verification": {
+    "cargo_test": "22 passed (9 lib.rs, 13 lru_list.rs)",
+    "cargo_clippy": "clean (-D warnings)",
+    "cargo_fmt": "clean"
   },
   "specs": [
     { "spec": ".specify/specs/001-lru-eviction-policy/spec.md", "status": "Backfilled",
@@ -18,21 +26,34 @@
         { "id": "FR-005", "status": "aligned", "location": "src/lib.rs:133-138; src/lru_list.rs:99-104" },
         { "id": "FR-006", "status": "aligned", "location": "src/lib.rs:140-149; src/lru_list.rs:107-118" },
         { "id": "FR-007", "status": "aligned", "location": "src/lib.rs:151-160" },
-        { "id": "FR-008", "status": "aligned", "location": "src/lib.rs:162-168" },
-        { "id": "FR-009", "status": "aligned", "location": "src/lib.rs:60-67,75-83,119-127,135,142-147,153-158,164" },
+        { "id": "FR-008", "status": "aligned", "location": "src/lib.rs:162-168; src/lru_list.rs:148-154" },
+        { "id": "FR-009", "status": "drifted", "severity": "low", "resolution": "backfill", "location": "src/lib.rs:98,109", "note": "batch_touch also returns Result/InvalidPool but was omitted from FR-009 list; added." },
         { "id": "FR-010", "status": "aligned", "location": "src/lru_list.rs:71-73,122-124" },
         { "id": "FR-011", "status": "aligned", "location": "src/lru_list.rs:21,38-45,143" },
         { "id": "FR-012", "status": "aligned", "location": "src/lib.rs:89-115" },
         { "id": "NFR-001", "status": "aligned", "location": "src/lru_list.rs" },
         { "id": "NFR-002", "status": "aligned", "location": "src/lib.rs:308-336" },
         { "id": "NFR-003", "status": "aligned", "location": "src/lib.rs:22-25" },
-        { "id": "NFR-004", "status": "aligned", "location": "src/lib.rs:27-38" },
-        { "id": "SC-001", "status": "aligned", "location": "src/lib.rs, src/lru_list.rs tests" },
+        { "id": "NFR-004", "status": "aligned", "location": "src/lib.rs:27-38,47-49,61-65,76-81,120-126", "note": "ILogger now actively used; prior NFR-004 align task satisfied." },
+        { "id": "SC-001", "status": "aligned", "location": "verified: 22 tests pass" },
         { "id": "SC-002", "status": "aligned", "location": "src/lib.rs:308-336" },
-        { "id": "SC-003", "status": "aligned", "location": "ci (not re-run)" },
-        { "id": "SC-004", "status": "aligned", "location": "consumer crates (not re-verified)" }
+        { "id": "SC-003", "status": "aligned", "location": "verified: clippy + fmt clean" },
+        { "id": "SC-004", "status": "aligned", "location": "consumer crates verified", "note": "Dependencies consumer list was stale (missing eviction-replay-benchmark); backfilled." }
       ]
     }
+  ],
+  "drifts": [
+    { "id": "D1", "requirement": "FR-009", "severity": "low", "resolution": "backfill", "applied": true,
+      "detail": "FR-009 omitted batch_touch from the Result-returning methods that report InvalidPool." },
+    { "id": "D2", "requirement": "Dependencies/plan", "severity": "low", "resolution": "backfill", "applied": true,
+      "detail": "Consumer list missing apps/eviction-replay-benchmark; plan test counts stale (8/12 -> 9/13)." }
+  ],
+  "human_decisions": [
+    { "id": "H1", "requirement": "FR-002 / interface track()", "applied": false,
+      "detail": "Interface (ieviction_policy.rs:84-86) documents idempotent re-registration; LRU impl (lib.rs:69) always push_back with no dedup. Interfaces out of scope to edit; decide (a) implement dedup or (b) relax interface doc + document LRU append behavior in FR-002." }
+  ],
+  "align_tasks": [
+    { "id": "A1", "requirement": "FR-012", "detail": "No dedicated test for batch_touch (same-pool amortization, multi-pool relock, empty-slice, invalid-pool). Add tests." }
   ],
   "unspecced": [],
   "conflicts": []

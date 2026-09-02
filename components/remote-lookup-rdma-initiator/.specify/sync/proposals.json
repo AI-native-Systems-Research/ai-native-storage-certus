@@ -1,69 +1,34 @@
 {
-  "generated": "2026-07-09",
-  "mode": "interactive",
-  "based_on": "drift-report 2026-07-09T18:24:27Z",
-  "strategy": "retire-and-respecify",
-  "summary": {
-    "retire_spec": 1,
-    "new_spec": 1,
-    "backfill_folded_into_new_spec": 8,
-    "removed_folded_into_retirement": 11,
-    "align": 0,
-    "human_decision": 0
-  },
+  "generated": "2026-09-02T21:46:01Z",
+  "component": "remote-lookup-rdma-initiator",
+  "git_commit": "2fc1cd3c",
   "proposals": [
     {
       "id": 1,
-      "direction": "RETIRE",
-      "target": "001-rdma-remote-lookup-rdma-initiator",
-      "action": "supersede",
-      "set_status": "Superseded by spec-002",
-      "keep_for_history": true,
-      "removed_requirements": [
-        "FR-001", "FR-002", "FR-005", "FR-006", "FR-012", "FR-016",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-006"
-      ],
-      "rationale": "Passive-responder design replaced wholesale by the outbound initiator; these requirements were deleted or relocated to remote-lookup.",
+      "spec_id": "002-rdma-push-initiator",
+      "spec_path": "specs/002-rdma-push-initiator/spec.md",
+      "requirement": "SC-004",
+      "title": "Stale benchmark header comment vs reframed SC-004 criterion",
+      "direction": "ALIGN",
       "confidence": "HIGH",
+      "effort": "small",
+      "severity": "minor",
       "approved": true,
-      "status": "applied"
-    },
-    {
-      "id": 2,
-      "direction": "NEW_SPEC",
-      "suggested_id": "002-rdma-push-initiator",
-      "title": "RDMA Push Initiator",
-      "supersedes": "001-rdma-remote-lookup-rdma-initiator",
-      "backfills_unspecced": [
-        "Outbound push interface (push/disconnect/disconnect_all, RemoteRegion, PushStatus)",
-        "Connection table + per-host state machine + reconnect-once",
-        "Testable RDMA transport seam (RdmaTransport/RdmaConn, RealTransport)",
-        "QP-health detection (is_qp_healthy, IBV_QPS_ERR)",
-        "Local memory-tier resolve with size-match (IMemoryTier::peek)",
-        "ip:port endpoint parsing"
-      ],
-      "inverted_requirements_migrated": {
-        "FR-003": "FR-005 (session -> host connection table)",
-        "FR-004": "FR-001 (inbound wire batch -> local push items, cap removed)",
-        "FR-008": "FR-008 (session close -> host disconnect/disconnect_all)",
-        "FR-009": "FR-007 (CM I/O error -> QP-health + reconnect-once)",
-        "FR-010": "FR-002 (dispatch service -> local memory tier)",
-        "FR-013": "FR-013 (session/protocol/listener tests -> connection/transport tests)",
-        "FR-007": "FR-003 (aligned, carried)",
-        "FR-011": "FR-010 (aligned, carried)",
-        "FR-014": "FR-011 (now wired, exceeds old spec)",
-        "FR-017": "FR-012 (aligned, carried)",
-        "SC-005": "SC-004 (telemetry overhead <5%, currently unmeasured)"
-      },
-      "confidence": "HIGH",
-      "approved": true,
-      "status": "applied"
+      "applied": false,
+      "applied_target": "align-tasks.md",
+      "current_state": "benches/push_telemetry.rs:1-18 still states the superseded literal '<5% vs disabled' pass/fail bar; spec-002 SC-004 (316-329) was reframed 2026-07-15 to 'small fixed absolute cost / ZST-when-off'. Shipped behavior and benchmark mechanics are correct.",
+      "proposed_resolution": "Reword the bench header comment to the fixed-absolute-cost / ZST-when-off criterion and cross-reference SC-004's 2026-07-15 note. No benchmark logic change.",
+      "rationale": "Spec is authoritative and accurate; the code comment drifted. ALIGN (spec -> code).",
+      "not_applied_reason": "Rust source file; out of scope for a Markdown-only sync-apply. Queued in align-tasks.md (Task A)."
     }
   ],
-  "next_steps": [
-    "Approve/modify proposals",
-    "Run /speckit.sync.apply or /speckit.specify to materialize spec-002 and set spec-001 Superseded",
-    "Re-run /speckit.sync.analyze to confirm alignment (open item: SC-004 telemetry overhead measurement)",
-    "Record accept-side + zyre control-plane boundary in remote-lookup's spec"
-  ]
+  "summary": {
+    "total": 1,
+    "approved": 1,
+    "applied": 0,
+    "backfill": 0,
+    "align": 1,
+    "human_decision": 0,
+    "new_spec": 0
+  }
 }

@@ -1,14 +1,16 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02",
   "project": "block-device-filesys",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 28,
-    "aligned": 27,
-    "drifted": 1,
+    "requirements_checked": 29,
+    "aligned": 29,
+    "drifted": 0,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced_features": 0,
+    "doc_drift_found_and_backfilled": 6
   },
+  "note": "All 29 FR/SC requirements are aligned with the current implementation. FR-015 (flagged drifted in the 2026-08-20 report) is now aligned — the 2026-08-20 backfill made spec.md match the ```ignore create() doc example. The former unspecced setters are now documented as FR-023 (unspecced count -> 0). Six stale-documentation items were found in the supporting artifacts (1 in spec.md edge cases, 5 in data-model.md) and resolved this run via BACKFILL; see doc_drift below. No ALIGN tasks; no code changes.",
   "specs": [
     {
       "id": "001-block-device-filesys",
@@ -16,28 +18,82 @@
       "aligned": [
         "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
         "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022",
+        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
+        "FR-022", "FR-023",
         "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
       ],
-      "drifted": [
-        {
-          "requirement": "FR-015",
-          "spec_text": "The create() constructor and DeviceConfig::new have runnable doc examples.",
-          "actual": "DeviceConfig::new has a runnable ``` example (config.rs:42-57); create()'s doc example is a ```ignore block, so it is not compiled or run by cargo test.",
-          "location": "src/lib.rs:77",
-          "severity": "minor"
-        }
-      ],
+      "drifted": [],
       "not_implemented": []
     }
   ],
-  "unspecced": [
+  "doc_drift": [
     {
-      "feature": "Internal config setters set_file_path/set_block_size/set_num_blocks (pub(crate), #[allow(dead_code)])",
-      "location": "src/lib.rs",
-      "lines": "95-109",
-      "suggested_spec": "Not public API; either remove as dead code or note as reserved config mutators. Out of scope for functional requirements."
+      "id": "EDGE-SQ-FULL",
+      "artifact": "specs/001-block-device-filesys/spec.md",
+      "location": "Edge Cases — io_uring submission queue full",
+      "spec_text": "The actor MUST back-pressure by waiting for completions before submitting new operations.",
+      "actual": "On ReadAsync/WriteAsync the actor surfaces SQ-push failure to the caller as an error Completion (ReadDone/WriteDone with Err(NotInitialized(\"io_uring submission queue full\"))); it does not block/wait. This matches FR-002.",
+      "code_location": "src/actor.rs:469-480 (read), src/actor.rs:588-601 (write)",
+      "severity": "minor",
+      "direction": "BACKFILL",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DM-FILE-PATH-TYPE",
+      "artifact": "specs/001-block-device-filesys/data-model.md",
+      "location": "BlockDeviceFilesysComponent — file_path field",
+      "spec_text": "file_path: RwLock<Option<PathBuf>>",
+      "actual": "file_path is Mutex<Option<PathBuf>>",
+      "code_location": "src/lib.rs:62",
+      "severity": "minor",
+      "direction": "BACKFILL",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DM-PROVIDES",
+      "artifact": "specs/001-block-device-filesys/data-model.md",
+      "location": "BlockDeviceFilesysComponent — Provides",
+      "spec_text": "Provides: [IBlockDevice]",
+      "actual": "provides: [IBlockDevice, IBlockDeviceAdmin]",
+      "code_location": "src/lib.rs:57",
+      "severity": "minor",
+      "direction": "BACKFILL",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DM-RING-TYPE",
+      "artifact": "specs/001-block-device-filesys/data-model.md",
+      "location": "FilesysActor — ring field (+ missing fields)",
+      "spec_text": "ring: IoUring; no shutdown_requested/telemetry fields listed; struct named FilesysActor",
+      "actual": "ring is Option<IoUring> (None on ring-creation fallback); struct is FilesysHandler; also has shutdown_requested: bool and (telemetry feature) telemetry: Arc<TelemetryStats>",
+      "code_location": "src/actor.rs:109-120",
+      "severity": "minor",
+      "direction": "BACKFILL",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DM-INFLIGHT-START",
+      "artifact": "specs/001-block-device-filesys/data-model.md",
+      "location": "InflightOp — telemetry start field",
+      "spec_text": "start_ns: u64 — computed as a freshly-created Instant's elapsed() (~0) and never read on completion; see align-tasks (telemetry-latency defect).",
+      "actual": "Field is start: Instant; start.elapsed() is recorded on the harvest path. The latency defect was fixed (FR-019, 2026-08-07); no align-task remains.",
+      "code_location": "src/actor.rs:103, src/actor.rs:822-823",
+      "severity": "moderate",
+      "direction": "BACKFILL",
+      "status": "APPLIED"
+    },
+    {
+      "id": "DM-CONFIGURED-STATE",
+      "artifact": "specs/001-block-device-filesys/data-model.md",
+      "location": "State Transitions — Configured",
+      "spec_text": "Configured: set_file_path(), set_block_size(), set_num_blocks() called",
+      "actual": "Config is supplied at construction via create(...); the set_* mutators are reserved crate-private #[allow(dead_code)] helpers (FR-023), not the configuration path.",
+      "code_location": "src/lib.rs:82-109",
+      "severity": "minor",
+      "direction": "BACKFILL",
+      "status": "APPLIED"
     }
   ],
+  "unspecced": [],
   "conflicts": []
 }

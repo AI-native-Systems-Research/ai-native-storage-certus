@@ -1,0 +1,22 @@
+{
+  "generated": "2026-09-02T21:28:34Z",
+  "component": "example-helloworld",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "e70f6f8916c8214c3bcb5c9659b59d8edd8f499399154506c4b98c14a950dbe6",
+  "drift_status": "clean",
+  "actions": {
+    "backfills_applied": 0,
+    "align_tasks_appended": 0,
+    "human_decisions_new": 0,
+    "backups_created": 0
+  },
+  "carried_over_align_tasks": 2,
+  "files_changed": [
+    ".specify/sync/drift-report.md",
+    ".specify/sync/drift-report.json",
+    ".specify/sync/proposals.md",
+    ".specify/sync/proposals.json",
+    ".specify/sync/apply-report.md",
+    ".specify/sync/apply-report.json"
+  ]
+}

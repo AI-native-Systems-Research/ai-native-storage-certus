@@ -24,3 +24,26 @@ The logger receptacle may not be connected (optional wiring), so guard log calls
 - [ ] Component still works correctly when ILogger is not connected (no panic)
 - [ ] All existing tests continue to pass
 - [ ] `cargo clippy -- -D warnings` passes
+
+---
+
+## Task: Align 001-lru-eviction-policy/FR-012 — add batch_touch tests (A1)
+
+Generated: 2026-09-02
+
+**Spec Requirement**: FR-012 — `batch_touch(handles)` marks multiple entries MRU in a single lock acquisition.
+**Current Code**: Implemented at `src/lib.rs:89-115`; correct and clippy/fmt-clean, but no dedicated test asserts its behavior.
+**Required Change**: Add unit/integration tests for `batch_touch`.
+**Files to Modify**: `src/lib.rs` (tests module)
+**Estimated Effort**: small
+
+### Acceptance Criteria
+- [ ] Same-pool batch: touching a slice of handles reorders those entries to MRU in the given order
+- [ ] Multi-pool batch: a slice spanning >1 pool relocks correctly and each pool's ordering is updated
+- [ ] Empty slice returns `Ok(())` with no effect
+- [ ] Handle referencing a non-existent pool returns `EvictionPolicyError::InvalidPool`
+- [ ] All existing tests still pass; `cargo clippy -- -D warnings` clean
+
+> Note: the earlier NFR-004 align task above (wire ILogger logging) is now
+> SATISFIED by the current implementation (`src/lib.rs:47-49,61-65,76-81,120-126`)
+> and requires no further action.

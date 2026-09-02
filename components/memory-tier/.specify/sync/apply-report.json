@@ -1,62 +1,60 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Phase B",
+  "applied": "2026-09-02",
   "component": "memory-tier",
   "spec": "001-memory-tier",
-  "mode": "BACKFILL-TO-REALITY",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
   "summary": {
-    "backfill_applied": 9,
-    "align_tasks": 0,
+    "backfill_applied": 2,
+    "align_tasks_generated": 0,
     "unspecced_backfilled": 0,
-    "resolved": 0,
-    "human_decision": 1
+    "human_decision": 3
   },
-  "specs_updated": [
-    { "spec": "001-memory-tier", "requirement": "FR-005", "change_type": "rewrite", "note": "16 shards -> single RwLock<Pool>" },
-    { "spec": "001-memory-tier", "requirement": "FR-006", "change_type": "rewrite", "note": "key-modulo-16 shard selection -> reader-writer lock model; Creusot claim removed" },
-    { "spec": "001-memory-tier", "requirement": "FR-007", "change_type": "rewrite", "note": "per-shard Mutex allocator/slot map -> single FreeList + single HashMap" },
-    { "spec": "001-memory-tier", "requirement": "FR-013", "change_type": "rewrite", "note": "round-robin shard counter -> eviction-policy delegation; Creusot claim removed" },
-    { "spec": "001-memory-tier", "requirement": "FR-014", "change_type": "rewrite", "note": "same-shard eviction -> documented alias for evict_next() (key ignored); Creusot claim removed" },
-    { "spec": "001-memory-tier", "requirement": "FR-021", "change_type": "rewrite", "note": "per-shard sampling -> single get_eviction_candidates() call" },
-    { "spec": "001-memory-tier", "requirement": "NFR-002", "change_type": "rewrite", "note": "16-way per-shard locking -> single RwLock<Pool>" },
-    { "spec": "001-memory-tier", "requirement": "SC-8", "change_type": "removed", "note": "10 Creusot properties / 21 VCs — never built; success criterion removed" },
-    { "spec": "001-memory-tier", "requirement": "FR-006/008/009/010/013/014/015/023 Verified column", "change_type": "rewrite", "note": "Creusot P# annotations replaced with Unit test / Implementation (IMemoryTier-doc-verified-claims)" }
+  "backfilled": [
+    {
+      "target": "components/memory-tier/specs/001-memory-tier/plan.md",
+      "change": "Rewrote sharded architecture sections (Summary, Memory Layout, Pointer Arithmetic, Concurrency Model, Key Design Decisions #1/#6) to the single-RwLock<Pool> design; replaced Creusot P1-P10 verification section with a 'None' note; reworded shard-related Future Considerations; refreshed Spec-Sync Notes."
+    },
+    {
+      "target": "components/memory-tier/specs/001-memory-tier/tasks.md",
+      "change": "Removed Creusot P1-P10 tasks and evict_next_for_key shard-targeting test; reworded shard-layout diagram task and configurable-shard-count backlog item; clarified README lru.rs task."
+    }
   ],
-  "prose_updated": [
-    "Status/Last-Synced metadata line",
-    "Overview paragraph (sharded -> single RwLock<Pool>)",
-    "User Story 2 acceptance criteria + test-coverage note",
-    "User Story 4 acceptance (clear all shards -> pool)",
-    "User Story 5 acceptance (capacity across shards -> total)",
-    "Key Entities table (MemoryTierState; Shard row replaced by Pool row; PoolId description)",
-    "Implementation Notes (top-level lock; evict_counter note removed; oldest_keys note)",
-    "Spec-Sync Notes block replaced with 2026-08-20 backfill-resolution note"
-  ],
-  "align_tasks_generated": [],
-  "unspecced_backfilled": [],
-  "resolved": [],
+  "align_tasks": [],
   "human_decision": [
-    { "requirement": "NFR-008", "detail": "Cargo.toml 0.1.0 / define_component! 0.3.0 / spec 0.2.0 — no authoritative value; spec text left unchanged; recorded in align-tasks.md for maintainer reconciliation." }
+    {
+      "item": "NFR-008 version",
+      "detail": "Cargo.toml 0.1.0 / define_component! 0.3.0 / spec 0.2.0 disagree; requires editing Cargo.toml + src/lib.rs (out of scope). Keeps drift_status = drift."
+    },
+    {
+      "item": "evict_next_for_key doc comment",
+      "detail": "components/interfaces/src/imemory_tier.rs:87-91 says 'same shard as key'; interfaces crate out of scope."
+    },
+    {
+      "item": "README source layout",
+      "detail": "README.md:23-30 lists nonexistent src/lru.rs; doc-only, not under specs/**."
+    }
   ],
   "backups": [
-    ".specify/sync/backups/specs/001-memory-tier/spec.md.bak"
+    ".specify/sync/backups/2026-09-02T21:40:18Z/specs/001-memory-tier/plan.md",
+    ".specify/sync/backups/2026-09-02T21:40:18Z/specs/001-memory-tier/tasks.md",
+    ".specify/sync/backups/2026-09-02T21:40:18Z/drift-report.md.prev"
   ],
   "files_touched": [
-    "components/memory-tier/specs/001-memory-tier/spec.md",
+    "components/memory-tier/specs/001-memory-tier/plan.md",
+    "components/memory-tier/specs/001-memory-tier/tasks.md",
+    "components/memory-tier/.specify/sync/drift-report.md",
+    "components/memory-tier/.specify/sync/drift-report.json",
     "components/memory-tier/.specify/sync/proposals.md",
     "components/memory-tier/.specify/sync/proposals.json",
     "components/memory-tier/.specify/sync/align-tasks.md",
     "components/memory-tier/.specify/sync/apply-report.md",
-    "components/memory-tier/.specify/sync/apply-report.json",
-    "components/memory-tier/.specify/sync/backups/specs/001-memory-tier/spec.md.bak"
+    "components/memory-tier/.specify/sync/apply-report.json"
   ],
   "not_modified": [
-    "src/lib.rs",
-    "Cargo.toml",
+    "components/memory-tier/src/lib.rs",
+    "components/memory-tier/src/allocator.rs",
+    "components/memory-tier/Cargo.toml",
+    "components/memory-tier/specs/001-memory-tier/spec.md",
     "components/interfaces/src/imemory_tier.rs",
-    "specs/001-memory-tier/plan.md",
-    "specs/001-memory-tier/tasks.md",
-    "README.md"
+    "components/memory-tier/README.md"
   ]
 }

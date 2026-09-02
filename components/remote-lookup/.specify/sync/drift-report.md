@@ -1,4 +1,12 @@
-Generated: pending
+---
+spec_sync_component: remote-lookup
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-09-02T21:39:18Z
+spec_sync_git_commit: 2fc1cd3c
+spec_sync_inputs_sha256: 3a4808dac9b2152d96d57ac564354186022e9decbae7329624dba50b42911989
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+Generated: 2026-09-02T21:39:18Z (re-verification + stamp pass; findings carried from the 2026-08-20 sweep, re-checked against source at commit 2fc1cd3c)
 # Spec-vs-Implementation Drift Report — remote-lookup
 
 Analysis of `components/remote-lookup` source against its two specs. Spec

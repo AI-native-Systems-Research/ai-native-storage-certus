@@ -1,11 +1,16 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T21:46:38Z",
   "project": "component-framework",
+  "component_dir": "lib/component-framework",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "8e73d91f2d75022d91ada52f220d2afa10a6c176fa62a400adaf8fbae7d5af66",
+  "drift_status": "drift",
   "summary": {
     "specs_analyzed": 6,
     "requirements_checked": 149,
-    "aligned": 149,
-    "drifted": 2,
+    "aligned": 148,
+    "drifted_functional": 1,
+    "drifted_doc_only": 2,
     "not_implemented": 0,
     "unspecced_features": 1
   },
@@ -13,6 +18,7 @@
     {
       "id": "001-com-component-framework",
       "title": "COM-Style Component Framework",
+      "requirements": 19,
       "aligned": 19,
       "drifted": [],
       "not_implemented": []
@@ -20,6 +26,7 @@
     {
       "id": "002-registry-refcount-binding",
       "title": "Registry, Reference Counting, and Binding",
+      "requirements": 27,
       "aligned": 27,
       "drifted": [],
       "not_implemented": []
@@ -27,21 +34,18 @@
     {
       "id": "003-actor-channels",
       "title": "Actor Model with Channel Components",
-      "aligned": 38,
+      "requirements": 38,
+      "aligned": 37,
       "drifted": [
         {
-          "requirement": "Post-relocation path reference",
-          "spec_text": "Crate relocated to lib/component-framework",
-          "actual": "align-tasks.md references old path components/component-framework/crates/component-core/src/actor.rs",
-          "location": "lib/component-framework/.specify/sync/align-tasks.md:29",
-          "severity": "minor"
-        },
-        {
-          "requirement": "Post-relocation path reference",
-          "spec_text": "Crate relocated to lib/component-framework",
-          "actual": "apply-report.md commit command references old components/component-framework/specs/003-actor-channels path",
-          "location": "lib/component-framework/.specify/sync/apply-report.md:60",
-          "severity": "minor"
+          "requirement": "FR-004",
+          "spec_text": "Lifecycle misuse must be reported via runtime error or type-level enforcement, not panic.",
+          "actual": "activate() re-activation after a deactivate cycle panics via .expect(...) on the already-taken receiver/handler instead of returning a typed error. (Literal clauses of FR-004 — activate-on-active returns AlreadyActive, double-deactivate prevented by consuming handle — do hold.)",
+          "location": "lib/component-framework/crates/component-core/src/actor.rs:610,617",
+          "severity": "minor",
+          "resolution": "ALIGN",
+          "status": "open",
+          "tracked_in": ".specify/sync/align-tasks.md"
         }
       ],
       "not_implemented": []
@@ -49,6 +53,7 @@
     {
       "id": "004-channel-benchmarks",
       "title": "Channel Backend Benchmarks",
+      "requirements": 24,
       "aligned": 24,
       "drifted": [],
       "not_implemented": []
@@ -56,25 +61,56 @@
     {
       "id": "005-numa-aware-actors",
       "title": "NUMA-Aware Actor Thread Pinning and Memory Allocation",
-      "aligned": 28,
-      "drifted": [],
+      "requirements": 28,
+      "aligned": 27,
+      "drifted": [
+        {
+          "requirement": "FR-001",
+          "spec_text": "Actors are single-use; re-activation requires constructing a new Actor instance. Edge Cases: 'Actor is consumed on activation.'",
+          "actual": "Actor::activate(&self) takes &self and does not consume; deactivate() resets state to IDLE, so a second activate() passes the CAS and then panics on the already-taken receiver/handler rather than being compile-time prevented or returning a typed error.",
+          "location": "lib/component-framework/crates/component-core/src/actor.rs:589,610,617,229",
+          "severity": "minor",
+          "resolution": "ALIGN",
+          "status": "open",
+          "tracked_in": ".specify/sync/align-tasks.md"
+        }
+      ],
       "not_implemented": []
     },
     {
       "id": "006-log-handler",
       "title": "Generic Log Handler",
+      "requirements": 13,
       "aligned": 13,
       "drifted": [],
       "not_implemented": []
+    }
+  ],
+  "doc_only_drift": [
+    {
+      "requirement": "Post-relocation path reference",
+      "actual": "align-tasks.md 'Files to Modify' cites old components/component-framework/... path",
+      "location": "lib/component-framework/.specify/sync/align-tasks.md:29",
+      "severity": "trivial",
+      "resolution": "fixed_this_run"
+    },
+    {
+      "requirement": "Post-relocation path reference",
+      "actual": "apply-report.md 2026-07-22 Next Steps commit command cites old components/component-framework/... path",
+      "location": "lib/component-framework/.specify/sync/apply-report.md:60",
+      "severity": "trivial",
+      "resolution": "left_as_historical_log"
     }
   ],
   "unspecced": [
     {
       "feature": "Additional Criterion benches beyond spec-named suites (actor_latency, binding, component_ref, method_dispatch, query_interface, receptacle, registry)",
       "location": "lib/component-framework/crates/component-framework/benches/",
-      "lines": "n/a",
       "suggested_spec": "Covered in spirit by SC-005 (001) and the performance-accountability constitution rule; no dedicated FR names each bench. No action required."
     }
   ],
-  "conflicts": []
+  "conflicts": [],
+  "notes": [
+    "Hash tool documents hashing <component-dir>/src/** but this crate has no top-level src/ (sources under crates/*/src/). Tool run as-specified; digest used verbatim, consistent with CI recomputation."
+  ]
 }

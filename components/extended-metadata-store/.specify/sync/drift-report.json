@@ -1,94 +1,83 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T21:41:34Z",
   "project": "extended-metadata-store",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "c9722d87a830647222f54f6550ec5f51c9751bad91036748e822863f1d2cd1b0",
+  "drift_status": "drift",
   "summary": {
-    "specs_analyzed": 2,
-    "requirements_checked": 52,
-    "aligned": 41,
-    "drifted": 5,
+    "specs_analyzed": 1,
+    "requirements_checked": 30,
+    "aligned": 27,
+    "drifted": 3,
     "not_implemented": 0,
-    "unspecced_features": 3
+    "unspecced_features": 0
   },
   "specs": [
     {
       "id": "001-extended-metadata-store",
       "title": "Extended Metadata Store",
       "aligned": [
-        "FR-01", "FR-02", "FR-03", "FR-04", "FR-06", "FR-07", "FR-08", "FR-09",
-        "FR-10", "FR-11", "FR-12", "FR-13", "FR-14", "FR-15", "FR-16", "FR-17",
-        "NFR-01", "NFR-02", "NFR-03", "NFR-04", "NFR-05", "NFR-06", "NFR-08",
-        "NFR-09", "NFR-10"
+        "FR-01", "FR-02", "FR-03", "FR-04", "FR-05", "FR-06", "FR-07", "FR-08",
+        "FR-09", "FR-10", "FR-12", "FR-13", "FR-14", "FR-15", "FR-16", "FR-17",
+        "FR-18", "NFR-01", "NFR-02", "NFR-03", "NFR-04", "NFR-05", "NFR-06",
+        "NFR-07", "NFR-08", "NFR-09", "NFR-10", "NFR-11", "SC-1/2/3/6/7"
       ],
       "drifted": [
         {
-          "requirement": "FR-05",
-          "spec_text": "force_flush() durability fix described as 'drafted on branch sync/spec-drift-sweep-20260807'.",
-          "actual": "Trigger-based fix already present in working tree; force_flush invokes installed FlushTrigger and blocks. Spec text stale; interface durability still unverified under testing/spdk.",
-          "location": "src/lib.rs:201-215",
-          "severity": "minor"
+          "requirement": "FR-11",
+          "spec_text": "FlushManager provides background flush with timer + dirty threshold; US6 acceptance: supports configurable timer interval AND dirty-count threshold.",
+          "actual": "FlushConfig::dirty_threshold (default 100) is configurable but NEVER read by the worker loop (src/flush.rs:172-208). Flushes fire only on the timer interval (when dirty_count>0) or on explicit trigger_flush(). put()/delete() do not signal the manager on crossing a threshold. flush_manager_dirty_threshold_triggers passes via its 50ms timer, not threshold logic. Threshold trigger effectively unimplemented; config field inert. Missed by prior sweeps.",
+          "location": "src/flush.rs:61,68,172-208",
+          "severity": "moderate",
+          "direction": "ALIGN",
+          "task": "ALIGN-EMS-003",
+          "new_this_sweep": true
         },
         {
-          "requirement": "NFR-07",
-          "spec_text": "MockBlockDevice provides deterministic fault-injection testing supporting SC-002/SC-003.",
-          "actual": "MockBlockDevice impl IBlockDevice does not implement read_write_stats (trait requires it), so the testing/spdk test build does not compile; persistence and SSD tests cannot run.",
-          "location": "src/test_support.rs:171",
-          "severity": "major"
-        },
-        {
-          "requirement": "SC-1/2/3/6/7",
-          "spec_text": "Unit/persistence/SSD tests, clippy, and docs are exercised by cargo/CI.",
-          "actual": "Crate is absent from root Cargo.toml members/default-members; CI never builds or tests it.",
-          "location": "Cargo.toml:23",
-          "severity": "moderate"
-        }
-      ],
-      "not_implemented": []
-    },
-    {
-      "id": "002-ssd-integration-test",
-      "title": "SSD Integration Test",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-008",
-        "FR-009", "FR-010", "FR-012", "SC-001", "SC-002", "SC-003", "SC-004",
-        "SC-005", "SC-006"
-      ],
-      "drifted": [
-        {
-          "requirement": "FR-011",
-          "spec_text": "Test MUST use the standard IExtendedMetadataStore interface, not internal APIs.",
-          "actual": "Store creation and durability use inherent/internal APIs (initialize_from_client, snapshot_entries, mark_flushed, load_entries, flush::flush_to_disk); consequence of FR-05 no-op history.",
+          "requirement": "FR-011 (ex-002; interface-only usage)",
+          "spec_text": "Test MUST use the standard IExtendedMetadataStore interface, not internal APIs, for the operations it validates (basis spec 002 now absent).",
+          "actual": "tests/integration_ssd.rs obtains durability/startup via inherent/internal APIs (initialize_from_client, snapshot_entries, flush::flush_to_disk, mark_flushed, load_entries); put/get/delete/iterate_all do use the interface. FR-05 now enables force_flush()-based durability.",
           "location": "tests/integration_ssd.rs",
-          "severity": "moderate"
+          "severity": "moderate",
+          "direction": "ALIGN",
+          "task": "ALIGN-EMS-001"
         },
         {
-          "requirement": "FR-007",
-          "spec_text": "Capacity exhaustion surfaced to the caller; test_capacity_exhaustion expects a put()-level capacity error.",
-          "actual": "put() enforces only ValueTooLarge; capacity is a flush-time String error inside flush::flush_to_disk, never mapped to CapacityExhausted, so the test passes trivially without reaching the exhaustion branch.",
-          "location": "src/flush.rs",
-          "severity": "moderate"
+          "requirement": "FR-007 (ex-002; CapacityExhausted)",
+          "spec_text": "Capacity exhaustion surfaced to the caller as CapacityExhausted (variant defined at interfaces/src/iextended_metadata_store.rs:12).",
+          "actual": "put() enforces only ValueTooLarge (src/lib.rs:159); region capacity enforced only at flush time as a String error (src/flush.rs:32-38), never mapped to CapacityExhausted. capacity_exhaustion_detected asserts the String, never the variant.",
+          "location": "src/flush.rs:32-38 / src/lib.rs:159",
+          "severity": "moderate",
+          "direction": "ALIGN",
+          "task": "ALIGN-EMS-002"
         }
       ],
-      "not_implemented": []
+      "not_implemented": [],
+      "resolved_verified": [
+        {"requirement": "FR-05", "location": "src/lib.rs:201-215"},
+        {"requirement": "NFR-07", "location": "src/test_support.rs:223-225"},
+        {"requirement": "SC-1/2/3/6/7 workspace membership", "location": "Cargo.toml:23,105"}
+      ]
     }
   ],
-  "unspecced": [
+  "sibling_artifact_drift": [
     {
-      "feature": "Superblock::region_capacity_bytes() never-called public accessor",
-      "location": "src/on_disk.rs",
-      "lines": "142",
-      "suggested_spec": "Document as public on-disk-format API or remove."
+      "file": "specs/001-extended-metadata-store/plan.md",
+      "issue": "Stale: claimed force_flush() is an unconditional no-op and the crate is not a workspace member; both false.",
+      "action": "BACKFILL applied"
     },
     {
-      "feature": "create_test_component_from_state() unused public test helper (testing-gated)",
-      "location": "src/test_support.rs",
-      "lines": "268",
-      "suggested_spec": "Document as test surface or remove."
-    },
+      "file": "specs/001-extended-metadata-store/tasks.md",
+      "issue": "Stale: ALIGN-001/ALIGN-002 listed as open MAJOR defects and T056 blocked on ALIGN-001; both RESOLVED.",
+      "action": "BACKFILL applied"
+    }
+  ],
+  "unspecced": [],
+  "human_decision": [
     {
-      "feature": "ExtendedMetadataStoreError::CapacityExhausted variant never constructed",
-      "location": "../interfaces/src/iextended_metadata_store.rs",
-      "lines": "12",
-      "suggested_spec": "Surface via an interface method or drop the variant."
+      "item": "Missing spec 002-ssd-integration-test",
+      "detail": "001 spec Known Gaps and ALIGN-EMS-001/002 reference 002-FR-007/FR-011, but specs/002-ssd-integration-test/ is absent from git HEAD (backups only). SSD tests (tests/integration_ssd.rs) still exist. Restore the 002 spec, or fold its requirements into 001 and renumber.",
+      "location": "components/extended-metadata-store/specs/"
     }
   ],
   "conflicts": []

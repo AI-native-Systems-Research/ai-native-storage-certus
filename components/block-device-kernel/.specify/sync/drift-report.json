@@ -1,13 +1,14 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02",
   "project": "block-device-kernel",
+  "git_commit": "2fc1cd3c",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 43,
-    "aligned": 41,
+    "requirements_checked": 44,
+    "aligned": 42,
     "drifted": 2,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced_features": 0
   },
   "specs": [
     {
@@ -17,7 +18,7 @@
         "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
         "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
         "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-022",
-        "FR-023", "FR-024", "FR-025", "FR-026",
+        "FR-023", "FR-024", "FR-025", "FR-026", "FR-027",
         "NFR-001", "NFR-002", "NFR-003", "NFR-004", "NFR-005", "NFR-006",
         "NFR-007", "NFR-008",
         "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-007", "SC-008",
@@ -26,15 +27,15 @@
       "drifted": [
         {
           "requirement": "FR-021",
-          "spec_text": "Feature-gated telemetry tracks min/max/mean latency; the Last-Synced note asserts the hardcoded-0 latency defect was fixed in code (per-op start captured, elapsed ns recorded).",
-          "actual": "Fix present in sync paths and wait_for_cqe, but the primary async-completion path harvest_completions() still calls record_op(0, op.bytes) with hardcoded 0 latency, despite InflightOp carrying a populated start timestamp. Async ReadAsync/WriteAsync ops record 0ns latency, driving min_latency_ns to 0 and skewing mean.",
+          "spec_text": "Component MUST provide feature-gated telemetry that tracks total ops, min/max/mean latency, total bytes, and mean throughput. The spec header note already documents that the fix is only partial (spec text is not drifted; code is).",
+          "actual": "Fix present in sync paths (src/actor.rs:329-333,394-398,634-638) and the blocking wait_for_cqe async harvest (:716-718), but the primary async-completion path harvest_completions() still calls record_op(0, op.bytes) with hardcoded 0 latency, despite InflightOp carrying a populated `start: Instant` (:101, set at :480/:554). Async ReadAsync/WriteAsync ops record 0ns latency, driving min_latency_ns to 0 and skewing mean.",
           "location": "src/actor.rs:776",
           "severity": "moderate"
         },
         {
           "requirement": "SC-006",
           "spec_text": "Feature-gated telemetry produces accurate TelemetrySnapshot values when enabled.",
-          "actual": "Latency values inaccurate for async operations because harvest_completions records 0ns latency; snapshot min/mean latency wrong when async IO dominates. Same root cause as FR-021.",
+          "actual": "Latency values inaccurate for async operations because harvest_completions records 0ns latency; snapshot min/mean latency wrong when async IO dominates. total_ops/total_bytes/mean_throughput_mbps remain accurate. Same root cause as FR-021.",
           "location": "src/actor.rs:776",
           "severity": "moderate"
         }
@@ -42,13 +43,6 @@
       "not_implemented": []
     }
   ],
-  "unspecced": [
-    {
-      "feature": "Command::FlushSync handler returning FlushDone{Ok} as a validated no-op (O_DIRECT|O_DSYNC leaves no volatile write cache); ns_id!=1 -> InvalidNamespace. Kernel spec never mentions FlushSync.",
-      "location": "src/actor.rs",
-      "lines": "233-247",
-      "suggested_spec": "Backfill an FR (parallel to filesys FR-022) documenting FlushSync as a validated no-op justified by O_DSYNC durability."
-    }
-  ],
+  "unspecced": [],
   "conflicts": []
 }

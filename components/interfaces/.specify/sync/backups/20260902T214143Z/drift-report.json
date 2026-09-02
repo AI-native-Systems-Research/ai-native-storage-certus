@@ -1,0 +1,46 @@
+{
+  "generated": "pending",
+  "project": "interfaces",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 47,
+    "aligned": 45,
+    "drifted": 2,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "001-interfaces",
+      "title": "Shared Interface Trait Definitions",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-015",
+        "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022",
+        "FR-023", "FR-024", "FR-026", "FR-027", "FR-028", "FR-029", "FR-030",
+        "FR-031", "FR-032", "FR-033", "FR-034",
+        "NFR-001", "NFR-002", "NFR-003", "NFR-004", "NFR-005", "NFR-006",
+        "SC-1", "SC-2", "SC-3", "SC-4", "SC-5", "SC-6", "SC-7"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-014",
+          "spec_text": "IExtendedMetadataStore trait (put/get/delete/iterate_all/force_flush) is part of the interfaces crate.",
+          "actual": "Trait is defined in src/iextended_metadata_store.rs but the module is never declared (mod) or re-exported (pub use) in src/lib.rs, so it is not part of the compiled crate. Consumer extended-metadata-store imports it and would fail to build; masked only because that crate is out-of-workspace.",
+          "location": "src/lib.rs (missing mod/pub use); definition at src/iextended_metadata_store.rs:30",
+          "severity": "major"
+        },
+        {
+          "requirement": "FR-025",
+          "spec_text": "ExtendedMetadataStoreError 4-variant enum (NotFound, StorageError, CapacityExhausted, ValueTooLarge) exported from interfaces.",
+          "actual": "Enum exists with exactly those 4 variants but lives in the undeclared iextended_metadata_store module, so it is not exported from the crate. Same orphaned-module root cause as FR-014.",
+          "location": "src/iextended_metadata_store.rs:5",
+          "severity": "major"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [],
+  "conflicts": []
+}

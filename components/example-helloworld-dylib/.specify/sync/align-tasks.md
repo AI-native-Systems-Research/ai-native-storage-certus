@@ -70,3 +70,21 @@ contradicts the corrected spec (spec→code direction, not spec-lag ⇒ not
 BACKFILL). Per policy the `.rs` source is not edited. This ALIGN item is
 **Task 2** above (still open) — no new task is created, as Task 2 already covers
 FR-4 exactly. No spec BACKFILL was applied (spec text already correct).
+
+---
+
+# 2026-09-02 Re-analysis (HEAD 2fc1cd3c)
+
+Regenerated drift report (2026-09-02T21:39:11Z): 7 checked, 6 aligned, **1 drifted**
+(FR-4, moderate), 0 not-implemented, 0 unspecced. Re-verified against source:
+
+- `src/lib.rs:4-7` **still** carries the stale "dynamically link the same
+  `component-core` and `example-helloworld` shared libraries" wording — Task 2
+  below remains **OPEN** and continues to cover FR-4 exactly. No new task created.
+- `apps/dynamic-loading-example/src/main.rs:7-9` still repeats the same stale
+  claim (out of scope for this component; noted only).
+- Task 1 (missing automated dylib-loading integration test) also remains **OPEN**:
+  `apps/dynamic-loading-example` is still a demo `fn main()` binary with no
+  `#[test]` coverage.
+
+Per workflow constraints, ALIGN items do not edit `.rs` source; both tasks stay queued.

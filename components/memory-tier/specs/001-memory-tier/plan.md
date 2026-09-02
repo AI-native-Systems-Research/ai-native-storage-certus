@@ -2,10 +2,11 @@
 
 **Branch**: `001-memory-tier` | **Date**: 2026-07-08 | **Spec**: [spec.md](spec.md)
 **Context**: Backfilled from existing implementation.
+**Last-Synced**: 2026-09-02 (spec-sync: backfilled the architecture sections to the single-`RwLock<Pool>` reality, matching `spec.md`; removed the never-built 16-way sharding and Creusot P1–P10 material — see "Spec-Sync Notes" at end).
 
 ## Summary
 
-The memory-tier component implements a sharded DRAM cache pool with pluggable eviction policy. The pool is pre-allocated at initialization time (via mmap or SPDK hugepages) and divided into 16 shards. Each shard maintains a first-fit free-list allocator and a HashMap of active slots. Eviction decisions are delegated to an external IEvictionPolicy receptacle (currently backed by eviction-policy-lru). The component exposes the IMemoryTier interface for insert/get/remove/evict operations.
+The memory-tier component implements a DRAM cache pool with a pluggable eviction policy. The pool is pre-allocated at initialization time (via mmap or SPDK hugepages) and held as a single, unsharded structure: one first-fit free-list allocator and one `HashMap<CacheKey, Slot>` slot map, guarded by a single `RwLock<Pool>`. Eviction decisions are delegated to an external `IEvictionPolicy` receptacle (currently backed by eviction-policy-lru). The component exposes the `IMemoryTier` interface for insert/get/remove/evict operations.
 
 ## Technical Context
 
@@ -14,27 +15,27 @@ The memory-tier component implements a sharded DRAM cache pool with pluggable ev
 The component is defined using the `define_component!` macro, which generates:
 - `IUnknown` implementation for runtime interface discovery
 - Receptacle slots for `ILogger` and `IEvictionPolicy`
-- Arc-based ownership with interior mutability via RwLock/Mutex
+- Arc-based ownership with interior mutability via RwLock
 
 ### Memory Layout
 
 ```
-Pool (contiguous mmap or spdk_zmalloc region):
-+------------------+------------------+-----+-------------------+
-| Shard 0          | Shard 1          | ... | Shard 15          |
-| (pool_size / 16) | (pool_size / 16) |     | (pool_size / 16)  |
-+------------------+------------------+-----+-------------------+
-
-Each shard managed by independent FreeList allocator.
-Shard assignment: key % 16
+Pool (single contiguous mmap or spdk_zmalloc region):
++-----------------------------------------------------------+
+| One first-fit FreeList allocator over the whole region    |
+| One HashMap<CacheKey, Slot> slot map                      |
+| Both guarded by a single RwLock<Pool>                     |
++-----------------------------------------------------------+
 ```
+
+There is no sharding: the whole pool is one allocator plus one slot map. Freed
+space is globally allocatable regardless of which key freed it.
 
 ### Pointer Arithmetic
 
-Global offset for a key in shard S with local offset L:
+A slot records a byte `offset` into the pool. The pointer for a slot is:
 ```
-global_offset = S * shard_size + L
-ptr = pool_ptr + global_offset
+ptr = pool_ptr + slot.offset
 ```
 
 ### Concurrency Model
@@ -42,13 +43,18 @@ ptr = pool_ptr + global_offset
 ```
 RwLock<MemoryTierState>
   |
-  +-- Read-lock on all data-path operations (hot path)
-  +-- Write-lock only during initialize() (cold path, once)
+  +-- Read-lock on all data-path operations; write-lock only during initialize()
   |
-  +-- Per-shard Mutex<Shard> for fine-grained write access
+  +-- Inner RwLock<Pool> guards the single allocator + slot map:
        |
-       +-- allocator: FreeList (mutated on insert/remove/evict)
-       +-- slots: HashMap<CacheKey, Slot> (mutated on insert/remove/evict)
+       +-- read lock:  get, peek, contains, batch_touch, capacity, used
+       +-- write lock: insert, remove, evict, clear
+       |
+       +-- allocator: FreeList (mutated on insert/remove/evict/clear)
+       +-- slots: HashMap<CacheKey, Slot> (mutated on insert/remove/evict/clear)
+
+Eviction-order touches are applied AFTER releasing the inner pool lock; the
+bound IEvictionPolicy has its own internal synchronization.
 ```
 
 ## Architecture
@@ -57,12 +63,12 @@ RwLock<MemoryTierState>
 
 | File | Responsibility |
 |------|---------------|
-| `src/lib.rs` | Component definition, IMemoryTier implementation, initialization, sharding logic, unit tests |
+| `src/lib.rs` | Component definition, IMemoryTier implementation, initialization, unit tests |
 | `src/allocator.rs` | FreeList allocator: first-fit allocation, deallocation with coalescing, capacity tracking |
 
 ### Key Design Decisions
 
-1. **Sharding (16-way)**: Reduces lock contention. Key-to-shard is deterministic (modulo), so operations on distinct keys can proceed in parallel across shards.
+1. **Single unsharded pool**: The pool is one `FreeList` allocator plus one `HashMap<CacheKey, Slot>` behind a single `RwLock<Pool>`. Readers (`get`/`peek`/`contains`/`batch_touch`/`capacity`/`used`) share a read lock; mutators (`insert`/`remove`/`evict`/`clear`) take the write lock. This keeps the allocator simple and correct; freed space is globally reusable.
 
 2. **Contiguous pool**: A single mmap region avoids per-allocation syscalls. Internal fragmentation is managed by the free-list with coalescing.
 
@@ -72,7 +78,7 @@ RwLock<MemoryTierState>
 
 5. **SPDK optional feature**: The SPDK allocation path is compile-time gated. Without the feature, the component uses mmap. With it, SPDK hugepages are preferred when the SPDK env is active at runtime.
 
-6. **Round-robin eviction**: The `evict_counter` atomic ensures global eviction cycles through all shards rather than always targeting the first.
+6. **Delegated victim selection**: `evict_next()` delegates the choice of victim entirely to the bound `IEvictionPolicy` (`identify_next_to_evict(pool_id)`), then removes the returned slot and frees its allocation. There is no internal round-robin counter or shard-selection state. `evict_next_for_key(key)` is an alias for `evict_next()` — the `key` argument is ignored because the pool is not sharded.
 
 ### Error Handling Strategy
 
@@ -83,8 +89,8 @@ All error cases are captured in the `MemoryTierError` enum:
 - `KeyNotFound(key)` - remove/lookup of absent key
 - `AllocationFailed(msg)` - mmap or SPDK allocation failure
 - `NotInitialized(msg)` - operation before initialize()
-- `NotEvictable(key)` - reserved for future write-through protection
-- `DEFAULT_POOL_SIZE` (256 MiB) - public constant, reserved for a future default-constructor path; not consumed by any call site today (`initialize()` always takes an explicit `pool_size`) *(backfilled 2026-07-22)*
+- `NotEvictable(key)` - reserved for future write-through protection; not returned by any code path today
+- `DEFAULT_POOL_SIZE` (256 MiB) - public constant, reserved for a future default-constructor path; not consumed by any call site today (`initialize()` always takes an explicit `pool_size`)
 
 ## Dependencies
 
@@ -118,7 +124,7 @@ All error cases are captured in the `MemoryTierError` enum:
 | `insert_zero_size_fails` | InvalidSize error |
 | `remove_and_reuse` | Remove frees slot, allows re-insert |
 | `evict_next_returns_some` | Eviction produces a key |
-| `pool_full_returns_error` | PoolFull when shard exhausted |
+| `pool_full_returns_error` | PoolFull when pool capacity is exhausted |
 | `capacity_and_used` | Accounting correctness |
 | `contains` | Presence check |
 | `clear_resets_all` | Full cache clear |
@@ -139,19 +145,12 @@ All error cases are captured in the `MemoryTierError` enum:
 | `zero_size_returns_none` | Zero-size allocation rejection |
 | `capacity_tracking` | Capacity and used bookkeeping |
 
-### Formal Verification (Creusot)
+### Formal Verification
 
-10 properties verified with 21 SMT-discharged verification conditions:
-- P1: size-nonzero
-- P2: init-guard
-- P3: no-duplicates
-- P4: shard-bounded
-- P5: shard-deterministic
-- P6: capacity-accounting
-- P7: used-within-capacity
-- P8: pool-full
-- P9: remove-key-not-found
-- P10: evict-round-robin
+None. No Creusot (or other) proof artifacts exist for this component; there is no
+`components/memory-tier/verif/` directory. Earlier revisions of this plan claimed
+"10 properties verified with Creusot (21 verification conditions)" for a sharded
+design that was never built; that claim has been removed as part of the backfill.
 
 ### Test Gaps Identified
 
@@ -164,21 +163,22 @@ All error cases are captured in the `MemoryTierError` enum:
 
 ## Future Considerations
 
-1. **Criterion benchmarks**: No benchmarks are currently defined. Adding throughput benchmarks for insert/get/evict under contention would validate the sharding strategy.
+1. **Criterion benchmarks**: No benchmarks are currently defined. Adding throughput benchmarks for insert/get/evict under contention would characterize the single-lock design and reveal whether finer-grained locking is warranted.
 
-2. **Adaptive shard count**: Currently hard-coded to 16. Could be configurable based on hardware thread count.
+2. **Finer-grained locking**: The pool is currently a single `RwLock<Pool>`. If write-lock contention becomes a bottleneck under high insert/evict rates, a sharded or lock-striped allocator could be revisited. (An earlier design proposed 16-way sharding; it was never built.)
 
 3. **Write-through tracking**: The `NotEvictable` error variant exists but is unused. A future enhancement could pin entries during write-through to prevent eviction of dirty data.
 
-4. **Statistics / metrics**: The component logs via ILogger but does not expose structured metrics (hit rate, eviction rate, fragmentation ratio).
+4. **Statistics / metrics**: Beyond the optional `telemetry` feature (eviction and lock-contention counters), the component does not expose richer structured metrics (hit rate, fragmentation ratio).
 
-5. **NUMA-aware sharding**: Currently shards are assigned by key modulo. A NUMA-aware scheme could map shards to NUMA nodes for locality.
+5. **NUMA-aware allocation**: The pool is bound to a single NUMA node at init via `mbind`. A future scheme could partition the pool across NUMA nodes for multi-socket locality.
 
 6. **Large allocation support**: The free-list first-fit strategy may fragment under mixed-size workloads. A buddy allocator or size-class approach could improve utilization.
 
 7. **GPU integration**: `pool_info()` exposes the base pointer for CUDA host registration, but no cuMemHostRegister call is made within this component.
 
-## Spec-Sync Notes (2026-07-22)
+## Spec-Sync Notes (2026-09-02 — backfilled to reality)
 
-- An optional `telemetry` Cargo feature (eviction count, read/write lock-contention counters, exposed via `telemetry()`/`reset_telemetry()`/`telemetry_snapshot()`) exists in `src/lib.rs` and is now captured in `spec.md` FR-027/FR-028/NFR-011 *(backfilled)*.
-- The 16-way sharding design described throughout this plan (Memory Layout, Pointer Arithmetic, Concurrency Model, Key Design Decision #1 and #6) does **not** match the current single-pool implementation. This plan has been left as-is (describing the original sharded design) rather than rewritten, pending a decision on whether sharding is unfinished work or was intentionally dropped. See `.specify/sync/align-tasks.md` ("sharding-not-implemented") before treating this plan's architecture sections as current.
+- This plan previously described a 16-way sharded pool (Memory Layout, Pointer Arithmetic, Concurrency Model, Key Design Decisions #1 and #6) and a "Formal Verification (Creusot)" section listing properties P1–P10. Neither the sharding nor the proofs were ever built. The 2026-08-20 Phase B decision resolved the sharding fate by backfilling `spec.md` to the single-`RwLock<Pool>` implementation; this pass brings `plan.md` into line with that resolved decision. The architecture sections now describe the shipped single-pool design, and the Creusot section is removed.
+- The optional `telemetry` Cargo feature (eviction count, read/write lock-contention counters, exposed via `telemetry()`/`reset_telemetry()`/`telemetry_snapshot()`) is captured in `spec.md` FR-027/FR-028/NFR-011.
+- **Open (HUMAN_DECISION):** the component version disagrees across three locations — `Cargo.toml` = `0.1.0`, `define_component!` macro = `0.3.0` (`src/lib.rs:140`), `spec.md` NFR-008 = `0.2.0`. Reconciling requires editing `Cargo.toml` and `src/lib.rs`, which are out of spec-sync edit scope. See `.specify/sync/align-tasks.md`.

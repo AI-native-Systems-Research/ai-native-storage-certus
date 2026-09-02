@@ -1,6 +1,9 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T21:46:22Z",
   "project": "zyre",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "7a057ebf8cfbae964be24a2265f94f6b8af446ee3ecb18d3c317d1281b959d9c",
+  "drift_status": "clean",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 17,

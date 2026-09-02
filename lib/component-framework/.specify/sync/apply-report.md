@@ -82,3 +82,53 @@ example, minor); 10 unspecced items, all benign.
 
 ## Verification
 - Single additive edit confined to `specs/004-channel-benchmarks/spec.md` FR-016. No `.rs` source touched.
+
+---
+
+# 2026-09-02 Sync Run (git 2fc1cd3c)
+
+Mode: full re-analysis of all 6 component-framework specs against current
+sources with file:line verification. `drift_status: drift`.
+
+## Result
+
+- 149 FR/SC checked (001=19, 002=27, 003=38, 004=24, 005=28, 006=13).
+- **148 aligned**; 1 functional drift (ALIGN); 2 trivial doc-only path drifts.
+- 0 not-implemented; 1 benign unspecced item (extra benches).
+
+## Applied this run
+
+| Change | Type | Detail |
+|--------|------|--------|
+| `align-tasks.md:29` path fix | Housekeeping (artifact) | Updated pre-relocation `components/component-framework/...` path to `lib/component-framework/...`; added an OPEN status note re-confirming the `activate()` re-activation panic (actor.rs:610/617) is still present at git 2fc1cd3c. |
+
+## NOT applied (by design)
+
+- **P-001 (ALIGN, 003-FR-004 / 005-FR-001)** — code-side fix for the
+  `activate()` re-activation panic. Spec-sync does not edit code; the task
+  remains in `align-tasks.md` for a human decision (convert `.expect(...)` to a
+  typed `ActorError`, or make `activate(self)` consume the actor).
+- **No spec `.md` edits** — every spec already states the intended behavior
+  correctly, so there was nothing to backfill. No spec backups were needed.
+- **`apply-report.md:60` stale path** — left intact as part of the dated
+  2026-07-22 historical log rather than rewritten; noted in the drift report.
+
+## Correction vs. prior report
+
+The previously generated `drift-report.md` marked 003-FR-004 "Aligned ✓" and
+reported only the two doc-path drifts. This run re-surfaces the `activate()`
+re-activation panic as a genuine (still-open) functional drift rather than
+rubber-stamping it; `drift_status` is `drift`, not `clean`.
+
+## Backups
+
+Pre-modification backups of the sync-artifact set saved to
+`.specify/sync/backups/2026-09-02T214638Z/` (align-tasks.md, drift-report.{md,json},
+apply-report.{md,json}, proposals.{md,json}).
+
+## Verification
+
+- Inputs digest (`scripts/spec-sync-hash.sh lib/component-framework`):
+  `8e73d91f2d75022d91ada52f220d2afa10a6c176fa62a400adaf8fbae7d5af66`.
+- Only `.specify/sync/` artifacts were edited (no `src/**` or `specs/**`), so
+  the digest is unchanged and consistent with CI recomputation.

@@ -1,76 +1,55 @@
 {
-  "generated": "2026-08-20T00:00:00Z",
-  "based_on_drift_report": "2026-08-07T15:30:30Z",
-  "component": "disk-partition-manager",
-  "phase": "B",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "note": "Supersedes the 2026-08-07 sync run. That run classified FR-003 as ALIGN and drafted a code fix on branch sync/spec-drift-sweep-20260807. That fix is now present in src/gpt.rs (read_gpt falls through to backup on both CorruptTable and NoPartitionTable), so under Phase B policy FR-003 is a described-as-drafted-item-now-implemented case -> BACKFILL. No ALIGN tasks remain.",
-  "summary": {
-    "backfill": 2,
+  "generated": "2026-09-02T21:27:23Z",
+  "project": "disk-partition-manager",
+  "spec": "001-gpt-partition-management",
+  "based_on_drift_report": "2026-09-02T21:27:23Z",
+  "counts": {
+    "backfill": 1,
+    "backfill_metadata": 1,
     "backfill_unspecced": 2,
+    "resolved": 20,
     "align": 0,
-    "resolved": 0,
-    "human_decision": 0,
-    "new_specs": 0
+    "human_decision": 0
   },
   "proposals": [
     {
       "id": "P1",
-      "spec": "001-gpt-partition-management",
-      "requirement": "FR-003",
+      "requirement": "spec-metadata:Last Synced",
       "direction": "BACKFILL",
-      "severity": "Medium",
-      "title": "Backup GPT fallback on primary signature corruption is implemented (was tracked as drafted/ALIGN)",
-      "rationale": "The drift report (generated against the pre-fix code snapshot) described read_gpt as falling through to the backup only on CorruptTable (CRC), propagating a bad primary signature as NoPartitionTable and letting initialize_or_format destructively reformat. Reading the current src/gpt.rs:66-96 shows the fix is present: the primary read arm matches BOTH `CorruptTable(_)` and `NoPartitionTable(_)` and falls through to the backup-header attempt; a genuinely unformatted disk still returns NoPartitionTable after both reads fail. The code is the working, intended reality and the spec merely lagged (it still said the fix was 'drafted on branch' and pointed at an ALIGN task). Per Phase B policy direction 1 (a described-as-drafted item that is actually implemented -> BACKFILL).",
-      "before": "System MUST support primary/backup GPT redundancy - if the primary header is corrupt, the backup header at the last LBA MUST be attempted. \"Corrupt\" includes both a header/entry-array CRC mismatch and a damaged or zeroed primary header signature (a torn write can damage either). (Sync 2026-08-07: previously the backup was attempted only on a CRC mismatch; a bad signature returned NoPartitionTable directly, which initialize_or_format then treated as \"unformatted\" and destructively reformatted a disk whose backup was still intact. A fix routing signature failures through the backup path is drafted on branch sync/spec-drift-sweep-20260807 - see .specify/sync/align-tasks.md.)",
-      "after": "System MUST support primary/backup GPT redundancy - if the primary header is corrupt, the backup header at the last LBA MUST be attempted. \"Corrupt\" includes both a header/entry-array CRC mismatch and a damaged or zeroed primary header signature (a torn write can damage either). (Sync 2026-08-20 - implemented and backfilled to reality: read_gpt (src/gpt.rs:66-96) falls through to the backup-header attempt on BOTH CorruptTable (CRC mismatch) and NoPartitionTable (signature damage from parse_header). A genuinely unformatted disk still returns NoPartitionTable - \"neither primary nor backup GPT header is valid\" - after both reads fail, so initialize_or_format's reformat path for truly-blank disks is preserved; only the damaged-primary/valid-backup case is affected, and it now recovers instead of being destructively reformatted. This supersedes the 2026-08-07 sweep, which had tracked the fix as \"drafted on branch\" via an ALIGN task; the fix is present in the current code, so FR-003 is resolved by spec backfill and no longer carries an ALIGN task.)",
-      "acceptance_scenarios_added": [
-        "US2 scenario 4: damaged/zeroed primary signature + valid backup -> backup used, table returned, disk NOT reformatted."
-      ],
-      "files": ["components/disk-partition-manager/.specify/specs/001-gpt-partition-management/spec.md"],
-      "applied": true
+      "subtype": "metadata",
+      "severity": "info",
+      "approved": true,
+      "applied": true,
+      "summary": "Refresh 'Last Synced' to 2026-09-02 with re-verification result (all aligned, no actionable drift; residual test gap noted). Prior 2026-08-20 note preserved."
     },
     {
       "id": "P2",
-      "spec": "001-gpt-partition-management",
-      "requirement": "PR-002",
-      "direction": "BACKFILL",
-      "severity": "Medium",
-      "title": "Read performs one ReadSync/recv per sector (~33 round-trips), not the originally stated <=2",
-      "rationale": "read_bytes (src/gpt.rs:451-495) loops one synchronous Command::ReadSync + completion recv per sector, so the 128x128B = 16KiB entry array is 32 round-trips at 512B (4 at 4096B) plus 1 header sector. This is the intended, working behavior and is O(1) in device size (satisfying the same intent as PR-001); the original 'at most 2 round-trips' was an over-specification. Spec-lag -> BACKFILL. Batching the entry-array read into a single multi-sector I/O is a deliberate future perf optimization, not tracked as drift. The current spec.md text already reflects this reality (backfilled 2026-08-07); no further edit required this run.",
-      "before": "Initialize (read) operation MUST require at most 2 I/O round-trips (header + entries) for the happy path.",
-      "after": "Initialize (read) operation reads a fixed, device-size-independent set of sectors: 1 header sector plus the partition-entry array. read_bytes issues one synchronous Command::ReadSync per sector, so the 128x128B = 16KiB entry array is read as 32 round-trips at 512B sector size (4 at 4096B), i.e. 33 (5) round-trips total for initialize - not the 'at most 2' originally stated. This is O(1) in device size, satisfying the same intent as PR-001. Batching the entry-array read into a single multi-sector I/O to restore a 2-round-trip happy path is a deliberate optimization left for a future perf task, not tracked as drift.",
-      "files": ["components/disk-partition-manager/.specify/specs/001-gpt-partition-management/spec.md"],
-      "applied": true,
-      "already_reflected": true
+      "requirement": "FR-001..FR-011,IR-001..IR-003,PR-001..PR-002,SC-001..SC-004",
+      "direction": "RESOLVED",
+      "severity": "",
+      "approved": true,
+      "applied": false,
+      "summary": "All 20 requirements verified aligned against current src/gpt.rs + src/lib.rs; no edit or code change required."
     },
     {
       "id": "P3",
-      "spec": "001-gpt-partition-management",
-      "requirement": "UNSPECCED: hardcoded primary entry LBA on read",
+      "requirement": "unspecced:hardcoded primary entry LBA on read",
+      "location": "src/gpt.rs:68",
       "direction": "BACKFILL-UNSPECCED",
       "severity": "Low",
-      "title": "Read hardcodes entry array at LBA 2, ignoring parsed header.partition_entry_lba",
-      "rationale": "try_read_gpt_at(1, 2) (src/gpt.rs:68) reads the primary entry array from a hardcoded LBA 2 rather than honoring the parsed header.partition_entry_lba (gpt.rs:370). Every Certus-written GPT uses LBA 2, so round-tripping our own tables is correct; a GPT written by an external tool with a different entry offset would be read incorrectly. This is a documented scope limitation, not a working feature warranting a MUST-level FR; captured in Implementation Notes. US2 'read an existing partition table' is scoped in practice to Certus-written/standard-layout tables. Honoring partition_entry_lba is a future robustness change.",
-      "before": "(not present in spec)",
-      "after": "Documented in Implementation Notes: 'Read path assumes Certus-written layout ... on read, the primary partition-entry array is read from a hardcoded LBA 2 rather than honoring the parsed header.partition_entry_lba. ... a GPT written by an external tool with a different entry offset would be read incorrectly. Low severity; honoring partition_entry_lba is a robustness improvement left for a future change.'",
-      "files": ["components/disk-partition-manager/.specify/specs/001-gpt-partition-management/spec.md"],
-      "applied": true,
-      "already_reflected": true
+      "approved": true,
+      "applied": false,
+      "summary": "Remains documented in Implementation Notes; already present in spec.md. No edit needed."
     },
     {
       "id": "P4",
-      "spec": "001-gpt-partition-management",
-      "requirement": "UNSPECCED: generate_guid silent zero-fallback on /dev/urandom failure",
+      "requirement": "unspecced:generate_guid zero-fallback",
+      "location": "src/gpt.rs:564-569",
       "direction": "BACKFILL-UNSPECCED",
       "severity": "Low",
-      "title": "generate_guid returns a near-zero (non-random) GUID if /dev/urandom cannot be opened",
-      "rationale": "generate_guid (src/gpt.rs:564-574) opens /dev/urandom and ignores read errors; if the file cannot be opened the GUID stays all-zero except the version/variant bits, which is non-random and collision-prone and contradicts FR-008's unconditional 'random GUIDs' assertion. This is a known-behavior/latent-defect caveat rather than a desirable feature, so it is documented in Implementation Notes rather than promoted to an FR. Erroring out on /dev/urandom failure would be a future code change.",
-      "before": "(only 'GUIDs are generated from /dev/urandom - no fallback if unavailable (zeros used)' in the pre-2026-08-07 spec)",
-      "after": "Documented in Implementation Notes: 'if /dev/urandom cannot be opened, generate_guid silently returns an all-zero GUID except for the version/variant bits - non-random and collision-prone. This contradicts FR-008's unconditional random GUIDs assertion. Documented here as a known behavior rather than an FR-level guarantee; erroring out on /dev/urandom failure would be a future code change.'",
-      "files": ["components/disk-partition-manager/.specify/specs/001-gpt-partition-management/spec.md"],
-      "applied": true,
-      "already_reflected": true
+      "approved": true,
+      "applied": false,
+      "summary": "Remains documented in Implementation Notes; already present in spec.md. No edit needed."
     }
   ]
 }

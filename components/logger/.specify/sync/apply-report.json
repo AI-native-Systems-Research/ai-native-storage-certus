@@ -1,42 +1,15 @@
 {
-  "generated": "2026-08-20T00:00:00Z",
-  "component": "logger",
-  "phase": "B",
-  "source": "components/logger/.specify/sync/proposals.json",
+  "generated": "2026-09-02T21:39:07Z",
+  "project": "logger",
   "summary": {
-    "backfill_applied": 1,
-    "align_tasks": 0,
+    "backfill_applied": 0,
+    "align_tasks_generated": 0,
     "unspecced_backfilled": 0,
     "resolved": 0,
     "human_decision": 0
   },
-  "specs_updated": [
-    {
-      "spec": "001-logger-component",
-      "requirement": "FR-006",
-      "change_type": "backfill_reword",
-      "detail": "Replaced 'yellow for warn' with the exact escapes from ansi_color (src/lib.rs:84-90): error red \\x1b[31m, warn 256-color orange \\x1b[38;5;208m, info green \\x1b[32m, debug cyan \\x1b[36m."
-    },
-    {
-      "spec": "001-logger-component",
-      "requirement": "US1-acceptance",
-      "change_type": "backfill_scenario_added",
-      "detail": "Added User Story 1 scenario 5 asserting the orange warn prefix \\x1b[38;5;208m and reset \\x1b[0m."
-    },
-    {
-      "spec": "001-logger-component",
-      "requirement": "metadata",
-      "change_type": "backfill_metadata",
-      "detail": "Added Last-Synced: 2026-08-20 line."
-    }
-  ],
-  "align_tasks_generated": [],
-  "unspecced_backfilled": [],
-  "resolved": [],
-  "backups": [
-    {
-      "edited": "specs/001-logger-component/spec.md",
-      "backup": ".specify/sync/backups/specs/001-logger-component/spec.md.bak"
-    }
-  ]
+  "specs_updated": [],
+  "align_tasks": [],
+  "backups": []
 }
+</content>

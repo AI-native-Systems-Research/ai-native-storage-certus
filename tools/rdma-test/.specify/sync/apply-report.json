@@ -1,0 +1,44 @@
+{
+  "applied": "2026-09-02T21:46:49Z",
+  "component": "tools/rdma-test",
+  "drift_status": "drift",
+  "backfills_applied": [
+    {
+      "id": "D2",
+      "file": "specs/001-rdma-network-test/quickstart.md",
+      "line": 74,
+      "change": "jq .results.throughput.bandwidth_gbps -> jq .results.write.bandwidth_gbps"
+    },
+    {
+      "id": "D1",
+      "file": "specs/001-rdma-network-test/tasks.md",
+      "line": 61,
+      "change": "'-t throughput' -> '-t write' in US1 checkpoint"
+    }
+  ],
+  "align_tasks": [
+    {
+      "id": "FR-012",
+      "severity": "major",
+      "status": "pre-existing",
+      "target": ".specify/sync/align-tasks.md#FR-012"
+    },
+    {
+      "id": "D3",
+      "severity": "minor",
+      "status": "new",
+      "file": "scripts/launch.sh",
+      "line": 11,
+      "target": ".specify/sync/align-tasks.md#launch-sh-comment"
+    }
+  ],
+  "new_specs": [],
+  "human_decisions": [],
+  "backups_dir": ".specify/sync/backups/20260902T214649Z/",
+  "not_applied": [
+    {
+      "id": "D3",
+      "reason": "code-file edit (shell script); recorded as align task per spec-sync rules"
+    }
+  ]
+}

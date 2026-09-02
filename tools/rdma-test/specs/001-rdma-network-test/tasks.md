@@ -58,7 +58,7 @@
 - [X] T016 [US1] Wire throughput test into server dispatch (listen, accept, handle throughput, exit) in src/server.rs
 - [X] T017 [US1] Add ThroughputResult to output module with both human and JSON formatting in src/output.rs
 
-**Checkpoint**: User Story 1 fully functional — `rdma-test server -t throughput` + `rdma-test client -a <ip> -t throughput` produces bandwidth results
+**Checkpoint**: User Story 1 fully functional — `rdma-test server -t write` + `rdma-test client -a <ip> -t write` produces bandwidth results
 
 ---
 

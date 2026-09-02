@@ -1,52 +1,19 @@
 {
-  "applied": "2026-08-20",
+  "applied": "2026-09-02",
   "component": "gpu-services",
-  "based_on": "proposals from 2026-08-20 (drift-report 2026-08-20)",
+  "based_on": "proposals from 2026-09-02 (drift-report 2026-09-02)",
+  "drift_status": "clean",
   "summary": {
-    "backfill_applied": 1,
+    "backfill_applied": 0,
     "align_tasks": 0,
     "unspecced_backfilled": 0,
     "resolved": 0,
     "human_decision": 0
   },
-  "specs_updated": [
-    {
-      "spec_id": "003-gpu-p2p-server",
-      "spec_file": "specs/003-gpu-p2p-server/spec.md",
-      "backup": ".specify/sync/backups/003-spec.md.20260820T171427Z.bak",
-      "changes": [
-        {
-          "requirement": "FR-012",
-          "change_type": "BACKFILL (requirement reworded: MDTS ceiling is operator responsibility documented via CLI help, not runtime-validated)"
-        },
-        {
-          "requirement": "US1 Acceptance Scenario 4",
-          "change_type": "ADD (chunked-read scenario: ceil(size/chunk-size) chunks, <n> reported)"
-        },
-        {
-          "requirement": "Assumptions",
-          "change_type": "ADD (bullet: operator responsible for --chunk-size <= MDTS)"
-        },
-        {
-          "requirement": "Metadata",
-          "change_type": "ADD (Last-Synced: 2026-08-20 line)"
-        }
-      ]
-    }
-  ],
+  "specs_updated": [],
   "align_tasks_generated": [],
   "unspecced_backfilled": [],
   "resolved": [],
-  "backups": [
-    {
-      "spec_file": "specs/003-gpu-p2p-server/spec.md",
-      "backup": ".specify/sync/backups/003-spec.md.20260820T171427Z.bak"
-    }
-  ],
-  "prior_deliverables_archived": [
-    "proposals-20260721.json",
-    "proposals-20260721.md",
-    "apply-report-20260721.json",
-    "apply-report-20260721.md"
-  ]
+  "backups": [],
+  "notes": "Clean run: no BACKFILL/ALIGN/HUMAN_DECISION items. No spec files edited, no backups created. Prior 003 FR-012 backfill (2026-08-20) re-verified and still holds."
 }

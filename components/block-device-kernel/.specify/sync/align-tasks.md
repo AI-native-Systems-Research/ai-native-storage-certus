@@ -200,3 +200,72 @@ site; plus a targeted test)
       `ReadAsync`/`WriteAsync` ops under `--features telemetry`
 - [ ] `cargo clippy -p block-device-kernel --all-targets -- -D warnings` remains
       clean after the change
+
+---
+
+# 2026-09-02 Re-verify (Spec-Sync)
+
+Drift source: `.specify/sync/drift-report.{json,md}` (regenerated 2026-09-02
+against HEAD `2fc1cd3c`). No `.rs` source was modified and no cargo command was
+run by this sync. The FlushSync backfill (FR-027) from 2026-08-20 is confirmed
+landed in the spec and aligned in code, so it is not restated here.
+
+## Task: Align 001-block-device-kernel/FR-021 & SC-006 — async telemetry latency records 0 ns (STILL OPEN)
+
+**Severity**: moderate
+
+**Status**: Re-verified unchanged at HEAD `2fc1cd3c`. This re-affirms the
+"2026-08-20 Phase B" task above — the fix has NOT been applied; `src/actor.rs:776`
+still reads `self.telemetry.record_op(0, op.bytes);`.
+
+**Spec Requirement**: FR-021 (feature-gated telemetry tracks total ops,
+min/max/mean latency, total bytes, mean throughput) and SC-006 (accurate
+`TelemetrySnapshot` values when enabled). Both correct as written — code defect,
+not a spec-lag item.
+
+**Current Code**: The synchronous paths (`src/actor.rs:332,397,637`) and the
+blocking `wait_for_cqe` completion site (`:718`, `op.start.elapsed()`) record a
+real duration. The primary async-completion path `harvest_completions()` still
+passes a hardcoded `0`:
+
+```
+// src/actor.rs:776
+#[cfg(feature = "telemetry")]
+self.telemetry.record_op(0, op.bytes);
+```
+
+`InflightOp` already carries a populated submission timestamp (`start: Instant`,
+`src/actor.rs:101`, set at `:480` and `:554`), so the real elapsed duration is
+available but unused. Every `ReadAsync`/`WriteAsync` op harvested via the
+idle-loop completion path records 0 ns latency, pinning `min_latency_ns` to 0
+(`src/telemetry.rs:41-52`) and skewing `mean_latency_ns` whenever async IO is
+present.
+
+**Required Change**: In `harvest_completions()`, replace the hardcoded `0` with
+`op.start.elapsed().as_nanos() as u64` (guarded by
+`#[cfg(feature = "telemetry")]`), exactly as the `wait_for_cqe` site at
+`src/actor.rs:718` already does. No new fields needed. Add a test that drives an
+async op through `harvest_completions` under `--features telemetry` and asserts
+`min/max/mean_latency_ns` are non-zero and plausible.
+
+**Files to Modify**:
+- `components/block-device-kernel/src/actor.rs` (line 776, inside
+  `harvest_completions`)
+- New/updated test in `components/block-device-kernel/tests/` or a `src/actor.rs`
+  unit test covering async-path telemetry latency accuracy
+
+**Estimated Effort**: small (one call-site change mirroring an existing correct
+site; plus a targeted test)
+
+### Acceptance Criteria
+- [ ] `harvest_completions()` passes `op.start.elapsed().as_nanos() as u64` (not
+      `0`) into `record_op()` for the async completion path
+- [ ] No new `InflightOp` field is introduced — the existing `start: Instant` is
+      reused
+- [ ] Sync-path latency recording (`:332`, `:397`, `:637`) and the `wait_for_cqe`
+      site (`:718`) are left unchanged
+- [ ] A test asserts `TelemetrySnapshot.min_latency_ns` / `max_latency_ns` /
+      `mean_latency_ns` are non-zero and plausible for async
+      `ReadAsync`/`WriteAsync` ops under `--features telemetry`
+- [ ] `cargo clippy -p block-device-kernel --all-targets -- -D warnings` remains
+      clean after the change

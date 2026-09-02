@@ -77,3 +77,38 @@ report partial results collected before failure.")
       populated with the test kinds that did complete — both in JSON
       (`--output json`) and human-readable mode.
 - [ ] `tasks.md` T032 accurately reflects implementation status.
+
+---
+
+## Task: Align 001-rdma-network-test — launch.sh stale `--test throughput` comment
+
+**Severity**: Minor
+
+**Detected**: spec-sync 2026-09-02 (residual from the 2026-07-22 backfill,
+which corrected `throughput` -> real enum values in the spec `.md` files but
+missed this usage comment inside the shell script).
+
+**Spec Requirement**: FR-017 fixes the `--test` value set to exactly
+`write`, `read`, `send`, `recv`, `latency`, `all`. There is no `throughput`
+value; `--test throughput` fails at clap argument parsing.
+
+**Current Code**: `tools/rdma-test/scripts/launch.sh:11` still shows an
+example invocation in its usage header comment:
+```
+#   ./launch.sh node1 node2 --size 65536 --iterations 50000 --test throughput
+```
+This example would fail if a user copied it verbatim.
+
+**Required Change**: Change `--test throughput` to `--test write` (or another
+valid value) in the `scripts/launch.sh` header comment. This is a code-file
+edit (a shell script), so per spec-sync rules it is recorded here rather than
+applied by the (spec-only) backfill step. No functional/behavioral impact.
+
+**Files to Modify**:
+- `tools/rdma-test/scripts/launch.sh` (line 11, header comment)
+
+**Estimated Effort**: Trivial
+
+### Acceptance Criteria
+- [ ] `scripts/launch.sh` contains no `--test throughput` reference; the
+      example uses a valid `--test` value.

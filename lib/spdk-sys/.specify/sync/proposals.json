@@ -1,0 +1,33 @@
+{
+  "generated": "2026-09-02T21:47:19Z",
+  "project": "spdk-sys",
+  "proposals": [
+    {
+      "id": 1,
+      "finding": "spdk_nvme_ctrlr_cmd_abort_ext and spdk_nvme_ctrlr_get_max_xfer_size allowlisted but not named by any FR",
+      "location": "lib/spdk-sys/build.rs:197,220",
+      "resolution": "BACKFILL",
+      "approved": true,
+      "target": "lib/spdk-sys/specs/001-spdk-sys/spec.md (FR-4)",
+      "notes": "Controller operations within FR-4 scope; named explicitly. Applied."
+    },
+    {
+      "id": 2,
+      "finding": "Stale components/spdk-sys path references after relocation to lib/spdk-sys",
+      "location": "lib/spdk-sys/.specify/sync/align-tasks.md:11,14,29",
+      "resolution": "BACKFILL",
+      "approved": true,
+      "target": "lib/spdk-sys/.specify/sync/align-tasks.md",
+      "notes": "Paths corrected to lib/spdk-sys. Applied."
+    },
+    {
+      "id": 3,
+      "finding": "Sanity suite covers only env/PCI types; no P1 NVMe type/fn-pointer coverage vs Success Criteria + FR-3/4/5",
+      "location": "lib/spdk-sys/tests/bindings_sanity.rs:9-97",
+      "resolution": "ALIGN",
+      "approved": true,
+      "target": "lib/spdk-sys/.specify/sync/align-tasks.md (code follow-up, out of scope)",
+      "notes": "Code-side test gap; spec not weakened. Mirrors open tasks.md:8."
+    }
+  ]
+}

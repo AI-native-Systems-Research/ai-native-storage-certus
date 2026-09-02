@@ -1,6 +1,9 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T21:46:08Z",
   "project": "spdk-env",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "8d1b1befdd776e12281e5c5d75a495e4b57500b039cda72761d72a2d82155584",
+  "drift_status": "drift",
   "summary": {
     "specs_analyzed": 2,
     "requirements_checked": 26,
@@ -23,18 +26,31 @@
       "aligned": 24,
       "drifted": [
         {
-          "requirement": "stale-crate-paths",
-          "spec_text": "tasks.md references components/spdk-sys/...; spec.md Input/Assumptions reference ../component-framework.",
-          "actual": "spdk-sys moved to lib/spdk-sys and component-framework to lib/component-framework; supporting spec docs still cite the old components/ paths.",
-          "location": "components/spdk-env/specs/002-spdk-env-vfio-init/tasks.md:22,24,34,35,36; spec.md:6,99,188",
-          "severity": "minor"
+          "requirement": "SC-001 (also User Story 1 narrative + Clarifications)",
+          "spec_text": "Discovers 100% of available VFIO-bound devices matching /sys/bus/pci/drivers/vfio-pci; US1/Clarifications say 'All SPDK-supported device types bound to VFIO (NVMe, virtio-blk, etc.)'.",
+          "actual": "enumerate_devices enumerates only the NVMe PCI driver (spdk_pci_get_driver(\"nvme\")); non-NVMe vfio-pci devices (e.g. virtio-blk) are never discovered. FR-006 already narrows to NVMe-only, so this is also an internal spec contradiction.",
+          "location": "components/spdk-env/src/env.rs:164-181; spec.md SC-001 (line 174), US1 narrative (line 22), Clarifications (line 12)",
+          "severity": "medium",
+          "resolution": "HUMAN_DECISION",
+          "align_task": "Task 1"
         }
       ],
       "not_implemented": [
-        "FR-015: skip in-use devices with per-device warning, return only successfully probed devices (spec-acknowledged 'Future: not yet implemented'; all matching devices are currently claimed)"
+        "FR-015: skip in-use devices with per-device warning, return only successfully probed devices (spec-acknowledged 'Future: not yet implemented'; enumerate_devices uses a non-attach callback per FR-006, so no probe/claim step exists to skip)"
       ]
     }
   ],
+  "resolved_since_last_run": [
+    {
+      "requirement": "stale-crate-paths",
+      "note": "spdk-sys -> lib/spdk-sys, component-framework -> lib/component-framework. Backfilled 2026-08-20; verified present this run (tasks.md:10 note + lib/spdk-sys paths; spec.md:6 bracketed note). spec.md:99,188 are crate-name refs, still valid."
+    }
+  ],
   "unspecced": [],
-  "conflicts": []
+  "conflicts": [
+    {
+      "description": "FR-006 (NVMe-only) contradicts SC-001 / User Story 1 narrative / Clarifications (all SPDK-supported device types). Tracked as the SC-001 drift item above; resolution is a scope decision.",
+      "severity": "medium"
+    }
+  ]
 }

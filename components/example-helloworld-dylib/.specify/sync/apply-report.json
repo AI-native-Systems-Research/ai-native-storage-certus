@@ -1,12 +1,13 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Spec-Sync Phase B",
+  "generated": "2026-09-02T21:39:11Z",
   "component": "example-helloworld-dylib",
-  "based_on": "drift-report.{json,md} (2026-08-20T09:24 regeneration)",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "877b58eaa2d0cdd0761fb044882642ce04fa46eebe46261b9aac29f2e0a9fed1",
+  "based_on": "drift-report.{json,md} (2026-09-02T21:39:11Z regeneration)",
+  "drift_status": "drift",
   "summary": {
     "backfill_applied": 0,
-    "align_tasks": 1,
+    "align_tasks": 2,
     "unspecced_backfilled": 0,
     "resolved": 0,
     "human_decision": 0
@@ -18,8 +19,16 @@
       "requirement": "FR-4 / Overview",
       "task": "align-tasks.md Task 2 — correct the stale module doc comment (src/lib.rs:4-7)",
       "severity": "moderate",
-      "status": "open (pre-existing, covers FR-4 exactly; re-confirmed this phase)",
+      "status": "open (re-confirmed 2026-09-02; covers FR-4 exactly)",
       "change_type": "doc-only code fix (queued, not applied — no .rs edited)"
+    },
+    {
+      "spec": "001-example-helloworld-dylib",
+      "requirement": "plan.md Testing",
+      "task": "align-tasks.md Task 1 — add automated dylib-loading integration test",
+      "severity": "low",
+      "status": "open (re-confirmed 2026-09-02)",
+      "change_type": "test/code gap (queued, not applied)"
     }
   ],
   "unspecced_backfilled": [],
@@ -27,7 +36,7 @@
   "backups": {
     "spec_md_files_edited": 0,
     "new_backups_created": [],
-    "note": "No spec.md edited this phase (spec already correct), so no new backups were required. Pre-existing backups from the 2026-07-22 backfill remain: backups/spec.md.bak, backups/plan.md.bak, backups/tasks.md.bak."
+    "note": "No spec.md edited this run (spec already correct), so no new backups required. Pre-existing backups remain: backups/spec.md.bak, backups/plan.md.bak, backups/tasks.md.bak."
   },
-  "notes": "No .rs source modified; no cargo run. Edits confined to .specify/sync/. The host-app doc apps/dynamic-loading-example/src/main.rs:6-9 repeats the same stale claim (out of scope; noted only)."
+  "notes": "No .rs source modified; no cargo run. Edits confined to .specify/sync/. Never touched components/interfaces/. Host-app doc apps/dynamic-loading-example/src/main.rs:7-9 repeats the same stale claim (out of scope; noted only)."
 }

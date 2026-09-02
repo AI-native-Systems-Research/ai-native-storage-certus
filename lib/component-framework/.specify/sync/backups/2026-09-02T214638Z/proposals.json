@@ -1,0 +1,37 @@
+{
+  "generated": "2026-04-10T12:00:00Z",
+  "based_on": "drift-report from 2026-04-10T12:00:00Z",
+  "summary": {
+    "backfill": 0,
+    "align": 0,
+    "human_decision": 0,
+    "new_specs": 0,
+    "remove_from_spec": 0
+  },
+  "proposals": [],
+  "recommendations": [
+    {
+      "id": "REC-001",
+      "type": "housekeeping",
+      "title": "Update spec status fields from Draft to Complete",
+      "description": "Specs 001-005 have Status: Draft and spec 006 has Status: Backfilled, but all requirements are fully implemented. Update to Complete/Implemented.",
+      "affected_specs": [
+        "001-com-component-framework",
+        "002-registry-refcount-binding",
+        "003-actor-channels",
+        "004-channel-benchmarks",
+        "005-numa-aware-actors",
+        "006-log-handler"
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "REC-002",
+      "type": "housekeeping",
+      "title": "Remove backfill notice from spec 006",
+      "description": "Spec 006-log-handler contains a Backfill Notice that is no longer needed since the spec has been validated against implementation.",
+      "affected_specs": ["006-log-handler"],
+      "confidence": "high"
+    }
+  ]
+}

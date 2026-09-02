@@ -120,3 +120,30 @@ two stale self-annotations were **annotated in place** this pass to mark them as
 describing the opposite of current code (telemetry IS integrated; trait methods
 are functional, no `serve` module exists). Full retirement of spec-001 to an
 archive path is a maintainer follow-up, tracked in apply-report.md Next Steps.
+
+---
+
+# 2026-09-02 Re-analysis (git 2fc1cd3c)
+
+Full re-verification of spec-002 against current `src/`/`tests/`/`benches/`
+(source unchanged since 2026-07-30, commit `00bd4002`). All 22 shipped-behavior
+FRs/SCs remain aligned at their cited `file:line`. **One ALIGN item is still
+open** and carried forward unchanged; no new align work surfaced.
+
+## Task A — (still open, carried forward) SC-004 stale bench header comment (minor)
+
+- **Status**: **still queued, not drafted** — unchanged since the 2026-07-22 and
+  2026-08-07 passes. Verified 2026-09-02 that `benches/push_telemetry.rs:1-18`
+  still states the literal `<5% vs disabled` bar (lines 3-4, 17-18).
+- **Spec**: `002-rdma-push-initiator` SC-004 (spec.md:316-329), reframed
+  2026-07-15 to "small fixed absolute cost / ZST-when-off".
+- **Required change**: reword the header comment to the fixed-absolute-cost /
+  ZST-when-off criterion and cross-reference SC-004's 2026-07-15 note; no
+  benchmark logic change.
+- **Files**: `components/remote-lookup-rdma-initiator/benches/push_telemetry.rs`
+  (doc comment only).
+- **Why not applied here**: `.rs` file — out of scope for a Markdown-only
+  spec-sync-apply. Because this remains actionable, this pass reports
+  `drift_status: drift` (honest), rather than the 2026-08-07 "clean" verdict that
+  folded the same open task under a clean headline.
+- **Owner**: remote-lookup-rdma-initiator maintainer.

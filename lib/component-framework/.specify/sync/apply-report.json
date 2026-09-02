@@ -1,72 +1,53 @@
 {
-  "applied_at": "2026-04-10T12:00:00Z",
-  "based_on": "proposals from 2026-04-10T12:00:00Z",
+  "applied_at": "2026-09-02T21:46:38Z",
+  "based_on": "proposals from 2026-09-02T21:46:38Z",
+  "git_commit": "2fc1cd3c",
+  "drift_status": "drift",
+  "inputs_sha256": "8e73d91f2d75022d91ada52f220d2afa10a6c176fa62a400adaf8fbae7d5af66",
   "summary": {
+    "requirements_checked": 149,
+    "aligned": 148,
     "drift_proposals_applied": 0,
-    "recommendations_applied": 2,
-    "specs_updated": 6,
+    "align_tasks_recorded": 1,
+    "artifact_fixes_applied": 1,
+    "specs_updated": 0,
     "new_specs_created": 0,
-    "tasks_generated": 0
+    "spec_backups_taken": 0
   },
   "changes": [
     {
-      "recommendation": "REC-001",
-      "type": "status_update",
-      "spec": "001-com-component-framework",
-      "before": "Draft",
-      "after": "Complete"
-    },
+      "proposal": "P-002",
+      "type": "artifact_path_fix",
+      "file": ".specify/sync/align-tasks.md",
+      "before": "components/component-framework/crates/component-core/src/actor.rs",
+      "after": "lib/component-framework/crates/component-core/src/actor.rs",
+      "note": "Also added an OPEN status note re-confirming the activate() re-activation panic at actor.rs:610/617."
+    }
+  ],
+  "deferred_to_align_tasks": [
     {
-      "recommendation": "REC-001",
-      "type": "status_update",
-      "spec": "002-registry-refcount-binding",
-      "before": "Draft",
-      "after": "Complete"
-    },
+      "proposal": "P-001",
+      "requirements": ["003-actor-channels/FR-004", "005-numa-aware-actors/FR-001"],
+      "severity": "minor",
+      "reason": "Code-side fix (activate() re-activation panic -> typed error, or consume self). spec-sync does not edit code; spec text is already correct."
+    }
+  ],
+  "not_applied": [
     {
-      "recommendation": "REC-001",
-      "type": "status_update",
-      "spec": "003-actor-channels",
-      "before": "Draft",
-      "after": "Complete"
-    },
-    {
-      "recommendation": "REC-001",
-      "type": "status_update",
-      "spec": "004-channel-benchmarks",
-      "before": "Draft",
-      "after": "Complete"
-    },
-    {
-      "recommendation": "REC-001",
-      "type": "status_update",
-      "spec": "005-numa-aware-actors",
-      "before": "Draft",
-      "after": "Complete"
-    },
-    {
-      "recommendation": "REC-001",
-      "type": "status_update",
-      "spec": "006-log-handler",
-      "before": "Backfilled",
-      "after": "Complete"
-    },
-    {
-      "recommendation": "REC-002",
-      "type": "section_removed",
-      "spec": "006-log-handler",
-      "section": "Backfill Notice"
+      "item": "apply-report.md:60 stale path",
+      "reason": "Historical dated log entry; left intact rather than rewritten. Noted in drift report."
     }
   ],
   "backups": {
-    "directory": ".specify/sync/backups/2026-04-10/",
+    "directory": ".specify/sync/backups/2026-09-02T214638Z/",
     "files": [
-      "001-spec.md",
-      "002-spec.md",
-      "003-spec.md",
-      "004-spec.md",
-      "005-spec.md",
-      "006-spec.md"
+      "align-tasks.md",
+      "drift-report.md",
+      "drift-report.json",
+      "apply-report.md",
+      "apply-report.json",
+      "proposals.md",
+      "proposals.json"
     ]
   }
 }

@@ -1,53 +1,59 @@
 {
-  "generated": "2026-06-19T00:00:00Z",
-  "based_on": "drift-report 2026-06-19",
+  "generated": "2026-09-02T21:32:00Z",
+  "based_on": "drift-report 2026-09-02",
   "summary": {
-    "backfill": 3,
+    "backfill": 2,
     "align": 1,
-    "human_decision": 0,
+    "human_decision": 1,
     "new_specs": 0,
     "remove": 0
   },
   "proposals": [
     {
       "id": "P1",
+      "drift": "D1",
       "spec_id": "001-lru-eviction-policy",
       "requirement": "FR-009",
       "direction": "backfill",
       "status": "approved",
-      "current_spec_text": "Operations on an invalid PoolId MUST return EvictionPolicyError::InvalidPool",
-      "proposed_text": "Methods returning Result (track, touch, remove) MUST return EvictionPolicyError::InvalidPool when given a non-existent pool. Methods returning Option or scalar (pop_oldest, peek_oldest, len, clear_pool) MUST gracefully degrade: returning None, empty collection, 0, or no-op respectively.",
+      "approved": true,
+      "current_spec_text": "Methods returning Result (track, touch, remove) MUST return EvictionPolicyError::InvalidPool when given a non-existent pool.",
+      "proposed_text": "Methods returning Result (track, touch, remove, batch_touch) MUST return EvictionPolicyError::InvalidPool when given a non-existent pool.",
       "confidence": "high"
     },
     {
       "id": "P2",
+      "drift": "D2",
       "spec_id": "001-lru-eviction-policy",
-      "requirement": "FR-010",
+      "requirement": "Dependencies+plan",
       "direction": "backfill",
       "status": "approved",
-      "current_spec_text": "remove and move_to_back on an already-removed entry MUST be idempotent (no panic, no effect)",
-      "proposed_text": "touch and remove on an already-removed handle MUST be idempotent (no panic, no effect).",
+      "approved": true,
+      "current_spec_text": "Consumers: dispatch-map, memory-tier, dispatcher, dispatcher-p2p, certus-connector, certus-server, certus-server-yaml",
+      "proposed_text": "Consumers: dispatch-map, memory-tier, dispatcher, dispatcher-p2p, certus-connector, certus-server, certus-server-yaml, eviction-replay-benchmark (plan test counts corrected 8->9 lib, 12->13 lru_list)",
       "confidence": "high"
     },
     {
       "id": "P3",
+      "drift": "A1",
       "spec_id": "001-lru-eviction-policy",
-      "requirement": "NFR-004",
+      "requirement": "FR-012",
       "direction": "align",
-      "status": "approved",
-      "current_spec_text": "Component MUST conform to Certus component model with receptacle for ILogger",
-      "proposed_action": "Add trace-level logging for create_pool and error paths",
+      "status": "pending",
+      "approved": false,
+      "proposed_action": "Add dedicated tests for batch_touch (single-pool amortization, multi-pool relock, empty slice, invalid pool).",
       "confidence": "high"
     },
     {
       "id": "P4",
+      "drift": "H1",
       "spec_id": "001-lru-eviction-policy",
-      "requirement": "SC-001",
-      "direction": "backfill",
-      "status": "approved",
-      "current_spec_text": "All 8 unit tests in lib.rs and 12 unit tests in lru_list.rs pass",
-      "proposed_text": "All tests in lib.rs and lru_list.rs pass (cargo test -p eviction-policy-lru).",
-      "confidence": "high"
+      "requirement": "FR-002",
+      "direction": "human_decision",
+      "status": "open",
+      "approved": false,
+      "detail": "Interface documents idempotent re-registration (ieviction_policy.rs:84-86); LRU impl always push_back (lib.rs:69). Decide implement-dedup vs relax-interface-doc. Interfaces out of scope to edit here.",
+      "confidence": "n/a"
     }
   ]
 }

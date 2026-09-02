@@ -1,89 +1,78 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02",
   "project": "memory-tier",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 48,
-    "aligned": 33,
-    "drifted": 8,
-    "not_implemented": 3,
+    "requirements_checked": 47,
+    "aligned": 46,
+    "drifted_spec_numbered": 1,
+    "drifted_supporting_artifacts_resolved_this_pass": 2,
+    "not_implemented": 0,
     "unspecced_features": 0
   },
+  "context": "spec.md was already backfilled to the single-RwLock<Pool> reality (2026-08-20 Phase B) and is fully aligned with src/. The previously committed drift-report described the pre-backfill sharded spec and was stale. This re-run re-verifies all requirements and extends the backfill to plan.md and tasks.md.",
   "specs": [
     {
       "id": "001-memory-tier",
       "title": "Memory Tier (DRAM Cache Pool)",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-008", "FR-009", "FR-010",
-        "FR-011", "FR-012", "FR-015", "FR-016", "FR-017", "FR-018", "FR-019",
-        "FR-020", "FR-022", "FR-023", "FR-024", "FR-025", "FR-026", "FR-027",
-        "FR-028", "FR-029",
-        "NFR-001", "NFR-003", "NFR-004", "NFR-005", "NFR-006", "NFR-007",
-        "NFR-009", "NFR-010", "NFR-011",
-        "SC-1"
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
+        "FR-022", "FR-023", "FR-024", "FR-025", "FR-026", "FR-027", "FR-028",
+        "FR-029",
+        "NFR-001", "NFR-002", "NFR-003", "NFR-004", "NFR-005", "NFR-006",
+        "NFR-007", "NFR-009", "NFR-010", "NFR-011",
+        "SC-1", "SC-2", "SC-3", "SC-4", "SC-5", "SC-6", "SC-7"
       ],
       "drifted": [
         {
-          "requirement": "FR-005",
-          "spec_text": "Pool is divided into 16 independent shards.",
-          "actual": "Single RwLock<Pool> with one FreeList and one HashMap; no shards.",
-          "location": "components/memory-tier/src/lib.rs:76-85,313-316",
-          "severity": "major"
-        },
-        {
-          "requirement": "FR-006",
-          "spec_text": "Shard selection uses key modulo 16.",
-          "actual": "No shard selection / shard_for_key exists.",
-          "location": "components/memory-tier/src/lib.rs",
-          "severity": "major"
-        },
-        {
-          "requirement": "FR-007",
-          "spec_text": "Each shard has its own Mutex-protected allocator and slot map.",
-          "actual": "One allocator + slot map under a single RwLock.",
-          "location": "components/memory-tier/src/lib.rs:76-79",
-          "severity": "major"
-        },
-        {
-          "requirement": "FR-013",
-          "spec_text": "evict_next() cycles through shards via atomic counter (round-robin).",
-          "actual": "evict_next delegates to ep.identify_next_to_evict; no evict_counter field.",
-          "location": "components/memory-tier/src/lib.rs:434-466",
-          "severity": "moderate"
-        },
-        {
-          "requirement": "FR-014",
-          "spec_text": "evict_next_for_key() evicts from the same shard as the target key.",
-          "actual": "key parameter ignored (_key); pure alias for evict_next().",
-          "location": "components/memory-tier/src/lib.rs:468-470",
-          "severity": "moderate"
-        },
-        {
-          "requirement": "FR-021",
-          "spec_text": "oldest_keys(n) samples per-shard with (n / NUM_SHARDS).max(1).",
-          "actual": "Single call ep.get_eviction_candidates(pool_id, n); no per-shard sampling.",
-          "location": "components/memory-tier/src/lib.rs:424-432",
-          "severity": "minor"
-        },
-        {
           "requirement": "NFR-008",
           "spec_text": "Component version is 0.2.0.",
-          "actual": "Cargo.toml = 0.1.0; define_component! version = 0.3.0; spec = 0.2.0 (three-way mismatch).",
-          "location": "components/memory-tier/Cargo.toml; components/memory-tier/src/lib.rs:140",
-          "severity": "minor"
+          "actual": "Cargo.toml = 0.1.0; define_component! version = 0.3.0; spec = 0.2.0 (three-way mismatch, no authoritative value).",
+          "location": "components/memory-tier/Cargo.toml:3; components/memory-tier/src/lib.rs:140; spec.md NFR-008",
+          "severity": "minor",
+          "disposition": "HUMAN_DECISION",
+          "resolved": false,
+          "reason": "Reconciling requires editing Cargo.toml and src/lib.rs, both out of spec-sync edit scope."
         },
         {
-          "requirement": "IMemoryTier-doc-verified-claims",
-          "spec_text": "Interface doc asserts Creusot-verified P1-P10 and shard index < 16 / cycles through all 16 shards.",
-          "actual": "No proofs exist and no shards exist; doc comments are stale and misleading.",
-          "location": "components/interfaces/src/imemory_tier.rs:53-119",
-          "severity": "major"
+          "requirement": "plan.md-architecture",
+          "spec_text": "plan.md described a 16-way sharded pool (Memory Layout, Pointer Arithmetic, per-shard Mutex Concurrency Model, Key Design Decisions #1/#6) and a Creusot P1-P10 verification section.",
+          "actual": "Single RwLock<Pool>, one FreeList + one HashMap; no shards, no Creusot proofs (no components/memory-tier/verif/).",
+          "location": "components/memory-tier/specs/001-memory-tier/plan.md",
+          "severity": "moderate",
+          "disposition": "BACKFILL",
+          "resolved": true,
+          "reason": "plan.md backfilled to the single-pool reality this pass; matches spec.md and the resolved 2026-08-20 sharding-fate decision."
+        },
+        {
+          "requirement": "tasks.md-stale-refs",
+          "spec_text": "tasks.md referenced Creusot P1-P10, 'Verify Creusot verification conditions', 'evict_next_for_key targeting correct shard', 'shard layout' diagram, and 'configurable shard count'.",
+          "actual": "No sharding, no Creusot proofs in code.",
+          "location": "components/memory-tier/specs/001-memory-tier/tasks.md",
+          "severity": "minor",
+          "disposition": "BACKFILL",
+          "resolved": true,
+          "reason": "tasks.md backfilled: removed Creusot/shard-targeting tasks; reworded layout/backlog items to the single-pool reality."
         }
       ],
-      "not_implemented": [
-        "SC-8 (10 Creusot properties / 21 verification conditions) - no proof artifacts under components/memory-tier/verif/",
-        "16-way sharded allocator and slot map (FR-005/006/007, NFR-002)",
-        "Round-robin eviction counter (FR-013)"
+      "not_implemented": [],
+      "out_of_scope_drift": [
+        {
+          "requirement": "IMemoryTier-doc-evict_next_for_key",
+          "detail": "components/interfaces/src/imemory_tier.rs:87-91 doc comment still says 'same shard as key' / 'target shard is empty' for evict_next_for_key; pool is unsharded and key is ignored.",
+          "location": "components/interfaces/src/imemory_tier.rs:87-91",
+          "editable": false,
+          "reason": "components/interfaces/** is outside this component's edit scope."
+        },
+        {
+          "requirement": "README-source-layout",
+          "detail": "README.md Source Layout lists nonexistent src/lru.rs; eviction is delegated to IEvictionPolicy.",
+          "location": "components/memory-tier/README.md:23-30",
+          "editable": false,
+          "reason": "README.md is doc-only, not under specs/**; outside spec-sync scope (tracked in tasks.md)."
+        }
       ]
     }
   ],
@@ -92,7 +81,7 @@
     {
       "requirement": "NFR-008 / version",
       "detail": "Cargo.toml (0.1.0) vs define_component! (0.3.0) vs spec (0.2.0) disagree on component version.",
-      "location": "components/memory-tier/Cargo.toml; components/memory-tier/src/lib.rs:140; spec.md:190"
+      "location": "components/memory-tier/Cargo.toml:3; components/memory-tier/src/lib.rs:140; spec.md NFR-008"
     }
   ]
 }

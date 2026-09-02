@@ -3,7 +3,7 @@ spec_sync_component: extent-manager
 spec_sync_drift_status: clean
 spec_sync_synced_at: 2026-09-02T20:45:00Z
 spec_sync_git_commit: 787b8263
-spec_sync_inputs_sha256: 5e8ff0212e33c827010f5b927a6f85f53cc28fbbfb74c4878170acf5294622da
+spec_sync_inputs_sha256: 2fa5fc420d919f4e3a26273d1dc4f6a734b7613e004aa69716e5806a324ee935
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Spec ↔ Implementation Drift Report — extent-manager

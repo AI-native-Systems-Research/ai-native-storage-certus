@@ -1,0 +1,36 @@
+{
+  "generated": "2026-08-20",
+  "phase": "B",
+  "project": "interfaces",
+  "spec": "components/interfaces/specs/001-interfaces/spec.md",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "summary": {
+    "backfill": 0,
+    "align": 0,
+    "resolved": 2,
+    "backfill_unspecced": 0,
+    "human_decision": 0
+  },
+  "proposals": [
+    {
+      "requirement": "FR-014",
+      "spec_id": "001-interfaces",
+      "title": "IExtendedMetadataStore Interface",
+      "direction": "RESOLVED",
+      "rationale": "Reported as a major defect: the IExtendedMetadataStore trait was defined in src/iextended_metadata_store.rs but the module was never declared or re-exported in src/lib.rs, so it was not part of the compiled crate. Per Phase B policy this defect was ALREADY FIXED on the main development thread. Verified in current source: src/lib.rs:77 declares `mod iextended_metadata_store;` (ungated) and src/lib.rs:99 has `pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};` (ungated). The trait (put/get/delete/iterate_all/force_flush) is defined at src/iextended_metadata_store.rs:30 and is now exported. Spec FR-014 text already correctly describes the implemented trait, so no spec change is required.",
+      "location": "src/lib.rs:77 (mod), src/lib.rs:99 (pub use); definition src/iextended_metadata_store.rs:30",
+      "before": null,
+      "after": null
+    },
+    {
+      "requirement": "FR-025",
+      "spec_id": "001-interfaces",
+      "title": "Supporting Types - Extended Metadata Store (ExtendedMetadataStoreError)",
+      "direction": "RESOLVED",
+      "rationale": "Same orphaned-module root cause as FR-014: the 4-variant ExtendedMetadataStoreError enum (NotFound, StorageError, CapacityExhausted, ValueTooLarge) existed but was not exported because its module was undeclared. Per Phase B policy this was ALREADY FIXED on the main thread. Verified: the enum with exactly those 4 variants is defined at src/iextended_metadata_store.rs:5-15 and is re-exported by the ungated `pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};` at src/lib.rs:99. Spec FR-025 text already matches the implementation, so no spec change is required.",
+      "location": "src/iextended_metadata_store.rs:5 (enum); src/lib.rs:99 (pub use)",
+      "before": null,
+      "after": null
+    }
+  ]
+}

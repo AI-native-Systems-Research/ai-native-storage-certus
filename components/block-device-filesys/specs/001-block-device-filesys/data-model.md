@@ -10,14 +10,14 @@ The top-level component struct produced by `define_component!`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| file_path | `RwLock<Option<PathBuf>>` | Path to the backing file |
+| file_path | `Mutex<Option<PathBuf>>` | Path to the backing file |
 | block_size | `AtomicU32` | Block/sector size in bytes (caller-supplied; enforced minimum 512, no implicit default) |
 | num_blocks | `AtomicU64` | Total number of blocks (device capacity) |
 | actor_handle | `Mutex<Option<ActorHandle<ControlMessage>>>` | Handle to the actor thread |
 | next_client_id | `AtomicU64` | Monotonically increasing client ID counter |
 | telemetry_stats | `Mutex<Option<Arc<dyn Any + Send + Sync>>>` | Type-erased telemetry (feature-gated) |
 
-**Provides**: `[IBlockDevice]`
+**Provides**: `[IBlockDevice, IBlockDeviceAdmin]`
 **Receptacles**: `{ logger: ILogger }`
 
 ### DeviceConfig
@@ -38,17 +38,19 @@ Validated configuration passed to the actor at initialization.
 
 ### FilesysActor (ActorHandler<ControlMessage>)
 
-The actor state, owned by the actor thread.
+The actor state, owned by the actor thread. *(The concrete struct is named `FilesysHandler` in code, `src/actor.rs:109`; "FilesysActor" is the conceptual name used throughout this spec.)*
 
 | Field | Type | Description |
 |-------|------|-------------|
 | fd | `OwnedFd` | File descriptor for backing file |
 | config | `DeviceConfig` | Device geometry |
-| ring | `IoUring` | io_uring instance for async ops |
+| ring | `Option<IoUring>` | io_uring instance for async ops; `None` when ring creation failed and the actor falls back to synchronous IO (FR-008) |
 | clients | `HashMap<u64, ClientSession>` | Connected clients by ID |
 | inflight | `HashMap<u64, InflightOp>` | In-flight async ops by OpHandle |
 | next_handle | `u64` | Monotonically increasing handle counter |
 | logger | `Option<Arc<dyn ILogger + Send + Sync>>` | Logger reference |
+| shutdown_requested | `bool` | Set when a `Shutdown` control message is received; stops the `on_idle` loop |
+| telemetry *(telemetry feature only)* | `Arc<TelemetryStats>` | Shared atomics-based telemetry collector (FR-019) |
 
 ### ControlMessage
 
@@ -82,7 +84,7 @@ Tracking state for an in-flight async io_uring operation.
 | deadline | `Option<Instant>` | Timeout deadline (if timeout_ms > 0) |
 | is_read | `bool` | Whether this is a read or write |
 | tag | `u64` | io_uring user_data tag correlating CQEs back to this op |
-| start_ns *(telemetry feature only)* | `u64` | Intended op-start timestamp for latency accounting — currently computed as a freshly-created `Instant`'s `elapsed()` (~0) and never read on completion; see align-tasks (telemetry-latency defect) |
+| start *(telemetry feature only)* | `Instant` | Op-submit timestamp; on completion the harvest path records `start.elapsed()` as the op latency (`src/actor.rs:103,822-823`). *(Corrected 2026-09-02 — the field is `start: Instant`, not `start_ns: u64`; the previously-documented "computed as ~0 and never read" latency defect was fixed per FR-019 and no align-task remains.)* |
 | bytes *(telemetry feature only)* | `u64` | Byte count recorded for this op |
 
 ## State Transitions
@@ -93,8 +95,8 @@ Tracking state for an in-flight async io_uring operation.
 Created → Configured → Initialized → Running → ShutDown
 ```
 
-- **Created**: `define_component!` instantiates with None/default fields
-- **Configured**: `set_file_path()`, `set_block_size()`, `set_num_blocks()` called
+- **Created**: `define_component!` instantiates via `create(file_path, block_size, num_blocks)`, which seeds the config fields
+- **Configured**: config fields are supplied at construction by `create(...)`. *(Corrected 2026-09-02 — the `set_file_path()`/`set_block_size()`/`set_num_blocks()` mutators are reserved crate-private `#[allow(dead_code)]` helpers, not the configuration path; see FR-023 in spec.md.)*
 - **Initialized**: `initialize()` opens/creates file, starts actor thread
 - **Running**: Clients can connect and perform IO
 - **ShutDown**: `shutdown()` stops actor, closes file

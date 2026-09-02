@@ -120,3 +120,34 @@ report were resolved as:
 Tasks 1–4 above are from prior sync runs and are **not** surfaced by the current
 drift report (those requirements now read as aligned); they are retained here for
 history and remain open where noted.
+
+---
+
+# 2026-09-02 Spec-Sync run
+
+Source: `components/spdk-env/.specify/sync/drift-report.json` (aligned 24,
+drifted 1, not_implemented 1, unspecced 0). Source (`src/*.rs`) unchanged since
+2026-06-11; every FR-001..FR-021 and SC-001..SC-005 independently re-verified
+against the implementation with file:line evidence.
+
+**No new ALIGN code tasks generated this run.** Resolution of the current
+findings:
+
+- **SC-001 / User Story 1 narrative / Clarifications device-type scope** (drift,
+  medium) → **HUMAN_DECISION**. This is exactly **Task 1** above (re-confirmed as
+  the live drift): the spec promises "all SPDK-supported device types (NVMe,
+  virtio-blk, etc.)" but `src/env.rs:164-181` enumerates only the NVMe PCI driver,
+  matching FR-006. Requires a scope decision (extend code vs. narrow
+  SC-001/US1/Clarifications to NVMe-only). Not auto-backfilled — it changes what
+  capability is promised and would overwrite a recorded clarification decision.
+  **Task 1 remains OPEN.**
+- **FR-015** (not_implemented) → **LEAVE + NOTE**, unchanged. Still self-flagged
+  "(Future: not yet implemented)"; **Task 4** continues to track the residual
+  present-tense wording in User Story 1 Acceptance Scenario 4 / its Edge Case.
+  **Task 4 remains OPEN.**
+- **stale-crate-paths** → **RESOLVED** (2026-08-20 backfill verified present:
+  `tasks.md:10` note + `lib/spdk-sys/` in T001/T004/T005/T006; `spec.md:6`
+  bracketed note). No longer surfaced as drift.
+
+Tasks 2 and 3 (from earlier runs) are latent/deferred and not surfaced by the
+current drift report; retained above for history.

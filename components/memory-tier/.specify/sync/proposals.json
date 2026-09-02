@@ -1,94 +1,47 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Phase B",
+  "generated": "2026-09-02",
   "component": "memory-tier",
   "spec": "001-memory-tier",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "decision": "backfill to reality — the single RwLock<Pool> implementation is the intended, working design; the 16-way sharded + Creusot-verified design in earlier spec revisions was never built.",
   "summary": {
-    "backfill": 9,
+    "backfill": 2,
     "align": 0,
-    "unspecced_backfilled": 0,
-    "resolved": 0,
-    "human_decision": 1
+    "human_decision": 3
   },
   "proposals": [
     {
-      "requirement": "FR-005",
+      "id": "plan-md-backfill",
       "direction": "BACKFILL",
-      "rationale": "Spec mandated a 16-way sharded pool; src/lib.rs:76-85,313-316 holds one FreeList + one HashMap behind a single RwLock<Pool>. No Shard struct, NUM_SHARDS, or shard_for_key exists. Code is the intended reality.",
-      "before": "Pool is divided into 16 independent shards",
-      "after": "Pool state (allocator + slot map) is held as a single, unsharded structure behind one `RwLock<Pool>` (no shards)"
+      "target": "components/memory-tier/specs/001-memory-tier/plan.md",
+      "rationale": "plan.md described a never-built 16-way sharded pool and a Creusot P1-P10 verification section; rewritten to the single-RwLock<Pool> design to match spec.md and the resolved 2026-08-20 sharding-fate decision.",
+      "approved": true
     },
     {
-      "requirement": "FR-006",
+      "id": "tasks-md-backfill",
       "direction": "BACKFILL",
-      "rationale": "No key-modulo-16 shard selection exists (src/lib.rs). The real concurrency mechanism is a single reader-writer lock; rewrote FR-006 to describe it instead of the non-existent shard selection.",
-      "before": "Shard selection uses key modulo 16 (Verified: Creusot P4, P5)",
-      "after": "Concurrency uses one reader-writer lock: read operations (get, peek, contains, batch_touch, capacity, used) take a shared read lock; mutations (insert, remove, evict, clear) take an exclusive write lock (Verified: Implementation)"
+      "target": "components/memory-tier/specs/001-memory-tier/tasks.md",
+      "rationale": "Removed Creusot P1-P10 and evict_next_for_key shard-targeting tasks; reworded shard layout / configurable shard count items to the single-pool reality.",
+      "approved": true
     },
     {
-      "requirement": "FR-007",
-      "direction": "BACKFILL",
-      "rationale": "One allocator + slot map under a single RwLock (src/lib.rs:76-79), not per-shard Mutex-protected structures.",
-      "before": "Each shard has its own Mutex-protected allocator and slot map",
-      "after": "A single first-fit `FreeList` allocator and a single `HashMap<CacheKey, Slot>` slot map serve the whole pool"
-    },
-    {
-      "requirement": "FR-013",
-      "direction": "BACKFILL",
-      "rationale": "evict_next delegates to ep.identify_next_to_evict(pool_id); there is no evict_counter field or round-robin shard cycling (src/lib.rs:434-466). Also removed the stale 'Creusot P10' verified claim.",
-      "before": "evict_next() cycles through shards via atomic counter (round-robin) (Verified: Creusot P10)",
-      "after": "evict_next() delegates victim selection to the eviction policy (identify_next_to_evict(pool_id)), then removes that slot and frees its allocation; there is no shard round-robin counter (Verified: Implementation)"
-    },
-    {
-      "requirement": "FR-014",
-      "direction": "BACKFILL",
-      "rationale": "src/lib.rs:468-470 binds the key parameter as _key and calls evict_next(); it is a pure alias. With a single global pool there is no shard to target, so this is correct/intended behavior. Removed stale 'Creusot P4, P5' claim.",
-      "before": "evict_next_for_key() evicts from the same shard as the target key (Verified: Creusot P4, P5)",
-      "after": "evict_next_for_key(key) is an alias for evict_next(); the `key` argument is ignored because the pool is not sharded (Verified: Implementation)"
-    },
-    {
-      "requirement": "FR-021",
-      "direction": "BACKFILL",
-      "rationale": "oldest_keys makes a single ep.get_eviction_candidates(pool_id, n) call (src/lib.rs:424-432); there is no (n/NUM_SHARDS).max(1) per-shard sampling.",
-      "before": "oldest_keys(n) peeks at N oldest keys across shards",
-      "after": "oldest_keys(n) returns up to N oldest keys via a single `IEvictionPolicy::get_eviction_candidates(pool_id, n)` call (no per-shard sampling)"
-    },
-    {
-      "requirement": "NFR-002",
-      "direction": "BACKFILL",
-      "rationale": "not_implemented in drift report ('16-way sharded allocator ... NFR-002'). Rewrote to describe the actual single-RwLock concurrency model.",
-      "before": "Per-shard locking minimizes contention (16-way parallelism)",
-      "after": "A single `RwLock<Pool>` serializes mutations while allowing concurrent readers; data-path touches are applied outside the pool lock via the eviction policy's own synchronization"
-    },
-    {
-      "requirement": "IMemoryTier-doc-verified-claims / SC-8",
-      "direction": "BACKFILL",
-      "rationale": "No proof artifacts exist under components/memory-tier/verif/ and no shards exist. Removed Success Criterion #8 ('10 formal properties verified with Creusot') and every 'Creusot P#' entry in the Verified column (FR-006/008/009/010/013/014/015/023). The interface-doc overclaiming (P4/P5/P10 'Verified') was already removed from components/interfaces/src/imemory_tier.rs; policy forbids re-adding it. A residual 'same shard as key' phrase remains in the interface's evict_next_for_key doc comment (out of this component's edit scope).",
-      "before": "SC-8: '10 formal properties verified with Creusot (21 verification conditions)'; FR Verified column entries 'Creusot P1/P2/P3/P4/P5/P8/P9/P10'",
-      "after": "SC-8 removed; Creusot annotations replaced with 'Unit test' or 'Implementation' as appropriate"
-    },
-    {
-      "requirement": "not_implemented: 16-way sharded allocator and slot map (FR-005/006/007, NFR-002)",
-      "direction": "BACKFILL",
-      "rationale": "Never-built design. Resolved by the FR-005/FR-006/FR-007 and NFR-002 backfills above — spec no longer mandates the unbuilt shard structure.",
-      "before": "(spec mandated a 16-way sharded allocator + per-shard slot maps)",
-      "after": "(spec now describes the single RwLock<Pool> allocator + HashMap slot map as built)"
-    },
-    {
-      "requirement": "not_implemented: Round-robin eviction counter (FR-013)",
-      "direction": "BACKFILL",
-      "rationale": "Never-built. Resolved by the FR-013 backfill — spec no longer mandates an evict_counter/round-robin cycling.",
-      "before": "(spec mandated an atomic round-robin shard counter for eviction)",
-      "after": "(spec now states victim selection is delegated to the eviction policy)"
-    },
-    {
-      "requirement": "NFR-008",
+      "id": "nfr-008-version",
       "direction": "HUMAN_DECISION",
-      "rationale": "Three-way version conflict with no authoritative value: Cargo.toml = 0.1.0, define_component! macro = 0.3.0 (src/lib.rs:140), spec = 0.2.0. Backfilling requires choosing a single real version, which means editing Cargo.toml and src/lib.rs (out of scope) — and none of the three is obviously correct. Left spec text unchanged pending a maintainer decision to reconcile all three.",
-      "before": "Component version is 0.2.0",
-      "after": "(unchanged — pending maintainer reconciliation of Cargo.toml 0.1.0 / define_component! 0.3.0 / spec 0.2.0)"
+      "target": "Cargo.toml / src/lib.rs / spec.md NFR-008",
+      "rationale": "Three-way version mismatch (0.1.0 / 0.3.0 / 0.2.0); reconciling requires editing Cargo.toml + src/lib.rs, out of spec-sync edit scope.",
+      "approved": false
+    },
+    {
+      "id": "imemory-tier-doc-evict-next-for-key",
+      "direction": "HUMAN_DECISION",
+      "target": "components/interfaces/src/imemory_tier.rs:87-91",
+      "rationale": "Stale 'same shard as key' doc comment; components/interfaces/** is out of this component's edit scope.",
+      "approved": false
+    },
+    {
+      "id": "readme-source-layout",
+      "direction": "HUMAN_DECISION",
+      "target": "components/memory-tier/README.md:23-30",
+      "rationale": "Nonexistent src/lru.rs in Source Layout; README is doc-only, not under specs/**, out of spec-sync scope.",
+      "approved": false
     }
   ]
 }

@@ -1,37 +1,24 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Spec-Sync Phase B",
-  "based_on": "drift-report regenerated 2026-08-20",
+  "generated": "2026-09-02",
+  "phase": "Spec-Sync re-verify",
+  "based_on": "drift-report regenerated 2026-09-02 against HEAD 2fc1cd3c",
   "component": "block-device-kernel",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "supersedes": "proposals.json (2026-08-07) — reflects the freshly regenerated drift report",
-  "backups": ".specify/sync/backups/001-block-device-kernel.spec.md.20260820T171219Z.bak",
+  "supersedes": "proposals.json (2026-08-20) — FlushSync/FR-027 backfill confirmed landed and aligned; only the async telemetry-latency defect remains",
+  "backups": ".specify/sync/backups/20260902T212814Z/spec.md",
   "proposals": [
     {
-      "id": "kernel-2026-08-20-1",
+      "id": "kernel-2026-09-02-1",
       "requirement": "FR-021 / SC-006",
       "direction": "ALIGN",
       "severity": "moderate",
       "confidence": "HIGH",
       "location": "src/actor.rs:776",
-      "rationale": "Correct spec, buggy code. FR-021 requires accurate min/max/mean latency telemetry and SC-006 requires accurate TelemetrySnapshot values. The 2026-08-07 fix was only partially landed: the three sync paths (src/actor.rs:332,397,637) and the blocking wait_for_cqe completion site (src/actor.rs:718) correctly capture a submission Instant and record start.elapsed(), but the primary async-completion path harvest_completions() still calls record_op(0, op.bytes) with a hardcoded 0 even though InflightOp carries a populated `start: Instant` (src/actor.rs:101, set at 480/554). Async ReadAsync/WriteAsync ops record 0 ns latency, driving min_latency_ns to 0 and skewing the mean. The code violates a correct, agreed requirement, so per policy this is an ALIGN task (no source edited). Single task covers both FR-021 and SC-006 (same root cause).",
-      "before": "FR-021 text unchanged (requirement is correct as written). Header Last-Synced note (2026-08-07) incorrectly asserted the telemetry defect was fully fixed and 'those requirements now hold as written'.",
-      "after": "FR-021 text unchanged. Header Last-Synced note corrected to state the fix is partial: sync paths + wait_for_cqe fixed, harvest_completions still records 0 ns for async ops, so FR-021/SC-006 do NOT hold for async IO; residual defect tracked as an ALIGN task. No source code changed.",
+      "approved": true,
+      "rationale": "Correct spec, buggy code. FR-021 requires accurate min/max/mean latency telemetry and SC-006 requires accurate TelemetrySnapshot values. Confirmed at HEAD 2fc1cd3c: the three sync paths (src/actor.rs:332,397,637) and the blocking wait_for_cqe completion site (:718) correctly capture a submission Instant and record start.elapsed(), but the primary async-completion path harvest_completions() still calls record_op(0, op.bytes) with a hardcoded 0 even though InflightOp carries a populated `start: Instant` (:101, set at :480/:554). Async ReadAsync/WriteAsync ops record 0 ns latency, driving min_latency_ns to 0 and skewing the mean. Code violates a correct, agreed requirement, so per policy this is an ALIGN task (no source edited). Single task covers both FR-021 and SC-006 (same root cause).",
+      "before": "FR-021 / SC-006 text unchanged (requirements correct as written). Spec header note already honestly documents the residual async defect.",
+      "after": "FR-021 / SC-006 text unchanged. No source code changed. Standing ALIGN task re-affirmed with a 2026-09-02 re-verification note.",
       "spec_edited": false,
-      "align_task": "align-tasks.md → '2026-08-20 Phase B' section"
-    },
-    {
-      "id": "kernel-2026-08-20-2",
-      "requirement": "FlushSync command handler (unspecced) -> new FR-027",
-      "direction": "BACKFILL-UNSPECCED",
-      "severity": "low",
-      "confidence": "HIGH",
-      "location": "src/actor.rs:233-247",
-      "rationale": "Working, intentional feature absent from the spec. process_command handles Command::FlushSync { ns_id }: for ns_id==1 it returns Completion::FlushDone{Ok(())} as a validated no-op (device is O_DIRECT|O_DSYNC, no volatile write cache to drain); ns_id!=1 returns InvalidNamespace. The kernel spec never mentioned FlushSync. Backfilled as a new FR parallel to block-device-filesys FR-022.",
-      "before": "No requirement mentioning FlushSync. US2 acceptance scenarios ended at scenario 4 (NsProbe).",
-      "after": "New FR-027 documenting FlushSync as a validated no-op justified by O_DIRECT|O_DSYNC durability, with ns_id!=1 -> InvalidNamespace; contrasted with filesys FR-022's real fdatasync. New US2 acceptance scenario 5 exercising FlushSync{ns_id:1} -> FlushDone(Ok) and ns_id!=1 -> InvalidNamespace.",
-      "spec_edited": true,
-      "spec_file": "specs/001-block-device-kernel/spec.md"
+      "align_task": "align-tasks.md -> '2026-09-02 re-verify' section (re-affirms 2026-08-20 Phase B task; still open)"
     }
   ]
 }

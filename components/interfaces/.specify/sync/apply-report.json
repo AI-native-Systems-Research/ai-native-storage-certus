@@ -1,37 +1,39 @@
 {
-  "generated": "2026-08-20",
-  "phase": "B",
+  "generated": "2026-09-02T21:52:26Z",
   "project": "interfaces",
   "spec": "components/interfaces/specs/001-interfaces/spec.md",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "backup_dir": ".specify/sync/backups/20260902T214143Z/",
   "summary": {
-    "backfill_applied": 0,
-    "align_tasks": 0,
-    "unspecced_backfilled": 0,
+    "backfill_applied": 12,
+    "align_tasks": 1,
+    "unspecced_backfilled": 1,
     "resolved": 2,
     "human_decision": 0
   },
-  "specs_updated": [],
-  "align_tasks_generated": [],
-  "unspecced_backfilled": [],
-  "resolved": [
-    {
-      "requirement": "FR-014",
-      "spec_id": "001-interfaces",
-      "title": "IExtendedMetadataStore Interface",
-      "fix_location": "src/lib.rs:77 (mod iextended_metadata_store;), src/lib.rs:99 (pub use ...IExtendedMetadataStore)",
-      "verified": true,
-      "note": "Module now declared and re-exported (ungated); trait defined at src/iextended_metadata_store.rs:30. Spec unchanged."
-    },
-    {
-      "requirement": "FR-025",
-      "spec_id": "001-interfaces",
-      "title": "Supporting Types - ExtendedMetadataStoreError",
-      "fix_location": "src/iextended_metadata_store.rs:5-15 (enum), src/lib.rs:99 (pub use ExtendedMetadataStoreError)",
-      "verified": true,
-      "note": "4-variant enum (NotFound, StorageError, CapacityExhausted, ValueTooLarge) now exported. Spec unchanged."
-    }
+  "specs_updated": [
+    { "id": "P1", "requirement": "FR-008", "change": "batch_lookup signature -> &[(CacheKey, Vec<IpcHandle>)]" },
+    { "id": "P2", "requirement": "FR-008", "change": "copy_gpu_to_memory_async signature -> regions: &[IpcHandle]" },
+    { "id": "P3", "requirement": "FR-008", "change": "added batch_populate method" },
+    { "id": "P4", "requirement": "FR-008", "change": "added tier_event_stats method" },
+    { "id": "P5", "requirement": "FR-018", "change": "added TierEventStats supporting type" },
+    { "id": "P6", "requirement": "FR-017", "change": "Command 12 -> 13 variants (FlushSync)" },
+    { "id": "P7", "requirement": "FR-017", "change": "Completion 11 -> 12 variants (FlushDone)" },
+    { "id": "P8", "requirement": "FR-017", "change": "documented ReadWriteStats histograms + IO_SIZE_BUCKETS const" },
+    { "id": "P9", "requirement": "FR-021", "change": "FormatParams 10-field -> 9-field, fields enumerated" },
+    { "id": "P10", "requirement": "FR-023", "change": "LookupConfig 10-field -> 12-field, added caller_wait/connection_teardown_timeout" },
+    { "id": "P11", "requirement": "FR-014/FR-025", "change": "refreshed stale orphaned-module note into 2026-09-02 resolution note" }
   ],
-  "spec_backups": [],
-  "specs_edited": []
+  "unspecced_backfilled": [
+    { "id": "P12", "requirement": "FR-035", "change": "added new FR documenting IIpcServer + IpcServerConfig/IpcError/IpcMetricsSnapshot with orphaned-module caveat", "location": "src/iipc.rs:40-192" }
+  ],
+  "align_tasks_generated": [
+    { "id": "ALIGN-IFACE-001", "requirement": "FR-035", "task": "wire mod iipc; + pub use iipc::{IIpcServer, IpcError, IpcMetricsSnapshot, IpcServerConfig} into src/lib.rs", "severity": "major", "location": "src/lib.rs, src/iipc.rs, components/ipc-component/src/lib.rs:33" }
+  ],
+  "resolved": [
+    { "requirement": "FR-014", "fix_location": "src/lib.rs:78 (mod), src/lib.rs:100 (pub use)", "verified": true },
+    { "requirement": "FR-025", "fix_location": "src/iextended_metadata_store.rs:5 (enum), src/lib.rs:100 (pub use)", "verified": true }
+  ],
+  "spec_backups": [".specify/sync/backups/20260902T214143Z/spec.md"],
+  "specs_edited": ["components/interfaces/specs/001-interfaces/spec.md"],
+  "rs_files_edited": []
 }

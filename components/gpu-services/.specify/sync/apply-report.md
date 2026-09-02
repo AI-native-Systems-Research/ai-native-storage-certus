@@ -1,50 +1,50 @@
 # Spec Sync Apply Report — gpu-services
 
-**Applied**: 2026-08-20
+**Applied**: 2026-09-02
 **Component**: gpu-services
-**Based on**: proposals from 2026-08-20 (drift-report 2026-08-20)
+**Based on**: proposals from 2026-09-02 (drift-report 2026-09-02)
 
 ## Summary
 
 | Metric | Count |
 |---|---|
-| BACKFILL applied | 1 |
+| BACKFILL applied | 0 |
 | ALIGN tasks generated | 0 |
 | UNSPECCED backfilled | 0 |
 | RESOLVED | 0 |
 | HUMAN_DECISION | 0 |
 
-Prior-round canonical deliverables were archived before regeneration:
-`proposals-20260721.{md,json}`, `apply-report-20260721.{md,json}` (the
-2026-08-07 sweep proposals were already archived as `proposals-20260807.json`).
+`drift_status: clean` — nothing to apply this run. All 78 requirements across
+the three specs are aligned with the implementation. No spec `.md` files were
+edited, so no backups were created under `.specify/sync/backups/`.
 
 ## Specs Updated
 
-| Spec | Requirement | Change Type |
-|---|---|---|
-| 003-gpu-p2p-server | FR-012 | BACKFILL — reworded: chunked reads confirmed; MDTS ceiling is an operator responsibility documented via CLI help + 128KB default, not runtime-validated |
-| 003-gpu-p2p-server | US1 Acceptance Scenario 4 | ADD — chunked-read scenario (`ceil(size/chunk-size)` chunks, `<n>` reported in `OK` response) |
-| 003-gpu-p2p-server | Assumptions | ADD — bullet: operator responsible for `--chunk-size` ≤ MDTS (refs FR-012) |
-| 003-gpu-p2p-server | Metadata | ADD — `Last-Synced: 2026-08-20` line |
+None. `specs/001-gpu-cuda-services/spec.md`,
+`specs/002-gpu-ssd-dma-prepare/spec.md`, and
+`specs/003-gpu-p2p-server/spec.md` were all left unchanged (0 drift each).
 
 ## Align Tasks Generated
 
-None. No drift item this run was a real behavioral bug (0 ALIGN).
+None. No drift item this run was a behavioral bug (0 ALIGN). `align-tasks.md`
+is unchanged.
 
 ## Unspecced Backfilled
 
-None. Drift report reported 0 unspecced features (auxiliary `dma.rs` /
-`gdrcopy_ffi.rs` items were backfilled into spec 002 in prior rounds).
+None. 0 unspecced features (all `dma.rs` / `gdrcopy_ffi.rs` public helpers are
+already spec-tracked).
 
 ## Resolved
 
-None. No per-component "already fixed on main thread" items for gpu-services.
+None.
 
 ## Backups
 
-| Spec file edited | Backup |
-|---|---|
-| `specs/003-gpu-p2p-server/spec.md` | `.specify/sync/backups/003-spec.md.20260820T171427Z.bak` |
+None required — no spec files were edited this run.
 
-`specs/001-gpu-cuda-services/spec.md` and `specs/002-gpu-ssd-dma-prepare/spec.md`
-were not edited this run (0 drift each), so no backups were required for them.
+## Notes
+
+The prior-round spec 003 FR-012 backfill (MDTS ceiling → operator
+responsibility) was applied on 2026-08-20 and its backup remains at
+`.specify/sync/backups/003-spec.md.20260820T171427Z.bak`. This 2026-09-02 run
+re-verified that backfill against the code and confirmed it still holds.

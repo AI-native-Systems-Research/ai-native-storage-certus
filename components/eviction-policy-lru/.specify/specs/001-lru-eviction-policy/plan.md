@@ -98,13 +98,14 @@ eviction-policy-lru
 ├── dispatcher-p2p (benchmark harness)
 ├── certus-connector (Python bindings)
 ├── certus-server (direct integration)
-└── certus-server-yaml (YAML-driven profiles)
+├── certus-server-yaml (YAML-driven profiles)
+└── eviction-replay-benchmark (trace-replay benchmark harness)
 ```
 
 ## Testing
 
-- **Unit tests** (`src/lru_list.rs`): 12 tests covering push/pop, move_to_back, remove (head/middle/tail), free-list reuse, single-element edge case, len tracking, clear, idempotent remove/move, peek.
-- **Integration tests** (`src/lib.rs`): 8 tests covering component-model wiring via `query_interface!`, pool independence, sequential pool IDs, FIFO ordering, touch reordering, remove invalidation, peek non-destructiveness, invalid pool errors, concurrent multi-thread stress.
+- **Unit tests** (`src/lru_list.rs`): 13 tests covering push/pop, move_to_back, remove (head/middle/tail), free-list reuse, single-element edge case, len tracking, clear, idempotent remove/move, peek.
+- **Integration tests** (`src/lib.rs`): 9 tests covering component-model wiring via `query_interface!`, pool independence, sequential pool IDs, FIFO ordering, touch reordering, remove invalidation, peek non-destructiveness, invalid pool errors, concurrent multi-thread stress. (No dedicated `batch_touch` test yet — see align-tasks.)
 
 ## Future Considerations
 

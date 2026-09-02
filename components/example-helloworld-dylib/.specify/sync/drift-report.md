@@ -1,6 +1,15 @@
+---
+spec_sync_component: example-helloworld-dylib
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-09-02T21:39:11Z
+spec_sync_git_commit: 2fc1cd3c
+spec_sync_inputs_sha256: 7f23645d8404124261e758ef49dfbea05ea8b35534df1b202f0a44cac1b7b6ef
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+
 # Drift Report: example-helloworld-dylib
 
-**Generated**: pending
+**Generated**: 2026-09-02T21:39:11Z (re-analysis at HEAD 2fc1cd3c)
 **Project**: Certus — components/example-helloworld-dylib
 
 ## Summary
@@ -21,13 +30,14 @@
 **Functional Requirements**
 
 - FR-1 ✓ Aligned — `#[no_mangle] pub fn create_component`. `src/lib.rs:20-21`.
-- FR-2 ✓ Aligned — returns `ComponentRef` wrapping `HelloWorldComponent`. `src/lib.rs:21-24`.
-- FR-3 ✓ Aligned — returned component supports `IGreeter` via `query_interface`; exercised by host app `apps/dynamic-loading-example/src/main.rs:75-76` (`query::<dyn IGreeter…>`).
+- FR-2 ✓ Aligned — returns `ComponentRef` wrapping `HelloWorldComponent` via `ComponentRef::from(comp as Arc<_>)`; `ComponentRef::from(Arc<T>)` exists at `lib/component-framework/crates/component-core/src/component_ref.rs:92`. `src/lib.rs:21-24`.
+- FR-3 ✓ Aligned — returned component provides `IGreeter` (`define_component! { provides: [IGreeter] }`, `components/example-helloworld/src/lib.rs:33-35`); exercised by host app `apps/dynamic-loading-example/src/main.rs:75-76` (`query::<dyn IGreeter…>`).
 - FR-4 ⚠️ Drifted (moderate) — **Requirement is satisfied** (TypeId consistency holds via same-source/same-`rustc` compilation), but the **code's own module doc contradicts the corrected spec's mechanism**.
   - Spec text (FR-4 / Implementation Notes): "each side statically embeds its own copy; no shared `.so` linkage is involved."
-  - Actual: `src/lib.rs:4-7` states "this dylib and the host binary dynamically link the same `component-core` and `example-helloworld` shared libraries." The same stale claim appears in the host app doc at `apps/dynamic-loading-example/src/main.rs:6-9`.
+  - Actual: `src/lib.rs:4-7` states "this dylib and the host binary dynamically link the same `component-core` and `example-helloworld` shared libraries." The same stale claim appears in the host app doc at `apps/dynamic-loading-example/src/main.rs:7-9`.
   - Location: `src/lib.rs:4-7`
   - Severity: moderate — the code documentation asserts an incorrect linkage mechanism that spec.md and plan.md were explicitly corrected to fix.
+  - Direction: spec→code (spec is correct, code doc stale) ⇒ **ALIGN**, not BACKFILL. Code is not edited by this workflow; the fix stays queued in `align-tasks.md` (Task 2).
 
 **Non-Functional Requirements**
 
@@ -45,6 +55,6 @@
 
 ## Recommendations
 
-- Fix the stale linkage description in `src/lib.rs:4-7` (module doc) to match the corrected spec: each side statically embeds its own `rlib` copy of `component-core`/`example-helloworld`; TypeId consistency stems from compile-time type identity, not shared `.so` linkage.
-- Apply the same correction to the host-app doc `apps/dynamic-loading-example/src/main.rs:6-9`, which repeats the same inaccurate claim (out of scope for this component's spec, but flagged for consistency).
-- Note: plan.md Testing claims an "integration test"; no in-crate `tests/` exists — the behavior is instead exercised by the `apps/dynamic-loading-example` binary. Consider aligning plan.md wording (minor).
+- Fix the stale linkage description in `src/lib.rs:4-7` (module doc) to match the corrected spec: each side statically embeds its own `rlib` copy of `component-core`/`example-helloworld`; TypeId consistency stems from compile-time type identity, not shared `.so` linkage. (Queued as `align-tasks.md` Task 2; code not edited here.)
+- Apply the same correction to the host-app doc `apps/dynamic-loading-example/src/main.rs:7-9`, which repeats the same inaccurate claim (out of scope for this component's spec, but flagged for consistency).
+- Note: plan.md Testing claims an "integration test"; no in-crate `tests/` exists — the behavior is instead exercised by the `apps/dynamic-loading-example` binary. Tracked as `align-tasks.md` Task 1 (code/test gap, not a spec text issue).

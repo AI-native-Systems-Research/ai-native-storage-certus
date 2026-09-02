@@ -1,0 +1,43 @@
+{
+  "generated": "2026-09-02T21:46:49Z",
+  "component": "tools/rdma-test",
+  "proposals": [
+    {
+      "id": "P1",
+      "requirement": "FR-012",
+      "disposition": "ALIGN",
+      "summary": "Connection-level retry (3x) and partial-results-on-failure are not implemented; only per-operation completion retry exists.",
+      "target": ".specify/sync/align-tasks.md#FR-012",
+      "approved": true,
+      "applied_this_pass": false,
+      "note": "Pre-existing align task; spec documents intended behavior."
+    },
+    {
+      "id": "P2",
+      "requirement": "FR-017",
+      "disposition": "BACKFILL",
+      "summary": "tasks.md:61 US1 checkpoint used invalid '-t throughput'; corrected to '-t write'.",
+      "target": "specs/001-rdma-network-test/tasks.md",
+      "approved": true,
+      "applied_this_pass": true
+    },
+    {
+      "id": "P3",
+      "requirement": "SC-006",
+      "disposition": "BACKFILL",
+      "summary": "quickstart.md:74 referenced nonexistent 'results.throughput' JSON key; corrected to '.results.write.bandwidth_gbps'.",
+      "target": "specs/001-rdma-network-test/quickstart.md",
+      "approved": true,
+      "applied_this_pass": true
+    },
+    {
+      "id": "P4",
+      "requirement": "FR-017",
+      "disposition": "ALIGN",
+      "summary": "launch.sh:11 usage comment uses invalid '--test throughput'; recorded as trivial code fix.",
+      "target": ".specify/sync/align-tasks.md#launch-sh-comment",
+      "approved": true,
+      "applied_this_pass": false
+    }
+  ]
+}

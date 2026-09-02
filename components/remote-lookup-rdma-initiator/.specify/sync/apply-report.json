@@ -1,0 +1,32 @@
+{
+  "applied": "2026-09-02T21:46:01Z",
+  "component": "remote-lookup-rdma-initiator",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "5f0bd4af9625e093efa50899b01081b2c33e96551f1671c2cd0644dde395a610",
+  "mode": "verify-and-reclassify (Markdown-only)",
+  "drift_status": "drift",
+  "changes": {
+    "specs_backfilled": [],
+    "code_changes": [],
+    "align_tasks_appended": [
+      "002-rdma-push-initiator/SC-004 — stale benchmark header comment (carried forward, still open)"
+    ],
+    "backups_created": []
+  },
+  "not_applied": [
+    {
+      "item": "SC-004 bench-comment fix (benches/push_telemetry.rs:1-18)",
+      "reason": ".rs file; out of scope for Markdown-only apply; queued in align-tasks.md Task A"
+    },
+    {
+      "item": "spec-001 superseded FRs/SCs (FR-001..FR-017, SC-001..SC-006)",
+      "reason": "by design; role wholesale-replaced by spec-002; stale FR-014/FR-015 annotations already in place"
+    }
+  ],
+  "summary": {
+    "specs_updated": 0,
+    "backfills": 0,
+    "align_tasks": 1,
+    "backups": 0
+  }
+}

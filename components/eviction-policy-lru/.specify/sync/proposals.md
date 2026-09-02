@@ -1,88 +1,92 @@
 # Drift Resolution Proposals
 
-Generated: 2026-06-19
-Based on: drift-report from 2026-06-19
+Generated: 2026-09-02T21:32:00Z
+Based on: drift-report from 2026-09-02
 
 ## Summary
 
 | Resolution Type | Count |
 |-----------------|-------|
-| Backfill (Code → Spec) | 3 |
+| Backfill (Code → Spec) | 2 |
 | Align (Spec → Code) | 1 |
-| Human Decision | 0 |
+| Human Decision | 1 |
 | New Specs | 0 |
 | Remove from Spec | 0 |
 
 ## Proposals
 
-### Proposal 1: 001-lru-eviction-policy/FR-009
+### Proposal 1 (D1): 001-lru-eviction-policy/FR-009
 
 **Direction**: BACKFILL
 **Status**: APPROVED
 
 **Current State**:
-- Spec says: "Operations on an invalid PoolId MUST return EvictionPolicyError::InvalidPool"
-- Code does: Only Result-returning methods report InvalidPool. Others gracefully degrade.
+- Spec says: Result-returning methods are `track`, `touch`, `remove`.
+- Code does: `batch_touch` also returns `Result` and reports `InvalidPool` (`src/lib.rs:98,109`).
 
 **Proposed Resolution**:
-- **FR-009**: Methods returning `Result` (`track`, `touch`, `remove`) MUST return `EvictionPolicyError::InvalidPool` when given a non-existent pool. Methods returning `Option` or scalar (`pop_oldest`, `peek_oldest`, `len`, `clear_pool`) MUST gracefully degrade: returning `None`, empty collection, `0`, or no-op respectively.
+- **FR-009**: extend the Result-method list to `track`, `touch`, `remove`, `batch_touch`.
 
-**Rationale**: Interface signatures inherently cannot carry errors for non-Result methods. Code behavior is intentional and well-tested.
+**Rationale**: `batch_touch` (FR-012) has the same error contract; FR-009 was simply incomplete.
 
 **Confidence**: HIGH
 
 ---
 
-### Proposal 2: 001-lru-eviction-policy/FR-010
+### Proposal 2 (D2): 001-lru-eviction-policy/Dependencies + plan
 
 **Direction**: BACKFILL
 **Status**: APPROVED
 
 **Current State**:
-- Spec says: "`remove` and `move_to_back` on an already-removed entry MUST be idempotent"
-- Code does: Public API uses `touch`, not `move_to_back`.
+- Spec/plan list 7 consumers; `apps/eviction-replay-benchmark` is a real consumer and was omitted. Plan test counts (8/12) are stale.
 
 **Proposed Resolution**:
-- **FR-010**: `touch` and `remove` on an already-removed handle MUST be idempotent (no panic, no effect).
+- Add `eviction-replay-benchmark` to spec Dependencies and plan Consumer Graph.
+- Correct plan test counts to 9 (lib.rs) / 13 (lru_list.rs).
 
-**Rationale**: Spec used internal method name; behavior requirement is correct, terminology needs correction.
+**Rationale**: `apps/eviction-replay-benchmark/Cargo.toml` depends on the crate and instantiates `EvictionPolicyLruComponent`; counts verified by `cargo test`.
 
 **Confidence**: HIGH
 
 ---
 
-### Proposal 3: 001-lru-eviction-policy/NFR-004 (ILogger)
+### Proposal 3 (A1): 001-lru-eviction-policy/FR-012 — batch_touch test coverage
 
 **Direction**: ALIGN (Spec → Code)
-**Status**: APPROVED
+**Status**: PENDING (recorded in align-tasks.md; not auto-applied)
 
 **Current State**:
-- Spec says: Component MUST conform to Certus component model with receptacle for ILogger
-- Code does: ILogger receptacle declared but never used
+- `batch_touch` is implemented (`src/lib.rs:89-115`) but has no dedicated test.
 
 **Proposed Resolution**:
-Add trace-level logging for key lifecycle events:
-- `create_pool()`: log pool creation with assigned ID
-- Error paths: log invalid pool/handle errors
+Add tests covering: single-pool amortized touch reorders entries; multi-pool
+handle slice relocks correctly; empty slice returns `Ok(())`; invalid pool
+returns `InvalidPool`.
 
-**Rationale**: User chose to make the receptacle useful rather than removing it.
+**Rationale**: Hot-path method with no direct assertions.
 
 **Confidence**: HIGH
 
 ---
 
-### Proposal 4: 001-lru-eviction-policy/SC-001
+### Proposal 4 (H1): 001-lru-eviction-policy/FR-002 — track() idempotent re-registration
 
-**Direction**: BACKFILL
-**Status**: APPROVED
+**Direction**: HUMAN_DECISION
+**Status**: OPEN (not applied)
 
 **Current State**:
-- Spec says: "All 8 unit tests in lib.rs and 12 unit tests in lru_list.rs pass"
-- Actual: 9 tests in lib.rs, 13 in lru_list.rs (22 total)
+- Interface `ieviction_policy.rs:84-86` documents idempotent re-registration of an
+  already-tracked key (refresh recency, return existing handle, no new node).
+- LRU impl `src/lib.rs:69` always `push_back` — no dedup; duplicate keys create
+  duplicate nodes.
 
-**Proposed Resolution**:
-- **SC-001**: All tests in `lib.rs` and `lru_list.rs` pass (`cargo test -p eviction-policy-lru`).
+**Options**:
+- (a) Implement dedup in `eviction-policy-lru` to honor the interface contract (code change).
+- (b) Relax the interface doc to make idempotent re-registration policy-optional and
+  document LRU's always-append behavior in FR-002 (interface edit is OUT OF SCOPE for this workflow).
 
-**Rationale**: Hard-coded counts become stale when tests are added.
+**Rationale**: Substantive contract divergence; interfaces are not editable here and
+the correct direction depends on intended semantics for duplicate tracking.
 
-**Confidence**: HIGH
+**Confidence**: N/A (requires human)

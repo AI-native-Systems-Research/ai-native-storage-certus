@@ -1,11 +1,19 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02",
   "project": "gpu-services",
+  "spec_sync": {
+    "component": "gpu-services",
+    "drift_status": "clean",
+    "synced_at": "2026-09-02T21:41:07Z",
+    "git_commit": "2fc1cd3c",
+    "inputs_sha256": "a2a54721631d8bda22acc5350ae148f03a44ac2a9bcdb9f85d7527aeddebe3cf",
+    "hash_tool": "scripts/spec-sync-hash.sh"
+  },
   "summary": {
     "specs_analyzed": 3,
     "requirements_checked": 78,
-    "aligned": 77,
-    "drifted": 1,
+    "aligned": 78,
+    "drifted": 0,
     "not_implemented": 0,
     "unspecced_features": 0
   },
@@ -27,19 +35,12 @@
     {
       "id": "003-gpu-p2p-server",
       "title": "GPU P2P Server",
-      "aligned": 15,
-      "drifted": [
-        {
-          "requirement": "FR-012",
-          "spec_text": "All transfer handlers MUST perform NVMe reads in --chunk-size increments (not exceeding the NVMe controller's MDTS).",
-          "actual": "Chunked reads implemented (do_chunked_read); MDTS ceiling only stated in CLI doc comment, not validated at runtime against the device.",
-          "location": "components/gpu-services/src/bin/p2p_server.rs:54,273",
-          "severity": "minor"
-        }
-      ],
+      "aligned": 16,
+      "drifted": [],
       "not_implemented": []
     }
   ],
   "unspecced": [],
-  "conflicts": []
+  "conflicts": [],
+  "notes": "Prior-round minor drift (003 FR-012 MDTS ceiling) was backfilled into spec 003 on 2026-08-20; 2026-09-02 re-verification confirms code and spec now agree. No new drift found."
 }

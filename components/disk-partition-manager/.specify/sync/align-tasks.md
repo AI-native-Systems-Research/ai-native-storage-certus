@@ -1,42 +1,44 @@
 # Align Tasks — disk-partition-manager
 
-**Phase B run**: 2026-08-20
-**Source**: `drift-report.{json,md}` (generated 2026-08-07T15:30:30Z)
-**Policy**: `.specify/sync/PHASE_B_POLICY.md`
+**Latest run**: 2026-09-02 (re-verification)
+**Source**: `drift-report.{json,md}` (generated 2026-09-02T21:27:23Z)
 
 ## No ALIGN tasks
 
-This Phase B run produced **zero ALIGN tasks**. Reading the referenced source for
-each drifted requirement showed no correct-spec-vs-buggy-code case remaining:
+This run produced **zero ALIGN tasks**. Every drifted requirement from earlier runs
+has been resolved, and re-reading the current source confirms no
+correct-spec-vs-buggy-code case remains:
 
-- **FR-003** — the 2026-08-07 sweep recorded this as an ALIGN item (backup-fallback on
-  primary *signature* corruption) and drafted a code fix on branch
-  `sync/spec-drift-sweep-20260807`. That fix is now present in `src/gpt.rs:66-96`:
-  `read_gpt` falls through to the backup-header attempt on **both** `CorruptTable(_)`
-  and `NoPartitionTable(_)`, and a genuinely unformatted disk still returns
-  `NoPartitionTable` after both reads fail. Because the code now implements the required
-  behavior, FR-003 is resolved by **BACKFILL** (spec text updated to describe the
-  implemented behavior) rather than an ALIGN task. See `proposals.md` P1.
-- **PR-002** — intended O(1)-in-device-size per-sector read behavior; resolved by
-  **BACKFILL** (already reflected in `spec.md`). See `proposals.md` P2.
+- **FR-003** — backup-fallback on primary *signature* corruption is implemented in
+  `src/gpt.rs:66-96`: the primary-read arm matches **both** `CorruptTable(_)` and
+  `NoPartitionTable(_)` (gpt.rs:79-80) and falls through to the backup-header attempt
+  (gpt.rs:86-95); a genuinely unformatted disk still returns `NoPartitionTable` after
+  both reads fail. Resolved by BACKFILL (2026-08-20); confirmed still present.
+- **PR-002** — intended O(1)-in-device-size per-sector read; spec text already reflects
+  reality. Resolved by BACKFILL.
 - Both unspecced items (hardcoded entry LBA 2 on read; `generate_guid` zero-fallback)
-  are low-severity caveats resolved by **BACKFILL-UNSPECCED** (Implementation Notes).
+  remain low-severity caveats documented in spec Implementation Notes (BACKFILL-UNSPECCED).
+
+## Standing (non-ALIGN) note: test-coverage gap
+
+The component still has **no unit tests** (`[dev-dependencies]` empty, Cargo.toml:15).
+SC-001/SC-002/SC-003 and the FR-003 signature-recovery scenario are functionally aligned
+but have zero automated verification. This is a normal test-authoring task (see
+`tasks.md` "Add Unit Tests"), **not** a spec-sync ALIGN item, because no
+source-vs-spec-requirement violation exists. Recommended tests:
+
+- format → initialize round-trip (offsets identical).
+- Corrupt primary header **CRC** → backup fallback.
+- Corrupt primary header **signature** (zeroed bytes) → backup fallback, no reformat.
+- Layout errors: fixed partitions exceed capacity; >1 `size_bytes=0`.
+- UTF-16LE name encode/decode (ASCII, max length, empty).
+- Protective MBR written correctly (type 0xEE, boot signature).
 
 ---
 
 ### Historical note (superseded)
 
-The prior (2026-08-07) `align-tasks.md` carried one HIGH task —
-"FR-003 — attempt backup GPT on primary *signature* corruption" — with a code fix drafted
-on the feature branch and a remaining test-gap item:
-
-> **REMAINING (test gap)**: the component has NO unit tests. Add a test that writes a
-> valid GPT, corrupts the primary header *signature* bytes (not just the CRC), and
-> asserts `read_gpt`/`initialize` recovers from the backup and does NOT reformat.
-
-That code fix has since landed in `src/gpt.rs`, so the ALIGN task itself is closed
-(reclassified to BACKFILL). The **test gap** it identified is not tracked here as an
-ALIGN item (no source/spec-requirement violation remains), but it persists as a known
-coverage gap: SC-001/SC-002/SC-003 and this signature-recovery scenario have no automated
-tests (see `drift-report.json` `conflicts` and `tasks.md`). It should be picked up as a
-normal test-authoring task, not a spec-sync ALIGN.
+The 2026-08-07 sweep carried one HIGH ALIGN task — "FR-003 — attempt backup GPT on
+primary *signature* corruption" — with a code fix drafted on branch
+`sync/spec-drift-sweep-20260807`. That fix landed in `src/gpt.rs`, so the ALIGN task was
+closed and reclassified to BACKFILL (2026-08-20). No ALIGN tasks have been generated since.

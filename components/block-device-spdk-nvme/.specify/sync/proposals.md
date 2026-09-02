@@ -1,121 +1,71 @@
 # Drift Resolution Proposals — block-device-spdk-nvme
 
-Generated: 2026-08-20 (Spec-Sync Phase B)
-Based on: `.specify/sync/drift-report.json` (generated 2026-08-20)
-Policy: `.specify/sync/PHASE_B_POLICY.md`
+Generated: 2026-09-02 (Spec-Sync re-sync)
+Based on: `.specify/sync/drift-report.json` (generated 2026-09-02)
 
 ## Summary
 
 | Resolution Type | Count |
 |-----------------|-------|
-| BACKFILL (spec → code) — drifted reqs | 3 |
-| BACKFILL-UNSPECCED (new/extended reqs) | 8 |
+| BACKFILL (spec → doc; drifted reqs) | 3 |
 | ALIGN (task, no code change) | 1 |
-| RESOLVED | 0 |
 | HUMAN_DECISION | 0 |
 
-All 3 drifted requirements are spec-lag (working/intentional code, stale spec text) →
-BACKFILL. All 8 unspecced features are working behaviors → BACKFILL-UNSPECCED. One
-genuine (cosmetic) code defect was found *inside* unspecced feature #3 and is filed as
-an ALIGN task (no `.rs` edited).
+All 3 drifted requirements are spec-lag (working/intentional code, spec text/refs behind
+code) → BACKFILL. One genuine code defect (telemetry test compile break) → ALIGN task
+(no `.rs` edited). No conflicts requiring human adjudication.
 
 ---
 
 ## Drifted requirements (BACKFILL)
 
-### Proposal 1 — 001/FR-005 — abort buffer-lifetime contract
+### Proposal 1 — 001/FR-030 — read_write_stats histograms + stale refs
 
-Direction: **BACKFILL** (spec-lag).
+Direction: **BACKFILL** (spec-lag; missing feature description + stale refs).
 
-- Spec said: the buffer-safe abort fix is "drafted on branch
-  `sync/spec-drift-sweep-20260807` and requires hardware validation (Task BD-1)."
-- Code does: fully implements defer-until-completion — `Command::AbortOp` marks the op
-  `aborting`, retains the `PendingOp` + pinned buffer, issues a real
-  `spdk_nvme_ctrlr_cmd_abort_ext` (matched by `cmd_cb_arg`), and defers
-  `Completion::AbortAck` until the original command's real completion, where the buffer
-  is released; unknown handles ack immediately. See `src/actor.rs:972-1020` and
-  `src/actor.rs:528-537`.
-- Resolution: rewrote the FR-005 status note to state the contract is implemented in
-  mainline; the "drafted / needs hardware validation" wording is superseded. BD-1 marked
-  RESOLVED in align-tasks.md.
+- Spec said: `read_write_stats()` returns per-direction byte/op/latency counters; impl at
+  `iblock_device.rs:494`, `lib.rs:511`, `telemetry.rs:140`.
+- Code does: `ReadWriteStats` also exposes per-transfer-size histograms
+  (`read_size_buckets`/`write_size_buckets: [u64; IO_SIZE_BUCKETS]`, `IO_SIZE_BUCKETS = 25`,
+  `components/interfaces/src/iblock_device.rs:139,159,161`) with a power-of-two bucketing
+  helper `size_bucket()` (`:177`), `bucket_lower_bound()` (`:193`), and aggregation/derived
+  accessors `merge_from()` (`:218`), `total_ops()` (`:232`), `total_bytes()` (`:237`),
+  `mean_read_latency_ns()` (`:242`), `mean_write_latency_ns()` (`:251`). The interface
+  method is at `iblock_device.rs:589`; the component impl at `src/lib.rs:525`; the collector
+  fills buckets in `src/telemetry.rs:67-85` and snapshots them at `:150-162`.
+- Resolution: extend FR-030 to describe the histograms and derived accessors, and correct
+  the three cited impl line numbers. (Interface source is not edited — spec text only.)
 
-### Proposal 2 — 001/FR-010 — device-info fixed fields
+### Proposal 2 — 001/FR-005 — abort dispatch line references
 
-Direction: **BACKFILL** (spec-lag).
+Direction: **BACKFILL** (spec-lag; stale refs only, behavior aligned).
 
-- Spec said: `max_transfer_size` returns 131072 (128 KiB) as a fixed constant (one of
-  three fixed fields).
-- Code does: `max_transfer_size` is auto-detected from the controller MDTS via
-  `spdk_nvme_ctrlr_get_max_xfer_size` (`src/controller.rs:169-177`); 131072 is only the
-  fallback when MDTS == 0. `nvme_version` (1.0.0, `src/controller.rs:156-161`) and
-  `numa_id` (0, `src/lib.rs:333-334`) ARE genuinely hardcoded.
-- Resolution: moved `max_transfer_size` to the hardware-derived list; the two remaining
-  fixed fields (`nvme_version`, `numa_id`) stay tracked under align-tasks.md Task BD-2.
+- Spec said: abort dispatch at `src/actor.rs:972-1020`, deferred ack at `:528-537`.
+- Code is at: AbortOp dispatch `src/actor.rs:999-1048`; deferred AbortAck `:559-576`.
+- Resolution: update the two embedded references in FR-005. No behavioral wording change.
 
-### Proposal 3 — 001/SC-005 — device-info consistency
+### Proposal 3 — 001/FR-031 — FlushSync line references
 
-Direction: **BACKFILL** (spec-lag, same root cause as FR-010).
+Direction: **BACKFILL** (spec-lag; stale refs only, behavior aligned).
 
-- Spec said: `nvme_version`, `max_transfer_size`, and `numa_id` are fixed constants.
-- Code does: `max_transfer_size` is MDTS-derived (hardware-consistent); only
-  `nvme_version` and `numa_id` are fixed.
-- Resolution: reworded SC-005 to include `max_transfer_size` among hardware-consistent
-  fields and list only the two remaining fixed fields.
-
----
-
-## Unspecced features (BACKFILL-UNSPECCED)
-
-### Proposal 4 — 001/FR-031 (new) — synchronous flush durability barrier
-
-`Command::FlushSync { ns_id }` → `do_sync_flush` via `spdk_nvme_ns_cmd_flush`, returning
-`Completion::FlushDone` (`src/actor.rs:941-951,1214-1260`). Added **FR-031** to spec 001
-plus a new acceptance scenario under User Story 1. (The in-code comment cites
-extent-manager FR-030, a different spec; spec 001 now owns this requirement.)
-
-### Proposal 5 — 001/Assumptions — dead `probe()` helper note
-
-`namespace::probe()` (`src/namespace.rs:20-47`) is `#[allow(dead_code)]`, superseded by
-`discover_namespaces`. Not a live behavior, so per the suggested_spec ("note as internal
-helper") it is documented in the Assumptions section as a superseded legacy helper /
-removal candidate — no behavioral FR added — so the drift sweep stops re-flagging it.
-
-### Proposal 6 — 002/FR-015 — GB/s throughput + per-thread IOPS breakdown
-
-`throughput_gbps` (`stats.rs:38,83`, printed at `report.rs:122-124`) and the per-thread
-IOPS breakdown (`report.rs:74-103`, read/write split in `rw` mode) are additive report
-fields. Extended FR-015 to describe them.
-
-### Proposal 7 — 002/FR-024 — batch send-failure rollback
-
-On a failed `Command::BatchSubmit` send, the worker rolls back the just-enqueued
-in-flight entries and decrements its submit counter (`worker.rs:158-171`), preventing
-phantom in-flight ops. Backfilled into FR-024.
-
-### Proposal 8 — 002/FR-026 — parallel init + per-device summary
-
-Parallel device init via `std::thread::scope` with distinct NUMA-local actor-CPU
-assignments and `[timing]` stderr lines (`main.rs:52-55,105-153`), plus the multi-device
-`=== Per-Device Summary ===` block (`main.rs:397-428`). Backfilled both into FR-026.
-The cosmetic format-string defect at `main.rs:423` is filed as an ALIGN task (below).
-
-### Proposal 9 — 002/SC-001 — barrier-based start sync
-
-A start barrier (`Barrier::new(total_workers + 1)`) ensures init/attach/connect time is
-excluded from the measured wall-clock window; the clock is taken immediately before
-`start_barrier.wait()` (`main.rs:262,328-329`; `worker.rs:106`). Documented in SC-001 as
-measurement methodology.
+- Spec said: FlushSync dispatch at `src/actor.rs:941-951`, `do_sync_flush` at `:1214-1260`.
+- Code is at: dispatch `src/actor.rs:968-978`; `do_sync_flush` `:1249-1288`
+  (`spdk_nvme_ns_cmd_flush` at `:1271`).
+- Resolution: update the two embedded references in FR-031. No behavioral wording change.
 
 ---
 
 ## ALIGN (task, no code change)
 
-### Proposal 10 — 002/FR-026 (BD-4) — per-device summary format defect
+### Proposal 4 — 001 telemetry tests (BD-5) — record() signature mismatch
 
-Direction: **ALIGN** (genuine, cosmetic code bug found inside unspecced feature #3).
+Direction: **ALIGN** (genuine code defect; do not edit `.rs` in this sweep).
 
-- Code: `apps/iops-benchmark/src/main.rs:423` format string
-  `"\nDevice {} ({}: {:.0} IOPS, {:.1} MB/s"` has an unbalanced `(` — the PCI address is
-  never closed, so lines render as `Device 0 (0000:03:00.0: ...`.
-- Required change: balance the parenthesis, e.g. `"\nDevice {} ({}): {:.0} IOPS, {:.1} MB/s"`.
-- Filed as **Task BD-4** in `align-tasks.md`. No `.rs` modified in this pass.
+- Code: `src/telemetry.rs:218,230,231,232` call `stats.record(1000, 4096)` (2 args), but
+  the current signature is `record(&self, latency_ns: u64, bytes: u64, is_read: bool)`
+  (3 args, `src/telemetry.rs:67`). These calls are under `#[cfg(feature = "telemetry")]`.
+- Impact: `cargo test -p block-device-spdk-nvme --features telemetry` fails to compile —
+  the telemetry unit tests cannot build (constitution "Comprehensive Testing" mandate).
+- Required change: pass the `is_read` argument to each call (e.g. `record(1000, 4096, true)`
+  / `false`) and, where relevant, assert on the new read/write-split counters.
+- Filed as **Task BD-5** in `align-tasks.md`. No `.rs` modified in this pass.

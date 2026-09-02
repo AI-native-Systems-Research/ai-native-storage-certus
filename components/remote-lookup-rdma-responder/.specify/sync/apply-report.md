@@ -230,3 +230,80 @@ under `backups/20260722T232111Z/`.)
    `drain_async_events` through `ILogger`; pairs with July Task 6 / FR-008 `Drop`
    logging — both want the same accept-loop logger handle).
 3. Commit spec/sync Markdown on a feature branch only — never to `unstable`.
+
+---
+
+# 2026-09-02 Fresh Verification Pass
+
+**Applied**: 2026-09-02T21:46:21Z
+**Git commit**: 2fc1cd3c (`unstable`)
+**Source**: `.specify/sync/drift-report.{json,md}` (regenerated 2026-09-02)
+**Proposals gate**: `.specify/sync/proposals.{md,json}` (this run; all 5 `approved`)
+**inputs_sha256**: `5e3677cf918170aac8f8ec2f82929f759b0e7435271cacce8ee1ceb613128816`
+**Scope guard**: only Markdown under `.specify/sync/**` edited; no `specs/**` `.md`
+change was needed (spec verified faithful), no `.rs` source touched, no cargo run.
+
+Drift headline: **21/24 aligned, 3 drifted (FR-008 Low, FR-010 Medium, FR-014 Low),
+0 not_implemented, 2 unspecced, 0 conflicts.**
+
+## What changed vs the 2026-08-20 report
+
+This pass re-verified the shipped `--features rdma` code line-by-line and found the
+FR-008 and FR-010 MUST sub-clauses are **still unmet in code** — the 2026-08-07 sweep
+*filed* align-tasks (Tasks 5 & 6) but no source change ever landed. The 2026-08-20
+report had folded those into "aligned/resolved"; honestly, a filed align-task is not
+compliance, so this pass re-classifies FR-008 and FR-010 as **Drifted (partial)**
+alongside FR-014 (21/24 aligned, 3 drifted). The load-bearing behavior of each FR
+remains fully implemented; only a secondary clause drifts, and all three are reachable
+only under `--features rdma`.
+
+## Changes Made
+
+### Specs Updated
+
+None. The spec is faithful to the code: FR-008/FR-010/FR-014 text is correct and
+load-bearing (the fix belongs in code, not the spec — ALIGN), and both unspecced
+features (async-event instrumentation, command-bridge thread) are already documented
+(Known Limitations / FR-004 note / data-model). No BACKFILL was warranted, so **no
+`specs/**` edit and no backup were taken this pass.**
+
+### Align Tasks (re-affirmed with current line refs — align-tasks.md 2026-09-02 section)
+
+| Task | Requirement | Severity | Current location | Prior task |
+|------|-------------|----------|------------------|------------|
+| A | FR-010 — `ibv_reg_mr` failure → `Registration` not `Bind` | Medium | `src/rdma.rs:300-309` → `src/lib.rs:203` | Task 5 (2026-08-07) |
+| B | FR-008 — log best-effort `rdma_destroy_qp`/`rdma_disconnect` failure in `Drop` | Low | `src/rdma.rs:154-169` | Task 6 (2026-08-07) |
+| C | FR-014 — route async-event diagnostics through `ILogger` not `eprintln!` | Low | `src/rdma.rs:459-464` | FR-014 async task (2026-08-20) |
+
+### Unspecced Backfilled
+
+None new. Both unspecced items verified present and faithful in the spec (no edit):
+- Device async-event instrumentation — spec.md Known Limitations (2026-08-07).
+- Command-bridge thread — spec.md FR-004 note + data-model.md entity (2026-08-20).
+
+### Resolved / Confirmed
+
+- **FR-016 wire-up confirmed implemented** in the shipped code
+  (`record_accept_loop_error` at `src/lib.rs:160-166`, `CmEvent::AcceptError` at
+  `src/rdma.rs:420-427`, forwarded via `src/connection.rs:216-218`) — correctly
+  aligned, not re-opened.
+
+### Not Applied / Deferred
+
+| Item | Reason |
+|------|--------|
+| FR-008 / FR-010 / FR-014 code fixes | Source `.rs` changes — out of scope for this Markdown-only spec-sync pass; re-affirmed as align-tasks A/B/C. |
+| Interfaces stale-`set_bind_ip` doc | `components/interfaces/**` is outside this component's write scope; separate code PR (July Task 4). |
+
+## Backups
+
+None this pass (no `specs/**` `.md` was modified). Prior backups remain under
+`.specify/sync/backups/`.
+
+## Next Steps
+
+1. Implement align-tasks A/B/C in a follow-up code PR (B and C share an accept-loop
+   `ILogger` handle; A is an independent error-channel split in `RealCmSeam::bind`).
+2. Once A/B/C land, this component reaches 24/24 aligned and the spec's FR-014
+   Known-Limitations note can be dropped.
+3. Commit spec/sync Markdown on a feature branch only — never to `unstable`.

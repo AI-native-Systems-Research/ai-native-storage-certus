@@ -1,4 +1,11 @@
-Generated: pending
+---
+spec_sync_component: remote-lookup-rdma-initiator
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-09-02T21:46:01Z
+spec_sync_git_commit: 2fc1cd3c
+spec_sync_inputs_sha256: d8a87b5d0e107f3e2703700bb98f2dd6bef4672bf706cb08daaae819adfb1905
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
 # Spec-vs-Implementation Drift Report — remote-lookup-rdma-initiator
 
 ## Summary
@@ -7,14 +14,35 @@ Generated: pending
 |---|---|
 | Specs Analyzed | 2 (1 active, 1 superseded) |
 | Requirements Checked | 23 (spec-002 only; spec-001 is superseded) |
-| Aligned | 23 |
-| Drifted | 0 |
+| Aligned | 22 |
+| Drifted | 1 (SC-004 — minor, benchmark doc-comment only) |
 | Not Implemented | 0 |
 | Unspecced Features | 0 |
 
-**Verdict: CLEAN.** The active spec (`002-rdma-push-initiator`) is fully aligned
-with `src/` and `tests/`. Spec-001 is formally superseded and honored as such;
-its historical drift is already self-annotated in the spec text.
+**Verdict: DRIFT (one minor, doc-comment-only ALIGN item outstanding).** The
+active spec (`002-rdma-push-initiator`) is aligned with `src/` and `tests/` in
+every shipped behavior. The single outstanding item is a stale doc comment in
+`benches/push_telemetry.rs` that still states SC-004's superseded literal
+`<5%` pass/fail bar; it is tracked as a code-side ALIGN task (out of scope to
+edit here). Spec-001 is formally superseded and honored as such; its historical
+drift is already self-annotated in the spec text.
+
+**Re-analysis note (2026-09-02):** component `src/` was last modified
+2026-07-30 (commit `00bd4002`, async-submission rework); no source, test, or
+spec change has landed since the 2026-08-07 drift sweep. Every FR/SC below was
+re-verified against the current code at `file:line`; the line references still
+resolve exactly. The only delta from the 2026-08-07 report is that this pass
+classifies the still-open SC-004 bench-comment align-task honestly as *drift*
+rather than folding it under an otherwise-"clean" verdict.
+
+**Concurrency caveat (2026-09-02):** a concurrent spec-sync run was actively
+editing `components/interfaces/` at stamp time (new `src/iipc.rs`, edits to
+`specs/001-interfaces/spec.md`). Because `spec-sync-hash.sh` folds the entire
+interfaces tree into every component's digest, `spec_sync_inputs_sha256` is the
+value at stamp time and may already have shifted — the `IRemoteLookupRdmaInitiator`
+interface file itself (`components/interfaces/src/iremote_lookup_rdma_initiator.rs`)
+is **unchanged**, so these interfaces edits do not affect any FR/SC verdict here.
+Recompute the hash once the interfaces sync settles if the CI gate flags a mismatch.
 
 ---
 
@@ -41,7 +69,9 @@ No action required beyond eventual regeneration/retirement of the stale spec
 ## Spec 002-rdma-push-initiator — Detailed Findings
 
 Active spec. Drift-swept 2026-08-07 (`sync/spec-drift-sweep-20260807`, "zero drift
-against code"). This re-analysis confirms it remains aligned.
+against code"). This 2026-09-02 re-analysis re-verified every FR/SC against the
+current source and confirms they remain aligned, with the single SC-004
+doc-comment exception below.
 
 ### Aligned ✓
 
@@ -69,11 +99,12 @@ against code"). This re-analysis confirms it remains aligned.
 | SC-001a | Every accepted batch reports exactly once (incl. rejected / torn-down); multiple batches in flight | tests `the_callback_fires_exactly_once` (1566), `a_full_submit_queue_fails_fast` (1596), `successive_batches_overlap_on_the_wire` (1808) |
 | SC-002 | Second push to connected host reuses connection (no new CM connect) | test `reused_connection_does_not_reconnect` (1936) |
 | SC-003 | QP error → exactly one reconnect-and-retry before `UnableToConnect` | tests `lost_writes_are_replayed...` (1422), `failing_again...gives_up` (1452) |
-| SC-004 | Telemetry per-push = small fixed cost / ZST when off; measured by benchmark | `benches/push_telemetry.rs` (Criterion two-baseline workflow) |
 
 ### Drifted ⚠️
 
-None.
+| Req | Severity | What drifted | Evidence | Resolution |
+|---|---|---|---|---|
+| SC-004 | minor (doc-comment only; shipped behavior + benchmark mechanics are correct) | The benchmark's header doc comment still states SC-004's *superseded* literal bar — "enabling the `telemetry` feature adds less than 5% overhead" and "SC-004 holds when every `push/*` case is within +5%" — which contradicts spec-002 SC-004's 2026-07-15 reframing to "small fixed absolute cost / ZST-when-off" (a `<5%`-of-mock gate cannot hold by construction against a ~200–700 ns mock push). | Spec: `specs/002-rdma-push-initiator/spec.md` SC-004 (lines 316-329). Code comment: `benches/push_telemetry.rs:1-18` (esp. lines 3-4, 17-18). The metric-recording behavior itself is aligned — `telemetry.rs` counters are `Relaxed` atomics, ZST no-op when off (207-276), wired at `connection.rs:370-384`. | **ALIGN** (spec is correct; the code comment is stale). Reword the bench header to the "fixed absolute cost / ZST-when-off" criterion and cross-reference SC-004's 2026-07-15 note. `.rs` edit is out of scope for a Markdown-only sync-apply → tracked in `align-tasks.md` (Task A). |
 
 ### Not Implemented ✗
 
@@ -110,12 +141,17 @@ which is correct — the `interfaces` crate still lives at `components/interface
 
 ## Recommendations
 
-1. **No code or active-spec changes needed** — spec-002 and the implementation
-   are in sync.
-2. **Retire or regenerate spec-001.** It is formally superseded and now serves
+1. **Resolve the SC-004 bench-comment align-task.** Reword
+   `benches/push_telemetry.rs:1-18` from the literal `<5% vs disabled` framing to
+   spec-002 SC-004's "small fixed absolute cost / ZST-when-off" criterion. This is
+   the only actionable drift; it is a code (doc-comment) change, so it is queued
+   in `align-tasks.md` rather than applied by this Markdown-only pass.
+2. **No active-spec content changes needed** — spec-002 text is accurate; the
+   drift is code→spec (a stale comment), not spec→code.
+3. **Retire or regenerate spec-001.** It is formally superseded and now serves
    only as historical intent; the component `CLAUDE.md` already flags it as stale.
    Consider archiving it (or replacing its body with a pointer to spec-002) so it
    stops appearing in requirement counts and drift sweeps.
-3. **Keep the SC-004 benchmark result honest.** The `push_telemetry` overhead
-   figure is measured against a ~200  ns mock; if the mock path changes, re-run
+4. **Keep the SC-004 benchmark result honest.** The `push_telemetry` overhead
+   figure is measured against a ~200 ns mock; if the mock path changes, re-run
    the two-baseline workflow so the "small fixed absolute cost" claim stays valid.

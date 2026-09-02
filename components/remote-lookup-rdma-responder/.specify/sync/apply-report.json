@@ -1,62 +1,73 @@
 {
-  "generated": "2026-08-20",
-  "phase": "Spec-Sync Phase B",
+  "generated": "2026-09-02",
+  "phase": "Spec-Sync fresh verification pass",
   "component": "remote-lookup-rdma-responder",
-  "mode": "PHASE_B_POLICY (Markdown-only; no .rs edits; no cargo)",
-  "source_drift_report": "2026-08-20 (23/24 aligned, 1 drifted, 0 not_implemented, 2 unspecced, 0 conflicts)",
+  "applied_at": "2026-09-02T21:46:21Z",
+  "git_commit": "2fc1cd3c",
+  "inputs_sha256": "5e3677cf918170aac8f8ec2f82929f759b0e7435271cacce8ee1ceb613128816",
+  "mode": "Markdown-only (.specify/sync/** only; no specs/** edit needed; no .rs edits; no cargo)",
+  "source_drift_report": "2026-09-02 (21/24 aligned, 3 drifted, 0 not_implemented, 2 unspecced, 0 conflicts)",
   "proposals_gate": ".specify/sync/proposals.{md,json}",
   "counts": {
-    "backfill_applied": 1,
-    "align_tasks": 1,
-    "unspecced_backfilled": 2,
+    "backfill_applied": 0,
+    "align_tasks": 3,
+    "unspecced_backfilled": 0,
     "resolved": 0,
     "human_decision": 0
   },
-  "specs_updated": [
-    {
-      "spec": "001-rdma-lookup-responder/spec.md",
-      "section": "Functional Requirements -> FR-004",
-      "requirement": "unspecced: command-bridge thread",
-      "change_type": "BACKFILL-UNSPECCED (note added)",
-      "reason": "Document the rdma-responder-cmd-bridge SPSC->eventfd bridge thread (src/rdma.rs:358-373) that makes the fd-less SPSC command inbox pollable by the accept loop epoll; realizes FR-004's command-inbox wait arm."
-    },
-    {
-      "spec": "001-rdma-lookup-responder/data-model.md",
-      "section": "Internal entities (after CM seam)",
-      "requirement": "unspecced: command-bridge thread",
-      "change_type": "BACKFILL-UNSPECCED (new subsection)",
-      "reason": "Add 'Command-inbox bridge thread' internal entity (role/lifecycle/real-vs-mock), per drift-report suggestion to note the FR-004 bridge in data-model."
-    }
-  ],
+  "specs_updated": [],
   "align_tasks_generated": [
     {
-      "requirement": "001 FR-014",
-      "title": "Route async-event diagnostics through ILogger",
-      "severity": "low",
-      "status": "queued (Markdown-only pass; no source edited)",
-      "location": "src/rdma.rs:459-464 (eprintln! bypass); src/lib.rs:116-120 (aligned path)",
+      "task": "A",
+      "requirement": "001 FR-010",
+      "title": "ibv_reg_mr failure -> Registration not Bind",
+      "severity": "medium",
+      "status": "queued (re-affirmed; Markdown-only pass, no source edited)",
+      "location": "src/rdma.rs:300-309 -> src/lib.rs:203",
       "files_followup": ["src/rdma.rs", "src/lib.rs"],
-      "classification_note": "Correct/agreed spec (route diagnostics through ILogger, receptacle wired and used on primary path) + non-compliant code (eprintln! on the async-event path) => ALIGN, not BACKFILL. Spec must not be weakened to bless eprintln!."
+      "prior_task": "Task 5 (2026-08-07)"
+    },
+    {
+      "task": "B",
+      "requirement": "001 FR-008",
+      "title": "log best-effort rdma_destroy_qp/rdma_disconnect failure in RealCmConn::drop",
+      "severity": "low",
+      "status": "queued (re-affirmed; Markdown-only pass, no source edited)",
+      "location": "src/rdma.rs:154-169",
+      "files_followup": ["src/rdma.rs"],
+      "prior_task": "Task 6 (2026-08-07)"
+    },
+    {
+      "task": "C",
+      "requirement": "001 FR-014",
+      "title": "route async-event diagnostics through ILogger not eprintln!",
+      "severity": "low",
+      "status": "queued (re-affirmed; Markdown-only pass, no source edited)",
+      "location": "src/rdma.rs:459-464; src/lib.rs:116-120 (aligned path)",
+      "files_followup": ["src/rdma.rs", "src/lib.rs"],
+      "prior_task": "FR-014 async-event task (2026-08-20)"
     }
   ],
   "unspecced_backfilled": [
     {
-      "feature": "Device async-event instrumentation (TAG_ASYNC, drain_async_events, async_event_name, FFI responder_async_fd/responder_drain_async_event)",
-      "location": "src/rdma.rs:41,47-70,351-356,440-466; src/ffi.rs:297-302; src/wrapper.c",
-      "status": "already-backfilled (spec.md Known Limitations, 2026-08-07); verified present, no FR promotion",
+      "feature": "Device async-event instrumentation",
+      "location": "src/rdma.rs:41,44-70,351-356,440-466; src/ffi.rs:294-302; src/wrapper.c",
+      "status": "already-backfilled (spec.md Known Limitations, 2026-08-07); verified present, no edit this run",
       "spec_edit_this_run": false
     },
     {
       "feature": "Command-bridge thread rdma-responder-cmd-bridge (SPSC->eventfd)",
       "location": "src/rdma.rs:358-373",
-      "status": "backfilled this run (spec.md FR-004 note + data-model.md entity)",
-      "spec_edit_this_run": true
+      "status": "already-backfilled (spec.md FR-004 note + data-model.md entity, 2026-08-20); verified present, no edit this run",
+      "spec_edit_this_run": false
     }
   ],
-  "resolved": [],
+  "resolved": [
+    {
+      "requirement": "001 FR-016",
+      "note": "Wire-up confirmed implemented in shipped code (record_accept_loop_error at src/lib.rs:160-166, CmEvent::AcceptError at src/rdma.rs:420-427, forwarded via src/connection.rs:216-218). Correctly aligned; not re-opened."
+    }
+  ],
   "human_decision": [],
-  "backups": [
-    ".specify/sync/backups/specs/001-rdma-lookup-responder/spec.md.bak",
-    ".specify/sync/backups/specs/001-rdma-lookup-responder/data-model.md.bak"
-  ]
+  "backups": []
 }

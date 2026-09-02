@@ -1,5 +1,5 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02",
   "project": "eviction-policy-session-lists",
   "summary": {
     "specs_analyzed": 1,
@@ -22,10 +22,19 @@
       "drifted": [
         {
           "requirement": "SC-001",
-          "spec_text": "On multi-turn traces, retain session-prefix blocks longer than LRU, reducing reloads by >=15%.",
-          "actual": "No comparative trace-replay harness exists; benches/session_list_benchmark.rs measures only hot-path throughput. Spec itself downgrades this to an unverified design goal (spec.md:114).",
-          "location": "components/eviction-policy-session-lists/specs/001-session-list-eviction/spec.md:114",
-          "severity": "minor"
+          "spec_text": "On multi-turn traces, retain session-prefix blocks longer than LRU, reducing reloads by >=15% (design target). Prior spec text (2026-08-20) asserted no comparative harness exists and SC-001 is unverifiable.",
+          "actual": "A comparative trace-replay harness DOES exist: apps/eviction-replay-benchmark replays a real multi-turn Qwen-Bailian trace through both eviction-policy-session-lists and eviction-policy-lru and reports per-policy hit-rate (miss == reload) at configurable cache sizes. It has existed since this component's introducing commit c247b890 (2026-08-04) and was missed by the 2026-08-07 and 2026-08-20 syncs, which inspected only benches/session_list_benchmark.rs. SC-001 is therefore measurable, not unverifiable; the sampled measured effect is real but workload/cache-size dependent and below the >=15% target (e.g. chat trace cache 256: session-lists 8.2% vs LRU 7.2%).",
+          "location": "components/eviction-policy-session-lists/specs/001-session-list-eviction/spec.md:116",
+          "evidence": [
+            "apps/eviction-replay-benchmark/src/sim.rs:148-206",
+            "apps/eviction-replay-benchmark/src/replay.rs:117-144",
+            "apps/eviction-replay-benchmark/src/main.rs",
+            "apps/eviction-replay-benchmark/tests/replay_hits.rs",
+            "apps/eviction-replay-benchmark/README.md:72-90",
+            "Cargo.toml:43,75 (workspace member)"
+          ],
+          "severity": "moderate",
+          "direction": "BACKFILL"
         }
       ],
       "not_implemented": []

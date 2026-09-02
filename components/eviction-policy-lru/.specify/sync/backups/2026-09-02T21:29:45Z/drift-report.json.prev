@@ -1,0 +1,39 @@
+{
+  "generated": "2026-08-07T15:28:26Z",
+  "project": "eviction-policy-lru",
+  "summary": {
+    "aligned": 20,
+    "drifted": 0,
+    "not_implemented": 0,
+    "unspecced": 0,
+    "result": "clean"
+  },
+  "specs": [
+    { "spec": ".specify/specs/001-lru-eviction-policy/spec.md", "status": "Backfilled",
+      "requirements": [
+        { "id": "FR-001", "status": "aligned", "location": "src/lib.rs:41-51" },
+        { "id": "FR-002", "status": "aligned", "location": "src/lib.rs:53-71" },
+        { "id": "FR-003", "status": "aligned", "location": "src/lib.rs:73-87; src/lru_list.rs:70-96" },
+        { "id": "FR-004", "status": "aligned", "location": "src/lib.rs:117-131; src/lru_list.rs:121-145" },
+        { "id": "FR-005", "status": "aligned", "location": "src/lib.rs:133-138; src/lru_list.rs:99-104" },
+        { "id": "FR-006", "status": "aligned", "location": "src/lib.rs:140-149; src/lru_list.rs:107-118" },
+        { "id": "FR-007", "status": "aligned", "location": "src/lib.rs:151-160" },
+        { "id": "FR-008", "status": "aligned", "location": "src/lib.rs:162-168" },
+        { "id": "FR-009", "status": "aligned", "location": "src/lib.rs:60-67,75-83,119-127,135,142-147,153-158,164" },
+        { "id": "FR-010", "status": "aligned", "location": "src/lru_list.rs:71-73,122-124" },
+        { "id": "FR-011", "status": "aligned", "location": "src/lru_list.rs:21,38-45,143" },
+        { "id": "FR-012", "status": "aligned", "location": "src/lib.rs:89-115" },
+        { "id": "NFR-001", "status": "aligned", "location": "src/lru_list.rs" },
+        { "id": "NFR-002", "status": "aligned", "location": "src/lib.rs:308-336" },
+        { "id": "NFR-003", "status": "aligned", "location": "src/lib.rs:22-25" },
+        { "id": "NFR-004", "status": "aligned", "location": "src/lib.rs:27-38" },
+        { "id": "SC-001", "status": "aligned", "location": "src/lib.rs, src/lru_list.rs tests" },
+        { "id": "SC-002", "status": "aligned", "location": "src/lib.rs:308-336" },
+        { "id": "SC-003", "status": "aligned", "location": "ci (not re-run)" },
+        { "id": "SC-004", "status": "aligned", "location": "consumer crates (not re-verified)" }
+      ]
+    }
+  ],
+  "unspecced": [],
+  "conflicts": []
+}

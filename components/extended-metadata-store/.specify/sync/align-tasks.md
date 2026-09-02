@@ -108,3 +108,81 @@ flush-time `String` capacity error to `CapacityExhausted` and propagate it out o
       intact after a capacity error (US5 scenario 2).
 - [ ] `region_capacity_bytes()` (FR-18) is used for the capacity computation, or an
       equivalent geometry-derived bound.
+
+---
+
+## Task: Honor `FlushConfig::dirty_threshold` in the FlushManager worker  [ALIGN-EMS-003]
+
+**Severity**: moderate
+
+**Added**: 2026-09-02 sync sweep (new finding — not present in prior sweeps).
+
+**Spec Requirement**: 001 spec FR-11 ("`FlushManager` provides background flush with
+timer **+ dirty threshold**") and User Story 6 acceptance criterion ("Background
+`FlushManager` supports configurable timer interval **and dirty-count threshold**").
+
+**Current Code**: `FlushConfig::dirty_threshold` is a public, configurable field with a
+default of 100 (`src/flush.rs:61`, `src/flush.rs:68`), but the worker loop
+(`src/flush.rs:172-208`) never reads it. The worker flushes only when the timer
+interval elapses with `dirty_count > 0`, or when `trigger_flush()` is called
+explicitly. There is no path where reaching `dirty_threshold` accumulated
+mutations triggers a flush ahead of the timer — and `put()`/`delete()`
+(`src/lib.rs:168,189`) merely `fetch_add` the dirty count without signaling the
+FlushManager. The regression test `flush_manager_dirty_threshold_triggers`
+(`tests/persistence.rs:542-583`) passes via the 50 ms timer (it sleeps 200 ms),
+not via any threshold logic — its own comment says "Short interval to ensure
+timer fires and checks dirty count". So the threshold trigger is effectively
+unimplemented and the config field is inert/misleading.
+
+**Required Change**: Make the FlushManager actually observe `dirty_threshold` — e.g.
+have the worker flush when `dirty_count_fn() >= config.dirty_threshold` on wake,
+and/or provide a way for the component's mutation path to signal the manager once
+the threshold is crossed so a flush fires without waiting for the next timer tick.
+Then strengthen `flush_manager_dirty_threshold_triggers` to use a long timer
+interval so it can only pass if the threshold trigger fires. Do **not** relax the
+spec to timer-only (do not delete the dirty-threshold promise from FR-11/US6) and
+do **not** edit source in this sweep — this task is queued for implementation.
+
+> Alternative (if the threshold trigger is deemed unwanted): this could instead be
+> resolved as a HUMAN_DECISION to drop the dirty-threshold feature from FR-11/US6
+> and remove the inert `dirty_threshold` field. The default assumption here is that
+> the feature is intended (the field, its default, the test name, and the US6
+> acceptance criterion all reference it), so ALIGN (implement it) is preferred.
+
+**Files to Modify**:
+- `components/extended-metadata-store/src/flush.rs` (worker loop + possibly the
+  mutation-path signaling in `src/lib.rs`)
+- `components/extended-metadata-store/tests/persistence.rs` (tighten the test)
+
+**Estimated Effort**: small–medium.
+
+### Acceptance Criteria
+- [ ] Accumulating `dirty_threshold` mutations triggers a flush without relying on
+      the timer interval.
+- [ ] `flush_manager_dirty_threshold_triggers` passes with a timer interval long
+      enough that only the threshold trigger can satisfy it.
+- [ ] `FlushConfig::dirty_threshold` is no longer an inert/unused field.
+
+---
+
+## Note: spec `002-ssd-integration-test` referenced but absent  [HUMAN_DECISION — 2026-09-02]
+
+The 001 spec's Known Gaps and tasks ALIGN-EMS-001/ALIGN-EMS-002 (above) cite
+requirements `002-FR-007` and `002-FR-011` from a spec `002-ssd-integration-test`.
+That spec **does not exist** in the repository: `components/extended-metadata-store/specs/`
+contains only `001-extended-metadata-store/`, and `002` is absent from git HEAD
+(only backups survive under `.specify/sync/backups/`). The SSD integration tests it
+described still exist (`tests/integration_ssd.rs`, 15 `test_*` functions) and are
+also referenced from 001's User Stories.
+
+This is a spec-artifact drift requiring a human decision — it is **not** resolved in
+this sweep:
+- **Option A**: Restore `specs/002-ssd-integration-test/spec.md` (recover from
+  `.specify/sync/backups/specs/002-ssd-integration-test/spec.md.bak`) so the ALIGN
+  tasks and Known Gaps references resolve.
+- **Option B**: Fold the SSD-integration requirements (interface-only usage,
+  capacity exhaustion) into the 001 spec and renumber ALIGN-EMS-001/002 to 001 FR
+  IDs, then drop the dangling `002-*` references.
+
+The underlying code gaps (ALIGN-EMS-001, ALIGN-EMS-002) are real regardless of which
+option is chosen and remain queued.

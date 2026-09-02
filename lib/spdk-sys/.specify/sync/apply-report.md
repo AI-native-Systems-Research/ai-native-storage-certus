@@ -1,34 +1,31 @@
 # Spec-Sync Apply Report: spdk-sys
 
-**Applied**: 2026-07-22 (AUTO-BACKFILL mode)
-**Drift report**: `components/spdk-sys/.specify/sync/drift-report.{json,md}`
-**Spec**: `components/spdk-sys/specs/001-spdk-sys/spec.md`
-**Scope**: Markdown only, under `components/spdk-sys/specs/**` and
-`components/spdk-sys/.specify/sync/**`. No source/build files were modified.
+**Applied**: 2026-09-02T21:47:19Z (AUTO-BACKFILL mode)
+**Drift report**: `lib/spdk-sys/.specify/sync/drift-report.{json,md}`
+**Spec**: `lib/spdk-sys/specs/001-spdk-sys/spec.md`
+**Scope**: Markdown only, under `lib/spdk-sys/specs/**` and
+`lib/spdk-sys/.specify/sync/**`. No source/build files were modified.
 
 ## Backups
 
-Pre-edit copies saved to `components/spdk-sys/.specify/sync/backups/`:
-- `spec.md.20260722T231948Z.bak`
-- `tasks.md.20260722T231948Z.bak` (unedited; backed up defensively)
+Pre-edit copies saved to `lib/spdk-sys/.specify/sync/backups/20260902T214719Z/`:
+- `spec.md.bak`
 
 ## Resolutions Applied
 
-| # | Drift item | Resolution | Change |
+| # | Finding | Resolution | Change |
 |---|---|---|---|
-| 1 | "28 DPDK libraries" claim (Implementation Notes) vs. code's 30 | BACKFILL | `spec.md`: "28 DPDK `rte_*` libraries" → "30 DPDK `rte_*` libraries" |
-| 2 | `libm` linked (`build.rs:134`) but missing from Dependencies table | BACKFILL | `spec.md`: Dependencies table system-libs row appended with `m` (`pthread, dl, numa, uuid, ssl, crypto, fuse3, m`) |
-| 3 | 5 allowlisted FFI types missing from Key Entities (`spdk_pci_driver`, `spdk_nvme_io_qpair_opts`, `spdk_nvme_cmd`, `spdk_nvme_format`, `spdk_nvme_ctrlr_list`) | BACKFILL | `spec.md`: 5 rows added to Key Entities table |
-| 4 | `SPDK_PCI_*` / `SPDK_NVME_TRANSPORT_*` constant bindings (`allowlist_var`, `build.rs:239-240`) have no covering FR | BACKFILL | `spec.md`: added `FR-9 | Generate bindings for SPDK PCI and NVMe transport constants needed by callers (SPDK_PCI_*, SPDK_NVME_TRANSPORT_*) | P2` |
-| 5 | `tests/bindings_sanity.rs` covers only env/PCI types; no P1 NVMe types/functions (FR-3/4/5), contradicting the Success Criteria sanity-test claim | ALIGN-TASK (moderate) | Success Criteria text left unchanged (not weakened, per hard rule). Appended `## Task: Extend sanity-test coverage to P1 NVMe FFI surface` to `.specify/sync/align-tasks.md`, cross-linked to the pre-existing open item in `specs/001-spdk-sys/tasks.md` ("Validate that sanity tests cover all critical types used by downstream consumers"). No source edits made (out of scope). |
+| 1 | `spdk_nvme_ctrlr_cmd_abort_ext` + `spdk_nvme_ctrlr_get_max_xfer_size` allowlisted (`build.rs:197,220`) but not named by any FR | BACKFILL | `spec.md` FR-4 description extended: "… admin commands, in-flight command abort via `spdk_nvme_ctrlr_cmd_abort_ext`, MDTS-derived max transfer size via `spdk_nvme_ctrlr_get_max_xfer_size`". Removes the sole unspecced-code finding. |
+| 2 | Stale `components/spdk-sys` path references after relocation to `lib/spdk-sys` | BACKFILL | `align-tasks.md:11,14,29` corrected from `components/spdk-sys/...` to `lib/spdk-sys/...`. |
+| 3 | Sanity suite covers only env/PCI types; no P1 NVMe type/fn-pointer coverage (`tests/bindings_sanity.rs:9-97`) vs Success Criteria + FR-3/4/5 | ALIGN-TASK (medium) | Success Criteria text left unchanged (not weakened, per hard rule). Pre-existing align-task in `align-tasks.md` ("Extend sanity-test coverage to P1 NVMe FFI surface") retained and its paths refreshed. No source edited (out of scope). Mirrors open `tasks.md:8`. |
 
 ## Not Applied / Out of Scope
 
-- `README.md:33` ("28 `rte_*` libraries") repeats the same drift as item #1 but
-  is not under `specs/**` or `.specify/sync/**`, so it was left untouched per
-  the hard rules restricting edits to Markdown in those two locations.
-- `build.rs`, `Cargo.toml`, `tests/bindings_sanity.rs` — source/build files,
-  never touched.
+- `README.md` — not under `specs/**` or `.specify/sync/**`; not touched.
+- `build.rs`, `Cargo.toml`, `wrapper.h`, `tests/bindings_sanity.rs` —
+  source/build files, never touched.
+- Historical `apply-report.md` narrative from the prior run is superseded by
+  this file rather than edited in place.
 
 ## Superseded Specs
 
@@ -36,20 +33,18 @@ None.
 
 ## New Specs
 
-None — no unspecced feature warranted a standalone new spec; both unspecced
-findings were narrow additions to the existing `001-spdk-sys` spec (Key
-Entities rows + one FR), handled as BACKFILL.
+None — the one unspecced finding was a narrow addition to the existing
+`001-spdk-sys` spec (FR-4 wording), handled as BACKFILL.
 
 ## Deferred Items
 
-None. All drift items and unspecced findings from the drift report were
-either backfilled directly into `spec.md` or routed to `align-tasks.md` as a
-moderate-severity align-task; nothing required deferral for lack of
-confidence or missing information.
+None. All drift items and findings were backfilled into `spec.md` /
+`align-tasks.md` or routed to the existing medium-severity align-task; nothing
+required deferral.
 
 ## Status
 
 `spec.md` `Status` field left as `Backfilled` — per `tasks.md:10`, the flip to
-`Reviewed` is gated on human review of the backfilled spec plus resolution of
-the still-open tasks (including the NVMe sanity-test gap tracked in
-`align-tasks.md`), not on this sync-apply pass alone.
+`Reviewed` is gated on human review plus resolution of the still-open tasks
+(including the NVMe sanity-test coverage gap tracked in `align-tasks.md`), not
+on this sync pass alone.

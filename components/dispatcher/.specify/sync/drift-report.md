@@ -3,7 +3,7 @@ spec_sync_component: dispatcher
 spec_sync_drift_status: clean
 spec_sync_synced_at: 2026-09-02T20:45:00Z
 spec_sync_git_commit: 787b8263
-spec_sync_inputs_sha256: 2886506afcb1d6dbaa9505fa7e3c01405c045fbf588dfd2003be84865ea63deb
+spec_sync_inputs_sha256: 3a720045e58edc3578b8979236cd4455aa6bedaef8ebd759d6cd4639a3598ed2
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Spec Drift Report — dispatcher

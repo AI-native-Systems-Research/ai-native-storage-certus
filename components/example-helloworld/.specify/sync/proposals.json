@@ -1,0 +1,23 @@
+{
+  "generated": "2026-09-02T21:28:34Z",
+  "component": "example-helloworld",
+  "based_on": "drift-report.json",
+  "drift_status": "clean",
+  "proposals": [],
+  "carried_over": [
+    {
+      "id": "align-task-1",
+      "type": "HUMAN_DECISION",
+      "status": "deferred",
+      "approved": false,
+      "description": "Wire ILogger in apps/helloworld-mainline via GreeterHandler::with_logger(...). Spec already corrected to current behavior; code follow-up out of scope for spec-sync."
+    },
+    {
+      "id": "align-task-2",
+      "type": "HUMAN_DECISION",
+      "status": "informational",
+      "approved": false,
+      "description": "Open design decision: promote IGreeter to shared interfaces crate. No action."
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "applied": "2026-09-02T21:47:19Z",
+  "mode": "AUTO-BACKFILL",
+  "project": "spdk-sys",
+  "component_dir": "lib/spdk-sys",
+  "scope": "Markdown only under lib/spdk-sys/specs/** and lib/spdk-sys/.specify/sync/**",
+  "backups_dir": "lib/spdk-sys/.specify/sync/backups/20260902T214719Z/",
+  "resolutions": [
+    {
+      "id": 1,
+      "resolution": "BACKFILL",
+      "target": "lib/spdk-sys/specs/001-spdk-sys/spec.md",
+      "change": "FR-4 description extended to name spdk_nvme_ctrlr_cmd_abort_ext and spdk_nvme_ctrlr_get_max_xfer_size"
+    },
+    {
+      "id": 2,
+      "resolution": "BACKFILL",
+      "target": "lib/spdk-sys/.specify/sync/align-tasks.md",
+      "change": "Corrected stale components/spdk-sys paths to lib/spdk-sys (lines 11,14,29)"
+    },
+    {
+      "id": 3,
+      "resolution": "ALIGN_TASK",
+      "target": "lib/spdk-sys/.specify/sync/align-tasks.md",
+      "change": "Retained existing medium-severity align-task for P1 NVMe sanity-test coverage; no source edited"
+    }
+  ],
+  "not_applied": [
+    "README.md (outside scope)",
+    "build.rs / Cargo.toml / wrapper.h / tests/bindings_sanity.rs (source/build)"
+  ],
+  "superseded_specs": [],
+  "new_specs": [],
+  "deferred": [],
+  "spec_status": "Backfilled"
+}

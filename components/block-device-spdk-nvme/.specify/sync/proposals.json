@@ -1,97 +1,53 @@
 {
-  "generated": "2026-08-20",
-  "based_on": "drift-report.json (generated 2026-08-20)",
-  "component": "block-device-spdk-nvme",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "generated": "2026-09-02",
+  "project": "block-device-spdk-nvme",
+  "based_on": ".specify/sync/drift-report.json (2026-09-02)",
   "summary": {
     "backfill": 3,
-    "backfill_unspecced": 8,
     "align": 1,
-    "resolved": 0,
     "human_decision": 0
   },
   "proposals": [
     {
-      "requirement": "001-spdk-nvme-block-device/FR-005",
-      "direction": "BACKFILL",
-      "rationale": "Spec-lag. The buffer-safe defer-until-completion abort contract is fully implemented in mainline (src/actor.rs:972-1020 abort dispatch keeps the PendingOp+buffer and issues spdk_nvme_ctrlr_cmd_abort_ext; src/actor.rs:528-537 defers AbortAck to the real completion). Spec still described it as 'drafted on branch, requires hardware validation (Task BD-1)'. Code is authoritative.",
-      "before": "...An abort for an unknown/already-completed handle is acked immediately (idempotent). *(Backfilled 2026-08-07 to document the buffer-lifetime contract; the fix is drafted on branch `sync/spec-drift-sweep-20260807` and requires hardware validation — see align-tasks.md Task BD-1.)*",
-      "after": "...An abort for an unknown/already-completed handle is acked immediately (idempotent). *(Backfilled 2026-08-07 to document the buffer-lifetime contract. Re-synced 2026-08-20: the defer-until-completion abort contract is now fully implemented in the shipped code ... See src/actor.rs:972-1020 (abort dispatch) and src/actor.rs:528-537 (deferred ack on real completion). The earlier 'drafted on branch, requires hardware validation (Task BD-1)' status is superseded — the fix is in the mainline component.)*"
+      "id": 1,
+      "spec": "001-spdk-nvme-block-device",
+      "requirement": "FR-030",
+      "type": "BACKFILL",
+      "rationale": "ReadWriteStats exposes per-transfer-size histograms (read_size_buckets/write_size_buckets, IO_SIZE_BUCKETS=25) plus size_bucket/bucket_lower_bound/merge_from/total_ops/total_bytes/mean_read_latency_ns/mean_write_latency_ns not described by FR-030; cited impl refs stale.",
+      "action": "Extend FR-030 to document histograms + derived accessors; correct impl refs to iblock_device.rs:589, lib.rs:525, telemetry.rs:150.",
+      "evidence": "components/interfaces/src/iblock_device.rs:139-259,589; src/telemetry.rs:67-85,150-162; src/lib.rs:525",
+      "approved": true
     },
     {
-      "requirement": "001-spdk-nvme-block-device/FR-010",
-      "direction": "BACKFILL",
-      "rationale": "Spec-lag. max_transfer_size is auto-detected from controller MDTS via spdk_nvme_ctrlr_get_max_xfer_size (src/controller.rs:169-177); 131072 is only the fallback when MDTS==0. Spec listed max_transfer_size among the three 'fixed' fields. nvme_version (1.0.0) and numa_id (0) ARE still hardcoded (spec correct on those).",
-      "before": "Three fields are currently fixed rather than hardware-derived: `nvme_version` returns 1.0.0, `max_transfer_size` returns 131072 (128 KiB), and `numa_id` returns 0 ... Populating these from the real SPDK identify/opts APIs is tracked in align-tasks.md Task BD-2.",
-      "after": "capacity, sector/block size, max queue depth, IO-queue count, AND `max_transfer_size` are read from the live controller/namespace. `max_transfer_size` is auto-detected from the controller's MDTS via `spdk_nvme_ctrlr_get_max_xfer_size` (src/controller.rs:169-177) ...; 131072 (128 KiB) is used only as a fallback when MDTS reports 0. Two fields remain fixed: `nvme_version` returns 1.0.0 (src/controller.rs:156-161) and `numa_id` returns 0 (src/lib.rs:333-334) ... tracked in align-tasks.md Task BD-2."
+      "id": 2,
+      "spec": "001-spdk-nvme-block-device",
+      "requirement": "FR-005",
+      "type": "BACKFILL",
+      "rationale": "Behavior aligned; embedded actor.rs line refs stale.",
+      "action": "Update FR-005 refs to src/actor.rs:999-1048 (dispatch) and :559-576 (deferred ack).",
+      "evidence": "src/actor.rs:999-1048,559-576",
+      "approved": true
     },
     {
-      "requirement": "001-spdk-nvme-block-device/SC-005",
-      "direction": "BACKFILL",
-      "rationale": "Spec-lag, same root cause as FR-010. max_transfer_size is MDTS-derived (hardware-consistent), not fixed. Only nvme_version and numa_id remain fixed.",
-      "before": "Per FR-010, `nvme_version`, `max_transfer_size`, and `numa_id` are currently fixed constants ...; a monitoring client sees fixed values for those three fields regardless of the bound controller.",
-      "after": "hardware-derived fields (capacity, sector/block size, max queue depth, IO-queue count, and `max_transfer_size`, which is MDTS-derived ...). Per FR-010, `nvme_version` and `numa_id` remain fixed constants ...; a monitoring client sees fixed values for those two fields regardless of the bound controller."
+      "id": 3,
+      "spec": "001-spdk-nvme-block-device",
+      "requirement": "FR-031",
+      "type": "BACKFILL",
+      "rationale": "Behavior aligned; embedded actor.rs line refs stale.",
+      "action": "Update FR-031 refs to src/actor.rs:968-978 (dispatch) and :1249-1288 (do_sync_flush).",
+      "evidence": "src/actor.rs:968-978,1249-1288",
+      "approved": true
     },
     {
-      "requirement": "001-spdk-nvme-block-device/FR-031 (new)",
-      "direction": "BACKFILL-UNSPECCED",
-      "unspecced_feature": "Command::FlushSync/FlushDone + do_sync_flush (durability barrier via spdk_nvme_ns_cmd_flush)",
-      "location": "src/actor.rs:941-951,1214-1260",
-      "rationale": "Working feature never described in spec 001. Added FR-031 + acceptance scenario under User Story 1. The referenced extent-manager FR-030 comment points at a different spec; spec 001 now owns this requirement.",
-      "before": "(no requirement)",
-      "after": "FR-031: The component MUST support a synchronous flush operation (Command::FlushSync { ns_id }) that flushes the target namespace's volatile write cache ... delivering a Completion::FlushDone { handle, result }. ... (Implemented at src/actor.rs:941-951 dispatch and src/actor.rs:1214-1260 do_sync_flush.)"
-    },
-    {
-      "requirement": "001-spdk-nvme-block-device/Assumptions (dead-code note)",
-      "direction": "BACKFILL-UNSPECCED",
-      "unspecced_feature": "Dead namespace::probe() free function superseded by discover_namespaces",
-      "location": "src/namespace.rs:20-47",
-      "rationale": "Dead code (#[allow(dead_code)]), not a live behavior. Per suggested_spec 'note as internal helper': documented in Assumptions as a superseded legacy helper / removal candidate rather than given a behavioral FR, so the sweep stops re-flagging it.",
-      "before": "(no note)",
-      "after": "Namespace discovery at attach time is performed by the controller's internal `discover_namespaces` path ... The standalone `namespace::probe()` free function (src/namespace.rs:20-47) is a superseded legacy helper, retained only under #[allow(dead_code)] ... a candidate for removal."
-    },
-    {
-      "requirement": "002-iops-benchmark/FR-015",
-      "direction": "BACKFILL-UNSPECCED",
-      "unspecced_feature": "throughput_gbps computed & reported; per-thread IOPS breakdown in final report",
-      "location": "src/stats.rs:38,83; src/report.rs:74-103,122-124",
-      "rationale": "Working additive report fields never listed in FR-015. Extended FR-015 to note GB/s throughput and the per-thread IOPS breakdown (read/write split in rw mode).",
-      "before": "The application MUST print a final results summary to stdout containing: total IOPS, throughput in MB/s, and latency statistics (min, mean, p50, p99, max) in microseconds.",
-      "after": "...same... *(Backfilled 2026-08-20 — the shipped report also prints throughput in GB/s alongside MB/s ... and, when more than one worker thread is running, a per-thread IOPS breakdown ... (report.rs:74-103). These are additive to the required aggregate fields.)*"
-    },
-    {
-      "requirement": "002-iops-benchmark/FR-024",
-      "direction": "BACKFILL-UNSPECCED",
-      "unspecced_feature": "Batch send-failure rollback of in-flight entries",
-      "location": "src/worker.rs:158-171",
-      "rationale": "Working robustness behavior not specced. Extended FR-024 to require in-flight rollback on failed BatchSubmit send so no phantom in-flight ops remain.",
-      "before": "(FR-024 batch requirement without send-failure rollback text)",
-      "after": "*(Backfilled 2026-08-20 — batch submission is atomic w.r.t. in-flight accounting: when a Command::BatchSubmit send fails, the worker MUST roll back the in-flight entries it just enqueued for that batch and decrement its submit counter (worker.rs:158-171).)*"
-    },
-    {
-      "requirement": "002-iops-benchmark/FR-026",
-      "direction": "BACKFILL-UNSPECCED",
-      "unspecced_feature": "Multi-device per-device summary block (#3) + parallel device init via thread::scope with distinct actor-CPU assignments and [timing] eprintlns (#8)",
-      "location": "src/main.rs:52-55,105-153,397-428",
-      "rationale": "Two working multi-device behaviors not described in FR-026. Backfilled both as implementation detail; also recorded the cosmetic format-string defect at main.rs:423 as an ALIGN task (BD-4).",
-      "before": "(FR-026 without parallel-init / per-device-summary detail)",
-      "after": "*(Backfilled 2026-08-20 — Selected devices are attached and initialized in parallel via std::thread::scope ... [timing] lines emitted (main.rs:52-55,105-153). When more than one device is benchmarked, the final output MUST include a === Per-Device Summary === block ... (main.rs:397-428). NOTE: the per-device summary line currently has a cosmetic format defect (unbalanced ( at main.rs:423); correcting it is tracked as an ALIGN task.)*"
-    },
-    {
-      "requirement": "002-iops-benchmark/SC-001",
-      "direction": "BACKFILL-UNSPECCED",
-      "unspecced_feature": "Barrier-based start sync excluding init time from wall-clock measurement",
-      "location": "src/main.rs:262,328-329; src/worker.rs:106",
-      "rationale": "Working measurement methodology not documented. Added to SC-001 to explain that init/attach/connect time is excluded from the measured window via a start barrier.",
-      "before": "SC-001: ... produces a valid IOPS result within the configured duration plus a 2-second startup/teardown margin.",
-      "after": "...same... *(Backfilled 2026-08-20 — measurement methodology: all workers and the main thread rendezvous on a start barrier before the benchmark clock starts, so SPDK env init, device attach, and client-connect time are excluded from the measured wall-clock window (main.rs:262,328-329; worker.rs:106).)*"
-    },
-    {
-      "requirement": "002-iops-benchmark/FR-026 (BD-4)",
-      "direction": "ALIGN",
-      "rationale": "Genuine (cosmetic) code defect uncovered inside unspecced feature #3: the per-device summary println! format string at main.rs:423 has an unbalanced '(' so the PCI address is not closed. Real bug, not spec-lag; policy says real bug -> ALIGN task, no .rs edit. Filed as Task BD-4 in align-tasks.md.",
-      "before": "\"\\nDevice {} ({}: {:.0} IOPS, {:.1} MB/s\"",
-      "after": "\"\\nDevice {} ({}): {:.0} IOPS, {:.1} MB/s\" (to be applied to src/main.rs:423 by the code owner)"
+      "id": 4,
+      "spec": "001-spdk-nvme-block-device",
+      "requirement": "telemetry-tests-record-signature",
+      "type": "ALIGN",
+      "task_id": "BD-5",
+      "rationale": "Telemetry unit tests call record() with the old 2-arg signature; current signature takes 3 args (latency_ns, bytes, is_read). cargo test --features telemetry fails to compile.",
+      "action": "Add ALIGN Task BD-5 to align-tasks.md; do not edit .rs in this sweep.",
+      "evidence": "src/telemetry.rs:67 (signature); :218,230,231,232 (2-arg calls)",
+      "approved": true
     }
   ]
 }

@@ -62,7 +62,7 @@ so that the eviction policy is safe under concurrent workloads.
 - **FR-006**: System MUST provide `get_eviction_candidates(pool, n)` that returns up to `n` least-recently-used keys without removing them, in O(n) time.
 - **FR-007**: System MUST provide `len(pool)` that returns the number of active entries in the pool.
 - **FR-008**: System MUST provide `clear_pool(pool)` that removes all entries from the pool, resetting it to empty.
-- **FR-009**: Methods returning `Result` (`track`, `touch`, `remove`) MUST return `EvictionPolicyError::InvalidPool` when given a non-existent pool. Methods returning `Option` or scalar (`identify_next_to_evict`, `get_eviction_candidates`, `len`, `clear_pool`) MUST gracefully degrade: returning `None`, empty collection, `0`, or no-op respectively.
+- **FR-009**: Methods returning `Result` (`track`, `touch`, `remove`, `batch_touch`) MUST return `EvictionPolicyError::InvalidPool` when given a non-existent pool. Methods returning `Option` or scalar (`identify_next_to_evict`, `get_eviction_candidates`, `len`, `clear_pool`) MUST gracefully degrade: returning `None`, empty collection, `0`, or no-op respectively.
 - **FR-010**: `touch` and `remove` on an already-removed handle MUST be idempotent (no panic, no effect). These return `Ok(())` silently rather than `Err(InvalidHandle)` — the `InvalidHandle` error variant is defined in the interface but is currently unused (reserved for future stricter validation).
 - **FR-012**: The component MUST provide a `batch_touch(handles: &[EvictionHandle])` method that marks multiple entries as most-recently-used in a single lock acquisition, amortizing lock overhead for the hot-path batch lookup use case.
 - **FR-011**: Removed node slots MUST be recycled via a free list to avoid unbounded memory growth for long-lived pools with high churn.
@@ -87,7 +87,7 @@ so that the eviction policy is safe under concurrent workloads.
 
 - **component-framework**: Provides `define_component!` macro, component lifecycle.
 - **interfaces**: Provides `IEvictionPolicy` trait definition and associated types.
-- **Consumers**: `dispatch-map`, `memory-tier`, `dispatcher`, `dispatcher-p2p`, `certus-connector`, `certus-server`, `certus-server-yaml`.
+- **Consumers**: `dispatch-map`, `memory-tier`, `dispatcher`, `dispatcher-p2p`, `certus-connector`, `certus-server`, `certus-server-yaml`, `eviction-replay-benchmark`.
 
 ## Success Criteria
 

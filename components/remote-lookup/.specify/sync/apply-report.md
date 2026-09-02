@@ -201,3 +201,44 @@ None (all items were unambiguous after reading the cited code).
   `.specify/sync/backups/specs/002-remote-lookup-rdma/spec.md.bak` (created)
 
 No `.rs` source or any non-Markdown file was modified; cargo was not run.
+
+---
+
+# 2026-09-02 Sweep (re-verification + stamp)
+
+Applied: 2026-09-02T21:39:18Z
+Mode: Re-verification pass — re-checked every FR/SC against source at commit `2fc1cd3c`, then
+stamped the drift report (it was left `Generated: pending` after the 2026-08-20 sweep).
+Source: `.specify/sync/drift-report.{json,md}` (2026-08-20 findings, re-verified).
+
+## Verification result
+
+Re-read the full component source (`src/actor.rs`, `src/lib.rs`, `src/server.rs`, `src/wire.rs`)
+and `components/interfaces/src/iremote_lookup.rs`, plus `tests/mesh.rs` and `Cargo.toml`. Every
+2026-08-20 finding still holds against the current code:
+
+- **FR-018 (Low, ALIGN — still open)**: `on_wire` drops both frame classes silently —
+  `Err(_) => return` (`src/actor.rs:314`) and `WireMessage::Unknown { .. } => {}` (`src/actor.rs:330`).
+  No `logger` call on either arm. The *ignore* half is aligned; the *logging* half is still a code
+  gap (align-tasks.md 2026-08-20 task). Confirmed unchanged.
+- **FR-006 size-collision guard** (`src/actor.rs:576-591`), **FR-014 `DISCONNECT_ACK_TIMEOUT`**
+  (`src/actor.rs:37,1020-1033`), **FR-030 caller_wait**, **FR-031 connection_teardown_timeout /
+  tick_orphans** (`src/actor.rs:849-885`), **FR-032 orphan-reuse guard** (`:441-443,630-632,772-774`),
+  **FR-033 LookupConfig actor_cpu/discovery/node_endpoint** (`iremote_lookup.rs:65-78`), **FR-034
+  integrity-check** (`Cargo.toml:14`): all present and matching the backfilled spec text.
+- **FR-001 lib.rs docstrings**: the 2026-08-07 doc correction is in place (`src/lib.rs:1-10,251-257`
+  describe the shipped KEY_QUERY→RDMA protocol and `Ok(())` ⇒ resident semantics). No doc-drift.
+- **Spec 001** superseded-by-002 annotations (FR-001/003/004/008, SC-002) present and correct.
+- **US7 test-coverage gap** (align-tasks.md Task 1 / tasks.md T025): still open — `tests/mesh.rs`
+  has `slot_survives_timeout_...` and `stuck_orphan_is_force_reclaimed_...` but no dedicated
+  zyre-`Exit` scenario exercising `on_exit`/`teardown_peer`. Not drift (feature is implemented).
+
+## Changes this pass
+
+- Stamped `drift-report.md` frontmatter (`spec_sync_*`) and set `Generated` timestamp; set
+  `drift-report.json` `generated` + `spec_sync_*` fields. `spec_sync_inputs_sha256` =
+  `44b753dd84f804f5678b32c34f6c26da2595b73203fc4cb56d8097f6b4302c5f`, `spec_sync_git_commit` =
+  `2fc1cd3c`, `spec_sync_drift_status` = `drift` (one open actionable Low ALIGN: FR-018 logging).
+- No spec `.md` edits (all 2026-08-20 backfills already applied — no spec backup needed).
+- No new ALIGN task (FR-018 logging task already recorded); no HUMAN_DECISION.
+- No `.rs` source modified; cargo not run.

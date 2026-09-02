@@ -1,37 +1,41 @@
 {
-  "generated": "2026-04-10T12:00:00Z",
-  "based_on": "drift-report from 2026-04-10T12:00:00Z",
+  "generated": "2026-09-02T21:46:38Z",
+  "based_on": "drift-report generated 2026-09-02T21:46:38Z",
+  "git_commit": "2fc1cd3c",
   "summary": {
     "backfill": 0,
-    "align": 0,
+    "align": 1,
     "human_decision": 0,
     "new_specs": 0,
-    "remove_from_spec": 0
+    "remove_from_spec": 0,
+    "housekeeping": 1
   },
-  "proposals": [],
-  "recommendations": [
+  "proposals": [
     {
-      "id": "REC-001",
-      "type": "housekeeping",
-      "title": "Update spec status fields from Draft to Complete",
-      "description": "Specs 001-005 have Status: Draft and spec 006 has Status: Backfilled, but all requirements are fully implemented. Update to Complete/Implemented.",
-      "affected_specs": [
-        "001-com-component-framework",
-        "002-registry-refcount-binding",
-        "003-actor-channels",
-        "004-channel-benchmarks",
-        "005-numa-aware-actors",
-        "006-log-handler"
-      ],
-      "confidence": "high"
+      "id": "P-001",
+      "type": "ALIGN",
+      "direction": "spec_to_code",
+      "requirements": ["005-numa-aware-actors/FR-001", "003-actor-channels/FR-004"],
+      "title": "actor re-activation must not panic (single-use / error-not-panic)",
+      "detail": "Actor::activate(&self) does not consume self and re-activation after a deactivate cycle panics via .expect(...) at actor.rs:610/617. Return a typed ActorError, or consume self on activate.",
+      "spec_edit_required": false,
+      "code_edit_required": true,
+      "tracked_in": ".specify/sync/align-tasks.md",
+      "confidence": "high",
+      "approved": true,
+      "applied": "deferred_to_align_tasks"
     },
     {
-      "id": "REC-002",
-      "type": "housekeeping",
-      "title": "Remove backfill notice from spec 006",
-      "description": "Spec 006-log-handler contains a Backfill Notice that is no longer needed since the spec has been validated against implementation.",
-      "affected_specs": ["006-log-handler"],
-      "confidence": "high"
+      "id": "P-002",
+      "type": "HOUSEKEEPING",
+      "direction": "artifact_fix",
+      "title": "Fix stale components/component-framework path in align-tasks.md:29",
+      "detail": "Updated pre-relocation path to lib/component-framework/... align-tasks.md:29. Historical stale path in apply-report.md:60 left as a dated log entry.",
+      "spec_edit_required": false,
+      "confidence": "high",
+      "approved": true,
+      "applied": "applied_this_run"
     }
-  ]
+  ],
+  "recommendations": []
 }

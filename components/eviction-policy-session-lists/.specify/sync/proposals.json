@@ -1,20 +1,20 @@
 {
-  "generated": "2026-08-20",
+  "generated": "2026-09-02",
   "component": "eviction-policy-session-lists",
-  "based_on": "drift-report.{json,md} (2026-08-20; 23 aligned, 1 drifted, 0 not_implemented, 0 unspecced)",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "prior_pass": "proposals-20260807.json",
-  "summary": { "backfill": 1, "backfill_unspecced": 0, "align": 0, "resolved": 0, "human_decision": 0 },
+  "based_on": "drift-report.{json,md} (2026-09-02; 23 aligned, 1 drifted, 0 not_implemented, 0 unspecced)",
+  "prior_pass": "proposals-20260807.json, proposals.md (2026-08-20)",
+  "summary": { "backfill": 2, "backfill_unspecced": 0, "align": 0, "resolved": 0, "human_decision": 0, "align_task_rescope": 1 },
   "proposals": [
     {
-      "id": "esl-001-SC-001-resync",
+      "id": "esl-001-SC-001-harness-correction",
       "spec": "001-session-list-eviction",
       "requirement": "SC-001",
       "direction": "BACKFILL",
       "confidence": "HIGH",
-      "rationale": "location=specs/001-session-list-eviction/spec.md:114 and source benches/session_list_benchmark.rs confirm the benchmark measures only this component's hot-path throughput (four benches: track, touch, batch_touch, identify_next_to_evict) through IEvictionPolicy. No comparative session-lists-vs-eviction-policy-lru trace-replay/hit-rate harness exists. Eviction implementation is correct and intentional (FR-001..FR-018, SC-002..SC-006 aligned). SC-001's >=15% figure is an aspirational design goal, not a behavioral requirement the code violates. Spec-lag -> BACKFILL, not ALIGN.",
-      "before": "SC-001 (design goal - not yet verified; downgraded 2026-08-07): ...design target >=15%... 'benches/session_list_benchmark.rs measures only this component's hot-path throughput, not a hit-rate comparison. Until that harness exists, the >=15% figure is a target, not a measured outcome.'",
-      "after": "SC-001 (design goal - not a measured outcome; downgraded 2026-08-07, re-verified 2026-08-20): ...names the four Criterion benches (track, touch, batch_touch, identify_next_to_evict); states it is explicitly NOT a verified measurable outcome; points to align-tasks.md Task 1 as the tracked follow-up.",
+      "approved": true,
+      "rationale": "SC-001's spec text asserted 'no comparative benchmark exists in the repo' and that SC-001 was unverifiable. This is false: apps/eviction-replay-benchmark (workspace member, Cargo.toml:43,75) replays a real multi-turn Qwen-Bailian trace through both eviction-policy-session-lists and eviction-policy-lru and reports per-policy hit-rate at configurable cache sizes (src/sim.rs:148-206, src/replay.rs:117-144, src/main.rs, tests/replay_hits.rs). It first appeared in c247b890 (2026-08-04), the component's own introducing commit, and was missed by the 2026-08-07 and 2026-08-20 syncs which inspected only benches/session_list_benchmark.rs. The eviction code itself is correct (FR-001..FR-018, SC-002..SC-006 aligned) so this is spec-lag -> BACKFILL. SC-001 is measurable, and the sampled results show the >=15% target is real-but-unmet and workload/cache-size dependent (chat trace cache 256: session-lists 8.2% vs LRU 7.2%); rewritten to say so honestly.",
+      "before": "SC-001 (design goal - not a measured outcome; downgraded 2026-08-07, re-verified 2026-08-20): ...no such comparative benchmark exists in the repo... Until such a harness exists, the >=15% figure remains a design target... Building that harness is tracked in align-tasks.md Task 1.",
+      "after": "SC-001 (design goal - measurable via the comparative harness, but not met at the >=15% target on sampled runs; corrected 2026-09-02): ...A comparative trace-replay harness DOES exist: apps/eviction-replay-benchmark... reports per-policy hit-rate... existed since the introducing commit and was overlooked by prior syncs... measured effect is workload/cache-size dependent and does NOT reach >=15%... target is aspirational-and-unmet, now measurable rather than unverifiable.",
       "applied": true
     },
     {
@@ -23,15 +23,28 @@
       "requirement": "(metadata)",
       "direction": "BACKFILL",
       "confidence": "HIGH",
-      "rationale": "Policy: update Last-Synced/Status metadata if present. Added a Last-Synced: 2026-08-20 line under Status.",
-      "before": "(no Last-Synced line)",
-      "after": "**Last-Synced**: 2026-08-20 (spec-sync Phase B; SC-001 re-verified against benches/session_list_benchmark.rs)",
+      "approved": true,
+      "rationale": "Update Last-Synced to 2026-09-02 recording the SC-001 correction (harness exists as apps/eviction-replay-benchmark).",
+      "before": "**Last-Synced**: 2026-08-20 (... still a design goal, no comparative harness)",
+      "after": "**Last-Synced**: 2026-09-02 (... comparative trace-replay harness assumed missing by the 2026-08-20 sync in fact exists as apps/eviction-replay-benchmark ...)",
+      "applied": true
+    },
+    {
+      "id": "esl-001-align-task1-rescope",
+      "spec": "001-session-list-eviction",
+      "requirement": "SC-001 (follow-up)",
+      "direction": "ALIGN_TASK_RESCOPE",
+      "confidence": "HIGH",
+      "approved": true,
+      "rationale": "align-tasks.md Task 1 asked to 'build the comparative harness'. It already exists (apps/eviction-replay-benchmark). Re-scoped to 'pin SC-001 to a measured operating point'; build-the-harness acceptance criteria marked done. Edits .specify/sync/align-tasks.md only, no code.",
+      "before": "Task 1: Build a comparative prefix-reload trace-replay harness (verify or retire SC-001). Current State: No comparative benchmark exists.",
+      "after": "Task 1: Pin SC-001 to a measured operating point (harness already exists). Build criteria checked off; remaining: rewrite SC-001 to a concrete measured figure.",
       "applied": true
     }
   ],
   "no_action": {
     "not_implemented": [],
     "unspecced": [],
-    "align": "No new ALIGN items. Pre-existing align-tasks.md Task 1 (build comparative prefix-reload harness) carried forward unchanged."
+    "align": "No ALIGN (code-change) items. The implementation satisfies all functional/behavioural requirements; SC-001 is a spec-refinement follow-up, not a behavioural bug."
   }
 }

@@ -14,12 +14,27 @@
 > argument (+ `BlockSemantics`/`SessionId` documented under FR-020); `integrity-check`
 > feature and `set_checksum`/`get_checksum` added to the Overview and FR-007;
 > `push_async`/`PushCompletion` added to FR-030/FR-033; FR-018 `LookupResult`
-> label corrected to 4-variant. **Deferred (not applied):** FR-014/FR-025
-> `IExtendedMetadataStore` remains an orphaned module — it is defined in
-> `src/iextended_metadata_store.rs` but never declared/re-exported from `lib.rs`,
-> so it is not part of the compiled crate. A real consumer
-> (`extended-metadata-store`) implements it and would fail to build; this latent
-> break is masked only because that crate is excluded from the workspace.
+> label corrected to 4-variant.
+
+> **Last Synced 2026-09-02**: **FR-014/FR-025 RESOLVED** — the
+> `IExtendedMetadataStore` module is no longer orphaned; `src/lib.rs` now declares
+> `mod iextended_metadata_store;` and re-exports
+> `pub use iextended_metadata_store::{ExtendedMetadataStoreError, IExtendedMetadataStore};`,
+> so the trait and its 4-variant error are part of the compiled, exported crate and
+> the `extended-metadata-store` consumer resolves. Backfilled from code: FR-008
+> (`batch_lookup` now takes `&[(CacheKey, Vec<IpcHandle>)]`; `copy_gpu_to_memory_async`
+> now takes `regions: &[IpcHandle]`; added `batch_populate` and `tier_event_stats`);
+> FR-018 (added `TierEventStats`); FR-017 (`Command` 12→13 with `FlushSync`,
+> `Completion` 11→12 with `FlushDone`, `ReadWriteStats` per-size histograms +
+> `IO_SIZE_BUCKETS`); FR-021 (`FormatParams` corrected 10→9 fields); FR-023
+> (`LookupConfig` corrected 10→12 fields, added `caller_wait`/
+> `connection_teardown_timeout`); new **FR-035** documents `IIpcServer`.
+> **Orphaned-module caveat (FR-035):** `IIpcServer` (and `IpcServerConfig`/`IpcError`/
+> `IpcMetricsSnapshot`) is defined in `src/iipc.rs` but the `iipc` module is **not yet
+> declared/re-exported from `lib.rs`**, so it is not part of the compiled crate. The
+> `ipc-component` consumer implements it and would fail to build; this latent break is
+> masked only because that crate is excluded from the workspace. See the code-side
+> ALIGN task to wire it in (`.specify/sync/align-tasks.md`).
 
 ## Overview
 
@@ -172,12 +187,12 @@ The crate has two Cargo features:
 - **Method**: `shutdown(&self) -> Result<(), DispatcherError>` - Shut down, completing in-flight writes.
 - **Method**: `lookup(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>` - Look up and DMA-copy to GPU memory.
 - **Method**: `lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>` - Async lookup returning CUDA stream.
-- **Method**: `batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>` - Concurrent batch lookup.
+- **Method**: `batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<Result<(), DispatcherError>>` - Concurrent batch lookup. Each key carries one *or more* GPU destination regions: a block exported as a single coalesced allocation (vLLM ≤0.22, `populate`) has exactly one region; a block split into N per-layer allocations (vLLM 0.23+) has N. The server scatters the one resident DRAM slot back across the N regions in order (region L ← slot + sum of preceding region sizes).
 - **Method**: `check(&self, key: CacheKey) -> Result<bool, DispatcherError>` - Check entry existence.
 - **Method**: `remove(&self, key: CacheKey) -> Result<(), DispatcherError>` - Remove entry and free resources.
 - **Method**: `populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>` - Populate cache from GPU memory.
 - **Method**: `reserve_memory(&self, key: CacheKey, size: u32, session_id: u64) -> Result<*mut u8, DispatcherError>` - Reserve memory-tier slot. `session_id` is an opaque per-request identifier (0 = unset) supplied by the client; it carries no allocation semantics and is used only for observability.
-- **Method**: `copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>` - DMA copy into reserved slot.
+- **Method**: `copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream) -> Result<(), DispatcherError>` - DMA copy into a reserved slot. Issues one `cudaMemcpyAsync` per region on the given stream; the N regions are gathered contiguously into the one slot (region L lands at `slot + sum of preceding region sizes`), so a block split into N per-layer GPU allocations is stored as one colocated unit. A single-region slice (`regions.len() == 1`) is the legacy path.
 - **Method**: `copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>` - Finalize populated slot.
 - **Method**: `release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>` - Release reserved slot (cancellation path).
 - **Method**: `touch(&self, key: CacheKey) -> Result<(), DispatcherError>` - Refresh eviction timestamp.
@@ -187,6 +202,8 @@ The crate has two Cargo features:
 - **Method**: `pin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Take an eviction-protection reference on a cache entry; multiple pins on the same key stack (ref-count increments).
 - **Method**: `unpin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Release an eviction-protection reference; the entry becomes evictable again once all pins are released.
 - **Method**: `read_write_stats(&self) -> ReadWriteStats` - Return cumulative per-direction SSD read/write byte, op, and latency counters aggregated across all data drives (zeroed unless built with the `telemetry` feature; monotonic).
+- **Method**: `batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>` - Batch form of `populate`: submits all D2H copies asynchronously, waits for the batch with a single `stream_synchronize`, then registers every entry in the dispatch-map and enqueues SSD write-through. Returns one `Result` per entry, in input order.
+- **Method**: `tier_event_stats(&self) -> TierEventStats` - Return cumulative KV-cache tier-movement counters (blocks promoted SSD→DRAM, lookups served to GPU, evictions from the DRAM memory tier and from SSD). Always populated (unconditional, unlike the telemetry-gated `read_write_stats`); monotonic since process start, take deltas across two calls.
 
 #### FR-009: IMemoryTier Interface (feature: spdk)
 - **Method**: `initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError>` - Initialize pool with NUMA binding.
@@ -308,10 +325,11 @@ The crate has two Cargo features:
 - `TelemetrySnapshot`: IO statistics (ops, latency, throughput).
 - `OpHandle`: Unique async operation identifier.
 - `NamespaceInfo`: NVMe namespace metadata.
-- `Command`: 12-variant enum for all NVMe operations (ReadSync, WriteSync, ReadAsync, WriteAsync, WriteZeros, BatchSubmit, AbortOp, NsProbe, NsCreate, NsFormat, NsDelete, ControllerReset).
-- `Completion`: 11-variant enum for operation results (ReadDone, WriteDone, WriteZerosDone, AbortAck, Timeout, NsProbeResult, NsCreated, NsFormatted, NsDeleted, ResetDone, Error); derives `Clone` (in addition to `Debug`) so the block-device actor can `try_send` a clone of a completion on a full ring without consuming the original, enabling non-blocking completion delivery.
+- `Command`: 13-variant enum for all NVMe operations (ReadSync, WriteSync, ReadAsync, WriteAsync, WriteZeros, BatchSubmit, AbortOp, NsProbe, NsCreate, NsFormat, NsDelete, ControllerReset, `FlushSync { ns_id: u32 }`).
+- `Completion`: 12-variant enum for operation results (ReadDone, WriteDone, WriteZerosDone, AbortAck, Timeout, NsProbeResult, NsCreated, NsFormatted, NsDeleted, ResetDone, `FlushDone { handle, result }`, Error); derives `Clone` (in addition to `Debug`) so the block-device actor can `try_send` a clone of a completion on a full ring without consuming the original, enabling non-blocking completion delivery.
 - `ClientChannels`: Channel pair (command_tx, completion_rx).
-- `ReadWriteStats`: Cumulative per-direction (read/write) byte, op, and latency-sum counters with `total_ops`/`total_bytes`/`mean_read_latency_ns`/`mean_write_latency_ns` helpers; returned by `IBlockDevice::read_write_stats` and `IDispatcher::read_write_stats` (see FR-004/FR-008).
+- `ReadWriteStats`: Cumulative per-direction (read/write) byte, op, and latency-sum counters with `total_ops`/`total_bytes`/`mean_read_latency_ns`/`mean_write_latency_ns` helpers; returned by `IBlockDevice::read_write_stats` and `IDispatcher::read_write_stats` (see FR-004/FR-008). Also carries per-transfer-size histograms `read_size_buckets`/`write_size_buckets: [u64; IO_SIZE_BUCKETS]` with helpers `size_bucket(bytes) -> usize` (power-of-two bucket index, sizes ≥ `2^(IO_SIZE_BUCKETS-1)` clamp into the last bucket), `bucket_lower_bound(idx)`, and `merge_from(&other)` for cross-drive aggregation.
+- `IO_SIZE_BUCKETS`: public `usize` const (= 25) — the number of power-of-two transfer-size histogram buckets in `ReadWriteStats`; re-exported from the crate root.
 
 #### FR-018: Supporting Types - Dispatcher
 - `DispatcherConfig`: 18-field configuration — `data_pci_addrs`, `max_cache_entries`, `format_on_init`, SSD eviction params (`ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, `ssd_eviction_interval_secs`), `poller_base_cpu`, `max_eviction_attempts`, `backfill_delay_ms`, partition sizes (`metadata_partition_size`, `extended_metadata_partition_size`), memory-tier proactive DRAM→SSD demotion params (`memory_tier_eviction_threshold`, `memory_tier_eviction_low_watermark`, `memory_tier_eviction_batch_size`, `memory_tier_eviction_interval_secs` — analogous to the SSD eviction sweep, disabled by default via threshold 0.0), and cold-load staging (`cold_staging_slots`, `cold_staging_buf_bytes`).
@@ -319,6 +337,7 @@ The crate has two Cargo features:
 - `DispatcherError`: 7-variant error enum.
 - `CacheKey`: Type alias for `u64`.
 - `LookupResult`: 4-variant enum (NotExist, MismatchSize, BlockDevice, MemoryTier).
+- `TierEventStats`: `Copy + Default + PartialEq + Eq` cumulative snapshot of KV-cache tier-movement counters, returned by `IDispatcher::tier_event_stats` (see FR-008). 4 `u64` fields: `promotions_to_memory`, `promotions_to_gpu`, `evictions_from_memory`, `evictions_from_ssd`. Monotonic since process start; always populated (not telemetry-gated).
 
 #### FR-019: Supporting Types - Memory Tier
 - `MemoryTierError`: 7-variant error enum.
@@ -335,7 +354,7 @@ The crate has two Cargo features:
 - `Extent`: Committed extent (key, size, offset).
 - `ExtentKey`: Type alias for `u64`.
 - `ExtentManagerError`: 5-variant error enum.
-- `FormatParams`: 10-field format configuration with defaults.
+- `FormatParams`: 9-field format configuration with defaults (`data_disk_size`, `slab_size`, `max_extent_size`, `sector_size`, `region_count`, `metadata_alignment`, `instance_id`, `metadata_disk_ns_id`, `metadata_region_size`).
 - `WriteHandle`: Publish/abort handle with auto-abort on drop.
 
 #### FR-022: Supporting Types - GPU Services
@@ -346,7 +365,7 @@ The crate has two Cargo features:
 
 #### FR-023: Supporting Types - Remote
 - `RemoteLookupError`: 2-variant error enum (`NotFound`, `TransportError`).
-- `LookupConfig`: 10-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`.
+- `LookupConfig`: 12-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `caller_wait` (`Option<Duration>`, default `None` — how long `batch_lookup` blocks before returning while the RDMA write may still land), `connection_teardown_timeout` (`Duration`, default 1000 ms), `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`.
 - ~~`LookupRef`~~ / ~~`RemoteRequestHandlerError`~~ — **SUPERSEDED**, removed together with `IRemoteRequestHandler` (see FR-013). No replacement type exists: the RDMA split's writes are one-sided (no zero-copy handle is returned to a caller) and its errors are `RemoteLookupRdmaInitiatorError`/`RemoteLookupRdmaResponderError` (FR-033/FR-034).
 
 #### FR-024: Supporting Types - Partition Table
@@ -433,6 +452,35 @@ The crate has two Cargo features:
 - `ResponderCommand`: 1-variant enum (`Disconnect { node: PeerId }`) — control commands sent to the responder actor.
 - `ResponderEvent`: 3-variant enum (`ConnectionEstablished { node: Option<PeerId> }`, `DisconnectAck { node: PeerId }`, `Error { message: String }`) — events emitted by the responder actor; `DisconnectAck` signals teardown-before-reclaim is complete.
 - `RemoteLookupRdmaResponderError`: 6-variant error enum (`NotInitialized`, `AlreadyInitialized`, `Bind`, `Registration`, `ChannelClosed`, `Internal`).
+
+#### FR-035: IIpcServer Interface + Supporting Types (transport-neutral IPC front-end)
+
+> **Orphaned-module caveat**: `IIpcServer` and its supporting types are defined in
+> `src/iipc.rs` but the `iipc` module is **not yet declared (`mod`) or re-exported
+> (`pub use`) from `src/lib.rs`**, so they are not part of the compiled `interfaces`
+> crate today. The consumer `components/ipc-component` does
+> `use interfaces::{IIpcServer, IpcError, IpcMetricsSnapshot, IpcServerConfig}` and
+> would fail to build; the latent break is masked only because `ipc-component` is
+> excluded from the workspace. A code-side task to wire the module in is recorded in
+> `.specify/sync/align-tasks.md` (ALIGN-IFACE-001). This FR documents the intended
+> contract as it exists in source.
+
+`IIpcServer` is a transport-neutral front-end for the dispatcher: a pluggable
+inter-process communication server (`define_interface!`, discoverable via `IUnknown`).
+The reference implementation (`ipc-component`) speaks gRPC, but the contract carries no
+gRPC/tonic types, so a future shared-memory or RDMA transport can implement the same
+interface. The interface is deliberately **un-gated** (no `spdk`/`gpu` types in its
+signatures), so mainlines can hold `Arc<dyn IIpcServer>` without the storage feature flags.
+
+- **Method**: `initialize(&self, config: IpcServerConfig) -> Result<(), IpcError>` - Configure the server and prepare transport resources. Must be called before `serve`; a second call returns `IpcError::AlreadyInitialized`.
+- **Method**: `serve(&self) -> Result<(), IpcError>` - Run the server, blocking the calling thread until `shutdown` is invoked. The implementation drives its own runtime (e.g. a dedicated OS thread with a tokio runtime), so it is safe to call from inside an async runtime. Returns `IpcError::NotInitialized` if `initialize` has not run.
+- **Method**: `shutdown(&self) -> Result<(), IpcError>` - Signal a running `serve` to stop and release transport resources. Idempotent; returns `Ok(())` even when not serving.
+- **Method**: `metrics_snapshot(&self) -> IpcMetricsSnapshot` - Read a consistent snapshot of the server's monotonic service counters (pull-based; polled by a telemetry backend).
+
+Supporting types (all `Debug`; `IpcServerConfig`/`IpcError`/`IpcMetricsSnapshot` are `Clone + PartialEq + Eq`):
+- `IpcServerConfig`: 4-field, transport-neutral, implements `Default` — `listen_addr: String` (default `"0.0.0.0:50051"`), `tls_cert: Option<String>`, `tls_key: Option<String>` (PEM pair; both or neither; `None` = plaintext), `eviction_channel_capacity: usize` (default 16384).
+- `IpcError`: 4-variant error enum (`NotInitialized`, `AlreadyInitialized`, `Config(String)`, `Transport(String)`).
+- `IpcMetricsSnapshot`: 5-field `Default` snapshot of cumulative counters — `populates`, `lookup_hits`, `lookup_misses`, `evictions`, `gpu_bytes_transferred` (all `u64`).
 
 ### Non-Functional Requirements
 

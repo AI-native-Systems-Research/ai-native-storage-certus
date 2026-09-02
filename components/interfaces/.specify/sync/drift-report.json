@@ -1,46 +1,97 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T21:52:26Z",
+  "spec_sync_drift_status": "drift",
+  "spec_sync_synced_at": "2026-09-02T21:52:26Z",
+  "spec_sync_git_commit": "2fc1cd3c",
+  "spec_sync_inputs_sha256": "1a69899701a8aa7fdd700310d07dd35134aa11a96a0216a3c823d2e887bc0e22",
+  "spec_sync_hash_tool": "scripts/spec-sync-hash.sh",
   "project": "interfaces",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 47,
-    "aligned": 45,
-    "drifted": 2,
+    "aligned": 42,
+    "drifted": 5,
     "not_implemented": 0,
-    "unspecced_features": 0
+    "unspecced_features": 1
   },
   "specs": [
     {
       "id": "001-interfaces",
       "title": "Shared Interface Trait Definitions",
+      "resolved_since_last_sync": [
+        {
+          "requirement": "FR-014",
+          "note": "IExtendedMetadataStore module now declared (src/lib.rs:78) and re-exported (src/lib.rs:100); trait at src/iextended_metadata_store.rs:30. Previously an orphaned module. Spec body aligned; only the top-of-file 'Deferred (not applied)' note is stale."
+        },
+        {
+          "requirement": "FR-025",
+          "note": "ExtendedMetadataStoreError 4-variant enum (src/iextended_metadata_store.rs:5) now exported via src/lib.rs:100. Aligned."
+        }
+      ],
       "aligned": [
         "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-015",
-        "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022",
-        "FR-023", "FR-024", "FR-026", "FR-027", "FR-028", "FR-029", "FR-030",
-        "FR-031", "FR-032", "FR-033", "FR-034",
+        "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015",
+        "FR-016", "FR-019", "FR-020", "FR-022", "FR-024", "FR-025", "FR-026",
+        "FR-027", "FR-028", "FR-029", "FR-030", "FR-031", "FR-032", "FR-033",
+        "FR-034",
         "NFR-001", "NFR-002", "NFR-003", "NFR-004", "NFR-005", "NFR-006",
         "SC-1", "SC-2", "SC-3", "SC-4", "SC-5", "SC-6", "SC-7"
       ],
       "drifted": [
         {
-          "requirement": "FR-014",
-          "spec_text": "IExtendedMetadataStore trait (put/get/delete/iterate_all/force_flush) is part of the interfaces crate.",
-          "actual": "Trait is defined in src/iextended_metadata_store.rs but the module is never declared (mod) or re-exported (pub use) in src/lib.rs, so it is not part of the compiled crate. Consumer extended-metadata-store imports it and would fail to build; masked only because that crate is out-of-workspace.",
-          "location": "src/lib.rs (missing mod/pub use); definition at src/iextended_metadata_store.rs:30",
-          "severity": "major"
+          "requirement": "FR-008",
+          "spec_text": "IDispatcher: batch_lookup takes &[(CacheKey, IpcHandle)]; copy_gpu_to_memory_async takes ipc_handle: IpcHandle; method list of 19.",
+          "actual": "batch_lookup takes &[(CacheKey, Vec<IpcHandle>)] (src/idispatcher.rs:338-341); copy_gpu_to_memory_async takes regions: &[IpcHandle] (src/idispatcher.rs:460); two additional methods not in spec: batch_populate (src/idispatcher.rs:427) and tier_event_stats (src/idispatcher.rs:575).",
+          "location": "src/idispatcher.rs:338, 460, 427, 575",
+          "severity": "moderate",
+          "sub_findings": ["D1", "D2", "D3", "D4"]
         },
         {
-          "requirement": "FR-025",
-          "spec_text": "ExtendedMetadataStoreError 4-variant enum (NotFound, StorageError, CapacityExhausted, ValueTooLarge) exported from interfaces.",
-          "actual": "Enum exists with exactly those 4 variants but lives in the undeclared iextended_metadata_store module, so it is not exported from the crate. Same orphaned-module root cause as FR-014.",
-          "location": "src/iextended_metadata_store.rs:5",
-          "severity": "major"
+          "requirement": "FR-017",
+          "spec_text": "Command: 12-variant enum; Completion: 11-variant enum; ReadWriteStats: per-direction byte/op/latency counters (no histograms).",
+          "actual": "Command has 13 variants (adds FlushSync { ns_id: u32 }, src/iblock_device.rs:411); Completion has 12 variants (adds FlushDone { handle, result }, src/iblock_device.rs:501); ReadWriteStats adds read_size_buckets/write_size_buckets: [u64; IO_SIZE_BUCKETS] plus size_bucket/bucket_lower_bound/merge_from and a new public const IO_SIZE_BUCKETS = 25 (also re-exported src/lib.rs:94).",
+          "location": "src/iblock_device.rs:139, 142, 159-161, 322, 411, 439, 501",
+          "severity": "minor",
+          "sub_findings": ["D5", "D6", "D7"]
+        },
+        {
+          "requirement": "FR-018",
+          "spec_text": "Supporting Types - Dispatcher lists DispatcherConfig, IpcHandle, DispatcherError, CacheKey, LookupResult.",
+          "actual": "TierEventStats (Copy + Default + PartialEq + Eq; 4 u64 fields: promotions_to_memory, promotions_to_gpu, evictions_from_memory, evictions_from_ssd) is defined and re-exported (src/lib.rs:33) but not listed in FR-018.",
+          "location": "src/idispatcher.rs:190-202",
+          "severity": "minor",
+          "sub_findings": ["D8"]
+        },
+        {
+          "requirement": "FR-021",
+          "spec_text": "FormatParams: 10-field format configuration with defaults.",
+          "actual": "FormatParams has 9 fields (data_disk_size, slab_size, max_extent_size, sector_size, region_count, metadata_alignment, instance_id, metadata_disk_ns_id, metadata_region_size).",
+          "location": "src/iextent_manager.rs:42-67",
+          "severity": "minor",
+          "sub_findings": ["D9"]
+        },
+        {
+          "requirement": "FR-023",
+          "spec_text": "LookupConfig: 10-field configuration (group, quorum_pct, phase1_timeout, op_deadline, max_retry_rounds, max_keys_per_query, bind_ip, actor_cpu, discovery, node_endpoint).",
+          "actual": "LookupConfig has 12 fields — adds caller_wait: Option<Duration> (src/iremote_lookup.rs:50) and connection_teardown_timeout: Duration (src/iremote_lookup.rs:57).",
+          "location": "src/iremote_lookup.rs:29",
+          "severity": "minor",
+          "sub_findings": ["D10"]
         }
       ],
       "not_implemented": []
     }
   ],
-  "unspecced": [],
+  "unspecced": [
+    {
+      "id": "U1",
+      "feature": "IIpcServer interface and supporting types",
+      "symbols": ["IIpcServer", "IpcServerConfig", "IpcError", "IpcMetricsSnapshot"],
+      "location": "src/iipc.rs:40-192",
+      "orphaned": true,
+      "orphan_detail": "The iipc module is never declared (mod) or re-exported (pub use) in src/lib.rs, so these symbols are not part of the compiled crate. Consumer components/ipc-component/src/lib.rs:33 imports interfaces::{IIpcServer, IpcError, IpcMetricsSnapshot, IpcServerConfig} and would fail to build; masked only because ipc-component is excluded from the workspace (not in root Cargo.toml members) and both files are untracked. Identical pattern to the historical FR-014/FR-025 orphan.",
+      "suggested_spec": "New FR-035 documenting the interface + IpcServerConfig (4-field), IpcError (4-variant), IpcMetricsSnapshot (5-field), with an orphaned-module caveat."
+    }
+  ],
   "conflicts": []
 }

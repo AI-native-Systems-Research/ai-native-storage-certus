@@ -292,3 +292,38 @@ closure capture to thread the logger into the seam).
 - [ ] With no logger bound, `drain_async_events` is a silent no-op and never turns an async event into an error (FR-014 tolerance preserved).
 - [ ] The accept-loop / seam has access to a logger handle when one is bound.
 - [ ] The spec's Known-Limitations note on the `eprintln!` gap can be dropped once this lands (or kept as an accepted, documented deviation if the maintainer declines the change).
+
+---
+
+# 2026-09-02 Fresh Verification Pass (HEAD 2fc1cd3c)
+
+A line-by-line re-verification of the shipped `--features rdma` code against the spec
+found that **three MUST sub-clauses are still unmet in code** — none of the queued
+Aug-07 / Aug-20 align-tasks below have landed a source change. Accordingly the
+2026-09-02 drift report re-classifies **FR-008** and **FR-010** from "aligned" back to
+**Drifted (partial)** alongside **FR-014** (21/24 aligned, 3 drifted). Filing an
+align-task does not make a requirement compliant; these remain open code work. In every
+case the *load-bearing* behavior of the FR is fully implemented — only the named
+secondary clause drifts — and all three are only reachable under `--features rdma`.
+
+The three open items are the **same** tasks already recorded above; this section only
+re-affirms them with **current** line references (HEAD 2fc1cd3c) so a follow-up code PR
+can find them:
+
+| # | Requirement | Unmet clause | Current location | Severity | Prior task |
+|---|-------------|--------------|------------------|----------|------------|
+| A | FR-010 | `ibv_reg_mr` failure MUST return `Registration`, not `Bind` | `src/rdma.rs:300-309` (reg_mr `Err`) → `src/lib.rs:203` (uniform `.map_err(...::Bind)`); precondition `Registration` paths at `src/lib.rs:191-200` are correct | Medium | Task 5 (2026-08-07) |
+| B | FR-008 | best-effort `rdma_destroy_qp`/`rdma_disconnect` failure MUST be logged | `src/rdma.rs:154-169` (`RealCmConn::drop` discards all return codes) | Low | Task 6 (2026-08-07) |
+| C | FR-014 | async-event diagnostics MUST route through `ILogger`, not `eprintln!` | `src/rdma.rs:459-464` (`eprintln!`); `src/lib.rs:116-120` (aligned primary path) | Low | FR-014 async-event task (2026-08-20) |
+
+**No source edited this pass** (spec-sync writes only `specs/**` and `.specify/sync/**`).
+Tasks B and C share the need for an accept-loop / seam `ILogger` handle and should land
+together. Task A is independent (error-channel split in `RealCmSeam::bind`).
+
+Note: the FR-016 wire-up (July Tasks 1 & 2) is confirmed **implemented** in the shipped
+code (`record_accept_loop_error` called at `src/lib.rs:160-166`, `CmEvent::AcceptError`
+emitted at `src/rdma.rs:420-427`, forwarded via `src/connection.rs:216-218`), so those
+are correctly reflected as aligned and are **not** re-opened. The July interfaces-doc
+task (`components/interfaces/src/iremote_lookup_rdma_responder.rs:256-262`, stale
+"never auto-detects" comment) is outside this component's write scope and remains a
+separate code-side PR.

@@ -1,0 +1,78 @@
+{
+  "generated": "2026-08-20",
+  "project": "dispatcher-p2p",
+  "spec": "001-gpudirect-cold-path",
+  "source": ".specify/sync/drift-report.json",
+  "summary": {
+    "align": 1,
+    "backfill": 1,
+    "backfill_unspecced": 6,
+    "resolved": 0,
+    "human_decision": 1
+  },
+  "proposals": [
+    {
+      "requirement": "FR-017",
+      "direction": "ALIGN",
+      "rationale": "Drop counter only incremented in dead-code emit_eviction (lib.rs:228-236, #[allow(dead_code)], no callers). Live publish sites (lib.rs:602-645; background.rs:414-419,611-616) use bare `let _ = tx.try_send(...)` and never increment, so eviction_dropped_count() always returns 0. Spec is correct, code is buggy -> ALIGN task.",
+      "before": "(spec unchanged)",
+      "after": "(spec unchanged; code-fix task in align-tasks.md)"
+    },
+    {
+      "requirement": "SC-006",
+      "direction": "BACKFILL",
+      "rationale": "Code logs non-fatal diagnostic at init (lib.rs:1209-1213) and defers panic to first cold batch_lookup (lib.rs:1752-1755); single-key lookup() falls back to DRAM. Behavior is intentional and already agreed in FR-006/FR-007/US2 AC-1; SC-006 wording was the lone stale statement.",
+      "before": "**SC-006**: Initialization panics with a clear diagnostic when P2P ring allocation fails (GDRCopy/BAR1 unavailable).",
+      "after": "**SC-006**: When P2P ring allocation fails (GDRCopy/BAR1 unavailable), initialization logs a clear, non-fatal diagnostic and continues (permitting hot-only testing without P2P hardware). The failure is surfaced fatally on first use: the first cold `batch_lookup` panics with a diagnostic directing the operator to the `full.yaml` profile, while the single-key `lookup()` path silently falls back to the DRAM path. (Consistent with FR-006, FR-007, and User Story 2 AC-1.)"
+    },
+    {
+      "requirement": "FR-018",
+      "direction": "BACKFILL-UNSPECCED",
+      "rationale": "ParallelBackgroundWriter (background.rs:154-219, started lib.rs:1287): per-drive write-through threads, WriteJob routed by device_index % num_drives, with in-flight/flush/shutdown. Persistence path was unspecced.",
+      "before": "(none - feature unspecced)",
+      "after": "New FR-018 + Key Entity ParallelBackgroundWriter + User Story 5 AS-3."
+    },
+    {
+      "requirement": "FR-019",
+      "direction": "BACKFILL-UNSPECCED",
+      "rationale": "BackgroundEvictor (background.rs:303-488, started lib.rs:1400 when ssd_eviction_threshold>0): periodic SSD capacity reclamation to a low watermark, frees extents, emits Removed events. ssd_eviction_* config.",
+      "before": "(none - feature unspecced)",
+      "after": "New FR-019 + Key Entity BackgroundEvictor + User Story 5 AS-2."
+    },
+    {
+      "requirement": "FR-020",
+      "direction": "BACKFILL-UNSPECCED",
+      "rationale": "MemoryTierEvictor (background.rs:490-654, started lib.rs:1428 when memory_tier_eviction_threshold>0): proactive DRAM->SSD demotion with pressure-scaled batch and dry-run backoff, emits Demoted events. memory_tier_eviction_* config.",
+      "before": "(none - feature unspecced)",
+      "after": "New FR-020 + Key Entity MemoryTierEvictor + User Story 5 AS-1."
+    },
+    {
+      "requirement": "FR-021",
+      "direction": "BACKFILL-UNSPECCED",
+      "rationale": "clear_memory_tier() (lib.rs:2606-2637): flush entire memory tier, demote-or-force-remove each entry, return cleared count.",
+      "before": "(none - feature unspecced)",
+      "after": "New FR-021 + User Story 5 AS-4."
+    },
+    {
+      "requirement": "FR-022",
+      "direction": "BACKFILL-UNSPECCED",
+      "rationale": "lookup_async() (lib.rs:2044-2110): returns GpuStream after async H2D copy on a warm stream (sync fallback), caller-driven pipelined sync. Async single-key contract was undocumented.",
+      "before": "(none - feature unspecced)",
+      "after": "New FR-022 + User Story 5 AS-5."
+    },
+    {
+      "requirement": "FR-023",
+      "direction": "BACKFILL-UNSPECCED",
+      "rationale": "pins::PinnedKeys (pins.rs:26-57, used lib.rs:1931): holds dispatch-map read pins across async H2D copy completion (not submission), release-once-on-drop across all exit paths; leaked pin permanently blocks eviction. Data-plane correctness invariant.",
+      "before": "(none - feature unspecced)",
+      "after": "New FR-023 + Key Entity PinnedKeys."
+    },
+    {
+      "requirement": "cold_staging_slots / cold_staging_buf_bytes",
+      "direction": "HUMAN_DECISION",
+      "rationale": "Config fields on shared interfaces::DispatcherConfig (idispatcher.rs:81-87) but NOT referenced anywhere in dispatcher-p2p/src/ (grep-verified). Dead config on this surface; the 64-slot ring is governed by FR-003. Backfilling a functional claim would invent behavior. Human should wire them in or remove them from the config surface.",
+      "before": "(none)",
+      "after": "(none - pending human decision)"
+    }
+  ]
+}
