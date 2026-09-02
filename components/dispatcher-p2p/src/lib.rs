@@ -2350,6 +2350,17 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
+    fn batch_copy_gpu_to_memory(
+        &self,
+        entries: &[(CacheKey, Vec<IpcHandle>)],
+    ) -> Vec<Result<(), DispatcherError>> {
+        // Delegate to per-key path (p2p does not batch GPU DMA).
+        entries
+            .iter()
+            .map(|(k, r)| self.copy_gpu_to_memory_async(*k, r, GpuStream(std::ptr::null_mut())))
+            .collect()
+    }
+
     fn copy_gpu_to_memory_completed(
         &self,
         key: CacheKey,
