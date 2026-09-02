@@ -1,45 +1,61 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T20:45:00Z",
   "project": "dispatch-map",
+  "spec": "specs/001-dispatch-map/spec.md",
+  "branch": "evolve-dispatcher-dw",
+  "git_commit": "787b8263",
+  "drift_status": "clean",
+  "inputs_sha256": "2dbb7666aa9c2fce3bdfda40d947ddbb498f6dbd7c925015bffb300f66944b74",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 32,
-    "aligned": 30,
-    "drifted": 2,
+    "requirements_checked": 33,
+    "drift_findings": 1,
+    "drifted_resolved_by_backfill": 1,
+    "preexisting_aligns_unchanged": 2,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced_features": 0
   },
   "specs": [
     {
       "id": "001-dispatch-map",
       "title": "Dispatch Map Component",
-      "aligned": 30,
       "drifted": [
+        {
+          "requirement": "FR-002,FR-013,KeyEntities",
+          "spec_text": "map internally sharded into N_SHARDS=64 independent partitions, each with its own Mutex<Inner>+Condvar, routing key % N_SHARDS",
+          "actual": "sharding reverted (8f494f8d); single global Mutex<Inner> + Condvar over one HashMap; no Shard type, no shard_for, no N_SHARDS in source",
+          "location": "components/dispatch-map/src/state.rs:11-83",
+          "severity": "moderate",
+          "commit": "8f494f8d",
+          "resolution": "backfill",
+          "outcome": "fixed"
+        }
+      ],
+      "preexisting_aligns": [
         {
           "requirement": "FR-012",
           "spec_text": "On initialization, the IEvictionPolicy receptacle MUST be connected (returns an error if unbound).",
-          "actual": "initialize() calls get_pool_id() first, which does eviction_policy.get().unwrap(); an unbound eviction_policy panics before the graceful map_err(NotInitialized) path is reached. Same unwrap in create_memory_tier_entry, recover_extent, oldest_keys.",
+          "actual": "get_pool_id() does eviction_policy.get().unwrap(); an unbound eviction_policy panics before the graceful NotInitialized path.",
           "location": "src/lib.rs:55",
-          "severity": "moderate"
+          "severity": "moderate",
+          "resolution": "align (deferred)",
+          "outcome": "unresolved",
+          "tracked_in": ".specify/sync/align-tasks.md"
         },
         {
           "requirement": "FR-003",
           "spec_text": "US1/AS3 + Edge Cases: create_memory_tier_entry with a null pointer returns an error; no entry is recorded.",
-          "actual": "create_memory_tier_entry only validates size == 0 (InvalidSize); there is no null-pointer check, so a null pointer is accepted and an entry is recorded.",
+          "actual": "create_memory_tier_entry only validates size == 0; there is no null-pointer check.",
           "location": "src/lib.rs:381",
-          "severity": "moderate"
+          "severity": "moderate",
+          "resolution": "align (deferred)",
+          "outcome": "unresolved",
+          "tracked_in": ".specify/sync/align-tasks.md"
         }
       ],
       "not_implemented": []
     }
   ],
-  "unspecced": [
-    {
-      "feature": "reuse_count AtomicU32 field on DispatchEntry, incremented on every lookup/take_read/downgrade_reference",
-      "location": "src/entry.rs, src/lib.rs",
-      "lines": "entry.rs:37; lib.rs:142-143,220-222,313-315",
-      "suggested_spec": "Either spec a per-entry read-hit counter with a query method, or remove the field (spec's Last Synced note already lists reuse_count removal as a pending code-side align)."
-    }
-  ],
+  "unspecced": [],
   "conflicts": []
 }

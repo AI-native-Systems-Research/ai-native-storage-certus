@@ -1,92 +1,67 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-02T20:45:00Z",
   "project": "dispatcher",
-  "branch": "sync-tmp",
+  "spec": "specs/001-dispatcher-cache-interface/spec.md",
+  "branch": "evolve-dispatcher-dw",
+  "git_commit": "787b8263",
+  "drift_status": "clean",
+  "inputs_sha256": "2886506afcb1d6dbaa9505fa7e3c01405c045fbf588dfd2003be84865ea63deb",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 67,
-    "aligned": 61,
-    "drifted": 5,
+    "drift_findings": 4,
+    "drifted_resolved_by_backfill": 4,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced_features": 0
   },
   "specs": [
     {
       "id": "001-dispatcher-cache-interface",
       "title": "Dispatcher Cache Interface",
-      "aligned": 61,
       "drifted": [
         {
-          "requirement": "FR-037",
-          "spec_text": "pre-allocate a single warm CUDA stream ... used by lookup_async and batch_lookup for memcpy_h2d_async on raw memory-tier pointers ... per-device warm stream from DEVICE_STREAMS.",
-          "actual": "DeviceStreams now holds two warm streams per device: warm_load (H2D) and warm_store (D2H), split so H2D and D2H DMA overlap on the PCIe bus (lib.rs:335-345); device_streams_for creates both plus the pipeline pair (lib.rs:371-378). The H2D memory-tier->GPU copy is issued via memcpy_batch_async (lib.rs:1127), not memcpy_h2d_async (mock-only now, lib.rs:4193,4260,5244). warm_stream AtomicU64 fallback retained.",
-          "location": "components/dispatcher/src/lib.rs:335-345,371-378,885,1127,2133,2740",
-          "commit": "995596e4",
-          "direction": "BACKFILL",
-          "severity": "moderate"
+          "requirement": "FR-024",
+          "spec_text": "unpinned+unpersisted eviction candidate is dropped via dm.remove + mt.remove",
+          "actual": "candidate is skipped (never dropped); dropping raced fatally with Check->Pin (read_ref==0 drop -> miss -> EngineDeadError)",
+          "location": "components/dispatcher/src/lib.rs:945-965",
+          "severity": "major",
+          "commit": "1d55b9c2",
+          "resolution": "backfill",
+          "outcome": "fixed"
         },
         {
-          "requirement": "FR-052",
-          "spec_text": "one warm stream plus one pipeline stream pair per device.",
-          "actual": "Each device now has two warm streams (warm_load, warm_store) plus the pipeline pair: DeviceStreams { warm_load, warm_store, pipe: [u64; 2] } (lib.rs:339-345). Device-resolution / fallback-on-(-1) semantics unchanged.",
-          "location": "components/dispatcher/src/lib.rs:339-345",
-          "commit": "995596e4",
-          "direction": "BACKFILL",
-          "severity": "minor"
+          "requirement": "FR-039#1",
+          "spec_text": "classifies all entries by dispatch-map state",
+          "actual": "dm.lookup Err (transient write_ref timeout) retried locally x5 rather than misclassified as KeyNotFound -> remote-forward -> fatal",
+          "location": "components/dispatcher/src/lib.rs:2181",
+          "severity": "minor",
+          "commit": "1d55b9c2",
+          "resolution": "backfill",
+          "outcome": "fixed"
         },
         {
-          "requirement": "FR-006 / FR-039(2) / FR-056 / Implementation-Notes",
-          "spec_text": "warm-path H2D uses IGpuServices::memcpy_h2d_async; copy_gpu_to_memory_async issues asynchronous GPU->host DMA on the supplied stream; populate D2H uses dma_copy_to_host.",
-          "actual": "Both warm directions now use the batched memcpy_batch_async (cuMemcpyBatchAsync) multi-region API. Memory-tier->GPU scatter (1 slot -> N regions) is a single memcpy_batch_async on warm_load (lib.rs:1116-1127); GPU->memory-tier gather in copy_gpu_to_memory_async (N regions -> 1 slot) is a single memcpy_batch_async on warm_store (lib.rs:2998-3009). No production call site uses memcpy_h2d_async.",
-          "location": "components/dispatcher/src/lib.rs:1116-1127,2984-3009",
-          "commit": "d8c26d58",
-          "direction": "BACKFILL",
-          "severity": "moderate"
+          "requirement": "FR-039#3",
+          "spec_text": "single-entry cold batch calls promote_and_serve inline, bypassing the cold pool",
+          "actual": "all cold entries (incl. single-key) go through the pooled path; inline fast path removed (no staging fallback -> fatal load failure under tier pressure)",
+          "location": "components/dispatcher/src/lib.rs:2291",
+          "severity": "moderate",
+          "commit": "1d55b9c2",
+          "resolution": "backfill",
+          "outcome": "fixed"
         },
         {
-          "requirement": "FR-040",
-          "spec_text": "The gRPC handler spawns this as a detached background task when BatchTouchRequest.promote = true.",
-          "actual": "gRPC removed entirely; shm-queue is the sole control transport (97e26738). promote_to_memory_tier API unchanged (lib.rs:3060); only the calling transport changed. Sentence names a transport that no longer exists.",
-          "location": "spec FR-040",
-          "commit": "97e26738",
-          "direction": "BACKFILL",
-          "severity": "minor"
-        },
-        {
-          "requirement": "FR-042",
-          "spec_text": "external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
-          "actual": "Eviction-event channel (create_eviction_channel / EvictionEvent, lib.rs:378,392-396) unchanged, but the named example consumer (gRPC TakeEvents) was removed in 97e26738; shm-queue transport is now the consumer.",
-          "location": "spec FR-042",
-          "commit": "97e26738",
-          "direction": "BACKFILL",
-          "severity": "minor"
+          "requirement": "FR-037,FR-056,Assumptions",
+          "spec_text": "populate_from_gpu uses the warm stream for its D2H copy",
+          "actual": "populate_from_gpu uses the dedicated store stream (PCIe full-duplex; do not serialize D2H behind concurrent H2D lookups)",
+          "location": "components/dispatcher/src/lib.rs:2941",
+          "severity": "moderate",
+          "commit": "9b83ebe1",
+          "resolution": "backfill",
+          "outcome": "fixed"
         }
       ],
       "not_implemented": []
     }
   ],
-  "unspecced": [
-    {
-      "feature": "tier_event_stats() -> TierEventStats: cumulative tier-transition counters on IDispatcher, backed by a lock-free TierEventCounters subsystem incremented on every tier transition. Always-on (unlike telemetry-gated read_write_stats).",
-      "location": "components/dispatcher/src/lib.rs (impl) + components/interfaces/src/idispatcher.rs (trait)",
-      "lines": "lib.rs:111-160,317,3390; idispatcher.rs:189-210,564",
-      "commit": "4659626b",
-      "suggested_spec": "New FR-058 (tier-event counters) + SC-017 (counters observable and monotonic across a populate/lookup/evict cycle)."
-    },
-    {
-      "feature": "DI/test hooks set_block_device_factory / set_extent_manager_factory / set_pipeline_metrics",
-      "location": "components/dispatcher/src/lib.rs",
-      "lines": "360-372",
-      "suggested_spec": "Already specced as FR-057 / SC-016 (2026-08-20). No action."
-    }
-  ],
-  "resolved_since_prior_report": [
-    "User Story 11 queue-depth intra-spec contradiction (fixed 2026-08-20; max_queue_depth = 128 per thread throughout).",
-    "CLAUDE.md stale component-framework path and -v2 crate names (corrected in current tree; also out of sync editing scope).",
-    "DI/test surface now specced as FR-057 / SC-016."
-  ],
-  "out_of_scope_notes": [
-    "Two source comments still say 'gRPC handler' (src/lib.rs ~2983, null-stream comment near copy_gpu_to_memory_async). Source files are outside sync editable scope (.specify/sync/** and specs/** only); flagged for a follow-up source-comment cleanup."
-  ],
+  "unspecced": [],
   "conflicts": []
 }
