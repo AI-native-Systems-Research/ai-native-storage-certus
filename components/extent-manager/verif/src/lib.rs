@@ -20,3 +20,4 @@ pub mod slab_geom;
 pub mod align;
 pub mod shard;
 pub mod bitmap;
+pub mod buddy;
