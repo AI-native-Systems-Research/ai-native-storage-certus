@@ -75,9 +75,10 @@ podman run --rm --network host \
 - GPU free; HF cache for the model + tokenizer (mounted, offline by default).
 - `certus` connector needs the host `certus-server` shmq endpoint already running
   (`serve_vllm.sh` does not start it) and `--ipc=host`.
-- `tiered` needs the offload image built with `--build-arg VLLM_FIX_TIERING=1`
-  (see `../kv-offload-replay/Dockerfile.offload`) so tiering survives at scale, and
-  a writable `FS_ROOT_DIR`.
+- `tiered` needs the offload image (see `../kv-offload-replay/Dockerfile.offload`),
+  which now bakes the tiering fix **by default** so tiering survives at scale, and
+  a writable `FS_ROOT_DIR`. (Opt out with `--build-arg VLLM_FIX_TIERING=0` only to
+  reproduce the stock upstream crash.)
 - Llama-3-8B: `MAX_MODEL_LEN` > 8192 is applied with RoPE linear x4 so agentic
   sessions + compaction (trigger 8500) fit; large-context models skip scaling.
 

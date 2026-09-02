@@ -123,8 +123,8 @@ SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES:-2097152}            # certus per-block slab (
 # ---- images / container plumbing ------------------------------------------
 ENGINE=${ENGINE:-podman}
 # none/cpu/tiered share the unified offload image (built from
-# ../kv-offload-replay/Dockerfile.offload; use --build-arg VLLM_FIX_TIERING=1 so
-# tiering survives at scale). certus needs the shmq connector image.
+# ../kv-offload-replay/Dockerfile.offload, which bakes the tiering fix BY DEFAULT
+# so tiering survives at scale). certus needs the shmq connector image.
 OFFLOAD_IMAGE=${OFFLOAD_IMAGE:-certus-offload-bench}
 SHMQ_IMAGE=${SHMQ_IMAGE:-localhost/certus-shmq-bench:latest}
 SERVER_NAME=${SERVER_NAME:-sa-vllm-${CONNECTOR}}
