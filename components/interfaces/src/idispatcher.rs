@@ -107,7 +107,7 @@ impl Default for DispatcherConfig {
             memory_tier_eviction_batch_size: 64,
             memory_tier_eviction_interval_secs: 2,
             cold_staging_slots: 64,
-            cold_staging_buf_bytes: 8 * 1024 * 1024,
+            cold_staging_buf_bytes: 4 * 1024 * 1024,
         }
     }
 }
