@@ -166,6 +166,74 @@ impl BuddyAllocator {
     }
 }
 
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // Tiny allocator geometry keeps every internal loop bounded and the SAT problem
+    // tractable: sector_size = 1, total = 2 usable blocks => max_order = 1,
+    // free_lists.len() = 2. This exercises the split-on-alloc and merge-on-free paths
+    // with a symbolic request size while staying within Kani's reach.
+    const SECTOR: u32 = 1;
+    const TOTAL: u64 = 2;
+
+    // FR-019: `new` publishes the whole usable range as free space.
+    // Also exercises all arithmetic in the constructor (shifts, subtractions) for overflow.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_new_total_free() {
+        let b = BuddyAllocator::new(0, TOTAL, SECTOR);
+        assert!(b.total_free() == TOTAL);
+        assert!(b.total_usable_size() == TOTAL);
+    }
+
+    // FR-019: any successful allocation returns an offset inside the managed byte range,
+    // at or above base_offset. Symbolic request size over the domain; Kani checks all
+    // internal shift/subtract/add arithmetic for overflow on the real `alloc`.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_alloc_offset_in_range() {
+        let base: u64 = kani::any();
+        kani::assume(base <= 1u64 << 40); // keep base+offset arithmetic in a sane range
+        let mut b = BuddyAllocator::new(base, TOTAL, SECTOR);
+        let size: u64 = kani::any();
+        kani::assume(size >= 1 && size <= TOTAL); // request within allocator capacity
+        if let Some(off) = b.alloc(size) {
+            assert!(off >= base);
+            assert!(off < base + TOTAL);
+        }
+    }
+
+    // FR-019: a successful allocation never increases free space (symbolic request size).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_alloc_shrinks_free() {
+        let mut b = BuddyAllocator::new(0, TOTAL, SECTOR);
+        let size: u64 = kani::any();
+        kani::assume(size >= 1 && size <= TOTAL);
+        let before = b.total_free();
+        if let Some(_off) = b.alloc(size) {
+            assert!(b.total_free() <= before);
+        }
+    }
+
+    // FR-019 / data-structure invariant: allocating a single block then freeing it
+    // restores the total free space (buddy merge round-trip). Concrete request size
+    // (one sector block) keeps the merge search tractable; the offset it frees is still
+    // whatever `alloc` produced, so the real merge path is exercised.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_alloc_free_round_trip_1block() {
+        let mut b = BuddyAllocator::new(0, TOTAL, SECTOR);
+        let before = b.total_free();
+        if let Some(off) = b.alloc(SECTOR as u64) {
+            assert!(b.total_free() < before); // one block consumed
+            b.free(off, SECTOR as u64);
+            assert!(b.total_free() == before); // free restores the original free space
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

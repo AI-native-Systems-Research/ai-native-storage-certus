@@ -63,6 +63,93 @@ impl AllocationBitmap {
     }
 }
 
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // Bounded slot count for the bitmap proofs. `find_free_from` scans 0..num_slots,
+    // so this bounds the loop; 8 slots exercise the sub-word packing (< 64) path.
+    const N: u32 = 8;
+
+    // FR-020: after set(idx) on a free slot, the slot reads as allocated and the
+    // allocated_count is incremented by exactly one. Invariant: is_set agrees with set.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_set_marks_slot() {
+        let mut bm = AllocationBitmap::new(N);
+        let idx: usize = kani::any();
+        kani::assume(idx < N as usize); // production guard: idx < num_slots (debug_assert in set)
+        assert!(!bm.is_set(idx));
+        let before = bm.count_set();
+        bm.set(idx);
+        assert!(bm.is_set(idx));
+        assert!(bm.count_set() == before + 1);
+    }
+
+    // FR-020 / data-structure invariant: set then clear returns the bitmap to the
+    // original state (slot free again, count restored).
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_set_clear_round_trip() {
+        let mut bm = AllocationBitmap::new(N);
+        let idx: usize = kani::any();
+        kani::assume(idx < N as usize);
+        bm.set(idx);
+        assert!(bm.is_set(idx));
+        bm.clear(idx);
+        assert!(!bm.is_set(idx));
+        assert!(bm.is_all_free());
+        assert!(bm.count_set() == 0);
+    }
+
+    // FR-020: distinct set slots do not alias — setting one slot never marks another.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_set_independent() {
+        let mut bm = AllocationBitmap::new(N);
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i < N as usize && j < N as usize && i != j);
+        bm.set(i);
+        assert!(bm.is_set(i));
+        assert!(!bm.is_set(j)); // j was never set; must remain free
+        assert!(bm.count_set() == 1);
+    }
+
+    // FR-020: find_free_from on a fresh (all-free) bitmap returns a valid, in-bounds,
+    // genuinely-free slot for any start index.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_find_free_from_valid() {
+        let bm = AllocationBitmap::new(N);
+        let start: usize = kani::any();
+        kani::assume(start < N as usize);
+        let found = bm.find_free_from(start);
+        match found {
+            Some(idx) => {
+                assert!(idx < N as usize);
+                assert!(!bm.is_set(idx));
+            }
+            None => assert!(false), // an all-free bitmap must always find a slot
+        }
+    }
+
+    // FR-020: a fully-allocated bitmap yields no free slot (find_free_from == None),
+    // and is_full reflects the count.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_find_free_from_full() {
+        let mut bm = AllocationBitmap::new(N);
+        for i in 0..N as usize {
+            bm.set(i);
+        }
+        assert!(bm.count_set() == N as usize);
+        let start: usize = kani::any();
+        kani::assume(start < N as usize);
+        assert!(bm.find_free_from(start).is_none());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

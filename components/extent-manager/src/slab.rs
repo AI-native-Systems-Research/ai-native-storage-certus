@@ -120,6 +120,75 @@ impl SizeClassManager {
     }
 }
 
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // Small slab: 4 slots of 4096 bytes each, based at a non-zero start offset so the
+    // offset arithmetic (start + idx*element_size) is genuinely exercised.
+    const START: u64 = 8192;
+    const ELEM: u32 = 4096;
+    const SLAB_SIZE: u64 = 4096 * 4; // => 4 slots
+    const NSLOTS: usize = 4;
+
+    // FR-011: a freshly created slab has every key slot set to FREE_KEY.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_new_keys_all_free() {
+        let s = Slab::new(START, SLAB_SIZE, ELEM);
+        assert!(s.num_slots() as usize == NSLOTS);
+        let idx: usize = kani::any();
+        kani::assume(idx < NSLOTS);
+        assert!(s.get_key(idx) == FREE_KEY);
+    }
+
+    // FR-005 / FR-012: slot_offset and slot_for_offset are exact inverses over the slot
+    // domain, and slot_offset is sector/element-aligned relative to start. This is the
+    // core of remove_extent(offset) locating the right slot.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_slot_offset_roundtrip() {
+        let s = Slab::new(START, SLAB_SIZE, ELEM);
+        let idx: usize = kani::any();
+        kani::assume(idx < NSLOTS);
+        let off = s.slot_offset(idx);
+        assert!(off == START + idx as u64 * ELEM as u64);
+        assert!(s.contains_offset(off));
+        assert!(s.slot_for_offset(off) == Some(idx));
+    }
+
+    // FR-005: alloc_slot yields an in-bounds slot whose reported offset matches
+    // slot_offset, and the byte offset lies within the slab's disk range.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_alloc_slot_offset_valid() {
+        let mut s = Slab::new(START, SLAB_SIZE, ELEM);
+        if let Some((idx, off)) = s.alloc_slot() {
+            assert!(idx < NSLOTS);
+            assert!(off == s.slot_offset(idx));
+            assert!(off >= START && off < START + SLAB_SIZE);
+        }
+    }
+
+    // FR-006 / FR-011: publishing a key then reading it back is consistent, and
+    // free_slot resets the key to the FREE_KEY sentinel.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_set_key_then_free() {
+        let mut s = Slab::new(START, SLAB_SIZE, ELEM);
+        let (idx, _off) = match s.alloc_slot() {
+            Some(v) => v,
+            None => return,
+        };
+        let key: u64 = kani::any();
+        kani::assume(key != FREE_KEY); // FREE_KEY is the reserved sentinel, never stored as a live key
+        s.set_key(idx, key);
+        assert!(s.get_key(idx) == key);
+        s.free_slot(idx);
+        assert!(s.get_key(idx) == FREE_KEY);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
