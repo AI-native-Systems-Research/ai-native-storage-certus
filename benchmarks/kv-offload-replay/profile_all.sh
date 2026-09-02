@@ -214,13 +214,28 @@ Flags (all optional; defaults shown):
                                LONGDOC_NUM_DOCS / LONGDOC_SEED (defaults 4000/8/1000);
                                NUM_CONVS defaults to LONGDOC_NUM_DOCS. Big docs need a
                                matching --max-model-len.
-  --min-turns <n>              Min human turns for the sharegpt workload; 2 selects the
-                               full corpus (the loader's >=2-turn floor; 1 = legacy
-                               alias), 12 the 450x12 subset. Implies --workload
-                               sharegpt. Forwarded as SHAREGPT_MIN_TURNS. [default 12]
-  --max-turns <n>              Max human turns; must match --min-turns (2 or 12). Implies
-                               --workload sharegpt; empty mirrors --min-turns.
-                               Forwarded as SHAREGPT_MAX_TURNS. [default = --min-turns]
+                               "synthetic-agentic" = the inference-perf agentic
+                               ReplayGraph DAG (tool loops, sub-agent fan-out, context
+                               compaction). It is HTTP-only, so each backend is run in
+                               SERVER mode: one vLLM serve (connector =
+                               --kv-transfer-config arm, via ../synthetic-agentic/
+                               serve_vllm.sh) driven by the inference-perf client
+                               container. Backends map NoOffload/CPUOffload/
+                               Tiered-CPU-FS/Certus-SPDK; SharedStorage is unsupported
+                               (no serve_vllm arm) and SKIPs. The workload is defined by
+                               ../synthetic-agentic/configs/synthetic_agentic.yaml (its
+                               fixed seed = the fairness guarantee; num_sessions there,
+                               NOT --num-convs). Needs the client image (--rebuild builds
+                               it) and MAX_MODEL_LEN>8192 (defaults to 32768 here).
+  --min-turns <n>              sharegpt: min human turns; 2 selects the full corpus (the
+                               loader's >=2-turn floor; 1 = legacy alias), 12 the 450x12
+                               subset; implies --workload sharegpt. synthetic-agentic:
+                               min of the per-session turn range (turns_per_session),
+                               any value. Forwarded as SHAREGPT_MIN_TURNS. [sharegpt 12; SA yaml 3]
+  --max-turns <n>              sharegpt: max human turns, must match --min-turns (2 or 12);
+                               implies --workload sharegpt. synthetic-agentic: max of the
+                               per-session turn range (may differ from --min-turns). Empty
+                               mirrors --min-turns. Forwarded as SHAREGPT_MAX_TURNS. [= --min-turns; SA yaml 8]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -316,7 +331,14 @@ fi
 # in resolve_workload — masked the corpus default, so --min-turns 2 still ran 450
 # convs. An explicit --num-convs (NUM_CONVS non-empty) always wins.
 if [[ -z "$NUM_CONVS" ]]; then
-    if [[ "$WORKLOAD_NAME" == "long-doc-qa" ]]; then
+    if [[ "$WORKLOAD_NAME" == "synthetic-agentic" ]]; then
+        # synthetic-agentic is driven by inference-perf in SERVER mode; its session
+        # count lives in the workload YAML (data.synthetic_agentic.num_sessions) and
+        # is set via SA_NUM_SESSIONS / NUM_SESSIONS, NOT the ShareGPT 450 default. An
+        # explicit --num-convs N is honoured (mapped to SA_NUM_SESSIONS below); when
+        # it is NOT passed, pin a neutral 0 here so nothing inherits the 450.
+        NUM_CONVS=0
+    elif [[ "$WORKLOAD_NAME" == "long-doc-qa" ]]; then
         # Draw the whole generated corpus; the workload's own default is
         # LONGDOC_NUM_DOCS (also 1000), and load_convs caps at NUM_CONVS. Kept as
         # a literal here (not read from the workload) so the sharegpt-shaped
@@ -839,6 +861,14 @@ workload_container_args() {  # -> prints podman args, one per line
 # Common container run for the three self-contained images (default podman store).
 run_container_bench() {  # variant image extra-args...
     local variant="$1" image="$2"; shift 2
+    # synthetic-agentic is HTTP-only (inference-perf), so it can't be driven in
+    # process. Route this leaf to server mode instead; the caller's preflight/build/
+    # reconfigure (which still ran) is exactly what serve mode needs — the offload
+    # image this would have run in process is the same image serve_vllm serves.
+    if [[ "$WORKLOAD_NAME" == "synthetic-agentic" ]]; then
+        run_server_bench "$variant"
+        return
+    fi
     local extra=("$@") f="${LOGDIR}/${variant}.log"
     local wl=(); mapfile -t wl < <(workload_container_args)
     log "starting ${variant} (image ${image})"
@@ -866,6 +896,285 @@ run_container_bench() {  # variant image extra-args...
         "$image" 2>&1 | tee "$f"
     local rc="${PIPESTATUS[0]}"
     finish_variant "$variant" "$rc" "$f"
+}
+
+# ── Server-mode workload runner (--workload synthetic-agentic) ────────────────
+# The synthetic-agentic workload is a ReplayGraph DAG driven by inference-perf, an
+# HTTP-only load generator, so it CANNOT run in-process like the ShareGPT/long-doc
+# drivers. Each backend is instead served as ONE vLLM server (serve_vllm.sh, where
+# the KV backend is just a --kv-transfer-config connector arm) and driven over
+# :${SA_PORT} by the inference-perf client container. Crucially the backend
+# LIFECYCLE is unchanged — the host reconfigure, the Certus-SPDK server, hugepage
+# release, GPU clock pinning and the results schema are all reused; only this leaf
+# swaps the in-process driver for serve+client. Records a row in the SAME schema
+# as finish_variant so the table/skill render it unchanged.
+SA_DIR="${REPO_ROOT}/benchmarks/synthetic-agentic"
+SA_SERVE="${SA_DIR}/serve_vllm.sh"
+SA_CLIENT_IMG="${SA_CLIENT_IMG:-synthetic-agentic-client:latest}"
+SA_PORT="${SA_PORT:-8000}"
+# Poll the served vLLM's /metrics on this cadence during the client run so the SA
+# arm captures the SAME vLLM Prometheus offload counters the in-process drivers
+# emit (prefix-cache queries/hits, external/offload-tier queries/hits, kv_offload
+# store/load bytes). The scraper writes render_kvprofile's `[prom] round N: k=v`
+# lines (values are per-interval deltas), which get folded into the variant log so
+# tools/render_kvprofile.py renders an SA run with no changes. Counters live on the
+# SERVER (they belong to the connector, not the HTTP client), hence the scrape.
+SA_PROM="${SA_DIR}/scrape_prom.py"
+SA_PROM_INTERVAL="${SA_PROM_INTERVAL:-10}"
+# Companion host sampler for the Tiered-CPU-FS arm: vLLM's /metrics carries the
+# connector's LOGICAL byte movement but not physical device I/O, so ssd_read_bytes/
+# ssd_write_bytes stay empty. This diffs /proc/diskstats for the FS-tier device and
+# emits those two keys as [prom] lines (same interval, folded into the variant log).
+# FS-tier only — the certus arm's SPDK device bypasses the kernel block layer and is
+# invisible to diskstats (SA_CERTUS_IOSTAT below covers it via GetIoStats instead).
+SA_DISK="${SA_DIR}/sample_diskstats.py"
+# Same idea for the Certus-SPDK arm: its SPDK NVMe extent tier is invisible to
+# /proc/diskstats, so ssd_read_bytes/ssd_write_bytes would stay empty for Certus too.
+# This poller reads the certus-server's own GetIoStats shmq op (device read/write
+# bytes) off the mailbox at $SHM_PATH and emits the same two [prom] keys, folded into
+# the variant log exactly like the FS-tier disk sidecar.
+SA_CERTUS_IOSTAT="${SA_DIR}/sample_certus_iostat.py"
+# synthetic-agentic sessions run long and compact mid-session above 8500 tokens, so
+# the 8192 in-process default is too small here (peak pre-compaction context is
+# ~8500 + one input turn ~= 11K). But max_model_len also sets a HARD GPU-KV floor:
+# vLLM's engine core refuses to start unless GPU KV cache can hold ONE request of
+# max_model_len (32768 -> 4.0 GiB for Llama-3-8B). On a constrained-KV offload run
+# (e.g. 24 GiB A30 @ 0.75 util: ~1.65 GiB KV after 15 GiB weights) 32768 exceeds
+# that floor and crashes init ("estimated maximum model length is 13504"). So the
+# default must clear the ~11K workload peak yet fit the floor: 12288 needs ~1.5 GiB
+# KV and exceeds the 8500 compaction trigger with headroom. Bigger GPU / higher util
+# can go larger via --max-model-len (or SA_MAX_MODEL_LEN); serve_vllm applies
+# Llama-3 RoPE x4 so any value up to 32768 is representable.
+SA_MAX_MODEL_LEN="${SA_MAX_MODEL_LEN:-12288}"
+[[ "$MAX_MODEL_LEN" -gt "$SA_MAX_MODEL_LEN" ]] && SA_MAX_MODEL_LEN="$MAX_MODEL_LEN"
+
+# synthetic-agentic is a chat + tool-calling workload, so its server needs a model
+# with a chat template AND tool support. The suite's default base
+# NousResearch/Meta-Llama-3-8B has neither (vLLM 400s on the chat template and on
+# forced tool_choice), so this arm defaults to the -Instruct variant. It shares
+# the base tokenizer/vocab, so the deterministic replay DAG (sized by token count)
+# is unchanged; only the served model differs. An explicit --model wins; force the
+# base model here with SA_MODEL=NousResearch/Meta-Llama-3-8B if you really want it.
+SA_MODEL="${SA_MODEL:-$MODEL}"
+[[ "$SA_MODEL" == "NousResearch/Meta-Llama-3-8B" ]] && SA_MODEL="NousResearch/Meta-Llama-3-8B-Instruct"
+
+# How many sessions the inference-perf client generates + replays (the workload's
+# "how many" knob; renders data.synthetic_agentic.num_sessions). Precedence:
+# SA_NUM_SESSIONS wins; else an explicit --num-convs N (NUM_CONVS>0) maps to it so
+# the documented "how many" flag Just Works here too; else the config default 200.
+# A short run replays sessions 0..N-1 = a byte-identical prefix of the full run
+# (determinism is per (seed, session_index)); good for a smoke, but too small an N
+# may not overflow GPU KV, leaving the offload tier cold — keep it large to compare
+# backends fairly.
+SA_NUM_SESSIONS="${SA_NUM_SESSIONS:-}"
+if [[ -z "$SA_NUM_SESSIONS" ]]; then
+    if [[ "${NUM_CONVS:-0}" -gt 0 ]]; then SA_NUM_SESSIONS="$NUM_CONVS"; else SA_NUM_SESSIONS=200; fi
+fi
+
+# synthetic-agentic reuses --min-turns/--max-turns as the PER-SESSION turn range.
+# SA's turns_per_session is a uniform(min,max), so the two flags map straight onto
+# it — and, unlike the ShareGPT corpus selectors, they may legitimately differ. Axis
+# split: --num-convs = how many sessions, --min/--max-turns = how long each one is.
+# Unset => the yaml default uniform(3,8); max mirrors min when only --min-turns is
+# given (matches the ShareGPT mirroring). The 12/12|2/2 constraint is sharegpt-only
+# (guarded above), so SA accepts any min<=max.
+SA_TURNS_MIN="${SHAREGPT_MIN_TURNS:-3}"
+SA_TURNS_MAX="${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-8}}"
+
+# Map a profile_all variant -> serve_vllm CONNECTOR arm (empty = unsupported).
+sa_connector_for() {
+    case "$1" in
+        NoOffload)     echo none ;;
+        CPUOffload)    echo cpu ;;
+        Tiered-CPU-FS) echo tiered ;;
+        Certus-SPDK)   echo certus ;;
+        *)             echo "" ;;
+    esac
+}
+
+# Build the serve_vllm.sh env for a connector. certus reuses the already-running
+# host Certus-SPDK server (its /dev/shm mailbox) and the shmq image, which lives in
+# the custom podman store — so it needs ENGINE pointed there (unquoted word-split).
+sa_serve_env() {  # connector -> prints NAME=VALUE lines
+    local connector="$1"
+    printf '%s\n' \
+        "CONNECTOR=${connector}" \
+        "MODEL=${SA_MODEL}" \
+        "PORT=${SA_PORT}" \
+        "GPU=${GPU}" \
+        "MAX_MODEL_LEN=${SA_MAX_MODEL_LEN}" \
+        "MAX_NUM_SEQS=${MAX_NUM_SEQS}" \
+        "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
+        "ENFORCE_EAGER=${ENFORCE_EAGER}" \
+        "CPU_BYTES=${CPU_BYTES}" \
+        "HF_CACHE=${HF_CACHE}" \
+        "OFFLOAD_IMAGE=${IMG_CPU}" \
+        "SERVER_NAME=sa-vllm-${connector}" \
+        "DETACH=1"
+    case "$connector" in
+        tiered)
+            # Same fs-tier layout as the in-process Tiered-CPU-FS leaf: RAID0/XFS at
+            # $SHARED_FS, tier root at /mnt/fs-tier/kv-tier inside the container.
+            printf '%s\n' \
+                "FS_TIER_HOST=${SHARED_FS}" \
+                "FS_TIER_MOUNT=/mnt/fs-tier" \
+                "FS_ROOT_DIR=/mnt/fs-tier/kv-tier"
+            ;;
+        certus)
+            printf '%s\n' \
+                "SHM_PATH=${SHM_PATH}" \
+                "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
+                "SHMQ_IMAGE=${IMG_SHMQ}" \
+                "ENGINE=podman --root ${PODMAN_STORE} --runroot ${PODMAN_RUNROOT}"
+            ;;
+    esac
+}
+
+run_server_bench() {  # variant
+    local variant="$1"
+    local connector; connector="$(sa_connector_for "$variant")"
+    local f="${LOGDIR}/${variant}.log"
+    if [[ -z "$connector" ]]; then
+        record "$variant" "SKIPPED" "" "" "" "" "" "synthetic-agentic has no serve_vllm connector arm for ${variant} (supported: NoOffload/CPUOffload/Tiered-CPU-FS/Certus-SPDK)" ""
+        warn "${variant} SKIPPED (synthetic-agentic): no serve_vllm connector arm"
+        return 0
+    fi
+    # The inference-perf client image (HTTP load generator, default store).
+    if ! img_exists "$SA_CLIENT_IMG"; then
+        if [[ "$DO_REBUILD" -eq 1 ]]; then
+            log "building ${SA_CLIENT_IMG} (inference-perf client) — see build-inference-perf.log"
+            if ! command podman build "${BUILD_ARGS[@]}" \
+                    -f "${SA_DIR}/Dockerfile.inference-perf" -t "$SA_CLIENT_IMG" "$SA_DIR" \
+                    > "${LOGDIR}/build-inference-perf.log" 2>&1; then
+                record "$variant" "SKIPPED" "" "" "" "" "" "inference-perf client image build failed (see build-inference-perf.log)" ""
+                warn "${variant} SKIPPED (synthetic-agentic): client image build failed"
+                return 0
+            fi
+        else
+            record "$variant" "SKIPPED" "" "" "" "" "" "client image ${SA_CLIENT_IMG} missing (pass --rebuild to build it, or build ${SA_DIR}/Dockerfile.inference-perf)" ""
+            warn "${variant} SKIPPED (synthetic-agentic): client image missing"
+            return 0
+        fi
+    fi
+
+    local -a env_lines=(); mapfile -t env_lines < <(sa_serve_env "$connector")
+    gpu_mark start "$variant"
+    log "${variant} (synthetic-agentic): serving vLLM (connector=${connector}) on :${SA_PORT}"
+    # Bring the server up detached; on failure record SKIPPED and bail (leave no
+    # orphan — stop is idempotent).
+    if ! env "${env_lines[@]}" bash "$SA_SERVE" up > "${LOGDIR}/serve-${connector}.log" 2>&1; then
+        env "${env_lines[@]}" bash "$SA_SERVE" stop >/dev/null 2>&1 || true
+        gpu_mark end "$variant"
+        record "$variant" "SKIPPED" "" "" "" "" "" "vLLM server (connector=${connector}) failed to become ready (see serve-${connector}.log)" "${LOGDIR}/serve-${connector}.log"
+        warn "${variant} SKIPPED (synthetic-agentic): server not ready"
+        return 0
+    fi
+
+    # Scrape the server's vLLM /metrics for the whole client run so the SA arm
+    # records the same offload counters the in-process drivers do. It writes
+    # `[prom] round N: k=delta` lines to a sidecar; we fold that into $f afterwards
+    # (below) so render_kvprofile — which parses the variant log — needs no change.
+    # Runs on the HOST against localhost:${SA_PORT} (the server is --network host).
+    local prom_sidecar="${LOGDIR}/${variant}.prom.log"
+    local prom_pid=""
+    if [[ -f "$SA_PROM" ]] && command -v python3 >/dev/null 2>&1; then
+        : > "$prom_sidecar"
+        python3 "$SA_PROM" \
+            --url "http://localhost:${SA_PORT}/metrics" \
+            --interval "$SA_PROM_INTERVAL" \
+            --out "$prom_sidecar" >> "${LOGDIR}/scrape-${connector}.log" 2>&1 &
+        prom_pid="$!"
+    else
+        warn "${variant} (synthetic-agentic): no ${SA_PROM} or python3 — /metrics NOT scraped (render_kvprofile will have no counters)"
+    fi
+
+    # Physical device I/O (not on vLLM /metrics — see SA_DISK / SA_CERTUS_IOSTAT).
+    # Both samplers emit the same ssd_read_bytes/ssd_write_bytes [prom] lines, folded
+    # into $f alongside the /metrics rounds; only the source differs per connector:
+    #   tiered → diff /proc/diskstats for the device backing $SHARED_FS
+    #   certus → certus-server GetIoStats over the shmq mailbox at $SHM_PATH
+    #            (the SPDK NVMe extent tier is invisible to /proc/diskstats)
+    local disk_sidecar="${LOGDIR}/${variant}.disk.log"
+    local disk_pid=""
+    if [[ "$connector" == "tiered" && -f "$SA_DISK" ]] && command -v python3 >/dev/null 2>&1; then
+        : > "$disk_sidecar"
+        python3 "$SA_DISK" \
+            --mount "$SHARED_FS" \
+            --interval "$SA_PROM_INTERVAL" \
+            --out "$disk_sidecar" >> "${LOGDIR}/iostat-${connector}.log" 2>&1 &
+        disk_pid="$!"
+    elif [[ "$connector" == "certus" && -f "$SA_CERTUS_IOSTAT" ]] && command -v python3 >/dev/null 2>&1; then
+        : > "$disk_sidecar"
+        python3 "$SA_CERTUS_IOSTAT" \
+            --shm-path "$SHM_PATH" \
+            --interval "$SA_PROM_INTERVAL" \
+            --out "$disk_sidecar" >> "${LOGDIR}/iostat-${connector}.log" 2>&1 &
+        disk_pid="$!"
+    fi
+
+    log "${variant} (synthetic-agentic): driving load with inference-perf -> ${f}"
+    local start="$SECONDS"
+    # --pids-limit=0 (unlimited): the load generator forks one worker process per
+    # host CPU and each worker's HF-tokenizers pool wants ncpu threads; the default
+    # 2048 pids ceiling is hit on many-core boxes and workers die with a rayon
+    # ThreadPoolBuildError (EAGAIN). The client image also pins RAYON_NUM_THREADS=1
+    # to cut the demand; this lifts the ceiling as a belt-and-suspenders safety net.
+    command podman run --rm --network host \
+        --pids-limit=0 \
+        -e "BASE_URL=http://localhost:${SA_PORT}" \
+        -e "MODEL=${SA_MODEL}" \
+        -e "NUM_SESSIONS=${SA_NUM_SESSIONS}" \
+        -e "SA_TURNS_MIN=${SA_TURNS_MIN}" \
+        -e "SA_TURNS_MAX=${SA_TURNS_MAX}" \
+        -v "${HF_CACHE}:/root/.cache/huggingface:z" \
+        -v "${LOGDIR}:/results:z" \
+        "$SA_CLIENT_IMG" run 2>&1 | tee "$f"
+    local rc="${PIPESTATUS[0]}"
+    local wall=$((SECONDS - start))
+
+    # Stop the scraper BEFORE server teardown so its final /metrics sample (taken on
+    # SIGTERM) still hits a live server, then fold the counter lines into $f.
+    if [[ -n "$prom_pid" ]]; then
+        kill -TERM "$prom_pid" 2>/dev/null || true
+        wait "$prom_pid" 2>/dev/null || true
+        if [[ -s "$prom_sidecar" ]]; then
+            cat "$prom_sidecar" >> "$f"
+            log "${variant} (synthetic-agentic): folded $(grep -c '^\[prom\]' "$prom_sidecar" 2>/dev/null || echo 0) /metrics rounds into $(basename "$f")"
+        else
+            warn "${variant} (synthetic-agentic): /metrics scrape produced no rounds (see scrape-${connector}.log)"
+        fi
+    fi
+    # Fold the device-I/O sampler (ssd_read_bytes/ssd_write_bytes) the same way —
+    # diskstats for tiered, GetIoStats for certus (see the launch branch above).
+    if [[ -n "$disk_pid" ]]; then
+        kill -TERM "$disk_pid" 2>/dev/null || true
+        wait "$disk_pid" 2>/dev/null || true
+        if [[ -s "$disk_sidecar" ]]; then
+            cat "$disk_sidecar" >> "$f"
+            log "${variant} (synthetic-agentic): folded $(grep -c '^\[prom\]' "$disk_sidecar" 2>/dev/null || echo 0) device-I/O rounds into $(basename "$f")"
+        else
+            warn "${variant} (synthetic-agentic): device-I/O sampler produced no rounds (see iostat-${connector}.log)"
+        fi
+    fi
+
+    env "${env_lines[@]}" bash "$SA_SERVE" stop >/dev/null 2>&1 || true
+    gpu_mark end "$variant"
+
+    # inference-perf writes its own report to the mounted logdir (the primary,
+    # richest comparable: throughput, TTFT, per-request latency). Best-effort scrape
+    # a single throughput number for the summary row; the report file is the truth.
+    local native
+    native="$(grep -oiE '(output[ _]?token|token)[^0-9]*throughput[^0-9]*[0-9.]+' "$f" 2>/dev/null | grep -oE '[0-9.]+' | tail -1)"
+    [[ -z "$native" ]] && native="$(grep -oiE 'throughput[^0-9]*[0-9.]+' "$f" 2>/dev/null | grep -oE '[0-9.]+' | tail -1)"
+    if [[ "$rc" -eq 0 ]]; then
+        # generations/tokens_per_sec aren't a clean fit for a session-graph workload;
+        # keep wall (measured here) + inference-perf's throughput as native_metric.
+        record "$variant" "OK" "$wall" "" "" "" "$native" "" "$f"
+        log "${variant} OK (synthetic-agentic): wall=${wall}s throughput=${native:-n/a} (see inference-perf report in ${LOGDIR})"
+    else
+        record "$variant" "FAILED" "$wall" "" "" "" "$native" "inference-perf exit=$rc (see $(basename "$f"))" "$f"
+        warn "${variant} FAILED (synthetic-agentic, exit=$rc); see $f"
+    fi
 }
 
 # ══ NoOffload ═════════════════════════════════════════════════════════════════
@@ -990,6 +1299,13 @@ if want certus-spdk; then
         if [[ "$up" -ne 1 ]]; then
             record "Certus-SPDK" "SKIPPED" "" "" "" "" "" "server mailbox ${SHM_PATH} did not appear within ${SERVER_WAIT}s (see server.log)" "${LOGDIR}/server.log"
             warn "Certus-SPDK SKIPPED: server did not come up"
+            stop_server
+        elif [[ "$WORKLOAD_NAME" == "synthetic-agentic" ]]; then
+            # Server mode: the host Certus-SPDK server is up and owns the mailbox;
+            # attach a vLLM serve (CertusShmqOffloadingSpec via --ipc=host) and drive
+            # it with inference-perf instead of the in-process shmq client.
+            log "server serving, mailbox ${SHM_PATH} — synthetic-agentic via vLLM serve + inference-perf"
+            run_server_bench "Certus-SPDK"
             stop_server
         else
             log "server serving, mailbox ${SHM_PATH} — launching shmq client"
@@ -1189,7 +1505,10 @@ json="${LOGDIR}/results.json"
 {
     echo "{"
     echo "  \"vllm_version\": $([[ -n "$VLLM_VERSION" ]] && echo "\"${VLLM_VERSION}\"" || echo null),"
-    echo "  \"model\": \"${MODEL}\","
+    # Record the model actually SERVED. The synthetic-agentic arm serves the
+    # -Instruct variant (SA_MODEL) rather than the base --model, so the slide
+    # subtitle must name that, not ${MODEL}.
+    echo "  \"model\": \"$([[ "$WORKLOAD_NAME" == "synthetic-agentic" ]] && echo "${SA_MODEL}" || echo "${MODEL}")\","
     echo "  \"num_convs\": ${NUM_CONVS},"
     echo "  \"max_rounds\": ${MAX_ROUNDS},"
     echo "  \"output_tokens\": ${OUTPUT_TOKENS},"
@@ -1209,7 +1528,7 @@ json="${LOGDIR}/results.json"
 # ── Human table ───────────────────────────────────────────────────────────────
 echo ""
 echo "=============================== KV-Offload Profile ==============================="
-echo "model=${MODEL}  num_convs=${NUM_CONVS}  output_tokens=${OUTPUT_TOKENS}${VLLM_VERSION:+  vllm=${VLLM_VERSION}}"
+echo "model=$([[ "$WORKLOAD_NAME" == "synthetic-agentic" ]] && echo "${SA_MODEL}" || echo "${MODEL}")  num_convs=${NUM_CONVS}  output_tokens=${OUTPUT_TOKENS}${VLLM_VERSION:+  vllm=${VLLM_VERSION}}"
 echo "logdir=${LOGDIR}"
 echo ""
 printf "%-15s %-10s %10s %7s %8s %10s\n" "Variant" "Status" "wall(s)" "rounds" "gens" "tokens/s"
