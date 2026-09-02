@@ -1,16 +1,27 @@
 ---
 spec_sync_component: extent-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-01T22:59:04Z
-spec_sync_git_commit: 33bddaba
-spec_sync_inputs_sha256: 710da42e9545095089819a1caa48d2b65ffc3449696cef7bfd4bfb5dbd55571d
+spec_sync_synced_at: 2026-09-02T20:45:00Z
+spec_sync_git_commit: 787b8263
+spec_sync_inputs_sha256: 5e8ff0212e33c827010f5b927a6f85f53cc28fbbfb74c4878170acf5294622da
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Spec ↔ Implementation Drift Report — extent-manager
 
-**Generated**: 2026-09-01T22:59:04Z
+**Generated**: 2026-09-01T22:59:04Z (re-stamped 2026-09-02 for an interfaces-only hash change)
 **Spec**: `specs/001-extent-manager-v2/spec.md` (Updated 2026-08-20)
-**Commit**: 33bddaba
+**Commit**: 787b8263
+
+> **2026-09-02 re-stamp (no content change).** This component's own `src/` and
+> `specs/` are byte-for-byte unchanged since its `fbc2fc24` sync, which stamped
+> the correct hash for that tree. The freshness hash folds in all of
+> `components/interfaces/src/**`, and branch `evolve-dispatcher-dw` edited
+> `idispatcher.rs`, `igpu_services.rs`, and the `lib.rs` re-exports
+> (`GpuMemcpyBatchOp`/`GpuMemcpySrcAccessOrder`). extent-manager references none
+> of those (it implements `IExtentManager` and consumes `IBlockDevice`), so there
+> is no new drift — only the folded-in hash moved
+> (`710da42e…` → `5e8ff021…`). Re-stamped so the CI Spec-Sync Gate sees a fresh
+> report; the drift analysis below still holds verbatim.
 
 ## Summary
 

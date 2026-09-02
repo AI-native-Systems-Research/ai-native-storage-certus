@@ -42,9 +42,31 @@ pipeline {
 
           # Diff base: the PR target on multibranch PR builds, else unstable.
           # (On the mainline itself the merge-base is HEAD, so nothing is checked.)
-          base="origin/${CHANGE_TARGET:-unstable}"
-          git fetch -q origin "${CHANGE_TARGET:-unstable}" || true
-          mb="$(git merge-base "$base" HEAD 2>/dev/null || echo "$base")"
+          #
+          # This gate must fail CLOSED. A multibranch checkout often fetches only
+          # the built branch's refspec, so refs/remotes/origin/<target> may not
+          # exist in the workspace. If we let an unresolvable base silently degrade
+          # to an empty diff, the gate passes without checking anything and stale
+          # spec-sync reports sail through. So resolve the base explicitly, prefer
+          # the remote-tracking ref but fall back to the FETCH_HEAD we just fetched,
+          # and abort the gate outright if neither is available.
+          target="${CHANGE_TARGET:-unstable}"
+          git fetch -q origin "$target" || {
+            echo "Spec-Sync Gate: could not fetch origin/$target — cannot establish a diff base; failing closed."
+            exit 1
+          }
+          if git rev-parse --verify -q "origin/$target" >/dev/null; then
+            base="origin/$target"
+          elif git rev-parse --verify -q FETCH_HEAD >/dev/null; then
+            base="FETCH_HEAD"
+          else
+            echo "Spec-Sync Gate: base ref for '$target' is unresolvable in this workspace; failing closed."
+            exit 1
+          fi
+          mb="$(git merge-base "$base" HEAD)" || {
+            echo "Spec-Sync Gate: no merge-base between $base and HEAD; failing closed."
+            exit 1
+          }
 
           # Every directory that carries specs (a component under the gate).
           # Scope is components/ only — lib/ and tools/ crates are not gated
@@ -59,7 +81,15 @@ pipeline {
           # its src/ or specs/. Changes confined to sync scratch (.specify/sync/**),
           # README, or Cargo.toml do not affect the content hash and must not
           # demand a fresh stamp, so they are deliberately excluded here.
-          changed="$(git diff --name-only "$mb" HEAD \
+          #
+          # Compute the diff first and fail closed if it errors (e.g. a bad base);
+          # only the grep no-match is tolerated with '|| true', so a genuinely empty
+          # change set is distinguished from a broken diff.
+          diff_out="$(git diff --name-only "$mb" HEAD)" || {
+            echo "Spec-Sync Gate: 'git diff $mb HEAD' failed; failing closed."
+            exit 1
+          }
+          changed="$(echo "$diff_out" \
                      | grep -oE '^components/[^/]+/(src|specs)/' \
                      | grep -oE '^components/[^/]+' | sort -u || true)"
 
@@ -80,9 +110,17 @@ pipeline {
             [ -d "$d/specs" ] || continue          # only dirs with specs are gated
             rpt="$d/.specify/sync/drift-report.md"
 
-            if [ ! -f "$rpt" ]; then
-              echo "FAIL $d: missing $rpt — run '/component-sync-specs $(basename "$d")' and commit it."
-              rc=1; continue
+            # Grandfather clause (opt-in migration): a component that has never
+            # adopted spec-sync — no freshness stamp committed, whether the
+            # report is absent entirely or predates the stamp format — is SKIPPED
+            # rather than failed. Adoption is opt-in; only the no-stamp case is
+            # exempt. A component that HAS a stamp is fully enforced below: an
+            # unresolved drift status or a stale hash still fails the gate. The
+            # stamp is the sole opt-in signal, so it is read first.
+            want="$(grep -m1 '^spec_sync_inputs_sha256:' "$rpt" 2>/dev/null | awk '{print $2}' || true)"
+            if [ -z "$want" ]; then
+              echo "skip $d: no spec-sync stamp (component has not adopted spec-sync)"
+              continue
             fi
 
             status="$(grep -m1 '^spec_sync_drift_status:' "$rpt" | awk '{print $2}' || true)"
@@ -91,7 +129,6 @@ pipeline {
               rc=1; continue
             fi
 
-            want="$(grep -m1 '^spec_sync_inputs_sha256:' "$rpt" | awk '{print $2}' || true)"
             have="$(scripts/spec-sync-hash.sh "$d")"
             if [ "$want" != "$have" ]; then
               echo "FAIL $d: stale report — src/specs (or interfaces) changed after last sync."

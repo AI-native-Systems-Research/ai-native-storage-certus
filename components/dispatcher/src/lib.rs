@@ -330,17 +330,18 @@ unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
 /// different device than the stream. Under tensor parallelism the server DMAs
 /// to more than one GPU, so a single shared stream fails ("invalid argument")
 /// for every transfer whose peer GPU isn't the stream's device. We therefore
-/// keep per-direction warm streams and a pair of pipeline streams per device.
+/// keep one warm stream and one pair of pipeline streams per device.
 ///
 /// Process-global by design: there is a single dispatcher instance serving all
 /// local GPUs, and CUDA streams are process-wide resources. Entries are created
 /// lazily on first use for each device and live until the process exits.
 pub(crate) struct DeviceStreams {
-    /// Warm-path stream for memory-tier → GPU (H2D) async load copies.
-    pub(crate) warm_load: u64,
-    /// Warm-path stream for GPU → memory-tier (D2H) async store copies.
-    /// Separate from warm_load so H2D and D2H DMA can overlap on the PCIe bus.
-    pub(crate) warm_store: u64,
+    /// Warm-path stream for memory-tier -> GPU (H2D) async copies (load path).
+    warm: u64,
+    /// Dedicated stream for GPU -> memory-tier (D2H) async copies (store path).
+    /// Separating D2H from H2D allows the GPU's two copy engines to run
+    /// concurrently, enabling PCIe full-duplex under bidirectional load.
+    store: u64,
     /// Dual streams for the pipelined SSD -> GPU cold path.
     pub(crate) pipe: [u64; 2],
 }
@@ -361,25 +362,25 @@ pub(crate) fn device_streams_for(gpu: &dyn IGpuServices, device: i32) -> Option<
     let mut guard = map.lock().unwrap();
     if let Some(s) = guard.get(&device) {
         return Some(DeviceStreams {
-            warm_load: s.warm_load,
-            warm_store: s.warm_store,
+            warm: s.warm,
+            store: s.store,
             pipe: s.pipe,
         });
     }
     // Create all streams on the target device (streams inherit the current device).
     gpu.set_device(device).ok()?;
-    let warm_load = gpu.create_stream().ok()?;
-    let warm_store = gpu.create_stream().ok()?;
+    let warm = gpu.create_stream().ok()?;
+    let store_s = gpu.create_stream().ok()?;
     let pipe_a = gpu.create_stream().ok()?;
     let pipe_b = gpu.create_stream().ok()?;
     let entry = DeviceStreams {
-        warm_load: warm_load.0 as u64,
-        warm_store: warm_store.0 as u64,
+        warm: warm.0 as u64,
+        store: store_s.0 as u64,
         pipe: [pipe_a.0 as u64, pipe_b.0 as u64],
     };
     let ret = DeviceStreams {
-        warm_load: entry.warm_load,
-        warm_store: entry.warm_store,
+        warm: entry.warm,
+        store: entry.store,
         pipe: entry.pipe,
     };
     guard.insert(device, entry);
@@ -739,19 +740,33 @@ impl DispatcherComponent {
                 ring_ref.streams
             }
         };
-        unsafe {
-            pipeline::pipelined_ssd_to_gpu_zero_copy(
-                &*block_dev,
-                &**gpu,
-                &streams,
-                lease.channels(),
+        // Use pipelined_multi_object_zero_copy with a single job — this is the
+        // same pipeline the cold-pool worker uses, with coalesced H2D (one
+        // memcpy_h2d_async per object after all NVMe reads complete) and no
+        // per-segment DmaBuffer mutex overhead. Empirically matches the cold
+        // pool path's p50 performance.
+        {
+            let job = pipeline::ColdReadJob {
                 mem_ptr,
-                ipc_handle.address as *mut std::ffi::c_void,
+                gpu_dst: ipc_handle.address as *mut std::ffi::c_void,
                 start_lba,
                 total_bytes,
-                chunk_size,
-                16,
-            )?;
+            };
+            let results = unsafe {
+                pipeline::pipelined_multi_object_zero_copy(
+                    &*block_dev,
+                    &**gpu,
+                    &streams,
+                    lease.channels(),
+                    &[job],
+                    chunk_size,
+                    128,
+                    None,
+                )
+            };
+            if let Some(Err(e)) = results.into_iter().next() {
+                return Err(e);
+            }
         }
         drop(lease);
         drop(drives);
@@ -882,7 +897,7 @@ impl DispatcherComponent {
         // the copies complete while lease.ptr() is still valid.
         let res = res.and_then(|()| {
             if regions.len() > 1 {
-                let warm_raw = dev_streams.as_ref().map_or(0, |s| s.warm_load);
+                let warm_raw = dev_streams.as_ref().map_or(0, |s| s.warm);
                 self.serve_memory_tier_to_gpu(
                     gpu,
                     lease.ptr() as *mut u8,
@@ -931,17 +946,23 @@ impl DispatcherComponent {
                 self.tier_counters.record_eviction_from_memory();
                 return true;
             }
-            // Fallback: write-through incomplete so it can't be demoted. Drop it
-            // entirely — but only if unpinned. `dm.remove` returns an error for
-            // pinned entries, so a success means no in-flight load points at it;
-            // only then is it safe to free the DRAM slot.
-            if dm.remove(cand).is_ok() {
-                let _ = mt.remove(cand);
-                self.emit_eviction(cand, EvictionReason::Removed);
-                self.tier_counters.record_eviction_from_memory();
-                return true;
-            }
-            // Pinned by an in-flight load — leave it and try the next candidate.
+            // Write-through incomplete (no ssd_offset) so it can't be demoted.
+            // Do NOT full-remove it: `dm.remove` returns NotExist for the key,
+            // which is UNRECOVERABLE. Under the Check→Pin race a connector may
+            // have already Checked this key resident and be about to load it; a
+            // just-Checked-but-not-yet-Pinned entry has read_ref==0, so dm.remove
+            // would succeed and silently drop it → the subsequent load misses →
+            // forwarded to remote-lookup → fatal IoError in the vLLM connector
+            // (assert transfer_result.success → EngineDeadError). Demotion is
+            // safe because it leaves the key resolvable (BlockDevice), but a full
+            // remove is not. So skip this candidate and try the next one; the
+            // widening scan in `evict_for_space` will reach a persisted (thus
+            // demotable) entry. If the whole tier is unpersisted we return false
+            // → AllocationFailed → the caller serves uncached (staging on load,
+            // dropped-from-store-set on save), never a fatal miss. The entry
+            // becomes demotable as soon as its write-through lands.
+            //
+            // Pinned by an in-flight load — also skip and try the next candidate.
         }
         false
     }
@@ -1033,7 +1054,7 @@ impl DispatcherComponent {
                             "memory-tier pool full (fragmentation after eviction)".into(),
                         ));
                     }
-                    // Force-evict one more pin-safe victim to relieve shard
+                    // Force-evict one more pin-safe victim to relieve
                     // fragmentation. If nothing is evictable (all pinned or
                     // unpersisted), fail rather than blind-free a slot an
                     // in-flight load still points at.
@@ -1109,26 +1130,25 @@ impl DispatcherComponent {
         let raw = warm_raw;
         if raw != 0 {
             let s = GpuStream(raw as *mut std::ffi::c_void);
-            let mut ops: Vec<interfaces::GpuMemcpyBatchOp> = Vec::with_capacity(regions.len());
             let mut off: usize = 0;
             for region in regions {
                 let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
                 if copy_size == 0 {
                     break;
                 }
-                ops.push(interfaces::GpuMemcpyBatchOp {
-                    src: (pointer as usize + off) as *const std::ffi::c_void,
-                    dst: region.address as *mut std::ffi::c_void,
-                    size: copy_size,
-                    src_access_order: interfaces::GpuMemcpySrcAccessOrder::Any,
-                });
+                gpu.memcpy_h2d_async(
+                    (pointer as usize + off) as *const std::ffi::c_void,
+                    region.address as *mut std::ffi::c_void,
+                    copy_size,
+                    s,
+                )
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "GPU DMA copy (memory-tier→device) failed: {e}"
+                    ))
+                })?;
                 off += region.size as usize;
             }
-            gpu.memcpy_batch_async(&ops, s).map_err(|e| {
-                DispatcherError::IoError(format!(
-                    "GPU batch DMA copy (memory-tier→device) failed: {e}"
-                ))
-            })?;
             if synchronize {
                 gpu.stream_synchronize(s).map_err(|e| {
                     DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
@@ -1871,7 +1891,7 @@ impl IDispatcher for DispatcherComponent {
                 dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
             };
             if !pool_drives.is_empty() {
-                const COLD_POOL_QUEUES_PER_DRIVE: usize = 2;
+                const COLD_POOL_QUEUES_PER_DRIVE: usize = 1;
                 match cold_pool::ColdReadPool::new(&pool_drives, &gpu, COLD_POOL_QUEUES_PER_DRIVE) {
                     Ok(pool) => {
                         self.log_info(&format!(
@@ -2130,7 +2150,7 @@ impl IDispatcher for DispatcherComponent {
             .find(|a| !a.is_null())
             .map_or(-1, |addr| set_batch_device(&*gpu, addr));
         let dev_streams = device_streams_for(&*gpu, batch_device);
-        let warm_raw = dev_streams.as_ref().map_or(0, |s| s.warm_load);
+        let warm_raw = dev_streams.as_ref().map_or(0, |s| s.warm);
 
         // Classify entries and handle fast paths inline.
         struct ColdEntry {
@@ -2161,7 +2181,37 @@ impl IDispatcher for DispatcherComponent {
             let key = *key;
             // Σ of the per-region sizes = the reserved slot's byte length.
             let total_size: u32 = regions.iter().map(|r| r.size).sum();
-            match dm.lookup(key) {
+
+            // A `dm.lookup` that returns Err means *timeout* waiting for a
+            // transient write_ref (a concurrent store-commit / promote) to
+            // clear, NOT a missing key: dispatch-map entries survive demotion
+            // (in-place flip to BlockDevice) and are removed only by the
+            // ssd-evictor / explicit remove. Collapsing that Err into
+            // `KeyNotFound` would forward a live key to remote-lookup, whose
+            // miss becomes a FATAL LOAD failure in the vLLM connector
+            // (EngineDeadError) — the remote-forward path has no graceful
+            // degrade. Retry the local lookup a few times so a writer holding
+            // write_ref past a single 2 s wait clears before we give up.
+            //
+            // Defensive: under the crash-repro workload this retry does not fire
+            // (write_ref windows are sub-millisecond with integrity gating off,
+            // so the first lookup already succeeds). The observed graceful
+            // degrade is restored by the two removal/allocation-path fixes
+            // (`evict_one_clean` no longer full-removes unpersisted victims; cold
+            // loads no longer take the no-staging inline fast path). This guards
+            // the one remaining fatal classification — Err(Timeout) misread as
+            // KeyNotFound — should lock contention ever widen that window.
+            const LOOKUP_RETRIES: u32 = 5;
+            let lookup = {
+                let mut lk = dm.lookup(key);
+                let mut retries = 0u32;
+                while matches!(lk, Err(_)) && retries < LOOKUP_RETRIES {
+                    retries += 1;
+                    lk = dm.lookup(key);
+                }
+                lk
+            };
+            match lookup {
                 Ok(lookup_result) => match lookup_result {
                     LookupResult::NotExist => {
                         results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
@@ -2240,8 +2290,17 @@ impl IDispatcher for DispatcherComponent {
         // Promote cold entries in parallel — multiple queue threads per drive.
         // Each thread gets its own NVMe queue pair and CUDA streams, enabling
         // concurrent reads on the same physical drive.
+        //
+        // All cold entries — including a lone single-key load — go through the
+        // pooled path. It defers tier-saturation (`AllocationFailed`) to the
+        // staging post-pass so a cold load degrades to an uncached serve instead
+        // of failing. The single-key inline `promote_and_serve` fast path is
+        // intentionally NOT used here: it has no staging fallback, so under
+        // memory-tier pressure it turned a survivable cold miss into a fatal
+        // LOAD FAILURE (which crashes vLLM) — a regression vs unstable. The
+        // scheduling win is not worth reintroducing that failure mode.
         if !cold_entries.is_empty() {
-            const MAX_QUEUES_PER_DRIVE: usize = 2;
+            const MAX_QUEUES_PER_DRIVE: usize = 1;
 
             let chunk_size = {
                 let ring_guard = self.pipeline_ring.read();
@@ -2737,7 +2796,7 @@ impl IDispatcher for DispatcherComponent {
         // Make this block's GPU device current and use its warm stream — a
         // stream on another GPU fails cudaMemcpyAsync under multi-GPU.
         let device = set_batch_device(&*gpu, ipc_handle.address);
-        let warm_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.warm_load);
+        let warm_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.warm);
 
         match result {
             Ok(lookup_result) => {
@@ -2883,9 +2942,9 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
         // D2H source is on the GPU (ipc_handle.address); make that device current
         // and use its dedicated store stream so D2H doesn't serialize with H2D
-        // loads on the warm_load stream.
+        // loads on the warm stream (PCIe full-duplex).
         let device = set_batch_device(&*gpu, ipc_handle.address);
-        let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.warm_store);
+        let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.store);
         let stream = GpuStream(store_raw as *mut std::ffi::c_void);
         self.copy_gpu_to_memory_async(key, std::slice::from_ref(&ipc_handle), stream)?;
         gpu.stream_synchronize(stream)
@@ -2902,6 +2961,94 @@ impl IDispatcher for DispatcherComponent {
         }
 
         Ok(())
+    }
+
+    /// Batch populate: issue all D2H copies asynchronously on a dedicated store
+    /// stream, synchronize once, then register all entries in the dispatch-map.
+    fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        if let Err(e) = self.ensure_initialized() {
+            return entries.iter().map(|_| Err(e.clone())).collect();
+        }
+
+        let gpu = match self.gpu_services.get() {
+            Ok(g) => g,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("gpu_services not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+        };
+
+        let t_total = std::time::Instant::now();
+        let mut results: Vec<Option<Result<(), DispatcherError>>> = vec![None; entries.len()];
+
+        // Resolve batch device and pick the dedicated store stream up front.
+        // All entries in one RPC come from a single rank → a single device.
+        let batch_device = entries
+            .iter()
+            .flat_map(|(_, h)| std::iter::once(h.address))
+            .find(|a| !a.is_null())
+            .map_or(-1, |addr| set_batch_device(&*gpu, addr));
+        let store_raw = device_streams_for(&*gpu, batch_device).map_or(0, |s| s.store);
+        let store_stream = GpuStream(store_raw as *mut std::ffi::c_void);
+
+        // Interleaved reserve + DMA: for each key, reserve a slot and immediately
+        // issue the async D2H copy. This pipelines memory-tier allocation with GPU
+        // DMA — early keys' transfers overlap with later keys' allocation.
+        let mut submitted: Vec<(usize, CacheKey, u32)> = Vec::with_capacity(entries.len());
+        for (i, (key, ipc_handle)) in entries.iter().enumerate() {
+            if ipc_handle.size == 0 {
+                results[i] = Some(Err(DispatcherError::InvalidParameter(
+                    "IPC handle size must be > 0".into(),
+                )));
+                continue;
+            }
+            match self.reserve_memory(*key, ipc_handle.size, 0) {
+                Ok(_) => {
+                    // Slot reserved — immediately issue async D2H copy.
+                    match self.copy_gpu_to_memory_async(*key, std::slice::from_ref(ipc_handle), store_stream) {
+                        Ok(()) => submitted.push((i, *key, ipc_handle.size)),
+                        Err(e) => {
+                            let _ = self.release_memory(*key);
+                            results[i] = Some(Err(e));
+                        }
+                    }
+                }
+                Err(e) => { results[i] = Some(Err(e)); }
+            }
+        }
+
+        if submitted.is_empty() {
+            return results.into_iter().map(|r| r.unwrap()).collect();
+        }
+
+        // Phase 4: ONE stream_synchronize for the entire batch.
+        // This guarantees all D2H copies have landed before any registration.
+        if let Err(e) = gpu.stream_synchronize(store_stream) {
+            // Sync failed — none of these entries can be safely registered.
+            for &(i, key, _) in &submitted {
+                let _ = self.release_memory(key);
+                results[i] = Some(Err(DispatcherError::IoError(format!(
+                    "batch store stream_synchronize failed: {e}"
+                ))));
+            }
+            return results.into_iter().map(|r| r.unwrap()).collect();
+        }
+
+        // Phase 5: Register all entries in dispatch-map and enqueue write-through.
+        for &(i, key, size) in &submitted {
+            results[i] = Some(self.copy_gpu_to_memory_completed(key, size));
+        }
+
+        if let Some(ref m) = *self.pipeline_metrics.read() {
+            let elapsed = t_total.elapsed().as_micros() as f64;
+            m.record_populate_total(elapsed);
+        }
+
+        results.into_iter().map(|r| r.unwrap()).collect()
     }
 
     fn reserve_memory(
@@ -2980,41 +3127,35 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
-        // If the caller passed a null stream (e.g. gRPC handler), resolve the
-        // dedicated warm_store stream for the source device. This avoids using
-        // the CUDA default stream which would serialize with the warm_load stream.
-        let effective_stream = if stream.0.is_null() {
+        // Null-stream callers (e.g. the shm-queue CopyToStore handler) need the
+        // copy to be complete on return — they have no stream handle to sync on.
+        // Resolve the device's `store` stream so the copy runs on a real stream,
+        // then synchronize before returning.
+        let (effective_stream, needs_sync) = if stream.0.is_null() {
             let device = regions
                 .first()
-                .map_or(-1, |r| {
-                    set_batch_device(&*gpu, r.address)
-                });
-            let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.warm_store);
-            GpuStream(store_raw as *mut std::ffi::c_void)
+                .map_or(-1, |r| set_batch_device(&*gpu, r.address));
+            let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.store);
+            (GpuStream(store_raw as *mut std::ffi::c_void), true)
         } else {
-            stream
+            (stream, false)
         };
 
-        let mut ops: Vec<interfaces::GpuMemcpyBatchOp> = Vec::with_capacity(regions.len());
         let mut off: usize = 0;
         for region in regions {
-            ops.push(interfaces::GpuMemcpyBatchOp {
-                src: region.address as *const std::ffi::c_void,
-                dst: (mem_ptr as usize + off) as *mut std::ffi::c_void,
-                size: region.size as usize,
-                src_access_order: interfaces::GpuMemcpySrcAccessOrder::Stream,
-            });
+            gpu.memcpy_d2h_async(
+                region.address as *const std::ffi::c_void,
+                (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                region.size as usize,
+                effective_stream,
+            )
+            .map_err(|e| {
+                let _ = mt.remove(key);
+                DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
+            })?;
             off += region.size as usize;
         }
-        gpu.memcpy_batch_async(&ops, effective_stream).map_err(|e| {
-            let _ = mt.remove(key);
-            DispatcherError::IoError(format!("GPU batch DMA copy failed: {e}"))
-        })?;
-        // Synchronize after all regions are submitted so the DRAM slot is
-        // fully populated when this function returns. Callers that pass their
-        // own stream (populate_from_gpu) may sync externally; callers that
-        // pass null (gRPC handler) rely on us to guarantee completion.
-        if stream.0.is_null() {
+        if needs_sync {
             gpu.stream_synchronize(effective_stream).map_err(|e| {
                 DispatcherError::IoError(format!("store stream_synchronize failed: {e}"))
             })?;
@@ -3500,6 +3641,7 @@ mod tests {
             inner.slots.keys().take(n).copied().collect()
         }
 
+
         fn evict_next(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
             let key = inner.slots.keys().next().copied()?;
@@ -3620,16 +3762,6 @@ mod tests {
 
         fn set_mismatch_key(&self, key: CacheKey) {
             self.inner.lock().unwrap().mismatch_keys.insert(key);
-        }
-
-        /// Outstanding read pins on one key.
-        fn read_refs(&self, key: CacheKey) -> u32 {
-            self.inner
-                .lock()
-                .unwrap()
-                .entries
-                .get(&key)
-                .map_or(0, |e| e.read_refs)
         }
 
         /// Outstanding read pins across every entry — what a pin probe samples at
@@ -4248,20 +4380,6 @@ mod tests {
             _ptr: *mut std::ffi::c_void,
             _size: usize,
         ) -> Result<(), String> {
-            Ok(())
-        }
-        fn memcpy_batch_async(
-            &self,
-            ops: &[interfaces::GpuMemcpyBatchOp],
-            stream: interfaces::GpuStream,
-        ) -> Result<(), String> {
-            for op in ops {
-                if op.src_access_order == interfaces::GpuMemcpySrcAccessOrder::Any {
-                    self.memcpy_h2d_async(op.src, op.dst, op.size, stream)?;
-                } else {
-                    self.memcpy_d2h_async(op.src, op.dst, op.size, stream)?;
-                }
-            }
             Ok(())
         }
     }
@@ -5541,6 +5659,168 @@ mod tests {
         c.evict_for_space(&dm, &mt, 4096, 100, 512).unwrap();
 
         assert!(mt.contains(0), "entry should not be evicted");
+    }
+
+    /// Regression test for the Check→Pin eviction race
+    /// ([[project_dispatcher_check_pin_eviction_race]]).
+    ///
+    /// A content-addressed key that a connector has Checked resident and is
+    /// about to Pin+Load must never be *silently dropped* from the dispatch
+    /// map by the evictor. The dangerous window is a resident memory-tier entry
+    /// whose write-through has not completed (`ssd_offset == None`) and that is
+    /// not yet pinned (`read_ref == 0`) — the just-Checked-but-not-yet-Pinned
+    /// state.
+    ///
+    /// Such a victim cannot be *demoted* (there is nothing on SSD to fall back
+    /// to). The buggy `evolve-dispatcher` `evict_one_clean` handled that by
+    /// `dm.remove`-ing it, which *succeeds* for an unpinned entry and turns the
+    /// key into `NotExist`. The racing load then misses, is forwarded to
+    /// remote-lookup, and on a single node returns a hard `IoError` — which the
+    /// vLLM connector asserts on (`transfer_result.success`), killing the
+    /// engine with `EngineDeadError`.
+    ///
+    /// The fix skips an unpersisted victim rather than removing it. This test
+    /// locks in the invariant that makes the crash impossible: eviction under
+    /// pressure against an all-unpersisted, all-unpinned tier frees nothing,
+    /// surfaces `AllocationFailed` (caller then serves uncached), and —
+    /// critically — leaves *every* key still resolvable, never `NotExist`.
+    ///
+    /// Reverting the fix (restoring the `dm.remove` fallback) fails this test:
+    /// `evict_for_space` returns `Ok`, `entry_count` drops, and the dropped
+    /// keys resolve to `NotExist`.
+    #[test]
+    fn evict_never_drops_unpersisted_unpinned_victim() {
+        let dm_concrete = Arc::new(MockDispatchMap::new());
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = dm_concrete.clone();
+        // Pool holds exactly 4 × 4 KiB entries; we fill it completely.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+
+        const N: u64 = 4;
+        for key in 0..N {
+            mt.insert(key, 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
+            // Release the write pin installed by create_memory_tier_entry so the
+            // entry is fully unpinned (read_ref == 0, write_ref == false): a
+            // resident, checkable key. Deliberately do NOT convert_to_storage —
+            // leaving ssd_offset == None means the entry is unpersisted and
+            // cannot be demoted to BlockDevice, only removed or skipped.
+            dm.release_write(key).unwrap();
+        }
+
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
+        );
+
+        // Pool is full (16384 used). Asking for one more slot forces eviction,
+        // but no candidate is demotable and none may be dropped.
+        let res = c.evict_for_space(&dm, &mt, 4096, 100, 512);
+        assert!(
+            matches!(res, Err(DispatcherError::AllocationFailed(_))),
+            "expected AllocationFailed when the whole tier is unpersisted, got {res:?}",
+        );
+
+        // The invariant that prevents the crash: nothing was silently dropped.
+        assert_eq!(
+            dm_concrete.entry_count(),
+            N as usize,
+            "an unpersisted, unpinned victim was removed → key becomes NotExist → fatal remote-forward",
+        );
+        for key in 0..N {
+            assert!(
+                !matches!(dm.lookup(key), Ok(LookupResult::NotExist)),
+                "key {key} resolved to NotExist after eviction — Check→Pin race regression",
+            );
+        }
+    }
+
+    /// Companion to [`evict_never_drops_unpersisted_unpinned_victim`]: the fix
+    /// must skip the racy unpersisted victim yet still make progress by
+    /// demoting a *persisted* neighbour, so eviction is not deadlocked.
+    ///
+    /// Mixed tier: three unpersisted, unpinned entries (each a just-Checked key
+    /// in the race window) plus one persisted, unpinned entry. The widening
+    /// scan in `evict_for_space` must reach the persisted entry, demote it to
+    /// BlockDevice (freeing the slot while keeping the key resolvable), and
+    /// leave the three racy keys untouched and still resolvable.
+    #[test]
+    fn evict_skips_unpersisted_victims_and_demotes_persisted_one() {
+        let dm_concrete = Arc::new(MockDispatchMap::new());
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = dm_concrete.clone();
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+
+        // Keys 0..3 unpersisted (no ssd_offset); key 3 persisted (demotable).
+        const N: u64 = 4;
+        const PERSISTED: u64 = 3;
+        for key in 0..N {
+            mt.insert(key, 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
+            dm.release_write(key).unwrap();
+            if key == PERSISTED {
+                // Complete write-through: gives it an ssd_offset so it can be
+                // demoted (MemoryTier → BlockDevice) instead of dropped.
+                dm.convert_to_storage(key, key * 4096).unwrap();
+            }
+        }
+
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            AtomicU64::new(0),
+            Arc::new(TierEventCounters::default()),
+        );
+
+        // One demotion frees exactly one slot, which is enough.
+        c.evict_for_space(&dm, &mt, 4096, 100, 512)
+            .expect("demoting the persisted neighbour should free space");
+
+        assert!(
+            mt.used() + 4096 <= mt.capacity(),
+            "a slot should have been freed by demotion",
+        );
+        // No entry was dropped from the dispatch map (demotion keeps the key).
+        assert_eq!(dm_concrete.entry_count(), N as usize, "no key should be removed");
+        // The persisted neighbour was demoted and is now resolvable on SSD.
+        assert!(
+            matches!(dm.lookup(PERSISTED), Ok(LookupResult::BlockDevice { .. })),
+            "persisted victim should be demoted to BlockDevice, still resolvable",
+        );
+        // The three racy unpersisted keys survive, still resolvable (not dropped).
+        for key in 0..N {
+            if key == PERSISTED {
+                continue;
+            }
+            assert!(
+                !matches!(dm.lookup(key), Ok(LookupResult::NotExist)),
+                "unpersisted key {key} must survive eviction of its neighbour",
+            );
+        }
     }
 
     #[test]

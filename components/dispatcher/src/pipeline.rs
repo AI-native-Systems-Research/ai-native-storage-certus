@@ -53,7 +53,9 @@ use interfaces::{
 use crate::io_segmenter;
 
 /// Number of GPU DMA copies before a periodic stream synchronization.
-pub const PIPELINE_RING_SIZE: usize = 8;
+/// Larger values reduce sync overhead at the cost of higher GPU-side memory
+/// pressure. 32 amortizes the ~50µs sync cost across more pipeline stages.
+pub const PIPELINE_RING_SIZE: usize = 32;
 
 /// Timeout for async NVMe read operations (ms).
 const READ_TIMEOUT_MS: u64 = 5000;
@@ -557,97 +559,46 @@ pub unsafe fn pipelined_multi_object_zero_copy(
     let mut t_sync_ns: u64 = 0;
     let mut _t_resub_ns: u64 = 0;
 
-    // Main pipeline loop: for each NVMe completion —
-    //   1. Decode tag → (object_idx, segment_idx)
-    //   2. Issue async H2D GPU DMA from memory-tier slot to client GPU
-    //   3. Sync both CUDA streams every PIPELINE_RING_SIZE completions
-    //   4. Submit the next NVMe read to keep the queue saturated
-    //
-    // Drain until every *submitted* read is accounted for (`completed <
-    // submitted`), never `break`ing while reads are still outstanding: those
-    // reads would complete later and the actor would block forever pushing their
-    // completions into this client's (now-undrained) SPSC ring, deadlocking the
-    // single-threaded block-device actor for the whole drive. On error we stop
-    // submitting new reads (`stop_submitting`) but keep draining the rest.
+    // Coalesced per-object H2D: track remaining segments per object.
+    // When an object's last segment completes, issue ONE H2D for the whole
+    // contiguous DRAM slot. NVMe resubmission happens BEFORE H2D launch to
+    // preserve NVMe/GPU overlap.
+    let mut obj_remaining: Vec<usize> = all_objs.iter().map(|o| o.segments.len()).collect();
+    let mut obj_failed: Vec<bool> = vec![false; num_jobs];
+
     let mut stop_submitting = false;
     while completed < submitted {
         let t0 = std::time::Instant::now();
         match channels.completion_rx.recv() {
             Ok(Completion::ReadDone { tag, result, .. }) => {
                 t_recv_ns += t0.elapsed().as_nanos() as u64;
+                completed += 1;
 
                 let obj_idx = (tag as usize) / max_segments_per_obj;
                 let seg_idx = (tag as usize) % max_segments_per_obj;
 
-                if let Err(e) = result {
+                // Validate tag bounds.
+                if obj_idx >= num_jobs
+                    || seg_idx >= all_objs.get(obj_idx).map_or(0, |o| o.segments.len())
+                {
+                    for r in results.iter_mut() {
+                        if r.is_ok() {
+                            *r = Err(DispatcherError::IoError("invalid completion tag".into()));
+                        }
+                    }
+                    obj_failed.fill(true);
+                    stop_submitting = true;
+                } else if let Err(e) = result {
                     results[obj_idx] = Err(DispatcherError::IoError(format!(
                         "SSD read obj={obj_idx} seg={seg_idx}: {e}"
                     )));
-                    completed += 1;
+                    obj_failed[obj_idx] = true;
+                    obj_remaining[obj_idx] = obj_remaining[obj_idx].saturating_sub(1);
                 } else {
-                    completed += 1;
-
-                    let job = &jobs[obj_idx];
-                    // The SSD read already landed in the DRAM slot (chunk_bufs wrap
-                    // job.mem_ptr). A null gpu_dst means "fill the DRAM slot only" —
-                    // the multi-region cold path scatters the slot to its N GPU
-                    // allocations afterwards, so skip the fused copy here.
-                    if !job.gpu_dst.is_null() {
-                        let tg = std::time::Instant::now();
-                        let obj = &all_objs[obj_idx];
-                        let seg = &obj.segments[seg_idx];
-                        let copy_len = seg
-                            .length
-                            .min(job.total_bytes.saturating_sub(seg.buffer_offset));
-                        let current_stream = streams[stream_idx % 2];
-
-                        let guard = obj.chunk_bufs[seg_idx].lock().unwrap();
-                        let dma_result = gpu.dma_copy_to_device_async(
-                            &guard,
-                            unsafe {
-                                (job.gpu_dst as *mut u8).add(seg.buffer_offset)
-                                    as *mut std::ffi::c_void
-                            },
-                            copy_len,
-                            current_stream,
-                        );
-                        drop(guard);
-
-                        if let Err(e) = dma_result {
-                            // DIAGNOSTIC (temporary): distinguish a stream/device
-                            // mismatch from an out-of-bounds segment on the cold path.
-                            let dst = unsafe { (job.gpu_dst as *mut u8).add(seg.buffer_offset) };
-                            let base_dev = gpu.device_of_ptr(job.gpu_dst).unwrap_or(-99);
-                            let dst_dev = gpu
-                                .device_of_ptr(dst as *const std::ffi::c_void)
-                                .unwrap_or(-99);
-                            eprintln!(
-                                "[pipeline] COLD DMA FAIL obj={obj_idx} seg={seg_idx} err='{e}' \
-                                 gpu_dst={:p} base_dev={base_dev} dst={dst:p} dst_dev={dst_dev} \
-                                 buf_offset={} seg_len={} copy_len={copy_len} total_bytes={} stream={:p}",
-                                job.gpu_dst,
-                                seg.buffer_offset,
-                                seg.length,
-                                job.total_bytes,
-                                current_stream.0,
-                            );
-                            results[obj_idx] = Err(DispatcherError::IoError(format!(
-                                "GPU DMA obj={obj_idx} seg={seg_idx}: {e}"
-                            )));
-                        }
-                        t_gpu_ns += tg.elapsed().as_nanos() as u64;
-
-                        stream_idx += 1;
-
-                        if stream_idx % PIPELINE_RING_SIZE == 0 {
-                            let ts = std::time::Instant::now();
-                            let _ = gpu.stream_synchronize(streams[0]);
-                            let _ = gpu.stream_synchronize(streams[1]);
-                            t_sync_ns += ts.elapsed().as_nanos() as u64;
-                        }
-                    }
+                    obj_remaining[obj_idx] -= 1;
                 }
 
+                // Resubmit next NVMe read BEFORE H2D launch (preserve overlap).
                 if !stop_submitting && submitted < work.len() {
                     let tr = std::time::Instant::now();
                     let (next_obj, next_seg) = work[submitted];
@@ -667,16 +618,47 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                     {
                         submitted += 1;
                     } else {
-                        // Can't submit more — stop, but keep draining what's out.
                         stop_submitting = true;
                     }
                     _t_resub_ns += tr.elapsed().as_nanos() as u64;
                 }
+
+                // Object fully read: issue ONE coalesced H2D for the entire slot.
+                if obj_idx < num_jobs
+                    && obj_remaining[obj_idx] == 0
+                    && !obj_failed[obj_idx]
+                    && !jobs[obj_idx].gpu_dst.is_null()
+                {
+                    let tg = std::time::Instant::now();
+                    let job = &jobs[obj_idx];
+                    let current_stream = streams[stream_idx % 2];
+
+                    let dma_result = gpu.memcpy_h2d_async(
+                        job.mem_ptr as *const std::ffi::c_void,
+                        job.gpu_dst,
+                        job.total_bytes,
+                        current_stream,
+                    );
+                    if let Err(e) = dma_result {
+                        results[obj_idx] = Err(DispatcherError::IoError(format!(
+                            "GPU H2D obj={obj_idx}: {e}"
+                        )));
+                    }
+                    t_gpu_ns += tg.elapsed().as_nanos() as u64;
+
+                    stream_idx += 1;
+
+                    // Periodic sync to bound GPU queue depth. Threshold is per
+                    // completed-object H2D, not per segment.
+                    if stream_idx % PIPELINE_RING_SIZE == 0 {
+                        let ts = std::time::Instant::now();
+                        let _ = gpu.stream_synchronize(streams[0]);
+                        let _ = gpu.stream_synchronize(streams[1]);
+                        t_sync_ns += ts.elapsed().as_nanos() as u64;
+                    }
+                }
             }
             Ok(Completion::Timeout { handle }) => {
-                // One outstanding read timed out. Record it, stop submitting new
-                // reads, but KEEP draining the rest (they will still complete or
-                // time out) so no completion is orphaned in the client ring.
                 for r in results.iter_mut() {
                     if r.is_ok() {
                         *r = Err(DispatcherError::IoError(format!(
@@ -684,12 +666,11 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                         )));
                     }
                 }
+                obj_failed.fill(true);
                 stop_submitting = true;
                 completed += 1;
             }
             Ok(_) => {
-                // Unexpected completion type on the cold-read channel. Count it so
-                // draining still terminates; stop submitting.
                 for r in results.iter_mut() {
                     if r.is_ok() {
                         *r = Err(DispatcherError::IoError(
@@ -697,13 +678,11 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                         ));
                     }
                 }
+                obj_failed.fill(true);
                 stop_submitting = true;
                 completed += 1;
             }
             Err(_) => {
-                // Channel disconnected: the actor is gone, so no further
-                // completions will arrive — draining more would hang. Safe to
-                // stop; no completions can be orphaned against a dead actor.
                 for r in results.iter_mut() {
                     if r.is_ok() {
                         *r = Err(DispatcherError::IoError(
@@ -711,6 +690,7 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                         ));
                     }
                 }
+                obj_failed.fill(true);
                 break;
             }
         }
@@ -1055,6 +1035,6 @@ mod tests {
     fn pipeline_ring_size_is_reasonable() {
         let size = PIPELINE_RING_SIZE;
         assert!(size >= 2);
-        assert!(size <= 16);
+        assert!(size <= 64);
     }
 }

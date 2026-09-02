@@ -6,9 +6,11 @@
 
 ## Description
 
-Central data-plane cache orchestrator for the Certus storage pipeline. Manages a two-tier cache (DRAM + SSD) and routes GPU-to-DRAM-to-SSD data movement. Implements zero-copy cold-path reads where SPDK DMA writes directly into CUDA-pinned memory-tier buffers.
+Central data-plane cache orchestrator for the Certus storage pipeline. Manages a two-tier cache (DRAM + SSD) and routes GPU-to-DRAM-to-SSD data movement. Implements zero-copy cold-path reads where SPDK DMA writes directly into CUDA-pinned memory-tier buffers, with coalesced per-object H2D GPU copies.
 
-On `populate`, copies GPU data via DMA into a memory-tier slot, then queues asynchronous write-through to SSD. On `lookup`, serves from memory-tier (hot path), or promotes from SSD with pipelined NVMe reads directly into the memory-tier pool (cold path). On capacity exhaustion, evicts LRU entries whose write-through has completed.
+On `populate`, copies GPU data via DMA into a memory-tier slot, then queues asynchronous write-through to SSD. `batch_populate` amortizes stream synchronization across the batch. On `lookup`, serves from memory-tier (hot path via per-region `memcpy_h2d_async` on the device's `warm` stream), or promotes from SSD with pipelined NVMe reads into the memory-tier pool (cold path). Single-key cold loads bypass the cold pool and call `promote_and_serve` inline. On capacity exhaustion, evicts LRU entries whose write-through has completed.
+
+Per-device CUDA streams: `warm` (H2D lookups + single-entry D2H populate), `store` (dedicated D2H for `batch_populate`, enabling PCIe full-duplex overlap), plus a pipeline pair for cold reads. Cold pool uses 1 queue per drive with `max_queue_depth=128`.
 
 On `initialize`, creates and initializes N data block devices and N extent managers from provided PCI addresses, manages GPT partition tables per drive, and starts background write-through workers and evictors. On `shutdown`, completes all in-flight writes then tears down managed subsystems.
 
@@ -38,12 +40,13 @@ define_interface! {
         fn shutdown(&self) -> Result<(), DispatcherError>;
         fn lookup(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
         fn lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>;
-        fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>;
+        fn batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<Result<(), DispatcherError>>;
         fn check(&self, key: CacheKey) -> Result<bool, DispatcherError>;
         fn remove(&self, key: CacheKey) -> Result<(), DispatcherError>;
         fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
+        fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>;
         fn reserve_memory(&self, key: CacheKey, size: u32, session_id: u64) -> Result<*mut u8, DispatcherError>;
-        fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>;
+        fn copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream) -> Result<(), DispatcherError>;
         fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
         fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
         fn pin(&self, key: CacheKey) -> Result<(), DispatcherError>;
@@ -53,28 +56,23 @@ define_interface! {
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError>;
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
         fn read_write_stats(&self) -> ReadWriteStats;
+        fn tier_event_stats(&self) -> TierEventStats;
     }
 }
 ```
 
-## Verified Properties
-
-The following invariants are formally proved with Creusot (see `components/dispatcher/verif/`):
+## Design Invariants
 
 | ID | Name | Description |
 |----|------|-------------|
 | P1 | drive-index-bounded | `drive_index(key, N)` always returns a value < N |
 | P2 | eviction-terminates | `evict_for_space` loop exits after at most `max_attempts` iterations |
-| P3 | size-validation | `populate` and `prepare_store` reject size == 0 |
+| P3 | size-validation | `populate` rejects size == 0 |
 | P4 | init-guard | all operations return `NotInitialized` before `initialize()` succeeds |
 | P5 | populate-lifecycle | successful populate yields MemoryTier entry with read_ref=1, no write_ref |
-| P6 | prepare-commit-lifecycle | prepare creates pending with drive_idx < num_drives; commit produces BlockDevice entry |
-| P7 | cancel-removes | `cancel_store` transitions entry to NotExist |
 | P8 | drive-index-deterministic | same key always maps to same drive |
 | P9 | eviction-progress | each successful eviction strictly decreases memory used |
 | P10 | reserve-complete-lifecycle | reserve→copy→complete yields MemoryTier entry with read_ref=1 |
-
-Total: 10 properties, 24 verification conditions discharged by SMT solvers.
 
 ## Receptacles
 
@@ -89,14 +87,15 @@ Total: 10 properties, 24 verification conditions discharged by SMT solvers.
 
 ## Key Types
 
-- `DispatcherConfig { data_pci_addrs, max_cache_entries, eviction_threshold, format_on_init, ssd_eviction_threshold, ssd_eviction_low_watermark, ssd_eviction_batch_size, ssd_eviction_interval_secs, poller_base_cpu, max_eviction_attempts, backfill_delay_ms }`
+- `DispatcherConfig { data_pci_addrs, max_cache_entries, format_on_init, ssd_eviction_threshold, ssd_eviction_low_watermark, ssd_eviction_batch_size, ssd_eviction_interval_secs, poller_base_cpu, max_eviction_attempts, backfill_delay_ms, metadata_partition_size, extended_metadata_partition_size, memory_tier_eviction_threshold, memory_tier_eviction_low_watermark, memory_tier_eviction_batch_size, memory_tier_eviction_interval_secs, cold_staging_slots, cold_staging_buf_bytes }`
 - `IpcHandle { address: *mut u8, size: u32 }` — opaque GPU memory pointer for DMA transfers
 - `DispatcherError` — `NotInitialized`, `KeyNotFound`, `AlreadyExists`, `AllocationFailed`, `IoError`, `Timeout`, `InvalidParameter`
 - `ReadWriteStats` — per-direction byte and latency counters aggregated across drives
+- `TierEventStats { promotions_to_memory, promotions_to_gpu, evictions_from_memory, evictions_from_ssd }` — cumulative tier-movement counters (always populated, monotonic)
 
 ## Internal Modules
 
 - `background` — parallel memory-tier-to-SSD write-through workers, SSD evictor, memory-tier evictor
 - `io_segmenter` — splits large DMA transfers into block-device-aligned segments (128 KiB default)
-- `pipeline` — pipelined SSD-to-GPU reads with zero-copy into memory-tier
-- `cold_pool` — persistent worker pool with pre-connected NVMe channels + CUDA streams per drive
+- `pipeline` — pipelined SSD-to-GPU reads with coalesced per-object H2D into memory-tier (`PIPELINE_RING_SIZE=32`)
+- `cold_pool` — persistent worker pool with pre-connected NVMe channels + CUDA streams per drive (1 queue per drive)

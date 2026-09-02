@@ -57,7 +57,8 @@ members:
   repeat: turns - 1
   arrival: staggered
   concurrent_start: concurrent_sessions
-  duration: ceil((system_prompt_tokens + i * (user_message_tokens + assistant_output_tokens) + user_message_tokens) / block_size)
+  duration: ceil((system_prompt_tokens + i * (user_message_tokens + assistant_output_tokens)
+    + user_message_tokens) / block_size)
   iteration_variable: i
 - ref: decode-block-store
   role: subsequent-turn-generation-writeback
@@ -70,14 +71,16 @@ members:
   repeat: turns - 1
   arrival: staggered
   concurrent_start: concurrent_sessions
-  duration: ceil((system_prompt_tokens + i * (user_message_tokens + assistant_output_tokens) + user_message_tokens) / block_size)
+  duration: ceil((system_prompt_tokens + i * (user_message_tokens + assistant_output_tokens)
+    + user_message_tokens) / block_size)
   iteration_variable: i
 - ref: request-completion-retention-and-delete
   role: session-end-cleanup
   repeat: 1
   arrival: burst
   concurrent_start: concurrent_sessions
-  duration: ceil((system_prompt_tokens + turns * (user_message_tokens + assistant_output_tokens)) / block_size)
+  duration: ceil((system_prompt_tokens + turns * (user_message_tokens + assistant_output_tokens))
+    / block_size)
 - ref: multi-turn-reuse
   role: inter-turn-cache-lookup-and-match
   repeat: turns - 1
@@ -91,9 +94,12 @@ members:
   concurrent_start: concurrent_sessions
   duration: floor(assistant_output_tokens / block_size)
 evidence:
-- 'Gao et al. 2024 AttentionStore arXiv:2403.19708: cost-effective multi-turn KV reuse with CPU/SSD tiering'
-- 'Zheng et al. 2023 SGLang RadixAttention arXiv:2312.07104: radix-tree prefix matching across turns'
-- 'Strati et al. 2024 DéjàVu arXiv:2403.01876: KV-cache streaming for multi-turn fault-tolerant serving'
+- 'Gao et al. 2024 AttentionStore arXiv:2403.19708: cost-effective multi-turn KV reuse
+  with CPU/SSD tiering'
+- 'Zheng et al. 2023 SGLang RadixAttention arXiv:2312.07104: radix-tree prefix matching
+  across turns'
+- "Strati et al. 2024 D\xE9j\xE0Vu arXiv:2403.01876: KV-cache streaming for multi-turn\
+  \ fault-tolerant serving"
 - 'vLLM automatic prefix caching: hash-chain block matching for session resumption'
 ---
 kind: composition
@@ -155,7 +161,8 @@ members:
   repeat: ceil(concurrent_requests * (1 - prefix_hit_rate))
   arrival: burst
   concurrent_start: ceil(concurrent_requests * (1 - prefix_hit_rate))
-  duration: ceil((system_prompt_tokens + retrieved_context_tokens + user_query_tokens) / block_size)
+  duration: ceil((system_prompt_tokens + retrieved_context_tokens + user_query_tokens)
+    / block_size)
 - ref: cohort-sharing-and-load-coalescing
   role: shared-system-prompt-coalesced-load
   repeat: 1
@@ -179,12 +186,17 @@ members:
   repeat: 1
   arrival: burst
   concurrent_start: concurrent_requests
-  duration: ceil((system_prompt_tokens + retrieved_context_tokens + user_query_tokens + output_tokens) / block_size)
+  duration: ceil((system_prompt_tokens + retrieved_context_tokens + user_query_tokens
+    + output_tokens) / block_size)
 evidence:
-- 'Juravsky et al. 2024 Hydragen arXiv:2402.05099: decomposed attention for high-throughput shared-prefix inference'
-- 'Zheng et al. 2023 SGLang RadixAttention arXiv:2312.07104: automatic prefix sharing for RAG workloads'
-- 'Yao et al. 2024 CacheBlend arXiv:2405.16444: non-prefix chunk fusion with selective token recompute for RAG'
-- 'LMCache arXiv:2510.09665: enterprise-scale KV layer with content-addressed chunk storage for RAG reuse'
+- 'Juravsky et al. 2024 Hydragen arXiv:2402.05099: decomposed attention for high-throughput
+  shared-prefix inference'
+- 'Zheng et al. 2023 SGLang RadixAttention arXiv:2312.07104: automatic prefix sharing
+  for RAG workloads'
+- 'Yao et al. 2024 CacheBlend arXiv:2405.16444: non-prefix chunk fusion with selective
+  token recompute for RAG'
+- 'LMCache arXiv:2510.09665: enterprise-scale KV layer with content-addressed chunk
+  storage for RAG reuse'
 ---
 kind: composition
 id: agentic-tool-use
@@ -227,12 +239,6 @@ parameters:
     - 1
     - 256
     default: 16
-  tool_latency_ms:
-    type: integer
-    range:
-    - 100
-    - 60000
-    default: 5000
 members:
 - ref: cold-prefill-store
   role: initial-system-prompt-and-tools-prefill
@@ -257,26 +263,33 @@ members:
   repeat: tool_calls
   arrival: staggered
   concurrent_start: concurrent_agents
-  duration: ceil((system_prompt_tokens + i * (tool_result_tokens + reasoning_tokens)) / block_size)
+  duration: ceil((system_prompt_tokens + i * (tool_result_tokens + reasoning_tokens))
+    / block_size)
   iteration_variable: i
 - ref: compute-local-eviction-and-later-reload
   role: eviction-during-tool-latency
   repeat: tool_calls
   arrival: staggered
   concurrent_start: concurrent_agents
-  duration: ceil((system_prompt_tokens + i * (tool_result_tokens + reasoning_tokens)) / block_size)
+  duration: ceil((system_prompt_tokens + i * (tool_result_tokens + reasoning_tokens))
+    / block_size)
   iteration_variable: i
 - ref: request-completion-retention-and-delete
   role: agent-session-end-cleanup
   repeat: 1
   arrival: burst
   concurrent_start: concurrent_agents
-  duration: ceil((system_prompt_tokens + tool_calls * (tool_result_tokens + reasoning_tokens)) / block_size)
+  duration: ceil((system_prompt_tokens + tool_calls * (tool_result_tokens + reasoning_tokens))
+    / block_size)
 evidence:
-- 'CacheTTL arXiv:2511.02230: adaptive TTL scheduling during tool-call pauses in multi-turn agent serving'
-- 'vLLM preemption and prefix-cache reuse: KV retention across tool-call boundaries with swap-out during tool wait'
-- 'SGLang fork/join primitives: prefix sharing across agentic branching with radix-tree retention'
-- 'Gao et al. 2024 AttentionStore arXiv:2403.19708: inter-turn KV persistence applicable to tool-call gaps'
+- 'CacheTTL arXiv:2511.02230: adaptive TTL scheduling during tool-call pauses in multi-turn
+  agent serving'
+- 'vLLM preemption and prefix-cache reuse: KV retention across tool-call boundaries
+  with swap-out during tool wait'
+- 'SGLang fork/join primitives: prefix sharing across agentic branching with radix-tree
+  retention'
+- 'Gao et al. 2024 AttentionStore arXiv:2403.19708: inter-turn KV persistence applicable
+  to tool-call gaps'
 ---
 kind: composition
 id: single-turn-api
@@ -339,9 +352,12 @@ members:
   concurrent_start: concurrent_requests
   duration: ceil((prompt_tokens + output_tokens) / block_size)
 evidence:
-- 'Kwon et al. 2023 PagedAttention SOSP: single-request lifecycle with paged block allocation and free'
-- 'vLLM automatic prefix caching: content-addressed hash-chain matching for repeated API prompts'
-- 'Pope et al. 2023 Efficiently Scaling Transformer Inference MLSys: decode memory-bandwidth characterization'
+- 'Kwon et al. 2023 PagedAttention SOSP: single-request lifecycle with paged block
+  allocation and free'
+- 'vLLM automatic prefix caching: content-addressed hash-chain matching for repeated
+  API prompts'
+- 'Pope et al. 2023 Efficiently Scaling Transformer Inference MLSys: decode memory-bandwidth
+  characterization'
 ---
 kind: composition
 id: reasoning-long-decode
@@ -429,10 +445,14 @@ members:
   duration: ceil(output_tokens / (block_size * 4))
   condition: output_tokens > block_size * 1024
 evidence:
-- 'Long CoT models (o1, DeepSeek-R1): output_tokens >> prompt_tokens, sustained decode-phase IO dominance'
-- 'Leviathan et al. 2023 Speculative Decoding: draft-verify loop accelerating long generation'
-- 'Miao et al. 2024 SpecInfer arXiv:2305.09781: tree-based speculative inference with KV batch verify'
-- 'Pope et al. 2023 MLSys: decode memory-bandwidth bound grows quadratically with cumulative generated length'
+- 'Long CoT models (o1, DeepSeek-R1): output_tokens >> prompt_tokens, sustained decode-phase
+  IO dominance'
+- 'Leviathan et al. 2023 Speculative Decoding: draft-verify loop accelerating long
+  generation'
+- 'Miao et al. 2024 SpecInfer arXiv:2305.09781: tree-based speculative inference with
+  KV batch verify'
+- 'Pope et al. 2023 MLSys: decode memory-bandwidth bound grows quadratically with
+  cumulative generated length'
 ---
 kind: composition
 id: code-generation
@@ -517,7 +537,8 @@ members:
   repeat: 1
   arrival: burst
   concurrent_start: concurrent_requests
-  duration: ceil((system_context_tokens + user_instruction_tokens + output_tokens) / block_size)
+  duration: ceil((system_context_tokens + user_instruction_tokens + output_tokens)
+    / block_size)
 - ref: prefix-invalidation-and-version-churn
   role: repo-context-invalidation-on-edit
   repeat: 1
@@ -531,10 +552,14 @@ members:
   concurrent_start: ceil(concurrent_requests * (1 - context_prefix_hit_rate))
   duration: ceil(system_context_tokens / block_size)
 evidence:
-- 'Copilot/Cursor-style code completion: high prefix-hit rate on repository context across edits'
-- 'SGLang RadixAttention arXiv:2312.07104: long shared repo context cached across completions'
-- 'Agrawal et al. 2024 Sarathi arXiv:2308.16369: chunked prefill interleaving for long-context requests'
-- 'Cai et al. 2024 Medusa arXiv:2401.10774: multi-head speculative decoding for code-completion patterns'
+- 'Copilot/Cursor-style code completion: high prefix-hit rate on repository context
+  across edits'
+- 'SGLang RadixAttention arXiv:2312.07104: long shared repo context cached across
+  completions'
+- 'Agrawal et al. 2024 Sarathi arXiv:2308.16369: chunked prefill interleaving for
+  long-context requests'
+- 'Cai et al. 2024 Medusa arXiv:2401.10774: multi-head speculative decoding for code-completion
+  patterns'
 ---
 kind: composition
 id: multimodal
@@ -608,9 +633,12 @@ members:
   concurrent_start: concurrent_requests
   duration: ceil((image_tokens + text_prompt_tokens + output_tokens) / block_size)
 evidence:
-- 'LLaVA/Qwen-VL architecture: image tokens fused as self-attention prefix KV (no cross-attention)'
-- 'Flamingo-style cross-attention: separate per-layer cross-attention KV with distinct lifecycle'
-- 'vLLM multimodal support: content-addressed hashing includes multimodal input hashes for cache validity'
+- 'LLaVA/Qwen-VL architecture: image tokens fused as self-attention prefix KV (no
+  cross-attention)'
+- 'Flamingo-style cross-attention: separate per-layer cross-attention KV with distinct
+  lifecycle'
+- 'vLLM multimodal support: content-addressed hashing includes multimodal input hashes
+  for cache validity'
 ---
 kind: composition
 id: continuous-batching
@@ -715,10 +743,13 @@ members:
   concurrent_start: 1
   duration: ceil(prefill_chunk_tokens / block_size)
 evidence:
-- 'Agrawal et al. 2024 Sarathi-Serve arXiv:2308.16369: chunked prefill piggybacks on decode iterations'
+- 'Agrawal et al. 2024 Sarathi-Serve arXiv:2308.16369: chunked prefill piggybacks
+  on decode iterations'
 - 'Yu et al. 2022 Orca OSDI: iteration-level scheduling with continuous batching'
-- 'Kwon et al. 2023 vLLM PagedAttention SOSP: paged allocation with preemption under memory pressure'
-- 'vLLM V1 scheduler: continuous-batching KV churn with lazy block overwrite and LRU eviction'
+- 'Kwon et al. 2023 vLLM PagedAttention SOSP: paged allocation with preemption under
+  memory pressure'
+- 'vLLM V1 scheduler: continuous-batching KV churn with lazy block overwrite and LRU
+  eviction'
 ---
 kind: composition
 id: disaggregated-prefill-decode
@@ -813,9 +844,12 @@ members:
   duration: ceil(prompt_tokens / block_size)
   condition: concurrent_requests > 128
 evidence:
-- 'Zhong et al. 2024 DistServe OSDI arXiv:2401.09670: disaggregated prefill/decode with inter-node KV migration'
-- 'Patel et al. 2024 Splitwise arXiv:2311.18677: phase splitting with KV transfer between specialized pools'
-- 'Qin et al. 2024 Mooncake FAST 2025 arXiv:2407.00079: RDMA-based KV transfer at 87-190 GB/s aggregate'
+- 'Zhong et al. 2024 DistServe OSDI arXiv:2401.09670: disaggregated prefill/decode
+  with inter-node KV migration'
+- 'Patel et al. 2024 Splitwise arXiv:2311.18677: phase splitting with KV transfer
+  between specialized pools'
+- 'Qin et al. 2024 Mooncake FAST 2025 arXiv:2407.00079: RDMA-based KV transfer at
+  87-190 GB/s aggregate'
 - 'NVIDIA Dynamo NIXL: direct VRAM-to-VRAM transfer for disaggregated serving'
 ---
 kind: composition
@@ -885,20 +919,16 @@ members:
   concurrent_start: concurrent_requests
   duration: ceil((prompt_tokens + beam_width * output_tokens) / block_size)
 evidence:
-- 'Kwon et al. 2023 PagedAttention SOSP: copy-on-write for parallel sampling with shared prefix blocks'
-- 'vLLM beam search: forked sequences share physical blocks until divergence triggers private copy'
+- 'Kwon et al. 2023 PagedAttention SOSP: copy-on-write for parallel sampling with
+  shared prefix blocks'
+- 'vLLM beam search: forked sequences share physical blocks until divergence triggers
+  private copy'
 ---
 kind: composition
 id: priority-preemption-cascade
 name: Priority-Based Preemption Cascade
 status: candidate
 parameters:
-  active_sequences:
-    type: integer
-    range:
-    - 32
-    - 4096
-    default: 256
   high_priority_burst:
     type: integer
     range:
@@ -949,8 +979,10 @@ members:
   concurrent_start: 1
   duration: ceil(avg_sequence_tokens / block_size)
 evidence:
-- 'Kwon et al. 2023 PagedAttention: priority-based preemption with shortest-sequence-first victim selection'
-- 'Mooncake 2024: cost-aware eviction considering popularity and reload cost from SSD tier'
+- 'Kwon et al. 2023 PagedAttention: priority-based preemption with shortest-sequence-first
+  victim selection'
+- 'Mooncake 2024: cost-aware eviction considering popularity and reload cost from
+  SSD tier'
 ---
 kind: composition
 id: kv-compression-pipeline
@@ -1007,8 +1039,10 @@ members:
   concurrent_start: concurrent_requests
   duration: ceil(sequence_tokens / (block_size * compression_ratio))
 evidence:
-- 'Liu et al. 2024 CacheGen SIGCOMM: 3.5-4.3x KV cache compression with streaming decode'
-- 'Hooper et al. 2024 KVQuant: per-channel quantization to extend effective context length'
+- 'Liu et al. 2024 CacheGen SIGCOMM: 3.5-4.3x KV cache compression with streaming
+  decode'
+- 'Hooper et al. 2024 KVQuant: per-channel quantization to extend effective context
+  length'
 - 'Yuan et al. 2024 KIVI: tuning-free 2-4 bit KV cache quantization'
 ---
 kind: composition
@@ -1072,9 +1106,11 @@ members:
   concurrent_start: concurrent_requests
   duration: floor(output_tokens / block_size)
 evidence:
-- 'Tang et al. 2024 Quest ICML: page-level importance scoring with <10% KV loaded per step'
+- 'Tang et al. 2024 Quest ICML: page-level importance scoring with <10% KV loaded
+  per step'
 - 'Lee et al. 2024 InfiniGen OSDI: speculative key-column proxy with <10% pages loaded'
-- 'Ribar et al. 2024 SparQ ICML: top-k sparse attention over offloaded long-context KV'
+- 'Ribar et al. 2024 SparQ ICML: top-k sparse attention over offloaded long-context
+  KV'
 ---
 kind: composition
 id: cache-aware-routing-migration
@@ -1155,6 +1191,8 @@ members:
   concurrent_start: concurrent_requests
   duration: 1
 evidence:
-- 'Qin et al. 2024 Mooncake FAST 2025: RDMA-based prefix-aware routing with 2.36x cache-hit improvement'
+- 'Qin et al. 2024 Mooncake FAST 2025: RDMA-based prefix-aware routing with 2.36x
+  cache-hit improvement'
 - 'llm-d: prefix-affinity routing with cost-benefit migration crossover at ~1K tokens'
-- 'Zhong et al. 2024 DistServe OSDI: 90 Gbps minimum bandwidth for KV migration to beat recompute'
+- 'Zhong et al. 2024 DistServe OSDI: 90 Gbps minimum bandwidth for KV migration to
+  beat recompute'

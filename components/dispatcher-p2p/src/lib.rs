@@ -2236,6 +2236,10 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
+    fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+        entries.iter().map(|(k, h)| self.populate(*k, h.clone())).collect()
+    }
+
     fn reserve_memory(
         &self,
         key: CacheKey,
@@ -2679,7 +2683,7 @@ mod tests {
 
     use interfaces::{
         CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle,
-        GpuMemcpyBatchOp, GpuStream, IMemoryTier, LookupConfig, LookupResult, MemoryTierError,
+        GpuStream, IMemoryTier, LookupConfig, LookupResult, MemoryTierError,
         MemoryTierTelemetrySnapshot, RemoteLookupError,
     };
 
@@ -2794,6 +2798,7 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             inner.slots.keys().take(n).copied().collect()
         }
+
 
         fn evict_next(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
@@ -3426,26 +3431,6 @@ mod tests {
         ) -> Result<(), String> {
             unsafe {
                 std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
-            }
-            Ok(())
-        }
-        fn memcpy_batch_async(
-            &self,
-            ops: &[GpuMemcpyBatchOp],
-            _stream: GpuStream,
-        ) -> Result<(), String> {
-            for op in ops {
-                if let Some(ref p) = self.probe {
-                    p.record(GpuEvent::SubmitH2d);
-                    let nth = p.submissions.fetch_add(1, Ordering::Relaxed) + 1;
-                    if p.fail_submit_on == nth {
-                        return Err("mock: injected batch submission failure".into());
-                    }
-                }
-                // SAFETY: In tests, both src and dst are valid host pointers valid for `size`.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(op.src as *const u8, op.dst as *mut u8, op.size);
-                }
             }
             Ok(())
         }

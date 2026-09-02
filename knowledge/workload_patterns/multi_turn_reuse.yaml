@@ -62,7 +62,7 @@ phases:
     keys: prior_turn_chunks
     order: sequential
     repeat: ceil(shared_prefix_tokens / chunk_size)
-    batch_size: ceil(prior_turn_tokens / block_size)
+    batch_size: ceil(shared_prefix_tokens / chunk_size)
   barrier_after: true
 - id: store-new-suffix
   depends_on: load-prior-turn
