@@ -730,6 +730,10 @@ impl IDispatcher for MockDispatcher {
         unimplemented!("mock: IDispatcher::pin not needed by remote-lookup tests")
     }
 
+    fn check_and_pin(&self, _key: CacheKey) -> Result<bool, DispatcherError> {
+        unimplemented!("mock: IDispatcher::check_and_pin not needed by remote-lookup tests")
+    }
+
     fn unpin(&self, _key: CacheKey) -> Result<(), DispatcherError> {
         unimplemented!("mock: IDispatcher::unpin not needed by remote-lookup tests")
     }

@@ -323,24 +323,24 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # all W must be eviction-protected for the duration of the load. The
         # returned spec carries LOGICAL keys — each worker folds in its own rank.
         pin_keys = [nk for k in int_keys for nk in self._ns_all(k)]
-        # Pin (promote=FALSE) only takes the eviction-protecting read-ref. We must
-        # NOT ask Pin to promote: Pin's promote is async/fire-and-forget, and the
-        # Lookup that immediately follows (in the load handler) already promotes
-        # cold (BlockDevice) entries itself. Two promotes race on the same key —
-        # both do mt.insert() — and the loser hits MemoryTierError::AlreadyExists,
-        # surfaced as ALLOCATION_FAILED, which fails the load and crashes vLLM
-        # (worker asserts transfer success). Lookup is self-sufficient: it serves
-        # MemoryTier hits directly and promotes BlockDevice misses in one path.
-        pin_ok = self._ring.pin(pin_keys, promote=False)
-        # Diagnostic: vLLM only reaches here for keys lookup()/Check reported as
-        # present, and cannot drop keys from the returned spec (dst block ids are
-        # positionally zipped). So a Pin failure here is the earliest signal that
-        # a Check-hit entry vanished — log which (namespaced) key.
+        # Atomic check-and-pin: verifies existence AND acquires the eviction-
+        # protecting read-ref in a single server-side operation. This eliminates
+        # the race window that existed between separate check() + pin() calls,
+        # where the entry could be evicted between the two RPCs — causing
+        # KeyNotFound on pin → LOAD FAILURE → vLLM engine crash.
+        #
+        # Keys that no longer exist return False (nothing held). Keys that exist
+        # return True (now pinned). The read-ref is released by complete_load →
+        # unpin after the load transfer finishes.
+        pin_ok = self._ring.check_and_pin(pin_keys)
+        # Diagnostic: a False here means the key was evicted between the
+        # scheduler's lookup (which reported HIT) and this check_and_pin. This
+        # is expected under memory pressure — log for observability.
         for nk, ok in zip(pin_keys, pin_ok):
             if not ok:
                 print(
                     f"[certus-shmq] PIN FAILURE key={nk} "
-                    f"(Check said present, Pin says gone — eviction race)",
+                    f"(evicted between scheduler lookup and prepare_load)",
                     flush=True,
                 )
         return CertusLoadStoreSpec([BlockLocation(key=k) for k in int_keys])

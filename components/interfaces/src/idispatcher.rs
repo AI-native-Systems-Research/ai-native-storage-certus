@@ -487,6 +487,14 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::Timeout`] if a writer holds exclusive access.
         fn pin(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
+        /// Atomically check existence and pin: if the key exists, acquire a read
+        /// reference (eviction protection) and return `true`. If the key does not
+        /// exist, return `false` with nothing held.
+        ///
+        /// This eliminates the race window between separate `check` + `pin` calls
+        /// where the entry can be evicted between the two operations.
+        fn check_and_pin(&self, key: CacheKey) -> Result<bool, DispatcherError>;
+
         /// Release an eviction-protection read reference on a cache entry.
         ///
         /// Decrements the read ref-count. When all pins are released, the

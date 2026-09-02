@@ -3252,6 +3252,33 @@ impl IDispatcher for DispatcherComponent {
         })
     }
 
+    fn check_and_pin(&self, key: CacheKey) -> Result<bool, DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        // dm.lookup atomically waits for write_ref==0 and increments read_ref.
+        // If the key exists, we KEEP the read_ref (that's the pin). If it doesn't
+        // exist, nothing is held. No race window — existence check and pin happen
+        // under the same lock acquisition.
+        match dm.lookup(key) {
+            Ok(result) => {
+                use interfaces::LookupResult;
+                let exists = !matches!(result, LookupResult::NotExist);
+                // Don't release_read — the read_ref IS the eviction-protection pin.
+                Ok(exists)
+            }
+            Err(interfaces::DispatchMapError::Timeout(_)) => {
+                // Write-ref held too long — treat as "not available".
+                Ok(false)
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
     fn unpin(&self, key: CacheKey) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 

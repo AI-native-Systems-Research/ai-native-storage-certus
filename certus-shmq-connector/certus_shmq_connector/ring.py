@@ -78,6 +78,7 @@ OP_REMOVE = 12
 OP_CLEAR_MEMORY_TIER = 13
 OP_FLUSH_TO_SSD = 14
 OP_GET_IO_STATS = 15
+OP_CHECK_AND_PIN = 16
 
 STATUS_OK = 0
 
@@ -687,6 +688,17 @@ class Ring:
             return []
         return decode_ok_flags(
             self._dispatch(OP_PIN, encode_promote_keys(promote, keys)), len(keys)
+        )
+
+    def check_and_pin(self, keys: Sequence[int]) -> list[bool]:
+        """Atomically check existence and pin: returns True for keys that exist
+        (now pinned with a read-ref), False for keys that don't exist (nothing held).
+        Eliminates the race window between separate check() + pin() calls."""
+        keys = list(keys)
+        if not keys:
+            return []
+        return decode_ok_flags(
+            self._dispatch(OP_CHECK_AND_PIN, encode_keys(keys)), len(keys)
         )
 
     def unpin(self, keys: Sequence[int]) -> list[bool]:

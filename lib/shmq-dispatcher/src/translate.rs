@@ -277,6 +277,7 @@ impl Translator {
             op::CLEAR_MEMORY_TIER => self.op_clear_memory_tier(&mut r),
             op::FLUSH_TO_SSD => self.op_flush_to_ssd(&mut r),
             op::GET_IO_STATS => self.op_get_io_stats(&mut r),
+            op::CHECK_AND_PIN => self.op_check_and_pin(&mut r),
             other => Err(OpError::Msg(format!("unknown opcode {other}"))),
         }
     }
@@ -464,6 +465,17 @@ impl Translator {
         }
         if promote {
             self.dispatcher.promote_to_memory_tier(&keys);
+        }
+        Ok(w.into_bytes())
+    }
+
+    fn op_check_and_pin(&self, r: &mut Reader) -> Result<Vec<u8>, OpError> {
+        let keys = Self::read_keys(r)?;
+        check_duplicate_keys(&keys)?;
+        let mut w = Writer::with_capacity(keys.len());
+        for &key in &keys {
+            let ok = self.dispatcher.check_and_pin(key).unwrap_or(false);
+            w.u8(ok as u8);
         }
         Ok(w.into_bytes())
     }
@@ -825,6 +837,9 @@ mod tests {
         }
         fn pin(&self, _key: CacheKey) -> Result<(), DispatcherError> {
             Ok(())
+        }
+        fn check_and_pin(&self, key: CacheKey) -> Result<bool, DispatcherError> {
+            Ok(self.resident.lock().unwrap().contains(&key))
         }
         fn unpin(&self, _key: CacheKey) -> Result<(), DispatcherError> {
             Ok(())

@@ -93,6 +93,7 @@ pub mod op {
     pub const CLEAR_MEMORY_TIER: u32 = 13;
     pub const FLUSH_TO_SSD: u32 = 14;
     pub const GET_IO_STATS: u32 = 15;
+    pub const CHECK_AND_PIN: u32 = 16;
 }
 
 /// Per-key states returned by the Check response byte. Widened from a plain
