@@ -65,9 +65,16 @@ If the user provides a number (1-12), use that property. If they provide free te
    - 12 → `check-pin-eviction-race`
    - Custom → ask user for a kebab-case name
 
-2. **Read the relevant source code** to understand the real synchronization protocol.
+2. **Read BOTH the specification and the source code.** The spec tells you which states are *allowed* (the intended contract); the code tells you which states are *reachable* (the real protocol). A model built from code alone encodes what the code *does*, not what it *should* do — so it will faithfully reproduce a bug and pass. Derive the safety **assertion from the spec**; derive the process structure and reachable transitions from the code.
 
-   Key source files by property and scope:
+   **Read the spec first (this is Spec-Kit driven — every component has `components/<c>/specs/<NNN-feature>/`):**
+   - Dispatcher (properties 1–4, 9, 12): `components/dispatcher/specs/001-dispatcher-cache-interface/` — `spec.md` (functional requirements, FR-IDs), `data-model.md` (entity states & transitions), `contracts/idispatcher.md` (per-operation pre/post-conditions), **`contracts/errors.md`** (which error each operation may legally return — the authority for "may a lookup return NotExist after populate?"), `checklists/requirements.md`. Also `info/DESIGN.md` and the `knowledge/` wiki (e.g. `size-mismatch-handling.md`).
+   - Extent-manager (properties 6, 11): `components/extent-manager/specs/001-extent-manager-v2/spec.md` (+ any `contracts/`, `data-model.md`).
+   - Block-device (properties 5, 10): `components/block-device-spdk-nvme/specs/001-spdk-nvme-block-device/spec.md`, `data-model.md`, `contracts/iblock_device.md`.
+
+   For the chosen property: locate the requirement / contract clause that states the guarantee (cite its FR-/requirement ID), and phrase the model's `assert()` as the *negation of a spec-permitted-outcome violation* — not as your paraphrase of the code. If the spec is silent on the property (e.g. it does not say whether eviction may render an observed key unresolvable), that gap is itself a finding: note it, model the stronger safe interpretation, and flag it for the user / spec owner.
+
+   **Then read the source code** to understand the real synchronization protocol and build the reachable state space. Key source files by property and scope:
 
    **Whole-system scope** (read certus-server wiring + component internals):
    - 1,4: `components/dispatcher/src/lib.rs` (populate, lookup, evict_for_space, batch_lookup)
@@ -180,10 +187,11 @@ If the user provides a number (1-12), use that property. If they provide free te
    - **Properties Verified** table (ID, Property description, Type: Safety/Liveness)
    - **System Abstraction** table (Real component → Promela process)
    - **Assumptions / Stubs** section (for single-component scope: list what is abstracted away and how)
+   - **Specification basis** section: for each asserted property, cite the spec clause it enforces (`spec.md` FR-ID, `contracts/errors.md`, or the requirements checklist), and note any spec gap the model had to resolve by choosing the stronger safe interpretation
    - **Mutant** section: name the known-bad switch, what it toggles, and the expected fixed-vs-mutant outcomes
    - **Running** section with shell commands (including `make mutant` and the mutant trail replay)
    - **Tuning the Model** section explaining parameters
-   - **Correspondence to Source Code** table (Model location → Source file → Line range)
+   - **Correspondence** table with THREE columns: Model location → *Intended behavior (spec §/FR-ID)* → *Implemented behavior (source file:line)*. Where the spec and code columns diverge, that row is a finding.
 
 8. **Run BOTH verifications** in the new directory: `make` (fixed) and `make mutant`.
 
@@ -191,17 +199,19 @@ If the user provides a number (1-12), use that property. If they provide free te
    - The fixed build (`make`) must report **0 errors**. The mutant build (`make mutant`) must report **≥1 assertion violation**; replay its trail with `spin -t -p -g -l -D<MUTANT> <file>.pml` and confirm the interleaving is the intended hazard.
    - **If the fixed build fails**, first decide whether it is a real defect in the code (analyze the trail, report it to the user — do not silently weaken the model to make it green) or a modeling artifact (over-abstraction, a missing pin, wrong atomicity). Only relax the *model* when it is genuinely an artifact; a real counterexample against current code is a finding, not a bug in the model.
    - **If the mutant build passes**, the property is too weak — strengthen it (per the bug-finding conventions above) until the mutant fails, then re-confirm the fixed build still passes.
+   - **If the fixed build passes but contradicts the spec** — i.e. the code is self-consistent yet the modeled behavior violates a `spec.md`/`contracts/` clause — that is a code-vs-spec divergence. Report it as a finding (the model verified the wrong contract); do not treat a green run as success when the assertion came from the code instead of the spec.
 
 9. **Report results** to the user:
    - Scope (single component or whole system)
-   - Property being verified
+   - Property being verified, and the spec clause (FR-ID / contract) it was derived from — plus any spec gap or code-vs-spec divergence surfaced
    - Fixed build: pass/fail status, state space size, depth, coverage (target: 0 unreached in all proctypes, modulo deliberately-pruned mutant-only branches)
    - Mutant: which hazard it injects, and confirmation the model catches it (violation + trail)
    - Path to the new model directory
 
 ## Notes
 
-- **A model that only passes proves nothing.** The single most important discipline (step 5) is the known-bad mutant: a property is only as good as its ability to reject a buggy variant. If you cannot construct a plausible mutant that the model catches, the property is probably too weak to catch a real regression either. This is precisely why property #4 (populate-lookup linearizability) *passed* while the Check→Pin race shipped — it was written to tolerate the eviction-drop, and no mutant ever forced it to confront one.
+- **Assert from the spec, not from the code.** The property you check must come from the specification (`spec.md` / `contracts/` / requirements checklist), because a model whose assertion is paraphrased from the implementation can only ever confirm the code agrees with itself — it cannot catch a bug the code and your reading of it share. The code is for the *reachable states*; the spec is for the *allowed states*. (See step 2.)
+- **A model that only passes proves nothing.** The next most important discipline (step 5) is the known-bad mutant: a property is only as good as its ability to reject a buggy variant. If you cannot construct a plausible mutant that the model catches, the property is probably too weak to catch a real regression either. This is precisely why property #4 (populate-lookup linearizability) *passed* while the Check→Pin race shipped — it was written to tolerate the eviction-drop, and no mutant ever forced it to confront one.
 - Spin is installed at `~/.local/bin/spin` on this machine (run `modelling/spin/install-spin.sh --prefix $HOME/.local` and put `$HOME/.local/bin` on `PATH`; the older `/usr/local/bin/spin` location also works if present). The optional Tcl/Tk GUI is `ispin` (needs the `tk` package for `wish`).
 - Keep parameters small (2-3 clients, 2-4 keys, pool cap < key count) to maintain tractable state spaces (<10M states).
 - The model should be self-contained — no external dependencies beyond Spin and a C compiler.
