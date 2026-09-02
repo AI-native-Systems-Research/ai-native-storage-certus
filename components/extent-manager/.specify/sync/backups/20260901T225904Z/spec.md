@@ -2,23 +2,10 @@
 
 **Feature Branch**: `001-extent-manager-v2`
 **Created**: 2026-04-23
-**Updated**: 2026-09-01
+**Updated**: 2026-08-20
 **Status**: Active
 **Source**: Generated from implementation, updated for index-free key-vector design
 
-> **Last Synced 2026-09-01** (component-sync-specs):
-> - FR-030 corrected — the flush is issued only after **checkpoint** writes; the
->   stale "(and in the format path)" claim was removed. `format()` writes the
->   superblock (`lib.rs:496-498`) with no flush, and `README.md:66` /
->   `Cargo.toml:24-27` already describe checkpoint-only flush. (If format-time
->   durability is later wanted, that is a deliberate code change, not a doc sync.)
-> - FR-016 note refreshed — the "docs incorrectly state 'five minutes' / should be
->   corrected" remediation already landed (`iextent_manager.rs:205`, `README.md:13`
->   both say 30s); the stale language was replaced with a plain statement.
-> - `plan.md` diagram fixed: `checkpoint_interval_ms: AtomicU64 (default 5000)` →
->   `checkpoint_timer_state: Arc<CheckpointTimerState>` @ 30s; superblock `(v5)` →
->   `(v6)`.
->
 > **Last Synced 2026-08-20** (spec-sync Phase B):
 > - FR-030 backfilled — the cross-crate `volatile_write_cache` compile fix has
 >   **landed**: `Command::FlushSync` and `Completion::FlushDone` are defined in the
@@ -373,11 +360,13 @@ again to verify the old slot is now reusable.
   current (or next) checkpoint rather than starting a parallel one.
   This serializes all checkpoint I/O through a single writer.
 - **FR-016**: A background thread MUST call `checkpoint()` at a
-  configurable interval (default 30 seconds, set in the constructor
-  `ExtentManager::new_inner`, `lib.rs:112`). The `IExtentManager`
-  interface doc comment (`components/interfaces/src/iextent_manager.rs:205`)
-  and this component's `README.md` (`README.md:13`) document the
-  30-second default consistently.
+  configurable interval (default 30 seconds). Note: both the
+  `IExtentManager` interface doc comment
+  (`components/interfaces/src/iextent_manager.rs`) and this
+  component's `README.md` incorrectly state "five minutes" — the
+  actual default is 30 seconds as set in the constructor
+  (`ExtentManager::new_inner`). These are stale doc strings that
+  should be corrected to reference the true 30-second default.
 - **FR-017**: Recovery MUST attempt the active checkpoint copy first;
   if it is unreadable (CRC failure, media error), recovery MUST fall
   back to the inactive copy.
@@ -448,7 +437,7 @@ again to verify the old slot is now reusable.
   gate that controls whether explicit flush commands are issued to the
   metadata device. When **enabled**, the component issues a
   `BlockDeviceClient::flush()` to the metadata device after checkpoint
-  writes, forcing data onto non-volatile media
+  writes (and in the format path), forcing data onto non-volatile media
   at a throughput cost — appropriate for devices whose write cache is
   volatile and where durability must be guaranteed once `checkpoint()`
   returns. When **disabled** (the default), no explicit flush is issued,

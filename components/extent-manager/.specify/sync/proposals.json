@@ -1,37 +1,51 @@
 {
-  "generated": "2026-08-20T00:00:00Z",
-  "based_on": "drift-report 2026-08-20 (extent-manager, 2 drifted)",
-  "component": "extent-manager",
-  "phase": "B",
-  "summary": { "backfill": 2, "align": 0, "unspecced_backfill": 0, "resolved": 0, "human_decision": 0, "new_specs": 0, "remove_from_spec": 0 },
+  "generated": "2026-09-01T22:59:04Z",
+  "based_on": "drift-report 2026-09-01T22:59:04Z",
+  "commit": "33bddaba",
+  "summary": {
+    "backfill": 2,
+    "align": 0,
+    "human_decision": 1,
+    "new_specs": 0,
+    "remove_from_spec": 0,
+    "plan_doc_fixes": 2
+  },
   "proposals": [
     {
       "id": "P1",
+      "spec": "001-extent-manager-v2",
       "requirement": "FR-030",
       "direction": "BACKFILL",
-      "severity": "moderate",
-      "spec_text": "FR-030 parenthetical + top Sync note claimed: 'Implementation status 2026-08-07: this feature does not yet compile' — BlockDeviceClient::flush() missing, Command::FlushSync/Completion::FlushDone absent from interfaces; a fix drafted on a branch, an align-task queued, add a CI job.",
-      "actual": "The cross-crate fix has LANDED on the current code. BlockDeviceClient::flush() exists and is gated on volatile_write_cache (block_io.rs:168), sending Command::FlushSync and awaiting Completion::FlushDone. The interfaces crate defines FlushSync (iblock_device.rs:411) and FlushDone (iblock_device.rs:501). checkpoint path calls metadata_client.flush() under the feature gate (lib.rs:308-310). Feature compiles and is functional; the 'does not yet compile / drafted / queued' status is stale.",
-      "location": "components/extent-manager/src/block_io.rs:168; components/extent-manager/src/lib.rs:308-310; components/interfaces/src/iblock_device.rs:411,501",
-      "before": "(Implementation status 2026-08-07: this feature does not yet compile — see the Sync note at the top of this spec and `.specify/sync/align-tasks.md`.)",
-      "after": "(Implementation status 2026-08-20: implemented and building. `BlockDeviceClient::flush()` (`block_io.rs:168`) sends `Command::FlushSync` and awaits `Completion::FlushDone` — both defined in the interfaces crate (`iblock_device.rs:411,501`) — and is called from the checkpoint path (`lib.rs:308-310`). Enable with `--features volatile_write_cache`.)",
-      "rationale": "Spec-lag: the code caught up to (and satisfies) the intended FR-030 semantics; the stale 'does not compile' status is the only drift. BACKFILL removes the stale status text. Also refreshes the top Sync note that carried the same stale claim.",
+      "recommended": "correct-spec-prose",
+      "spec_text": "issues a flush to the metadata device after checkpoint writes (and in the format path)",
+      "actual": "flush() called only in checkpoint path (lib.rs:308-310); format() has no flush (lib.rs:496-498); README.md:66 and Cargo.toml:24-27 say checkpoint-only",
+      "proposed_edit": "Remove the '(and in the format path)' parenthetical from FR-030 prose.",
+      "alternative": "Add a feature-gated flush() after lib.rs:498 (behavior change, not applied automatically).",
       "confidence": "HIGH",
-      "approved": true
+      "human_decision": true
     },
     {
       "id": "P2",
-      "requirement": "plan.md-layout-refs",
+      "spec": "001-extent-manager-v2",
+      "requirement": "FR-016",
       "direction": "BACKFILL",
-      "severity": "minor",
-      "spec_text": "plan.md references a `block_device` receptacle (Technical Context 'Storage' block; Component Structure receptacle list) and a `components/extent-manager/v2/` source path (Project Structure tree).",
-      "actual": "The shipped component has only `metadata_device` + `logger` receptacles (spec FR-001) and a flat `src/` layout; there is no `v2/` path. The data path is caller-owned (dispatcher/dispatcher-p2p, FR-036) — the component performs no data-device I/O.",
-      "location": "components/extent-manager/specs/001-extent-manager-v2/plan.md:25,39,213",
-      "before": "Storage lists two IBlockDevice receptacles (`block_device` data device + `metadata_device`); Component Structure lists `block_device: IBlockDevice (data device)` receptacle; source tree rooted at `components/extent-manager/v2/`.",
-      "after": "Storage lists one `metadata_device` receptacle and notes the data device is caller-owned (not a receptacle); Component Structure drops the `block_device` receptacle with a note pointing to FR-036; source tree rooted at `components/extent-manager/`. A Last-Synced 2026-08-20 note records the refresh.",
-      "rationale": "Spec-lag in the planning doc: code/spec.md already agree on the metadata_device+logger receptacle model and flat src/. Backfill the plan to reality.",
+      "spec_text": "interface doc + README incorrectly state 'five minutes' ... should be corrected to 30-second default",
+      "actual": "iextent_manager.rs:205 and README.md:13 already say 30 seconds",
+      "proposed_edit": "Rewrite the FR-016 note to state the 30 s default plainly and drop the obsolete remediation language.",
       "confidence": "HIGH",
-      "approved": true
+      "human_decision": false
+    },
+    {
+      "id": "P3",
+      "spec": "001-extent-manager-v2",
+      "target": "plan.md",
+      "direction": "BACKFILL",
+      "edits": [
+        {"location": "plan.md:59", "from": "checkpoint_interval_ms: AtomicU64 (default 5000)", "to": "checkpoint_timer_state: Arc<CheckpointTimerState> (Mutex<Option<Duration>> + Condvar + shutdown), default 30s"},
+        {"location": "plan.md:229", "from": "superblock.rs ... (v5)", "to": "superblock.rs ... (v6)"}
+      ],
+      "confidence": "HIGH",
+      "human_decision": false
     }
   ]
 }
