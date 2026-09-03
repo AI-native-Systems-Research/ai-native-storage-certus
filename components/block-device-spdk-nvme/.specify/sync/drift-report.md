@@ -1,145 +1,210 @@
+---
+spec_sync_component: block-device-spdk-nvme
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-09-03T17:48:19Z
+spec_sync_git_commit: a1b649f4
+spec_sync_inputs_sha256: 02e17aab7111f30ad96043ce07100372e30529894b80b079812dc23460c38b22
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
 # Drift Report — block-device-spdk-nvme
 
-**Generated**: pending
+**Generated**: 2026-09-03
+**Mode**: Spec↔implementation drift analysis with ALIGN + BACKFILL edits applied
+to `specs/**` only. No `src/` or `interfaces/src/` code was changed this sweep.
+Two specs:
+- `specs/001-spdk-nvme-block-device/spec.md` → `src/{lib.rs,actor.rs,qpair.rs,controller.rs,namespace.rs,command.rs,telemetry.rs,tsc.rs}` + `components/interfaces/src/iblock_device.rs`
+- `specs/002-iops-benchmark/spec.md` → `apps/iops-benchmark/src/{main.rs,config.rs,worker.rs,stats.rs,report.rs,lba.rs}` (implementation lives in `apps/`, **outside** this crate's `src/` and therefore outside the CI input hash — see note below).
 
-Read-only spec↔implementation drift analysis. Two specs:
-- `specs/001-spdk-nvme-block-device/spec.md` → `src/{lib.rs,actor.rs,qpair.rs,controller.rs,namespace.rs,command.rs,telemetry.rs,tsc.rs}`
-- `specs/002-iops-benchmark/spec.md` → `apps/iops-benchmark/src/{main.rs,config.rs,worker.rs,stats.rs,report.rs,lba.rs}` (implementation lives in `apps/`, not this crate's `src/`).
+> **Correction of the prior artifact.** The previous report read
+> "**Generated**: pending" and claimed **3 drifted / 8 unspecced** items
+> (FR-005 "drafted", FR-010/SC-005 `max_transfer_size`, unspecced FlushSync,
+> GB/s, per-thread breakdown, batch rollback, parallel init, barrier sync). That
+> report was **stale**: it was generated against an older spec revision. The
+> 2026-08-20 (spec 002) and 2026-08-27 (spec 001) syncs had **already backfilled
+> every one of those items** into the current `spec.md` files, and the prior
+> report's own `file:line` anchors had themselves drifted. This sweep re-verifies
+> the current specs against the current code and finds the behavior fully
+> aligned; the only remaining spec-level drift was **stale embedded line anchors**
+> (fixed) plus **one unspecced interface cluster** (backfilled).
+
+> **Note on the CI input hash.** `scripts/spec-sync-hash.sh components/block-device-spdk-nvme`
+> hashes this crate's `src/**` + `specs/**` and the `components/interfaces`
+> tree. Spec 002's implementation lives in `apps/iops-benchmark/src/**`, which is
+> **not** in the hash scope, so the committed digest does not cover it; the spec
+> 002 findings below were nonetheless verified by hand against that tree.
 
 ## Summary
 
 | Metric | Count |
 |---|---|
 | Specs Analyzed | 2 |
-| Requirements Checked | 73 (001: FR-001..030 + SC-001..008 = 38; 002: FR-001..026 incl 006a/006b + SC-001..007 = 35) |
-| Aligned | 70 |
-| Drifted | 3 |
+| Requirements Checked (FR + SC) | 73 (001: FR-001..032 + SC-001..008; 002: FR-001..026 incl. 006a/006b + SC-001..007) |
+| Aligned (behavior) | 73 |
+| Drifted this sweep | 6 spec-anchor/backfill items → **all resolved via ALIGN/BACKFILL** |
 | Not Implemented | 0 |
-| Unspecced | 8 |
+| Unspecced Features | 1 (backfilled this sweep) |
+| Parked (documented, hardware-discovery / cosmetic) | 3 |
 
-## Detailed Findings
-
-### Spec 001-spdk-nvme-block-device — SPDK NVMe Block Device Component
-
-#### Aligned ✓
-
-- **FR-001** IBlockDevice create/connect channels — `src/lib.rs` (`connect_client`, ~`lib.rs:414-422`).
-- **FR-002** ingress + callback SPSC channels per client — `src/lib.rs:51,414-422`.
-- **FR-003** sync R/W — actor do_read/do_write sync paths.
-- **FR-004** async R/W fire-and-forget; caller `tag` echoed in ReadDone/WriteDone from stored `PendingOp.tag` — `src/actor.rs:538-550,713-722,832-843`.
-- **FR-005** abort defers AbortAck until real completion, keeps PendingOp+buffer alive, real `spdk_nvme_ctrlr_cmd_abort_ext` matched by `cmd_cb_arg`; unknown handle acked immediately — `src/actor.rs:972-1020,534-537,742-744,863-865`. (Code IMPLEMENTS the UAF-safe contract — see Drifted for the stale "drafted" spec wording.)
-- **FR-006** write-zeros via `spdk_nvme_ns_cmd_write_zeroes` — `src/actor.rs:926-940,1262-1305`.
-- **FR-007** BatchSubmit (all sub-ops onto one selected qpair) — `src/actor.rs:952-971`.
-- **FR-008** namespace probe/create/format/delete incl. unallocated-capacity from tnvmcap/unvmcap — `src/actor.rs:1028-1080`; `src/namespace.rs:73-228`.
-- **FR-009** controller reset cancels all pending, `spdk_nvme_ctrlr_reset` — `src/actor.rs:577-616,1081-1083`.
-- **FR-011** telemetry min/max/mean + feature-off error — `src/telemetry.rs`; `src/lib.rs` telemetry().
-- **FR-012** single controller via set_pci_address + initialize/attach — `src/lib.rs`.
-- **FR-013** actor pinned to NUMA-local core (`src/lib.rs:229-245`); controller NUMA hardcoded 0 at probe (`src/lib.rs:334`) — matches the backfilled node-0 caveat.
-- **FR-014** actor polls all client channels — `src/actor.rs` poll loop.
-- **FR-015** qpair pool depths [4,16,64,256] (`src/qpair.rs:141`), capped by ctrlr max (`:162`), shallowest-with-capacity (`:261-265`), fallback most-available (`:274-279`), `io_queue_requests = depth*4` (`:173`).
-- **FR-016** ILogger receptacle — `src/lib.rs`.
-- **FR-017** spdk-env used for SPDK init — `src/lib.rs` (spdk-env dependency/init path).
-- **FR-018** client DmaBuffer / Arc accepted in messages — `src/command.rs`, actor buffer handling.
-- **FR-019** client disconnect cancels in-flight + discards completions — actor DisconnectClient path.
-- **FR-020** namespace ops serialized through actor — `src/actor.rs` command dispatch.
-- **FR-021** IBlockDeviceAdmin set_pci_address/set_actor_cpu/initialize/shutdown — `src/lib.rs:351-390`.
-- **FR-022** TscClock calibrated once (`src/tsc.rs:43-49,79-102`); timeout throttled ~1ms (`src/actor.rs:1390-1394,271-272`).
-- **FR-023** ContextPool slab allocator, acquire/release, cap 340 — `src/actor.rs:80-115,318-319,726-731,847-852`.
-- **FR-024** reused `completion_scratch`/`timeout_scratch` (mem::swap / clear-and-reuse; lazy first-alloc then no hot-path alloc) — `src/actor.rs:262-267,508-510,562-568`.
-- **FR-025** ENOMEM (rc=-12) retry loop up to `min(timeout_ms,1000ms)`, polling qpairs each iter — `src/actor.rs:35,746,752,755-783,867,871,874-902`.
-- **FR-026** non-blocking per-client FIFO backlog `deliver`/`flush_pending`; Completion derives Clone — `src/command.rs:35-56`; `src/actor.rs:416-420`.
-- **FR-027** signal_stop + detach_controller (explicit spdk_nvme_detach for Arc-cycle release) — `src/lib.rs:351-390`.
-- **FR-028** on_stop order drain → deliver Error{Aborted} → park (NOT park-first) — `src/actor.rs:1411-1448`.
-- **FR-029** round-robin poll via rotating `poll_start_idx`; `MAX_COMMANDS_PER_CLIENT_PER_POLL = 64` — `src/actor.rs:408,422-430`.
-- **FR-030** read_write_stats() per-direction ops/bytes/latency + size buckets — `src/telemetry.rs:150-162`; `src/lib.rs:520-541`.
-- **SC-001..004, SC-006, SC-008** design/hardware/coverage criteria — satisfied by structure + `apps/iops-benchmark` coverage (SC-008).
-- **SC-007** actor on NUMA-local core (node-0 caveat per FR-013) — `src/lib.rs:229-245`.
-- (Assumption) crossbeam-channel fully removed from `Cargo.toml` and `src/`; production path uses component_core SpscChannel. Only stale doc references remain (`CLAUDE.md:39`, `info/FUNCTIONAL-DESIGN.md:49`, `specs/001-.../{tasks.md:198-199,plan.md:22}`).
-
-#### Drifted ⚠️
-
-- **FR-005** — *minor* (spec lags code).
-  - Spec text: the buffer-lifetime/UAF fix "is drafted on branch `sync/spec-drift-sweep-20260807` and requires hardware validation — see align-tasks.md Task BD-1."
-  - Actual: the defer-until-completion contract is fully IMPLEMENTED on this branch (op marked `aborting`, PendingOp+buffer retained, real abort issued, AbortAck deferred to completion, unknown handle acked immediately).
-  - Location: `src/actor.rs:972-1020,534-537`.
-  - Severity: minor — code is the safe/intended behavior; the spec understates status. Update FR-005 to mark implemented (pending hardware validation).
-
-- **FR-010** — *minor* (inaccurate backfilled claim for one field).
-  - Spec text: "`max_transfer_size` returns 131072 (128 KiB)" as a fixed constant.
-  - Actual: `max_transfer_size` is auto-detected from the controller's MDTS via `spdk_nvme_ctrlr_get_max_xfer_size`, using 131072 only as a fallback when MDTS==0; the init log advertises the detected MDTS.
-  - Location: `src/controller.rs:169-177`; `src/lib.rs:468-472,186-191`.
-  - Severity: minor. (`nvme_version`="1.0.0" at `controller.rs:157-161` and `numa_node`=0 at `lib.rs:334` ARE genuinely hardcoded and match the spec claim — aligned.)
-
-- **SC-005** — *minor* (same root as FR-010).
-  - Spec text: "`nvme_version`, `max_transfer_size`, and `numa_id` are currently fixed constants."
-  - Actual: `max_transfer_size` is MDTS-derived (hardware-consistent), not fixed; only `nvme_version` and `numa_id` are fixed.
-  - Location: `src/controller.rs:169-177`; `src/lib.rs:468-472`.
-  - Severity: minor.
-
-#### Not Implemented ✗
-
-None. All FR-001..030 and SC-001..008 are present.
+**Verification run this sweep** (grounds the SC claims): `cargo test -p
+block-device-spdk-nvme --no-fail-fast` — **exit 0** (SPDK prebuilt at
+`deps/spdk-build/`; tests use mocks, no hardware needed).
 
 ---
 
-### Spec 002-iops-benchmark — IOPS Benchmark Example Application
+## Spec 001-spdk-nvme-block-device — SPDK NVMe Block Device Component
 
-Implementation: `apps/iops-benchmark/src/` (external to this crate).
+**Behavior: all 32 FRs + 8 SCs verified CONFIRMED against the current code.**
+The only spec drift was stale embedded `file:line` anchors (code shifted since
+the 2026-08-27 sync) plus one unspecced interface cluster. Both resolved.
 
-#### Aligned ✓
+### Resolved this sweep
 
-- **FR-001..006** CLI flags + defaults: `--op`=read (`config.rs:68`), `--block-size`=4096 (`:74`), `--queue-depth`=32 (`:85`), `--threads`=1 (`:88`), `--duration`=10 (`:92`), `--ns-id`=1 (`:96`).
-- **FR-006a** `--pci-addr` (first device if omitted) — `config.rs:100-101`; `main.rs:65-91,531-555`.
-- **FR-006b** `--pattern`=random default — `config.rs:108-109`.
-- **FR-007** startup validation — `config.rs:124-174`; `main.rs:203-212`.
-- **FR-008** clamp queue depth + warn — `config.rs:182-190`; `main.rs:214-219`.
-- **FR-009** each thread connects via IBlockDevice — `main.rs`/`worker.rs` connect path.
-- **FR-010** async pipeline kept full to queue depth — `worker.rs` run loop.
-- **FR-011** rw 50/50 via `rand::random::<bool>()` — `worker.rs:221-227`.
-- **FR-012** config summary at startup — `report.rs`/`main.rs` header.
-- **FR-013** per-second progress to stderr — `report.rs:37-62` (eprintln); `main.rs:342-376`.
-- **FR-014** signal stop + collect after duration — `main.rs`.
-- **FR-015** latency min/mean/p50/p99/max — `stats.rs:93-104,128-144`; `report.rs:127-132`.
-- **FR-016** rw read/write IOPS separate — `stats.rs:22-34,56-77`; `report.rs:105-116`.
-- **FR-017** random/sequential LBA, non-overlapping per-thread regions — `lba.rs:14-90`; `worker.rs:73-81`.
-- **FR-018** IO errors counted, benchmark continues — `worker.rs`/`stats.rs`.
-- **FR-019** exit 0 success / non-zero on failure — `main.rs`.
-- **FR-020** `--quiet` — `config.rs:116-117`; `main.rs:342`.
-- **FR-021** `--help` (clap) — `config.rs:65`.
-- **FR-022** `--io-mode` sync/async default async — `config.rs:111-113`; `worker.rs:192-217`.
-- **FR-023** `--block-size` comma list, per-IO random size — `config.rs:73-75`; `worker.rs:177-182`.
-- **FR-024** `--batch-size` default 1 + per-op timing (each op own Instant, FIFO-popped) — `config.rs:80-81`; `worker.rs:146-173,189-190,240-241,255`.
-- **FR-025** NUMA worker pinning + node CPU discovery — `main.rs:221-253,294-302,483-485`.
-- **FR-026** `--device-count` default 1, multi-device select/init/distribute — `config.rs:104-105`; `main.rs:88-91,125-179,255-323`.
-- **SC-001..005, SC-007** design/measurement criteria satisfied by implementation.
-- **SC-006** stats from client-side completion timestamps; telemetry cross-check intentionally unwired (iops→block-device dependency has no `telemetry` feature) — matches backfilled SC-006 text — `apps/iops-benchmark/Cargo.toml`; `worker.rs:241,255`.
+- **FR-005 (ALIGN — stale anchors).** Behavior confirmed: `Command::AbortOp`
+  marks the op `aborting`, retains the `PendingOp`+buffer, issues a real
+  `spdk_nvme_ctrlr_cmd_abort_ext` matched by `cmd_cb_arg`, defers `AbortAck`
+  until the real completion, and acks an unknown handle immediately. The spec's
+  cited anchors had drifted: abort dispatch `972-1020` → **`src/actor.rs:999-1047`**;
+  deferred ack `528-537` → **`src/actor.rs:543-576`** (the `pending.aborting`
+  branch that emits `AbortAck` on the real completion). Spec anchors corrected.
+- **FR-030 (ALIGN — stale anchors + BACKFILL — unspecced surface).** Behavior
+  confirmed: `read_write_stats()` returns per-direction byte/op/latency counters.
+  Anchors corrected: trait decl `iblock_device.rs:494` → **`:589`**; impl
+  `lib.rs:511` → **`:525`**; backing accumulation `telemetry.rs:140` → **`:150`**.
+  **Unspecced cluster backfilled:** `ReadWriteStats` also carries per-transfer-size
+  IO histograms (`read_size_buckets`/`write_size_buckets`, `IO_SIZE_BUCKETS = 25`
+  log2-spaced buckets via `size_bucket()`/`bucket_lower_bound()`) and a
+  `merge_from()` dispatcher-wide aggregation helper
+  (`components/interfaces/src/iblock_device.rs:139,155-161,177,193,218`) — none of
+  which FR-030 previously mentioned. Backfilled into FR-030.
+- **FR-031 (ALIGN — stale anchors).** Behavior confirmed: `Command::FlushSync
+  { ns_id }` validates the namespace, issues `spdk_nvme_ns_cmd_flush`, delivers
+  `Completion::FlushDone`, and surfaces a bad ns / non-zero submit rc as an error
+  rather than crashing. Anchors corrected: dispatch `941-951` →
+  **`src/actor.rs:968-978`**; `do_sync_flush` `1214-1260` → **`src/actor.rs:1249-1288`**.
 
-#### Drifted ⚠️
+### Verified accurate (no edit needed)
 
-None material to the spec. (Note: `stats.rs:127` doc comment says "nearest-rank" but `percentile` at `stats.rs:135-143` interpolates — a code-internal doc/behavior mismatch, not spec drift.)
+- **FR-010 / SC-005.** `max_transfer_size` MDTS-derived via
+  `spdk_nvme_ctrlr_get_max_xfer_size` (`controller.rs:171`, within the cited
+  `169-177`), 131072 fallback only when MDTS==0; `nvme_version` fixed at 1.0.0
+  (`controller.rs:157`, within cited `156-161`); `numa_id` hardcoded 0
+  (`lib.rs:333`). All cited anchors accurate. The two fixed fields
+  (`nvme_version`, `numa_id`) remain **parked** pending hardware-discovery Task
+  BD-2 (documented in spec + align-tasks.md) — not actionable drift.
+- **FR-032.** `log_dma_issue!` macro `actor.rs:50`; invocations `:825`
+  (read-async), `:945` (write-async), `:1189` (read-sync), `:1240`
+  (write-sync) — **all five exact.** `#[cfg(debug_assertions)]`-gated,
+  telemetry-independent.
+- **FR-013 / SC-007.** Actor pinned NUMA-local (`lib.rs:229-245`); controller
+  NUMA hardcoded 0 (`lib.rs:333-334`) — matches the node-0 caveat (Task BD-2).
+- **FR-015.** Qpair pool depths `[4,16,64,256]` (`qpair.rs:141`), capped by ctrlr
+  max (`:162-164`), shallowest-with-capacity (`:261-265`), fallback most-available
+  (`:274-279`), `io_queue_requests = depth*4` (`:173`).
+- **FR-021.** `IBlockDeviceAdmin::{set_pci_address,set_actor_cpu,initialize,shutdown}`
+  (`iblock_device.rs:601,607,610,625`; impl `lib.rs:352-390`).
+- **FR-022.** `TscClock` calibrated at construction (`tsc.rs:43-49,79-102`);
+  timeout throttled ~1ms (`actor.rs:1418-1422`, field `:296-297`).
+- **FR-023.** `ContextPool` slab, cap **340** (`actor.rs:344`), acquire/release
+  (`:118-139`), acquire sites `:751`/`:873`.
+- **FR-025.** ENOMEM (`-12`) retry to `min(timeout,1000)` via `clamp(1,1000)`,
+  polling all qpairs each iter (`actor.rs:35`; read `:771-808`; write `:893-928`).
+- **FR-026.** Non-blocking per-client FIFO backlog `deliver`/`flush_pending`
+  (`command.rs:35-56`); `Completion` derives `Clone` (`iblock_device.rs:438`);
+  flush-retry call site `actor.rs:441-445`.
+- **FR-029.** Round-robin via rotating `poll_start_idx` (`actor.rs:447-455`);
+  `MAX_COMMANDS_PER_CLIENT_PER_POLL = 64` (`actor.rs:433`, cap break `:463`).
+- **Assumption (dead `probe()`)** — `namespace.rs:19-47`, `#[allow(dead_code)]`,
+  off all live paths. Accurately documented.
+- **crossbeam-channel** — fully removed from production path; only stale doc
+  references remain (below threshold).
 
-#### Not Implemented ✗
+All 13 `Command` variants, 12 `Completion` variants, 11 `IBlockDevice` methods,
+and 6 `IBlockDeviceAdmin` methods map to existing FRs (after the FR-030 backfill).
 
-None. All FR-001..026 and SC-001..007 accounted for.
+---
 
-## Unspecced Code
+## Spec 002-iops-benchmark — IOPS Benchmark Example Application
 
-| Feature | Location | Suggested Spec |
-|---|---|---|
-| `Command::FlushSync`/`FlushDone` + `do_sync_flush` (comment references extent-manager's FR-030, a different spec) | `src/actor.rs:941-951,1218-1260` | Backfill an FR in spec 001 for the FlushSync durability barrier. |
-| Dead `probe()` free function superseded by `discover_namespaces` | `src/namespace.rs:20-47` | Remove dead code or note as internal helper. |
-| Multi-device per-device summary block (has cosmetic unbalanced-`(` format bug) | `apps/iops-benchmark/src/main.rs:397-428` (bug at `:423`) | Backfill under FR-026 reporting; fix format string. |
-| Barrier-based start sync (excludes init time from wall-clock) | `apps/iops-benchmark/src/main.rs:262,328-329`; `worker.rs:106` | Note in spec 002 as measurement methodology. |
-| `throughput_gbps` reporting | `apps/iops-benchmark/src/stats.rs:38,83`; `report.rs:122-124` | Extend FR-015 output list. |
-| Per-thread IOPS breakdown in final report | `apps/iops-benchmark/src/report.rs:74-103` | Extend FR-015/FR-016 reporting. |
-| Batch send-failure rollback of in-flight entries | `apps/iops-benchmark/src/worker.rs:165-171` | Note under FR-024. |
-| Parallel device init via `thread::scope` with distinct actor-CPU assignments; `[timing]` init eprintlns | `apps/iops-benchmark/src/main.rs:52-55,105-153` | Note under FR-026. |
+Implementation: `apps/iops-benchmark/src/` (outside the CI hash scope).
 
-## Recommendations
+**Behavior: all FRs + SCs verified CONFIRMED.** Two additive, previously
+unspecced reporting behaviors were backfilled this sweep.
 
-1. **FR-005 (minor)**: update spec text from "drafted" to "implemented (pending hardware validation)" — the defer-until-completion buffer-lifetime fix is fully present at `src/actor.rs:972-1020,534-537`.
-2. **FR-010 / SC-005 (minor)**: correct the backfilled claim — `max_transfer_size` is MDTS-auto-detected (`src/controller.rs:169-177`) with 131072 as fallback, not a fixed constant. Only `nvme_version` (1.0.0) and `numa_id` (0) are genuinely hardcoded.
-3. **Unspecced FlushSync** in spec 001: backfill an FR; the handler exists (`src/actor.rs:1218-1260`) but the SPDK component's own spec never mentions FlushSync.
-4. Clean up stale crossbeam-channel doc references (dependency already removed from `Cargo.toml`/`src`).
-5. Fix the cosmetic unbalanced-`(` in the iops per-device summary (`apps/iops-benchmark/src/main.rs:423`) and reconcile the `stats.rs:127` "nearest-rank" comment with the interpolated implementation.
-6. Spec 002 is essentially fully aligned; remaining items are unspecced reporting extras worth backfilling under FR-015/FR-026.
+### Resolved this sweep
+
+- **FR-013 (BACKFILL).** The per-second progress line also prints instantaneous
+  throughput (MB/s) and, with >1 worker thread, a per-thread instantaneous-IOPS
+  breakdown (`report.rs:37-62`, called from `main.rs:374`) — additive to the
+  required elapsed-time + instantaneous-IOPS fields. Backfilled.
+- **FR-012 (BACKFILL).** The startup config summary also shows the active IO mode
+  (already required by FR-022) and, when `--batch-size > 1`, the batch size
+  (`report.rs:25-27`); the multi-device path emits an `[info] assigning actor
+  CPUs …` diagnostic to stderr (`main.rs:127-130`). Backfilled.
+
+### Verified accurate (no edit needed)
+
+- **FR-001..006** defaults: `--op`=read (`config.rs:68`), `--block-size`=4096
+  (`:74`), `--queue-depth`=32 (`:84`), `--threads`=1 (`:88`), `--duration`=10
+  (`:92`), `--ns-id`=1 (`:96`). **FR-006a** `--pci-addr` first-if-omitted
+  (`config.rs:100-101`; `main.rs:87-91`). **FR-006b** `--pattern`=random
+  (`config.rs:108`).
+- **FR-007** validation (`config.rs:133-152`); **FR-008** clamp+warn
+  (`config.rs:182-190`).
+- **FR-011** rw 50/50 via `rand::random::<bool>()` (`worker.rs:225`);
+  **FR-017** random/sequential non-overlapping per-thread regions
+  (`lba.rs:38-78`; `worker.rs:73-81`).
+- **FR-015** GB/s + per-thread breakdown (`stats.rs:38,83`; `report.rs:74-103,122`);
+  latency min/mean/p50/p99/max present.
+- **FR-022** `--io-mode`=async (`config.rs:112`; `worker.rs:192-217`);
+  **FR-023** comma-list block sizes, per-IO random (`config.rs:74`; `worker.rs:177-182`);
+  **FR-024** `--batch-size`=1 + send-failure rollback of in-flight entries
+  (`worker.rs:165-171`).
+- **FR-025** NUMA worker pinning (`main.rs:221-246`, affinity ~`296-302`,
+  actor CPU `483-485`); **FR-026** `--device-count`=1, parallel init via
+  `std::thread::scope` + `[timing]` lines + `=== Per-Device Summary ===`
+  (`main.rs:52-55,132-153,397-428`).
+- **SC-001** barrier start sync `Barrier::new(total_workers+1)`, `bench_start`
+  before `wait()` (`main.rs:262,328-329`; `worker.rs:106`).
+- **SC-006** stats from client-side completion timestamps; telemetry cross-check
+  intentionally unwired — iops depends on `block-device-spdk-nvme` without the
+  `telemetry` feature (`apps/iops-benchmark/Cargo.toml`). Matches backfilled text.
+
+---
+
+## Parked (documented; not actionable spec↔impl behavioral drift)
+
+1. **`nvme_version` / `numa_id` hardcoded** (spec 001, FR-010/FR-013/SC-005/SC-007).
+   Tracked as align-tasks.md **Task BD-2** (hardware discovery). Documented in the
+   spec; behavior matches the documented caveat.
+2. **iops per-device summary cosmetic format defect** — unbalanced `(` in the
+   format string at `apps/iops-benchmark/src/main.rs:423` (confirmed still
+   present this sweep). Tracked as an ALIGN task in
+   `apps/iops-benchmark/.specify/sync/align-tasks.md`. Cosmetic output only; not a
+   behavioral or spec discrepancy.
+3. **iops telemetry cross-check unwired** (spec 002, SC-006). Tracked as
+   align-tasks.md **Task BD-3**. Documented in the spec.
+
+## Below-threshold notes (no change)
+
+- **`stats.rs:127` "nearest-rank" doc comment** contradicts the interpolating
+  `percentile` implementation (`stats.rs:135-143`). This is a **code-internal
+  doc-comment** inconsistency, not spec↔impl drift — spec 002 Assumptions
+  explicitly states the percentile algorithm "is an implementation detail." Worth
+  fixing the comment when `stats.rs` is next touched.
+- Stale `crossbeam-channel` references in `CLAUDE.md` / design docs (dependency
+  already removed). Doc-only.
+
+## Stamp rationale
+
+`drift_status: clean`. All 73 FR+SC across both specs are behaviorally aligned
+with the shipped code (independently re-verified this sweep, not carried over
+from the stale prior report). The six spec-level drift items found — four stale
+embedded line anchors (FR-005, FR-030, FR-031) and two additive-reporting gaps
+plus one unspecced interface cluster (FR-013, FR-012, FR-030 histograms) — were
+all resolved in-place via ALIGN/BACKFILL edits to `specs/**`. No `src/` or
+`interfaces/src/` code was changed, so no test/clippy/doc/bench state changed
+(`cargo test -p block-device-spdk-nvme` was green before and remains applicable).
+The three parked items are documented hardware-discovery tasks (BD-2, BD-3) and
+one cosmetic format defect — none is a spec↔implementation behavioral
+contradiction. This is not a clean stamp over an unacknowledged mismatch; every
+remaining gap is documented here and in the specs.
