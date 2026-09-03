@@ -78,7 +78,7 @@ A system builder uses the component registry to create components by name and th
 ### Edge Cases
 
 - What happens when a factory panics during component construction? The registry must not leave corrupted state; the error is propagated to the caller.
-- What happens when all explicit ComponentRef handles are released while a receptacle still points to a component's interface? Since receptacles hold Arc references, the component stays alive as long as any receptacle is connected. The component is only destroyed when all references (both explicit handles and receptacle connections) are dropped.
+- What happens when all explicit ComponentRef handles are released while a receptacle still points to a component's interface? Since receptacles hold Arc references, the component stays alive as long as any receptacle is connected. Dropping every external reference (explicit handles and receptacle connections) *should* destroy the component — but see the FR-018 known limitation: a `define_component!`-generated component currently also holds strong `Arc` self-clones in its interface map, so in the shipped implementation the component is retained until process exit even after all external references drop.
 - What happens when the registry is accessed concurrently from multiple threads? All registry operations (register, unregister, create) must be thread-safe.
 - What happens when a third-party assembler attempts to bind a receptacle that is already connected? The existing "already connected" error from the receptacle system applies.
 - What happens when attach is called on a component reference after the component has been destroyed? Since ComponentRef wraps Arc and receptacles also hold Arc, this situation cannot arise — Rust's ownership system prevents access to dropped values at compile time.
@@ -106,11 +106,22 @@ A system builder uses the component registry to create components by name and th
 - **FR-017**: Third-party binding MUST resolve string names to TypeId internally and produce a clear error when the resolved types are not compatible.
 - **FR-019**: Third-party binding MUST accept a provider component reference, a provider interface name, a consumer component reference, and a consumer receptacle name to perform a single wiring operation.
 - **FR-018**: Factory functions MUST return components wrapped in a single
-  `ComponentRef`. The caller holds exactly one external reference. Internal
-  reference count may be higher due to implementation details (e.g., the
-  interface map holds Arc clones for query support). The component MUST be
-  destroyed when all external `ComponentRef` handles and receptacle
-  connections are dropped.
+  `ComponentRef`. The caller holds exactly one external reference. The internal
+  reference count is higher: to support `query`, the `define_component!`-generated
+  interface map holds one strong `Arc` self-clone per provided interface plus one
+  for `IUnknown`.
+  - **Known limitation (2026-09-03):** these interface-map self-clones are strong
+    `Arc`s, not `Weak`, and the generated component emits no teardown that clears
+    the map. As a result a `define_component!`-generated component retains a
+    self-reference: dropping all external `ComponentRef` handles and receptacle
+    connections does **not** drive the strong count to zero, so the component's
+    heap allocation is not reclaimed until process exit. The `ComponentRef`/`Arc`
+    refcount primitive itself is correct (see FR-009–FR-013); the retention is
+    confined to the macro's interface-map self-clone.
+  - **Intended behavior (future fix):** store the interface-map self-clones as
+    `Weak` and upgrade on `query`, so the component is destroyed once all external
+    `ComponentRef` handles and receptacle connections are dropped. Tracked in the
+    `002` drift report (`.specify/sync/drift-report.md`).
 - **FR-020**: The registry MUST provide a simplified factory registration method (`register_simple`) that accepts a closure returning a `ComponentRef` without requiring a configuration parameter. This is syntactic sugar over FR-003 for components that need no configuration.
 
 ### Key Entities
@@ -125,7 +136,7 @@ A system builder uses the component registry to create components by name and th
 ### Measurable Outcomes
 
 - **SC-001**: Developers can register a factory and create a component by name in under 5 lines of code.
-- **SC-002**: Reference counting correctly manages component lifetime — zero leaks and zero use-after-free in all test scenarios.
+- **SC-002**: The reference-counting mechanism (`ComponentRef`/`Arc` attach, release, `Drop`, cross-thread) manages lifetime correctly with zero use-after-free in all test scenarios. **Known limitation (2026-09-03):** components created via `define_component!` additionally retain strong `Arc` self-clones in their interface map (see FR-018), so those components are not reclaimed when external references drop. "Zero leaks" holds for the refcount primitives and receptacle wiring, but not for the macro's interface-map self-reference; the intended `Weak`-based fix is tracked in the `002` drift report.
 - **SC-003**: Concurrent registry access from 10+ threads produces no data races or incorrect results.
 - **SC-004**: First-party binding works identically to the existing receptacle wiring mechanism (backward compatible).
 - **SC-005**: Third-party binding can wire any two compatible components without compile-time knowledge of their concrete types.

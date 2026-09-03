@@ -1,8 +1,0 @@
-vllm:prefix_cache_queries_total{engine="0",model_name="/root/.cache/huggingface/hub/models--NousResearch--Meta-Llama-3-8B/snapshots/315b20096dc791d381d514deb5f8bd9c8d6d3061"} 105035.0
-vllm:prefix_cache_queries_created{engine="0",model_name="/root/.cache/huggingface/hub/models--NousResearch--Meta-Llama-3-8B/snapshots/315b20096dc791d381d514deb5f8bd9c8d6d3061"} 1.7852624105755057e+09
-vllm:prefix_cache_hits_total{engine="0",model_name="/root/.cache/huggingface/hub/models--NousResearch--Meta-Llama-3-8B/snapshots/315b20096dc791d381d514deb5f8bd9c8d6d3061"} 0.0
-vllm:prefix_cache_hits_created{engine="0",model_name="/root/.cache/huggingface/hub/models--NousResearch--Meta-Llama-3-8B/snapshots/315b20096dc791d381d514deb5f8bd9c8d6d3061"} 1.7852624105755246e+09
-vllm:external_prefix_cache_queries_total{engine="0",model_name="/root/.cache/huggingface/hub/models--NousResearch--Meta-Llama-3-8B/snapshots/315b20096dc791d381d514deb5f8bd9c8d6d3061"} 0.0
-vllm:external_prefix_cache_queries_created{engine="0",model_name="/root/.cache/huggingface/hub/models--NousResearch--Meta-Llama-3-8B/snapshots/315b20096dc791d381d514deb5f8bd9c8d6d3061"} 1.7852624105755444e+09
-vllm:external_prefix_cache_hits_total{engine="0",model_name="/root/.cache/huggingface/hub/models--NousResearch--Meta-Llama-3-8B/snapshots/315b20096dc791d381d514deb5f8bd9c8d6d3061"} 0.0
-vllm:external_prefix_cache_hits_created{engine="0",model_name="/root/.cache/huggingface/hub/models--NousResearch--Meta-Llama-3-8B/snapshots/315b20096dc791d381d514deb5f8bd9c8d6d3061"} 1.785262410575744e+09
