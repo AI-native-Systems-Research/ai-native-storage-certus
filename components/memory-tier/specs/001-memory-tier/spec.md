@@ -4,7 +4,7 @@
 **Created**: 2026-07-08
 **Status**: Backfilled — aligned to implementation
 **Source**: Generated from existing implementation
-**Last-Synced**: 2026-08-20 (spec-sync Phase B: backfilled to the single-`RwLock<Pool>` reality; see "Spec-Sync Notes" at end)
+**Last-Synced**: 2026-09-03 (spec-sync: version reconciled to 0.3.0 and residual interface-doc sharding drift resolved; single-`RwLock<Pool>` reality confirmed. See "Spec-Sync Notes" at end)
 
 ## Backfill Notice
 > This spec was generated from existing code via `speckit.sync.backfill`.
@@ -188,7 +188,7 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | NFR-005 | Allocator uses BTreeMap for O(log n) first-fit search | Implementation |
 | NFR-006 | Pool memory is properly freed on Drop (munmap or spdk_free) | Implementation |
 | NFR-007 | Default pool size is 256 MiB | Implementation |
-| NFR-008 | Component version is 0.2.0 | Cargo.toml |
+| NFR-008 | Component version is 0.3.0 | Cargo.toml |
 | NFR-009 | SPDK feature is optional (compile-time gated) | Cargo.toml |
 | NFR-010 | Returned pointers are DMA-suitable (page-aligned, contiguous) | Architecture |
 | NFR-011 | `telemetry` feature is zero-cost when disabled (counters compiled out entirely, not just unused) | Cargo.toml *(backfilled)* |
@@ -267,13 +267,16 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 >   "formally proved / N shards" overclaiming was removed from the `IMemoryTier` interface docs.
 >   These claims are intentionally **not** re-added.
 >
-> Still open (HUMAN_DECISION):
-> - **NFR-008 (component version).** Three values disagree — `Cargo.toml` = `0.1.0`,
->   `define_component!` macro = `0.3.0`, this spec = `0.2.0`. No single value is authoritative,
->   so the spec text is left unchanged pending a maintainer decision to reconcile all three
->   (see `.specify/sync/align-tasks.md`). This is the only item not resolved by backfill; it
->   requires editing `Cargo.toml` and `src/lib.rs`, which are out of scope for this pass.
+> Resolved 2026-09-03 (this pass):
+> - **NFR-008 (component version).** The previous three-way mismatch (`Cargo.toml` = `0.1.0`,
+>   `define_component!` macro = `0.3.0`, spec = `0.2.0`) was reconciled to **0.3.0** by maintainer
+>   decision — the runtime-reported `define_component!` value is authoritative. `Cargo.toml`
+>   (`version = "0.3.0"`) and NFR-008 were updated to match; the macro was already `0.3.0`.
+> - **Residual interface-doc sharding drift.** The `evict_next_for_key` doc comment in
+>   `components/interfaces/src/imemory_tier.rs` still described eviction "from the same shard as
+>   `key`" / "target shard is empty". It was rewritten to state that the method is an alias for
+>   `evict_next` and that `key` is ignored (single unsharded pool), matching FR-014 and the code.
+>   The Creusot/`P4/P5/P10` "Verified" overclaiming had already been removed from that file in the
+>   Phase B pass.
 >
-> Note: a residual "same shard as `key`" phrase remains in the `evict_next_for_key` doc comment
-> in `components/interfaces/src/imemory_tier.rs` (outside this component's edit scope). The
-> Creusot/`P4/P5/P10` "Verified" overclaiming was already removed from that interface file.
+> No open items remain.

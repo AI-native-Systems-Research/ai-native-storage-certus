@@ -1,106 +1,111 @@
+---
+spec_sync_component: memory-tier
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-09-03T17:00:41Z
+spec_sync_git_commit: 8efc5284
+spec_sync_inputs_sha256: 14e633dff59773a32d0a6d094cd85b179400b37f9f30a603b8826dcfcc0e4813
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
 # Spec ↔ Implementation Drift Report — memory-tier
 
-**Generated**: pending
+**Generated**: 2026-09-03
+**Mode**: Read-only drift analysis, then ALIGN (doc→reality) + version reconciliation applied.
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
 | Specs Analyzed | 1 |
-| Requirements Checked | 40 (29 FR + 11 NFR) + 8 SC |
-| Aligned | 33 |
-| Drifted | 8 |
-| Not Implemented | 3 |
+| Requirements Checked | 40 (29 FR + 11 NFR) + 7 SC |
+| Aligned | 40 |
+| Drifted (this sweep) | 2 → both resolved |
+| Not Implemented | 0 |
 | Unspecced | 0 |
 
-The dominant drift is the **16-way sharding architecture** described throughout
-the spec that does not exist in code (single `RwLock<Pool>`). The spec's own
-"Spec-Sync Notes (2026-07-22)" already enumerate most of these as intentionally
-deferred; this report confirms they still hold and adds the stale
-verification-claim finding.
+The 2026-08-20 Phase B backfill already rewrote the spec to describe the shipped
+**single-`RwLock<Pool>`** design (retiring the never-built "16-way sharded pool +
+Creusot-verified properties" narrative). This sweep confirms code and spec agree
+on that reality and resolves the two items Phase B had left open:
+
+1. the residual sharding language in the shared `IMemoryTier` doc comment, and
+2. the three-way component-version mismatch (NFR-008).
+
+Both are now fixed; no actionable drift remains.
 
 ## Spec: 001-memory-tier — Memory Tier (DRAM Cache Pool)
 
-### Aligned ✓
+### Aligned ✓ (verified this sweep)
 
 | Req | Evidence |
 |-----|----------|
 | FR-001 single contiguous mmap region | `src/lib.rs:190-224` (`alloc_mmap`) |
-| FR-002 hugepage w/ fallback | `MAP_HUGETLB` then plain mmap `src/lib.rs:195-223` |
+| FR-002 hugepage w/ fallback | `MAP_HUGETLB` then plain mmap `src/lib.rs:200-223` |
 | FR-003 spdk_zmalloc when SPDK active | `src/lib.rs:277-303` |
-| FR-004 4 KiB alignment | `ALIGNMENT=4096`, `next_multiple_of` `src/allocator.rs:5,42,60` |
+| FR-004 4 KiB alignment | `ALIGNMENT`/`next_multiple_of` `src/allocator.rs` |
+| FR-005 single unsharded pool behind one `RwLock<Pool>` | `struct Pool` + `pool: RwLock<Pool>` `src/lib.rs:76-85`; re-created in `initialize` `:313-316` |
+| FR-006 read ops shared lock / mutations exclusive lock | reads `state.pool.read()` (`get :401`, `peek :418`, `contains :563`, `batch_touch :545`, `capacity :572`, `used :582`); mutations `state.pool.write()` (`insert :354`, `remove :494`, `evict_next :454`, `clear :602`) |
+| FR-007 one first-fit `FreeList` + one `HashMap<CacheKey,Slot>` | `struct Pool { allocator: FreeList, slots: HashMap<..> }` `src/lib.rs:76-79` |
 | FR-008 insert zero size → InvalidSize | `src/lib.rs:329-331` |
 | FR-009 insert duplicate → AlreadyExists | `src/lib.rs:356-358` |
 | FR-010 insert PoolFull | `src/lib.rs:360-363` |
 | FR-011 get returns ptr+size, updates order | `src/lib.rs:381-410` |
 | FR-012 peek without order update | `src/lib.rs:412-422` |
+| FR-013 evict_next delegates to `identify_next_to_evict`; no shard counter | `src/lib.rs:434-466` |
+| FR-014 evict_next_for_key is an alias for evict_next; `_key` ignored | `src/lib.rs:468-470` |
 | FR-015 remove frees; KeyNotFound absent | `src/lib.rs:472-503` |
 | FR-016 touch updates order | `src/lib.rs:505-518` |
 | FR-017 batch_touch amortizes lock | `src/lib.rs:520-555` |
 | FR-018 clear resets, returns count | `src/lib.rs:594-608` |
 | FR-019 NUMA mbind w/ fallback | `src/lib.rs:225-254` |
 | FR-020 is_dma_capable true only for SPDK | `src/lib.rs:610-613` |
+| FR-021 oldest_keys = single `get_eviction_candidates(pool_id, n)` call | `src/lib.rs:424-432` |
 | FR-022 pool_info base ptr + size | `src/lib.rs:585-592` |
 | FR-023 initialized flag guard on all ops | `initialized.load(Acquire)` throughout `src/lib.rs` |
-| FR-024 IEvictionPolicy receptacle | `define_component!` `src/lib.rs:143-144` |
+| FR-024 IEvictionPolicy receptacle | `define_component!` `src/lib.rs:142-145` |
 | FR-025 ILogger optional receptacle | `src/lib.rs:143` |
-| FR-026 free-list coalescing | `src/allocator.rs:59-83` |
+| FR-026 free-list coalescing | `src/allocator.rs:59-83` (tests `coalesce_adjacent`, `coalesce_with_following`) |
 | FR-027 telemetry counters (feature) | `src/lib.rs:37-60` |
 | FR-028 telemetry_snapshot / telemetry / reset | `src/lib.rs:166-177,615-635` |
 | FR-029 free_capacity() | `src/lib.rs:180-187` |
-| NFR-001/003/004/005/006/007/009/010/011 | free-list BTreeMap, Drop, Send/Sync, spdk feature — `src/lib.rs`, `src/allocator.rs` |
+| NFR-001/002 RwLock serializes mutations, touches outside pool lock | `get`/`touch`/`batch_touch` drop pool guard before `ep.touch` `src/lib.rs:407-408,515-516,553-554` |
+| NFR-003/004/005/006/007/009/010 | mmap data path, `unsafe impl Send/Sync` `:95-96`, BTreeMap free-list, Drop `:116-136`, DEFAULT_POOL_SIZE 256 MiB `:34`, spdk feature-gated |
+| **NFR-008 component version = 0.3.0** | `Cargo.toml:3` = `0.3.0`, `define_component!` `version:` = `0.3.0` `src/lib.rs:140`, spec NFR-008 = `0.3.0` — **all three agree** |
+| NFR-011 telemetry zero-cost when disabled | `#[cfg(feature = "telemetry")]` gating throughout `src/lib.rs` |
+| SC-1 all unit tests pass | `cargo test -p memory-tier` → 21 passed, 0 failed |
+| SC-2..SC-7 | Drop frees pool, RwLock concurrency, 4 KiB invariant, evict→reinsert, NUMA fallback, SPDK DMA path — all present |
 
-### Drifted ⚠️
+### Drifted ⚠️ → resolved this sweep
 
-- **FR-005 / FR-007 / NFR-002 (16 independent shards, per-shard lock)** — spec: pool
-  divided into 16 Mutex-protected shards for 16-way parallelism. actual: single
-  `RwLock<Pool>` with one `FreeList` + one `HashMap`. `src/lib.rs:76-85,313-316`.
-  **major** (spec-acknowledged deferred; align-task "sharding-not-implemented").
-- **FR-006 (shard = key modulo 16)** — no shard selection exists in code.
-  `src/lib.rs` has no `shard_for_key`. **major** (same root cause as above).
-- **FR-013 (evict_next round-robin via atomic counter)** — spec: cycles shards via
-  atomic. actual: `evict_next` delegates to `ep.identify_next_to_evict`; no
-  `evict_counter` field exists. `src/lib.rs:434-466`. **moderate**.
-- **FR-014 (evict_next_for_key targets key's shard)** — actual: `_key` ignored; pure
-  alias for `evict_next`. `src/lib.rs:468-470`. **moderate** (align-task
-  "evict-lru-for-key-ignores-key").
-- **FR-021 (oldest_keys per-shard `(n/NUM_SHARDS)` sampling)** — actual: single call
-  `ep.get_eviction_candidates(pool_id, n)`, no per-shard sampling. `src/lib.rs:424-432`.
-  **minor** (current behavior is simpler and correct; only the sampling mechanism drifted).
-- **NFR-008 (version 0.2.0)** — three-way mismatch: `Cargo.toml` = `0.1.0`,
-  `define_component!` `version:` = `0.3.0` (`src/lib.rs:140`), spec says `0.2.0`.
-  **minor** (align-task "version-mismatch").
-- **SC-003 / SC (16-thread concurrency via shard locks)** — concurrency real but
-  serialized through a single `RwLock`, not 16 shard locks as claimed. **moderate**.
-- **IMemoryTier doc comments assert stale "Verified P1–P10 / 16 shards"** — 
-  `components/interfaces/src/imemory_tier.rs:53-119` claims Creusot-verified
-  properties and "index < 16 / cycles through all 16 shards" that describe the
-  non-existent sharded design and non-existent proofs. **major** (misleading
-  contract documentation; align-task "creusot-proofs-absent").
+- **Interface doc: `evict_next_for_key` described sharding** (ALIGN, doc→reality) —
+  `components/interfaces/src/imemory_tier.rs:87-91` said "evict … from the same
+  shard as `key`" / "target shard is empty", contradicting FR-014 and the code
+  (`src/lib.rs:468-470` ignores `_key`). The interface tree is folded into this
+  component's sync hash, so it is in scope. **Resolved**: doc comment rewritten to
+  state the method is an alias for `evict_next` and that `key` is ignored because
+  the pool is a single unsharded region. Severity: minor (documentation-only, no
+  behavior change).
+- **NFR-008 version three-way mismatch** (version reconciliation) — `Cargo.toml` =
+  `0.1.0`, `define_component!` macro = `0.3.0` (`src/lib.rs:140`), spec = `0.2.0`.
+  **Resolved by maintainer decision**: reconciled to **0.3.0** (the runtime-reported
+  `define_component!` value is authoritative). `Cargo.toml` bumped `0.1.0`→`0.3.0`
+  and spec NFR-008 updated `0.2.0`→`0.3.0`; the macro was already `0.3.0`. Severity:
+  minor.
 
 ### Not Implemented ✗
 
-- **SC-8 (10 Creusot properties, 21 verification conditions)** — no proof artifacts
-  under `components/memory-tier/` (`verif/` absent). Referenced by FR-006, FR-014,
-  FR-013, FR-023 "Verified" columns.
-- **16-way sharded allocator/slot-map** (FR-005/006/007) — architecture absent.
-- **Round-robin eviction counter** (FR-013) — field/logic absent.
+None. The spec no longer asserts a 16-way sharded allocator, a round-robin
+eviction counter, or Creusot-verified properties, so there are no unimplemented
+requirements. `verif/` is correctly absent (SC-8 and the "Verified P#" columns
+were removed in Phase B and are intentionally not re-added).
 
 ## Unspecced Features
 
-None. All implemented surface (telemetry, free_capacity, DEFAULT_POOL_SIZE) is
-now captured in the spec (backfilled 2026-07-22). `DEFAULT_POOL_SIZE` is a
-declared-but-unused constant — documented in Implementation Notes.
+None. All implemented surface (telemetry, `free_capacity`, `DEFAULT_POOL_SIZE`) is
+captured in the spec. `DEFAULT_POOL_SIZE` remains a declared-but-unused constant,
+documented in Implementation Notes.
 
 ## Recommendations
 
-1. **Decide sharding fate** (highest priority): either implement the 16-way
-   sharded pool (FR-005/006/007/013/014/021, NFR-002) or rewrite the spec to
-   describe the shipped single-`RwLock<Pool>` design. This decision blocks
-   several FRs and SC-003/SC-8.
-2. **Fix stale verification claims** in `components/interfaces/src/imemory_tier.rs:53-119`
-   — remove or requalify the "Verified P1–P10" and "16 shards" doc comments until
-   proofs and sharding actually exist.
-3. **Reconcile version** across `Cargo.toml` (0.1.0), `define_component!` (0.3.0),
-   and spec NFR-008 (0.2.0) to a single source of truth.
-4. Either honor `key` in `evict_next_for_key` (FR-014) or respec it as an alias.
+None outstanding. Commit this stamped `drift-report.md` together with the code and
+spec changes (`Cargo.toml`, `spec.md`, `components/interfaces/src/imemory_tier.rs`)
+so the CI Spec-Sync Gate sees a fresh report whose input hash matches the tree.
