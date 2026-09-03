@@ -38,6 +38,21 @@ SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/certus-server}"
 LOG="${LOG:-${SCRIPT_DIR}/certus-shmq_$(stamp).log}"
 SERVER_LOG="${SERVER_LOG:-${SCRIPT_DIR}/server-shmq_$(stamp).log}"
 
+# Data-parallel fan-out: DP_SIZE>1 runs that many independent client containers
+# (one per GPU in GPUS) against this ONE server / shared mailbox, each replaying
+# a disjoint conversation shard. GPUS defaults to 0,1,... for DP_SIZE replicas.
+# DP_SIZE=1 keeps the original single-client behaviour exactly.
+DP_SIZE="${DP_SIZE:-1}"
+GPUS="${GPUS:-}"
+if [[ -z "$GPUS" ]]; then
+  if [[ "$DP_SIZE" -gt 1 ]]; then
+    GPUS="$(seq -s' ' 0 $((DP_SIZE - 1)))"   # 0 1 ... DP_SIZE-1
+  else
+    GPUS="$GPU"                               # single replica: inherit GPU (default "all")
+  fi
+fi
+CONNECTOR_SRC="${CONNECTOR_SRC:-}"            # optional connector-package override (bind-mounted)
+
 [[ -x "$SERVER_BIN" ]] || {
   echo "error: server binary not built at ${SERVER_BIN}" >&2
   echo "       build it: cargo build --release -p certus-server" >&2
@@ -103,26 +118,61 @@ echo "[certus-shmq] server serving, mailbox ${SHM_PATH} — launching client"
 
 # run-bench.sh handles the client container (GPU, --ipc=host, HF cache, store).
 # No CERTUS_SERVER: the shared /dev/shm mailbox at SHM_PATH is the endpoint.
+# One invocation = one replica; DP_RANK/DP_SIZE select its conversation shard and
+# its disjoint channel-claim partition on the shared mailbox.
+run_client() {
+  local gpu="$1" dp_rank="$2" log="$3"
+  IMAGE="$IMAGE" \
+  GPU="$gpu" \
+  DP_RANK="$dp_rank" \
+  DP_SIZE="$DP_SIZE" \
+  SHM_PATH="$SHM_PATH" \
+  NUM_CONVS="$NUM_CONVS" \
+  MAX_ROUNDS="$MAX_ROUNDS" \
+  DATASET_HOST="${DATASET_HOST:-}" \
+  WORKLOAD_MODE="${WORKLOAD_MODE:-batched}" \
+  ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-0}" \
+  WORKLOAD_SRC="${WORKLOAD_SRC:-}" \
+  ASYNC_SRC="${ASYNC_SRC:-}" \
+  CONNECTOR_SRC="${CONNECTOR_SRC:-}" \
+  MODEL="$MODEL" \
+  SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
+  TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
+  ENFORCE_EAGER="${ENFORCE_EAGER:-0}" \
+  HF_CACHE="$HF_CACHE" \
+  PODMAN_STORE="$PODMAN_STORE" \
+  PODMAN_RUNROOT="$PODMAN_RUNROOT" \
+    bash "${REPO_ROOT}/certus-shmq-connector/run-bench.sh" 2>&1 | tee "$log"
+  return "${PIPESTATUS[0]}"
+}
+
 rc=0
-IMAGE="$IMAGE" \
-GPU="$GPU" \
-SHM_PATH="$SHM_PATH" \
-NUM_CONVS="$NUM_CONVS" \
-MAX_ROUNDS="$MAX_ROUNDS" \
-DATASET_HOST="${DATASET_HOST:-}" \
-WORKLOAD_MODE="${WORKLOAD_MODE:-batched}" \
-ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-0}" \
-WORKLOAD_SRC="${WORKLOAD_SRC:-}" \
-ASYNC_SRC="${ASYNC_SRC:-}" \
-MODEL="$MODEL" \
-SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
-TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
-ENFORCE_EAGER="${ENFORCE_EAGER:-0}" \
-HF_CACHE="$HF_CACHE" \
-PODMAN_STORE="$PODMAN_STORE" \
-PODMAN_RUNROOT="$PODMAN_RUNROOT" \
-  bash "${REPO_ROOT}/certus-shmq-connector/run-bench.sh" 2>&1 | tee "$LOG" || true
-rc="${PIPESTATUS[0]}"
+if [[ "$DP_SIZE" -le 1 ]]; then
+  # Single replica: original path, original single $LOG, exact prior behaviour.
+  run_client "$GPU" 0 "$LOG" || true
+  rc=$?
+else
+  # Data-parallel: launch one client per GPU in the background, all sharing the
+  # one server/mailbox, then wait for every replica before tearing the server
+  # down. Per-replica logs so the two tee streams don't clobber each other.
+  read -r -a gpu_arr <<< "$GPUS"
+  echo "[certus-shmq] DP fan-out: DP_SIZE=${DP_SIZE} GPUS='${GPUS}'"
+  declare -a pids=() logs=()
+  for r in $(seq 0 $((DP_SIZE - 1))); do
+    gpu="${gpu_arr[$r]}"
+    rlog="${LOG%.log}.gpu${gpu}.log"
+    logs[$r]="$rlog"
+    echo "[certus-shmq] replica ${r}: GPU=${gpu} -> ${rlog}"
+    run_client "$gpu" "$r" "$rlog" &
+    pids[$r]=$!
+  done
+  for r in $(seq 0 $((DP_SIZE - 1))); do
+    if wait "${pids[$r]}"; then :; else
+      echo "[certus-shmq] replica ${r} (GPU ${gpu_arr[$r]}) exited non-zero" >&2
+      rc=1
+    fi
+  done
+fi
 
 stop_server
 exit "$rc"
