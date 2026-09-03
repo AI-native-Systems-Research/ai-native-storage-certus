@@ -97,6 +97,12 @@ struct Cli {
     #[arg(long = "shmq-poller-cpu")]
     shmq_poller_cpu: Option<usize>,
 
+    /// Log periodic shm-queue poller fairness/backlog stats (per-channel
+    /// serviced counts, low/high channel split, worker-queue depth). Diagnostic
+    /// only; off by default.
+    #[arg(long = "shmq-poller-stats")]
+    shmq_poller_stats: bool,
+
     /// Memory-tier pool size (e.g. 256M, 1G, 512K). Defaults to 2G.
     #[arg(long = "memory-tier-size", value_parser = parse_size)]
     memory_tier_size: Option<usize>,
@@ -336,6 +342,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         channels: cli.channels,
         reserve_timeout: Duration::from_secs(cli.reserve_timeout_secs),
         poller_cpu: cli.shmq_poller_cpu,
+        poller_stats: cli.shmq_poller_stats,
     };
     tokio::task::spawn_blocking(move || {
         serve(server, translator, serve_config, &SHUTDOWN, serve_logger)
