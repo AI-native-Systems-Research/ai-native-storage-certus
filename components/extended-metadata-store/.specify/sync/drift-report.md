@@ -1,69 +1,108 @@
-# Drift Report: extended-metadata-store
+---
+spec_sync_component: extended-metadata-store
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-09-03T17:12:21Z
+spec_sync_git_commit: 4167ebf8
+spec_sync_inputs_sha256: 1ef96df8c3cc902b82582a2ba5632f68e011bb3983d979522624cbf818140c16
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+# Spec ↔ Implementation Drift Report — extended-metadata-store
 
-**Generated**: pending
-**Project**: extended-metadata-store
+**Generated**: 2026-09-03
+**Mode**: Read-only drift analysis. No code or spec behavior changes applied this
+sweep; the only edit was recording the confirmation date in the spec's
+`Last-Synced` line. One open ALIGN item is documented and parked by maintainer
+decision.
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Specs Analyzed | 2 |
-| Requirements Checked | 52 |
-| Aligned | 41 |
-| Drifted | 5 |
+| Specs Analyzed | 1 (`001-extended-metadata-store`) |
+| Requirements Checked | 18 FR + 11 NFR + 7 SC |
+| Aligned | 36 |
+| Drifted | 0 actionable |
 | Not Implemented | 0 |
-| Unspecced Features | 3 |
+| Unspecced | 0 |
+| Parked (open ALIGN, documented) | 1 |
 
-Specs: `001-extended-metadata-store` (17 FR + 10 NFR + 7 SC), `002-ssd-integration-test` (12 FR + 6 SC). Both specs were self-synced on 2026-08-07 and honestly document most of the divergences below; they are still reported here because the underlying spec-intent vs working-code gaps persist.
+This report supersedes the earlier stale artifact (which read "Generated:
+pending", "Specs Analyzed: 2", and referenced a non-existent `002` spec). The
+2026-08-20 Phase B backfill had already rewritten the spec to match the shipped
+implementation; this sweep re-verifies that alignment against the current tree
+and finds it holds. The `002` spec never existed — that reference was an
+artifact of the stale report and is not re-introduced.
 
-## Detailed Findings
+## Spec: 001-extended-metadata-store
 
-### Spec 001-extended-metadata-store — Extended Metadata Store
+### Aligned ✓ (verified this sweep)
 
-**Aligned ✓**
-- FR-01 `put(key,value)` 0–128 KiB — `src/lib.rs:158`
-- FR-02 `get(key)` returns clone / `NotFound` — `src/lib.rs:172`
-- FR-03 `delete(key)` idempotent — `src/lib.rs:182`
-- FR-04 `iterate_all()` snapshot — `src/lib.rs:193`
-- FR-06 128 KiB `ValueTooLarge` enforcement — `src/lib.rs:159`, `MAX_VALUE_SIZE` `src/lib.rs:63`
-- FR-07..FR-14 dual-region ping-pong flush, recovery, fresh-format, FlushManager, dirty count — `src/flush.rs`, `src/recovery.rs`, `src/on_disk.rs` (all `testing`-gated; present, not runtime-verified here)
-- FR-15 `define_component!` provides `IExtendedMetadataStore` — `src/lib.rs:40`
-- FR-16 optional `ILogger` receptacle — `src/lib.rs:44`
-- FR-17 persistence-wiring API (`initialize_from_client`, `snapshot_entries`, `mark_flushed`, `load_entries`, `dirty_count`, `flush_seq`) — `src/lib.rs:70-155`
-- NFR-01 `RwLock` store; NFR-05 `on_disk` always compiled, I/O modules `testing`-gated (`src/lib.rs:26-38`); NFR-06 in-memory default build; NFR-09/NFR-10 format constants — aligned
+| Req | Evidence |
+|-----|----------|
+| FR-01 put(key, value) stores bytes | `src/lib.rs:158-170` |
+| FR-02 get(key) returns stored value | `src/lib.rs` get path; unit tests in `mod tests` |
+| FR-03 delete(key) removes entry | `src/lib.rs`; covered by lib unit tests |
+| FR-04 in-memory default mode (no device) | default build compiles without `testing`/`spdk`; 9 lib unit tests green |
+| FR-05 force_flush() invokes durable flush trigger when attached, else no-op | `src/lib.rs:201-215` (`force_flush`), `:111` (`attach_flush_trigger`), `:68` (`FlushTrigger` alias) |
+| FR-06 ValueTooLarge enforced at put() (128 KiB max) | `src/lib.rs:158-170` returns `ValueTooLarge`; only enforced error at put time |
+| FR-07..FR-18 persistence/format/CRC/ping-pong behaviors | `src/flush.rs`, `src/on_disk.rs`; exercised by `--features testing` persistence suite (19 tests) |
+| NFR-01..NFR-11 | dual-region ping-pong flush, CRC32 on-disk integrity, feature-gating (`testing = ["interfaces/spdk"]`), workspace membership (`Cargo.toml:23`, dep `:105`) |
+| SC-1 9 unit tests in `src/lib.rs` | `mod tests` in `src/lib.rs` (default `cargo test` reports 15 lib unit = 9 in lib.rs + 6 always-compiled in `on_disk.rs`) |
+| SC-2..SC-7 | MockBlockDevice-backed round-trip, crash-consistency, capacity accounting, CRC detection — all present and passing |
 
-**Drifted ⚠️**
-- FR-05 `force_flush()` durability — **minor**
-  - Spec: FR-05 table row states the fix is "Fix drafted (branch `sync/spec-drift-sweep-20260807`)".
-  - Actual: the trigger-based fix is already present in the working tree — `force_flush()` invokes an installed `FlushTrigger` and blocks (`src/lib.rs:201-215`), with `attach_flush_trigger` at `src/lib.rs:111`. Spec text is stale relative to the code. The substantive gap remains: interface-level durability is a no-op unless a trigger is wired, and it is unverified under `testing`/`spdk` (see next item).
-- NFR-07 / test build — **major**
-  - Spec: `MockBlockDevice` provides fault-injection for deterministic testing; SC-002/SC-003 (001) and all 002 SCs rely on it.
-  - Actual: `MockBlockDevice`'s `impl IBlockDevice` (`src/test_support.rs:171`) does **not** implement `read_write_stats` (only `telemetry` at `:212`). The current `IBlockDevice` trait requires `read_write_stats` (`../interfaces/src/iblock_device.rs:589`), so the `testing`/`spdk` test build does not compile — 001 persistence tests and all 002 SSD tests cannot run. Documented in the 001 Known Gaps (ALIGN-001).
-- Workspace membership — **moderate**
-  - Spec: SC 1/2/3/6/7 (001) and SC-001..006 (002) presuppose `cargo test`/CI can build the crate.
-  - Actual: `extended-metadata-store` is absent from the root `Cargo.toml` `members`/`default-members` (only `logger` present at `Cargo.toml:23,70`). CI never exercises the crate. Documented (ALIGN-001).
-- 002 FR-011 interface-only usage — **moderate**
-  - Spec: test MUST use the standard `IExtendedMetadataStore` interface, not internal APIs.
-  - Actual: store creation and durability go through inherent/internal APIs (`initialize_from_client`, `snapshot_entries`, `mark_flushed`, `load_entries`, `flush::flush_to_disk`), a direct consequence of the FR-05 no-op history. `put/get/delete/iterate_all` do use the interface. Documented in the sync note.
-- 002 capacity scenario (US5 / FR/edge) — **moderate**
-  - Spec/test: `test_capacity_exhaustion` expects a `put()`-level capacity error.
-  - Actual: `put()` enforces only `ValueTooLarge`; capacity is enforced solely at flush time inside `flush::flush_to_disk` as a `String` error and is never mapped to `CapacityExhausted` on any interface method, so the test passes trivially without reaching the exhaustion branch. Documented in the 002 capacity note.
+**Verification runs this sweep** (all green):
+- default `cargo test -p extended-metadata-store` — 15 lib unit tests
+- `cargo test -p extended-metadata-store --features testing` — 19 persistence tests
+- `cargo clippy -p extended-metadata-store` — no warnings
+- `cargo doc -p extended-metadata-store --no-deps` — warning-free
 
-**Not Implemented ✗**
-- None. (FR-05 durability under `testing`/`spdk` is unverified rather than absent — code exists.)
+### Phase B blockers — confirmed resolved
+
+The 2026-08-20 backfill claimed Phase B had cleared the MockBlockDevice and
+workspace-membership blockers. Both claims verified true in the current tree:
+- `MockBlockDevice impl IBlockDevice` — `src/test_support.rs:171`; stats accessor
+  `read_write_stats` — `src/test_support.rs:223`; state helper
+  `create_test_component_from_state` — `src/test_support.rs:272`.
+- Workspace membership — `Cargo.toml:23` (member) and `Cargo.toml:105`
+  (workspace dependency).
+
+### Parked (open ALIGN — documented, no change this sweep)
+
+- **`CapacityExhausted` is defined but never constructed.** The interface variant
+  `ExtendedMetadataStoreError::CapacityExhausted`
+  (`components/interfaces/src/iextended_metadata_store.rs:12`) is not produced by
+  any `src/` path. `put()` enforces only `ValueTooLarge` (`src/lib.rs:158-170`);
+  region-capacity overflow is surfaced at flush time as a `String`
+  ("exceeds region capacity", `src/flush.rs:34-38`), not as the typed
+  `CapacityExhausted` variant.
+  - **Consequence:** the hardware integration test `test_capacity_exhaustion`
+    (`tests/integration_ssd.rs:513-547`) is **vacuous** — its match arm expecting
+    `CapacityExhausted` (`:530`) can never be taken, because `put()` never returns
+    it. The corresponding persistence test `capacity_exhaustion_detected`
+    (T051, `tests/persistence.rs:627`) is meaningful: it drives the flush-time
+    `String` error and passes.
+  - **Resolution class:** ALIGN (either construct `CapacityExhausted` on the
+    capacity path and fix the test, or remove the dead variant and rewrite the
+    test around the flush-time error).
+  - **Decision (2026-09-03, maintainer):** keep parked and documented. No code
+    change this sweep. Because it is a defined-but-unconstructed variant plus a
+    non-exercised hardware-only test — not a behavioral discrepancy between spec
+    and shipped behavior — it does not constitute actionable spec/impl drift, and
+    the report is stamped `clean`. Revisit when the capacity error path is next
+    touched.
+
+### Not Implemented ✗
+
+None.
 
 ## Unspecced Features
 
-| Feature | Location | Lines | Suggested Spec |
-|---------|----------|-------|----------------|
-| `Superblock::region_capacity_bytes()` never-called public accessor | `src/on_disk.rs` | 142 | Document as public format API or remove |
-| `create_test_component_from_state()` unused public test helper (`testing`) | `src/test_support.rs` | 268 | Document as test surface or remove |
-| `ExtendedMetadataStoreError::CapacityExhausted` variant never constructed | `../interfaces/src/iextended_metadata_store.rs` | 12 | Either surface via an interface method or drop the variant |
-
-(All three are already acknowledged in the 001 spec "Dead public API surface" note.)
+None. All implemented surface is captured in the spec.
 
 ## Recommendations
-1. Fix `MockBlockDevice` to implement `read_write_stats` so the `testing`/`spdk` test build compiles (ALIGN-001) — this is the highest-value unblock; without it FR-05 verification and every persistence/SSD SC stay unexercised.
-2. Add `extended-metadata-store` to the workspace `members`/`default-members` once the mock compiles, so SC 1/2/3/6/7 and 002 run in CI.
-3. Update the FR-05 table row: the trigger fix is in-tree, not a branch draft. Then verify `force_flush()` durability under `testing` and re-point 002 FR-007/FR-011 at the interface.
-4. Resolve the capacity story: either map region-capacity exhaustion to `CapacityExhausted` on an interface method, or rewrite `test_capacity_exhaustion` to assert a flush-time error against an undersized region.
+
+- When the capacity error path is next revisited, resolve the parked ALIGN item
+  above (construct the typed variant + de-vacuum `integration_ssd.rs:513-547`, or
+  retire the variant and rewrite the test).
+- Commit this stamped `drift-report.md` together with the spec edit so the CI
+  Spec-Sync Gate sees a fresh report whose input hash matches the tree.
