@@ -1,8 +1,3 @@
-Good, I can see the format of existing files. Now I have enough context to write the complete domain reference file.
-
-Here is the full domain reference file:
-
-```markdown
 ---
 id: cache-value-and-recompute
 decision: Whether to retain a cached KV block or let it be evicted and recomputed on next use
