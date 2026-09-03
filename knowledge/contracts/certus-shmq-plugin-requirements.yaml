@@ -91,14 +91,21 @@ known_bugs:
     fix: "Hash the complete OffloadKey (including group_idx) into the u64"
 
   invalid_eviction_events:
-    severity: CRITICAL
-    location: "manager.py:374, mediums.py:83"
+    severity: MEDIUM
+    location: "manager.py:387, mediums.py:84"
     description: |
-      Eviction events emit medium="Certus" but vLLM expects Medium.CPU
-      or Medium.STORAGE (enum values). Event translation in vLLM
-      (events.py:57, events.py:425) indexes a fixed Medium mapping
-      and will raise KeyError for "Certus".
-    impact: "Crash when vLLM processes eviction events"
+      OffloadingEvent.medium is typed as Medium (enum: CPU, STORAGE) but
+      CertusLoadStoreSpec.medium() returns the string "Certus". The scheduler
+      stuffs OffloadingEvent objects directly into KVEventBatch.events alongside
+      BlockStored/BlockRemoved (msgspec.Struct subclasses of KVCacheEvent).
+      With NullEventPublisher (default, KV events disabled) this is harmless.
+      When KV events publishing is enabled (ZmqEventPublisher), msgspec
+      serialization fails because OffloadingEvent is a plain @dataclass, not a
+      KVCacheEvent msgspec.Struct — the medium string value never even reaches
+      a consumer.
+    impact: |
+      No crash under default configuration. Crashes msgspec serialization only
+      when kv_events_config is set (external event publishing enabled).
     fix: |
       Emit Medium.STORAGE for NVMe-tier events.
       Maintain a reversible mapping from server u64 keys back to
