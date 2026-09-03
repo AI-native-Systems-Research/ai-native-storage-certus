@@ -1,12 +1,22 @@
 ---
 spec_sync_component: memory-tier
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T17:00:41Z
-spec_sync_git_commit: 8efc5284
-spec_sync_inputs_sha256: 14e633dff59773a32d0a6d094cd85b179400b37f9f30a603b8826dcfcc0e4813
+spec_sync_synced_at: 2026-09-03T18:54:21Z
+spec_sync_git_commit: b220a1c8
+spec_sync_inputs_sha256: d55cba7b408172a4f5bee951b6c01a7f34924f889bcf2b223c74eacb8614d04f
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Spec ↔ Implementation Drift Report — memory-tier
+
+> **Digest refreshed 2026-09-03 (spec-sync gate fix).** The earlier
+> `spec_sync_inputs_sha256` was computed in a working tree that contained an
+> untracked `components/interfaces/src/iipc.rs` — a local file not part of this
+> branch — which `scripts/spec-sync-hash.sh` folds into every component's
+> interface hash, so CI's clean checkout recomputed a different digest. The
+> stray file was removed and the digest recomputed in a clean tree. No `src/`,
+> `specs/`, or report content changed; drift status remains `clean`. (This
+> component's own sync — including the `imemory_tier.rs` doc-comment fix — is
+> unchanged; the interface edit is already reflected in this digest.)
 
 **Generated**: 2026-09-03
 **Mode**: Read-only drift analysis, then ALIGN (doc→reality) + version reconciliation applied.

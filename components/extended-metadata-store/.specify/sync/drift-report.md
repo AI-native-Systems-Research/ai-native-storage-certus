@@ -1,12 +1,20 @@
 ---
 spec_sync_component: extended-metadata-store
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T17:12:21Z
-spec_sync_git_commit: 4167ebf8
-spec_sync_inputs_sha256: 1ef96df8c3cc902b82582a2ba5632f68e011bb3983d979522624cbf818140c16
+spec_sync_synced_at: 2026-09-03T18:54:21Z
+spec_sync_git_commit: b220a1c8
+spec_sync_inputs_sha256: f7a2c534ca840b8a32a62eedfb9ffc909ef7b4afd42e2f121885abc0d7f3401e
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Spec ↔ Implementation Drift Report — extended-metadata-store
+
+> **Digest refreshed 2026-09-03 (spec-sync gate fix).** The earlier
+> `spec_sync_inputs_sha256` was computed in a working tree that contained an
+> untracked `components/interfaces/src/iipc.rs` — a local file not part of this
+> branch — which `scripts/spec-sync-hash.sh` folds into every component's
+> interface hash, so CI's clean checkout recomputed a different digest. The
+> stray file was removed and the digest recomputed in a clean tree. No `src/`,
+> `specs/`, or report content changed; drift status remains `clean`.
 
 **Generated**: 2026-09-03
 **Mode**: Read-only drift analysis. No code or spec behavior changes applied this

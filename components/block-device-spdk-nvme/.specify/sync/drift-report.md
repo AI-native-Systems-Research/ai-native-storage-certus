@@ -1,12 +1,20 @@
 ---
 spec_sync_component: block-device-spdk-nvme
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T17:48:19Z
-spec_sync_git_commit: a1b649f4
-spec_sync_inputs_sha256: 02e17aab7111f30ad96043ce07100372e30529894b80b079812dc23460c38b22
+spec_sync_synced_at: 2026-09-03T18:54:21Z
+spec_sync_git_commit: b220a1c8
+spec_sync_inputs_sha256: 62f99c943a92e4a45e07f04d103e5e6ebc6e83df639af05c79019770df2dc93c
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Drift Report — block-device-spdk-nvme
+
+> **Digest refreshed 2026-09-03 (spec-sync gate fix).** The earlier
+> `spec_sync_inputs_sha256` was computed in a working tree that contained an
+> untracked `components/interfaces/src/iipc.rs` — a local file not part of this
+> branch — which `scripts/spec-sync-hash.sh` folds into every component's
+> interface hash, so CI's clean checkout recomputed a different digest. The
+> stray file was removed and the digest recomputed in a clean tree. No `src/`,
+> `specs/`, or report content changed; drift status remains `clean`.
 
 **Generated**: 2026-09-03
 **Mode**: Spec↔implementation drift analysis with ALIGN + BACKFILL edits applied
