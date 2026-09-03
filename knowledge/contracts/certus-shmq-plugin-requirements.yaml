@@ -1,0 +1,170 @@
+# Certus SHMQ Connector — Plugin Requirements and Known Issues
+# How certus-shmq-connector plugs into vLLM and what it must satisfy.
+
+connector: certus-shmq-connector
+plugin_type: "Direct OffloadingSpec implementation (NOT a secondary tier)"
+package: certus_shmq_connector
+platform: "x86-64 only (ring relies on x86 TSO memory ordering)"
+
+# ─── Plugin Registration ──────────────────────────────────────────────
+
+registration:
+  config: |
+    {
+      "kv_connector": "OffloadingConnector",
+      "kv_role": "kv_both",
+      "kv_connector_extra_config": {
+        "spec_name": "CertusShmqOffloadingSpec",
+        "spec_module_path": "certus_shmq_connector.spec"
+      }
+    }
+
+# ─── Architecture ─────────────────────────────────────────────────────
+
+architecture:
+  overview: |
+    Certus implements OffloadingSpec DIRECTLY — it does NOT use vLLM's
+    TieringOffloadingSpec or CPUPrimaryTierOffloadingManager.
+    Certus owns the entire stack: CPU cache, NVMe I/O, GPU transfers.
+
+  comparison: |
+    vLLM TieringOffloadingSpec path:
+      GPU ←→ CPU (vLLM code) ←→ FS/obj/p2p (vLLM code)
+
+    Certus path:
+      GPU ←[CUDA IPC]→ certus-server ←[SPDK]→ NVMe
+      Control plane: vLLM worker ←[shmq ring]→ certus-server
+
+  critical_detail: |
+    The shmq ring is CONTROL PLANE ONLY.
+    KV block bytes do NOT travel through the ring.
+    The server directly DMA-transfers through CUDA IPC handles.
+    The ring carries: commands, key mappings, completion notifications.
+
+# ─── Classes Implemented ──────────────────────────────────────────────
+
+classes:
+  CertusShmqOffloadingSpec:
+    implements: OffloadingSpec
+    module: certus_shmq_connector.spec
+    methods:
+      get_manager: "→ ShmqCertusOffloadingManager"
+      get_worker: "→ CertusShmqWorker"
+
+  ShmqCertusOffloadingManager:
+    implements: OffloadingManager
+    module: certus_shmq_connector.manager
+    key_mapping: "OffloadKey bytes → u64 (see known_bugs.key_collision)"
+    tp_support: "Per-rank key namespacing, W channel slots, AND-across-ranks residency"
+
+  CertusShmqWorker:
+    implements: OffloadingWorker
+    module: certus_shmq_connector.handler
+    transport: "shmq ring commands + CUDA IPC handle direct transfers"
+
+# ─── Version Compatibility ────────────────────────────────────────────
+
+version_compatibility:
+  compat_module: certus_shmq_connector.compat
+  tested_versions: ["0.20", "0.22", "0.23", "0.24", "0.26"]
+  NOT_tested: ["0.21", "0.25", "0.27", "0.28"]
+  notes: |
+    compat.py is the single source of version-variance truth.
+    Do NOT claim support for untested versions.
+    The optimizer SHOULD NOT modify compat.py.
+  version_limitations:
+    pre_0.26: "Requires exactly one KV cache group"
+    "0.23+": "Per-layer KV tensors (not 1 coalesced tensor)"
+    "0.26+": "OffloadingWorker API (replaces OffloadingHandler)"
+
+# ─── Known Bugs (must be fixed) ──────────────────────────────────────
+
+known_bugs:
+  key_collision:
+    severity: CRITICAL
+    location: "manager.py:37 (_key_to_u64)"
+    description: |
+      _key_to_u64 uses only the first 8 bytes of OffloadKey, discarding
+      the group_idx (last 4 bytes) entirely. Keys from different groups
+      that share the first 8 hash bytes will collide deterministically.
+    impact: "Data corruption — loading block from wrong group"
+    fix: "Hash the complete OffloadKey (including group_idx) into the u64"
+
+  invalid_eviction_events:
+    severity: CRITICAL
+    location: "manager.py:374, mediums.py:83"
+    description: |
+      Eviction events emit medium="Certus" but vLLM expects Medium.CPU
+      or Medium.STORAGE (enum values). Event translation in vLLM
+      (events.py:57, events.py:425) indexes a fixed Medium mapping
+      and will raise KeyError for "Certus".
+    impact: "Crash when vLLM processes eviction events"
+    fix: |
+      Emit Medium.STORAGE for NVMe-tier events.
+      Maintain a reversible mapping from server u64 keys back to
+      complete OffloadKey values for event reporting.
+
+# ─── Behavioral Differences from vLLM Default ─────────────────────────
+
+behavioral_differences:
+  prepare_store_on_full:
+    vllm_default: "Returns None when storage is full"
+    certus_behavior: |
+      Returns partial or empty non-None PrepareStoreOutput.
+      Failed reservations are omitted from keys_to_store.
+      Partial TP reservations are aborted.
+      Returned keys preserve source order.
+    note: "Different from vLLM's default pattern but valid per the interface."
+
+  worker_shutdown:
+    issue: |
+      Worker shutdown does not shut down its executor or close the
+      singleton ring. Ring and executor are process-lifetime resources.
+      This is intentional but should be documented.
+
+# ─── Platform and Deployment Requirements ─────────────────────────────
+
+requirements:
+  platform: "x86-64 Linux only (ring uses x86 TSO memory ordering)"
+  runtime:
+    - "certus-server must be running and accessible via /dev/shm/certus-shmq"
+    - "CUDA IPC requires GPU processes on the same node"
+    - "SPDK environment must be initialized (hugepages, vfio-pci)"
+  tp_support:
+    mechanism: "TENSOR_PARALLEL_SIZE environment variable"
+    caveat: "If not set, defaults to 1 rank SILENTLY — no warning"
+
+# ─── Optimizer Constraints ────────────────────────────────────────────
+
+optimizer_can_change:
+  - "shmq ring protocol (batch sizes, message format, slab sizes)"
+  - "certus-server NVMe I/O patterns (queue depth, pipelining)"
+  - "CPU memory management within the connector"
+  - "GPU transfer patterns (CUDA streams, IPC handles, pinned memory)"
+  - "Key mapping and indexing (u64 encoding, namespace scheme)"
+  - "Batching strategy (how many blocks per ring message)"
+  - "Concurrency (thread pool sizes, async patterns)"
+
+optimizer_must_not_change:
+  - "OffloadingSpec/Manager/Worker method signatures (vLLM calls them)"
+  - "OffloadKey encoding (hash + group_idx packing — shared with vLLM)"
+  - "compat.py version-variance layer (tested adaptation, not optimization target)"
+  - "Plugin registration (spec_name, spec_module_path)"
+
+optimizer_must_preserve:
+  - "Lookup correctness — HIT means data IS available"
+  - "Store/load data integrity — loaded data matches stored data exactly"
+  - "TP shard consistency — all ranks agree on residency"
+  - "No data loss — only evict fully-stored blocks"
+
+# ─── Performance Targets ──────────────────────────────────────────────
+
+performance_targets:
+  decode_miss_load_bs1:
+    budget: "<2ms p99"
+    notes: "Single block. Latency-critical. Blocks model runner."
+  prefill_restore_load_bs16:
+    budget: "Maximize throughput (GB/s)"
+    notes: "Batch load. Time-to-first-token includes this."
+  background_store:
+    budget: "Non-blocking. Should not delay inference."

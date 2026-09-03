@@ -1,0 +1,233 @@
+# vLLM KV Offload Plugin Interface
+# What ANY connector must implement to work with vLLM.
+# Source: vllm/v1/kv_offload/base.py
+#
+# This is the ABSTRACT CONTRACT — no implementation details.
+# WARNING: vLLM marks this API as experimental and subject to change.
+
+api_version: "v0.28 (commit dc9114b)"
+api_stability: "Experimental — subject to change between vLLM releases"
+verified_against: "vllm v0.28.1rc0-197-gdc9114b201"
+tested_versions: ["0.20", "0.22", "0.23", "0.24", "0.26", "0.28"]
+
+plugin_mechanism:
+  how_vllm_discovers_connectors: |
+    1. User sets kv_connector_extra_config in engine config
+    2. vLLM's OffloadingSpecFactory loads spec_module_path
+    3. Instantiates spec_name class with OffloadingConfig
+    4. Calls get_manager() in scheduler process
+    5. Calls get_worker(kv_caches) in each GPU worker process
+  config_example: |
+    {
+      "kv_connector": "OffloadingConnector",
+      "kv_role": "kv_both",
+      "kv_connector_extra_config": {
+        "spec_name": "<YourSpec>",
+        "spec_module_path": "<your.module>",
+        "cpu_bytes_to_use": 10737418240,
+        "block_size": 16
+      }
+    }
+
+# ─── Required Interfaces ──────────────────────────────────────────────
+
+required_interfaces:
+  OffloadingSpec:
+    module: vllm.v1.kv_offload.base
+    init: "(config: OffloadingConfig)"
+    required_methods:
+      get_manager: "() -> OffloadingManager  # called once in scheduler process"
+      get_worker: "(kv_caches: CanonicalKVCaches) -> OffloadingWorker  # called per GPU worker"
+    optional_methods:
+      build_metric_definitions: |
+        @classmethod (extra_config: dict[str, Any]) -> dict[str, OffloadingMetricMetadata]
+        Optional. Defines custom metrics the connector exposes.
+
+  OffloadingManager:
+    module: vllm.v1.kv_offload.base
+    thread_model: "Single scheduler thread. Not thread-safe required."
+    required:
+      lookup: "(key: OffloadKey, req_context: ReqContext) -> LookupResult"
+      prepare_load: "(keys: Collection[OffloadKey], req_context: ReqContext) -> LoadStoreSpec"
+      prepare_store: |
+        (keys: Collection[OffloadKey], req_context: ReqContext) -> PrepareStoreOutput | None
+        Returns None when blocks cannot be stored (any reason, not just capacity).
+      on_new_request: "(req_context: ReqContext) -> RequestOffloadingContext"
+    optional:
+      touch: "(keys: Collection[OffloadKey], req_context: ReqContext) -> None"
+      complete_load: "(keys: Collection[OffloadKey], req_context: ReqContext) -> None"
+      complete_store: "(keys: Collection[OffloadKey], req_context: ReqContext, success: bool = True) -> None"
+      on_request_finished: |
+        (req_context: ReqContext) -> None
+        NOTE: may fire while previously submitted transfers are still running.
+        Completion callbacks may arrive after on_request_finished.
+      take_events: "() -> Iterable[OffloadingEvent]"
+      on_schedule_end: "(context: ScheduleEndContext) -> None"
+      has_pending_work: "() -> bool"
+      reset_cache: "() -> None"
+      get_stats: "() -> OffloadingConnectorStats | None"
+      shutdown: "() -> None"
+
+  OffloadingWorker:
+    module: vllm.v1.kv_offload.base
+    thread_model: "Per-GPU worker process. SEPARATE process from manager."
+    required:
+      submit_store: "(job_id: int, src_spec: GPULoadStoreSpec, dst_spec: LoadStoreSpec) -> bool"
+      submit_load: "(job_id: int, src_spec: LoadStoreSpec, dst_spec: GPULoadStoreSpec) -> bool"
+      get_finished: |
+        () -> list[TransferResult]
+        Non-blocking poll. This is the NORMAL completion path.
+      wait: |
+        (job_ids: set[int]) -> None
+        Blocking wait. Used for flushing fenced/preempted jobs, NOT normal polling.
+    optional:
+      shutdown: "() -> None"
+
+# ─── Key Data Types ───────────────────────────────────────────────────
+
+key_types:
+  OffloadKey:
+    type: "NewType('OffloadKey', bytes)"
+    encoding: "block_hash (content-addressed) + group_idx (4-byte big-endian)"
+    notes: "Content-addressed — same token content = same key across instances"
+
+  LookupResult:
+    type: "enum"
+    values: ["MISS", "HIT", "HIT_PENDING", "RETRY"]
+
+  Medium:
+    type: "enum"
+    values: ["CPU", "STORAGE", "REMOTE"]
+    notes: "Used in OffloadingEvent to identify which tier"
+
+  Locality:
+    type: "enum"
+    values: ["LOCAL", "REMOTE"]
+
+  TierFilter:
+    type: "enum"
+    values: ["ALL", "LOCAL", "REMOTE"]
+    notes: "Used in ReqContext.load_tier_filter to restrict which tiers to search"
+
+  ReqContext:
+    fields:
+      - "req_id: str"
+      - "kv_transfer_params: dict[str, Any] | None"
+      - "load_tier_filter: TierFilter = TierFilter.ALL  # NOT optional, has default"
+      - "internal typed state map"
+
+  OffloadPolicy:
+    notes: "Per-request offloading policy set by on_new_request"
+
+  RequestOffloadingContext:
+    notes: "Returned by on_new_request. Contains per-request policy and state."
+
+  ScheduleEndContext:
+    notes: "Passed to on_schedule_end with scheduling step metadata"
+
+  OffloadingEvent:
+    fields:
+      - "keys: list[OffloadKey]"
+      - "medium: Medium"
+    notes: "Used for eviction notifications, BlockStored events, etc."
+
+  GPULoadStoreSpec:
+    fields:
+      - "block_ids: np.ndarray[np.int64]"
+      - "group_sizes: Sequence[int]"
+      - "block_indices: Sequence[int]"
+
+  PrepareStoreOutput:
+    fields:
+      - "keys_to_store: Collection[OffloadKey]"
+      - "store_spec: LoadStoreSpec"
+      - "evicted_keys: Collection[OffloadKey]"
+
+  TransferResult:
+    fields:
+      - "job_id: int"
+      - "success: bool"
+      - "transfer_size: int | None"
+      - "transfer_time: float | None"
+
+  CanonicalKVCaches:
+    fields:
+      - "tensors: list[CanonicalKVCacheTensor]"
+      - "group_data_refs: list[list[CanonicalKVCacheRef]]"
+    notes: "N per-layer tensors (changed from 1 coalesced tensor in v0.23)"
+
+  CanonicalKVCacheTensor:
+    fields:
+      - "tensor: torch.Tensor  # shape (num_blocks, ...)"
+      - "page_size_bytes: int"
+
+  CanonicalKVCacheRef:
+    fields:
+      - "tensor_idx: int"
+      - "page_size_bytes: int"
+      - "page_mapping: CanonicalPageMapping | None"
+
+# ─── LookupResult Semantics ──────────────────────────────────────────
+
+lookup_semantics:
+  MISS:
+    meaning: "Block not in offload storage"
+    vllm_behavior: "Recomputes KV from scratch (prefill) or stalls (decode miss)"
+    optimization_impact: "Every MISS costs a full prefill computation"
+  HIT:
+    meaning: "Block in primary tier, ready for immediate GPU load"
+    vllm_behavior: "Calls prepare_load + submit_load to transfer to GPU"
+    optimization_impact: "Load latency is the critical path"
+  HIT_PENDING:
+    meaning: "Block being promoted from secondary tier to primary (async)"
+    vllm_behavior: "Retries lookup on next scheduling step. Does NOT block."
+    optimization_impact: "Reducing promotion latency reduces retry steps"
+  RETRY:
+    meaning: "Connector needs more time (generic deferral)"
+    vllm_behavior: "Same as HIT_PENDING — retries next step"
+    optimization_impact: "Minimize situations requiring RETRY"
+
+# ─── Calling Sequences ────────────────────────────────────────────────
+
+calling_sequences:
+  store: |
+    1. manager.prepare_store(keys) → PrepareStoreOutput | None
+       Returns None when blocks cannot be stored (any reason).
+    2. worker.submit_store(job_id, gpu_spec, store_spec) → bool
+    3. worker.get_finished()  [normal polling — NOT wait()]
+    4. manager.complete_store(keys, success)
+  load: |
+    1. manager.lookup(key) per block → HIT/MISS/HIT_PENDING/RETRY
+    2. manager.prepare_load(hit_keys) → LoadStoreSpec
+    3. worker.submit_load(job_id, src_spec, gpu_spec) → bool
+    4. worker.get_finished()  [normal polling]
+    5. manager.complete_load(keys)
+  eviction: |
+    Triggered inside prepare_store when storage cannot accommodate new blocks.
+    Connector decides the eviction policy. vLLM has NO explicit evict() call.
+    Eviction is entirely connector-owned.
+  lifecycle: |
+    init: Spec(config) → get_manager() → get_worker(kv_caches)
+    per-request: on_new_request → lookup/load/store → on_request_finished
+      NOTE: on_request_finished may fire while transfers are still in-flight.
+    per-step: on_schedule_end
+    end: shutdown()
+
+# ─── Concurrency ──────────────────────────────────────────────────────
+
+concurrency:
+  manager_and_worker_separate_processes: true
+  manager_thread_safe_required: false
+  tp_support: "TP>1: all ranks must agree on block residency"
+
+# ─── Invariants ───────────────────────────────────────────────────────
+
+invariants:
+  - "Manager and Worker are in SEPARATE processes — no shared state"
+  - "OffloadKey is content-addressed (full hash + group_idx), not positional"
+  - "prepare_store returns None when blocks cannot be stored — no crash"
+  - "complete_store(success=False) must clean up any partial state"
+  - "on_request_finished may fire before all transfers complete"
+  - "TP>1: all ranks must agree on residency"
+  - "Eviction is connector-owned — vLLM never calls evict()"
+  - "get_finished() is normal polling; wait() is for fenced/preempted flush only"
