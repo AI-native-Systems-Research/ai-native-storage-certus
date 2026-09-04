@@ -43,11 +43,14 @@ extern "C" fn handle_signal(_sig: libc::c_int) {
 /// for; keep it in sync with `tools/render_kvprofile.py`'s `TIER_RE`.
 fn format_tier_stats(s: &interfaces::TierEventStats) -> String {
     format!(
-        "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]",
+        "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]  \
+         store[backpressure {sb}, drops-on-full {sd}]",
         pm = s.promotions_to_memory,
         pg = s.promotions_to_gpu,
         em = s.evictions_from_memory,
         es = s.evictions_from_ssd,
+        sb = s.store_backpressure_events,
+        sd = s.store_drops_on_full,
     )
 }
 

@@ -122,6 +122,12 @@ pub struct TierEventCounters {
     /// Store-allocation retries taken while backpressuring on a momentarily
     /// full memory tier (see `reserve_memory`). Bumped once per retry sleep.
     store_backpressure_events: AtomicU64,
+    /// Stores dropped best-effort because the memory tier was still full after
+    /// the backpressure budget elapsed (see `populate`/`batch_populate`). The
+    /// KV block is not cached — a later load misses and recomputes — but the
+    /// store reports success so the vLLM offloading connector does not treat a
+    /// full cache as a fatal transfer failure.
+    store_drops_on_full: AtomicU64,
 }
 
 impl TierEventCounters {
@@ -159,6 +165,14 @@ impl TierEventCounters {
             .fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Record one best-effort store drop (tier full after backpressure). Returns
+    /// the count *before* this call, so a caller can log a one-shot line on the
+    /// first drop (return value `0`).
+    #[inline]
+    pub fn record_store_drop_on_full(&self) -> u64 {
+        self.store_drops_on_full.fetch_add(1, Ordering::Relaxed)
+    }
+
     /// Read the cumulative counters without resetting them.
     pub fn snapshot(&self) -> TierEventStats {
         TierEventStats {
@@ -167,6 +181,7 @@ impl TierEventCounters {
             evictions_from_memory: self.evictions_from_memory.load(Ordering::Relaxed),
             evictions_from_ssd: self.evictions_from_ssd.load(Ordering::Relaxed),
             store_backpressure_events: self.store_backpressure_events.load(Ordering::Relaxed),
+            store_drops_on_full: self.store_drops_on_full.load(Ordering::Relaxed),
         }
     }
 }
@@ -2947,7 +2962,25 @@ impl IDispatcher for DispatcherComponent {
         // Phase 1: Evict if needed and allocate memory-tier slot.
         let t_alloc = std::time::Instant::now();
         // Internal populate path has no client session context.
-        let _mem_ptr = self.reserve_memory(key, size, 0)?;
+        match self.reserve_memory(key, size, 0) {
+            Ok(_) => {}
+            Err(DispatcherError::AllocationFailed(_)) => {
+                // Best-effort drop: the tier is still full after the
+                // backpressure budget elapsed. Skip caching this block and
+                // report success — a later load simply misses and recomputes.
+                // Reporting an error here would trip vLLM's
+                // `assert transfer_result.success` and kill the engine, so a
+                // full cache must never be fatal to the store path.
+                if self.tier_counters.record_store_drop_on_full() == 0 {
+                    self.log_info(
+                        "store drop-on-full engaged: memory tier full after backpressure \
+                         budget; dropping store (not cached, load will recompute)",
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
         let alloc_us = t_alloc.elapsed().as_micros() as f64;
 
         // Phase 2: Async DMA copy from GPU into the reserved slot, then sync.
@@ -3032,6 +3065,18 @@ impl IDispatcher for DispatcherComponent {
                             results[i] = Some(Err(e));
                         }
                     }
+                }
+                Err(DispatcherError::AllocationFailed(_)) => {
+                    // Best-effort drop (see `populate`): tier still full after
+                    // the backpressure budget. Skip this key and report success
+                    // so a full cache is never fatal to vLLM's store path.
+                    if self.tier_counters.record_store_drop_on_full() == 0 {
+                        self.log_info(
+                            "store drop-on-full engaged: memory tier full after backpressure \
+                             budget; dropping store (not cached, load will recompute)",
+                        );
+                    }
+                    results[i] = Some(Ok(()));
                 }
                 Err(e) => { results[i] = Some(Err(e)); }
             }
@@ -5120,7 +5165,7 @@ mod tests {
     }
 
     #[test]
-    fn populate_allocation_failure() {
+    fn populate_drops_best_effort_on_allocation_failure() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
         let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices::default());
@@ -5150,15 +5195,26 @@ mod tests {
         c.memory_tier.connect(mt).unwrap();
 
         let d = query_interface!(c, IDispatcher).unwrap();
+        // Budget 0 = fail fast (no backpressure wait); the full tier then
+        // triggers the best-effort drop rather than surfacing AllocationFailed.
         d.initialize(DispatcherConfig {
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            store_backpressure_ms: 0,
             ..Default::default()
         })
         .unwrap();
 
+        // A store against a full tier is dropped best-effort: populate reports
+        // success (so vLLM's transfer assert never fires), the key is not
+        // cached, and the drop is recorded.
         let mut buf = vec![0u8; 4096];
-        let err = d.populate(1, make_handle(&mut buf));
-        assert!(matches!(err, Err(DispatcherError::AllocationFailed(_))));
+        d.populate(1, make_handle(&mut buf))
+            .expect("full-tier store must drop, not fail");
+        assert!(!d.check(1).unwrap(), "dropped store must not be cached");
+        assert!(
+            d.tier_event_stats().store_drops_on_full > 0,
+            "expected store_drops_on_full to be recorded"
+        );
         d.shutdown().unwrap();
     }
 
@@ -6007,8 +6063,11 @@ mod tests {
         c.memory_tier.connect(mt).unwrap();
 
         let d = query_interface!(c, IDispatcher).unwrap();
+        // Budget 0 = fail fast, so the full-tier store takes the best-effort
+        // drop path immediately instead of backpressuring.
         d.initialize(DispatcherConfig {
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            store_backpressure_ms: 0,
             ..Default::default()
         })
         .unwrap();
@@ -6025,13 +6084,16 @@ mod tests {
         dm.take_read(1).unwrap();
 
         // Populating key 2 needs the only slot, held by pinned key 1. Eviction
-        // must refuse and surface pool-full rather than free the pinned slot.
+        // must refuse to free the pinned slot; the store is then dropped
+        // best-effort (reports success, not cached) rather than failing.
         let mut buf2 = vec![0u8; 4096];
-        let res = d.populate(2, make_handle(&mut buf2));
+        d.populate(2, make_handle(&mut buf2))
+            .expect("full-of-pinned store must drop, not fail");
         assert!(
-            matches!(res, Err(DispatcherError::AllocationFailed(_))),
-            "populate should fail (pool full of pinned data), got: {res:?}"
+            d.tier_event_stats().store_drops_on_full > 0,
+            "expected store_drops_on_full to be recorded"
         );
+        assert!(!d.check(2).unwrap(), "dropped store must not be cached");
 
         // The critical invariant: key 1's slot was NOT reclaimed.
         assert!(

@@ -69,6 +69,9 @@ command -v numactl >/dev/null 2>&1 && numa_prefix=(numactl "--cpunodebind=${NUMA
 poller_flags=()
 [[ -n "$POLLER_BASE_CPU" ]] && poller_flags+=(--poller-base-cpu "$POLLER_BASE_CPU")
 [[ -n "$SHMQ_POLLER_CPU" ]] && poller_flags+=(--shmq-poller-cpu "$SHMQ_POLLER_CPU")
+# Opt-in poller fairness/backlog diagnostics (per-channel serviced counts,
+# low/high channel split, worker-queue high-water mark) into SERVER_LOG.
+[[ -n "${SHMQ_POLLER_STATS:-}" ]] && poller_flags+=(--shmq-poller-stats)
 
 SERVER_PID=""
 stop_server() {

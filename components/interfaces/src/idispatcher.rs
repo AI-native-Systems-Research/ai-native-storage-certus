@@ -214,6 +214,13 @@ pub struct TierEventStats {
     /// nonzero value means the tier saturated and the store path waited for the
     /// evictor to catch up rather than failing the store.
     pub store_backpressure_events: u64,
+    /// Stores dropped best-effort because the memory tier was still full after
+    /// the backpressure budget elapsed. The KV block is not cached (a later
+    /// load misses and recomputes), but the store reports success so a full
+    /// cache is never fatal to the vLLM offloading connector. A nonzero value
+    /// means the tier could not absorb the store inflow even after
+    /// backpressuring — consider a larger tier or more SSD write bandwidth.
+    pub store_drops_on_full: u64,
 }
 
 #[cfg(feature = "spdk")]

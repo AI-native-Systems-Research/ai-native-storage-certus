@@ -109,6 +109,22 @@ fn format_io_stats(s: &interfaces::ReadWriteStats) -> String {
     )
 }
 
+/// Format the cumulative KV-cache tier-movement counters for the server log,
+/// including the store-path backpressure/drop counters that report whether the
+/// memory tier saturated under load. Always available (not gated by a feature).
+fn format_tier_stats(s: &interfaces::TierEventStats) -> String {
+    format!(
+        "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]  \
+         store[backpressure {sb}, drops-on-full {sd}]",
+        pm = s.promotions_to_memory,
+        pg = s.promotions_to_gpu,
+        em = s.evictions_from_memory,
+        es = s.evictions_from_ssd,
+        sb = s.store_backpressure_events,
+        sd = s.store_drops_on_full,
+    )
+}
+
 /// Certus shared-memory-queue server exposing the IDispatcher control plane.
 #[derive(Parser)]
 #[command(
@@ -554,6 +570,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format_io_stats(&dispatcher.read_write_stats())
         ));
     }
+
+    // Always-on: the cumulative KV-cache tier-movement counts for this run,
+    // logged before teardown while the dispatcher's counters are still live.
+    logger.info(&format!(
+        "certus-server: FINAL tier-events {}",
+        format_tier_stats(&dispatcher.tier_event_stats())
+    ));
 
     let _ = dispatcher.shutdown();
     logger.info("certus-server: shutdown complete");
