@@ -68,7 +68,16 @@ pub const CUDA_MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
 
 /// cudaHostAlloc flags.
 pub const CUDA_HOST_ALLOC_DEFAULT: c_int = 0;
+/// Memory is considered pinned by all CUDA contexts, not just the one current
+/// at allocation time. Required so buffers allocated under device 0's context
+/// remain page-locked (fast/zero-copy) for transfers to other GPUs.
+pub const CUDA_HOST_ALLOC_PORTABLE: c_int = 1;
 pub const CUDA_HOST_ALLOC_MAPPED: c_int = 2;
+
+/// cudaHostRegister flags.
+/// Registered memory is portable across all CUDA contexts (all devices), not
+/// only the context current at registration time.
+pub const CUDA_HOST_REGISTER_PORTABLE: c_int = 1;
 
 /// Opaque CUDA stream handle.
 pub type CudaStream = *mut c_void;

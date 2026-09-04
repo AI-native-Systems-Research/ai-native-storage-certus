@@ -36,8 +36,16 @@ export MAX_ROUNDS="${MAX_ROUNDS:-0}"
 export OUTPUT_TOKENS="${OUTPUT_TOKENS:-150}"
 export MAX_NUM_SEQS="${MAX_NUM_SEQS:-64}"
 export MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
+# Data-parallel: DP_SIZE>1 fans out that many INDEPENDENT cputier containers
+# (one per GPU, each its own vLLM + isolated CPU/fs tier), each replaying a
+# disjoint conversation shard. run-docker-cputier-patched.sh does the fan-out and
+# writes run${rr}.gpu<N>.log per replica; aggregate throughput is
+# sum(generations) / max(replay) — the wall-clock envelope, never a sum of
+# per-replica gen/s. DP_SIZE=1 keeps the single-log path unchanged.
+export DP_SIZE="${DP_SIZE:-1}"
+export GPUS="${GPUS:-}"
 
-echo "START $(date -Is)  PATCHED(fix#2)  runs=$RUNS  num_convs=$NUM_CONVS  max_rounds=$MAX_ROUNDS  cpu_tier=$((CPU_BYTES/(1<<30)))G  fs_tier=$DISK_DIR_HOST  output_tokens=$OUTPUT_TOKENS" | tee "$PROGRESS"
+echo "START $(date -Is)  PATCHED(fix#2)  runs=$RUNS  num_convs=$NUM_CONVS  max_rounds=$MAX_ROUNDS  cpu_tier=$((CPU_BYTES/(1<<30)))G  fs_tier=$DISK_DIR_HOST  output_tokens=$OUTPUT_TOKENS  dp_size=$DP_SIZE" | tee "$PROGRESS"
 
 for r in $(seq 1 "$RUNS"); do
   rr=$(printf "%02d" "$r")
@@ -49,18 +57,45 @@ for r in $(seq 1 "$RUNS"); do
   t1=$(date +%s)
   wall=$(( t1 - t0 ))
 
-  done_line=$(grep -m1 '^\[run\] done\.' "$LOG" 2>/dev/null)
-  if [ -n "$done_line" ]; then
-    gens=$(sed -nE 's/.*generations=([0-9]+).*/\1/p' <<<"$done_line")
-    replay=$(sed -nE 's/.*wall=([0-9.]+)s.*/\1/p' <<<"$done_line")
-    rounds=$(sed -nE 's/.*rounds=([0-9]+).*/\1/p' <<<"$done_line")
-    gps=$(awk -v g="${gens:-0}" -v w="${replay:-0}" 'BEGIN{ if(w>0) printf "%.2f", g/w; else print "?" }')
-    echo "RUN_DONE $r/$RUNS  rc=$rc  status=OK  gens=${gens:-?}  replay=${replay:-?}s  rounds=${rounds:-?}  gen_per_s=${gps:-?}  wall=${wall}s" | tee -a "$PROGRESS"
+  if [ "$DP_SIZE" -le 1 ]; then
+    done_line=$(grep -m1 '^\[run\] done\.' "$LOG" 2>/dev/null)
+    if [ -n "$done_line" ]; then
+      gens=$(sed -nE 's/.*generations=([0-9]+).*/\1/p' <<<"$done_line")
+      replay=$(sed -nE 's/.*wall=([0-9.]+)s.*/\1/p' <<<"$done_line")
+      rounds=$(sed -nE 's/.*rounds=([0-9]+).*/\1/p' <<<"$done_line")
+      gps=$(awk -v g="${gens:-0}" -v w="${replay:-0}" 'BEGIN{ if(w>0) printf "%.2f", g/w; else print "?" }')
+      echo "RUN_DONE $r/$RUNS  rc=$rc  status=OK  gens=${gens:-?}  replay=${replay:-?}s  rounds=${rounds:-?}  gen_per_s=${gps:-?}  wall=${wall}s" | tee -a "$PROGRESS"
+    else
+      lastround=$(grep -oE '^\[run\] round [0-9]+' "$LOG" 2>/dev/null | grep -oE '[0-9]+' | tail -1)
+      keyerr=$(grep -m1 -E '_req_state|KeyError|EngineDeadError' "$LOG" 2>/dev/null | head -c 80)
+      echo "RUN_DONE $r/$RUNS  rc=$rc  status=CRASH  died_round=${lastround:-?}  gen_per_s=?  wall=${wall}s  err=[${keyerr:-none}]" | tee -a "$PROGRESS"
+      echo "WARN run$rr CRASH rc=$rc died_round=${lastround:-?} (see run${rr}.log)" | tee -a "$PROGRESS"
+    fi
   else
-    lastround=$(grep -oE '^\[run\] round [0-9]+' "$LOG" 2>/dev/null | grep -oE '[0-9]+' | tail -1)
-    keyerr=$(grep -m1 -E '_req_state|KeyError|EngineDeadError' "$LOG" 2>/dev/null | head -c 80)
-    echo "RUN_DONE $r/$RUNS  rc=$rc  status=CRASH  died_round=${lastround:-?}  gen_per_s=?  wall=${wall}s  err=[${keyerr:-none}]" | tee -a "$PROGRESS"
-    echo "WARN run$rr CRASH rc=$rc died_round=${lastround:-?} (see run${rr}.log)" | tee -a "$PROGRESS"
+    # DP: aggregate the per-replica gpu logs. sum generations, take max replay
+    # (wall-clock envelope), recompute gen/s from the raw ints (not summed rates).
+    sum_gens=0; max_replay=0; n_done=0; parts=""
+    for rlog in "${LOG%.log}".gpu*.log; do
+      [ -f "$rlog" ] || continue
+      dl=$(grep -m1 '^\[run\] done\.' "$rlog" 2>/dev/null)
+      [ -z "$dl" ] && continue
+      g=$(sed -nE 's/.*generations=([0-9]+).*/\1/p' <<<"$dl")
+      e=$(sed -nE 's/.*wall=([0-9.]+)s.*/\1/p' <<<"$dl")
+      [ -z "$g" ] && continue
+      n_done=$(( n_done + 1 ))
+      sum_gens=$(( sum_gens + g ))
+      max_replay=$(awk -v a="$max_replay" -v b="${e:-0}" 'BEGIN{print (b>a)?b:a}')
+      parts="${parts}$(basename "$rlog"):g=${g},replay=${e}s "
+    done
+    if [ "$n_done" -gt 0 ] && awk -v e="$max_replay" 'BEGIN{exit !(e>0)}'; then
+      agg_gps=$(awk -v g="$sum_gens" -v e="$max_replay" 'BEGIN{printf "%.2f", g/e}')
+    else
+      agg_gps=""
+    fi
+    echo "RUN_DONE $r/$RUNS  rc=$rc  replicas=${n_done}/${DP_SIZE}  gens=${sum_gens}  replay=${max_replay}s  gen_per_s=${agg_gps:-?}  wall=${wall}s  [${parts}]" | tee -a "$PROGRESS"
+    if [ "$rc" -ne 0 ] || [ "$n_done" -lt "$DP_SIZE" ] || [ -z "$agg_gps" ]; then
+      echo "WARN run$rr rc=$rc replicas=${n_done}/${DP_SIZE} (see run${rr}.gpu*.log)" | tee -a "$PROGRESS"
+    fi
   fi
   sleep 5
 done

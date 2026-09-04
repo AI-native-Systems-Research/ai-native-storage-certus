@@ -935,7 +935,7 @@ impl IGpuServices for GpuServicesComponent {
             // SAFETY: cudaHostAlloc allocates page-locked host memory.
             let mut host_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
             let err = unsafe {
-                cuda_ffi::cudaHostAlloc(&mut host_ptr, size, cuda_ffi::CUDA_HOST_ALLOC_DEFAULT)
+                cuda_ffi::cudaHostAlloc(&mut host_ptr, size, cuda_ffi::CUDA_HOST_ALLOC_PORTABLE)
             };
             if err != cuda_ffi::CUDA_SUCCESS {
                 return Err(format!(
@@ -973,7 +973,11 @@ impl IGpuServices for GpuServicesComponent {
             drop(state);
 
             // SAFETY: ptr is valid for `size` bytes and page-aligned (caller contract).
-            let err = unsafe { cuda_ffi::cudaHostRegister(ptr, size, 0) };
+            // PORTABLE so the shared memory-tier pool stays pinned for every GPU's
+            // context (data-parallel replicas transfer from it to multiple devices).
+            let err = unsafe {
+                cuda_ffi::cudaHostRegister(ptr, size, cuda_ffi::CUDA_HOST_REGISTER_PORTABLE)
+            };
             let we_registered_cuda = err == cuda_ffi::CUDA_SUCCESS;
             if err != cuda_ffi::CUDA_SUCCESS
                 && err != cuda_ffi::CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED
