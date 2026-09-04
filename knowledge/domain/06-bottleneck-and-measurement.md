@@ -1,8 +1,3 @@
-I have all the context needed. I can see the format, production evidence style, and specific numbers from the existing files. Let me now output the complete domain reference file.
-
----
-
-```markdown
 ---
 id: bottleneck-and-measurement
 decision: Identify what resource or interaction is actually limiting system throughput or latency, and design experiments that causally prove the bottleneck before committing optimization effort

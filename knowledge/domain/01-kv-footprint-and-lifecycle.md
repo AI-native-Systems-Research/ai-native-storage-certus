@@ -1,6 +1,3 @@
-I now have sufficient context from the codebase. Let me compose the full domain reference file.
-
-```markdown
 ---
 id: kv-footprint-and-lifecycle
 decision: How to size, address, and manage the lifetime of KV cache blocks
