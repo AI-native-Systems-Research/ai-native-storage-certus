@@ -198,9 +198,17 @@ impl IRemoteLookupRdmaResponderAdmin for RemoteLookupRdmaResponderComponent {
                     "memory tier pool not initialized (pool_info returned None)".into(),
                 )
             })?;
+            // FR-010: an `ibv_reg_mr` failure surfaces as `Registration`; every
+            // bind / listen / device-resolution failure surfaces as `Bind`.
             let (seam, endpoint, stop_efd, region) =
-                RealCmSeam::bind(&bind_ip, command_rx, pool_ptr, pool_len)
-                    .map_err(RemoteLookupRdmaResponderError::Bind)?;
+                RealCmSeam::bind(&bind_ip, command_rx, pool_ptr, pool_len).map_err(|e| match e {
+                    crate::rdma::CmBindError::Bind(msg) => {
+                        RemoteLookupRdmaResponderError::Bind(msg)
+                    }
+                    crate::rdma::CmBindError::Registration(msg) => {
+                        RemoteLookupRdmaResponderError::Registration(msg)
+                    }
+                })?;
             Ok((
                 Box::new(seam) as Box<dyn CmListener>,
                 endpoint,
