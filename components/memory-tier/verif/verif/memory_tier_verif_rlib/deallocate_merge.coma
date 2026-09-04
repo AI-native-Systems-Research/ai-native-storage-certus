@@ -1,0 +1,116 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 296 0 303 19 *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 304 37 304 88
+let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 306 19 306 53
+let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 284 11 284 47
+let%span slib'2 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 285 11 285 44
+let%span slib'3 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 286 11 286 57
+let%span slib'4 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 288 10 288 76
+let%span slib'5 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 289 10 289 70
+let%span slib'6 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 290 10 290 30
+let%span slib'7 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 292 10 292 50
+let%span slib'8 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 294 10 294 80
+let%span slib'9 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 295 10 295 68
+let%span slib'10 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 140 11 140 47
+let%span slib'11 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 141 11 141 44
+let%span slib'12 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 142 10 143 68
+let%span slib'13 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 144 10 145 50
+let%span slib'14 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 146 10 146 50
+let%span slib'15 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 147 10 147 30
+let%span slib'16 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 177 11 177 48
+let%span slib'17 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 178 10 178 43
+let%span slib'18 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 179 10 179 30
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type tup2_usize_usize = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let coalesce_prev (prev_offset: UInt64.t) (prev_size: UInt64.t) (offset: UInt64.t) (size: UInt64.t)
+  (return (x: tup2_usize_usize)) =
+{[@stop_split] [@expl:coalesce_prev requires] ([@stop_split] [@expl:coalesce_prev requires #0] [%#slib'10] UInt64.t'int prev_offset
+      + UInt64.t'int prev_size
+    <= UInt64.t'int offset)
+  /\ ([@stop_split] [@expl:coalesce_prev requires #1] [%#slib'11] UInt64.t'int prev_size + UInt64.t'int size
+  <= UInt64.t'int const_MAX)}
+  any
+  [ return (result: tup2_usize_usize) ->
+  {[@stop_split] [@expl:coalesce_prev ensures] ([@stop_split] [@expl:coalesce_prev ensures #0] [%#slib'12] UInt64.t'int prev_offset
+          + UInt64.t'int prev_size
+        = UInt64.t'int offset
+      -> UInt64.t'int result.f0 = UInt64.t'int prev_offset
+      /\ UInt64.t'int result.f1 = UInt64.t'int prev_size + UInt64.t'int size)
+    /\ ([@stop_split] [@expl:coalesce_prev ensures #1] [%#slib'13] UInt64.t'int prev_offset + UInt64.t'int prev_size
+        < UInt64.t'int offset
+      -> UInt64.t'int result.f0 = UInt64.t'int offset /\ UInt64.t'int result.f1 = UInt64.t'int size)
+    /\ ([@stop_split] [@expl:coalesce_prev ensures #2] [%#slib'14] UInt64.t'int result.f0 + UInt64.t'int result.f1
+      = UInt64.t'int offset + UInt64.t'int size)
+    /\ ([@stop_split] [@expl:coalesce_prev ensures #3] [%#slib'15] UInt64.t'int result.f0 <= UInt64.t'int offset)}
+    (! return {result}) ]
+
+let coalesce_next (new_size: UInt64.t) (next_size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:coalesce_next requires] [%#slib'16] UInt64.t'int new_size + UInt64.t'int next_size
+  <= UInt64.t'int const_MAX}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:coalesce_next ensures] ([@stop_split] [@expl:coalesce_next ensures #0] [%#slib'17] UInt64.t'int result
+      = UInt64.t'int new_size + UInt64.t'int next_size)
+    /\ ([@stop_split] [@expl:coalesce_next ensures #1] [%#slib'18] UInt64.t'int result >= UInt64.t'int new_size)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let deallocate_merge [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 296 0 303 19]
+  (prev_offset: UInt64.t) (prev_size: UInt64.t) (offset: UInt64.t) (size: UInt64.t) (next_present: bool)
+  (next_size: UInt64.t) (return (x: tup2_usize_usize)) =
+{[@stop_split] [@expl:deallocate_merge requires] ([@stop_split] [@expl:deallocate_merge requires #0] [%#slib'1] UInt64.t'int prev_offset
+      + UInt64.t'int prev_size
+    <= UInt64.t'int offset)
+  /\ ([@stop_split] [@expl:deallocate_merge requires #1] [%#slib'2] UInt64.t'int prev_size + UInt64.t'int size
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:deallocate_merge requires #2] [%#slib'3] UInt64.t'int prev_size + UInt64.t'int size
+    + UInt64.t'int next_size
+  <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = coalesce_prev [%#slib] {prev_offset} {prev_size} {offset} {size}
+        (fun (_x: tup2_usize_usize) -> [ &_42 <- _x ] s1)
+    | s1 = [ &new_offset <- _42.f0 ] s2
+    | s2 = [ &new_size <- _42.f1 ] s3
+    | s3 = any [ br0 -> {next_present = false} (! bb5) | br1 -> {next_present} (! bb2) ] ]
+  | bb2 = s0
+    [ s0 = coalesce_next [%#slib'0] {new_size} {next_size} (fun (_x: UInt64.t) -> [ &_49 <- _x ] s1)
+    | s1 = [ &new_size <- _49 ] s2
+    | s2 = bb5 ]
+  | bb5 = s0 [ s0 = [ &_ret <- { f0 = new_offset; f1 = new_size } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup2_usize_usize = Any.any_l ()
+  | & prev_offset: UInt64.t = prev_offset
+  | & prev_size: UInt64.t = prev_size
+  | & offset: UInt64.t = offset
+  | & size: UInt64.t = size
+  | & next_present: bool = next_present
+  | & next_size: UInt64.t = next_size
+  | & new_offset: UInt64.t = Any.any_l ()
+  | & new_size: UInt64.t = Any.any_l ()
+  | & _42: tup2_usize_usize = Any.any_l ()
+  | & _49: UInt64.t = Any.any_l () ])
+  [ return (result: tup2_usize_usize) ->
+  {[@stop_split] [@expl:deallocate_merge ensures] ([@stop_split] [@expl:deallocate_merge ensures #0] [%#slib'4] UInt64.t'int prev_offset
+          + UInt64.t'int prev_size
+        = UInt64.t'int offset -> UInt64.t'int result.f0 = UInt64.t'int prev_offset)
+    /\ ([@stop_split] [@expl:deallocate_merge ensures #1] [%#slib'5] UInt64.t'int prev_offset + UInt64.t'int prev_size
+        < UInt64.t'int offset -> UInt64.t'int result.f0 = UInt64.t'int offset)
+    /\ ([@stop_split] [@expl:deallocate_merge ensures #2] [%#slib'6] UInt64.t'int result.f0 <= UInt64.t'int offset)
+    /\ ([@stop_split] [@expl:deallocate_merge ensures #3] [%#slib'7] UInt64.t'int result.f0 + UInt64.t'int result.f1
+      >= UInt64.t'int offset + UInt64.t'int size)
+    /\ ([@stop_split] [@expl:deallocate_merge ensures #4] [%#slib'8] next_present
+      -> UInt64.t'int result.f0 + UInt64.t'int result.f1
+      = UInt64.t'int offset + UInt64.t'int size + UInt64.t'int next_size)
+    /\ ([@stop_split] [@expl:deallocate_merge ensures #5] [%#slib'9] not next_present
+    -> UInt64.t'int result.f0 + UInt64.t'int result.f1 = UInt64.t'int offset + UInt64.t'int size)}
+    (! return {result}) ]

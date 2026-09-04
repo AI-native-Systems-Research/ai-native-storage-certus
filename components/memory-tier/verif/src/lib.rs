@@ -228,3 +228,106 @@ pub fn leftover_offset_aligned(offset: usize, size: usize) -> usize {
     let aligned = align_up(size);
     offset + aligned
 }
+
+// -------------------------------------------------------------------------
+// P9 — FR-029 (backfilled): free_capacity() == capacity() - used().
+//
+// Mirrors `pool.allocator.capacity() - pool.allocator.used()` (lib.rs:186,
+// exposed as `free_capacity()`). Proves the accounting identity and the
+// invariant that free bytes never exceed capacity. Backs the proactive-eviction
+// trigger. The `used <= capacity` invariant it requires is the same one
+// `allocate_split` (P3) establishes and preserves.
+// -------------------------------------------------------------------------
+
+/// Free bytes in the pool: total capacity minus bytes in use.
+#[requires(used@ <= capacity@)] // accounting invariant (preserved by allocate/deallocate)
+#[ensures(result@ == capacity@ - used@)] // exact complement of `used`
+#[ensures(result@ <= capacity@)] // free bytes never exceed total capacity
+pub fn free_capacity(capacity: usize, used: usize) -> usize {
+    capacity - used
+}
+
+// -------------------------------------------------------------------------
+// P10 — FR-018 / User Story 4: clear() resets pool accounting.
+//
+// Mirrors `pool.allocator = FreeList::new(state.pool_size)` (lib.rs:605), which
+// via `FreeList::new` (allocator.rs:16-26) sets `used = 0` and
+// `capacity = pool_size`. The returned entry count comes from `HashMap::len()`
+// (a trusted container op — see verified_properties.md) and is NOT modeled
+// here; what is proved is the arithmetic reset of the allocator's accounting.
+// -------------------------------------------------------------------------
+
+/// Reset the allocator accounting on `clear()`: used → 0, capacity → pool_size.
+#[ensures(result.0@ == 0)] // no bytes in use after clear
+#[ensures(result.1@ == pool_size@)] // full pool capacity restored
+pub fn clear_reset(pool_size: usize) -> (usize, usize) {
+    let new_used = 0;
+    let new_capacity = pool_size;
+    (new_used, new_capacity)
+}
+
+// -------------------------------------------------------------------------
+// P11 — FR-026 / FR-015: the FULL deallocate coalescing path.
+//
+// Composes coalesce_prev (P5) and coalesce_next (P6) exactly as
+// `deallocate()` runs them (allocator.rs:63-82): first merge with the
+// preceding region, then, if a free region begins exactly at the merged
+// region's end, merge with it. `next_present` models the trusted BTreeMap
+// lookup `self.free_regions.get(&next_offset).is_some()` (allocator.rs:77);
+// `next_size` is that region's size. This proves the merge across BOTH
+// neighbours (a) only ever extends the region outward, (b) never drops the
+// freed bytes, and (c) conserves total bytes exactly.
+// -------------------------------------------------------------------------
+
+/// Full deallocate merge: coalesce a freed region with its preceding and
+/// following free neighbours (the trusted lookups having chosen them).
+#[requires(prev_offset@ + prev_size@ <= offset@)] // prev ends at/before offset (no overlap)
+#[requires(prev_size@ + size@ <= usize::MAX@)] // prev-merge overflow-free
+#[requires(prev_size@ + size@ + next_size@ <= usize::MAX@)] // full-merge overflow-free
+// (a) coalescing only extends the region leftward:
+#[ensures(prev_offset@ + prev_size@ == offset@ ==> result.0@ == prev_offset@)]
+#[ensures(prev_offset@ + prev_size@ < offset@ ==> result.0@ == offset@)]
+#[ensures(result.0@ <= offset@)]
+// (b) the freed span is always still covered by the merged region:
+#[ensures(result.0@ + result.1@ >= offset@ + size@)]
+// (c) byte conservation: right endpoint grows by next_size iff a following region merged:
+#[ensures(next_present ==> result.0@ + result.1@ == offset@ + size@ + next_size@)]
+#[ensures(!next_present ==> result.0@ + result.1@ == offset@ + size@)]
+pub fn deallocate_merge(
+    prev_offset: usize,
+    prev_size: usize,
+    offset: usize,
+    size: usize,
+    next_present: bool,
+    next_size: usize,
+) -> (usize, usize) {
+    let (new_offset, mut new_size) = coalesce_prev(prev_offset, prev_size, offset, size);
+    if next_present {
+        new_size = coalesce_next(new_size, next_size);
+    }
+    (new_offset, new_size)
+}
+
+// -------------------------------------------------------------------------
+// P12 — FR-004: align_up is idempotent (aligned sizes are fixed points).
+//
+// A structural strengthening of P1: rounding an already-4 KiB-aligned size up
+// again returns it unchanged. This is what makes the alignment invariant
+// stable under repeated allocation — the leftover offset stays a fixed point
+// of align_up. Proved purely from align_up's own postcondition (multiple of
+// 4096, in [size, size+4096)): the only multiple of 4096 in that half-open
+// window is `size` itself.
+// -------------------------------------------------------------------------
+
+/// Applying `align_up` twice equals applying it once (`result.1 == result.0`).
+#[requires(size@ > 0)]
+#[requires(size@ + 8191 <= usize::MAX@)] // overflow-free through two align_up calls
+#[ensures(result.0@ % 4096 == 0)] // first application is aligned
+#[ensures(result.1@ == result.0@)] // second application is a no-op — idempotent
+pub fn align_up_idempotent(size: usize) -> (usize, usize) {
+    let once = align_up(size);
+    // once < size + 4096 ⟹ once + 4095 < size + 8191 <= usize::MAX, so the
+    // second call's overflow precondition holds.
+    let twice = align_up(once);
+    (once, twice)
+}

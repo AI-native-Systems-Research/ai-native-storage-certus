@@ -1,5 +1,12 @@
 # Verified properties — memory-tier (Creusot)
 
+> **Superseded — see [`memory-tier_properties.md`](memory-tier_properties.md).**
+> That file is the current, authoritative, interface-aggregated record (12
+> proofs / 48 VCs, IMemoryTier 17-method coverage map, TOOL-vs-AGENT gaps,
+> wall-clock + peak-RSS measurements). This file documents only the original
+> 8-proof allocator core (`Proved (8 files)`) and is retained for history; its
+> per-file "N/N VCs" figures pre-date the recount and are not authoritative.
+
 Proven from spec `specs/001-memory-tier/spec.md` against code `src/allocator.rs`
 (the `FreeList` first-fit allocator). Artifacts: `verif/` (run `cargo creusot`
 from `components/memory-tier/verif/`; all 8 goals discharge — `Proved (8 files) ✔`).
