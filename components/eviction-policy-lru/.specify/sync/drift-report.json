@@ -12,7 +12,7 @@
     "result": "clean"
   },
   "specs": [
-    { "spec": ".specify/specs/001-lru-eviction-policy/spec.md", "status": "Backfilled",
+    { "spec": "specs/001-lru-eviction-policy/spec.md", "status": "Backfilled",
       "requirements": [
         { "id": "FR-001", "status": "aligned", "location": "src/lib.rs:41-51" },
         { "id": "FR-002", "status": "aligned", "location": "src/lib.rs:53-71", "note": "BACKFILL: documented non-idempotent re-registration (src/lib.rs:69 push_back); diverges from interface idempotency clause by design (interfaces commit 1da4e777); no caller re-tracks a live key" },

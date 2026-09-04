@@ -1,9 +1,9 @@
 ---
 spec_sync_component: eviction-policy-lru
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-04T17:01:54Z
-spec_sync_git_commit: 0aa01097
-spec_sync_inputs_sha256: 46def3c25a0b610ec89dc68887bf3dee83e2ac98aaeb23353381a1f633f86884
+spec_sync_synced_at: 2026-09-04T17:26:15Z
+spec_sync_git_commit: 50b7223a
+spec_sync_inputs_sha256: 2ef00d2d228f9e95e44b8972d32fbe47597071b2f1c09339af6d00cf8910b10a
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Drift Report: eviction-policy-lru
@@ -117,23 +117,24 @@ doc sync. Recorded as a latent hazard, not stamped as drift.
 - **No `src/` change** this sweep — the two resolutions are spec-doc BACKFILLs only,
   so the green build state is unaffected and the input hash is unchanged.
 
-## Gate & tooling note (important)
+## Gate & tooling note
 
-This component stores its specs under `.specify/specs/`, **not** a top-level
-`components/eviction-policy-lru/specs/`. Two consequences:
+This sweep also **relocated** the spec tree from `.specify/specs/` to a top-level
+`components/eviction-policy-lru/specs/001-lru-eviction-policy/` (`git mv`, no
+content change) so the component is now genuinely enforced by the CI Spec-Sync
+Gate. Two consequences, both now in effect:
 1. The CI Spec-Sync Gate discovers targets via `find components -maxdepth 2 -type d
-   -name specs` — which does **not** match `.specify/specs`, so this component is
-   **not gated by CI** regardless of this stamp (same situation as
-   `disk-partition-manager`).
+   -name specs`, which now matches `components/eviction-policy-lru/specs` — so this
+   component **is gated by CI** and this stamp is load-bearing (the gate fails the
+   build on `drift_status != clean` or a recomputed-hash mismatch).
 2. `scripts/spec-sync-hash.sh` hashes `<dir>/src` + `<dir>/specs` (+ interfaces);
-   with no top-level `specs/`, the digest covers `src/` + interfaces **only** and
-   does **not** include this spec markdown. Editing the spec does not change the
-   hash. The stamp therefore certifies the `src/`+interfaces inputs; the spec
-   accuracy rests on this human-readable report.
-
-To make this component genuinely gated and hash-covered, its `.specify/specs/`
-tree would need to move to a top-level `specs/` dir (or the tooling taught about
-the `.specify/specs/` layout) — a structural change out of scope for this sync.
+   with the specs now at a top-level `specs/`, the digest **includes** this spec
+   markdown. Editing `spec.md`/`plan.md`/`tasks.md` now changes the hash and
+   requires re-stamping. (This is why the stamped `spec_sync_inputs_sha256`
+   changed this sweep even though `src/` was untouched — the spec markdown entered
+   the hash for the first time.) The sync artifacts under `.specify/sync/` are
+   **not** hashed (the digest walks only `src/` + `specs/` + interfaces), so
+   editing this report does not perturb the stamp.
 
 ## Aligned ✓
 

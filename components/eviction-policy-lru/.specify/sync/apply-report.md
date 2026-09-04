@@ -31,6 +31,6 @@ Original spec saved to: `.specify/sync/backups/spec.md.2026-06-19.bak`
 
 ## Next Steps
 
-1. Review updated spec: `.specify/specs/001-lru-eviction-policy/spec.md`
+1. Review updated spec: `specs/001-lru-eviction-policy/spec.md` (relocated from `.specify/specs/` this sweep)
 2. Implement align task: Add logging per `.specify/sync/align-tasks.md`
 3. Commit changes: `git add .specify/ && git commit -m "sync: apply drift resolutions for eviction-policy-lru"`
