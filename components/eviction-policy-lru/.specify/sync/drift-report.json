@@ -1,18 +1,21 @@
 {
-  "generated": "2026-08-07T15:28:26Z",
+  "generated": "2026-09-04T17:01:54Z",
   "project": "eviction-policy-lru",
   "summary": {
     "aligned": 20,
     "drifted": 0,
+    "resolved_this_sweep_backfill": 2,
+    "resolved_this_sweep_align": 0,
+    "deferred_cross_component": 1,
     "not_implemented": 0,
     "unspecced": 0,
     "result": "clean"
   },
   "specs": [
-    { "spec": ".specify/specs/001-lru-eviction-policy/spec.md", "status": "Backfilled",
+    { "spec": "specs/001-lru-eviction-policy/spec.md", "status": "Backfilled",
       "requirements": [
         { "id": "FR-001", "status": "aligned", "location": "src/lib.rs:41-51" },
-        { "id": "FR-002", "status": "aligned", "location": "src/lib.rs:53-71" },
+        { "id": "FR-002", "status": "aligned", "location": "src/lib.rs:53-71", "note": "BACKFILL: documented non-idempotent re-registration (src/lib.rs:69 push_back); diverges from interface idempotency clause by design (interfaces commit 1da4e777); no caller re-tracks a live key" },
         { "id": "FR-003", "status": "aligned", "location": "src/lib.rs:73-87; src/lru_list.rs:70-96" },
         { "id": "FR-004", "status": "aligned", "location": "src/lib.rs:117-131; src/lru_list.rs:121-145" },
         { "id": "FR-005", "status": "aligned", "location": "src/lib.rs:133-138; src/lru_list.rs:99-104" },
@@ -20,18 +23,38 @@
         { "id": "FR-007", "status": "aligned", "location": "src/lib.rs:151-160" },
         { "id": "FR-008", "status": "aligned", "location": "src/lib.rs:162-168" },
         { "id": "FR-009", "status": "aligned", "location": "src/lib.rs:60-67,75-83,119-127,135,142-147,153-158,164" },
-        { "id": "FR-010", "status": "aligned", "location": "src/lru_list.rs:71-73,122-124" },
+        { "id": "FR-010", "status": "aligned", "location": "src/lru_list.rs:71-73,122-124", "note": "stale-handle ABA after free-list recycle is a documented known limitation, not spec drift; InvalidHandle reserved for future validation" },
         { "id": "FR-011", "status": "aligned", "location": "src/lru_list.rs:21,38-45,143" },
         { "id": "FR-012", "status": "aligned", "location": "src/lib.rs:89-115" },
         { "id": "NFR-001", "status": "aligned", "location": "src/lru_list.rs" },
         { "id": "NFR-002", "status": "aligned", "location": "src/lib.rs:308-336" },
         { "id": "NFR-003", "status": "aligned", "location": "src/lib.rs:22-25" },
         { "id": "NFR-004", "status": "aligned", "location": "src/lib.rs:27-38" },
-        { "id": "SC-001", "status": "aligned", "location": "src/lib.rs, src/lru_list.rs tests" },
+        { "id": "SC-001", "status": "aligned", "location": "22 tests pass (this sweep)" },
         { "id": "SC-002", "status": "aligned", "location": "src/lib.rs:308-336" },
-        { "id": "SC-003", "status": "aligned", "location": "ci (not re-run)" },
-        { "id": "SC-004", "status": "aligned", "location": "consumer crates (not re-verified)" }
+        { "id": "SC-003", "status": "aligned", "location": "clippy -D warnings + fmt clean (this sweep)" },
+        { "id": "SC-004", "status": "aligned", "location": "consumer crates (spec-declared; not re-verified)" }
+      ],
+      "entities_backfill": [
+        { "was": "EvictionKey", "now": "CacheKey", "reason": "no distinct EvictionKey type/alias exists; tracked key is interfaces::CacheKey (idispatch_map::CacheKey, u64)" }
       ]
+    }
+  ],
+  "deferred": [
+    {
+      "id": "interface-idempotency-wording",
+      "summary": "IEvictionPolicy::track doc (ieviction_policy.rs:82-87) states re-registration idempotency as a universal contract, but only lineage policies honor it; LRU is non-idempotent by design.",
+      "decision": "document LRU, defer interface",
+      "reason": "scoping the interface wording is a coordinated interfaces-crate change that invalidates every stamped component's folded hash; LRU-side divergence documented in FR-002.",
+      "blocking": false
+    }
+  ],
+  "known_limitations": [
+    {
+      "id": "stale-handle-aba",
+      "summary": "free-list recycling (FR-011) can make a retained stale handle reference a recycled slot's new occupant; FR-010 no-op guarantee is scoped to already-removed handles only.",
+      "fix": "generation counter in EvictionHandle (code + interface change)",
+      "blocking": false
     }
   ],
   "unspecced": [],

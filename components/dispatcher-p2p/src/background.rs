@@ -1,14 +1,14 @@
 //! Background write worker for memory-tier-to-SSD persistence and SSD eviction.
 
 use crossbeam_channel::{Receiver, Sender};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
 
-use crate::{EvictionEvent, EvictionReason};
+use crate::{publish_eviction, EvictionEvent, EvictionReason};
 
 /// A job for the background writer to persist a memory-tier entry to SSD.
 #[derive(Debug)]
@@ -324,6 +324,7 @@ impl BackgroundEvictor {
         config: EvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
         eviction_tx: Option<Sender<EvictionEvent>>,
+        eviction_dropped: Arc<AtomicU64>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
@@ -339,6 +340,7 @@ impl BackgroundEvictor {
                     &config,
                     logger.as_deref(),
                     eviction_tx.as_ref(),
+                    &eviction_dropped,
                 );
             })
             .expect("failed to spawn SSD evictor thread");
@@ -364,6 +366,7 @@ impl BackgroundEvictor {
         config: &EvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
         eviction_tx: Option<&Sender<EvictionEvent>>,
+        eviction_dropped: &AtomicU64,
     ) {
         loop {
             thread::sleep(config.interval);
@@ -411,12 +414,12 @@ impl BackgroundEvictor {
                     continue;
                 }
 
-                if let Some(tx) = eviction_tx {
-                    let _ = tx.try_send(EvictionEvent {
-                        key,
-                        reason: EvictionReason::Removed,
-                    });
-                }
+                publish_eviction(
+                    eviction_tx,
+                    Some(eviction_dropped),
+                    key,
+                    EvictionReason::Removed,
+                );
 
                 // Free extent on the appropriate drive.
                 let drive_idx = key as usize % extent_mgrs.len().max(1);
@@ -510,6 +513,7 @@ impl MemoryTierEvictor {
         config: MemoryTierEvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
         eviction_tx: Arc<Mutex<Option<Sender<EvictionEvent>>>>,
+        eviction_dropped: Arc<AtomicU64>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
@@ -524,6 +528,7 @@ impl MemoryTierEvictor {
                     &config,
                     logger.as_deref(),
                     &eviction_tx,
+                    &eviction_dropped,
                 );
             })
             .expect("failed to spawn memory-tier evictor thread");
@@ -548,6 +553,7 @@ impl MemoryTierEvictor {
         config: &MemoryTierEvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
         eviction_tx: &Mutex<Option<Sender<EvictionEvent>>>,
+        eviction_dropped: &AtomicU64,
     ) {
         let mut consecutive_dry_runs = 0u32;
 
@@ -608,11 +614,14 @@ impl MemoryTierEvictor {
                     continue;
                 }
 
-                if let Some(ref tx) = *eviction_tx.lock().unwrap() {
-                    let _ = tx.try_send(EvictionEvent {
+                {
+                    let guard = eviction_tx.lock().unwrap();
+                    publish_eviction(
+                        guard.as_ref(),
+                        Some(eviction_dropped),
                         key,
-                        reason: EvictionReason::Demoted,
-                    });
+                        EvictionReason::Demoted,
+                    );
                 }
 
                 demoted += 1;

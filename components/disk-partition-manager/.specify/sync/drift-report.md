@@ -1,22 +1,47 @@
 ---
 spec_sync_component: disk-partition-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T18:07:26Z
-spec_sync_git_commit: 2c7864a2
-spec_sync_inputs_sha256: 0404aab9898ca897385ea0121820c841d3255396863ec73bc3067e80d29eaff9
+spec_sync_synced_at: 2026-09-04T17:42:15Z
+spec_sync_git_commit: 405897d7
+spec_sync_inputs_sha256: d0944a60043c65a4c813ed2f97b97b6758985db2af4e6c290fe3f95da395de67
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Drift Report: disk-partition-manager
 
-**Generated**: 2026-09-03
+**Generated**: 2026-09-04 (re-verified + relocated; prior verification 2026-09-03)
 **Component**: `components/disk-partition-manager`
-**Scope**: `.specify/specs/001-gpt-partition-management/spec.md` (+ plan/tasks
+**Scope**: `specs/001-gpt-partition-management/spec.md` (+ plan/tasks
 skim) vs implementation in `src/gpt.rs`, `src/lib.rs`, and the interface
 `components/interfaces/src/ipartition_table.rs`. Cross-component integration
 (SC-004) verified against `components/dispatcher/src/lib.rs` and
 `components/dispatcher-p2p/src/lib.rs`. No `src/`, `spec.md`, or interface source
-was changed this sweep — the specification was already accurate and every anchor
-independently re-verified.
+was changed this sweep — every FR/IR/PR/SC and Key Entity was independently
+re-read against the current code and found aligned; the specification was already
+accurate.
+
+**This sweep (2026-09-04): structural relocation + fresh verification.** Two things
+happened, neither weakening any requirement:
+1. **Relocated** the spec tree from `.specify/specs/001-gpt-partition-management/`
+   to a top-level `components/disk-partition-manager/specs/…` (`git mv`, no content
+   change) so the component is now discovered and enforced by the CI Spec-Sync
+   Gate (`find components -maxdepth 2 -type d -name specs`), which never matched
+   `.specify/specs/`. See "Note on the CI input hash" below — the digest now covers
+   the spec markdown, so the stamped `spec_sync_inputs_sha256` changed even though
+   no code changed.
+2. **Independently re-verified** all 11 FR / 3 IR / 2 PR / 4 SC + 4 entities against
+   `src/{gpt,lib}.rs` and `ipartition_table.rs`, refreshed the drifted SC-004
+   dispatcher-p2p anchors, and confirmed the crate is green: `cargo build -p
+   disk-partition-manager`, `cargo clippy -p disk-partition-manager --all-targets
+   -- -D warnings`, and `cargo fmt -p disk-partition-manager --check` all pass this
+   sweep (SPDK present locally). The crate still has **no unit tests** — SC-001/002/003
+   remain behaviorally aligned but automated-verification-free (parked #1, unchanged).
+
+**On the prior stamp.** The 2026-09-03 stamp (`0404aab9…`, commit `2c7864a2`) was
+computed against a polluted working tree (untracked hashed files under
+`components/interfaces/src/` present that day, since removed); a clean checkout of
+that same commit hashes to `028c2c9e…`, so that stamp would not have matched CI.
+This sweep re-stamps from a verified-clean tree (`d0944a60…`), confirmed to match a
+pristine `git archive HEAD` recompute.
 
 > **Correction of the prior artifact.** The previous report was dated
 > **2026-08-07T15:30:30Z**, carried **no** freshness stamp, and classified
@@ -40,12 +65,16 @@ independently re-verified.
 
 > **Note on the CI input hash.** `scripts/spec-sync-hash.sh
 > components/disk-partition-manager` hashes `<dir>/src/**` + `<dir>/specs/**` +
-> the `components/interfaces` tree. This component keeps its spec under
-> **`.specify/specs/001-gpt-partition-management/`**, not `<dir>/specs/`, so the
-> committed digest covers `src/gpt.rs`, `src/lib.rs`, and the interface tree, but
-> **not** `spec.md` itself. The digest still changes on any code or interface
-> edit; the spec-only backfills recorded here do not move it. Spec↔code
-> alignment below was verified by hand regardless.
+> the `components/interfaces` tree. As of this sweep the spec lives at a
+> **top-level `specs/001-gpt-partition-management/`** (relocated from
+> `.specify/specs/`), so the committed digest now covers `src/gpt.rs`,
+> `src/lib.rs`, `spec.md`/`plan.md`/`tasks.md`, **and** the interface tree — the
+> spec markdown is hashed for the first time (this is why the stamp moved from
+> `028c2c9e…` on the old layout to `d0944a60…`, with no code change). Editing the
+> spec now changes the digest and requires re-stamping. The `.specify/sync/`
+> artifacts (this report, JSON, backups) are **not** hashed — the walker visits
+> only `src/`, `specs/`, and the interfaces tree — so editing this report does not
+> perturb the stamp.
 
 ## Summary
 
@@ -86,7 +115,7 @@ All anchors below re-checked against the current `src/gpt.rs` / `src/lib.rs` /
 | SC-001 | Aligned (no test) | `write_gpt:152-237` ↔ `try_read_gpt_at:98-150` | Write/read share identical LBA↔sector math; round-trip offsets identical. No automated test — see parked #1. |
 | SC-002 | Aligned (no test) | `read_gpt:66-96` | CRC-corrupt **and** signature-damaged primary both fall back to backup transparently. No automated test — see parked #1. |
 | SC-003 | Aligned (no test) | `encode/decode_utf16le_name:576-595` | ASCII names round-trip UTF-8→UTF-16LE→UTF-8. No automated test — see parked #1. |
-| SC-004 | Aligned | `dispatcher/src/lib.rs:1611`; `dispatcher-p2p/src/lib.rs:1025,1147` | Dispatchers wire `config.format_on_init` → `initialize_or_format(format_on_init, partition_config)`; when false, a non-Certus layout is not reformatted. |
+| SC-004 | Aligned | `dispatcher/src/lib.rs:1611` (guard `:1764`); `dispatcher-p2p/src/lib.rs:1042` (guard `:1164`) | Dispatchers wire `config.format_on_init` → `initialize_or_format(format_on_init, partition_config)`; when false, a non-Certus layout is not reformatted (`!config.format_on_init` guard). Anchors refreshed this sweep (dispatcher-p2p moved from `:1025/:1147`). |
 
 **Key Entities — all 4 Aligned:** `PartitionConfig`, `PartitionSpec`,
 `PartitionTable`, `PartitionInfo` map to the interface types in
@@ -147,10 +176,14 @@ stale, unstamped 2026-08-07 report). The two items that report had marked
 read count) — were both resolved by prior syncs (FR-003 by a code fix now present
 at `gpt.rs:66-96`; PR-002 by a spec backfill to the real behavior) and are
 confirmed aligned here. **No `src/`, `spec.md`, or interface source was changed
-this sweep**, so no build/test/clippy/doc state changed and the committed digest
-is stable. The three remaining items — the absent unit tests, the hardcoded
-LBA-2 read, and the `generate_guid` zero-fallback — are a tracked
-code-completeness follow-up and two low-severity behaviors already documented in
-the spec's Implementation Notes; **none is a spec↔implementation behavioral
-contradiction**. This is not a clean stamp over an unacknowledged mismatch:
-every remaining gap is documented here and in the spec.
+this sweep** — the only change is the `git mv` relocation of the spec tree (no
+content change) plus this report. The committed digest did move
+(`028c2c9e…`→`d0944a60…`) solely because the relocation brings the spec markdown
+into the hash for the first time; `cargo build`/`clippy -D warnings`/`fmt --check`
+for the crate were re-run green this sweep (SPDK present), so the build/lint state
+is verified, not merely assumed. The three remaining items — the absent unit
+tests, the hardcoded LBA-2 read, and the `generate_guid` zero-fallback — are a
+tracked code-completeness follow-up and two low-severity behaviors already
+documented in the spec's Implementation Notes; **none is a spec↔implementation
+behavioral contradiction**. This is not a clean stamp over an unacknowledged
+mismatch: every remaining gap is documented here and in the spec.

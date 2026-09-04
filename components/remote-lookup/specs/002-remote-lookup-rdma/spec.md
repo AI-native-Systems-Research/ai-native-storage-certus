@@ -410,9 +410,10 @@ one-sided write into a reclaimed slot).
   a short buffer, bad tag, or bad UTF-8). Both classes MUST be **logged** before being dropped so a
   version/framing mismatch is diagnosable. Servers MUST echo `op_id` in KEY_RESPONSE and
   RDMA_STATUS. *(Backfilled 2026-08-20 — the malformed/truncated-frame ignore class (b) was
-  previously unspecced; `src/actor.rs:314`. The **logging** half of this requirement is not yet met
-  for either arm (`Unknown => {}` at `src/actor.rs:330` and `Err(_) => return` at `src/actor.rs:314`
-  are both silent) and is tracked as an ALIGN task; the ignore half is aligned.)*
+  previously unspecced; `src/actor.rs:314`. The **logging** half was aligned 2026-09-03: `on_wire`
+  now logs both arms via the optional `ILogger` receptacle before dropping — the malformed-frame arm
+  logs the sender, byte length, and decode error; the `Unknown` arm logs the sender plus the frame's
+  `version`/`msg_type`/`op_id` (`src/actor.rs`). Both classes remain ignored (poll loop continues).)*
 - **FR-019** (stale responses): A KEY_RESPONSE or RDMA_STATUS whose `op_id` is not in the
   active-operation map MUST be discarded without error.
 - **FR-020** (concurrency): The actor MUST support multiple concurrent in-flight operations, each
@@ -496,11 +497,15 @@ one-sided write into a reclaimed slot).
   the orphan-reuse guard prevents a new fetch from aliasing DRAM that a late one-sided write from
   the prior peer could still touch. This complements FR-014/FR-031.
 
-- **FR-033** *(Backfilled 2026-08-07 — completes the FR-022 configuration surface.)* Beyond the
+- **FR-033** *(Backfilled 2026-08-07; `bind_ip` added 2026-09-03 — completes the FR-022
+  configuration surface.)* Beyond the
   quorum/phase-1/deadline/retry-cap/max-keys knobs of FR-022, `LookupConfig` MUST also carry
+  `bind_ip` (the RoCE IPv4 the responder binds to, forwarded to the responder admin via
+  `set_bind_ip` during `initialize` — `src/lib.rs:146`; `interfaces/src/iremote_lookup.rs:63`),
   `actor_cpu` (best-effort NUMA/CPU pinning of the actor thread), `discovery` (zyre gossip
   discovery configuration), and `node_endpoint` (the advertised node endpoint). All derive sensible
-  defaults per FR-022's `Default` contract.
+  defaults per FR-022's `Default` contract (`bind_ip` defaults to the empty string, deferring the
+  bind address to the responder's own resolution — `interfaces/src/iremote_lookup.rs:92`).
 
 - **FR-034** *(Backfilled 2026-08-07 — build plumbing, previously unspecced.)* The crate MUST expose
   an `integrity-check` Cargo feature that forwards to `interfaces/integrity-check`, enabling the

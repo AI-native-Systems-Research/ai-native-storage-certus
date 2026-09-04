@@ -1,11 +1,31 @@
-Generated: pending
+---
+spec_sync_component: remote-lookup
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-09-04T00:20:50Z
+spec_sync_git_commit: 85c17e8e
+spec_sync_inputs_sha256: 9095d0013c312b91de32d0bfa6f4cdadd0e3382b50290f2b0e2dc84433139cab
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
 # Spec-vs-Implementation Drift Report — remote-lookup
 
 Analysis of `components/remote-lookup` source against its two specs. Spec
 `002-remote-lookup-rdma` is the **design-of-record**; spec
 `001-remote-lookup-placeholder` is **superseded** (its Supersession Notice is
-honored — divergences from 001 are intentional and non-actionable). READ-ONLY:
-no source was built or modified.
+honored — divergences from 001 are intentional and non-actionable).
+
+**This sweep (2026-09-03)** independently re-verified every spec-002 FR/SC against
+`src/` and applied three fixes:
+1. **FR-018 (Low) — ALIGN**: `on_wire` now *logs* both the malformed-decode arm and
+   the `WireMessage::Unknown` arm via the optional `ILogger` before dropping the
+   frame (previously both silent). The spec's "logged and ignored" requirement is now
+   fully met.
+2. **`bind_ip` — BACKFILL**: FR-033's `LookupConfig` field enumeration omitted the
+   load-bearing `bind_ip` field (the prior report also missed this — it marked FR-033
+   aligned). Backfilled into FR-033.
+3. **`seams.rs:692` — ALIGN (lint)**: a `clippy::clone_on_copy` `-D warnings` error
+   (`h.clone()` on the `Copy` type `IpcHandle`) that the prior report never noted —
+   it lurked because remote-lookup is **not** a default CI member, so CI never clippy's
+   it. Fixed to `*h`.
 
 ## Summary
 
@@ -13,25 +33,57 @@ no source was built or modified.
 | --- | --- |
 | Specs Analyzed | 2 |
 | Requirements Checked | 60 |
-| Aligned | 54 |
-| Drifted | 6 (1 actionable Low; 5 superseded / non-actionable) |
+| Aligned (after this sweep) | 60 (spec-002) + superseded-honored (spec-001) |
+| Drifted → resolved this sweep | 2 (FR-018 ALIGN, `bind_ip` BACKFILL) + 1 lint (seams.rs:692) |
+| Drifted (superseded / non-actionable) | 5 (intentional supersession of spec 001) |
 | Not Implemented | 0 |
-| Unspecced Features | 3 |
+| Unspecced Features | 2 (down from 3 — malformed-frame drop is now covered by FR-018(b)) |
 
-The single actionable finding is **FR-018 (Low)**: unknown/malformed wire frames
-are ignored correctly but not *logged*, so the "logged and ignored" requirement
-is half-met. This was already queued as ALIGN Task 3 in the 2026-08-07 sweep and
-remains open. All other divergences are intentional supersession of spec 001.
+**Verification this sweep.** Lib build + lib clippy are green:
+- `cargo build -p remote-lookup --lib` — clean
+- `cargo clippy -p remote-lookup --lib -- -D warnings` — clean (confirms the
+  `seams.rs:692` lint fix and the FR-018 logging edit compile lint-clean)
 
-No stale crate-path references were found in either spec (no
-`components/component-framework` or `components/spdk-sys` references to flag as
-the components/→lib/ move MINOR drift).
+> **Environmental verification gap (not drift).** The full `tests/mesh.rs` suite
+> (SC-001..SC-008 automated coverage) and `cargo clippy --all-targets` could **not**
+> be executed this sweep: the crate's `zyre` dev-dependency requires `deps/zyre-build/`,
+> which is absent in this environment, so `--all-targets`/`cargo test` fail to link.
+> The SC test bodies are present in the tree and passed in prior sweeps; the code paths
+> they exercise are unchanged by this sweep's edits (which touch only `on_wire`
+> logging, a mock-seam lint, and a spec doc). This is an environment limitation, not a
+> code or spec defect.
 
 ---
 
 ## Spec 002 — Remote Lookup over Zyre + RDMA (design-of-record)
 
-45 requirements checked (37 FR incl. 006a/016a/016b, 8 SC). Aligned 44, Drifted 1, Not Implemented 0.
+45 requirements checked (37 FR incl. 006a/016a/016b, 8 SC). All aligned after this sweep.
+
+### Resolved this sweep
+
+**FR-018 — ALIGN (code fix).** Spec: "Unknown message types MUST be **logged** and
+ignored"; the 2026-08-20 backfill extended this to malformed/truncated frames
+(class (b)). Before this sweep both arms were silent (`WireMessage::Unknown { .. } => {}`
+and `Err(_) => return`). `on_wire` (`src/actor.rs`) now logs both via the optional
+`ILogger` receptacle before dropping: the malformed arm logs sender + byte length +
+decode error; the `Unknown` arm logs sender + `version`/`msg_type`/`op_id`. Both
+classes remain ignored (poll loop continues). FR-018's spec note was updated to record
+the logging half as met.
+
+**FR-033 — BACKFILL (spec doc).** FR-033 enumerated `LookupConfig` fields beyond
+FR-022's knobs (`actor_cpu`, `discovery`, `node_endpoint`) but omitted `bind_ip`
+(`interfaces/src/iremote_lookup.rs:63`, default `String::new()` at :92), which is
+load-bearing: `src/lib.rs:146` forwards `config.bind_ip` to the responder admin via
+`set_bind_ip` during `initialize`. Code is authoritative (the field exists and is
+used); the spec under-enumerated it → BACKFILL, not ALIGN. Verified the remaining
+non-FR-022 fields are already specced (`caller_wait` at the FR near spec.md:479;
+`connection_teardown_timeout` at FR-014/spec.md:376), so `bind_ip` was the only gap.
+
+**seams.rs:692 — ALIGN (lint hygiene).** `batch_populate`'s mock called
+`self.populate(*k, h.clone())` where `IpcHandle` is `Copy`
+(`interfaces/src/idispatcher.rs:130`), tripping `clippy::clone_on_copy` under
+`-D warnings`. Fixed to `*h`. (Not previously reported; surfaced only under a
+component-local `cargo clippy` since remote-lookup is not a default CI member.)
 
 ### Aligned ✓
 
@@ -57,11 +109,12 @@ the components/→lib/ move MINOR drift).
 | FR-016a (pins owned by completion callback, released on run or drop) | `src/server.rs:47-121,296-311` |
 | FR-016b (every RDMA_REQUEST yields exactly one RDMA_STATUS) | `src/server.rs:86-121,289-293` |
 | FR-017 (promotion failure ⇒ KeyNoLongerAvailable) | `src/server.rs:249-287` |
+| FR-018 (framing + op_id echo; unknown/malformed frames **logged** and ignored) | `src/actor.rs` `on_wire` (both arms log via `ILogger`); `src/wire.rs:99-129` |
 | FR-019 (stale op_id discarded without error) | `src/actor.rs:412-414,498-509` |
 | FR-020 (multiple concurrent ops keyed by op_id; caller blocks on its op) | `src/actor.rs:161,682-727`; `src/lib.rs:291-313` |
 | FR-021 (ignore SHOUT whose peer id == own uuid) | `src/actor.rs:337-340` |
 | FR-022 (LookupConfig public, Default, sensible defaults) | `components/interfaces/src/iremote_lookup.rs:28-98` |
-| FR-023 (8 receptacles: zyre/dispatch_map/memory_tier/dispatcher/initiator/responder/responder_admin/logger) | `src/lib.rs:44-53` |
+| FR-023 (8 receptacles) | `src/lib.rs:44-53` |
 | FR-024 (no direct RDMA logic; via initiator/responder) | `src/actor.rs`, `src/worker.rs`, `src/server.rs` (delegated) |
 | FR-025 (responder_admin bring-up; read Endpoint + rkey; open control channel) | `src/lib.rs:142-166` |
 | FR-026 (single-flight per-key in-flight index; follower waits) | `src/actor.rs:102-108,428-434,541-554` |
@@ -71,90 +124,51 @@ the components/→lib/ move MINOR drift).
 | FR-030 (caller_wait decouples caller block from op_deadline) | `src/lib.rs:301-313`; `iremote_lookup.rs:44-50` |
 | FR-031 (timer-driven force-reclaim backstop; tick_orphans) | `src/actor.rs:110-121,264-268,849-885` |
 | FR-032 (orphan-reuse guard: no re-reserve of orphaned key) | `src/actor.rs:441-443,630-632,772-774` |
-| FR-033 (LookupConfig also carries actor_cpu/discovery/node_endpoint) | `iremote_lookup.rs:64-78`; `src/lib.rs:146-149,171-173` |
+| FR-033 (LookupConfig also carries bind_ip/actor_cpu/discovery/node_endpoint) | `iremote_lookup.rs:63-78`; `src/lib.rs:146-149,171-173` |
 | FR-034 (`integrity-check` Cargo feature forwards interfaces/integrity-check) | `Cargo.toml:9-14` |
-| SC-001 (peer memory hit becomes locally resident in one batch_lookup) | test `memory_hit_is_fetched_from_peer` `tests/mesh.rs:228-250` |
-| SC-002 (no peer ⇒ NotFound within deadline, no slot left) | test `total_miss_returns_not_found_within_deadline` `tests/mesh.rs:577-597` |
-| SC-003 (greedy Phase-1: RDMA_REQUEST on same event as first satisfiable KEY_RESPONSE) | `src/actor.rs:420-485` (whisper inline in on_key_response) |
-| SC-004 (retry to alternate succeeds) | test `failed_fetch_retries_alternate_peer` `tests/mesh.rs:337-366` |
-| SC-005 (no reclaim of slot exposed to departed peer w/o ack; no pin/write-ref leak) | `src/actor.rs:916-937`; `src/server.rs:47-121`; tests `slot_survives_timeout...` / `stuck_orphan...` |
-| SC-006 (peer departure completes as criteria met, no spurious wait) | `src/actor.rs:1009` (check_all_completions in on_exit) |
-| SC-007 (wrong-size request ⇒ not-available, never partial write) | `src/server.rs:137-160,218-236` |
-| SC-008 (concurrent same-key ⇒ exactly one remote fetch) | test `concurrent_same_key_lookups_issue_one_rdma` `tests/mesh.rs:252-290` |
-
-### Drifted ⚠️
-
-| Requirement | Spec text | Actual | Location | Severity |
-| --- | --- | --- | --- | --- |
-| FR-018 | "Unknown message types MUST be **logged** and ignored." | Framing header (`[version][msg_type][op_id]`) and op_id echo are correct, and unknown/malformed frames are ignored — but no log line is emitted: `WireMessage::Unknown { .. } => {}` and the malformed-decode arm `Err(_) => return` are both silent. | `src/actor.rs:314,330` | Low |
+| SC-001..SC-008 | `tests/mesh.rs` (see environmental note above); Phase-1 greediness `src/actor.rs:420-485`; wrong-size guard `src/server.rs:137-160,218-236` |
 
 ### Not Implemented ✗
 
-None. (US7 peer-departure behavior is fully implemented in `on_exit`/`teardown_peer`; note the automated mesh test for it — ALIGN Task 1 / tasks.md T025 — is still a test-coverage gap, not a missing feature.)
+None. (US7 peer-departure behavior is fully implemented in `on_exit`/`teardown_peer`;
+the automated mesh test for it — tasks.md T025 — remains a test-coverage gap, not a
+missing feature. See Recommendations.)
 
 ---
 
 ## Spec 001 — Remote Lookup Batch Interface (SUPERSEDED)
 
-15 requirements checked (10 FR, 5 SC). **Superseded by 002** — divergences below
-are intentional and NON-ACTIONABLE (severity Low/superseded), per 001's
-Supersession Notice.
-
-### Aligned ✓ (requirements that still hold under 002)
-
-| Requirement | Location |
-| --- | --- |
-| FR-002 (one Result per entry, positional order) | `src/operation.rs:149-160` |
-| FR-005 (callable any time after instantiation; uninitialized ⇒ NotFound) | `src/lib.rs:275-289` |
-| FR-006 (empty slice ⇒ empty Vec) | `src/lib.rs:276-278` |
-| FR-007 (interface resides in components/interfaces/src/iremote_lookup.rs) | `components/interfaces/src/iremote_lookup.rs` |
-| FR-009 (join_cluster signature present) | `iremote_lookup.rs:180`; `src/lib.rs:318-324` |
-| FR-010 (leave_cluster signature present) | `iremote_lookup.rs:194`; `src/lib.rs:327-333` |
-| SC-001 (unit tests pass) | `src/lib.rs:376-455` |
-| SC-003 (doc tests compile/pass) | doc examples in `iremote_lookup.rs` / `src/lib.rs` |
-| SC-004 (clippy clean) | project convention |
-| SC-005 (cargo doc warning-free) | project convention |
-
-### Drifted ⚠️ (intentional supersession — Low, non-actionable)
-
-| Requirement | Spec text (001) | Actual (002 design-of-record) | Location | Severity |
-| --- | --- | --- | --- | --- |
-| FR-001 | `batch_lookup(&[(CacheKey, IpcHandle)])` | `batch_lookup(&[(CacheKey, u32 /*size*/)])` — IpcHandle dropped; remote-lookup is CPU/DRAM-only (002 FR-001) | `iremote_lookup.rs:163-166` | Low (superseded) |
-| FR-003 | Log a message per entry (placeholder) | Real KEY_QUERY→RDMA protocol; no per-entry placeholder log | `src/actor.rs` | Low (superseded) |
-| FR-004 | Return `Err(NotFound)` for each entry, no network I/O | Performs real zyre + one-sided RDMA I/O; `Ok(())` on resident | `src/actor.rs`, `src/server.rs` | Low (superseded) |
-| FR-008 | Expose functionality only through IRemoteLookup (no public fns outside) | 002 FR-029 adds `peers_seen`/`signal_shutdown`/`shutdown` for teardown/tests | `src/lib.rs:336-367` | Low (superseded) |
-| SC-002 | Compiles with `(CacheKey, IpcHandle)` param | Compiles with `(CacheKey, u32)` (002) | `iremote_lookup.rs:163-166` | Low (superseded) |
-
-### Not Implemented ✗
-
-None.
+15 requirements checked (10 FR, 5 SC). **Superseded by 002** — divergences are
+intentional and NON-ACTIONABLE, per 001's Supersession Notice: `batch_lookup` takes
+`(CacheKey, u32)` not `(CacheKey, IpcHandle)` (002 FR-001, CPU/DRAM-only); real
+KEY_QUERY→RDMA protocol replaces the per-entry placeholder log (FR-003/004); FR-029
+adds `peers_seen`/`signal_shutdown`/`shutdown` beyond the "only via IRemoteLookup"
+rule (FR-008). All aligned-under-002 signatures still hold (`src/lib.rs`,
+`iremote_lookup.rs`). No action; leave for history.
 
 ---
 
 ## Unspecced
 
-| Feature | Location | Lines | Note |
-| --- | --- | --- | --- |
-| `DISCONNECT_ACK_TIMEOUT` (500 ms bounded wait for DisconnectAck) | `src/actor.rs` | 37, 1020-1033 | Implementation detail backing FR-014; distinct from configurable `connection_teardown_timeout`. The 500 ms handshake bound is a hardcoded constant, not a `LookupConfig` knob. Consider a one-line spec note. |
-| Malformed/truncated frame silent drop | `src/actor.rs` | 312-315 | FR-018 addresses *unknown* message types; a `WireError` (truncated/bad-tag/bad-utf8) frame is dropped with no log. Same "logging" gap as the FR-018 drift; fold into that ALIGN task. |
-| `publish_success` AlreadyExists size-collision guard | `src/actor.rs` | 576-591 | Refines FR-006's "racing AlreadyExists counts as success" with a size check (matching size ⇒ satisfied; differing size ⇒ reclaim, never evict). Documented in `knowledge/size-mismatch-handling.md` but not in FR text. Superset/defensive; harmless. |
+| Feature | Location | Note |
+| --- | --- | --- |
+| `DISCONNECT_ACK_TIMEOUT` (500 ms bounded wait for DisconnectAck) | `src/actor.rs:37,1020-1033` | Implementation detail backing FR-014; distinct from configurable `connection_teardown_timeout`. Hardcoded constant, not a `LookupConfig` knob. Optional one-line spec note (Recommendation 3). |
+| `publish_success` AlreadyExists size-collision guard | `src/actor.rs:576-591` | Refines FR-006's "racing AlreadyExists counts as success" with a size check. Documented in `knowledge/size-mismatch-handling.md`; defensive superset, harmless. |
+
+*(The "malformed/truncated frame silent drop" formerly listed here is resolved: it is
+now covered by FR-018(b) and the malformed arm logs before dropping.)*
 
 ---
 
 ## Recommendations
 
-1. **Resolve FR-018 (Low, actionable).** Emit a `logger.debug`/`warn` on both the
-   `WireMessage::Unknown` arm and the malformed-decode (`Err(_)`) arm in
-   `on_wire` (`src/actor.rs:314,330`) before dropping the frame. This is ALIGN
-   Task 3 from the 2026-08-07 sweep, still open. Trivial and low-risk. Closing it
-   would make spec 002 fully aligned.
-2. **Close the US7 test-coverage gap (medium, not drift).** ALIGN Task 1 /
-   tasks.md T025 — add a `tests/mesh.rs` scenario for peer departure (cached-reply
-   drop, in-progress-key return, and DisconnectAck-before-reclaim) to exercise the
-   already-correct `on_exit`/`teardown_peer` path (backs SC-005/SC-006).
-3. **Optional spec note for the 500 ms DisconnectAck bound.** Add a sentence to
-   FR-014 (or FR-031) documenting the fixed `DISCONNECT_ACK_TIMEOUT` handshake
-   bound so the two teardown timers (ack-handshake vs. orphan grace) are both
-   spec-visible.
-4. **No action on spec 001.** It is correctly stamped Superseded; leave for
-   history. Do not treat its IpcHandle/placeholder divergences as drift.
+1. **Close the US7 test-coverage gap (medium, not drift).** tasks.md T025 — add a
+   `tests/mesh.rs` scenario for peer departure (cached-reply drop, in-progress-key
+   return, DisconnectAck-before-reclaim) exercising the already-correct
+   `on_exit`/`teardown_peer` path (backs SC-005/SC-006). Blocked in this environment
+   by the missing `deps/zyre-build/` (see environmental note).
+2. **Optional spec note for the 500 ms DisconnectAck bound.** Document the fixed
+   `DISCONNECT_ACK_TIMEOUT` handshake bound in FR-014/FR-031 so both teardown timers
+   (ack-handshake vs. orphan grace) are spec-visible.
+3. **No action on spec 001.** Correctly stamped Superseded; its IpcHandle/placeholder
+   divergences are intentional, not drift.

@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Last-Synced**: 2026-08-20 (Spec-Sync Phase B — SC-006 reworded to match implemented graceful-init/deferred-panic behavior; FR-018..FR-023 backfilled for previously unspecced background/admin/async features)
+**Last-Synced**: 2026-09-03 (Spec-Sync — FR-017 ALIGN: eviction drop-count now actually incremented on every live emit path; `eviction_dropped_count()` reflects reality. Prior 2026-08-20 Phase B: SC-006 reworded to match implemented graceful-init/deferred-panic behavior; FR-018..FR-023 backfilled for previously unspecced background/admin/async features.)
 
 **Input**: User description: "GPUDirect Storage cold-read path for dispatcher-p2p. NVMe DMA reads directly into GPU BAR1 staging buffers, then D2D copies to client GPU destination, eliminating host DRAM bounce."
 
