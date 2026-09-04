@@ -1,5 +1,19 @@
-Generated: pending
+---
+spec_sync_component: remote-lookup-rdma-initiator
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-09-04T00:20:50Z
+spec_sync_git_commit: ede3006e
+spec_sync_inputs_sha256: 904e6a96ab64cb72756cc0dca1118bd9e7388a711966c41f917eeb9467ced596
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
 # Spec-vs-Implementation Drift Report — remote-lookup-rdma-initiator
+
+**Re-verified 2026-09-03** (independent re-sweep, not a re-stamp). Every spec-002
+FR/SC re-checked against `src/`; verification builds all green this sweep:
+`cargo build/clippy(--all-targets, -D warnings)/test -p remote-lookup-rdma-initiator`
+(26 + 1 passed; 0 failed) and `cargo clippy --features rdma --all-targets -- -D warnings`
+— all clean (rdma-core present in this environment). No drift found; **no code or
+active-spec change this sweep.**
 
 ## Summary
 
@@ -119,3 +133,11 @@ which is correct — the `interfaces` crate still lives at `components/interface
 3. **Keep the SC-004 benchmark result honest.** The `push_telemetry` overhead
    figure is measured against a ~200  ns mock; if the mock path changes, re-run
    the two-baseline workflow so the "small fixed absolute cost" claim stays valid.
+4. **Cross-component interfaces-doc nit (deferred).** The interface module doc
+   `components/interfaces/src/iremote_lookup_rdma_initiator.rs:9-12` enumerates
+   connection states ("connecting", "connected", "recovering") that should be
+   reconciled against the current implementation's actual state surface. This is an
+   interfaces-crate doc concern, **not** an initiator `src/`/`specs/` drift — editing
+   `components/interfaces/` invalidates the folded input hash of every stamped
+   component, so it is deferred to a coordinated interfaces-doc pass + re-stamp rather
+   than fixed here.
