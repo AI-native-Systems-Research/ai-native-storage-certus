@@ -98,10 +98,11 @@ Same as `full` profile:
 
 When a key is not found locally (neither DRAM nor SSD):
 1. Dispatcher forwards the miss to the RemoteLookup orchestrator via `batch_lookup(&[(key, expected_size)])`
-2. RemoteLookup reserves a landing slot in its own responder-registered memory and SHOUTs a `KeyQuery` to peers over Zyre
-3. A peer that holds the key WHISPERs back; RemoteLookup WHISPERs an `RdmaRequest` carrying its `endpoint`, pool `rkey`, and slot descriptors
-4. The holding peer connects to this node's responder and RDMA-**writes** the value directly into the reserved slot
-5. The data (now in local memory) is optionally promoted into the memory-tier/dispatch-map for future warm access, then DMA'd to the client GPU
+2. RemoteLookup reserves a landing slot in its own pool via `memory_tier.insert` (the whole pool is registered `REMOTE_WRITE` once, so the slot is immediately writable under the pool-wide `rkey`) and SHOUTs a `KeyQuery` to peers over Zyre. This runs in **two phases**:
+   - **Phase 1 (memory probe):** peers WHISPER a `KeyResponse` classifying each key as `Memory`/`Disk`/`None`. Once a quorum replies (`quorum_pct`, default 80%) or `phase1_timeout` (20 ms) elapses, RemoteLookup WHISPERs an `RdmaRequest` (`endpoint`, pool `rkey`, slot descriptors) to a preferred `Memory`-holder
+   - **Phase 2 (disk re-scan):** if no memory-holder served it, RemoteLookup re-scans the cached responses (no new SHOUT) and targets a `Disk`-holder, which promotes disk→memory before writing. The op is bounded by `op_deadline` (50 ms)
+3. The chosen data-holder connects to this node's responder and RDMA-**writes** the value directly into the reserved slot, then WHISPERs an `RdmaStatus`
+4. On `RdmaStatus::Success` RemoteLookup publishes the already-written slot with `dispatch_map.create_memory_tier_entry(key, ptr, len)` + `release_write(key)`, making it a warm hit; the value is then DMA'd to the client GPU. Concurrent ops for one key are coalesced single-flight, and an unpublished slot still exposed to a live peer is orphaned (not freed) until a late status, peer EXIT, or timeout reclaims it
 
 ### Incoming Remote Request (this node is the data-holder)
 
@@ -182,6 +183,8 @@ define_component! {
 | `leave_cluster()` | Leave the Zyre group |
 
 **Error type:** `RemoteLookupError` — `NotFound`, `TransportError(String)`
+
+**`LookupConfig` defaults** (overridable via env vars): `group` `"remote_lookup"`, `quorum_pct` 80, `phase1_timeout` 20 ms, `op_deadline` 50 ms, `connection_teardown_timeout` 1000 ms, `max_retry_rounds` 2, `max_keys_per_query` 256, `bind_ip` auto-detected when empty. A hardcoded `DISCONNECT_ACK_TIMEOUT` of 500 ms bounds the wait for the responder's `DisconnectAck` during slot reclamation.
 
 > Note: `dispatcher.remote_lookup` and `remote_lookup.dispatcher` form a deliberate `Arc` cycle, broken explicitly at teardown.
 

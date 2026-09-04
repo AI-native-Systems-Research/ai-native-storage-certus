@@ -34,12 +34,12 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 9. **Entry is now durable.** Exists in both DRAM and SSD.
 
-## Split-Populate API (reserve_memory / populate_memory / memory_populated)
+## Split-Populate API (reserve_memory / copy_gpu_to_memory_async / copy_gpu_to_memory_completed)
 
 Same as `full` profile:
 1. `reserve_memory(key, size, session_id)` — Reserve DRAM slot (`session_id`: opaque per-request id, 0 = unset, observability only)
-2. `populate_memory(key, ipc_handle)` — DMA into reserved slot
-3. `memory_populated(key, size)` — Finalize: register + enqueue write-through
+2. `copy_gpu_to_memory_async(key, &[IpcHandle], stream)` — Issue the D2H copy into the reserved slot on the given stream
+3. `copy_gpu_to_memory_completed(key, size)` — Finalize: create the memory-tier entry, downgrade the write reference, and enqueue background write-through
 4. `release_memory(key)` — Cancel without populating
 
 ## Remote Visibility
@@ -56,7 +56,7 @@ Same as `full`: AlreadyExists returned. Client must `remove` before re-populatin
 
 ## Eviction
 
-- **DRAM eviction:** delegated to the bound eviction policy. Serving a peer uses one-sided RDMA WRITE out of the source entry and does not pin it, so remote traffic does not block eviction.
+- **DRAM eviction:** delegated to the bound eviction policy. Serving a peer holds a dispatch-map **read pin** on each source entry for the whole RDMA window — the NIC reads the source buffer asynchronously after `push_async` returns, and the pin (owned by the completion callback) is released only when the write lands. An in-flight outbound push therefore keeps its source entry unevictable for the transfer window. One-sided RDMA WRITE still means no *cross-node* reference is taken on the requester's side.
 - **SSD eviction:** Threshold-based background evictor. Entries removed from both DRAM and SSD can no longer be served to querying peers.
 
 ## Crash Recovery

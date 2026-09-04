@@ -7,7 +7,7 @@ The `full-remote` lookup flow extends the `full` profile with a **remote path**:
 ## Assumptions and Invariants
 
 - **Cache block sizes are variable.** The client provides an IPC handle with a size field; remote queries carry the *expected value length in bytes*.
-- **Read references protect in-flight local reads.** Local lookups hold dispatch-map read references; eviction skips entries with active references. Remote transfer is one-sided RDMA WRITE and does not pin the data-holder's source entry.
+- **Read references protect in-flight local reads.** Local lookups hold dispatch-map read references; eviction skips entries with active references. Remote transfer is one-sided RDMA WRITE, so it takes no *cross-node* reference on the requester — but the data-holder **does** hold a local read pin on each source entry until the write completes (see the remote-serve step below).
 - **Remote lookups are best-effort.** A remote miss returns NotFound — there is no cascading or multi-hop forwarding.
 - **No P2P DMA.** SSD→GPU and remote→GPU transfers always pass through DRAM.
 - **RDMA for inter-node data movement.** The requester offers a landing region (via its Responder); the data-holder RDMA-writes into it (via its Initiator).
@@ -26,13 +26,13 @@ Same as `full` profile:
 
 ### Cold Path (BlockDevice → MemoryTier → GPU)
 
-Same as `full` profile:
-1. BlockDevice hit → retrieve SSD offset.
-2. Evict if needed to make space.
+Same as `full` profile (base `dispatcher` crate):
+1. BlockDevice hit → retrieve SSD offset; the read pin is held for the whole SSD→DRAM→GPU pipeline.
+2. Evict if needed to make space (`try_evict_to_block`).
 3. Allocate memory-tier slot.
-4. Pipelined SSD→DRAM read via PipelineRing.
-5. Re-register in dispatch-map as MemoryTier.
-6. GPU transfer complete.
+4. Pipelined SSD→DRAM read via the `ColdReadPool` worker over the PipelineRing StagingPool, overlapped with H2D to GPU.
+5. Promote in place via `promote_block_to_memory_tier(key, ptr, size)` (ssd_offset retained), then release the read pin.
+6. GPU transfer complete; if the memory tier is saturated, `serve_cold_staged` streams SSD→staging→GPU without promoting (entry stays BlockDevice).
 
 ## Lookup Flow — Remote Path (this node is the requester)
 
@@ -42,19 +42,19 @@ When the dispatch-map returns `NotExist` (key not found locally):
 
 2. **Forward to RemoteLookup.** The dispatcher calls `remote_lookup.batch_lookup(&[(key, expected_size)])` for keys that missed locally, where `expected_size` is the value length in bytes.
 
-3. **Reserve a landing slot.** RemoteLookup reserves a slot in its own Responder-registered memory pool to receive the value.
+3. **Reserve a landing slot.** RemoteLookup reserves a slot inside its own memory-tier pool via `memory_tier.insert(key, size)`. The Responder registers the *whole* pool once as a single `REMOTE_WRITE` MR and hands out one pool-wide `rkey` (`local_region()`), so the slot is already RDMA-writable the moment it is allocated. Concurrent lookups for the same key are coalesced single-flight — later callers ride the first as followers rather than reserving duplicate slots.
 
-4. **Query peers.** RemoteLookup SHOUTs a `KeyQuery` for the key over Zyre. A peer that holds it WHISPERs back.
+4. **Phase 1 — memory probe.** RemoteLookup SHOUTs a `KeyQuery` over Zyre. Each peer WHISPERs a `KeyResponse` classifying every queried key as `Memory`, `Disk`, or `None`. Once a **quorum** of the expected peers replies (`quorum_pct`, default 80%) *or* `phase1_timeout` (default 20 ms) elapses, the round advances. A `Memory`-holder is preferred: RemoteLookup WHISPERs it an `RdmaRequest` carrying its `endpoint`, pool `rkey`, and slot descriptors.
 
-5. **Advertise the slot.** RemoteLookup WHISPERs an `RdmaRequest` carrying its `endpoint`, pool `rkey`, and slot descriptors to the holding peer.
+5. **Phase 2 — disk re-scan.** If no memory-holder served the key, RemoteLookup re-scans the responses it already cached (no new SHOUT) and targets a `Disk`-holder. That peer promotes the key disk→memory before writing. The whole operation is bounded by `op_deadline` (default 50 ms) across up to `max_retry_rounds` rounds.
 
-6. **RDMA data transfer.** The holding peer (data-holder) connects to this node's Responder and RDMA-**writes** the value directly into the reserved slot. This node's Responder accepts the write; it never reads peer memory.
+6. **RDMA data transfer.** The chosen data-holder connects to this node's Responder and RDMA-**writes** the value directly into the reserved slot. This node's Responder accepts the write; it never reads peer memory. The holder WHISPERs an `RdmaStatus` when the write lands.
 
-7. **Local promotion (optional).** The received data may be inserted into the local memory-tier and dispatch-map so future lookups are warm/local.
+7. **Publish on success.** On `RdmaStatus::Success` the value is already sitting in the reserved slot, so RemoteLookup simply publishes it: `dispatch_map.create_memory_tier_entry(key, ptr, len)` then `release_write(key)`. The key is now an ordinary memory-tier (warm) hit for future lookups. A slot whose op never published while still exposed to a live peer is **orphaned** rather than freed, and reclaimed on a late `RdmaStatus`, peer `EXIT`, or op timeout.
 
-8. **GPU transfer.** Data is copied from local memory to client GPU via the standard H2D DMA path.
+8. **GPU transfer.** Data is copied from the now-local memory-tier slot to the client GPU via the standard H2D DMA path.
 
-**If no peer has the entry:** no peer replies to the `KeyQuery`; RemoteLookup returns `NotFound` for that key, and the dispatcher returns KeyNotFound to the client.
+**If no peer has the entry:** no peer classifies the key as `Memory` or `Disk`; RemoteLookup returns `NotFound` for that key, and the dispatcher returns KeyNotFound to the client.
 
 ## Incoming Remote Lookup (this node is the data-holder)
 
@@ -83,7 +83,7 @@ When a peer forwards a miss whose key this node holds:
 
 - **Concurrent populate for same key:** Rejected by dispatch-map (AlreadyExists).
 - **DRAM eviction during lookup:** Skips entries with active local read references.
-- **Serving a peer does not pin the source entry:** the data-holder copies the value out via one-sided RDMA WRITE, so a slow or failed peer does not pin the holder's memory-tier entry. On the *requester* side, reserved landing slots are reclaimed via the Responder control channel (`Disconnect` → `DisconnectAck`) on peer EXIT.
+- **Serving a peer pins the source entry locally, not across nodes:** the data-holder holds a dispatch-map read pin on each source value until its one-sided RDMA WRITE completes (the pin is owned by the completion callback, because the NIC keeps reading the buffer after submission returns) — so an in-flight push does keep the holder's memory-tier entry unevictable for the transfer window. What it does *not* take is a cross-node reference: the requester holds nothing on the holder. On the *requester* side, reserved landing slots are reclaimed via the Responder control channel (`Disconnect` → `DisconnectAck`) on peer EXIT.
 - **Remove during lookup:** Fails with ActiveReferences if any local reader holds a ref.
 - **Background write-through during lookup:** Coexists with local read refs.
 
