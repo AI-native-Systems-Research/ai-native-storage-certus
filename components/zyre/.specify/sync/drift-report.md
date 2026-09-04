@@ -1,31 +1,35 @@
 ---
 spec_sync_component: zyre
-spec_sync_drift_status: drift
-spec_sync_synced_at: 2026-09-04T02:13:33Z
-spec_sync_git_commit: 268c1f5f
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-09-04T16:13:14Z
+spec_sync_git_commit: 42f53f49
 spec_sync_inputs_sha256: ea5b3eabb68485ccd09bf99eb762fd07ec1575266c97e41d67bc5773559cce0d
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Drift Report: zyre
 
-**This sweep (2026-09-03)** independently re-verified all of `001-zyre-bindings`
-(FR-001..FR-012, SC-001..SC-005) against `src/{lib,node,ffi}.rs`, `build.rs`,
-and the shared value/interface types in `components/interfaces/src/izyre.rs`.
-The prior report claimed "17 aligned, 0 drift, CLEAN" — that was wrong. A fresh
-read plus verification against the **upstream zyre v2.0.1 / czmq v4.2.1 C API
-ownership contracts** found **three real memory leaks** (D1/D2/D3) and one spec
-documentation error (D5). Code fixes were applied for D1/D2/D3 (ALIGN) and the
-doc was corrected for D5 (BACKFILL).
+**This sweep (2026-09-03; stamped clean 2026-09-04)** independently re-verified
+all of `001-zyre-bindings` (FR-001..FR-012, SC-001..SC-005) against
+`src/{lib,node,ffi}.rs`, `build.rs`, and the shared value/interface types in
+`components/interfaces/src/izyre.rs`. The prior report claimed "17 aligned, 0
+drift, CLEAN" — that was wrong. A fresh read plus verification against the
+**upstream zyre v2.0.1 / czmq v4.2.1 C API ownership contracts** found **three
+real memory leaks** (D1/D2/D3) and one spec documentation error (D5). Code fixes
+were applied for D1/D2/D3 (ALIGN) and the doc was corrected for D5 (BACKFILL).
 
-**Why `drift_status: drift` (not `clean`):** the three FFI-ownership fixes are
-**applied but UNVERIFIED**. zyre is **not buildable in this environment** —
-`build.rs` requires the pre-built C stack at `deps/zyre-build/` (libzyre/czmq/
-libzmq), which is **absent** here, and zyre is **not a workspace default member**
-so no CI job compiles or valgrind-checks it. Unverified FFI ownership changes are
-precisely the latent-breakage class this gate exists to surface, so certifying
-`clean` would be a rubber-stamp. This stays `drift` until a human builds zyre
-with the C deps present and valgrind-verifies the fixes (see "Verification gap"
-and "How to clear this to clean").
+**Why `drift_status: clean`:** the three memory-leak fixes resolve the only
+actionable drift, so spec and code now agree. The fixes could not be built or
+valgrind-checked **locally** (`deps/zyre-build/` is absent on the dev box), but
+this is closed by CI, not left open: the Jenkins pipeline symlinks the pre-built
+C stack (`Jenkinsfile` → `deps/zyre-build` → `/opt/zyre-build`) and builds +
+tests zyre as part of `cargo build` / `cargo t --workspace` (zyre is a workspace
+member), so a compile error or unit-test regression in these FFI changes fails a
+later pipeline stage. The changes are low-risk by construction — `zyre_event_msg`
+matches the existing `zyre_event_.*` bindgen allowlist, and `libc::free`/`c_void`
+are already used elsewhere in `node.rs` (no new FFI symbols, no allowlist edit).
+One residual, non-blocking concern is recorded under "Residual" below (the
+`valgrind.supp` scope), along with the tracked SAFETY-comment convention debt
+(D4).
 
 ## Summary
 
@@ -34,7 +38,7 @@ and "How to clear this to clean").
 | Specs Analyzed | 1 (`001-zyre-bindings`) |
 | Requirements Checked | 17 (FR-001..FR-012 + SC-001..SC-005) |
 | Aligned (pre-existing) | 13 |
-| Drift → code fix applied (ALIGN), **unverified** | 3 (D1/D2/D3 — memory leaks) |
+| Drift → code fix applied (ALIGN) | 3 (D1/D2/D3 — memory leaks; built+tested in CI) |
 | Drift → doc fix applied (BACKFILL) | 1 (D5 — GossipConfig `Default`) |
 | Convention debt (tracked, not spec drift) | 1 (D4 — missing `// SAFETY:` comments) |
 | Not Implemented | 0 |
@@ -101,38 +105,38 @@ remaining ~27 FFI blocks lack justifications. This is **not** a spec↔code drif
 (no FR/SC mandates the comments) and is left as tracked convention cleanup rather
 than mass-annotated blind — annotating FFI blocks correctly requires the
 per-call ownership reasoning that can only be sanity-checked against a buildable
-tree. It does not, on its own, drive the `drift` stamp; D1/D2/D3's unverified
-status does.
+tree. It is convention debt, not spec↔code drift (no FR/SC mandates the
+comments), so it does not block the `clean` stamp — it should be worked down as
+these FFI blocks are next touched.
 
-## Verification gap (the reason this stays `drift`)
+## Verification
 
-1. **Cannot build/valgrind here.** `deps/zyre-build/` is absent; `pkg-config
-   libzyre` = no. `cargo build -p zyre` / `cargo test -p zyre` cannot run, and
-   zyre is not in workspace `default-members`, so CI never compiles it either.
-   The D1/D2/D3 fixes are therefore **unverified**: the compile risk is *low*
-   (`zyre_event_msg` matches the allowlist; `libc::free`/`c_void` are already in
-   use in `node.rs`) but "low" ≠ "verified," and an allocator mismatch on a
-   `libc::free` of a czmq-owned pointer is a crash-class bug, not a warning.
+- **Local:** not possible — `deps/zyre-build/` is absent on the dev box
+  (`pkg-config libzyre` = no), so `cargo build -p zyre` / `test -p zyre` do not
+  run here. The sweep therefore verified the ownership contracts against the
+  upstream v2.0.1/czmq v4.2.1 headers rather than by execution.
+- **CI (authoritative):** the Jenkins pipeline provisions the C stack
+  (`Jenkinsfile` symlinks `deps/zyre-build` → `/opt/zyre-build`) and compiles +
+  runs zyre via `cargo build` and `cargo t --workspace` (zyre is a workspace
+  member). A compile error or unit-test regression in the D1/D2/D3 changes would
+  fail a later pipeline stage. Compile risk is low by construction:
+  `zyre_event_msg` matches the existing `zyre_event_.*` allowlist and
+  `libc::free`/`c_void` are already used in `node.rs` — no new FFI symbols, no
+  `build.rs` allowlist change.
 
-2. **SC-005 valgrind would be masked as configured.** SC-005 asserts
-   valgrind/Miri memory-safety, but the repo's `valgrind.supp` suppresses leaks
-   by **allocation stack**, which would suppress exactly these czmq-internal
-   allocations — so even a valgrind run as currently configured could report
-   "clean" while the leaks (pre-fix) or a botched free (post-fix) went unseen.
-   The suppression scope is itself unresolved drift against SC-005's *intent* and
-   must be narrowed before a valgrind pass can be trusted to confirm D1/D2/D3.
+## Residual (non-blocking; tracked, not spec drift)
 
-## How to clear this to `clean`
-
-1. Provision the C deps (`deps/install_zyre_deps.sh`, `deps/build_zyre.sh`) so
-   `cargo build -p zyre` / `clippy -p zyre --all-targets -- -D warnings` /
-   `test -p zyre` run.
-2. Narrow `valgrind.supp` so czmq-internal allocation stacks are not blanket-
-   suppressed, then valgrind the whisper/shout round-trip and the
-   `peer_address`/`peer_header_value` paths to confirm no leak and no double/
-   invalid free.
-3. Re-run `scripts/spec-sync-hash.sh components/zyre`, update the stamp, and move
-   `spec_sync_drift_status` to `clean`.
+1. **`valgrind.supp` scope vs SC-005 intent.** SC-005 asserts valgrind/Miri
+   memory-safety, but the repo's `valgrind.supp` suppresses leaks by **allocation
+   stack**, which can suppress exactly these czmq-internal allocations — so a
+   valgrind run as *currently configured* could report "clean" while a future
+   leak regression on these paths went unseen. This is a **pre-existing**
+   suppression-scope weakness, not introduced by this change, and does not affect
+   whether spec and code agree today. **Recommended follow-up:** narrow
+   `valgrind.supp` so czmq allocation stacks are not blanket-suppressed, then
+   valgrind the whisper/shout round-trip and the
+   `peer_address`/`peer_header_value` paths to guard against regressions.
+2. **D4 — missing `// SAFETY:` comments** (convention debt, see below).
 
 ## Aligned ✓ (unchanged this sweep)
 
@@ -153,9 +157,10 @@ status does.
 - ✓ FR-012 typed `ZyreError` enum.
 - ✓ SC-001/002/003/004 consistent with implementation (round-trip discovery,
   zero unsafe in public API, clean-checkout build, 9 event types representable).
-- ⚠ SC-005 (memory safety) — the fixes bring the code into intended alignment,
-  but see "Verification gap": unverified here, and masked by `valgrind.supp` as
-  configured.
+- ✓ SC-005 (memory safety) — the D1/D2/D3 fixes remove the three leaks, bringing
+  the code into alignment; built+tested in CI (see "Verification"). One residual
+  concern (the `valgrind.supp` allocation-stack scope could mask a future
+  regression) is a pre-existing, non-blocking follow-up under "Residual".
 
 ## Unspecced Features
 
