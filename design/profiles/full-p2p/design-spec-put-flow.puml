@@ -2,16 +2,18 @@
 skinparam shadowing false
 skinparam defaultFontSize 11
 
-title Cache Put / Populate Flow (full)
+title Cache Put / Populate Flow (full-p2p)
 
 participant "Client\n(Python/shmq)" as client
 participant "Shmq Mailbox\n(/dev/shm)" as shmq
-participant "Dispatcher" as disp
+participant "DispatcherP2p" as disp
 participant "MemoryTier\n(DRAM pool)" as mt
 participant "DispatchMap" as dm
 participant "BackgroundWriter" as bgw
 participant "ExtentManager" as em
 participant "BlockDevice\n(NVMe SSD)" as ssd
+
+note over disp: Put path is identical to the `full` profile.\nThe P2P BAR1 ring only affects the cold READ path.
 
 == Synchronous Path (client-visible) ==
 
@@ -22,13 +24,13 @@ shmq -> disp: populate(key, IpcHandle)
 disp -> mt: evict_lru() if pool full
 note right of mt: LRU entries with\ncompleted write-through\nare eligible
 
-disp -> mt: insert(key, size)\n-> mem_ptr
+disp -> mt: reserve_memory(key, size)\n-> mem_ptr
 note right of mt: First-fit alloc from\nmmap'd CUDA-pinned pool
 
-disp -> disp: cudaMemcpy D2H\n(GPU -> mem_ptr)
-note right of disp: Zero-copy into\npinned memory-tier slot
+disp -> disp: copy_gpu_to_memory_async\n(GPU -> mem_ptr, store stream)
+note right of disp: Async D2H into\npinned memory-tier slot
 
-disp -> dm: create_memory_tier_entry\n(key, ptr, size)
+disp -> dm: copy_gpu_to_memory_completed\n-> create_memory_tier_entry(key, ptr, size)
 note right of dm: Entry visible to\ncheck/lookup immediately
 
 disp -> dm: downgrade_reference\n(write -> read)
@@ -51,6 +53,6 @@ note right of dm: ssd_offset set; entry stays\nMemoryTier, now durable/evictable
 
 bgw -> dm: release_read(key)
 
-note over mt, ssd: Entry exists in BOTH DRAM and SSD.\nLookups served from DRAM (warm).\nIf evicted from DRAM -> served from SSD (cold).
+note over mt, ssd: Entry exists in BOTH DRAM and SSD.\nLookups served from DRAM (warm).\nIf evicted from DRAM -> served over P2P cold path (SSD -> BAR1 -> GPU).
 
 @enduml

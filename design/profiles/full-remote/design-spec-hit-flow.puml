@@ -41,20 +41,22 @@ shmq -> disp: lookup(key, IpcHandle)
 
 disp -> dm: lookup(key) + take_read
 dm --> disp: BlockDevice { offset }
-disp -> dm: release_read(key)
+note right of dm: read pin held for the\nwhole SSD->DRAM->GPU pipeline
 
-disp -> mt: evict_lru() if pool full
+disp -> mt: evict_lru() if pool full\n(try_evict_to_block)
 disp -> mt: insert(key, size)\n-> new_ptr
 
-disp -> pr: pipelined_read(offset, size)
-note right of pr: 8 CUDA-pinned SPDK-registered\nbuffers, 2 CUDA streams
+disp -> pr: ColdReadPool: pipelined_read(offset, size)
+note right of pr: StagingPool: CUDA-pinned SPDK-registered\nbuffers + per-device pipe streams
 pr -> ssd: NVMe read (chunked at MDTS)
 ssd --> pr: data chunks
 pr -> mt: copy chunks to new_ptr
 pr -> disp: cudaMemcpyAsync H2D\n(overlapped with I/O)
 
-disp -> dm: create_memory_tier_entry\n(key, new_ptr, size)
-note right of dm: Promoted: BlockDevice -> MemoryTier\nssd_offset preserved
+disp -> dm: promote_block_to_memory_tier\n(key, new_ptr, size)
+note right of dm: In-place BlockDevice -> MemoryTier\nssd_offset preserved
+
+disp -> dm: release_read(key)
 
 disp --> shmq: Ok(stream_handle)
 shmq --> client: BatchLookupResponse\n(success)
@@ -69,19 +71,23 @@ dm --> disp: NotExist
 note right of disp: Key not found locally
 
 disp -> rl: batch_lookup([(key, expected_size)])
-rl -> rl: reserve landing slot in\nresponder-registered memory
+rl -> rl: reserve landing slot\nmemory_tier.insert(key, size)\n(pool-wide REMOTE_WRITE rkey)
 rl -> peer: SHOUT KeyQuery(key) via Zyre
-note right of peer: Peer resolves via its\nown MemoryTier + DispatchMap
+peer --> rl: WHISPER KeyResponse\n(Memory / Disk / None)
+note right of rl: Phase 1: memory probe.\nAdvance on quorum (80%) or\nphase1_timeout (20ms).\nPhase 2: disk re-scan of\ncached responses if needed.
 
-alt Peer has the entry
+alt Peer has the entry (Memory or Disk)
     rl -> peer: WHISPER RdmaRequest\n(endpoint, rkey, slot)
+    note right of peer: Disk-holder promotes\ndisk -> memory first
     peer -> rl: RDMA Write (data) INTO slot\n(peer = data-holder, via its Initiator)
-    note right of rl: Data lands in local memory\nvia this node's Responder
+    peer --> rl: WHISPER RdmaStatus(Success)
+    rl -> dm: create_memory_tier_entry(key, ptr, len)\n+ release_write(key)
+    note right of dm: Publish already-written slot\n-> future lookups are warm
     rl --> disp: Ok
     disp --> shmq: Ok
     shmq --> client: BatchLookupResponse\n(success)
-else Peer miss
-    peer --> rl: no KeyQuery reply
+else Peer miss (all None)
+    peer --> rl: no holder within op_deadline (50ms)
     rl --> disp: NotFound
     disp --> shmq: KeyNotFound
     shmq --> client: BatchLookupResponse\n(key_not_found)

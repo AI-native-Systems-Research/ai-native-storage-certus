@@ -35,7 +35,7 @@ rectangle "**Server Host**" as server_box #FAFAFA {
                 agent "BlockDeviceSpdkNvme\n<<IBlockDevice>>" as blkdev
                 agent "ExtentManager\n<<IExtentManager>>" as extmgr
             }
-            agent "ParallelBackgroundWriter\nBackgroundEvictor\nPipelineRing" as disp_bg #FEF9C3
+            agent "ParallelBackgroundWriter\nBackgroundEvictor | MemoryTierEvictor\nColdReadPool\nPipelineRing (StagingPool)" as disp_bg #FEF9C3
         }
 
         agent "DispatchMap\n<<IDispatchMap>>" as dispatch_map #DBEAFE

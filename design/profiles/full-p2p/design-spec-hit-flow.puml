@@ -2,14 +2,17 @@
 skinparam shadowing false
 skinparam defaultFontSize 11
 
-title Cache Get / Lookup Flow (full)
+title Cache Get / Lookup Flow (full-p2p)
 
 participant "Client\n(Python/shmq)" as client
+participant "Client GPU VRAM" as gpu
 participant "Shmq Mailbox\n(/dev/shm)" as shmq
-participant "Dispatcher" as disp
+participant "DispatcherP2p" as disp
 participant "MemoryTier\n(DRAM pool)" as mt
 participant "DispatchMap" as dm
-participant "PipelineRing" as pr
+participant "P2pColdReadPool" as cp
+participant "P2pRing\n(GPU BAR1)" as ring
+participant "DramBackfillWorker" as bf
 participant "BlockDevice\n(NVMe SSD)" as ssd
 
 == Warm Path (MemoryTier -> GPU) ==
@@ -21,43 +24,46 @@ shmq -> disp: lookup(key, IpcHandle)
 disp -> dm: lookup(key) + take_read
 dm --> disp: MemoryTier { ptr, size }
 
-disp -> disp: cudaMemcpyAsync H2D\n(mem_ptr -> GPU, warm_stream)
+disp -> gpu: cudaMemcpyAsync H2D\n(mem_ptr -> GPU, warm_stream)
 note right of disp: Zero-copy from\npinned memory-tier pool
 
 disp -> dm: release_read(key)
 disp -> mt: touch(key)
-note right of mt: Refresh LRU timestamp
 
 disp --> shmq: Ok(stream_handle)
 shmq -> shmq: cudaIpcCloseMemHandle
 shmq --> client: BatchLookupResponse\n(success)
 
-== Cold Path (BlockDevice -> MemoryTier -> GPU) ==
+== Cold Path — P2P (BlockDevice -> BAR1 ring -> GPU VRAM) ==
 
 client -> shmq: BatchLookupRequest\n(key, IpcHandle)
 shmq -> disp: lookup(key, IpcHandle)
 
 disp -> dm: lookup(key) + take_read
 dm --> disp: BlockDevice { offset }
-note right of dm: read pin held for the\nwhole SSD->DRAM->GPU pipeline
+note right of dm: read pin held for the\nwhole SSD->BAR1->GPU pipeline
 
-disp -> mt: evict_lru() if pool full\n(try_evict_to_block)
-disp -> mt: insert(key, size)\n-> new_ptr
+disp -> cp: schedule(key, offset, gpu_dst)
+note right of cp: single-region only;\nmulti-region -> InvalidParameter
 
-disp -> pr: ColdReadPool: pipelined_read(offset, size)
-note right of pr: StagingPool: CUDA-pinned SPDK-registered\nbuffers + per-device pipe streams
-pr -> ssd: NVMe read (chunked at MDTS)
-ssd --> pr: data chunks
-pr -> mt: copy chunks to new_ptr
-pr -> disp: cudaMemcpyAsync H2D\n(overlapped with I/O)
+cp -> ssd: NVMe read (chunked at MDTS)
+ssd --> ring: DMA directly into BAR1 slot\n(GDRCopy + SPDK-registered)
+ring -> gpu: device-to-device copy\n(BAR1 slot -> VRAM)
+note right of ring: single PCIe hop,\nno DRAM bounce; slots pipeline
 
-disp -> dm: promote_block_to_memory_tier\n(key, new_ptr, size)
-note right of dm: In-place BlockDevice -> MemoryTier\nssd_offset preserved
+cp -> dm: release_read(key)
+note right of dm: entry stays BlockDevice
 
-disp -> dm: release_read(key)
-
+cp -> bf: enqueue DramBackfillJob(key)
 disp --> shmq: Ok(stream_handle)
 shmq --> client: BatchLookupResponse\n(success)
+
+== Async DRAM Backfill (after backfill_delay_ms) ==
+
+bf -> ssd: read block (SSD -> DRAM)
+bf -> mt: insert(key, size) -> ptr
+bf -> dm: promote_block_to_memory_tier\n(key, ptr, size)
+note right of dm: BlockDevice -> MemoryTier in place\n(ssd_offset retained); future lookups warm
 
 == Cache Miss ==
 

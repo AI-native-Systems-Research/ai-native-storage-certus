@@ -38,16 +38,16 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 9. **Entry is now durable.** The entry exists in both DRAM (memory-tier) and SSD. Lookups are served from DRAM (warm path). If later evicted from DRAM, lookups promote from SSD (cold path).
 
-## Split-Populate API (reserve_memory / populate_memory / memory_populated)
+## Split-Populate API (reserve_memory / copy_gpu_to_memory_async / copy_gpu_to_memory_completed)
 
 An alternative to the single-call `populate` is the split-populate path, which separates reservation from DMA:
 
 1. **`reserve_memory(key, size, session_id)`** — Reserves a DRAM slot in the memory-tier (runs eviction if needed). Returns a raw pointer to the allocated slot. Does NOT register in the dispatch-map. `session_id` is an opaque per-request identifier (0 = unset) supplied by the client for observability only; it has no allocation semantics.
-2. **`populate_memory(key, ipc_handle)`** — Issues `cudaMemcpy` D2H into the previously reserved slot.
-3. **`memory_populated(key, size)`** — Finalizes the entry: registers in the dispatch-map and enqueues background write-through (equivalent to steps 5–9 of the put flow).
+2. **`copy_gpu_to_memory_async(key, regions, stream)`** — Issues an async `cudaMemcpyAsync` D2H of the client GPU region(s) into the previously reserved slot on the supplied CUDA stream. Multiple regions are gathered into the contiguous slot.
+3. **`copy_gpu_to_memory_completed(key, size)`** — Called after the async copy completes; finalizes the entry: registers in the dispatch-map and enqueues background write-through (equivalent to steps 5–9 of the put flow).
 4. **`release_memory(key)`** — Cancellation path: frees the reserved slot without populating.
 
-This API enables the shmq serve layer to overlap reservation with other batch work, and supports external DMA engines that populate the slot outside the dispatcher's control.
+This API enables the shmq serve layer to overlap reservation and the D2H copy with other batch work, and supports external DMA engines that populate the slot outside the dispatcher's control. **`batch_populate(entries)`** applies the single-call path across multiple `(key, IpcHandle)` pairs at once.
 
 ## Duplicate Key Handling
 
@@ -59,7 +59,8 @@ A lookup arriving while background write-through is in progress finds the entry 
 
 ## Eviction
 
-- **DRAM eviction:** delegated to the bound eviction policy. Only entries with a completed write-through (ssd_offset set) and no active references are eligible. The dispatch-map entry transitions from MemoryTier to BlockDevice; subsequent lookups use the cold path.
+- **DRAM eviction (inline):** on a failed slot allocation the dispatcher evicts synchronously, delegated to the bound eviction policy. Only entries with a completed write-through (ssd_offset set) and no active references are eligible. The dispatch-map entry transitions from MemoryTier to BlockDevice via `try_evict_to_block`; subsequent lookups use the cold path.
+- **DRAM demotion (background MemoryTierEvictor):** a dedicated background thread proactively demotes cold DRAM entries to SSD-only when the memory tier is under pressure, using the same `try_evict_to_block` transition (data already durable on SSD). This keeps headroom for incoming puts without stalling them on inline eviction.
 - **SSD eviction (BackgroundEvictor):** When SSD usage exceeds a configurable threshold, the evictor scans for oldest keys, removes their extents, and frees space. Entries evicted from SSD are fully removed from the system — a subsequent lookup returns KeyNotFound.
 
 ## Crash Recovery

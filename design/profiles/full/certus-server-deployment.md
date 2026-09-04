@@ -66,7 +66,7 @@
 │                      │  │   pool  │  │                        │           │  │
 │                      │  │ • LRU   │  │  [Entry Table]         │           │  │
 │                      │  │ • first │  │   key → {MemoryTier|   │           │  │
-│                      │  │   -fit  │  │     BlockDevice|Staging}│           │  │
+│                      │  │   -fit  │  │     BlockDevice}        │           │  │
 │                      │  │ alloc.  │  └────────────────────────┼───────────┘  │
 │                      │  │         │                           │              │
 │                      │  │ recepts:│                           ▼              │
@@ -138,10 +138,12 @@
 7. **RemoteLookupComponent** — remote cache cluster integration
 8. **DispatcherComponent** — top-level orchestrator (bound to dispatch_map, memory_tier, gpu, spdk_env, remote_lookup)
    - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvme + ExtentManager) pair per `--device-pci` address; each drive stores both data and metadata
-   - Allocates **PipelineRing** (CUDA-pinned + SPDK-registered ring buffers) for pipelined reads
+   - Allocates **PipelineRing** (owns the cold-load StagingPool: CUDA-pinned + SPDK-registered ring buffers, plus per-device warm/store/pipe CUDA streams) for pipelined reads
    - Creates dedicated **warm_stream** (CUDA stream) for async memory-tier→GPU DMA
    - Starts **ParallelBackgroundWriter** for async DRAM→SSD write-through
    - Starts **BackgroundEvictor** thread for SSD-tier space reclamation (threshold-based)
+   - Starts **MemoryTierEvictor** thread for DRAM→SSD demotion under memory-tier pressure
+   - Builds the **ColdReadPool** — per-drive persistent workers (pre-connected NVMe channel + CUDA stream) for cold SSD→DRAM→GPU reads
 
 ## Data Flow
 

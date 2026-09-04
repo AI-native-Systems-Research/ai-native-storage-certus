@@ -92,10 +92,14 @@ define_component! {
             initialized: AtomicBool,
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
+            bg_mt_evictor: Mutex<Option<MemoryTierEvictor>>,  // DRAM -> SSD demotion
+            cold_pool: Mutex<Option<ColdReadPool>>,           // per-drive cold-read workers
             data_drives: RwLock<Vec<DataDrive>>,
             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
-            pipeline_ring: RwLock<Option<PipelineRing>>,
+            pipeline_ring: RwLock<Option<PipelineRing>>,      // owns the cold-load StagingPool
             warm_stream: AtomicU64,
+            tier_counters: Arc<TierEventCounters>,
+            eviction_tx: Sender<EvictionJob>,
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             // ...
@@ -168,22 +172,23 @@ The top-level orchestrator interface. Coordinates all cache operations.
 | `initialize(config)` | Creates N block devices + N extent managers from PCI addresses |
 | `shutdown()` | Drains background writes, shuts down all drives |
 | `populate(key, ipc_handle)` | GPU→DRAM DMA, registers entry, enqueues write-through |
+| `batch_populate(entries)` | Populate multiple `(key, IpcHandle)` pairs in one call |
 | `reserve_memory(key, size, session_id)` | Reserve a DRAM slot without DMA (returns raw pointer); `session_id` is an opaque per-request id (0 = unset) for observability only |
-| `populate_memory(key, ipc_handle)` | DMA into a previously reserved slot |
-| `memory_populated(key, size)` | Finalize reserved slot: register in dispatch-map + enqueue write-through |
+| `copy_gpu_to_memory_async(key, regions, stream)` | Async D2H copy of GPU region(s) into a previously reserved slot on the given CUDA stream |
+| `copy_gpu_to_memory_completed(key, size)` | Finalize a reserved slot after the async copy: register in dispatch-map + enqueue write-through |
 | `release_memory(key)` | Cancel a reserved slot without populating |
 | `lookup(key, ipc_handle)` | Serves from DRAM (warm) or promotes from SSD (cold) |
 | `lookup_async(key, ipc_handle)` | Non-blocking lookup, returns CUDA stream |
-| `batch_lookup(entries)` | Batch lookup: multiple keys with parallel SSD promotion |
+| `batch_lookup(entries)` | Batch lookup over `&[(CacheKey, Vec<IpcHandle>)]` with parallel SSD promotion |
 | `check(key)` | Existence check without data transfer |
 | `remove(key)` | Removes entry from all tiers |
 | `touch(key)` | Refreshes eviction timestamp |
+| `pin(key) / unpin(key)` | Pin an entry in DRAM (exempt from eviction/demotion) and release the pin |
 | `promote_to_memory_tier(keys)` | Pre-promote cold entries to DRAM for future warm access |
-| `prepare_store(key, size)` | Direct-write API: allocates DMA buffer + extent |
-| `commit_store(key)` | Writes prepared buffer to SSD |
-| `cancel_store(key)` | Aborts prepared write |
 | `clear_memory_tier()` | Evicts all DRAM entries |
 | `flush_to_ssd()` | Force all pending write-through jobs to complete |
+| `read_write_stats()` | Aggregate read/write byte and op counters |
+| `tier_event_stats()` | Tier-transition counters (promotions, demotions, evictions) |
 
 ### IDispatchMap
 
@@ -191,13 +196,13 @@ The key→location index with reader/writer reference counting.
 
 | Method | Description |
 |--------|-------------|
-| `set_dma_alloc(alloc)` | Registers the DMA buffer allocator function |
 | `initialize()` | Initializes internal state |
-| `create_staging(key, size)` | Allocates DMA staging buffer for a key |
 | `create_memory_tier_entry(key, ptr, size)` | Registers DRAM-resident entry |
-| `lookup(key)` | Returns `LookupResult` enum (NotExist/Staging/MemoryTier/BlockDevice) |
-| `convert_to_storage(key, offset)` | Transitions entry to SSD-backed state |
+| `lookup(key)` | Returns `LookupResult` enum (NotExist/MismatchSize/MemoryTier/BlockDevice) |
+| `convert_to_storage(key, offset)` | Records the SSD `ssd_offset`; the entry **stays MemoryTier** (now durable/evictable) |
 | `convert_memory_tier_to_block(key)` | Demotes DRAM entry to SSD-only |
+| `promote_block_to_memory_tier(key, ptr, size)` | In-place BlockDevice→MemoryTier (retains `ssd_offset`); works on pinned entries |
+| `try_evict_to_block(key)` | MemoryTier→BlockDevice, only if `ssd_offset` is set and the entry is unreferenced |
 | `take_read/release_read` | Reference counting for concurrent access |
 | `take_write/release_write` | Exclusive writer semantics |
 | `downgrade_reference(key)` | Atomically downgrade write ref to read ref |
@@ -227,6 +232,7 @@ DRAM cache pool with pluggable eviction (via `IEvictionPolicy`).
 | `capacity() / used()` | Pool utilization metrics |
 | `pool_info()` | Returns base pointer + size for CUDA registration |
 | `is_dma_capable()` | Whether pool is registered for zero-copy DMA |
+| `telemetry_snapshot()` | Point-in-time counters (inserts, hits, evictions, bytes resident) |
 | `clear()` | Remove all entries, return count evicted |
 
 ### IBlockDevice
@@ -236,12 +242,18 @@ NVMe block device with actor-model architecture.
 | Method | Description |
 |--------|-------------|
 | `connect_client()` | Returns (command_tx, completion_rx) channel pair |
-| `block_size()` | Device sector size |
+| `block_size()` | Device logical block size |
+| `sector_size(ns_id)` | Sector size for a namespace |
 | `num_sectors(ns_id)` | Namespace capacity |
 | `max_transfer_size()` | MDTS limit |
+| `max_queue_depth()` | Max outstanding ops per queue |
+| `num_io_queues()` | Number of I/O queues |
 | `numa_node()` | Controller NUMA node |
+| `nvme_version()` | Reported NVMe spec version |
+| `telemetry()` | Controller/queue telemetry snapshot |
+| `read_write_stats()` | Aggregate read/write byte and op counters |
 
-Commands are sent as enum variants: `ReadAsync`, `WriteSync`, `ReadSync`, `WriteZeros`.
+Commands are sent as enum variants: `ReadSync`, `WriteSync`, `ReadAsync`, `WriteAsync`, `WriteZeros`, `BatchSubmit`, `AbortOp`, `ControllerReset`, `FlushSync`, and the `Ns*` namespace-management ops.
 
 ### IExtentManager
 
@@ -289,12 +301,14 @@ The central orchestrator implementing `IDispatcher`. Two variants exist:
 - **DispatcherComponent** (`components/dispatcher/`) — Standard dispatcher
 - **DispatcherP2pComponent** (`components/dispatcher-p2p/`) — Adds GPUDirect P2P ring and DRAM backfill worker
 
-Both variants own:
+The `full` profile uses **DispatcherComponent**, which owns:
 
 - **N data drives**: Each is a (BlockDevice, ExtentManager) pair created from PCI addresses
 - **ParallelBackgroundWriter**: Multi-threaded write-through (drains jobs from a channel)
 - **BackgroundEvictor**: Monitors SSD utilization and reclaims space
-- **Pipeline ring**: Pre-allocated ring of 8 CUDA-pinned DMA buffers + 2 CUDA streams for pipelined SSD→GPU reads
+- **MemoryTierEvictor**: Background thread that demotes cold DRAM entries to SSD (DRAM→SSD), evicting only entries with `ssd_offset` set and no active references
+- **ColdReadPool**: Persistent per-drive worker pool, each worker holding a pre-connected NVMe channel and CUDA stream for cold SSD→DRAM→GPU reads without per-request setup
+- **PipelineRing**: Owns the cold-load StagingPool — a pre-allocated ring of CUDA-pinned, SPDK-registered DMA buffers plus per-device CUDA streams (warm H2D, store D2H, and pipe[2] for cold loads)
 - **Warm stream**: Dedicated CUDA stream for async memory-tier→GPU copies (lock-free access via AtomicU64)
 - **BlockDeviceFactory / ExtentManagerFactory**: Factory closures for creating DataDrive components during initialization
 
@@ -327,7 +341,6 @@ The index tracking every cached entry's location and state. Receptacles: `evicti
 enum LookupResult {
     NotExist,
     MismatchSize,
-    Staging { buffer: Arc<DmaBuffer> },
     BlockDevice { offset: u64 },
     MemoryTier { pointer: *mut u8, size: u32 },
 }
@@ -437,7 +450,8 @@ The dispatch-map uses reader/writer references to coordinate concurrent access:
 |--------|---------|
 | `dispatcher-bg-writer` | Parallel write-through: memory-tier → SSD |
 | `dispatcher-bg-evictor` | Monitors SSD utilization, reclaims extents |
-| `dispatcher-bg-backfill` | (P2P variant) DRAM backfill for hot P2P entries |
+| `dispatcher-bg-mt-evictor` | Demotes cold DRAM entries to SSD (DRAM→SSD) when the memory tier is under pressure |
+| Cold-read pool workers | Per-drive persistent workers (pre-connected NVMe channel + CUDA stream) for cold SSD→DRAM→GPU reads |
 | `extent-mgr-checkpoint` | Periodic checkpoint of allocation metadata |
 | Block device actor threads | One per NVMe controller, NUMA-pinned |
 

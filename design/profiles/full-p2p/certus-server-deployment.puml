@@ -11,7 +11,7 @@ skinparam agent {
 }
 hide stereotype
 
-title Certus Server — full-remote Profile
+title Certus Server — full-p2p Profile
 
 ' ============================================================
 ' CLIENT
@@ -30,33 +30,26 @@ rectangle "**Server Host**" as server_box #FAFAFA {
 
         agent "Shmq Mailbox\nPopulate | Lookup | Check\nRemove | Touch | Flush" as shmq #F0F0F0
 
-        rectangle "**Dispatcher** <<IDispatcher>>" as dispatcher #DBEAFE {
+        rectangle "**DispatcherP2p** <<IDispatcher>>\n(crate: dispatcher-p2p)" as dispatcher #DBEAFE {
             rectangle "DataDrive [0..N]" as data_drive #FEF3C7 {
                 agent "BlockDeviceSpdkNvme\n<<IBlockDevice>>" as blkdev
                 agent "ExtentManager\n<<IExtentManager>>" as extmgr
             }
-            agent "ParallelBackgroundWriter\nBackgroundEvictor | MemoryTierEvictor\nColdReadPool\nPipelineRing (StagingPool)" as disp_bg #FEF9C3
+            agent "ParallelBackgroundWriter\nBackgroundEvictor | MemoryTierEvictor\nP2pColdReadPool | DramBackfillWorker\nPipelineRing (fallback)" as disp_bg #FEF9C3
+            agent "P2pRing\nGPU BAR1 staging (64 slots)\nGDRCopy + SPDK-registered" as p2p_ring #FBCFE8
         }
 
         agent "DispatchMap\n<<IDispatchMap>>" as dispatch_map #DBEAFE
         agent "MemoryTier\n<<IMemoryTier>>" as memory_tier #DBEAFE
         agent "EvictionPolicy\n<<IEvictionPolicy>>" as eviction #E5E7EB
-        agent "GpuServices\n<<IGpuServices>>" as gpu_svc #BBF7D0
+        agent "GpuServices\n<<IGpuServices>>\nH2D | D2H | D2D" as gpu_svc #BBF7D0
         agent "SPDKEnv\n<<ISPDKEnv>>" as spdk_env #E5E7EB
-
-        rectangle "**Remote Cache Layer**" as remote_box #FEE2E2 {
-            agent "RemoteLookup\n<<IRemoteLookup>>\norchestrator: query + reserve" as remote_lookup
-            agent "RdmaInitiator\n<<IRemoteLookupRdmaInitiator>>\npush values OUT to peers\n(async: one connection thread per peer)" as remote_initiator
-            agent "RdmaResponder\n<<IRemoteLookupRdmaResponder>>\naccept writes IN from peers" as remote_responder
-            agent "Zyre\n<<IZyre>>\npeer discovery" as remote_zyre
-        }
+        agent "RemoteLookup\n<<IRemoteLookup>>\n(placeholder)" as remote_lookup #E5E7EB
     }
 
     agent "GPU Memory\n(server)" as server_gpu #LightGreen
     database "NVMe SSD [0..N]" as nvme_data
 }
-
-cloud "**Peer Certus Nodes**" as peers #FEE2E2
 
 ' ============================================================
 ' CONNECTIONS
@@ -70,7 +63,7 @@ shmq -down-> dispatcher
 dispatcher -down-> dispatch_map
 dispatcher -down-> memory_tier
 dispatcher -down-> gpu_svc
-dispatcher -right-> remote_lookup
+dispatcher --> remote_lookup
 
 dispatch_map -down-> eviction
 memory_tier -down-> eviction
@@ -79,18 +72,11 @@ disp_bg --> blkdev
 blkdev -down-> spdk_env
 extmgr --> blkdev : metadata
 
-remote_lookup -down-> remote_initiator : submit push (push_async)
-remote_initiator .up.> remote_lookup : completion callback\n(statuses; releases read pins)
-remote_lookup -down-> remote_responder : reserve slot
-remote_lookup -down-> remote_zyre : discover / query
-
 gpu_svc -right-> server_gpu : DMA
 
 spdk_env -down-> nvme_data : VFIO
 blkdev .down.> nvme_data : NVMe I/O
-
-remote_zyre <-down-> peers : gossip (KeyQuery / RdmaRequest)
-remote_initiator -down-> peers : RDMA write OUT (data-holder)
-peers -up-> remote_responder : RDMA write IN (requester)
+nvme_data .up.> p2p_ring : P2P DMA\n(cold read)
+p2p_ring .right.> server_gpu : D2D copy
 
 @enduml
