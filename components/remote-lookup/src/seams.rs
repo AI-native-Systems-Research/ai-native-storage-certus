@@ -689,7 +689,7 @@ impl IDispatcher for MockDispatcher {
     }
 
     fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
-        entries.iter().map(|(k, h)| self.populate(*k, h.clone())).collect()
+        entries.iter().map(|(k, h)| self.populate(*k, *h)).collect()
     }
 
     fn reserve_memory(
