@@ -1,20 +1,22 @@
 ---
 spec_sync_component: spdk-env
-spec_sync_drift_status: drift
-spec_sync_synced_at: 2026-09-04T02:05:38Z
-spec_sync_git_commit: 7219c346
-spec_sync_inputs_sha256: 8fc7d79b7e010c3adf924e3842e0fe6d1f21b9e272329bef38190a40f94fe802
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-09-04T16:10:38Z
+spec_sync_git_commit: e7e1bc10
+spec_sync_inputs_sha256: ba0268416df0d95407ce161f890379d8a46a4d6bff9b8650773a4e3d50afac44
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Drift Report: spdk-env
 
-**This sweep (2026-09-03)** independently re-verified spec `002-spdk-env-vfio-init`
-(19 FR + 5 SC) against `src/{lib,env,checks,device,dma,error}.rs`,
-`examples/spdk-env-example.rs`, and the mirror interface
-(`components/interfaces/src/{ispdk_env,spdk_types}.rs`). Three documentation
-BACKFILLs were applied (D1/D2/D5). **One actionable drift remains unresolved
-(D4) — hence `drift_status: drift`.** No code bugs (no ALIGN) were found in this
-sweep; D4 is a product/engineering scope decision, not a defect.
+**This sweep (2026-09-03, D4 resolved 2026-09-04)** independently re-verified
+spec `002-spdk-env-vfio-init` (19 FR + 5 SC) against
+`src/{lib,env,checks,device,dma,error}.rs`, `examples/spdk-env-example.rs`, and
+the mirror interface (`components/interfaces/src/{ispdk_env,spdk_types}.rs`).
+Four documentation BACKFILLs were applied (D1/D2/D5 on 2026-09-03; D4 on
+2026-09-04). **No actionable drift remains — `drift_status: clean`.** No code
+bugs (no ALIGN) were found; D4 was a device-scope inconsistency resolved by a
+product decision to keep the NVMe-only scope and re-scope the spec to match
+(BACKFILL), not by masking a code bug.
 
 Spec `001-spdk-vfio-env` is a **superseded, unfilled `spec-template.md`
 scaffold** (its own Supersession Notice at lines 1-7 says so and points to
@@ -26,26 +28,40 @@ scaffold** (its own Supersession Notice at lines 1-7 says so and points to
 |---|---|
 | Specs Analyzed | 2 (1 live, 1 superseded scaffold) |
 | Requirements Checked | 24 (19 FR + 5 SC, spec 002) |
-| Aligned | 18 FR + 4 SC |
-| Drifted → resolved this sweep | 3 doc BACKFILLs (D1 FR-005, D2 FR-015 note, D5 SC-005) |
-| Drifted → **UNRESOLVED** | 1 (D4 — SC-001/User Story 1 vs FR-006, HUMAN_DECISION) |
+| Aligned | 18 FR + 5 SC (SC-001 aligned after D4 BACKFILL) |
+| Drifted → resolved this sweep | 4 doc BACKFILLs (D1 FR-005, D2 FR-015 note, D5 SC-005, D4 device scope) |
+| Drifted → **UNRESOLVED** | 0 |
 | Not Implemented (spec-acknowledged) | 1 (FR-015 skip-and-warn, explicitly "Future") |
 | Unspecced (public surface, low) | see notes |
 
-## Why `drift` (not `clean`)
+## D4 resolution (2026-09-04) — device scope re-scoped to NVMe (BACKFILL)
 
-**D4** is a genuine, unresolved spec-vs-code inconsistency about *promised
-capability*, tracked as **Task 1 in `.specify/sync/align-tasks.md`** and there
-classified as a real functional gap, not mere doc lag. Resolving it requires
-either (a) a code change to enumerate all SPDK-supported VFIO device types, or
-(b) a deliberate product decision to keep NVMe-only scope and re-scope
-SC-001/User Story 1/Clarifications to match FR-006. Neither is a text-only
-mechanical fix, and the choice belongs to a human (the `--interactive` propose
-step). Per the sync mandate, this stamp is **not** set to `clean` to pass the
-gate; the drift is left visible and explained until the scope decision is made.
-The HARD RULE is respected: NVMe-only is a deliberate FR-006 implementation, so
-this is **not** being backfilled to mask a code bug — it is left open for a
-human decision.
+**D4** was a genuine spec-vs-code inconsistency about *promised capability*:
+SC-001, User Story 1, and the 2026-04-07 Clarification promised "all
+SPDK-supported VFIO device types (NVMe, virtio-blk, etc.)", while FR-006 **and
+the code** (`enumerate_devices` → `spdk_pci_enumerate` against
+`spdk_pci_get_driver("nvme")` only, `env.rs:163-181`) implement NVMe-only. It was
+surfaced (not masked) as `drift` pending a product/engineering decision. That
+decision — **keep the NVMe-only scope; broadening to other VFIO device types is a
+future enhancement, not current behavior** — was taken, so this is resolved by
+**BACKFILL** (re-scope the doc to match the correct, deliberate FR-006
+implementation), never by an ALIGN that would have masked a bug. Edits, all
+carrying a dated backfill note:
+- Clarification (`spec.md:12`): answer changed to "NVMe devices bound to VFIO".
+- User Story 1 narrative (`spec.md:22`): "discover all VFIO-attached devices" /
+  "probes for all SPDK-supported device types (NVMe, virtio-blk, etc.)" →
+  "discover the NVMe devices bound to VFIO" / "enumerates NVMe devices bound to
+  VFIO (per FR-006)".
+- Acceptance Scenario 2 (`spec.md:31`): dropped "for all SPDK-supported device
+  types"; scoped to "each enumerated NVMe device".
+- User Story 3 Scenario 1 (`spec.md:65`): "all VFIO-bound devices" → "all NVMe
+  devices bound to VFIO".
+- SC-001 (`spec.md:174`): "VFIO-bound devices" → "NVMe devices bound to VFIO".
+
+The neutral "VFIO-attached device" phrasing in FR-002 and the `VfioDevice` entity
+was left as-is — an NVMe device *is* a VFIO-attached device, so those are not
+contradictory. If broad device support is later implemented, this BACKFILL should
+be revisited (re-widen the scope + extend `enumerate_devices`).
 
 ## Resolved this sweep (BACKFILL — doc lag against correct code)
 
@@ -75,18 +91,8 @@ not printed.
 
 ## Unresolved this sweep
 
-**D4 — SC-001 / User Story 1 / Clarifications vs FR-006 (HUMAN_DECISION, medium).**
-- SC-001 (`spec.md:174`): "discovers 100% of available … VFIO-bound devices";
-  User Story 1 (`spec.md:22`) and the Clarification (`spec.md:12`): "all
-  SPDK-supported device types (NVMe, virtio-blk, etc.)".
-- FR-006 (`spec.md:104`) narrows to NVMe-only; the code implements exactly that:
-  `enumerate_devices` calls `spdk_pci_enumerate` only against
-  `spdk_pci_get_driver("nvme")` (`env.rs:163-181`). virtio-blk and other types
-  are never enumerated.
-- This is an internal spec inconsistency AND a real functional gap. Left
-  **unresolved** and untouched in `src/` and in SC-001/User Story 1 pending the
-  product decision recorded in `align-tasks.md` Task 1. **This is the reason for
-  `drift_status: drift`.**
+None. D4 (device scope) was resolved on 2026-09-04 by BACKFILL — see "D4
+resolution" above.
 
 ## No change needed
 
@@ -121,6 +127,7 @@ change — observation only.
 | FR-019 explicit fini(), idempotent, Drop reuses teardown | `lib.rs:74-79`; `env.rs:188-200`; `lib.rs:100-107` |
 | FR-020 DmaBuffer re-export, new/from_raw, Deref/DerefMut, flag-gated Drop | `dma.rs:6`; `spdk_types.rs:238,293,375-401`; `env.rs:102,191-196` |
 | FR-021 five operator scripts | `bind_vfio.sh`, `add_kernel_options.sh`, `cfg_user_spdk.sh`, `show_spdk_devices.sh`, `fix_dnf_cache.sh` |
+| SC-001 discover NVMe VFIO devices (post-BACKFILL, NVMe-only) | `env.rs:115-185`; enumerates `spdk_pci_get_driver("nvme")` only |
 | SC-002 specific issue in first error | `checks.rs:26-34,96-101,135-140,167-171` |
 | SC-003 example compiles/runs non-root (structural) | `examples/spdk-env-example.rs:40-61` |
 | SC-004 synchronous, no threads | `env.rs:17-70`; no spawns |
@@ -148,15 +155,15 @@ change — observation only.
 
 ## Recommendations
 
-1. **Resolve D4 (align-tasks Task 1).** Product/engineering decision: extend
-   `enumerate_devices` to all SPDK VFIO driver types (code ALIGN), or re-scope
-   SC-001/User Story 1/Clarifications to NVMe-only (doc BACKFILL). Then the stamp
-   can move to `clean`.
+1. **D4 resolved (align-tasks Task 1).** The device scope was re-scoped to
+   NVMe-only by BACKFILL (see above). If broad VFIO device support (virtio-blk,
+   etc.) is later desired, re-widen SC-001/User Story 1/Clarifications **and**
+   extend `enumerate_devices` together — do not let the doc lead the code again.
 2. **align-tasks Task 3 (latent).** `do_init`'s error path clears the singleton
    flag but never calls `spdk_env_fini()`; harmless today because
    `enumerate_devices` always returns `Ok`, but a real leak if enumeration is
-   made fallible (e.g. Task 1's extension or FR-015). Code change, out of scope
-   for a doc sync.
+   made fallible (e.g. a future device-scope extension or FR-015). Code change,
+   out of scope for a doc sync.
 
 ## Verification feasibility
 

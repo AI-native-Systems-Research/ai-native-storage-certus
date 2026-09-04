@@ -9,7 +9,7 @@
 
 ### Session 2026-04-07
 
-- Q: Which device types should the component discover? → A: All SPDK-supported device types bound to VFIO (NVMe, virtio-blk, etc.)
+- Q: Which device types should the component discover? → A: NVMe devices bound to VFIO. *(Spec-sync backfill 2026-09-04: the original answer read "All SPDK-supported device types bound to VFIO (NVMe, virtio-blk, etc.)", but the implemented and specified scope is NVMe-only — see FR-006: `enumerate_devices` enumerates only the NVMe PCI driver (`env.rs:163-181`). Re-scoped to match the implementation; enumerating other VFIO-bound device types (virtio-blk, etc.) is a possible future enhancement, not current behavior.)*
 - Q: Should the component enforce singleton semantics? → A: Enforce singleton — second instantiation returns an error
 - Q: When should SPDK/DPDK initialization occur? → A: Explicit `init()` method on ISPDKEnv — caller constructs, wires receptacles, then calls `init()`
 - Q: How should the component behave if the logging receptacle is not connected? → A: Fail `init()` with an error requiring the logger to be connected first
@@ -19,7 +19,7 @@
 
 ### User Story 1 - Initialize SPDK Environment and Discover VFIO Devices (Priority: P1)
 
-A developer instantiates the SPDKEnv component, wires the logging receptacle, and calls `init()` to initialize the SPDK/DPDK runtime and discover all VFIO-attached devices available on the system. The component performs system prerequisite checks (VFIO availability, permissions, hugepages), initializes the SPDK/DPDK environment, probes for all SPDK-supported device types (NVMe, virtio-blk, etc.), and exposes them through the ISPDKEnv interface.
+A developer instantiates the SPDKEnv component, wires the logging receptacle, and calls `init()` to initialize the SPDK/DPDK runtime and discover the NVMe devices bound to VFIO on the system. The component performs system prerequisite checks (VFIO availability, permissions, hugepages), initializes the SPDK/DPDK environment, enumerates NVMe devices bound to VFIO (per FR-006), and exposes them through the ISPDKEnv interface.
 
 **Why this priority**: This is the core purpose of the component. Without environment initialization and device discovery, no other functionality is possible.
 
@@ -28,7 +28,7 @@ A developer instantiates the SPDKEnv component, wires the logging receptacle, an
 **Acceptance Scenarios**:
 
 1. **Given** a system with VFIO enabled and at least one VFIO-bound device, **When** the component is constructed, logger wired, and `init()` called, **Then** it returns a list of discovered devices with identifying information (PCI address, device type).
-2. **Given** a successful initialization, **When** the developer queries available devices through ISPDKEnv, **Then** each device entry includes sufficient information to identify the device (BDF address, vendor/device IDs) for all SPDK-supported device types.
+2. **Given** a successful initialization, **When** the developer queries available devices through ISPDKEnv, **Then** each enumerated NVMe device entry includes sufficient information to identify the device (BDF address, vendor/device IDs).
 3. **Given** a system with no VFIO-bound devices, **When** the component initializes successfully, **Then** it returns an empty device list without error.
 4. **Given** a system where some VFIO-bound devices are in use by another SPDK process, **When** the component initializes, **Then** it skips unavailable devices with a logged warning and returns only successfully probed devices.
 
@@ -62,7 +62,7 @@ A developer runs the component as an unprivileged user. The component operates c
 
 **Acceptance Scenarios**:
 
-1. **Given** a non-root user with appropriate /dev/vfio permissions, **When** the component is initialized, **Then** it successfully enumerates all VFIO-bound devices.
+1. **Given** a non-root user with appropriate /dev/vfio permissions, **When** the component is initialized, **Then** it successfully enumerates all NVMe devices bound to VFIO.
 2. **Given** a non-root user without appropriate permissions, **When** the component is initialized, **Then** it reports which specific files or directories lack permissions rather than a generic "access denied" error.
 
 ---
@@ -171,7 +171,7 @@ A developer integrates the SPDKEnv component with other Certus components via th
 
 ### Measurable Outcomes
 
-- **SC-001**: The component discovers 100% of available (not in-use) VFIO-bound devices on a properly configured system, matching the devices visible in /sys/bus/pci/drivers/vfio-pci minus those locked by other processes.
+- **SC-001**: The component discovers 100% of available (not in-use) NVMe devices bound to VFIO on a properly configured system, matching the NVMe devices visible in /sys/bus/pci/drivers/vfio-pci minus those locked by other processes. *(Spec-sync backfill 2026-09-04: re-scoped from "VFIO-bound devices" to "NVMe devices bound to VFIO" to match FR-006 and the implementation, which enumerate only the NVMe PCI driver.)*
 - **SC-002**: On a misconfigured system (no VFIO, wrong permissions, no hugepages), the component reports the specific issue within its first error message, enabling the user to resolve the problem without additional debugging. *(Backfilled 2026-08-07: dropped the stale "missing logger" misconfiguration case — the component has no logger receptacle per FR-007; the same correction was already applied to SC-005.)*
 - **SC-003**: The example main.rs compiles and runs successfully as a non-root user on a system with correct VFIO permissions, printing device information to the console.
 - **SC-004**: All component operations complete synchronously without spawning threads, confirming procedural (non-actor) behavior.
