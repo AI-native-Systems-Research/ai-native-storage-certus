@@ -119,6 +119,12 @@ struct Cli {
     #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
     max_eviction_attempts: usize,
 
+    /// Milliseconds a store allocation backpressures on a momentarily full
+    /// memory tier (retrying eviction while the background evictor drains)
+    /// before surfacing AllocationFailed. 0 disables (fail fast).
+    #[arg(long = "store-backpressure-ms", default_value_t = 5000)]
+    store_backpressure_ms: u64,
+
     /// Memory-tier utilization threshold (0.0–1.0) for background DRAM→SSD demotion.
     /// Disabled by default (0.0). Set to e.g. 0.8 to start demoting at 80% full.
     #[arg(long = "memory-tier-eviction-threshold", default_value_t = 0.0)]
@@ -206,6 +212,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         format: cli.format,
         poller_base_cpu: cli.poller_base_cpu,
         max_eviction_attempts: cli.max_eviction_attempts,
+        store_backpressure_ms: cli.store_backpressure_ms,
         memory_tier_eviction_threshold: cli.memory_tier_eviction_threshold,
         rl_group: cli.rl_group.clone(),
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),

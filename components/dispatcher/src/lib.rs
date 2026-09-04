@@ -119,6 +119,9 @@ pub struct TierEventCounters {
     evictions_from_memory: AtomicU64,
     /// Extents freed on SSD by the background extent evictor.
     evictions_from_ssd: AtomicU64,
+    /// Store-allocation retries taken while backpressuring on a momentarily
+    /// full memory tier (see `reserve_memory`). Bumped once per retry sleep.
+    store_backpressure_events: AtomicU64,
 }
 
 impl TierEventCounters {
@@ -147,6 +150,15 @@ impl TierEventCounters {
         self.evictions_from_ssd.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record one store-backpressure retry. Returns the count *before* this
+    /// call, so a caller can log a one-shot line on the first engagement
+    /// (return value `0`).
+    #[inline]
+    pub fn record_store_backpressure(&self) -> u64 {
+        self.store_backpressure_events
+            .fetch_add(1, Ordering::Relaxed)
+    }
+
     /// Read the cumulative counters without resetting them.
     pub fn snapshot(&self) -> TierEventStats {
         TierEventStats {
@@ -154,6 +166,7 @@ impl TierEventCounters {
             promotions_to_gpu: self.promotions_to_gpu.load(Ordering::Relaxed),
             evictions_from_memory: self.evictions_from_memory.load(Ordering::Relaxed),
             evictions_from_ssd: self.evictions_from_ssd.load(Ordering::Relaxed),
+            store_backpressure_events: self.store_backpressure_events.load(Ordering::Relaxed),
         }
     }
 }
@@ -311,6 +324,7 @@ define_component! {
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             max_eviction_attempts: AtomicUsize,
+            store_backpressure_ms: AtomicU64,
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
             eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
             eviction_dropped: AtomicU64,
@@ -1738,6 +1752,8 @@ impl IDispatcher for DispatcherComponent {
 
         self.max_eviction_attempts
             .store(config.max_eviction_attempts, Ordering::Relaxed);
+        self.store_backpressure_ms
+            .store(config.store_backpressure_ms, Ordering::Relaxed);
 
         self.dispatch_map
             .get()
@@ -3091,9 +3107,53 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        let mem_ptr = self.evict_and_insert(&dm, &mt, key, size, max_attempts)?;
 
-        Ok(mem_ptr)
+        // Bounded store backpressure. Under a sustained async offload burst the
+        // memory tier can hit genuine 100% utilization: the oldest entries are
+        // *transiently* un-evictable (pinned by an in-flight load, or not yet
+        // written through by the bg_writer), so `evict_and_insert` surfaces
+        // `AllocationFailed`. The saturation is momentary — the background
+        // `MemoryTierEvictor` demotes ~512 slabs / 200 ms tick and in-flight
+        // write-throughs land within ~1-2 s — so we retry the allocation for a
+        // bounded budget instead of failing the store. Failing is fatal here:
+        // the shmq worker replies STATUS_ERROR and vLLM's offloading connector
+        // does `assert transfer_result.success` -> EngineDeadError. Retrying
+        // also applies natural backpressure to the synchronous vLLM store,
+        // throttling the producer rather than killing the engine. Deadlock-free:
+        // the threads we wait on (evictor, bg_writer, other workers' loads) are
+        // all independent of this store worker. `budget = 0` restores the
+        // original fail-fast behavior.
+        let budget =
+            std::time::Duration::from_millis(self.store_backpressure_ms.load(Ordering::Relaxed));
+        if budget.is_zero() {
+            let mem_ptr = self.evict_and_insert(&dm, &mt, key, size, max_attempts)?;
+            return Ok(mem_ptr);
+        }
+
+        const POLL: std::time::Duration = std::time::Duration::from_millis(20);
+        let deadline = std::time::Instant::now() + budget;
+        loop {
+            match self.evict_and_insert(&dm, &mt, key, size, max_attempts) {
+                Ok(mem_ptr) => return Ok(mem_ptr),
+                Err(DispatcherError::AllocationFailed(_))
+                    if std::time::Instant::now() < deadline =>
+                {
+                    if self.tier_counters.record_store_backpressure() == 0 {
+                        // One-shot: the memory tier saturated and the store path
+                        // began backpressuring rather than failing. Runs are
+                        // otherwise silent about this path (certus-server does
+                        // not dump tier stats), so surface it once.
+                        self.log_info(&format!(
+                            "store backpressure engaged: memory tier full, \
+                             retrying reserve (budget {} ms)",
+                            budget.as_millis()
+                        ));
+                    }
+                    std::thread::sleep(POLL);
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     fn copy_gpu_to_memory_async(
@@ -4401,6 +4461,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4561,6 +4622,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4609,6 +4671,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4630,6 +4693,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4653,6 +4717,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4681,6 +4746,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4710,6 +4776,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4739,6 +4806,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4763,6 +4831,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4787,6 +4856,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4816,6 +4886,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4848,6 +4919,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4871,6 +4943,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4895,6 +4968,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4950,6 +5024,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4984,6 +5059,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5062,6 +5138,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5613,6 +5690,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5649,6 +5727,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5720,6 +5799,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5790,6 +5870,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5842,6 +5923,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5911,6 +5993,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
