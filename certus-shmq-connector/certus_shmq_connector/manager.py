@@ -31,7 +31,7 @@ from .compat import (
 )
 
 from .mediums import BlockLocation, CertusLoadStoreSpec, denamespace_key, ns_key
-from .ring import REASON_REMOVED
+from .ring import CHECK_MISS, CHECK_RESIDENT, REASON_REMOVED
 
 
 def _key_to_u64(key: OffloadKey) -> int:
@@ -116,16 +116,35 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         this is ``[logical_key]`` (ns_key is identity) → exact baseline."""
         return [ns_key(logical_key, r, self._world_size) for r in range(self._world_size)]
 
-    def _check_all_present(self, logical_keys: list[int]) -> dict[int, bool]:
+    def _check_all_present(
+        self, logical_keys: list[int], *, resident_only: bool = False
+    ) -> dict[int, bool]:
         """Batched Check over every per-rank key. A logical block is present iff
         ALL W of its shards are present — a load needs every shard, so partial
         residency (some ranks evicted) must read as a MISS. One batched Check
-        RPC covers the whole expanded list; flags return in expansion order."""
+        RPC covers the whole expanded list; flags return in expansion order.
+
+        ``resident_only`` selects which tri-state counts as "present":
+
+        - ``False`` (store dedup): a shard counts as present when RESIDENT *or*
+          PENDING. A PENDING shard is a store another rank/session already has in
+          flight, so we must not re-store it — dedup wants pending-counts-present.
+        - ``True`` (load decision): only RESIDENT counts; a PENDING shard reads as
+          absent. This is mandatory for the paths that feed vLLM's matched-token /
+          cache-hit decision (``lookup``/``touch``): a PENDING key is reserved but
+          has no dispatch-map entry yet, so if vLLM counts it as a hit it issues a
+          load that finds NotExist and fatally fails the transfer. Treating it as a
+          miss makes vLLM recompute the (not-yet-loadable) block instead — correct
+          and cheap, since it only affects blocks momentarily in flight."""
         w = self._world_size
         if not logical_keys:
             return {}
         expanded = [nk for k in logical_keys for nk in self._ns_all(k)]
-        flags = self._ring.check(expanded)
+        states = self._ring.check_states(expanded)
+        if resident_only:
+            flags = [s == CHECK_RESIDENT for s in states]
+        else:
+            flags = [s != CHECK_MISS for s in states]
         out: dict[int, bool] = {}
         for i, k in enumerate(logical_keys):
             chunk = flags[i * w:(i + 1) * w]
@@ -165,7 +184,9 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         cached = self._lookup_cache.get(int_key)
         if cached is None:
             # AND across all W shards — a load needs every rank's shard present.
-            cached = self._check_all_present([int_key]).get(int_key, False)
+            cached = self._check_all_present(
+                [int_key], resident_only=True
+            ).get(int_key, False)
         return lookup_result(cached)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
@@ -186,7 +207,9 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # (offloading/scheduler.py::_maximal_prefix_lookup) is served from this
         # map instead of firing one Check RPC per key. AND-across-ranks per
         # logical key (a block is a hit only if all shards are present).
-        self._lookup_cache.update(self._check_all_present(int_keys))
+        self._lookup_cache.update(
+            self._check_all_present(int_keys, resident_only=True)
+        )
 
     # ── store ──
 
