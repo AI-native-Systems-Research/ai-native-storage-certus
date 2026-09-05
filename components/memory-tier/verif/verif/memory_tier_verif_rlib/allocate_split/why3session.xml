@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<file format="coma">
+<path name=".."/><path name="allocate_split.coma"/>
+<theory name="Coma">
+ <goal name="vc_allocate_split">
+ <transf name="split_vc" >
+  <goal name="vc_allocate_split.0" expl="integer overflow">
+  </goal>
+  <goal name="vc_allocate_split.1" expl="integer overflow">
+  </goal>
+  <goal name="vc_allocate_split.2" expl="integer overflow">
+  <transf name="split_vc" >
+   <goal name="vc_allocate_split.2.0" expl="integer overflow">
+   </goal>
+  </transf>
+  </goal>
+  <goal name="vc_allocate_split.3" expl="allocate_split ensures">
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

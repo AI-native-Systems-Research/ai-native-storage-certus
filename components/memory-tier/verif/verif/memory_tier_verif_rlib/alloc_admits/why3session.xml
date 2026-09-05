@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<file format="coma">
+<path name=".."/><path name="alloc_admits.coma"/>
+<theory name="Coma">
+ <goal name="vc_alloc_admits">
+ <transf name="split_vc" >
+  <goal name="vc_alloc_admits.0" expl="alloc_admits ensures #0 (alloc_admits ensures)">
+  </goal>
+  <goal name="vc_alloc_admits.1" expl="alloc_admits ensures #1 (alloc_admits ensures)">
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

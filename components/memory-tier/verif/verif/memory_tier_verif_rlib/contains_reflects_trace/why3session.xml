@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<file format="coma">
+<path name=".."/><path name="contains_reflects_trace.coma"/>
+<theory name="Coma">
+ <goal name="vc_new_u64">
+ </goal>
+ <goal name="vc_deref_mut_Ghost_FMap_u64_SlotMirror">
+ </goal>
+ <goal name="vc_insert_ghost_u64">
+ </goal>
+ <goal name="vc_remove_ghost_u64">
+ </goal>
+ <goal name="vc_clear_ghost_u64">
+ </goal>
+ <goal name="vc_new_unit">
+ </goal>
+ <goal name="vc_contains_reflects_trace">
+ </goal>
+</theory>
+</file>
+</why3session>

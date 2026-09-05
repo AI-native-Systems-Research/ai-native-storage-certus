@@ -1,0 +1,50 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 654 0 654 32 *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 653 10 653 70
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 45 14 45 31
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 46 14 46 55
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use map.Map
+use map.Const
+use int.Int
+
+type t_FMap_u64_SlotMirror
+
+type t_SlotMirror = { offset: UInt64.t; size: UInt32.t }
+
+type t_Option_SlotMirror = None | Some t_SlotMirror
+
+function to_mapping_u64 (self: t_FMap_u64_SlotMirror) : Map.map UInt64.t t_Option_SlotMirror
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_SlotMirror) (k: UInt64.t) : t_Option_SlotMirror =
+  [%#sfmap'2] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_SlotMirror) (k: UInt64.t) = [%#sfmap] get_u64 self k <> None
+
+meta "rewrite_def" predicate contains_u64
+
+function len_u64 (self: t_FMap_u64_SlotMirror) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_SlotMirror [len_u64 self]. [%#sfmap'3] len_u64 self >= 0
+
+constant empty_u64 : t_FMap_u64_SlotMirror
+
+axiom empty_u64_spec: [%#sfmap'0] len_u64 empty_u64 = 0
+
+axiom empty_u64_spec'0: [%#sfmap'1] to_mapping_u64 empty_u64 = Const.const (None)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+function contains_reflects_clear [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 654 0 654 32] : ()
+
+goal vc_contains_reflects_clear:
+  [@stop_split] [@expl:contains_reflects_clear ensures] [%#slib] forall k: UInt64.t. not contains_u64 empty_u64 k

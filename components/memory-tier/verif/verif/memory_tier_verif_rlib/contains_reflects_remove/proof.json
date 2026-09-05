@@ -1,0 +1,24 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_contains_reflects_remove": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.019 },
+                  { "prover": "alt-ergo", "time": 0.017 }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

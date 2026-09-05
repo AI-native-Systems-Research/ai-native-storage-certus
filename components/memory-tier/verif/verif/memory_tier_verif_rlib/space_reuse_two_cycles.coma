@@ -1,0 +1,106 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 570 0 576 10 *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 578 25 578 90
+let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 579 13 579 46
+let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 581 25 581 88
+let%span slib'2 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 582 4 582 37
+let%span slib'3 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 564 11 564 28
+let%span slib'4 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 565 11 565 36
+let%span slib'5 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 566 11 566 40
+let%span slib'6 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 567 11 567 46
+let%span slib'7 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 568 11 568 45
+let%span slib'8 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 569 10 569 26
+let%span slib'9 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 88 11 88 28
+let%span slib'10 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 89 11 89 36
+let%span slib'11 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 90 11 90 40
+let%span slib'12 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 91 11 91 46
+let%span slib'13 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 92 11 92 45
+let%span slib'14 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 93 10 93 44
+let%span slib'15 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 94 10 94 51
+let%span slib'16 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 95 10 95 46
+let%span slib'17 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 96 10 96 32
+let%span slib'18 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 97 10 97 44
+let%span slib'19 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 119 11 119 33
+let%span slib'20 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 120 10 120 42
+
+use creusot.int.UInt64
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+type tup3_usize_usize_usize = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+let allocate_split (used: UInt64.t) (capacity: UInt64.t) (offset: UInt64.t) (region_size: UInt64.t)
+  (aligned_size: UInt64.t) (return (x: tup3_usize_usize_usize)) =
+{[@stop_split] [@expl:allocate_split requires] ([@stop_split] [@expl:allocate_split requires #0] [%#slib'9] UInt64.t'int aligned_size
+    > 0)
+  /\ ([@stop_split] [@expl:allocate_split requires #1] [%#slib'10] ComputerDivision.mod (UInt64.t'int aligned_size) 4096
+    = 0)
+  /\ ([@stop_split] [@expl:allocate_split requires #2] [%#slib'11] UInt64.t'int region_size
+    >= UInt64.t'int aligned_size)
+  /\ ([@stop_split] [@expl:allocate_split requires #3] [%#slib'12] UInt64.t'int offset + UInt64.t'int region_size
+    <= UInt64.t'int capacity)
+  /\ ([@stop_split] [@expl:allocate_split requires #4] [%#slib'13] UInt64.t'int used + UInt64.t'int aligned_size
+  <= UInt64.t'int capacity)}
+  any
+  [ return (result: tup3_usize_usize_usize) ->
+  {[@stop_split] [@expl:allocate_split ensures] ([@stop_split] [@expl:allocate_split ensures #0] [%#slib'14] UInt64.t'int result.f0
+      = UInt64.t'int used + UInt64.t'int aligned_size)
+    /\ ([@stop_split] [@expl:allocate_split ensures #1] [%#slib'15] UInt64.t'int result.f1
+      = UInt64.t'int region_size - UInt64.t'int aligned_size)
+    /\ ([@stop_split] [@expl:allocate_split ensures #2] [%#slib'16] UInt64.t'int result.f2
+      = UInt64.t'int offset + UInt64.t'int aligned_size)
+    /\ ([@stop_split] [@expl:allocate_split ensures #3] [%#slib'17] UInt64.t'int result.f0 <= UInt64.t'int capacity)
+    /\ ([@stop_split] [@expl:allocate_split ensures #4] [%#slib'18] UInt64.t'int result.f2 + UInt64.t'int result.f1
+    <= UInt64.t'int capacity)}
+    (! return {result}) ]
+
+let deallocate_used (used: UInt64.t) (aligned_size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:deallocate_used requires] [%#slib'19] UInt64.t'int used >= UInt64.t'int aligned_size}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:deallocate_used ensures] [%#slib'20] UInt64.t'int result
+    = UInt64.t'int used - UInt64.t'int aligned_size}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let space_reuse_two_cycles [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 570 0 576 10]
+  (used: UInt64.t) (capacity: UInt64.t) (offset: UInt64.t) (region_size: UInt64.t) (aligned_size: UInt64.t)
+  (return (x: UInt64.t)) =
+{[@stop_split] [@expl:space_reuse_two_cycles requires] ([@stop_split] [@expl:space_reuse_two_cycles requires #0] [%#slib'3] UInt64.t'int aligned_size
+    > 0)
+  /\ ([@stop_split] [@expl:space_reuse_two_cycles requires #1] [%#slib'4] ComputerDivision.mod (UInt64.t'int aligned_size) 4096
+    = 0)
+  /\ ([@stop_split] [@expl:space_reuse_two_cycles requires #2] [%#slib'5] UInt64.t'int region_size
+    >= UInt64.t'int aligned_size)
+  /\ ([@stop_split] [@expl:space_reuse_two_cycles requires #3] [%#slib'6] UInt64.t'int offset + UInt64.t'int region_size
+    <= UInt64.t'int capacity)
+  /\ ([@stop_split] [@expl:space_reuse_two_cycles requires #4] [%#slib'7] UInt64.t'int used + UInt64.t'int aligned_size
+  <= UInt64.t'int capacity)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = allocate_split [%#slib] {used} {capacity} {offset} {region_size} {aligned_size}
+        (fun (_x: tup3_usize_usize_usize) -> [ &_26 <- _x ] s1)
+    | s1 = [ &u1 <- _26.f0 ] s2
+    | s2 = deallocate_used [%#slib'0] {u1} {aligned_size} (fun (_x: UInt64.t) -> [ &u2 <- _x ] s3)
+    | s3 = allocate_split [%#slib'1] {u2} {capacity} {offset} {region_size} {aligned_size}
+        (fun (_x: tup3_usize_usize_usize) -> [ &_38 <- _x ] s4)
+    | s4 = [ &u3 <- _38.f0 ] s5
+    | s5 = deallocate_used [%#slib'2] {u3} {aligned_size} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s6)
+    | s6 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & used: UInt64.t = used
+  | & capacity: UInt64.t = capacity
+  | & offset: UInt64.t = offset
+  | & region_size: UInt64.t = region_size
+  | & aligned_size: UInt64.t = aligned_size
+  | & u1: UInt64.t = Any.any_l ()
+  | & _26: tup3_usize_usize_usize = Any.any_l ()
+  | & u2: UInt64.t = Any.any_l ()
+  | & u3: UInt64.t = Any.any_l ()
+  | & _38: tup3_usize_usize_usize = Any.any_l () ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:space_reuse_two_cycles ensures] [%#slib'8] UInt64.t'int result
+    = UInt64.t'int used}
+    (! return {result}) ]

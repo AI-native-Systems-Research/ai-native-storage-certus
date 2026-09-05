@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<file format="coma">
+<path name=".."/><path name="mutator_preserves_init.coma"/>
+<theory name="Coma">
+ <goal name="vc_mutator_preserves_init">
+ </goal>
+</theory>
+</file>
+</why3session>

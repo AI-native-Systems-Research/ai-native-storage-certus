@@ -1,0 +1,28 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 502 0 502 67 *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 504 23 504 24
+let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 500 10 500 47
+let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 501 10 501 27
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_TierState = { initialized: bool; capacity: UInt64.t; used: UInt64.t; spdk_allocated: bool }
+
+type tup2_TierState_usize = { f0: t_TierState; f1: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let gate_readonly_scalar [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 502 0 502 67]
+  (state: t_TierState) (return (x: tup2_TierState_usize)) = (! bb0
+  [ bb0 = any [ br0 -> {state.initialized = false} (! bb1) | br1 -> {state.initialized} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- { f0 = state; f1 = state.used } ] s1 | s1 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_ret <- { f0 = state; f1 = ([%#slib] (0: UInt64.t)) } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup2_TierState_usize = Any.any_l () | & state: t_TierState = state ])
+  [ return (result: tup2_TierState_usize) ->
+  {[@stop_split] [@expl:gate_readonly_scalar ensures] ([@stop_split] [@expl:gate_readonly_scalar ensures #0] [%#slib'0] not state.initialized
+      -> UInt64.t'int result.f1 = 0)
+    /\ ([@stop_split] [@expl:gate_readonly_scalar ensures #1] [%#slib'1] result.f0 = state)}
+    (! return {result}) ]

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<file format="coma">
+<path name=".."/><path name="lifecycle_alloc_free.coma"/>
+<theory name="Coma">
+ <goal name="vc_allocate_split">
+ </goal>
+ <goal name="vc_deallocate_used">
+ </goal>
+ <goal name="vc_lifecycle_alloc_free">
+ <transf name="split_vc" >
+  <goal name="vc_lifecycle_alloc_free.0" expl="allocate_split requires">
+  </goal>
+  <goal name="vc_lifecycle_alloc_free.1" expl="deallocate_used requires">
+  </goal>
+  <goal name="vc_lifecycle_alloc_free.2" expl="lifecycle_alloc_free ensures">
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

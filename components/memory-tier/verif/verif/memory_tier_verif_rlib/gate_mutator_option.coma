@@ -1,0 +1,45 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 473 0 473 74 *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 479 13 479 14
+let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 469 10 469 74
+let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 470 10 470 60
+let%span slib'2 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 471 10 471 68
+let%span slib'3 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 472 10 472 49
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_TierState = { initialized: bool; capacity: UInt64.t; used: UInt64.t; spdk_allocated: bool }
+
+type t_Option_usize = None | Some UInt64.t
+
+type tup2_TierState_Option_usize = { f0: t_TierState; f1: t_Option_usize }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let gate_mutator_option [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 473 0 473 74]
+  (state: t_TierState) (return (x: tup2_TierState_Option_usize)) = (! bb0
+  [ bb0 = any [ br0 -> {state.initialized = false} (! bb1) | br1 -> {state.initialized} (! bb2) ]
+  | bb2 = s0
+    [ s0 = [ &s <- state ] s1
+    | s1 = [ &s <- { s with used = ([%#slib] (0: UInt64.t)) } ] s2
+    | s2 = [ &_19 <- Some (state.used) ] s3
+    | s3 = [ &_ret <- { f0 = s; f1 = _19 } ] s4
+    | s4 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_16 <- None ] s1 | s1 = [ &_ret <- { f0 = state; f1 = _16 } ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: tup2_TierState_Option_usize = Any.any_l ()
+  | & state: t_TierState = state
+  | & _16: t_Option_usize = Any.any_l ()
+  | & s: t_TierState = Any.any_l ()
+  | & _19: t_Option_usize = Any.any_l () ])
+  [ return (result: tup2_TierState_Option_usize) ->
+  {[@stop_split] [@expl:gate_mutator_option ensures] ([@stop_split] [@expl:gate_mutator_option ensures #0] [%#slib'0] not state.initialized
+      -> result.f0.initialized = state.initialized)
+    /\ ([@stop_split] [@expl:gate_mutator_option ensures #1] [%#slib'1] not state.initialized
+      -> result.f0.used = state.used)
+    /\ ([@stop_split] [@expl:gate_mutator_option ensures #2] [%#slib'2] not state.initialized
+      -> result.f0.capacity = state.capacity)
+    /\ ([@stop_split] [@expl:gate_mutator_option ensures #3] [%#slib'3] not state.initialized -> result.f1 = None)}
+    (! return {result}) ]

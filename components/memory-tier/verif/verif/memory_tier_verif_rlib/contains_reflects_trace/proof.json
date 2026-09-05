@@ -1,0 +1,37 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_clear_ghost_u64": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_contains_reflects_trace": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.024 }
+            ]
+          }
+        ]
+      },
+      "vc_deref_mut_Ghost_FMap_u64_SlotMirror": {
+        "prover": "alt-ergo",
+        "time": 0.015
+      },
+      "vc_insert_ghost_u64": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_new_u64": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_new_unit": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_remove_ghost_u64": { "prover": "alt-ergo", "time": 0.018 }
+    }
+  }
+}

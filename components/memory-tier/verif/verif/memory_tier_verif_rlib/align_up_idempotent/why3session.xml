@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<file format="coma">
+<path name=".."/><path name="align_up_idempotent.coma"/>
+<theory name="Coma">
+ <goal name="vc_align_up">
+ </goal>
+ <goal name="vc_align_up_idempotent">
+ </goal>
+</theory>
+</file>
+</why3session>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<file format="coma">
+<path name=".."/><path name="leftover_offset_aligned.coma"/>
+<theory name="Coma">
+ <goal name="vc_align_up">
+ </goal>
+ <goal name="vc_leftover_offset_aligned">
+ <transf name="split_vc" >
+  <goal name="vc_leftover_offset_aligned.0" expl="align_up requires">
+  </goal>
+  <goal name="vc_leftover_offset_aligned.1" expl="integer overflow">
+  </goal>
+  <goal name="vc_leftover_offset_aligned.2" expl="leftover_offset_aligned ensures">
+  </goal>
+ </transf>
+ </goal>
+</theory>
+</file>
+</why3session>

@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_clone_TierState": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_clone_bool": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_clone_usize": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

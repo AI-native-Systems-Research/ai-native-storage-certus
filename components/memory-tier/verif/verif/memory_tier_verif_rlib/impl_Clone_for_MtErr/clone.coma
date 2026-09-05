@@ -1,0 +1,39 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 358 9 358 14 *)
+
+(* <MtErr as std::clone::Clone> *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 358 9 358 14
+
+use creusot.prelude.Any
+
+type t_MtErr = NotInitialized | AlreadyExists | KeyNotFound | PoolFull | InvalidSize
+
+type tup2_MtErr_MtErr = { f0: t_MtErr; f1: t_MtErr }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_MtErr [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 358 9 358 14] (self: t_MtErr)
+  (return (x: t_MtErr)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {self = NotInitialized} (! bb10)
+    | br1 -> {self = AlreadyExists} (! bb9)
+    | br2 -> {self = KeyNotFound} (! bb8)
+    | br3 -> {self = PoolFull} (! bb7)
+    | br4 -> {self = InvalidSize} (! bb6) ]
+  | bb6 = s0 [ s0 = [ &_ret <- InvalidSize ] s1 | s1 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_ret <- PoolFull ] s1 | s1 = return {_ret} ]
+  | bb8 = s0 [ s0 = [ &_ret <- KeyNotFound ] s1 | s1 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- AlreadyExists ] s1 | s1 = return {_ret} ]
+  | bb10 = s0 [ s0 = [ &_ret <- NotInitialized ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_MtErr = Any.any_l () | & self: t_MtErr = self ])
+  [ return (result: t_MtErr) -> {[@stop_split] [@expl:clone ensures] [%#slib] match { f0 = self; f1 = result } with
+      | {f0 = NotInitialized; f1 = NotInitialized} -> true
+      | {f0 = AlreadyExists; f1 = AlreadyExists} -> true
+      | {f0 = KeyNotFound; f1 = KeyNotFound} -> true
+      | {f0 = PoolFull; f1 = PoolFull} -> true
+      | {f0 = InvalidSize; f1 = InvalidSize} -> true
+      | _ -> false
+      end}
+    (! return {result}) ]

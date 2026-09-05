@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_space_reuse_free_grows": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.015 },
+          { "prover": "alt-ergo", "time": 0.016 },
+          { "prover": "alt-ergo", "time": 0.014 }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,60 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 647 0 647 65 *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 645 10 645 34
+let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 646 10 646 76
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 77 14 77 67
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 78 14 78 84
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use map.Map
+use int.Int
+
+type t_FMap_u64_SlotMirror
+
+type t_SlotMirror = { offset: UInt64.t; size: UInt32.t }
+
+type t_Option_SlotMirror = None | Some t_SlotMirror
+
+function to_mapping_u64 (self: t_FMap_u64_SlotMirror) : Map.map UInt64.t t_Option_SlotMirror
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_SlotMirror) (k: UInt64.t) : t_Option_SlotMirror =
+  [%#sfmap'2] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_SlotMirror) (k: UInt64.t) = [%#sfmap] get_u64 self k <> None
+
+meta "rewrite_def" predicate contains_u64
+
+function len_u64 (self: t_FMap_u64_SlotMirror) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_SlotMirror [len_u64 self]. [%#sfmap'3] len_u64 self >= 0
+
+function remove_u64 (self: t_FMap_u64_SlotMirror) (k: UInt64.t) : t_FMap_u64_SlotMirror
+
+axiom remove_u64_spec:
+  forall self: t_FMap_u64_SlotMirror, k: UInt64.t [remove_u64 self k]. [%#sfmap'0] to_mapping_u64 (remove_u64 self k)
+    = Map.set (to_mapping_u64 self) k (None)
+
+axiom remove_u64_spec'0:
+  forall self: t_FMap_u64_SlotMirror, k: UInt64.t [remove_u64 self k]. [%#sfmap'1] len_u64 (remove_u64 self k)
+    = (if contains_u64 self k then len_u64 self - 1 else len_u64 self)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant m : t_FMap_u64_SlotMirror
+
+constant k : UInt64.t
+
+function contains_reflects_remove [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 647 0 647 65] (m: t_FMap_u64_SlotMirror) (k: UInt64.t) : ()
+
+goal vc_contains_reflects_remove:
+  [@stop_split] [@expl:contains_reflects_remove ensures] ([@stop_split] [@expl:contains_reflects_remove ensures #0] [%#slib] not contains_u64 (remove_u64 m k) k)
+  /\ ([@stop_split] [@expl:contains_reflects_remove ensures #1] [%#slib'0] forall j: UInt64.t. j <> k
+    -> contains_u64 (remove_u64 m k) j = contains_u64 m j)

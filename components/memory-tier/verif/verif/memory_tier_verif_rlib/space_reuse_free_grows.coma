@@ -1,0 +1,38 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 556 0 556 89 *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 557 19 557 38
+let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 558 4 558 23
+let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 552 11 552 33
+let%span slib'2 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 553 11 553 29
+let%span slib'3 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 554 10 554 56
+let%span slib'4 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 555 10 555 34
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let space_reuse_free_grows [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 556 0 556 89]
+  (used: UInt64.t) (capacity: UInt64.t) (aligned_size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:space_reuse_free_grows requires] ([@stop_split] [@expl:space_reuse_free_grows requires #0] [%#slib'1] UInt64.t'int aligned_size
+    <= UInt64.t'int used)
+  /\ ([@stop_split] [@expl:space_reuse_free_grows requires #1] [%#slib'2] UInt64.t'int used <= UInt64.t'int capacity)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.sub [%#slib] {used} {aligned_size} (fun (_x: UInt64.t) -> [ &new_used <- _x ] s1)
+    | s1 = UInt64.sub [%#slib'0] {capacity} {new_used} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & used: UInt64.t = used
+  | & capacity: UInt64.t = capacity
+  | & aligned_size: UInt64.t = aligned_size
+  | & new_used: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:space_reuse_free_grows ensures] ([@stop_split] [@expl:space_reuse_free_grows ensures #0] [%#slib'3] UInt64.t'int result
+      = UInt64.t'int capacity - (UInt64.t'int used - UInt64.t'int aligned_size))
+    /\ ([@stop_split] [@expl:space_reuse_free_grows ensures #1] [%#slib'4] UInt64.t'int result
+    >= UInt64.t'int aligned_size)}
+    (! return {result}) ]

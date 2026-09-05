@@ -13,7 +13,7 @@
 //! `deallocate()` byte-faithfully; the `verified_properties.md` file records the
 //! source line correspondence for the drift check.
 
-use creusot_std::prelude::*;
+use creusot_std::prelude::{Clone, *};
 
 /// 4 KiB alignment, matching `allocator.rs::ALIGNMENT`.
 pub const ALIGNMENT: usize = 4096;
@@ -330,4 +330,367 @@ pub fn align_up_idempotent(size: usize) -> (usize, usize) {
     // second call's overflow precondition holds.
     let twice = align_up(once);
     (once, twice)
+}
+
+// =========================================================================
+// GLOBAL-INVARIANT LEDGER, rank 1 + supports: INIT-GATE, INIT-MONOTONIC,
+// CAP-CONST. Faithful mirror of the `MemoryTier` runtime state and the
+// initialize-gate that guards every data-path method.
+//
+// The shipped `MemoryTierState` (lib.rs:81-90) carries an `AtomicBool
+// initialized` plus the pool accounting; every one of the 16 non-`initialize`
+// methods opens with `if !state.initialized.load(..) { return <gated>; }`
+// (e.g. lib.rs:334, :383, :414, :436, :474, :507, :525, :559, :569, :578) and
+// only then touches the pool. `is_dma_capable`/`telemetry_snapshot` do not read
+// the flag but return their backing fields, which default to `false`/`0` until
+// `initialize` runs — the gate holds for them by construction.
+//
+// These are MIRRORS: the real state uses `AtomicBool`/`RwLock<Pool>`/raw
+// pointers, none of which build under Creusot. `TierState` transcribes the
+// accounting subset the gate reads and returns; `MtErr` mirrors the
+// `MemoryTierError` variants the gate produces. A green proof here covers the
+// mirror's control-flow shape (gated branch returns the sentinel and does not
+// mutate state), NOT the atomic load itself (concurrency → Loom).
+// =========================================================================
+
+/// Mirror of the `MemoryTierError` variants the init-gate and mutators return
+/// (interfaces `MemoryTierError`). Only the variants the gate proofs need.
+#[derive(Clone, Copy)]
+pub enum MtErr {
+    NotInitialized,
+    AlreadyExists,
+    KeyNotFound,
+    PoolFull,
+    InvalidSize,
+}
+
+/// Faithful mirror of the accounting subset of `MemoryTierState` (lib.rs:81-90)
+/// that the init-gate reads and the mutators touch. The `RwLock<Pool>`, raw
+/// `*mut u8`, `PoolId` and telemetry atomics are omitted (out of Creusot scope).
+#[derive(Clone, Copy)]
+pub struct TierState {
+    /// The `initialized` latch (real: `AtomicBool`, lib.rs:86).
+    pub initialized: bool,
+    /// Pool capacity in bytes, fixed at `initialize` (real: `allocator.capacity`).
+    pub capacity: usize,
+    /// Bytes currently in use (real: `allocator.used`).
+    pub used: usize,
+    /// SPDK-allocation flag, set only by the FFI init path (lib.rs:87).
+    pub spdk_allocated: bool,
+}
+
+// -------------------------------------------------------------------------
+// INIT-MONOTONIC (supports rank 1) + CAP-CONST (rank 9): initialize.
+//
+// Mirrors `initialize` (lib.rs:261-326): the double-init guard
+// (`if state.initialized { return Err(..) }`, lib.rs:271-275) frames state on
+// a repeat call, and the success path sets `capacity = pool_size`,
+// `used = 0`, `initialized = true` (lib.rs:313-318). Establishes the latch and
+// the CAP-CONST base value.
+// -------------------------------------------------------------------------
+
+/// `initialize` mirror: establishes the `initialized` latch and fixes capacity.
+#[requires(pool_size@ > 0)] // INIT-ZERO handled upstream; here the admitted path
+#[ensures(state.initialized ==> result.0.initialized == state.initialized)] // INIT-DOUBLE: latch unchanged
+#[ensures(state.initialized ==> result.0.used == state.used)] // INIT-DOUBLE frame: no accounting change
+#[ensures(state.initialized ==> result.0.capacity == state.capacity)] // frame
+#[ensures(state.initialized ==> result.1 == Err(MtErr::AlreadyExists))] // repeat init rejected
+#[ensures(!state.initialized ==> result.0.initialized)] // INIT-MONOTONIC: latch established
+#[ensures(!state.initialized ==> result.0.capacity@ == pool_size@)] // CAP-CONST base
+#[ensures(!state.initialized ==> result.0.used@ == 0)] // INIT-EMPTY (accounting half)
+#[ensures(!state.initialized ==> result.1 == Ok(()))]
+pub fn initialize_state(state: TierState, pool_size: usize) -> (TierState, Result<(), MtErr>) {
+    if state.initialized {
+        // Double-init guard: no state change (INIT-DOUBLE / INIT-ERR-NO-STATE-CHANGE).
+        return (state, Err(MtErr::AlreadyExists));
+    }
+    let s = TierState {
+        initialized: true,
+        capacity: pool_size,
+        used: 0,
+        spdk_allocated: state.spdk_allocated,
+    };
+    (s, Ok(()))
+}
+
+/// INIT-MONOTONIC + CAP-CONST preservation: no data-path mutator ever clears the
+/// `initialized` latch or changes `capacity` — only `initialize` writes them, and
+/// it is guarded. This models the accounting change an allocator mutator
+/// (insert/remove/evict) makes: `used` moves, `initialized`/`capacity` are
+/// untouched. `delta_used` is the (signed-as-two-cases) accounting effect.
+#[requires(state.initialized)] // called only on the initialized data path
+#[requires(new_used@ <= state.capacity@)] // USED-LE-CAP maintained by the caller
+#[ensures(result.initialized)] // INIT-MONOTONIC: latch stays true
+#[ensures(result.capacity == state.capacity)] // CAP-CONST: capacity is fixed
+#[ensures(result.used@ == new_used@)] // accounting update takes effect
+pub fn mutator_preserves_init(state: TierState, new_used: usize) -> TierState {
+    TierState {
+        initialized: state.initialized, // never reset
+        capacity: state.capacity,       // never changed after init
+        used: new_used,
+        spdk_allocated: state.spdk_allocated,
+    }
+}
+
+// -------------------------------------------------------------------------
+// INIT-GATE (rank 1, attachments 16). The gate manifests in four shapes
+// (reconciliation flag #3). Each mirror below proves, for its shape, that when
+// `!initialized` the operation (a) returns the shape's gated sentinel and
+// (b) does NOT mutate state. The mutator shapes (Result / evict-Option) are
+// where the guard is load-bearing: without it the initialized-branch mutation
+// would run pre-init. Read-only shapes carry the no-mutation clause trivially.
+// One proof per shape discharges the INIT-GATE bundle for every method of that
+// shape (16 methods total) — it is NOT re-proved per method.
+// -------------------------------------------------------------------------
+
+/// INIT-GATE shape R — Result-returning MUTATORS: `insert`, `remove`, `clear`.
+/// Mirrors the guard at lib.rs:334-338 / :474-478 / :595-600: `if !initialized
+/// { return Err(NotInitialized) }` BEFORE the pool write. The initialized branch
+/// performs a representative accounting mutation (`used` moves to `req`), so the
+/// no-mutation clause is non-vacuous: dropping the guard makes it fail.
+#[requires(req@ <= state.capacity@)] // admitted request fits (USED-LE-CAP)
+#[ensures(!state.initialized ==> result.0.initialized == state.initialized)] // no mutation (latch)
+#[ensures(!state.initialized ==> result.0.used == state.used)] // no mutation (accounting)
+#[ensures(!state.initialized ==> result.0.capacity == state.capacity)] // no mutation (capacity)
+#[ensures(!state.initialized ==> result.1 == Err(MtErr::NotInitialized))] // gated sentinel
+pub fn gate_mutator_result(state: TierState, req: usize) -> (TierState, Result<usize, MtErr>) {
+    if !state.initialized {
+        return (state, Err(MtErr::NotInitialized));
+    }
+    // initialized data path: representative pool mutation (USED-CONSERVE proves the real math).
+    let mut s = state;
+    s.used = req;
+    (s, Ok(req))
+}
+
+/// INIT-GATE shape O(mut) — Option-returning MUTATORS: `evict_next`,
+/// `evict_next_for_key`. Mirrors lib.rs:436-439 (`if !initialized { return None }`)
+/// then the victim free (lib.rs:456-457) which lowers `used`. Gated → None, no free.
+#[ensures(!state.initialized ==> result.0.initialized == state.initialized)] // no mutation
+#[ensures(!state.initialized ==> result.0.used == state.used)] // no free happened
+#[ensures(!state.initialized ==> result.0.capacity == state.capacity)]
+#[ensures(!state.initialized ==> result.1 == None)] // gated sentinel
+pub fn gate_mutator_option(state: TierState) -> (TierState, Option<usize>) {
+    if !state.initialized {
+        return (state, None);
+    }
+    // initialized path: representative victim free (used drops to 0 here; real math is P4/P11).
+    let mut s = state;
+    s.used = 0;
+    (s, Some(state.used))
+}
+
+/// INIT-GATE shape O(ro) — read-only Option ops: `get`, `peek`, `pool_info`.
+/// Mirrors lib.rs:383-385 / :414-416 / :587-591: `if !initialized { return None }`.
+/// Read-only, so no state is ever mutated; gated result is None.
+#[ensures(!state.initialized ==> result.1 == None)] // gated sentinel
+#[ensures(result.0 == state)] // read-only: state is never mutated (init or not)
+pub fn gate_readonly_option(state: TierState) -> (TierState, Option<usize>) {
+    if !state.initialized {
+        return (state, None);
+    }
+    // initialized path: pure read, returns a derived value; no mutation.
+    (state, Some(state.used))
+}
+
+/// INIT-GATE shape S — read-only scalar accessors: `contains`(false),
+/// `capacity`(0), `used`(0), `oldest_keys`(empty→len 0), `is_dma_capable`(false),
+/// `telemetry_snapshot`(0). Mirrors e.g. lib.rs:559-561 / :569-571 / :578-580 and
+/// the default-field returns of is_dma_capable/telemetry_snapshot. Gated → 0/false.
+#[ensures(!state.initialized ==> result.1@ == 0)] // gated default (0 / false-as-0 / empty-count)
+#[ensures(result.0 == state)] // read-only: never mutates
+pub fn gate_readonly_scalar(state: TierState) -> (TierState, usize) {
+    if !state.initialized {
+        return (state, 0);
+    }
+    (state, state.used)
+}
+
+/// INIT-GATE shape N — no-op ops: `touch`, `batch_touch`. Mirrors lib.rs:507-509
+/// / :525-527: `if !initialized { return; }` — silent no-op, no state change.
+#[ensures(!state.initialized ==> result == state)] // gated: no-op, state unchanged
+pub fn gate_noop(state: TierState) -> TierState {
+    if !state.initialized {
+        return state;
+    }
+    // initialized path: touches the eviction policy only (external component);
+    // the pool state itself is not mutated by touch/batch_touch.
+    state
+}
+
+// -------------------------------------------------------------------------
+// PTR-IN-BOUNDS (rank 8, attachments 4): a returned allocation stays in-pool.
+//
+// The pointer `insert` returns is `pool_ptr.add(offset)` (lib.rs:377); its
+// backing region spans `[offset, offset + aligned_size)`. Safety needs
+// `offset + aligned_size <= pool_size`. After first-fit selects region
+// `(offset, region_size)` with `region_size >= aligned_size` inside the pool
+// (`offset + region_size <= capacity`, the allocate_split precondition), the
+// carved region is a prefix of it, so it stays in bounds. Pure arithmetic.
+// -------------------------------------------------------------------------
+
+/// The carved allocation `[offset, offset+aligned_size)` lies within the pool.
+#[requires(region_size@ >= aligned_size@)] // first-fit guarantee (allocator.rs:44)
+#[requires(offset@ + region_size@ <= pool_size@)] // selected region is in-pool
+#[ensures(result@ == offset@ + aligned_size@)] // end of the returned region
+#[ensures(result@ <= pool_size@)] // PTR-IN-BOUNDS: pointer + size stays mapped
+pub fn ptr_in_bounds(offset: usize, region_size: usize, aligned_size: usize, pool_size: usize) -> usize {
+    offset + aligned_size
+}
+
+// -------------------------------------------------------------------------
+// SPACE-REUSE (rank 7, attachments 4): freed bytes become allocatable again.
+// Extends P7 (lifecycle_alloc_free, single cycle) to (a) an explicit
+// free-capacity-grows statement and (b) a two-cycle round-trip. Mirrors the
+// allocate/deallocate `used` accounting (allocator.rs:53, :61) that FR-025
+// SPACE-REUSE rests on.
+// -------------------------------------------------------------------------
+
+/// After freeing `aligned_size` bytes, free capacity grows by exactly that much,
+/// so a subsequent request of up to the freed size is admissible (fits in the
+/// pool). `used` is `capacity - free`; freeing lowers `used` by `aligned_size`.
+#[requires(aligned_size@ <= used@)] // can't free more than in use (P4 precondition)
+#[requires(used@ <= capacity@)] // USED-LE-CAP
+#[ensures(result@ == capacity@ - (used@ - aligned_size@))] // new free capacity
+#[ensures(result@ >= aligned_size@)] // the freed bytes are at least re-allocatable
+pub fn space_reuse_free_grows(used: usize, capacity: usize, aligned_size: usize) -> usize {
+    let new_used = used - aligned_size; // deallocate_used (P4)
+    capacity - new_used // free_capacity (P9)
+}
+
+/// SPACE-REUSE two-cycle round-trip: alloc → free → alloc → free returns `used`
+/// to its start value, i.e. the space reclaimed by the first free is fully
+/// reusable by the second alloc. Composes allocate_split/deallocate_used twice.
+#[requires(aligned_size@ > 0)]
+#[requires(aligned_size@ % 4096 == 0)]
+#[requires(region_size@ >= aligned_size@)]
+#[requires(offset@ + region_size@ <= capacity@)]
+#[requires(used@ + aligned_size@ <= capacity@)]
+#[ensures(result@ == used@)] // used fully restored after two alloc/free cycles
+pub fn space_reuse_two_cycles(
+    used: usize,
+    capacity: usize,
+    offset: usize,
+    region_size: usize,
+    aligned_size: usize,
+) -> usize {
+    // Cycle 1: allocate then free.
+    let (u1, _r1, _l1) = allocate_split(used, capacity, offset, region_size, aligned_size);
+    let u2 = deallocate_used(u1, aligned_size);
+    // Cycle 2: the freed region is allocatable again (u2 == used <= capacity).
+    let (u3, _r3, _l3) = allocate_split(u2, capacity, offset, region_size, aligned_size);
+    deallocate_used(u3, aligned_size)
+}
+
+// =========================================================================
+// GLOBAL-INVARIANT LEDGER, rank 4: CONTAINS-REFLECTS (attachments 6).
+//
+// The shipped slot map is a `HashMap<CacheKey, Slot>` (lib.rs:78), which
+// Creusot cannot model directly. We model it with the logic-level `FMap` from
+// `creusot_std` and prove the observable membership invariant: `contains(k)` is
+// true iff k is in the map, and that the four mutators maintain it exactly —
+// `insert` adds k (lib.rs:368), `remove` removes k (lib.rs:498), `evict` removes
+// the victim k (lib.rs:456, the same `slots.remove`), and `clear` empties the
+// map (lib.rs:604, `slots.clear()`). Keys are modelled as `u64` (the concrete
+// `CacheKey`); the value carries the slot record so the model stays faithful.
+//
+// Two layers of evidence:
+//  (1) Universally-quantified LOGIC LEMMAS — the general reflection statement
+//      over ALL maps/keys, proved from FMap's `insert`/`remove`/`empty` axioms.
+//  (2) A concrete GHOST-TRACE (`contains_reflects_trace`) exercising an
+//      insert→insert→remove→evict→clear sequence with `proof_assert!` after each
+//      step, mirroring the operational HashMap flow (the ghost_map idiom).
+//
+// A green proof covers the FMap MODEL of the slot map, not the shipped
+// `HashMap` (whose hashing/probing is trusted, as recorded in the properties
+// doc). What IS proved is that the membership algebra the component relies on
+// (insert/remove/clear ↔ contains) holds exactly.
+// =========================================================================
+
+use creusot_std::logic::FMap;
+
+/// Payload mirror of `Slot` (lib.rs:70-74). Only membership matters for
+/// CONTAINS-REFLECTS, so the eviction handle is dropped; offset/size are kept so
+/// the modelled entry remains a faithful slot record.
+#[derive(Clone, Copy)]
+pub struct SlotMirror {
+    pub offset: usize,
+    pub size: u32,
+}
+
+/// CONTAINS-REFLECTS (insert). Inserting key `k` makes `contains(k)` hold, and
+/// leaves every other key's membership unchanged (frame). Proved from `FMap`'s
+/// `insert` axiom (`to_mapping().set(k, Some(v))`). Mirrors `pool.slots.insert`
+/// (lib.rs:368) — the success branch of `insert` after the dedup check.
+#[logic]
+#[ensures(m.insert(k, v).contains(k))] // insert adds exactly k
+#[ensures(forall<j: u64> j != k ==> m.insert(k, v).contains(j) == m.contains(j))] // frame
+#[ensures(m.insert(k, v).get(k) == Some(v))] // the recorded slot is retrievable
+pub fn contains_reflects_insert(m: FMap<u64, SlotMirror>, k: u64, v: SlotMirror) {}
+
+/// CONTAINS-REFLECTS (insert accounting / INSERT-DEDUP length). Inserting a
+/// fresh key grows the map by one; re-inserting a present key leaves the size
+/// unchanged (the shipped code rejects the duplicate before inserting,
+/// lib.rs:356-358, so the map is never grown on a dup).
+#[logic]
+#[ensures(!m.contains(k) ==> m.insert(k, v).len() == m.len() + 1)] // fresh key: +1
+#[ensures(m.contains(k) ==> m.insert(k, v).len() == m.len())] // present key: no growth
+pub fn contains_reflects_insert_len(m: FMap<u64, SlotMirror>, k: u64, v: SlotMirror) {}
+
+/// CONTAINS-REFLECTS (remove / evict). Removing key `k` makes `contains(k)`
+/// false, and leaves every other key unchanged (frame). Proved from `FMap`'s
+/// `remove` axiom (`to_mapping().set(k, None)`). Mirrors `pool.slots.remove(&key)`
+/// used by both `remove` (lib.rs:498) and `evict_next` (lib.rs:456).
+#[logic]
+#[ensures(!m.remove(k).contains(k))] // remove/evict deletes exactly k
+#[ensures(forall<j: u64> j != k ==> m.remove(k).contains(j) == m.contains(j))] // frame
+pub fn contains_reflects_remove(m: FMap<u64, SlotMirror>, k: u64) {}
+
+/// CONTAINS-REFLECTS (clear). After `clear`, no key is present. Proved from
+/// `FMap::empty()`'s axiom (`to_mapping() == cst(None)`). Mirrors
+/// `pool.slots.clear()` (lib.rs:604).
+#[logic]
+#[ensures(forall<k: u64> !FMap::<u64, SlotMirror>::empty().contains(k))]
+pub fn contains_reflects_clear() {}
+
+/// CONTAINS-REFLECTS operational trace. Exercises the full slot-map lifecycle —
+/// empty → insert k1 → insert k2 → remove k1 → evict(remove) k2 → re-insert →
+/// clear — asserting after every step that membership reflects exactly the
+/// inserted-and-not-removed key set. This is the `ghost_map` idiom applied to
+/// the memory-tier slot map, cross-checking the logic lemmas above against a
+/// concrete operational sequence.
+pub fn contains_reflects_trace() {
+    let s1 = SlotMirror { offset: 0, size: 4096 };
+    let s2 = SlotMirror { offset: 4096, size: 8192 };
+    let mut map = FMap::<u64, SlotMirror>::new();
+    ghost! {
+        // Fresh / cleared pool: nothing is present.
+        proof_assert!(forall<k: u64> !map.contains(k));
+
+        // insert(k1): k1 present, k2 absent.
+        map.insert_ghost(1u64, s1);
+        proof_assert!(map.contains(1u64));
+        proof_assert!(!map.contains(2u64));
+
+        // insert(k2): both present.
+        map.insert_ghost(2u64, s2);
+        proof_assert!(map.contains(1u64));
+        proof_assert!(map.contains(2u64));
+
+        // remove(k1): k1 gone, k2 stays (frame).
+        map.remove_ghost(&1u64);
+        proof_assert!(!map.contains(1u64));
+        proof_assert!(map.contains(2u64));
+
+        // evict(k2) == remove(victim k2): map now empty.
+        map.remove_ghost(&2u64);
+        proof_assert!(!map.contains(1u64));
+        proof_assert!(!map.contains(2u64));
+
+        // re-insert then clear: clear empties the map.
+        map.insert_ghost(1u64, s1);
+        proof_assert!(map.contains(1u64));
+        map.clear_ghost();
+        proof_assert!(forall<k: u64> !map.contains(k));
+    };
 }

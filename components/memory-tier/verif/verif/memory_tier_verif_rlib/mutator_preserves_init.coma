@@ -1,0 +1,37 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 426 0 426 77 *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 421 11 421 28
+let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 422 11 422 39
+let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 423 10 423 28
+let%span slib'2 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 424 10 424 43
+let%span slib'3 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 425 10 425 35
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_TierState = { initialized: bool; capacity: UInt64.t; used: UInt64.t; spdk_allocated: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let mutator_preserves_init [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 426 0 426 77]
+  (state: t_TierState) (new_used: UInt64.t) (return (x: t_TierState)) =
+{[@stop_split] [@expl:mutator_preserves_init requires] ([@stop_split] [@expl:mutator_preserves_init requires #0] [%#slib] state.initialized)
+  /\ ([@stop_split] [@expl:mutator_preserves_init requires #1] [%#slib'0] UInt64.t'int new_used
+  <= UInt64.t'int state.capacity)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_ret <- { initialized = state.initialized;
+                        capacity = state.capacity;
+                        used = new_used;
+                        spdk_allocated = state.spdk_allocated } ] s1
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_TierState = Any.any_l () | & state: t_TierState = state | & new_used: UInt64.t = new_used ])
+  [ return (result: t_TierState) ->
+  {[@stop_split] [@expl:mutator_preserves_init ensures] ([@stop_split] [@expl:mutator_preserves_init ensures #0] [%#slib'1] result.initialized)
+    /\ ([@stop_split] [@expl:mutator_preserves_init ensures #1] [%#slib'2] result.capacity = state.capacity)
+    /\ ([@stop_split] [@expl:mutator_preserves_init ensures #2] [%#slib'3] UInt64.t'int result.used
+    = UInt64.t'int new_used)}
+    (! return {result}) ]

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE why3session PUBLIC "-//Why3//proof session v5//EN"
+"https://www.why3.org/why3session.dtd">
+<why3session shape_version="6">
+<file format="coma">
+<path name=".."/><path name="space_reuse_two_cycles.coma"/>
+<theory name="Coma">
+ <goal name="vc_allocate_split">
+ </goal>
+ <goal name="vc_deallocate_used">
+ </goal>
+ <goal name="vc_space_reuse_two_cycles">
+ </goal>
+</theory>
+</file>
+</why3session>

@@ -1,0 +1,187 @@
+(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 370 9 370 14 *)
+
+(* <TierState as std::clone::Clone> *)
+
+let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 372 4 373 25
+let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 374 4 375 23
+let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 376 4 377 19
+let%span slib'2 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 378 4 379 28
+let%span slib'3 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 370 9 370 14
+let%span sclone = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/clone.rs" 21 18 21 33
+let%span snum = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 48 26 48 41
+let%span sops = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 179 8 179 108
+let%span sops'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 185 8 185 94
+let%span sops'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 190 51 190 98
+let%span sops'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 136 15 136 59
+let%span sops'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 140 8 140 32
+let%span sops'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 145 46 145 65
+let%span sops'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 150 15 150 31
+let%span sops'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 151 15 151 28
+let%span sops'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 156 8 156 24
+let%span sops'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 162 8 163 104
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_TierState = { initialized: bool; capacity: UInt64.t; used: UInt64.t; spdk_allocated: bool }
+
+let clone_bool (self_: bool) (return (x: bool)) = any
+  [ return (result: bool) -> {[@stop_split] [@expl:clone ensures] [%#sclone] result = self_} (! return {result}) ]
+
+let clone_usize (self_: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:clone ensures] [%#snum] result = self_} (! return {result}) ]
+
+predicate postcondition_once_clone (self: ()) (args: bool) (result: bool) =
+  let self_ = args in [%#sclone] result = self_
+
+meta "rewrite_def" predicate postcondition_once_clone
+
+predicate resolve_clone [@inline:trivial] (_1: ()) = true
+
+meta "rewrite_def" predicate resolve_clone
+
+predicate postcondition_mut_clone (self: ()) (args: bool) (result_state: ()) (result: bool) =
+  let self_ = args in [%#sclone] result = self_
+
+meta "rewrite_def" predicate postcondition_mut_clone
+
+function fn_mut_once_clone (self: ()) (args: bool) (res: bool) : ()
+
+axiom fn_mut_once_clone_spec:
+  forall self: (), args: bool, res: bool [postcondition_once_clone self args res]. [%#sops'8] postcondition_once_clone self args res
+    = (exists res_state: (). postcondition_mut_clone self args res_state res /\ resolve_clone res_state)
+
+predicate hist_inv_clone (self: ()) (result_state: ()) = true
+
+function hist_inv_trans_clone (self: ()) (b: ()) (c: ()) : ()
+
+axiom hist_inv_trans_clone_spec:
+  forall self: (), b: (), c: () [hist_inv_clone self b, hist_inv_clone b c | hist_inv_clone self b, hist_inv_clone self c | hist_inv_clone b c, hist_inv_clone self c]. ([%#sops'5] hist_inv_clone self b)
+    -> ([%#sops'6] hist_inv_clone b c) -> ([%#sops'7] hist_inv_clone self c)
+
+function hist_inv_refl_clone (self: ()) : ()
+
+axiom hist_inv_refl_clone_spec: forall self: () [hist_inv_clone self self]. [%#sops'4] hist_inv_clone self self
+
+function postcondition_mut_hist_inv_clone (self: ()) (args: bool) (res_state: ()) (res: bool) : ()
+
+axiom postcondition_mut_hist_inv_clone_spec:
+  forall self: (), args: bool, res_state: (), res: bool [postcondition_mut_clone self args res_state res | hist_inv_clone self res_state]. ([%#sops'2] postcondition_mut_clone self args res_state res)
+    -> ([%#sops'3] hist_inv_clone self res_state)
+
+function fn_hist_inv_clone (self: ()) (res_state: ()) : ()
+
+axiom fn_hist_inv_clone_spec:
+  forall self: (), res_state: () [hist_inv_clone self res_state]. [%#sops'1] hist_inv_clone self res_state
+    = (self = res_state)
+
+predicate postcondition_clone (self: ()) (args: bool) (result: bool) = let self_ = args in [%#sclone] result = self_
+
+meta "rewrite_def" predicate postcondition_clone
+
+function fn_once_clone (self: ()) (args: bool) (res: bool) : ()
+
+axiom fn_once_clone_spec:
+  forall self: (), args: bool, res: bool [postcondition_once_clone self args res]. [%#sops'0] postcondition_once_clone self args res
+    = (postcondition_clone self args res /\ resolve_clone self)
+
+function fn_mut_clone (self: ()) (args: bool) (res_state: ()) (res: bool) : ()
+
+axiom fn_mut_clone_spec:
+  forall self: (), args: bool, res_state: (), res: bool [postcondition_mut_clone self args res_state res]. [%#sops] postcondition_mut_clone self args res_state res
+    = (postcondition_clone self args res /\ self = res_state)
+
+predicate postcondition_once_clone'0 (self: ()) (args: UInt64.t) (result: UInt64.t) =
+  let self_ = args in [%#snum] result = self_
+
+meta "rewrite_def" predicate postcondition_once_clone'0
+
+predicate resolve_clone'0 [@inline:trivial] (_1: ()) = true
+
+meta "rewrite_def" predicate resolve_clone'0
+
+predicate postcondition_mut_clone'0 (self: ()) (args: UInt64.t) (result_state: ()) (result: UInt64.t) =
+  let self_ = args in [%#snum] result = self_
+
+meta "rewrite_def" predicate postcondition_mut_clone'0
+
+function fn_mut_once_clone'0 (self: ()) (args: UInt64.t) (res: UInt64.t) : ()
+
+axiom fn_mut_once_clone_spec'0:
+  forall self: (), args: UInt64.t, res: UInt64.t [postcondition_once_clone'0 self args res]. [%#sops'8] postcondition_once_clone'0 self args res
+    = (exists res_state: (). postcondition_mut_clone'0 self args res_state res /\ resolve_clone'0 res_state)
+
+predicate hist_inv_clone'0 (self: ()) (result_state: ()) = true
+
+function hist_inv_trans_clone'0 (self: ()) (b: ()) (c: ()) : ()
+
+axiom hist_inv_trans_clone_spec'0:
+  forall self: (), b: (), c: () [hist_inv_clone'0 self b, hist_inv_clone'0 b c | hist_inv_clone'0 self b, hist_inv_clone'0 self c | hist_inv_clone'0 b c, hist_inv_clone'0 self c]. ([%#sops'5] hist_inv_clone'0 self b)
+    -> ([%#sops'6] hist_inv_clone'0 b c) -> ([%#sops'7] hist_inv_clone'0 self c)
+
+function hist_inv_refl_clone'0 (self: ()) : ()
+
+axiom hist_inv_refl_clone_spec'0: forall self: () [hist_inv_clone'0 self self]. [%#sops'4] hist_inv_clone'0 self self
+
+function postcondition_mut_hist_inv_clone'0 (self: ()) (args: UInt64.t) (res_state: ()) (res: UInt64.t) : ()
+
+axiom postcondition_mut_hist_inv_clone_spec'0:
+  forall self: (), args: UInt64.t, res_state: (), res: UInt64.t [postcondition_mut_clone'0 self args res_state res | hist_inv_clone'0 self res_state]. ([%#sops'2] postcondition_mut_clone'0 self args res_state res)
+    -> ([%#sops'3] hist_inv_clone'0 self res_state)
+
+function fn_hist_inv_clone'0 (self: ()) (res_state: ()) : ()
+
+axiom fn_hist_inv_clone_spec'0:
+  forall self: (), res_state: () [hist_inv_clone'0 self res_state]. [%#sops'1] hist_inv_clone'0 self res_state
+    = (self = res_state)
+
+predicate postcondition_clone'0 (self: ()) (args: UInt64.t) (result: UInt64.t) =
+  let self_ = args in [%#snum] result = self_
+
+meta "rewrite_def" predicate postcondition_clone'0
+
+function fn_once_clone'0 (self: ()) (args: UInt64.t) (res: UInt64.t) : ()
+
+axiom fn_once_clone_spec'0:
+  forall self: (), args: UInt64.t, res: UInt64.t [postcondition_once_clone'0 self args res]. [%#sops'0] postcondition_once_clone'0 self args res
+    = (postcondition_clone'0 self args res /\ resolve_clone'0 self)
+
+function fn_mut_clone'0 (self: ()) (args: UInt64.t) (res_state: ()) (res: UInt64.t) : ()
+
+axiom fn_mut_clone_spec'0:
+  forall self: (), args: UInt64.t, res_state: (), res: UInt64.t [postcondition_mut_clone'0 self args res_state res]. [%#sops] postcondition_mut_clone'0 self args res_state res
+    = (postcondition_clone'0 self args res /\ self = res_state)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_TierState [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 370 9 370 14]
+  (self: t_TierState) (return (x: t_TierState)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_6 <- self.initialized ] s1
+    | s1 = clone_bool [%#slib] {_6} (fun (_x: bool) -> [ &_4 <- _x ] s2)
+    | s2 = [ &_9 <- self.capacity ] s3
+    | s3 = clone_usize [%#slib'0] {_9} (fun (_x: UInt64.t) -> [ &_7 <- _x ] s4)
+    | s4 = [ &_12 <- self.used ] s5
+    | s5 = clone_usize [%#slib'1] {_12} (fun (_x: UInt64.t) -> [ &_10 <- _x ] s6)
+    | s6 = [ &_15 <- self.spdk_allocated ] s7
+    | s7 = clone_bool [%#slib'2] {_15} (fun (_x: bool) -> [ &_13 <- _x ] s8)
+    | s8 = [ &_ret <- { initialized = _4; capacity = _7; used = _10; spdk_allocated = _13 } ] s9
+    | s9 = return {_ret} ] ]
+  [ & _ret: t_TierState = Any.any_l ()
+  | & self: t_TierState = self
+  | & _4: bool = Any.any_l ()
+  | & _6: bool = Any.any_l ()
+  | & _7: UInt64.t = Any.any_l ()
+  | & _9: UInt64.t = Any.any_l ()
+  | & _10: UInt64.t = Any.any_l ()
+  | & _12: UInt64.t = Any.any_l ()
+  | & _13: bool = Any.any_l ()
+  | & _15: bool = Any.any_l () ])
+  [ return (result: t_TierState) ->
+  {[@stop_split] [@expl:clone ensures] [%#slib'3] postcondition_clone () self.initialized result.initialized
+    /\ postcondition_clone'0 () self.capacity result.capacity
+    /\ postcondition_clone'0 () self.used result.used
+    /\ postcondition_clone () self.spdk_allocated result.spdk_allocated}
+    (! return {result}) ]

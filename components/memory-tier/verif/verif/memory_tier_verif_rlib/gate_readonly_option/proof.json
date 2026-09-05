@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_gate_readonly_option": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

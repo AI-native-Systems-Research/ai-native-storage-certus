@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mutator_preserves_init": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}
