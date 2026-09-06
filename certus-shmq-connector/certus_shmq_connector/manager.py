@@ -35,10 +35,21 @@ from .ring import CHECK_MISS, CHECK_RESIDENT, REASON_REMOVED
 
 
 def _key_to_u64(key: OffloadKey) -> int:
-    """Convert an OffloadKey (bytes) to a u64 for the server."""
+    """Fold an OffloadKey to the u64 the server is keyed by.
+
+    Ints pass through unchanged (already a server key). A byte key is hashed
+    WHOLE (BLAKE2b, 8-byte digest) rather than truncated to its first 8 bytes:
+    a vLLM OffloadKey is a 32-byte block hash + 4-byte KV-cache-group index, so
+    the old ``key[:8]`` discarded the group index and 24 bytes of the hash,
+    aliasing distinct blocks onto one u64 (two blocks that share a hash prefix,
+    or the same block across different groups, collided). Folding the full key
+    keeps the map collision-resistant across groups and hash suffixes. The fold
+    is deterministic, so the u64 the scheduler computes here matches the one
+    carried downstream in the load/store spec and recomputed on later calls.
+    """
     if isinstance(key, int):
         return key
-    return int.from_bytes(key[:8], "big")
+    return int.from_bytes(hashlib.blake2b(key, digest_size=8).digest(), "big")
 
 
 def _keys_to_u64s(keys: Iterable[OffloadKey]) -> list[int]:
