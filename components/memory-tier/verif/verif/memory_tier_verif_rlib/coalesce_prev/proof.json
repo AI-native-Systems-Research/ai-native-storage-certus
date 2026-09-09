@@ -1,1 +1,6 @@
-{ "profile": [], "proofs": { "Coma": { "vc_coalesce_prev": null } } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_coalesce_prev": { "prover": "alt-ergo", "time": 0.024 } }
+  }
+}

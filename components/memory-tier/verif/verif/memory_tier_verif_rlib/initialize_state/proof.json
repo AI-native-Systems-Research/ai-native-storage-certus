@@ -3,8 +3,11 @@
   "proofs": {
     "Coma": {
       "vc_initialize_state": {
-        "tactic": "compute_specified",
-        "children": []
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "z3", "time": 0.008 },
+          { "prover": "alt-ergo", "time": 0.014 }
+        ]
       }
     }
   }

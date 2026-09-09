@@ -1,0 +1,56 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 337 0 337 100 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 338 20 338 21
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 332 10 332 65
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 333 10 333 71
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 334 10 334 65
+let%span slib'3 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 335 10 335 57
+let%span slib'4 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 336 10 336 47
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_MtErr = NotInitialized | AlreadyExists | KeyNotFound | PoolFull | InvalidSize
+
+type t_Result_unit_MtErr = Ok () | Err t_MtErr
+
+type t_TierState = { initialized: bool; capacity: UInt64.t; used: UInt64.t; spdk_allocated: bool }
+
+type tup2_TierState_Result_unit_MtErr = { f0: t_TierState; f1: t_Result_unit_MtErr }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let initialize_rejects_zero [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 337 0 337 100]
+  (state: t_TierState) (pool_size: UInt64.t) (return (x: tup2_TierState_Result_unit_MtErr)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_17 <- pool_size = ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_17 = false} (! bb2) | br1 -> {_17} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &_22 <- InvalidSize ] s1
+    | s1 = [ &_21 <- Err _22 ] s2
+    | s2 = [ &_ret <- { f0 = state; f1 = _21 } ] s3
+    | s3 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_24 <- Ok _25 ] s1 | s1 = [ &_ret <- { f0 = state; f1 = _24 } ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: tup2_TierState_Result_unit_MtErr = Any.any_l ()
+  | & state: t_TierState = state
+  | & pool_size: UInt64.t = pool_size
+  | & _17: bool = Any.any_l ()
+  | & _21: t_Result_unit_MtErr = Any.any_l ()
+  | & _22: t_MtErr = Any.any_l ()
+  | & _24: t_Result_unit_MtErr = Any.any_l ()
+  | & _25: () = Any.any_l () ])
+  [ return (result: tup2_TierState_Result_unit_MtErr) ->
+  {[@stop_split] [@expl:initialize_rejects_zero ensures] ([@stop_split] [@expl:initialize_rejects_zero ensures #0] [%#slib'0] UInt64.t'int pool_size
+        = 0 -> result.f1 = Err (InvalidSize))
+    /\ ([@stop_split] [@expl:initialize_rejects_zero ensures #1] [%#slib'1] UInt64.t'int pool_size = 0
+      -> result.f0.initialized = state.initialized)
+    /\ ([@stop_split] [@expl:initialize_rejects_zero ensures #2] [%#slib'2] UInt64.t'int pool_size = 0
+      -> result.f0.capacity = state.capacity)
+    /\ ([@stop_split] [@expl:initialize_rejects_zero ensures #3] [%#slib'3] UInt64.t'int pool_size = 0
+      -> result.f0.used = state.used)
+    /\ ([@stop_split] [@expl:initialize_rejects_zero ensures #4] [%#slib'4] UInt64.t'int pool_size > 0
+    -> result.f1 = Ok ())}
+    (! return {result}) ]

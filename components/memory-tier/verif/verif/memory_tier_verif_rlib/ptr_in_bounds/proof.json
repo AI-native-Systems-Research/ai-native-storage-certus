@@ -1,1 +1,6 @@
-{ "profile": [], "proofs": { "Coma": { "vc_ptr_in_bounds": null } } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_ptr_in_bounds": { "prover": "alt-ergo", "time": 0.02 } }
+  }
+}

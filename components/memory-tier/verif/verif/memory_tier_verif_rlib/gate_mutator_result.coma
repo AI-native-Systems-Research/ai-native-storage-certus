@@ -1,7 +1,14 @@
-(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 370 0 370 93 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 414 0 414 93 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 409 11 409 34
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 410 10 410 74
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 411 10 411 60
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 412 10 412 68
+let%span slib'3 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 413 10 413 71
 
 use creusot.int.UInt64
 use creusot.prelude.Any
+use int.Int
 
 type t_TierState = { initialized: bool; capacity: UInt64.t; used: UInt64.t; spdk_allocated: bool }
 
@@ -15,25 +22,36 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let gate_mutator_result [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 370 0 370 93]
-  (state: t_TierState) (req: UInt64.t) (return (x: tup2_TierState_Result_usize_MtErr)) = (! bb0
+let gate_mutator_result [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 414 0 414 93]
+  (state: t_TierState) (req: UInt64.t) (return (x: tup2_TierState_Result_usize_MtErr)) =
+{[@stop_split] [@expl:gate_mutator_result requires] [%#slib] UInt64.t'int req <= UInt64.t'int state.capacity}
+  (! bb0
   [ bb0 = any [ br0 -> {state.initialized = false} (! bb1) | br1 -> {state.initialized} (! bb2) ]
   | bb2 = s0
     [ s0 = [ &s <- state ] s1
     | s1 = [ &s <- { s with used = req } ] s2
-    | s2 = [ &_12 <- Ok req ] s3
-    | s3 = [ &_ret <- { f0 = s; f1 = _12 } ] s4
+    | s2 = [ &_25 <- Ok req ] s3
+    | s3 = [ &_ret <- { f0 = s; f1 = _25 } ] s4
     | s4 = return {_ret} ]
   | bb1 = s0
-    [ s0 = [ &_8 <- NotInitialized ] s1
-    | s1 = [ &_7 <- Err _8 ] s2
-    | s2 = [ &_ret <- { f0 = state; f1 = _7 } ] s3
+    [ s0 = [ &_21 <- NotInitialized ] s1
+    | s1 = [ &_20 <- Err _21 ] s2
+    | s2 = [ &_ret <- { f0 = state; f1 = _20 } ] s3
     | s3 = return {_ret} ] ]
   [ & _ret: tup2_TierState_Result_usize_MtErr = Any.any_l ()
   | & state: t_TierState = state
   | & req: UInt64.t = req
-  | & _7: t_Result_usize_MtErr = Any.any_l ()
-  | & _8: t_MtErr = Any.any_l ()
+  | & _20: t_Result_usize_MtErr = Any.any_l ()
+  | & _21: t_MtErr = Any.any_l ()
   | & s: t_TierState = Any.any_l ()
-  | & _12: t_Result_usize_MtErr = Any.any_l () ])
-  [ return (result: tup2_TierState_Result_usize_MtErr) -> (! return {result}) ]
+  | & _25: t_Result_usize_MtErr = Any.any_l () ])
+  [ return (result: tup2_TierState_Result_usize_MtErr) ->
+  {[@stop_split] [@expl:gate_mutator_result ensures] ([@stop_split] [@expl:gate_mutator_result ensures #0] [%#slib'0] not state.initialized
+      -> result.f0.initialized = state.initialized)
+    /\ ([@stop_split] [@expl:gate_mutator_result ensures #1] [%#slib'1] not state.initialized
+      -> result.f0.used = state.used)
+    /\ ([@stop_split] [@expl:gate_mutator_result ensures #2] [%#slib'2] not state.initialized
+      -> result.f0.capacity = state.capacity)
+    /\ ([@stop_split] [@expl:gate_mutator_result ensures #3] [%#slib'3] not state.initialized
+    -> result.f1 = Err (NotInitialized))}
+    (! return {result}) ]

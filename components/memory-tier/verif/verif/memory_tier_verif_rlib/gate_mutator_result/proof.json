@@ -2,7 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_gate_mutator_result": { "prover": "alt-ergo", "time": 0.015 }
+      "vc_gate_mutator_result": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.015 } ]
+      }
     }
   }
 }

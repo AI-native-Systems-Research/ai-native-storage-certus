@@ -1,0 +1,33 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 541 0 541 63 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 542 28 542 29
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 543 15 543 16
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 539 10 539 50
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 540 10 540 49
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let oldest_guard_empty [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 541 0 541 63]
+  (initialized: bool) (n: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = any [ br0 -> {initialized = false} (! bb3) | br1 -> {initialized} (! bb1) ]
+  | bb1 = s0
+    [ s0 = [ &_11 <- n = ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_11 = false} (! bb4) | br1 -> {_11} (! bb3) ] ]
+  | bb4 = s0 [ s0 = [ &_ret <- n ] s1 | s1 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_ret <- [%#slib'0] (0: UInt64.t) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & initialized: bool = initialized
+  | & n: UInt64.t = n
+  | & _11: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:oldest_guard_empty ensures] ([@stop_split] [@expl:oldest_guard_empty ensures #0] [%#slib'1] not initialized
+        \/ UInt64.t'int n = 0 -> UInt64.t'int result = 0)
+    /\ ([@stop_split] [@expl:oldest_guard_empty ensures #1] [%#slib'2] initialized /\ UInt64.t'int n > 0
+    -> UInt64.t'int result <= UInt64.t'int n)}
+    (! return {result}) ]

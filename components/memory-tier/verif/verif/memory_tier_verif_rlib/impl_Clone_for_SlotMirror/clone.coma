@@ -1,10 +1,10 @@
-(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 506 9 506 14 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 601 9 601 14 *)
 
 (* <SlotMirror as std::clone::Clone> *)
 
-let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 508 4 508 21
-let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 509 4 509 17
-let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 506 9 506 14
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 603 4 603 21
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 604 4 604 17
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 601 9 601 14
 let%span snum = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 48 26 48 41
 let%span snum'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 48 26 48 41
 let%span sops = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 179 8 179 108
@@ -156,7 +156,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_SlotMirror [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 506 9 506 14]
+let clone_SlotMirror [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 601 9 601 14]
   (self: t_SlotMirror) (return (x: t_SlotMirror)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &_6 <- self.offset ] s1

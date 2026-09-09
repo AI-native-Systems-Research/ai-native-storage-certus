@@ -1,12 +1,12 @@
-(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 303 9 303 14 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 319 9 319 14 *)
 
 (* <TierState as std::clone::Clone> *)
 
-let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 305 4 306 25
-let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 307 4 308 23
-let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 309 4 310 19
-let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 311 4 312 28
-let%span slib'3 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 303 9 303 14
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 321 4 321 25
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 322 4 322 23
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 323 4 323 19
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 324 4 324 28
+let%span slib'3 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 319 9 319 14
 let%span sclone = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/clone.rs" 21 18 21 33
 let%span snum = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 48 26 48 41
 let%span sops = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/ops.rs" 179 8 179 108
@@ -156,7 +156,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_TierState [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 303 9 303 14]
+let clone_TierState [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 319 9 319 14]
   (self: t_TierState) (return (x: t_TierState)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &_6 <- self.initialized ] s1

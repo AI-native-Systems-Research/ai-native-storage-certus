@@ -1,0 +1,33 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 521 0 521 93 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 523 15 523 34
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 518 11 518 33
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 519 10 519 61
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 520 10 520 46
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let evict_dealloc_guarded [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 521 0 521 93]
+  (used: UInt64.t) (aligned_size: UInt64.t) (victim_present: bool) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:evict_dealloc_guarded requires] [%#slib'0] UInt64.t'int aligned_size <= UInt64.t'int used}
+  (! bb0
+  [ bb0 = any [ br0 -> {victim_present = false} (! bb2) | br1 -> {victim_present} (! bb1) ]
+  | bb1 = s0
+    [ s0 = UInt64.sub [%#slib] {used} {aligned_size} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- used ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & used: UInt64.t = used
+  | & aligned_size: UInt64.t = aligned_size
+  | & victim_present: bool = victim_present ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:evict_dealloc_guarded ensures] ([@stop_split] [@expl:evict_dealloc_guarded ensures #0] [%#slib'1] victim_present
+      -> UInt64.t'int result = UInt64.t'int used - UInt64.t'int aligned_size)
+    /\ ([@stop_split] [@expl:evict_dealloc_guarded ensures #1] [%#slib'2] not victim_present
+    -> UInt64.t'int result = UInt64.t'int used)}
+    (! return {result}) ]

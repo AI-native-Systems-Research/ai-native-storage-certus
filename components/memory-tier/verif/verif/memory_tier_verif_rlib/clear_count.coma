@@ -1,0 +1,27 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 577 0 577 46 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 579 12 579 13
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 575 10 575 25
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 576 10 576 24
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type tup2_usize_usize = { f0: UInt64.t; f1: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clear_count [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 577 0 577 46] (n: UInt64.t)
+  (return (x: tup2_usize_usize)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &count <- n ] s1
+    | s1 = [ &_ret <- { f0 = count; f1 = ([%#slib] (0: UInt64.t)) } ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: tup2_usize_usize = Any.any_l () | & n: UInt64.t = n | & count: UInt64.t = Any.any_l () ])
+  [ return (result: tup2_usize_usize) ->
+  {[@stop_split] [@expl:clear_count ensures] ([@stop_split] [@expl:clear_count ensures #0] [%#slib'0] UInt64.t'int result.f0
+      = UInt64.t'int n)
+    /\ ([@stop_split] [@expl:clear_count ensures #1] [%#slib'1] UInt64.t'int result.f1 = 0)}
+    (! return {result}) ]

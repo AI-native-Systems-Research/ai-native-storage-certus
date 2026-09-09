@@ -1,18 +1,31 @@
-(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 142 0 142 64 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 145 0 145 64 *)
 
-let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 143 4 143 24
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 146 4 146 24
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 142 11 142 48
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 143 10 143 43
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 144 10 144 30
 
 use creusot.int.UInt64
 use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let coalesce_next [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 142 0 142 64]
-  (new_size: UInt64.t) (next_size: UInt64.t) (return (x: UInt64.t)) = (! bb0
+let coalesce_next [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 145 0 145 64]
+  (new_size: UInt64.t) (next_size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:coalesce_next requires] [%#slib'0] UInt64.t'int new_size + UInt64.t'int next_size
+  <= UInt64.t'int const_MAX}
+  (! bb0
   [ bb0 = s0
     [ s0 = UInt64.add [%#slib] {new_size} {next_size} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1)
     | s1 = return {_ret} ] ]
   [ & _ret: UInt64.t = Any.any_l () | & new_size: UInt64.t = new_size | & next_size: UInt64.t = next_size ])
-  [ return (result: UInt64.t) -> (! return {result}) ]
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:coalesce_next ensures] ([@stop_split] [@expl:coalesce_next ensures #0] [%#slib'1] UInt64.t'int result
+      = UInt64.t'int new_size + UInt64.t'int next_size)
+    /\ ([@stop_split] [@expl:coalesce_next ensures #1] [%#slib'2] UInt64.t'int result >= UInt64.t'int new_size)}
+    (! return {result}) ]

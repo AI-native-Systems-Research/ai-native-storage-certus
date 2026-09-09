@@ -1,4 +1,6 @@
-(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 417 0 417 47 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 460 0 460 47 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 459 10 459 48
 
 use creusot.int.UInt64
 use creusot.prelude.Any
@@ -9,10 +11,12 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let gate_noop [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 417 0 417 47]
+let gate_noop [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 460 0 460 47]
   (state: t_TierState) (return (x: t_TierState)) = (! bb0
   [ bb0 = any [ br0 -> {state.initialized = false} (! bb1) | br1 -> {state.initialized} (! bb2) ]
   | bb2 = s0 [ s0 = [ &_ret <- state ] s1 | s1 = return {_ret} ]
   | bb1 = s0 [ s0 = [ &_ret <- state ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_TierState = Any.any_l () | & state: t_TierState = state ])
-  [ return (result: t_TierState) -> (! return {result}) ]
+  [ return (result: t_TierState) -> {[@stop_split] [@expl:gate_noop ensures] [%#slib] not state.initialized
+    -> result = state}
+    (! return {result}) ]

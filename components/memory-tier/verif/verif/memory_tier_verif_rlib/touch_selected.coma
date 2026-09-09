@@ -1,0 +1,20 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 565 0 565 44 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 567 15 567 19
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 569 4 569 9
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 564 10 564 27
+
+use creusot.prelude.Any
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let touch_selected [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 565 0 565 44]
+  (present: bool) (return (x: bool)) = (! bb0
+  [ bb0 = any [ br0 -> {present = false} (! bb2) | br1 -> {present} (! bb1) ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- [%#slib'0] false ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & present: bool = present ])
+  [ return (result: bool) -> {[@stop_split] [@expl:touch_selected ensures] [%#slib'1] result = present}
+    (! return {result}) ]

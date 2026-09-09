@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize_rejects_zero": { "prover": "z3", "time": 0.004 }
+    }
+  }
+}

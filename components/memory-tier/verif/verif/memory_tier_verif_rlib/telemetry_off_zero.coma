@@ -1,0 +1,27 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 586 0 586 46 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 587 5 587 6
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 587 8 587 9
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 587 11 587 12
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 585 10 585 60
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let telemetry_off_zero [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 586 0 586 46]
+  (return (x: tup3_u64_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_ret <- { f0 = ([%#slib] (0: UInt64.t));
+                        f1 = ([%#slib'0] (0: UInt64.t));
+                        f2 = ([%#slib'1] (0: UInt64.t)) } ] s1
+    | s1 = return {_ret} ] ] [ & _ret: tup3_u64_u64_u64 = Any.any_l () ])
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:telemetry_off_zero ensures] [%#slib'2] UInt64.t'int result.f0 = 0
+    /\ UInt64.t'int result.f1 = 0 /\ UInt64.t'int result.f2 = 0}
+    (! return {result}) ]

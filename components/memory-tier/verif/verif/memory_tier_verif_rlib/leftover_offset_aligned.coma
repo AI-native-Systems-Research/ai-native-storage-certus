@@ -1,19 +1,51 @@
-(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 178 0 178 67 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 236 0 236 67 *)
 
-let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 179 18 179 32
-let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 180 4 180 20
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 237 18 237 32
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 238 4 238 20
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 231 11 231 30
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 232 11 232 20
+let%span slib'3 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 233 11 233 48
+let%span slib'4 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 234 10 234 29
+let%span slib'5 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 235 10 235 28
+let%span slib'6 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 35 11 35 20
+let%span slib'7 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 36 11 36 38
+let%span slib'8 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 37 10 37 29
+let%span slib'9 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 38 10 38 26
+let%span slib'10 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 39 10 39 21
+let%span slib'11 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 40 10 40 32
 
 use creusot.int.UInt64
+use int.ComputerDivision
 use creusot.prelude.Any
+use int.Int
 
-let align_up (size: UInt64.t) (return (x: UInt64.t)) = any [ return (result: UInt64.t) -> (! return {result}) ]
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let align_up (size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:align_up requires] ([@stop_split] [@expl:align_up requires #0] [%#slib'6] UInt64.t'int size > 0)
+  /\ ([@stop_split] [@expl:align_up requires #1] [%#slib'7] UInt64.t'int size + 4095 <= UInt64.t'int const_MAX)}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:align_up ensures] ([@stop_split] [@expl:align_up ensures #0] [%#slib'8] ComputerDivision.mod (UInt64.t'int result) 4096
+      = 0)
+    /\ ([@stop_split] [@expl:align_up ensures #1] [%#slib'9] UInt64.t'int result >= UInt64.t'int size)
+    /\ ([@stop_split] [@expl:align_up ensures #2] [%#slib'10] UInt64.t'int result > 0)
+    /\ ([@stop_split] [@expl:align_up ensures #3] [%#slib'11] UInt64.t'int result < UInt64.t'int size + 4096)}
+    (! return {result}) ]
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let leftover_offset_aligned [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 178 0 178 67]
-  (offset: UInt64.t) (size: UInt64.t) (return (x: UInt64.t)) = (! bb0
+let leftover_offset_aligned [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 236 0 236 67]
+  (offset: UInt64.t) (size: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:leftover_offset_aligned requires] ([@stop_split] [@expl:leftover_offset_aligned requires #0] [%#slib'1] ComputerDivision.mod (UInt64.t'int offset) 4096
+    = 0)
+  /\ ([@stop_split] [@expl:leftover_offset_aligned requires #1] [%#slib'2] UInt64.t'int size > 0)
+  /\ ([@stop_split] [@expl:leftover_offset_aligned requires #2] [%#slib'3] UInt64.t'int offset + UInt64.t'int size
+    + 4096
+  <= UInt64.t'int const_MAX)}
+  (! bb0
   [ bb0 = s0
     [ s0 = align_up [%#slib] {size} (fun (_x: UInt64.t) -> [ &aligned <- _x ] s1)
     | s1 = UInt64.add [%#slib'0] {offset} {aligned} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s2)
@@ -21,4 +53,9 @@ let leftover_offset_aligned [#"/home/cornel/mt-creusot-rerun/components/memory-t
   [ & _ret: UInt64.t = Any.any_l ()
   | & offset: UInt64.t = offset
   | & size: UInt64.t = size
-  | & aligned: UInt64.t = Any.any_l () ]) [ return (result: UInt64.t) -> (! return {result}) ]
+  | & aligned: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:leftover_offset_aligned ensures] ([@stop_split] [@expl:leftover_offset_aligned ensures #0] [%#slib'4] ComputerDivision.mod (UInt64.t'int result) 4096
+      = 0)
+    /\ ([@stop_split] [@expl:leftover_offset_aligned ensures #1] [%#slib'5] UInt64.t'int result >= UInt64.t'int offset)}
+    (! return {result}) ]

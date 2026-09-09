@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_insert_dedup": {
+        "tactic": "compute_specified",
+        "children": [ { "prover": "z3", "time": 0.004 } ]
+      }
+    }
+  }
+}

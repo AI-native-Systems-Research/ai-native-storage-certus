@@ -5,7 +5,7 @@
       "vc_clear_ghost_u64": { "prover": "alt-ergo", "time": 0.018 },
       "vc_contains_reflects_trace": {
         "tactic": "compute_specified",
-        "children": []
+        "children": [ { "prover": "alt-ergo", "time": 0.037 } ]
       },
       "vc_deref_mut_Ghost_FMap_u64_SlotMirror": {
         "prover": "alt-ergo",

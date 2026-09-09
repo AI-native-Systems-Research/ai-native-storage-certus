@@ -3,8 +3,11 @@
   "proofs": {
     "Coma": {
       "vc_gate_readonly_scalar": {
-        "tactic": "compute_specified",
-        "children": []
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.013 },
+          { "prover": "alt-ergo", "time": 0.015 }
+        ]
       }
     }
   }

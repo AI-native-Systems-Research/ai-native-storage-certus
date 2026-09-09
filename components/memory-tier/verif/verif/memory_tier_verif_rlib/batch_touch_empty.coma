@@ -1,0 +1,29 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 552 0 552 45 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 553 14 553 15
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 554 15 554 16
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 550 10 550 36
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 551 10 551 38
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let batch_touch_empty [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 552 0 552 45]
+  (len: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_7 <- len = ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_7 = false} (! bb2) | br1 -> {_7} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib'0] (0: UInt64.t) ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- len ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & len: UInt64.t = len | & _7: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:batch_touch_empty ensures] ([@stop_split] [@expl:batch_touch_empty ensures #0] [%#slib'1] UInt64.t'int len
+        = 0 -> UInt64.t'int result = 0)
+    /\ ([@stop_split] [@expl:batch_touch_empty ensures #1] [%#slib'2] UInt64.t'int len > 0
+    -> UInt64.t'int result <= UInt64.t'int len)}
+    (! return {result}) ]

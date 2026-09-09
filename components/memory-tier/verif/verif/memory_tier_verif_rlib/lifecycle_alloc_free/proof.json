@@ -5,8 +5,12 @@
       "vc_allocate_split": { "prover": "alt-ergo", "time": 0.023 },
       "vc_deallocate_used": { "prover": "alt-ergo", "time": 0.023 },
       "vc_lifecycle_alloc_free": {
-        "tactic": "compute_specified",
-        "children": []
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.017 },
+          { "prover": "alt-ergo", "time": 0.023 },
+          { "prover": "alt-ergo", "time": 0.02 }
+        ]
       }
     }
   }

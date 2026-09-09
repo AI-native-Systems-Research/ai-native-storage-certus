@@ -1,0 +1,19 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 532 0 532 74 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 531 10 531 31
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let evict_key_alias [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 532 0 532 74]
+  (_key: UInt64.t) (base_result: t_Option_u64) (return (x: t_Option_u64)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- base_result ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Option_u64 = Any.any_l () | & base_result: t_Option_u64 = base_result ])
+  [ return (result: t_Option_u64) -> {[@stop_split] [@expl:evict_key_alias ensures] [%#slib] result = base_result}
+    (! return {result}) ]

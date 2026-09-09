@@ -1,0 +1,41 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 482 0 482 77 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 479 10 479 59
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 480 10 480 40
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 481 10 481 41
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_MtErr = NotInitialized | AlreadyExists | KeyNotFound | PoolFull | InvalidSize
+
+type t_Result_unit_MtErr = Ok () | Err t_MtErr
+
+type tup2_usize_Result_unit_MtErr = { f0: UInt64.t; f1: t_Result_unit_MtErr }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let insert_dedup [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 482 0 482 77]
+  (used: UInt64.t) (present: bool) (return (x: tup2_usize_Result_unit_MtErr)) = (! bb0
+  [ bb0 = any [ br0 -> {present = false} (! bb2) | br1 -> {present} (! bb1) ]
+  | bb1 = s0
+    [ s0 = [ &_15 <- AlreadyExists ] s1
+    | s1 = [ &_14 <- Err _15 ] s2
+    | s2 = [ &_ret <- { f0 = used; f1 = _14 } ] s3
+    | s3 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_17 <- Ok _18 ] s1 | s1 = [ &_ret <- { f0 = used; f1 = _17 } ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: tup2_usize_Result_unit_MtErr = Any.any_l ()
+  | & used: UInt64.t = used
+  | & present: bool = present
+  | & _14: t_Result_unit_MtErr = Any.any_l ()
+  | & _15: t_MtErr = Any.any_l ()
+  | & _17: t_Result_unit_MtErr = Any.any_l ()
+  | & _18: () = Any.any_l () ])
+  [ return (result: tup2_usize_Result_unit_MtErr) ->
+  {[@stop_split] [@expl:insert_dedup ensures] ([@stop_split] [@expl:insert_dedup ensures #0] [%#slib] present
+      -> result.f1 = Err (AlreadyExists))
+    /\ ([@stop_split] [@expl:insert_dedup ensures #1] [%#slib'0] present -> UInt64.t'int result.f0 = UInt64.t'int used)
+    /\ ([@stop_split] [@expl:insert_dedup ensures #2] [%#slib'1] not present -> result.f1 = Ok ())}
+    (! return {result}) ]

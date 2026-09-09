@@ -1,10 +1,20 @@
-(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 326 0 326 93 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 374 0 374 93 *)
 
-let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 332 21 332 25
-let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 334 14 334 15
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 379 21 379 25
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 381 14 381 15
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 365 11 365 25
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 366 10 366 73
+let%span slib'3 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 367 10 367 59
+let%span slib'4 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 368 10 368 67
+let%span slib'5 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 369 10 369 69
+let%span slib'6 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 370 10 370 53
+let%span slib'7 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 371 10 371 65
+let%span slib'8 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 372 10 372 52
+let%span slib'9 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 373 10 373 51
 
 use creusot.int.UInt64
 use creusot.prelude.Any
+use int.Int
 
 type t_TierState = { initialized: bool; capacity: UInt64.t; used: UInt64.t; spdk_allocated: bool }
 
@@ -18,27 +28,44 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let initialize_state [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 326 0 326 93]
-  (state: t_TierState) (pool_size: UInt64.t) (return (x: tup2_TierState_Result_unit_MtErr)) = (! bb0
+let initialize_state [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 374 0 374 93]
+  (state: t_TierState) (pool_size: UInt64.t) (return (x: tup2_TierState_Result_unit_MtErr)) =
+{[@stop_split] [@expl:initialize_state requires] [%#slib'1] UInt64.t'int pool_size > 0}
+  (! bb0
   [ bb0 = any [ br0 -> {state.initialized = false} (! bb2) | br1 -> {state.initialized} (! bb1) ]
   | bb1 = s0
-    [ s0 = [ &_8 <- AlreadyExists ] s1
-    | s1 = [ &_7 <- Err _8 ] s2
-    | s2 = [ &_ret <- { f0 = state; f1 = _7 } ] s3
+    [ s0 = [ &_29 <- AlreadyExists ] s1
+    | s1 = [ &_28 <- Err _29 ] s2
+    | s2 = [ &_ret <- { f0 = state; f1 = _28 } ] s3
     | s3 = return {_ret} ]
   | bb2 = s0
     [ s0 = [ &s <- { initialized = ([%#slib] true);
                      capacity = pool_size;
                      used = ([%#slib'0] (0: UInt64.t));
                      spdk_allocated = state.spdk_allocated } ] s1
-    | s1 = [ &_13 <- Ok _14 ] s2
-    | s2 = [ &_ret <- { f0 = s; f1 = _13 } ] s3
+    | s1 = [ &_34 <- Ok _35 ] s2
+    | s2 = [ &_ret <- { f0 = s; f1 = _34 } ] s3
     | s3 = return {_ret} ] ]
   [ & _ret: tup2_TierState_Result_unit_MtErr = Any.any_l ()
   | & state: t_TierState = state
   | & pool_size: UInt64.t = pool_size
-  | & _7: t_Result_unit_MtErr = Any.any_l ()
-  | & _8: t_MtErr = Any.any_l ()
+  | & _28: t_Result_unit_MtErr = Any.any_l ()
+  | & _29: t_MtErr = Any.any_l ()
   | & s: t_TierState = Any.any_l ()
-  | & _13: t_Result_unit_MtErr = Any.any_l ()
-  | & _14: () = Any.any_l () ]) [ return (result: tup2_TierState_Result_unit_MtErr) -> (! return {result}) ]
+  | & _34: t_Result_unit_MtErr = Any.any_l ()
+  | & _35: () = Any.any_l () ])
+  [ return (result: tup2_TierState_Result_unit_MtErr) ->
+  {[@stop_split] [@expl:initialize_state ensures] ([@stop_split] [@expl:initialize_state ensures #0] [%#slib'2] state.initialized
+      -> result.f0.initialized = state.initialized)
+    /\ ([@stop_split] [@expl:initialize_state ensures #1] [%#slib'3] state.initialized -> result.f0.used = state.used)
+    /\ ([@stop_split] [@expl:initialize_state ensures #2] [%#slib'4] state.initialized
+      -> result.f0.capacity = state.capacity)
+    /\ ([@stop_split] [@expl:initialize_state ensures #3] [%#slib'5] state.initialized
+      -> result.f1 = Err (AlreadyExists))
+    /\ ([@stop_split] [@expl:initialize_state ensures #4] [%#slib'6] not state.initialized -> result.f0.initialized)
+    /\ ([@stop_split] [@expl:initialize_state ensures #5] [%#slib'7] not state.initialized
+      -> UInt64.t'int result.f0.capacity = UInt64.t'int pool_size)
+    /\ ([@stop_split] [@expl:initialize_state ensures #6] [%#slib'8] not state.initialized
+      -> UInt64.t'int result.f0.used = 0)
+    /\ ([@stop_split] [@expl:initialize_state ensures #7] [%#slib'9] not state.initialized -> result.f1 = Ok ())}
+    (! return {result}) ]

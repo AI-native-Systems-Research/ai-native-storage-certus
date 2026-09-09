@@ -1,4 +1,7 @@
-(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 396 0 396 75 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 440 0 440 75 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 438 10 438 49
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 439 10 439 27
 
 use creusot.int.UInt64
 use creusot.prelude.Any
@@ -13,13 +16,18 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let gate_readonly_option [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 396 0 396 75]
+let gate_readonly_option [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 440 0 440 75]
   (state: t_TierState) (return (x: tup2_TierState_Option_usize)) = (! bb0
   [ bb0 = any [ br0 -> {state.initialized = false} (! bb1) | br1 -> {state.initialized} (! bb2) ]
   | bb2 = s0
-    [ s0 = [ &_8 <- Some (state.used) ] s1 | s1 = [ &_ret <- { f0 = state; f1 = _8 } ] s2 | s2 = return {_ret} ]
-  | bb1 = s0 [ s0 = [ &_6 <- None ] s1 | s1 = [ &_ret <- { f0 = state; f1 = _6 } ] s2 | s2 = return {_ret} ] ]
+    [ s0 = [ &_12 <- Some (state.used) ] s1 | s1 = [ &_ret <- { f0 = state; f1 = _12 } ] s2 | s2 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_10 <- None ] s1 | s1 = [ &_ret <- { f0 = state; f1 = _10 } ] s2 | s2 = return {_ret} ] ]
   [ & _ret: tup2_TierState_Option_usize = Any.any_l ()
   | & state: t_TierState = state
-  | & _6: t_Option_usize = Any.any_l ()
-  | & _8: t_Option_usize = Any.any_l () ]) [ return (result: tup2_TierState_Option_usize) -> (! return {result}) ]
+  | & _10: t_Option_usize = Any.any_l ()
+  | & _12: t_Option_usize = Any.any_l () ])
+  [ return (result: tup2_TierState_Option_usize) ->
+  {[@stop_split] [@expl:gate_readonly_option ensures] ([@stop_split] [@expl:gate_readonly_option ensures #0] [%#slib] not state.initialized
+      -> result.f1 = None)
+    /\ ([@stop_split] [@expl:gate_readonly_option ensures #1] [%#slib'0] result.f0 = state)}
+    (! return {result}) ]

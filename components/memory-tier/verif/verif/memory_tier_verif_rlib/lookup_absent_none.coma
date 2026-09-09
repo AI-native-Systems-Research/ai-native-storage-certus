@@ -1,0 +1,25 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 495 0 495 69 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 493 10 493 37
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 494 10 494 41
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Option_usize = None | Some UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lookup_absent_none [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 495 0 495 69]
+  (present: bool) (off: UInt64.t) (return (x: t_Option_usize)) = (! bb0
+  [ bb0 = any [ br0 -> {present = false} (! bb1) | br1 -> {present} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- Some off ] s1 | s1 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Option_usize = Any.any_l () | & present: bool = present | & off: UInt64.t = off ])
+  [ return (result: t_Option_usize) ->
+  {[@stop_split] [@expl:lookup_absent_none ensures] ([@stop_split] [@expl:lookup_absent_none ensures #0] [%#slib] not present
+      -> result = None)
+    /\ ([@stop_split] [@expl:lookup_absent_none ensures #1] [%#slib'0] present -> result = Some off)}
+    (! return {result}) ]

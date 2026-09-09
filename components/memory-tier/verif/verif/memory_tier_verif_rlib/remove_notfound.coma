@@ -1,0 +1,29 @@
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 507 0 507 58 *)
+
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 505 10 505 56
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 506 10 506 38
+
+use creusot.prelude.Any
+
+type t_MtErr = NotInitialized | AlreadyExists | KeyNotFound | PoolFull | InvalidSize
+
+type t_Result_unit_MtErr = Ok () | Err t_MtErr
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let remove_notfound [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 507 0 507 58]
+  (present: bool) (return (x: t_Result_unit_MtErr)) = (! bb0
+  [ bb0 = any [ br0 -> {present = false} (! bb1) | br1 -> {present} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- Ok _10 ] s1 | s1 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_9 <- KeyNotFound ] s1 | s1 = [ &_ret <- Err _9 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_MtErr = Any.any_l ()
+  | & present: bool = present
+  | & _9: t_MtErr = Any.any_l ()
+  | & _10: () = Any.any_l () ])
+  [ return (result: t_Result_unit_MtErr) ->
+  {[@stop_split] [@expl:remove_notfound ensures] ([@stop_split] [@expl:remove_notfound ensures #0] [%#slib] not present
+      -> result = Err (KeyNotFound))
+    /\ ([@stop_split] [@expl:remove_notfound ensures #1] [%#slib'0] present -> result = Ok ())}
+    (! return {result}) ]

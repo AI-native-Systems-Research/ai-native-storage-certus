@@ -1,22 +1,29 @@
-(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 51 0 51 40 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 64 0 64 40 *)
 
-let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 52 15 52 16
-let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 53 15 53 20
-let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 55 4 55 8
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 65 15 65 16
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 66 15 66 20
+let%span slib'1 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 68 4 68 8
+let%span slib'2 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 62 10 62 40
+let%span slib'3 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 63 10 63 38
 
 use creusot.int.UInt64
 use creusot.prelude.Any
+use int.Int
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let alloc_admits [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 51 0 51 40] (size: UInt64.t)
+let alloc_admits [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 64 0 64 40] (size: UInt64.t)
   (return (x: bool)) = (! bb0
   [ bb0 = s0
-    [ s0 = [ &_3 <- size = ([%#slib] (0: UInt64.t)) ] s1
-    | s1 = any [ br0 -> {_3 = false} (! bb2) | br1 -> {_3} (! bb1) ] ]
+    [ s0 = [ &_7 <- size = ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_7 = false} (! bb2) | br1 -> {_7} (! bb1) ] ]
   | bb1 = s0 [ s0 = [ &_ret <- [%#slib'0] false ] s1 | s1 = return {_ret} ]
   | bb2 = s0 [ s0 = [ &_ret <- [%#slib'1] true ] s1 | s1 = return {_ret} ] ]
-  [ & _ret: bool = Any.any_l () | & size: UInt64.t = size | & _3: bool = Any.any_l () ])
-  [ return (result: bool) -> (! return {result}) ]
+  [ & _ret: bool = Any.any_l () | & size: UInt64.t = size | & _7: bool = Any.any_l () ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:alloc_admits ensures] ([@stop_split] [@expl:alloc_admits ensures #0] [%#slib'2] UInt64.t'int size
+        = 0 -> result = false)
+    /\ ([@stop_split] [@expl:alloc_admits ensures #1] [%#slib'3] UInt64.t'int size > 0 -> result = true)}
+    (! return {result}) ]

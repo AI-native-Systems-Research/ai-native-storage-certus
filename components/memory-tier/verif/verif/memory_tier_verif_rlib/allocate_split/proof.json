@@ -1,1 +1,6 @@
-{ "profile": [], "proofs": { "Coma": { "vc_allocate_split": null } } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_allocate_split": { "prover": "alt-ergo", "time": 0.034 } }
+  }
+}
