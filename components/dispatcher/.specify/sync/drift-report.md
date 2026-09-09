@@ -1,14 +1,35 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-09T21:33:18Z
-spec_sync_git_commit: 5bb71702
-spec_sync_inputs_sha256: af0388391aea2f22dc103ed59e028b2b2dd20eff09db928bdd0867811d96ac0e
+spec_sync_synced_at: 2026-09-09T22:27:18Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: a329a8f6167271e626bfdbf62814cd4733ef0666b44bd65ef3cf2215f076b010
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (merged-branch; store-backpressure implementer).** This
+> is the component that implements the store-backpressure feature
+> (`store_backpressure_ms` + the `store_backpressure_events`/`store_drops_on_full`
+> counters in `idispatcher.rs`); the drift analysis below is current and
+> code-authoritative. The merge's conflict resolution reverted this stamp's
+> `inputs_sha256` to unstable's `b220a1c8` value (which predates the interfaces
+> change) while keeping the correct report body. The digest is recomputed here
+> over the merged tree (`3411518a`) so it matches what CI will recompute. Drift status
+> remains `clean`.
+
 # Spec Drift Report — dispatcher
 
-Generated: 2026-09-09
+> **Digest refreshed 2026-09-03 (interfaces-only hash change).** This branch
+> reworded a doc comment on `IMemoryTier::evict_next_for_key`
+> (`components/interfaces/src/imemory_tier.rs`) as part of the memory-tier
+> spec-sync. `scripts/spec-sync-hash.sh` folds the whole `components/interfaces`
+> tree into every component's hash, so this component's digest moved even though
+> no interface signature or behavior changed and dispatcher was not otherwise
+> re-synced. The interface delta is confined to documentation and cannot affect
+> dispatcher's spec↔implementation alignment; the report body below stands
+> unchanged and drift status remains `clean`. Digest recomputed against the
+> current interface tree.
+
+Generated: 2026-09-02
 Project: dispatcher (spec: specs/001-dispatcher-cache-interface/spec.md)
 Mode: Read-only drift analysis, then BACKFILL apply to `spec.md` (code authoritative).
 Branch: `fix-dispatcher-store-backpressure`

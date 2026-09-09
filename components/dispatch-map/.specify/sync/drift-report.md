@@ -1,14 +1,38 @@
 ---
 spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-09T21:33:18Z
-spec_sync_git_commit: 5bb71702
-spec_sync_inputs_sha256: 7f74b8e980be9afe665117e3ba9100092073f8f7960e78ad9620f0656cb810a7
+spec_sync_synced_at: 2026-09-09T22:27:18Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: 53db1daa719b3aa07ae719ac78d8f022da460e93c481fbf41d741058af246c2e
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
 # Dispatch-Map — Spec ↔ Implementation Drift Report
 
-**Generated**: 2026-09-02 (last analysis); **Restamped**: 2026-09-09
+> **Digest refreshed 2026-09-03 (interfaces-only hash change).** This branch
+> reworded a doc comment on `IMemoryTier::evict_next_for_key`
+> (`components/interfaces/src/imemory_tier.rs`) as part of the memory-tier
+> spec-sync. `scripts/spec-sync-hash.sh` folds the whole `components/interfaces`
+> tree into every component's hash, so this component's digest moved even though
+> no interface signature or behavior changed and dispatch-map was not otherwise
+> re-synced. The interface delta is confined to documentation and cannot affect
+> dispatch-map's spec↔implementation alignment; the report body below stands
+> unchanged and drift status remains `clean`. Digest recomputed against the
+> current interface tree.
+
+**Generated**: 2026-09-02
 **Component**: `components/dispatch-map`
 **Branch**: `fix-dispatcher-store-backpressure` (restamp); `evolve-dispatcher-dw` (analysis)
 **Mode**: Read-only drift analysis, then BACKFILL apply to `spec.md` (code authoritative).
