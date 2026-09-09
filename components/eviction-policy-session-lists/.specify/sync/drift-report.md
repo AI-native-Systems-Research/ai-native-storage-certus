@@ -1,11 +1,24 @@
 ---
 spec_sync_component: eviction-policy-session-lists
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-04T02:01:56Z
-spec_sync_git_commit: 7343a2a8
-spec_sync_inputs_sha256: cf85e57387bfc77b6b5699306279af654841ab780890e306a1c4ee1c6c7a7911
+spec_sync_synced_at: 2026-09-09T22:27:18Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: 832369172f70733b13b96dc47ec6330d6361d4f937e8afa4c460be471bdc8dfb
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
 # Spec ↔ Implementation Drift Report — eviction-policy-session-lists
 
 **This sweep (2026-09-03)** independently re-verified all 24 requirements

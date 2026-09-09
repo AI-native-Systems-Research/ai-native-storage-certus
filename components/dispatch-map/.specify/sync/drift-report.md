@@ -1,11 +1,24 @@
 ---
 spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T18:54:21Z
-spec_sync_git_commit: b220a1c8
-spec_sync_inputs_sha256: a64000f6e71a1bc91b86aecf42c99bd5aaab16fdb1d0fa1756f9606f5b8e3b54
+spec_sync_synced_at: 2026-09-09T22:27:18Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: 53db1daa719b3aa07ae719ac78d8f022da460e93c481fbf41d741058af246c2e
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
 # Dispatch-Map — Spec ↔ Implementation Drift Report
 
 > **Digest refreshed 2026-09-03 (interfaces-only hash change).** This branch
@@ -21,8 +34,23 @@ spec_sync_hash_tool: scripts/spec-sync-hash.sh
 
 **Generated**: 2026-09-02
 **Component**: `components/dispatch-map`
-**Branch**: `evolve-dispatcher-dw`
+**Branch**: `fix-dispatcher-store-backpressure` (restamp); `evolve-dispatcher-dw` (analysis)
 **Mode**: Read-only drift analysis, then BACKFILL apply to `spec.md` (code authoritative).
+
+> **Refresh 2026-09-09 (restamp only — no drift, no spec change):** the stamp was
+> refreshed to input hash
+> `7f74b8e980be9afe665117e3ba9100092073f8f7960e78ad9620f0656cb810a7` at commit
+> `5bb71702`. The previous stamp (`2dbb7666…`) went stale for two reasons, neither
+> of which is dispatch-map drift: (1) `components/dispatch-map/specs/001-dispatch-map/spec.md`
+> was already backfilled to the global-lock design in commit `6a3d801c` (the sweep
+> documented below), and (2) `scripts/spec-sync-hash.sh` folds **all** of
+> `components/interfaces/` into every component's hash, so the dispatcher-only
+> `idispatcher.rs` store-backpressure change (`39ffee9b`/`c400ced8`, new
+> `DispatcherConfig::store_backpressure_ms` + two `TierEventStats` counters)
+> re-hashed dispatch-map even though it references none of those types. Re-verified
+> this sweep: `src/state.rs` still uses a single global `Mutex<Inner>` + `Condvar`
+> (matches FR-002/FR-013); no `IDispatchMap` method or type changed. **Drift status
+> remains `clean`; no `spec.md` edit was needed.**
 
 ## Summary
 

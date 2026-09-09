@@ -52,6 +52,11 @@ MAX_ROUNDS="${MAX_ROUNDS:-0}"   # 0 = replay all turns; N caps at N rounds/turns
 MODEL="${MODEL:-ibm-granite/granite-4.1-8b}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
+# Data-parallel shard identity for this replica (shared-server DP). The driver
+# uses these to select its conversation slice + globally-unique session ids, and
+# the connector uses them to claim a disjoint channel partition on the mailbox.
+DP_RANK="${DP_RANK:-0}"
+DP_SIZE="${DP_SIZE:-1}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 
 # PROM_PORT — if set, publish the container's Prometheus exporter on that host
@@ -362,6 +367,8 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "ACTIVE_SESSIONS=${ACTIVE_SESSIONS}" \
     -e "MODEL=${MODEL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
+    -e "DP_RANK=${DP_RANK}" \
+    -e "DP_SIZE=${DP_SIZE}" \
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
     -e "ENFORCE_EAGER=${ENFORCE_EAGER:-0}" \
     -e "WORKLOAD_MODE=${WORKLOAD_MODE:-batched}" \

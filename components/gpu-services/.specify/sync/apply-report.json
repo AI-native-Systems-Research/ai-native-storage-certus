@@ -1,52 +1,34 @@
 {
-  "applied": "2026-08-20",
-  "component": "gpu-services",
-  "based_on": "proposals from 2026-08-20 (drift-report 2026-08-20)",
-  "summary": {
-    "backfill_applied": 1,
-    "align_tasks": 0,
-    "unspecced_backfilled": 0,
-    "resolved": 0,
-    "human_decision": 0
-  },
-  "specs_updated": [
+  "applied_at": "2026-09-09",
+  "based_on": "proposals 2026-09-09",
+  "changes": [
     {
-      "spec_id": "003-gpu-p2p-server",
-      "spec_file": "specs/003-gpu-p2p-server/spec.md",
-      "backup": ".specify/sync/backups/003-spec.md.20260820T171427Z.bak",
-      "changes": [
-        {
-          "requirement": "FR-012",
-          "change_type": "BACKFILL (requirement reworded: MDTS ceiling is operator responsibility documented via CLI help, not runtime-validated)"
-        },
-        {
-          "requirement": "US1 Acceptance Scenario 4",
-          "change_type": "ADD (chunked-read scenario: ceil(size/chunk-size) chunks, <n> reported)"
-        },
-        {
-          "requirement": "Assumptions",
-          "change_type": "ADD (bullet: operator responsible for --chunk-size <= MDTS)"
-        },
-        {
-          "requirement": "Metadata",
-          "change_type": "ADD (Last-Synced: 2026-08-20 line)"
-        }
-      ]
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-015",
+      "direction": "backfill",
+      "change_type": "modified_append",
+      "summary": "Documented CUDA_HOST_REGISTER_PORTABLE + idempotent ALREADY_REGISTERED/EBUSY handling + conditional cudaHostUnregister rollback."
+    },
+    {
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-020",
+      "direction": "backfill",
+      "change_type": "modified_append",
+      "summary": "Documented CUDA_HOST_ALLOC_PORTABLE for the pinned DMA buffer."
+    },
+    {
+      "spec": "002-gpu-ssd-dma-prepare",
+      "requirement": "FR-019",
+      "direction": "backfill",
+      "change_type": "modified_append",
+      "summary": "Documented portable flag + idempotent registration, consistent with spec-001 FR-015."
     }
   ],
-  "align_tasks_generated": [],
-  "unspecced_backfilled": [],
-  "resolved": [],
-  "backups": [
-    {
-      "spec_file": "specs/003-gpu-p2p-server/spec.md",
-      "backup": ".specify/sync/backups/003-spec.md.20260820T171427Z.bak"
-    }
-  ],
-  "prior_deliverables_archived": [
-    "proposals-20260721.json",
-    "proposals-20260721.md",
-    "apply-report-20260721.json",
-    "apply-report-20260721.md"
-  ]
+  "new_specs": [],
+  "align_tasks": [],
+  "not_applied": [],
+  "result": {
+    "drift_status": "clean",
+    "actionable_drift_remaining": 0
+  }
 }

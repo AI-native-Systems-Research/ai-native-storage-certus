@@ -109,6 +109,12 @@ if __name__ == "__main__":
     CONV_MULTIPLIER = int(os.environ.get("CONV_MULTIPLIER", 1))
     MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # 0 = until convs exhausted
 
+    # Data-parallel sharding: with DP_SIZE>1, N replicas (one per GPU, separate
+    # containers) each replay a disjoint strided 1/N slice of the conversations
+    # against the shared server. DP_SIZE=1/DP_RANK=0 = original single-GPU run.
+    DP_SIZE = max(1, int(os.environ.get("DP_SIZE", 1)))
+    DP_RANK = max(0, int(os.environ.get("DP_RANK", 0)))
+
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
     print(f"[run] model={MODEL} shm_path={SHM_PATH}", file=sys.stderr)
     print(
@@ -155,6 +161,18 @@ if __name__ == "__main__":
     if CONV_MULTIPLIER > 1:
         print(
             f"[run] replicated x{CONV_MULTIPLIER} -> {len(convs)} conversations",
+            file=sys.stderr,
+        )
+
+    # Strided data-parallel shard. The global index of local conversation i is
+    # (DP_RANK + i*DP_SIZE); it feeds session_id below so ids stay unique across
+    # replicas against the shared server (content-hash cache dedup is unaffected).
+    if DP_SIZE > 1:
+        _global_total = len(convs)
+        convs = convs[DP_RANK::DP_SIZE]
+        print(
+            f"[run] DP shard rank={DP_RANK}/{DP_SIZE}: {len(convs)} of "
+            f"{_global_total} conversations",
             file=sys.stderr,
         )
 
@@ -232,9 +250,10 @@ if __name__ == "__main__":
     # Tag each request with its conversation as the KV-offload session_id. The
     # conversation index is stable across rounds, so every turn of the same
     # conversation shares one session_id; the connector forwards it (hashed to
-    # u64) on Reserve -> the dispatcher logs it. +1 so conversation 0 gets a
-    # non-zero id (0 == "unset" sentinel).
-    _session_id_fn = lambda i: i + 1  # noqa: E731
+    # u64) on Reserve -> the dispatcher logs it. Map the local (post-shard) index
+    # back to the GLOBAL conversation index so ids stay unique across DP replicas
+    # sharing one server; +1 so conversation 0 gets a non-zero id (0 == "unset").
+    _session_id_fn = lambda i: (DP_RANK + i * DP_SIZE) + 1  # noqa: E731
 
     # ── SSD device I/O source (shared by both execution modes) ────────────────
     # The server's cumulative NVMe read/write byte counters (its rw-telemetry) are
