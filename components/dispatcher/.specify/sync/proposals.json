@@ -1,78 +1,32 @@
 {
-  "generated": "2026-08-31",
+  "generated": "2026-09-09T21:33:18Z",
   "project": "dispatcher",
   "spec": "001-dispatcher-cache-interface",
-  "branch": "sync-tmp",
+  "branch": "fix-dispatcher-store-backpressure",
   "source": ".specify/sync/drift-report.json",
   "editing_scope": ["specs/**"],
   "summary": {
     "align": 0,
-    "backfill": 5,
-    "backfill_unspecced": 1,
+    "backfill": 1,
+    "backfill_unspecced": 0,
     "resolved": 0,
     "human_decision": 0,
-    "approved": 6
+    "approved": 1
   },
   "proposals": [
     {
-      "requirement": "FR-037",
+      "requirement": "FR-060 (new); FR-003, FR-033, FR-056, FR-058, FR-059; edge-case; US1 scenario 5",
       "direction": "BACKFILL",
-      "commit": "995596e4",
+      "commit": "39ffee9b,c400ced8",
       "status": "APPROVED",
-      "rationale": "DeviceStreams now holds two warm streams per device: warm_load (H2D) + warm_store (D2H), split for PCIe overlap (lib.rs:335-345); device_streams_for creates both plus pipeline pair (:371-378). Spec said 'single warm CUDA stream'.",
-      "before": "pre-allocate a single warm CUDA stream ... used ... for memcpy_h2d_async ... the per-device warm stream from DEVICE_STREAMS.",
-      "after": "per-device warm_load (H2D) + warm_store (D2H) streams split for PCIe bidirectional overlap; H2D via memcpy_batch_async on warm_load; warm_stream AtomicU64 fallback retained."
-    },
-    {
-      "requirement": "FR-052",
-      "direction": "BACKFILL",
-      "commit": "995596e4",
-      "status": "APPROVED",
-      "rationale": "DeviceStreams { warm_load, warm_store, pipe: [u64;2] } (lib.rs:339-345): two warm streams + pipeline pair per device.",
-      "before": "one warm stream plus one pipeline stream pair per device.",
-      "after": "two warm streams (warm_load for H2D and warm_store for D2H, FR-037) plus one pipeline stream pair per device."
-    },
-    {
-      "requirement": "FR-006 / FR-039(2) / FR-056 / Implementation-Notes",
-      "direction": "BACKFILL",
-      "commit": "d8c26d58",
-      "status": "APPROVED",
-      "rationale": "Both warm directions now use batched memcpy_batch_async (cuMemcpyBatchAsync): H2D scatter on warm_load (lib.rs:1116-1127); D2H gather in copy_gpu_to_memory_async on warm_store (lib.rs:2998-3009). memcpy_h2d_async is mock-only now (lib.rs:4193,4260,5244).",
-      "before": "warm-path H2D via memcpy_h2d_async; copy_gpu_to_memory_async issues asynchronous GPU->host DMA on the supplied stream.",
-      "after": "batched memcpy_batch_async scatter (H2D on warm_load) / gather (D2H on warm_store)."
-    },
-    {
-      "requirement": "FR-040",
-      "direction": "BACKFILL",
-      "commit": "97e26738",
-      "status": "APPROVED",
-      "rationale": "gRPC removed; shm-queue sole control transport. promote_to_memory_tier API unchanged; only the invoking transport changed.",
-      "before": "The gRPC handler spawns this as a detached background task when BatchTouchRequest.promote = true.",
-      "after": "The shm-queue control transport (the sole control transport since gRPC was removed) spawns this as a detached background task when a batch-touch request sets promote = true."
-    },
-    {
-      "requirement": "FR-042",
-      "direction": "BACKFILL",
-      "commit": "97e26738",
-      "status": "APPROVED",
-      "rationale": "Eviction-event channel unchanged; named example consumer (gRPC TakeEvents) removed. shm-queue transport is now the consumer.",
-      "before": "external consumers (e.g., gRPC TakeEvents stream) to observe cache evictions without polling.",
-      "after": "external consumers (e.g., the shm-queue TakeEvents stream) to observe cache evictions without polling."
-    },
-    {
-      "requirement": "FR-058 + SC-017",
-      "direction": "BACKFILL-UNSPECCED",
-      "commit": "4659626b",
-      "status": "APPROVED",
-      "rationale": "IDispatcher::tier_event_stats() -> TierEventStats (idispatcher.rs:564; struct :189-210) implemented via lock-free TierEventCounters (lib.rs:111-160, tier_counters field :317, trait impl :3390); no requirement covered it. Four monotonic u64 counters: promotions_to_memory, promotions_to_gpu, evictions_from_memory, evictions_from_ssd. Always-on; non-tiering variants return zeros.",
-      "before": "(none - feature unspecced)",
-      "after": "New FR-058 (tier-event counters) + SC-017 (zero at startup, monotonic, delta = tier events in window; non-tiering variant returns zeros)."
+      "rationale": "reserve_memory applies bounded store backpressure (retry evict_and_insert on a 20ms poll until store_backpressure_ms budget, default 5000ms, then fail fast; budget=0 restores single-shot fail-fast) at src/lib.rs:3115. populate (src/lib.rs:2950) and batch_populate (src/lib.rs:3017) unconditionally best-effort drop on full: log, bump store_drops_on_full, return Ok(()) without caching, instead of propagating AllocationFailed (which the vLLM connector turns into a fatal assert transfer_result.success -> EngineDeadError). DispatcherConfig gained store_backpressure_ms; TierEventStats gained store_backpressure_events + store_drops_on_full (idispatcher.rs). Spec previously specified only FR-053 read-path staging and a four-field TierEventStats, and specified populate/batch_populate to surface AllocationFailed on a full tier.",
+      "accuracy_note": "Drop-on-full is unconditional; store_backpressure_ms=0 disables ONLY the reserve_memory retry, not the caller-side drop. Verified against src/lib.rs:3150-3202. Spec text does not claim store_backpressure_ms=0 makes populate return AllocationFailed.",
+      "before": "(store path) reserve_memory fails fast on AllocationFailed; populate/batch_populate surface AllocationFailed on a full tier; TierEventStats has four u64 fields (promotions_to_memory, promotions_to_gpu, evictions_from_memory, evictions_from_ssd).",
+      "after": "New FR-060 (two-layer store backpressure: bounded backpressure in reserve_memory + unconditional best-effort drop-on-full in populate/batch_populate). FR-003/FR-033/FR-056/FR-058/FR-059 + one edge case + US1 acceptance scenario 5 updated; store_backpressure_ms config (default 5000) and store_backpressure_events/store_drops_on_full counters (six u64 fields) documented.",
+      "confidence": "HIGH"
     }
   ],
   "not_proposed": [
-    "US11 queue-depth contradiction: resolved 2026-08-20 (max_queue_depth = 128). Aligned.",
-    "CLAUDE.md path/-v2 names: corrected in current tree + out of editing scope. Aligned.",
-    "DI/test surface: already specced as FR-057/SC-016 (2026-08-20).",
-    "Two src/lib.rs 'gRPC handler' source comments: source out of editing scope; follow-up cleanup."
+    "Two src/lib.rs 'gRPC handler' source comments: source out of editing scope; follow-up cleanup (carried over)."
   ]
 }

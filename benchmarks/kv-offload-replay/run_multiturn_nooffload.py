@@ -36,6 +36,11 @@ if __name__ == "__main__":
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
     MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
     MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # 0 = until convs exhausted
+    # Data-parallel sharding: with DP_SIZE>1, N replicas (one per GPU) each replay
+    # a disjoint strided 1/N conversation slice so the DP baseline arm is scored on
+    # the same per-replica shard as the offloading arms. DP_SIZE=1 = original.
+    DP_SIZE = max(1, int(os.environ.get("DP_SIZE", 1)))
+    DP_RANK = max(0, int(os.environ.get("DP_RANK", 0)))
 
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
     print(f"[run] model={MODEL}", file=sys.stderr)
@@ -45,6 +50,11 @@ if __name__ == "__main__":
           file=sys.stderr)
 
     convs = common.load_convs(SUBSET_PATH, NUM_CONVS)
+    if DP_SIZE > 1:
+        _global_total = len(convs)
+        convs = convs[DP_RANK::DP_SIZE]
+        print(f"[run] DP shard rank={DP_RANK}/{DP_SIZE}: {len(convs)} of "
+              f"{_global_total} conversations", file=sys.stderr)
     print(f"[run] loaded {len(convs)} conversations", file=sys.stderr)
 
     from vllm import SamplingParams

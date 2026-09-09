@@ -1,11 +1,39 @@
 ---
 spec_sync_component: extended-metadata-store
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T18:54:21Z
-spec_sync_git_commit: b220a1c8
-spec_sync_inputs_sha256: f7a2c534ca840b8a32a62eedfb9ffc909ef7b4afd42e2f121885abc0d7f3401e
+spec_sync_synced_at: 2026-09-09T23:14:09Z
+spec_sync_git_commit: 8f6a5b40
+spec_sync_inputs_sha256: 6b39fa69d44019b99e12fd297e6866c9ac6cdf81a41d33c73bc8a138754c52eb
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+>
+> **Correction 2026-09-09T23:14Z (clean-tree digest; branch linearized).** The
+> 22:27 re-stamp above was computed in a working tree that carried untracked,
+> uncommitted files under this component's `specs/` — the speckit scratch docs
+> (`data-model.md`, `research.md`, `quickstart.md`, `contracts/`, `checklists/`)
+> and an entire local `002-ssd-integration-test/` spec — none of which are
+> tracked on this branch. `scripts/spec-sync-hash.sh` walks files on disk, so
+> those strays inflated the local digest and CI's clean checkout recomputed a
+> different one (same failure class as the 2026-09-03 `iipc.rs` note below). The
+> digest is now recomputed in a pristine `git worktree` at the branch tip over
+> the **tracked** inputs only (`specs/001-extended-metadata-store/{spec,plan,tasks}.md`
+> + `components/interfaces`), giving `6b39fa69…`, which is exactly what CI hashes.
+> The branch was also rebased onto `origin/unstable` (merge commit removed), so
+> `spec_sync_git_commit` now points at the linear tip `8f6a5b40`. No `src/`,
+> `specs/`, or report-body content changed; drift status remains `clean`.
+
 # Spec ↔ Implementation Drift Report — extended-metadata-store
 
 > **Digest refreshed 2026-09-03 (spec-sync gate fix).** The earlier

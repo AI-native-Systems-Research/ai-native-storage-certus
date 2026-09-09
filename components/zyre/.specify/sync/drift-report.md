@@ -1,11 +1,24 @@
 ---
 spec_sync_component: zyre
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-04T16:13:14Z
-spec_sync_git_commit: 42f53f49
-spec_sync_inputs_sha256: ea5b3eabb68485ccd09bf99eb762fd07ec1575266c97e41d67bc5773559cce0d
+spec_sync_synced_at: 2026-09-09T22:27:18Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: f7add1fd38d8bb09e866c844cdeb5aaa4c8094e5cbcc137084a2afb68667d14c
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
 # Drift Report: zyre
 
 **This sweep (2026-09-03; stamped clean 2026-09-04)** independently re-verified

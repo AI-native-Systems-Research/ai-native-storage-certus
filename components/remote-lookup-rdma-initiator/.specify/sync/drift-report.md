@@ -1,11 +1,24 @@
 ---
 spec_sync_component: remote-lookup-rdma-initiator
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-04T00:20:50Z
-spec_sync_git_commit: ede3006e
-spec_sync_inputs_sha256: 904e6a96ab64cb72756cc0dca1118bd9e7388a711966c41f917eeb9467ced596
+spec_sync_synced_at: 2026-09-09T22:27:18Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: 18b805dbfccc864f72f2de4bfcfeaf08848bff2aa90966e0c0f486655a0bfdae
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
 # Spec-vs-Implementation Drift Report — remote-lookup-rdma-initiator
 
 **Re-verified 2026-09-03** (independent re-sweep, not a re-stamp). Every spec-002

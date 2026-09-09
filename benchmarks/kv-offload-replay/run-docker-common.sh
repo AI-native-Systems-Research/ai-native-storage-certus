@@ -56,6 +56,11 @@ COMMON_RUN_ARGS=(
   # must be forwarded explicitly here to reach the containerized driver.
   -e "WORKLOAD_MODE=${WORKLOAD_MODE:-batched}"
   -e "ACTIVE_SESSIONS=${ACTIVE_SESSIONS:-0}"
+  # Data-parallel shard identity for this replica. The driver uses these to
+  # replay a disjoint 1/N conversation slice; each DP replica is an independent
+  # container on its own GPU with its own isolated tiers. Default 0/1 = single.
+  -e "DP_RANK=${DP_RANK:-0}"
+  -e "DP_SIZE=${DP_SIZE:-1}"
   -e "HF_HUB_OFFLINE=0"
   -v "${HF_CACHE}:/root/.cache/huggingface:z"
 )

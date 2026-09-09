@@ -1,11 +1,24 @@
 ---
 spec_sync_component: block-device-spdk-nvme
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T18:54:21Z
-spec_sync_git_commit: b220a1c8
-spec_sync_inputs_sha256: 62f99c943a92e4a45e07f04d103e5e6ebc6e83df639af05c79019770df2dc93c
+spec_sync_synced_at: 2026-09-09T22:27:18Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: 154277dc7f3efb370fbc33bc599d3316b8bf63ad66c08540e470aeaaa0bdaf84
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
 # Drift Report — block-device-spdk-nvme
 
 > **Digest refreshed 2026-09-03 (spec-sync gate fix).** The earlier
