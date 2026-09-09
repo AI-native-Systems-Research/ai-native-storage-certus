@@ -1,10 +1,26 @@
+---
+spec_sync_component: component-framework
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-09-03T17:33:06Z
+spec_sync_git_commit: cab68bf2
+spec_sync_inputs_sha256: ffeeb57f098e00d29807473fb4317861ae4fe512b35be0820a2feabf403eb4e6
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
 # Drift Report: component-framework
 
-**Generated**: pending
+**Generated**: 2026-09-03
 **Component**: `lib/component-framework` (relocated from `components/component-framework`)
-**Scope**: spec.md (+ plan/data-model skim) under `specs/*/` vs implementation
-under `crates/{component-core,component-macros,component-framework}/src/` and
-`examples/`. READ-ONLY analysis.
+**Scope**: `specs/*/` (spec.md + plan/data-model skim) vs implementation under
+`crates/{component-core,component-macros,component-framework}/src/` and
+`examples/`. This sweep applied one ALIGN (spec→reality) resolution; no source
+code was changed.
+
+> **Note on the CI input hash.** `scripts/spec-sync-hash.sh lib/component-framework`
+> hashes `<dir>/src` + `<dir>/specs` + the `components/interfaces` tree. This
+> crate keeps its Rust sources under `crates/*/src`, not `<dir>/src`, so the
+> committed hash covers `specs/**` and the interfaces tree only — the drift
+> findings below were nonetheless verified against the actual `crates/*/src`
+> implementation by hand.
 
 ## Summary
 
@@ -13,14 +29,19 @@ under `crates/{component-core,component-macros,component-framework}/src/` and
 | Specs Analyzed | 6 |
 | Requirements Checked (FR + SC) | 149 |
 | Aligned | 149 |
-| Drifted | 2 (doc-only, stale path refs) |
+| Drifted this sweep | 1 actionable (lifecycle) → resolved via ALIGN + 2 doc-only (stale paths) |
 | Not Implemented | 0 |
-| Unspecced Features | 1 |
+| Unspecced Features | 1 (benign) |
 
-All functional requirements (FR) and success criteria (SC) across the six specs
-are implemented and match the specs. The only drift is stale `components/…`
-path references in two prior spec-sync artifact files left over from the
-relocation of this crate from `components/` to `lib/`.
+**Correction of the prior artifact.** The previous "Generated: pending" report
+claimed all 149 FR+SC aligned with only two doc-only path drifts, and marked
+spec 002 **SC-002 ✓** and **FR-018 ✓**. That pass was **vacuous**: the sole
+component-drop test in the crate uses a hand-written `IUnknown` that stores no
+self-clone, so it never exercised the `define_component!`-generated interface
+map. Re-verifying against `crates/component-macros/src/define_component.rs`
+uncovered a genuine, previously-unacknowledged lifecycle drift (below). It is
+resolved this sweep by ALIGNing the spec to reality; the underlying code fix is
+deferred by maintainer decision (2026-09-03).
 
 ---
 
@@ -47,15 +68,70 @@ All 13 FRs and 6 SCs Aligned.
 
 ### Spec 002-registry-refcount-binding — Registry, Ref-Counting, Binding
 
-All 20 FRs and 7 SCs Aligned.
+All 20 FRs and 7 SCs Aligned **after this sweep's ALIGN edit**. One actionable
+lifecycle drift was found and resolved by aligning the spec to reality; the
+code fix is deferred (see "Known limitation", below).
 
 - FR-001..008 (registry map/register/create-by-name/not-found/duplicate/list/unregister/thread-safe) ✓ `crates/component-core/src/registry.rs:62-210` (`RegistryError::{NotFound,AlreadyRegistered,FactoryFailed}`)
-- FR-009..013 (atomic refcount via Arc, attach, Drop-based release, cross-thread, compile-time UAF prevention) ✓ `crates/component-core/src/component_ref.rs`
-- FR-014..019 (first-party + third-party binding, enumerate by name, TypeId resolution + mismatch error, single wiring op) ✓ `crates/component-core/src/binding.rs:100-128`
+- FR-009..013 (atomic refcount via `Arc`, `attach`, `Drop`-based release, cross-thread, compile-time UAF prevention) ✓ `crates/component-core/src/component_ref.rs` — **the refcount primitive itself is correct**; `attach`/`Drop`/`Arc::strong_count` behave as specified and there is no use-after-free.
+- FR-014..019 (first-party + third-party binding, enumerate by name, TypeId resolution + mismatch error, single wiring op) ✓ `crates/component-core/src/binding.rs:100-138`
 - FR-020 (`register_simple`) ✓ `registry.rs:147`
-- FR-018 (factory returns single `ComponentRef`) ✓ `registry.rs` `ComponentFactory::create`
 - Factory panic isolation ✓ `catch_unwind` `registry.rs:195-200`
-- SC-001..007 ✓
+- SC-001, SC-003..007 ✓
+- **FR-018 / SC-002 — ALIGNED this sweep (was drifted).**
+
+#### Lifecycle drift — found, verified, resolved via ALIGN (code fix deferred)
+
+**Finding.** Every `define_component!`-generated component leaks its own heap
+allocation. `define_component.rs` populates the component's `__interface_map`
+with **strong** `Arc` self-clones — one per provided interface
+(`interface_map_inserts`, ~`define_component.rs:180-198`) plus one unconditional
+clone for `IUnknown` (`iunknown_insert`, ~`:200-213`, emitted even for
+zero-interface components). The map is stored in the component's own field
+(`:311`) during `init_method` (~`:327-375`). No `Weak` reference exists anywhere
+in the three crates, the macro emits no `Drop`, and `__interface_map` is never
+cleared. The result is a self-referential strong `Arc` cycle: the internal
+strong count never returns to zero when external references drop, so the
+allocation persists until process exit.
+
+**Why the prior "SC-002 ✓" was vacuous.** The only drop test in the crate
+(`component_ref.rs`) uses a hand-written `IUnknown` that stores no self-clone,
+so it cannot observe the macro-generated cycle. No test asserts that a real
+`define_component!` component is destroyed once external references drop.
+
+**Contradicted spec text (pre-edit):**
+- FR-018 final clause: "The component MUST be destroyed when all external
+  `ComponentRef` handles and receptacle connections are dropped." — false for
+  macro-generated components.
+- SC-002: "zero leaks … in all test scenarios." — false for macro-generated
+  components.
+- Edge case (spec §Edge Cases): "The component is only destroyed when all
+  references … are dropped." — false for macro-generated components.
+
+**Resolution (ALIGN spec→reality, 2026-09-03 maintainer decision "don't fix the
+code for the moment, just update the specs"):** the spec now documents the
+retention as a **known limitation** and records the intended `Weak`-based fix,
+rather than asserting a destruction guarantee the shipped code does not provide.
+Edits applied to `specs/002-registry-refcount-binding/spec.md`:
+- **FR-018** rewritten: explicitly states the interface map holds strong `Arc`
+  self-clones, that this retains a self-reference until process exit, and that
+  the intended future fix is to store the self-clones as `Weak` and upgrade on
+  `query`.
+- **SC-002** rewritten: "zero leaks" is scoped to the refcount primitive and
+  receptacle wiring (both correct); the macro's interface-map self-reference is
+  called out as the known exception.
+- **Edge case** annotated with the same FR-018 caveat.
+
+**Deferred code fix (tracked here).** Store the interface-map self-clones as
+`Weak<dyn I>` in `define_component.rs`, and have `iunknown::query` /
+`connect_receptacle_raw` `upgrade()` on access (a design that also lets the
+existing hand-rolled `IUnknown` impls that store a strong `Arc` keep working via
+an `Arc` fallback in `query`). Receptacle connections and handed-out queried
+`Arc`s stay strong and legitimately keep a provider alive while connected
+(FR-018), so only the internal self-reference becomes `Weak`, breaking the
+cycle. Must be accompanied by a new test that asserts a real
+`define_component!` component reaches strong-count 0 / is dropped once all
+external references release. **Not applied this sweep by maintainer decision.**
 
 ### Spec 003-actor-channels — Actor Model with Channel Components
 
@@ -116,30 +192,52 @@ All 8 FRs and 5 SCs Aligned. Implemented in `crates/component-core/src/log.rs`.
 
 ## Drifted Items ⚠️
 
-| # | Requirement | Spec vs Actual | Location | Severity |
-|---|-------------|----------------|----------|----------|
-| 1 | Post-relocation path references | Doc references old path `components/component-framework/...` after crate moved to `lib/component-framework/` | `.specify/sync/align-tasks.md:29` | minor |
-| 2 | Post-relocation path references | Suggested `git add`/commit command references old `components/component-framework/specs/...` path | `.specify/sync/apply-report.md:60` | minor |
+| # | Requirement | Spec vs Actual | Location | Severity | Status |
+|---|-------------|----------------|----------|----------|--------|
+| 1 | FR-018 / SC-002 lifecycle | Spec asserted destruction-on-external-drop and "zero leaks"; `define_component!` stores strong `Arc` self-clones in `__interface_map`, so macro-generated components are retained until process exit | `crates/component-macros/src/define_component.rs:180-213,311,327-375` | **major** | **Resolved via ALIGN** (spec updated; code fix deferred) |
+| 2 | Post-relocation path references | Doc references old path `components/component-framework/...` after crate moved to `lib/component-framework/` | `.specify/sync/align-tasks.md:29` | minor | Open (doc-only) |
+| 3 | Post-relocation path references | Suggested `git add`/commit command references old `components/component-framework/specs/...` path | `.specify/sync/apply-report.md:60` | minor | Open (doc-only) |
 
-Both are stale spec-sync artifacts from before the `components/` → `lib/`
+Items 2–3 are stale spec-sync artifacts from before the `components/` → `lib/`
 relocation. No spec.md, plan.md, quickstart.md, README.md, or Cargo manifest
-retains the old path. Severity minor: they do not break a working build/command
-(the commands are historical), but the referenced paths no longer exist.
+retains the old path. They do not break a working build (the commands are
+historical), but the referenced paths no longer exist.
 
 ---
 
 ## Unspecced Features
 
-| Feature | Location | Lines | Suggested Spec |
-|---------|----------|-------|----------------|
-| Additional actor benches beyond spec-named ones (`actor_latency`, `binding`, `component_ref`, `method_dispatch`, `query_interface`, `receptacle`, `registry`) | `crates/component-framework/benches/` | — | Covered in spirit by SC-005 (001) / performance-accountability constitution; no dedicated FR names each bench. No action needed. |
+| Feature | Location | Suggested Spec |
+|---------|----------|----------------|
+| Additional actor benches beyond spec-named ones (`actor_latency`, `binding`, `component_ref`, `method_dispatch`, `query_interface`, `receptacle`, `registry`) | `crates/component-framework/benches/` | Covered in spirit by SC-005 (001) / performance-accountability constitution; no dedicated FR names each bench. No action needed. |
 
 ---
 
-## Recommendations
+## Minor recommendations (not blocking; below drift threshold)
 
-1. Update the two stale `components/component-framework` path references in
-   `.specify/sync/align-tasks.md:29` and `.specify/sync/apply-report.md:60` to
-   `lib/component-framework/...` (or note them as historical). Minor.
-2. No source or spec changes required — implementation is fully aligned with
-   all six specs.
+- **SC-007 leaf-accessor doc examples.** `ComponentRef::new/attach/ref_count`
+  (`component_ref.rs:56,63,72`) and `ComponentRegistry::unregister/list`
+  (`registry.rs:157,210`) carry doc comments and are exercised by unit tests,
+  and their enclosing types carry runnable doctests, but these individual
+  accessors lack their own `# Examples` blocks. `cargo doc --no-deps` is
+  warning-free and the CI gate does not enforce per-method examples, so this is
+  a constitution-completeness nit, not spec/impl behavioral drift. Add short
+  `# Examples` when next touching these files.
+- Update the two stale `components/component-framework` path references
+  (items 2–3) to `lib/component-framework/...` or annotate them as historical.
+
+---
+
+## Stamp rationale
+
+`drift_status: clean`. The one major lifecycle drift is resolved at the
+spec↔implementation level this sweep by ALIGNing the spec to the shipped
+behavior and documenting the retention as a **known limitation** with the
+intended `Weak`-based fix recorded (FR-018, SC-002, Edge Cases in
+`spec.md`). Per the maintainer decision on 2026-09-03 ("don't fix the code for
+the moment, just update the specs"), the code fix is deliberately deferred and
+tracked in this report; no source was changed, so no test/clippy/doc/bench state
+changed. The remaining items are doc-only (stale paths) and a below-threshold
+SC-007 example nit. This is **not** a clean stamp over an unacknowledged
+mismatch — the leak is documented loudly in both the spec and this report, and
+`clean` reflects that spec and code now agree.

@@ -98,6 +98,12 @@ Configuration for gossip-based discovery (alternative to UDP beacon).
 
 **Invariant**: At least one of `bind` or `connect` must be provided.
 
+**Construction**: Unlike `NodeConfig`, `GossipConfig` has **no** `Default` impl —
+an empty config (`bind: None, connect: []`) would always fail the invariant above.
+It is constructed via the `bind(endpoint)` / `connect(endpoint)` smart constructors
+(a `#[non_exhaustive]` struct with public fields, so further fields can still be set
+after construction). The invariant is re-checked by `create_node` via `validate`.
+
 ---
 
 ### PeerId

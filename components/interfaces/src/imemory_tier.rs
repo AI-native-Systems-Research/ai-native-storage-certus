@@ -84,10 +84,14 @@ component_macros::define_interface! {
         /// Returns the evicted key, or `None` if the pool is empty.
         fn evict_next(&self) -> Option<CacheKey>;
 
-        /// Evict the eviction policy's next victim from the same shard as `key`.
+        /// Evict the eviction policy's next victim. Alias for [`evict_next`](Self::evict_next).
         ///
-        /// This ensures the freed space is allocatable by a subsequent `insert(key, ...)`.
-        /// Returns the evicted key, or `None` if the target shard is empty.
+        /// The pool is a single unsharded region, so the `key` argument does not
+        /// constrain which victim is chosen — any freed space is globally
+        /// allocatable by a subsequent `insert`. Provided for call sites that
+        /// want to free space "for" a specific key without special-casing the
+        /// unsharded layout.
+        /// Returns the evicted key, or `None` if the pool is empty.
         fn evict_next_for_key(&self, key: CacheKey) -> Option<CacheKey>;
 
         /// Peek at the N oldest keys without removing them.

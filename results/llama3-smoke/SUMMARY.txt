@@ -1,6 +1,0 @@
-run: llama3 (NousResearch/Meta-Llama-3-8B), 5 docs x 10000 tok, out=1, repeat=1/tile, inflight=1, completions
-server: vllm 0.20.0, --load-format auto, rope linear x4, max-model-len 32768, prefix-caching on
-GPU KV cache size: 38064 tokens ; working set: 50000 tokens (5 x 10000) -> exceeds cache
-prefix_cache_queries delta: 105035 ; prefix_cache_hits delta: 0 -> 0.0% hit rate
-warmup: mean TTFT 1.588s, round 7.947s, 5/5
-query : mean TTFT 1.591s, round 7.961s, 5/5  (no speedup: 0% reuse)

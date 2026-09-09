@@ -49,9 +49,11 @@
 │  │  │  └────────────────────────┘ │                               │   │  │
 │  │  └───────────────────────────┼──┼─┼───────────────────────────────┘   │  │
 │  │               │   │       │  │  │ │                                    │  │
-│  │  [ParallelBackgroundWriter]──┼──┼─┼── WriteJob ──▶ DataDrive           │  │
-│  │  [BackgroundEvictor] ────────┼──┼─┼── Evict stale SSD extents          │  │
-│  │  [PipelineRing] ────────────┘  │ │── Pipelined SSD→DRAM→GPU reads     │  │
+│  │  [ParallelBackgroundWriter] ── WriteJob ──▶ DataDrive                  │  │
+│  │  [BackgroundEvictor] ── Evict stale SSD extents                        │  │
+│  │  [MemoryTierEvictor] ── Demote cold DRAM ──▶ SSD                       │  │
+│  │  [ColdReadPool] ── Per-drive cold SSD→DRAM→GPU workers                 │  │
+│  │  [PipelineRing] ── StagingPool for pipelined reads                     │  │
 │  └───────────────┼───┼────────────┼─┼────────────────────────────────────┘  │
 │                  │   │       │    │ │                                        │
 │                  ▼   │       │    ▼ │                                        │
@@ -139,10 +141,11 @@
 10. **RemoteLookupComponent** — orchestrator; `init_hook` brings up the responder, advertises the local RDMA endpoint via Zyre, spawns the initiator worker, and joins the discovery group
 11. **DispatcherComponent** — top-level orchestrator
     - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvme + ExtentManager) per `--device-pci`
-    - Allocates **PipelineRing** for pipelined cold reads (8-deep, 2 CUDA streams)
+    - Allocates the **ColdReadPool** (per-drive workers with pre-connected NVMe channels + CUDA streams) and the **PipelineRing** (owns the cold-load StagingPool: CUDA-pinned + SPDK-registered ring buffers, plus per-device warm/store/pipe CUDA streams)
     - Creates **warm_stream** for async memory-tier→GPU DMA
     - Starts **ParallelBackgroundWriter** for async write-through
     - Starts **BackgroundEvictor** for SSD space reclamation
+    - Starts **MemoryTierEvictor** for DRAM→SSD demotion under memory pressure
 
 ## Data Flow
 

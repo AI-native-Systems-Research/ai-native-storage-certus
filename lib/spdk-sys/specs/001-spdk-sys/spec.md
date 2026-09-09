@@ -49,7 +49,7 @@ This crate is consumed by higher-level safe wrappers (`spdk-env`, `block-device-
 | FR-1 | Generate Rust bindings for SPDK environment API (`spdk_env_opts_init`, `spdk_env_init`, `spdk_env_fini`) | P1 |
 | FR-2 | Generate bindings for PCI enumeration and device accessor functions (`spdk_pci_*`) | P1 |
 | FR-3 | Generate bindings for NVMe probe/attach/detach lifecycle | P1 |
-| FR-4 | Generate bindings for NVMe controller operations (namespace mgmt, qpair alloc, admin commands) | P1 |
+| FR-4 | Generate bindings for NVMe controller and namespace operations: namespace management (`create_ns`/`attach_ns`/`delete_ns`/`format`), namespace info accessors (`spdk_nvme_ns_is_active`/`spdk_nvme_ns_get_data`/`spdk_nvme_ns_get_sector_size`/`spdk_nvme_ns_get_num_sectors`/`spdk_nvme_ns_get_size`), qpair allocation (`alloc_io_qpair`/`free_io_qpair`), admin commands (`cmd_admin_raw`), in-flight command abort (`spdk_nvme_ctrlr_cmd_abort_ext`), controller reset/identify (`reset`/`get_data`/`get_id`), and MDTS-derived max transfer size (`spdk_nvme_ctrlr_get_max_xfer_size`) | P1 |
 | FR-5 | Generate bindings for NVMe I/O operations (read, write, write_zeroes, flush, completion processing) | P1 |
 | FR-6 | Generate bindings for DMA memory allocation (`spdk_dma_zmalloc`, `spdk_dma_free`, `spdk_zmalloc`, `spdk_free`) | P1 |
 | FR-7 | Export all necessary SPDK/DPDK/system linker directives | P1 |
@@ -111,3 +111,4 @@ This crate is consumed by higher-level safe wrappers (`spdk-env`, `block-device-
 - `spdk_nvme_ctrlr_data` is marked as an opaque type because its C layout includes complex bitfields.
 - 30 DPDK `rte_*` libraries are linked statically with `+whole-archive`.
 - The `wrapper.h` file includes `spdk/env.h`, `spdk/env_dpdk.h`, and `spdk/nvme.h`.
+- *(Backfilled 2026-09-03 — spec-sync.)* FR-4 was extended to name three allowlisted binding clusters present in `build.rs` but previously unnamed by any requirement: the MDTS-derived max transfer size accessor `spdk_nvme_ctrlr_get_max_xfer_size` (`build.rs:197`, used by the block-device actor to fragment I/O to the device limit), the in-flight command abort `spdk_nvme_ctrlr_cmd_abort_ext` (`build.rs:220`, used on `AbortOp` so the controller does not DMA into a released buffer), and the five namespace info accessors `spdk_nvme_ns_is_active`/`_get_data`/`_get_sector_size`/`_get_num_sectors`/`_get_size` (`build.rs:207-211`, used to report namespace geometry/state). No source or build change accompanied this backfill — the bindings already existed; only the spec was made to name them.

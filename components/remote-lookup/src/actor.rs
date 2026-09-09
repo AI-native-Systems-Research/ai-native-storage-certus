@@ -311,7 +311,17 @@ impl ActorState {
     fn on_wire(&mut self, from: PeerId, bytes: &[u8]) {
         let msg = match WireMessage::decode(bytes) {
             Ok(m) => m,
-            Err(_) => return, // malformed frame: drop
+            Err(e) => {
+                // FR-018(b): malformed/truncated frame — log then drop; the poll
+                // loop continues. Logged so a framing mismatch is diagnosable.
+                if let Some(logger) = &self.deps.logger {
+                    logger.debug(&format!(
+                        "remote-lookup: dropping malformed frame from {from} ({} bytes): {e:?}",
+                        bytes.len()
+                    ));
+                }
+                return;
+            }
         };
         match msg {
             WireMessage::KeyQuery { op_id, entries } => self.handle_key_query(from, op_id, entries),
@@ -327,7 +337,19 @@ impl ActorState {
                 slots,
             } => self.handle_rdma_request(from, op_id, endpoint, rkey, slots),
             WireMessage::RdmaStatus { op_id, entries } => self.on_rdma_status(from, op_id, entries),
-            WireMessage::Unknown { .. } => {}
+            // FR-018(a): unrecognized `msg_type` — log then ignore.
+            WireMessage::Unknown {
+                version,
+                msg_type,
+                op_id,
+            } => {
+                if let Some(logger) = &self.deps.logger {
+                    logger.debug(&format!(
+                        "remote-lookup: ignoring unknown frame from {from} \
+                         (version={version}, msg_type={msg_type}, op_id={op_id})"
+                    ));
+                }
+            }
         }
     }
 

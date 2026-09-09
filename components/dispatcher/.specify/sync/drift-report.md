@@ -1,12 +1,23 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-02T20:45:00Z
-spec_sync_git_commit: 787b8263
-spec_sync_inputs_sha256: 2886506afcb1d6dbaa9505fa7e3c01405c045fbf588dfd2003be84865ea63deb
+spec_sync_synced_at: 2026-09-03T18:54:21Z
+spec_sync_git_commit: b220a1c8
+spec_sync_inputs_sha256: 5a309317d598ec6681d629f951ccc4d566156e0be4c96b4907661ac75086d738
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Spec Drift Report — dispatcher
+
+> **Digest refreshed 2026-09-03 (interfaces-only hash change).** This branch
+> reworded a doc comment on `IMemoryTier::evict_next_for_key`
+> (`components/interfaces/src/imemory_tier.rs`) as part of the memory-tier
+> spec-sync. `scripts/spec-sync-hash.sh` folds the whole `components/interfaces`
+> tree into every component's hash, so this component's digest moved even though
+> no interface signature or behavior changed and dispatcher was not otherwise
+> re-synced. The interface delta is confined to documentation and cannot affect
+> dispatcher's spec↔implementation alignment; the report body below stands
+> unchanged and drift status remains `clean`. Digest recomputed against the
+> current interface tree.
 
 Generated: 2026-09-02
 Project: dispatcher (spec: specs/001-dispatcher-cache-interface/spec.md)

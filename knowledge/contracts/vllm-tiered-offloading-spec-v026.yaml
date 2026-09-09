@@ -1,0 +1,202 @@
+# vLLM TieringOffloadingSpec — Built-in Reference Implementation
+# This is vLLM's own multi-tier connector. Competitor to certus.
+# Understanding how it works helps identify where to be better.
+
+name: TieringOffloadingSpec
+type: "vLLM built-in connector (reference implementation)"
+api_version: "v0.28 (commit dc9114b)"
+activation: '"spec_name": "TieringOffloadingSpec"'
+notes: "Class name is TieringOffloadingSpec, NOT TieredOffloadingSpec"
+
+# ─── Architecture ─────────────────────────────────────────────────────
+
+architecture:
+  hierarchy: |
+    GPU ←→ CPU primary tier ←→ Secondary tier(s)
+
+    ONLY the CPU primary tier has direct GPU access.
+    Secondary tiers CANNOT read/write GPU memory.
+    All transfers are STAGED through CPU.
+  tiers:
+    primary:
+      name: CPUPrimaryTierOffloadingManager
+      what: "Pinned CPU memory cache (mmap'd SharedOffloadRegion)"
+    secondary:
+      pluggable: true
+      builtin_types:
+        - "fs — FileSystemTierManager (files on disk)"
+        - "obj — Object store via NIXL (S3-compatible)"
+        - "p2p — Cross-instance sharing via NIXL backends (e.g., UCX)"
+
+# ─── CPU Primary Tier ─────────────────────────────────────────────────
+
+primary_tier:
+  class: CPUPrimaryTierOffloadingManager
+  storage:
+    mechanism: "SharedOffloadRegion — single mmap'd region (pinned, NUMA-aware)"
+    structure: "Fixed-size slots indexed by block ID"
+    capacity: "Configured via cpu_bytes_to_use"
+  eviction:
+    policy: "LRU (default), ARC, or custom (pluggable via eviction_policy)"
+    trigger: "Inside prepare_store() when no free slots"
+    protection: "ref_cnt system — blocks being transferred are non-evictable (ref_cnt > 0)"
+    behavior: "Only evicts ref_cnt=0 blocks. Returns None if not enough evictable."
+  gpu_transfer:
+    store: "cudaMemcpyAsync D2H (GPU → pinned CPU memory)"
+    load: "cudaMemcpyAsync H2D (pinned CPU memory → GPU)"
+    notes: "Runs asynchronously alongside model computation"
+  config:
+    cpu_bytes_to_use: "Total host memory reserved across all workers (required)"
+    block_size: "Tokens per block. Must be multiple of GPU block size."
+    blocks_per_chunk: "Alternative to block_size (mutually exclusive)"
+    eviction_policy: '"lru" (default) or "arc" or custom class name'
+    cache_policy_module_path: "Module path for custom eviction policy class"
+    offload_prompt_only: "Only offload prefill blocks (default true)"
+  tiering_specific_notes: |
+    store_threshold is NOT supported in tiering mode (rejected if >= 2).
+    max_tracker_size is NOT passed to the tiering primary manager.
+    These are CPUOffloadingSpec-only (single-tier mode) parameters.
+
+# ─── Filesystem Secondary Tier (the main competitor) ──────────────────
+
+filesystem_tier:
+  class: FileSystemTierManager
+  type: '"fs"'
+  what: "Persists KV blocks as individual files on local/shared filesystem"
+
+  storage:
+    format: "One .bin file per block"
+    layout: "<root_dir>_r<rank>/<hhh>/<hh>_g<group_idx>/<hash_hex>.bin"
+    dedup: "Skips write if file already exists (content-addressed by block hash)"
+    atomicity: "Write to .tmp then os.replace() (atomic rename)"
+    o_direct: "Probed at init. Uses O_DIRECT if supported, else buffered."
+
+  io:
+    store: "os.write() to temp file → os.replace()"
+    load: "os.readv() directly into primary tier memoryview"
+    c_extension: "Optional compiled C module (fs_io_C) for GIL-free batch I/O"
+
+  concurrency:
+    model: "DualQueueThreadPool — separate load/store priority queues"
+    read_threads: "16 (default)"
+    write_threads: "16 (default)"
+    total: "32 Python threads"
+    behavior: |
+      Each group prefers its own queue but borrows from the other when idle.
+      Loads don't starve behind stores.
+
+  lookup:
+    mechanism: "ASYNCHRONOUS — first lookup returns RETRY"
+    detail: |
+      The FS tier uses an async lookup manager (async_lookup.py).
+      First lookup for a key returns RETRY immediately.
+      The actual os.path.exists batch runs on a background thread.
+      Subsequent lookups for the same key (next scheduler step) return HIT or MISS.
+      This adds at least 1 scheduler step delay to FS-tier hits.
+
+  promotion:
+    trigger: "lookup() finds block in FS but not in CPU primary"
+    mechanism: "Deferred batch — queued during lookup, flushed at on_schedule_end()"
+    returns: "HIT_PENDING until promotion completes (1+ scheduler steps)"
+    flow: "FS file → os.readv into CPU memoryview → next lookup HIT → cudaMemcpy H2D"
+
+  cross_instance_sharing:
+    supported: true
+    caveat: |
+      Deterministic sharing depends on hashing configuration.
+      Non-cryptographic prefix hashing requires matching PYTHONHASHSEED
+      across instances for identical file paths.
+
+  config:
+    root_dir: "Base directory for block storage (required)"
+    n_read_threads: "16 (default). Read-priority threads."
+    n_write_threads: "16 (default). Write-priority threads."
+    enable_kv_events: |
+      Publish BlockStored events (default false).
+      NOTE: requires global KV events also enabled to function.
+
+  performance_characteristics:
+    notes: "These are ESTIMATED ranges, not measured contract guarantees."
+    per_block_overhead: "file open + read + close per block (estimated: ~100-500us SSD, ~1-5ms HDD)"
+    metadata_overhead: "One inode per block. Millions of blocks = inode pressure."
+    kernel_overhead: "Every I/O is a syscall through the kernel I/O stack"
+    no_nvme_queue_depth: "Sequential os.readv, one block at a time per thread"
+    no_pipelining: "Entire batch finishes before reporting job completion"
+    gil_contention: "32 Python threads share GIL on non-C-extension path"
+    async_lookup_delay: "First lookup always returns RETRY (1 scheduler step minimum)"
+
+# ─── Object Store Secondary Tier ──────────────────────────────────────
+
+object_store_tier:
+  class: "OBJ secondary tier"
+  type: '"obj"'
+  what: "S3-compatible object store via NIXL OBJ backend"
+  config: "store_config with bucket, endpoint, optional credentials, region"
+  use_case: "Cloud deployments, shared model serving"
+
+# ─── P2P Secondary Tier ───────────────────────────────────────────────
+
+p2p_tier:
+  class: "P2P secondary tier"
+  type: '"p2p"'
+  what: "Cross-instance block sharing via NIXL backends (e.g., UCX)"
+  notes: "NOT necessarily RDMA — depends on configured NIXL backend"
+  use_case: "Disaggregated prefill/decode architectures"
+
+# ─── SecondaryTierManager Interface ───────────────────────────────────
+
+secondary_tier_interface:
+  class: SecondaryTierManager
+  module: vllm.v1.kv_offload.tiering.base
+  init: "(offloading_spec, primary_kv_view: memoryview, tier_type: str)"
+  required:
+    lookup: "(key: OffloadKey, req_context: ReqContext) -> LookupResult"
+    submit_store: "(job_metadata: TransferJob) -> None"
+    submit_load: "(job_metadata: TransferJob) -> None"
+    get_finished_jobs: "() -> Iterable[JobResult]"
+    on_new_request: "(req_context: ReqContext) -> RequestOffloadingContext"
+    drain_jobs: "() -> None"
+  optional:
+    touch: "(keys, req_context) -> None"
+    on_request_finished: "(req_context) -> None"
+    serve_external_requests: "() -> None"
+    on_schedule_end: "(context) -> None"
+    has_pending_work: "() -> bool"
+    take_events: "() -> Iterable[OffloadingEvent]"
+    shutdown: "() -> None"
+    build_metric_definitions: "@classmethod -> dict[str, OffloadingMetricMetadata]"
+    get_stats: "() -> OffloadingConnectorStats | None"
+  registration: |
+    SecondaryTierFactory.register_tier("type_name", "module.path", "ClassName")
+    Or set "type" + "module_path" in the secondary_tiers config entry.
+
+# ─── Data Flows ───────────────────────────────────────────────────────
+
+data_flows:
+  store_path: |
+    1. vLLM calls prepare_store(keys)
+    2. CPU primary allocates slots, evicts LRU if full
+    3. worker.submit_store() → cudaMemcpy D2H (GPU → CPU)
+    4. complete_store() → CPU primary marks blocks as stored
+    5. TieringManager cascades to ALL secondary tiers:
+       a. Increments ref_cnt on primary slots (protects from eviction)
+       b. tier.submit_store(job) → threads write blocks to storage
+       c. get_finished_jobs() → decrements ref_cnt
+  load_path: |
+    1. lookup(key) → check CPU primary first
+    2. CPU HIT → return HIT (fast path — data in DRAM)
+    3. CPU MISS → check secondary tiers in order:
+       a. FS tier: async lookup (first call → RETRY, background stat())
+       b. Next step: lookup returns HIT → initiate promotion
+       c. Allocate CPU slot (ref_cnt=-1, locked until promotion completes)
+       d. Return HIT_PENDING to vLLM
+    4. on_schedule_end(): flush deferred promotions as batched loads
+    5. Thread pool reads files into CPU memoryview
+    6. get_finished_jobs() → ref_cnt: -1→0 (now loadable)
+    7. Next scheduler step: lookup → CPU HIT
+    8. prepare_load → submit_load → cudaMemcpy H2D → complete_load
+  eviction: |
+    CPU primary eviction does NOT delete from secondary tier.
+    The secondary copy persists. Future lookup finds it there and promotes back.
+    No explicit demotion — blocks flow one-way: GPU → CPU → secondary.
+    Eviction only removes from CPU cache, not from disk/object store.

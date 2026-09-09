@@ -13,7 +13,7 @@ A shared LRU eviction policy component providing O(1) track/touch/remove/pop ope
 **Primary Dependencies**:
 - `component-framework` — Component model macros and lifecycle
 - `component-core` — `query_interface!` for runtime interface discovery
-- `interfaces` — `IEvictionPolicy` trait and associated types (`EvictionHandle`, `EvictionKey`, `PoolId`, `EvictionPolicyError`)
+- `interfaces` — `IEvictionPolicy` trait and associated types (`EvictionHandle`, `CacheKey`, `PoolId`, `EvictionPolicyError`)
 
 **Performance Goals**: O(1) for all single-entry operations. Per-pool locking to minimize contention.
 

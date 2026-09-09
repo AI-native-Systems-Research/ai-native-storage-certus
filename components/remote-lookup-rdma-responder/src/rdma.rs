@@ -194,6 +194,31 @@ pub struct RealCmSeam {
 // copied eventfd), never these raw pointers.
 unsafe impl Send for RealCmSeam {}
 
+/// Failure kind returned by [`RealCmSeam::bind`] so `initialize()` can report the
+/// FR-010 whole-pool `ibv_reg_mr` registration failure as
+/// [`RemoteLookupRdmaResponderError::Registration`], while every bind / listen /
+/// device-resolution failure maps to [`RemoteLookupRdmaResponderError::Bind`]
+/// (FR-002). The `From` impls default a bare string error to `Bind`, so only the
+/// registration site needs to name the `Registration` variant explicitly.
+pub(crate) enum CmBindError {
+    /// A bind / `rdma_listen` / device-resolution failure (FR-002).
+    Bind(String),
+    /// The whole-pool `ibv_reg_mr` registration failed (FR-010).
+    Registration(String),
+}
+
+impl From<String> for CmBindError {
+    fn from(msg: String) -> Self {
+        CmBindError::Bind(msg)
+    }
+}
+
+impl From<&str> for CmBindError {
+    fn from(msg: &str) -> Self {
+        CmBindError::Bind(msg.to_string())
+    }
+}
+
 impl RealCmSeam {
     /// Bind an ephemeral port on `bind_ip`, `rdma_listen`, register the whole
     /// memory-tier pool `[pool_ptr, pool_ptr + pool_len)` in the listener's
@@ -210,7 +235,7 @@ impl RealCmSeam {
         command_rx: Receiver<ResponderCommand>,
         pool_ptr: *mut u8,
         pool_len: usize,
-    ) -> Result<(Self, Endpoint, c_int, LocalRegion), String> {
+    ) -> Result<(Self, Endpoint, c_int, LocalRegion), CmBindError> {
         // Default to the first active RDMA device when no bind IP is supplied.
         let resolved_ip = if bind_ip.trim().is_empty() {
             first_active_rdma_ipv4()?
@@ -251,7 +276,7 @@ impl RealCmSeam {
             {
                 ffi::rdma_destroy_id(listen_id);
                 ffi::rdma_destroy_event_channel(channel);
-                return Err(format!("rdma_bind_addr({resolved_ip}) failed"));
+                return Err(format!("rdma_bind_addr({resolved_ip}) failed").into());
             }
             if ffi::rdma_listen(listen_id, LISTEN_BACKLOG) != 0 {
                 ffi::rdma_destroy_id(listen_id);
@@ -303,9 +328,9 @@ impl RealCmSeam {
                 ffi::ibv_dealloc_pd(pd);
                 ffi::rdma_destroy_id(listen_id);
                 ffi::rdma_destroy_event_channel(channel);
-                return Err(format!(
+                return Err(CmBindError::Registration(format!(
                     "ibv_reg_mr failed for pool {pool_ptr:p} len {pool_len}"
-                ));
+                )));
             }
             let local_region = LocalRegion {
                 addr: pool_ptr as u64,

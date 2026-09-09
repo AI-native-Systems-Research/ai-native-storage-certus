@@ -1,6 +1,3 @@
-I have sufficient context. Here's the complete domain reference file:
-
-```markdown
 ---
 id: tier-policy-and-eviction
 decision: Which storage tier each KV block should occupy, when to move it, and when to discard it

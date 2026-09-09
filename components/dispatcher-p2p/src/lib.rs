@@ -60,6 +60,33 @@ pub struct EvictionEvent {
     pub reason: EvictionReason,
 }
 
+/// Publish a best-effort eviction event to the registered subscriber, counting
+/// undeliverable events.
+///
+/// FR-017: eviction-event delivery MUST NOT block or fail an eviction. When the
+/// event cannot be delivered — the channel is full **or** no subscriber has
+/// registered one — it is silently dropped and the running drop count is
+/// incremented (readable/resettable via `eviction_dropped_count`).
+///
+/// `dropped` is `Some` only on paths that intend to emit; the internal
+/// non-emitting `evict_for_space` path passes `None`, so it neither publishes
+/// nor counts.
+pub(crate) fn publish_eviction(
+    tx: Option<&crossbeam_channel::Sender<EvictionEvent>>,
+    dropped: Option<&AtomicU64>,
+    key: CacheKey,
+    reason: EvictionReason,
+) {
+    let Some(dropped) = dropped else { return };
+    let delivered = match tx {
+        Some(tx) => tx.try_send(EvictionEvent { key, reason }).is_ok(),
+        None => false,
+    };
+    if !delivered {
+        dropped.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 use component_framework::define_component;
 use interfaces::{
     CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
@@ -171,7 +198,7 @@ define_component! {
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
-            eviction_dropped: AtomicU64,
+            eviction_dropped: Arc<AtomicU64>,
         },
     }
 }
@@ -223,16 +250,6 @@ impl DispatcherP2pComponent {
 
     pub fn eviction_dropped_count(&self) -> u64 {
         self.eviction_dropped.swap(0, Ordering::Relaxed)
-    }
-
-    #[allow(dead_code)]
-    fn emit_eviction(&self, key: CacheKey, reason: EvictionReason) {
-        let guard = self.eviction_tx.lock().unwrap();
-        if let Some(ref tx) = *guard {
-            if tx.try_send(EvictionEvent { key, reason }).is_err() {
-                self.eviction_dropped.fetch_add(1, Ordering::Relaxed);
-            }
-        }
     }
 
     fn drive_index(key: CacheKey, num_drives: usize) -> usize {
@@ -541,7 +558,9 @@ impl DispatcherP2pComponent {
         needed: u32,
         target_key: CacheKey,
     ) -> Result<(), DispatcherError> {
-        Self::evict_for_space_inner(dm, mt, needed, target_key, None)
+        // Internal, non-emitting path: `dropped = None` means neither publish
+        // nor count (FR-017 applies only to the emit paths below).
+        Self::evict_for_space_inner(dm, mt, needed, target_key, None, None)
     }
 
     fn evict_for_space_emit(
@@ -552,7 +571,14 @@ impl DispatcherP2pComponent {
         target_key: CacheKey,
     ) -> Result<(), DispatcherError> {
         let guard = self.eviction_tx.lock().unwrap();
-        Self::evict_for_space_inner(dm, mt, needed, target_key, guard.as_ref())
+        Self::evict_for_space_inner(
+            dm,
+            mt,
+            needed,
+            target_key,
+            guard.as_ref(),
+            Some(self.eviction_dropped.as_ref()),
+        )
     }
 
     fn evict_for_space_inner(
@@ -561,6 +587,7 @@ impl DispatcherP2pComponent {
         needed: u32,
         target_key: CacheKey,
         eviction_tx: Option<&crossbeam_channel::Sender<EvictionEvent>>,
+        dropped: Option<&AtomicU64>,
     ) -> Result<(), DispatcherError> {
         const MAX_SCAN: usize = 4;
         const MAX_ATTEMPTS: usize = 512;
@@ -599,12 +626,7 @@ impl DispatcherP2pComponent {
                     // concurrent lookups from obtaining the now-freed pointer.
                     if dm.try_evict_to_block(key).is_ok() {
                         let _ = mt.remove(key);
-                        if let Some(tx) = eviction_tx {
-                            let _ = tx.try_send(EvictionEvent {
-                                key,
-                                reason: EvictionReason::Demoted,
-                            });
-                        }
+                        publish_eviction(eviction_tx, dropped, key, EvictionReason::Demoted);
                     }
                 }
                 None => {
@@ -615,12 +637,7 @@ impl DispatcherP2pComponent {
                     for &cand in &candidates {
                         if dm.try_evict_to_block(cand).is_ok() {
                             let _ = mt.remove(cand);
-                            if let Some(tx) = eviction_tx {
-                                let _ = tx.try_send(EvictionEvent {
-                                    key: cand,
-                                    reason: EvictionReason::Demoted,
-                                });
-                            }
+                            publish_eviction(eviction_tx, dropped, cand, EvictionReason::Demoted);
                             evicted = true;
                             break;
                         }
@@ -630,19 +647,19 @@ impl DispatcherP2pComponent {
                         if let Some(evicted_key) = mt.evict_next_for_key(target_key) {
                             if dm.try_evict_to_block(evicted_key).is_err() {
                                 let _ = dm.remove(evicted_key);
-                                if let Some(tx) = eviction_tx {
-                                    let _ = tx.try_send(EvictionEvent {
-                                        key: evicted_key,
-                                        reason: EvictionReason::Removed,
-                                    });
-                                }
+                                publish_eviction(
+                                    eviction_tx,
+                                    dropped,
+                                    evicted_key,
+                                    EvictionReason::Removed,
+                                );
                             } else {
-                                if let Some(tx) = eviction_tx {
-                                    let _ = tx.try_send(EvictionEvent {
-                                        key: evicted_key,
-                                        reason: EvictionReason::Demoted,
-                                    });
-                                }
+                                publish_eviction(
+                                    eviction_tx,
+                                    dropped,
+                                    evicted_key,
+                                    EvictionReason::Demoted,
+                                );
                             }
                         }
                     }
@@ -1409,6 +1426,7 @@ impl IDispatcher for DispatcherP2pComponent {
                     },
                     evictor_logger,
                     evictor_eviction_tx,
+                    Arc::clone(&self.eviction_dropped),
                 );
                 *self.bg_evictor.lock().unwrap() = Some(evictor);
             }
@@ -1438,6 +1456,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 },
                 mt_evictor_logger,
                 Arc::clone(&self.eviction_tx),
+                Arc::clone(&self.eviction_dropped),
             );
             *self.bg_mt_evictor.lock().unwrap() = Some(mt_evictor);
         }
@@ -2538,6 +2557,7 @@ impl IDispatcher for DispatcherP2pComponent {
 
         let eviction_tx_guard = self.eviction_tx.lock().unwrap();
         let eviction_tx_ref = eviction_tx_guard.as_ref();
+        let eviction_dropped_ref = self.eviction_dropped.as_ref();
 
         std::thread::scope(|s| {
             for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
@@ -2556,6 +2576,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 let cold = &cold_entries;
                 let logger = &logger;
                 let etx = eviction_tx_ref;
+                let edrop = eviction_dropped_ref;
 
                 s.spawn(move || {
                     for &ci in entry_indices {
@@ -2563,7 +2584,15 @@ impl IDispatcher for DispatcherP2pComponent {
                         let block_size = block_dev.block_size() as u64;
                         let start_lba = entry.offset / block_size;
 
-                        if Self::evict_for_space_inner(dm, mt, entry.size, entry.key, etx).is_err()
+                        if Self::evict_for_space_inner(
+                            dm,
+                            mt,
+                            entry.size,
+                            entry.key,
+                            etx,
+                            Some(edrop),
+                        )
+                        .is_err()
                         {
                             continue;
                         }
@@ -3472,7 +3501,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -3604,7 +3633,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -3663,7 +3692,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
     }
 
@@ -3683,7 +3712,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -3705,7 +3734,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -3732,7 +3761,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -3760,7 +3789,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3788,7 +3817,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -3811,7 +3840,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -3834,7 +3863,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3862,7 +3891,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -3893,7 +3922,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3915,7 +3944,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3938,7 +3967,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -3992,7 +4021,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -4025,7 +4054,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -4102,7 +4131,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -4591,6 +4620,84 @@ mod tests {
         assert!(mt.contains(0), "entry should not be evicted");
     }
 
+    /// FR-017: undeliverable eviction events are counted, not silently lost, and
+    /// the count is readable/resettable via `eviction_dropped_count()`. Also
+    /// pins the emit-vs-non-emit contract of `publish_eviction`.
+    #[test]
+    fn publish_eviction_counts_only_undeliverable_emits() {
+        let dropped = AtomicU64::new(0);
+        let (tx, rx) = crossbeam_channel::bounded::<EvictionEvent>(1);
+
+        // Delivered event: no drop counted.
+        publish_eviction(Some(&tx), Some(&dropped), 1, EvictionReason::Demoted);
+        assert_eq!(dropped.load(Ordering::Relaxed), 0);
+
+        // Channel now full (capacity 1, undrained): next event is dropped + counted.
+        publish_eviction(Some(&tx), Some(&dropped), 2, EvictionReason::Demoted);
+        assert_eq!(dropped.load(Ordering::Relaxed), 1);
+
+        // No subscriber registered: also dropped + counted.
+        publish_eviction(None, Some(&dropped), 3, EvictionReason::Removed);
+        assert_eq!(dropped.load(Ordering::Relaxed), 2);
+
+        // Internal, non-emitting path (`dropped = None`): never counts, never sends.
+        drop(rx); // even a disconnected channel must not be touched on this path
+        publish_eviction(Some(&tx), None, 4, EvictionReason::Demoted);
+        assert_eq!(dropped.load(Ordering::Relaxed), 2);
+    }
+
+    /// FR-017 end-to-end: evictions routed through the emit path increment the
+    /// component's running drop count when the subscriber cannot keep up, and a
+    /// read resets it.
+    #[test]
+    fn eviction_dropped_count_tracks_emit_path() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+        let c = DispatcherP2pComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+        );
+
+        // Capacity-1 subscriber, never drained: the first eviction event fills the
+        // channel; every subsequent one is undeliverable.
+        let _rx = c.create_eviction_channel(1);
+
+        // Fill the 16 KiB pool with 4 × 4 KiB evictable entries.
+        for key in 0..4u64 {
+            mt.insert(key, 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
+            dm.release_write(key).unwrap();
+            dm.convert_to_storage(key, key * 4096).unwrap();
+        }
+
+        // Force evicting all four entries in a single emit call.
+        c.evict_for_space_emit(&dm, &mt, 16384, 100).unwrap();
+
+        let dropped = c.eviction_dropped_count();
+        assert!(
+            dropped >= 1,
+            "undeliverable eviction events must be counted (got {dropped})"
+        );
+        assert_eq!(
+            c.eviction_dropped_count(),
+            0,
+            "running count resets to 0 after a read"
+        );
+    }
+
     #[test]
     fn populate_triggers_eviction_on_full_pool() {
         let dm = Arc::new(MockDispatchMap::new());
@@ -4612,7 +4719,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Arc::new(Mutex::new(None)),
-            AtomicU64::new(0),
+            Arc::new(AtomicU64::new(0)),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -4811,6 +4918,7 @@ mod tests {
             },
             None,
             None,
+            Arc::new(AtomicU64::new(0)),
         );
 
         std::thread::sleep(std::time::Duration::from_millis(200));

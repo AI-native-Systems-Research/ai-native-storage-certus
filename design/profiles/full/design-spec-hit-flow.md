@@ -32,25 +32,27 @@ The get/lookup flow serves a cached block from either DRAM (memory-tier) or SSD 
 
 ### Cold Path (BlockDevice → MemoryTier → GPU)
 
-1. **Steps 1–4 are identical** to the warm path.
+1. **Steps 1–4 are identical** to the warm path. The dispatch-map lookup returns a `BlockDevice { offset }` result and the reader holds a read pin for the whole SSD→DRAM→GPU pipeline.
 
-2. **BlockDevice hit → promote.** The dispatch-map lookup returns a BlockDevice result with the SSD offset. The read reference is released (the entry will be re-registered during promotion).
+2. **Schedule on the cold-read pool.** The lookup is handed to the `ColdReadPool`, which selects the per-drive worker for `key % num_drives`. That worker owns a pre-connected NVMe channel and a CUDA stream, so no per-request setup is needed.
 
-3. **Evict if needed.** If the memory-tier pool is full, LRU entries with completed write-through are evicted to make space for the promoted entry.
+3. **Allocate memory-tier slot.** A slot is allocated in the memory-tier for the promoted entry, running inline eviction first if the pool is full (LRU entries with completed write-through are demoted to BlockDevice via `try_evict_to_block`).
 
-4. **Allocate memory-tier slot.** A new slot is allocated in the memory-tier for the promoted entry.
+4. **Pipelined SSD → DRAM → GPU read.** Using the PipelineRing's StagingPool (pre-allocated CUDA-pinned, SPDK-registered DMA buffers with per-device pipe CUDA streams), the worker issues chunked NVMe reads at MDTS granularity. Each completed chunk copies into the memory-tier slot and streams H2D to GPU, overlapping NVMe I/O with GPU DMA:
+   - NVMe read completes into a staging buffer → copy to memory-tier slot
+   - Simultaneously: previous chunk streams H2D to GPU via the async CUDA stream
 
-5. **Pipelined SSD → DRAM read.** Using the PipelineRing (8 pre-allocated CUDA-pinned, SPDK-registered DMA buffers with 2 CUDA streams), the dispatcher issues chunked NVMe reads at MDTS granularity. Each completed chunk is available in the memory-tier slot immediately. This overlaps NVMe I/O with GPU DMA:
-   - NVMe read completes into ring buffer → copy to memory-tier slot
-   - Simultaneously: previous chunk streams H2D to GPU via async CUDA stream
+5. **Promote in place.** Once the block is resident in DRAM, the dispatcher calls `promote_block_to_memory_tier(key, ptr, size)`, which flips the dispatch-map entry from BlockDevice to MemoryTier **in place**, retaining the `ssd_offset` (data remains on SSD for durability). The transition works even on pinned entries and does not disturb the held read pin.
 
-6. **Re-register in dispatch-map.** The old BlockDevice entry is removed and a fresh MemoryTier entry is created with the new pointer. The ssd_offset is preserved (data remains on SSD for durability).
+6. **Release pin, GPU transfer complete.** After all chunks have streamed to GPU, the read pin is released and the transfer is done. The client's GPU memory holds the full block; subsequent lookups take the warm path.
 
-7. **GPU transfer complete.** After all chunks have been streamed to GPU, the transfer is done. The client's GPU memory holds the full block.
+### Tier-Saturation Fallback (serve_cold_staged)
 
-### Staging Path (Legacy / Prepare-Store)
+If the memory tier cannot allocate a slot even after inline eviction (e.g. every resident entry is pinned or actively referenced), the dispatcher falls back to `serve_cold_staged`: it streams the block SSD → staging → GPU through the PipelineRing **without** promoting it. The entry stays `BlockDevice`, so the next cold lookup repeats the staged serve rather than benefiting from a warm entry. This keeps lookups making progress under memory-tier pressure instead of failing.
 
-If an entry is in the Staging state (from the `prepare_store`/`commit_store` direct-write API), lookup performs a synchronous `dma_copy_to_device` from the staging buffer to GPU and releases the read reference.
+### Concurrent Promotion Race
+
+If two lookups for the same cold key race, only one promotion can win the in-place `promote_block_to_memory_tier`. The loser observes the entry already `MemoryTier` (or an `AlreadyExists`/state-changed result), and serves the block warm (DRAM → GPU) rather than issuing a duplicate promotion.
 
 ## Batch Lookup and Pre-Promotion
 

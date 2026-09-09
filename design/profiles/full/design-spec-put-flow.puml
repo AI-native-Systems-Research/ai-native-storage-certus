@@ -47,7 +47,7 @@ note right of ssd: Split into max_transfer_size\nchunks, each via WriteSync
 
 bgw -> em: publish()\n(finalize extent)
 bgw -> dm: convert_to_storage\n(key, block_offset)
-note right of dm: ssd_offset set;\nentry now durable
+note right of dm: ssd_offset set; entry stays\nMemoryTier, now durable/evictable
 
 bgw -> dm: release_read(key)
 

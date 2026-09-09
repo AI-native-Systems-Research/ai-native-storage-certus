@@ -772,8 +772,15 @@ impl KernelHandler {
                         ))
                     }
                 } else {
+                    // Async completions are harvested here on the idle loop.
+                    // Record the true submission-to-completion latency from the
+                    // op's stored submission timestamp — matching the sibling
+                    // `wait_for_cqe` site above. (Passing a hardcoded 0 here
+                    // pinned min_latency_ns to 0 and skewed the mean for async
+                    // IO, violating FR-021/SC-006.)
                     #[cfg(feature = "telemetry")]
-                    self.telemetry.record_op(0, op.bytes);
+                    self.telemetry
+                        .record_op(op.start.elapsed().as_nanos() as u64, op.bytes);
                     Ok(())
                 };
 

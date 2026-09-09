@@ -1,6 +1,3 @@
-Now I have a solid understanding of the format and depth required. I have enough evidence from the web searches and existing files. Let me produce the complete domain reference file for correctness-and-recovery.
-
-```markdown
 ---
 id: correctness-and-recovery
 decision: Whether a proposed storage optimization preserves inference correctness and crash-safe durability of KV blocks

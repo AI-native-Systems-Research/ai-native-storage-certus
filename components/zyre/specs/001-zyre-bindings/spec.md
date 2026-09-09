@@ -101,7 +101,7 @@ A Certus node operator configures zyre nodes to use gossip-based discovery inste
 
 - **IZyreNode**: The public handle trait for a single zyre peer, returned by `IZyre::create_node` as `Box<dyn IZyreNode>`. Node operations live here. A plain `Send` (not `Sync`) trait. Its sole concrete implementation, `ZyreNode`, owns the underlying `zyre_t` pointer and is crate-private.
 - **ZyreEvent**: A typed enum representing an incoming network event, carrying the event type, peer UUID, peer name, and optional group/message data.
-- **NodeConfig / GossipConfig**: Configuration for constructing nodes (public fields + `Default`, `#[non_exhaustive]`), validated by `create_node`.
+- **NodeConfig / GossipConfig**: Configuration for constructing nodes (both `#[non_exhaustive]` with public fields), validated by `create_node`. `NodeConfig` has a `Default` impl (`let mut c = NodeConfig::default(); c.name = Some(...)`). `GossipConfig` has **no** `Default` — an empty gossip config (`bind: None, connect: []`) would fail its own invariant, so it is constructed via the `bind()`/`connect()` smart constructors instead.
 - **PeerId**: A newtype over UUID string identifying a remote peer.
 - **IZyre**: Component interface acting as a node factory (`create_node`) plus a `ping()` health check.
 

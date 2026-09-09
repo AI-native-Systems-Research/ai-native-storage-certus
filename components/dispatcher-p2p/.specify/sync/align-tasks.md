@@ -8,7 +8,25 @@ code to match the spec) — **no `.rs` source is modified by this sync pass**.
 
 ---
 
-## Task: Align 001-gpudirect-cold-path/FR-017
+## Task: Align 001-gpudirect-cold-path/FR-017 — ✅ RESOLVED 2026-09-03
+
+> **Resolved 2026-09-03 (Spec-Sync ALIGN apply).** Introduced a shared free
+> helper `publish_eviction(tx, dropped, key, reason)` in `src/lib.rs` that
+> increments the drop counter on **any** non-delivery (full channel **or** no
+> subscriber) when `dropped` is `Some`, and is a no-op when `dropped` is `None`.
+> All four live emit sites now route through it — the three in
+> `evict_for_space_inner` (reached via `evict_for_space_emit` and the
+> `promote_to_memory_tier` scoped-thread path), `BackgroundEvictor::evictor_loop`,
+> and `MemoryTierEvictor::evictor_loop`. The internal, deliberately non-emitting
+> `evict_for_space` path passes `dropped = None` (neither publishes nor counts).
+> `eviction_dropped` was widened `AtomicU64` → `Arc<AtomicU64>` so the two
+> background evictor threads share the same counter (threaded in via
+> `BackgroundEvictor::start` / `MemoryTierEvictor::start`); the dead
+> `emit_eviction` was deleted. Two unit tests added
+> (`publish_eviction_counts_only_undeliverable_emits`,
+> `eviction_dropped_count_tracks_emit_path`). Verified: `cargo build` clean,
+> `cargo clippy -p dispatcher-p2p --all-targets -- -D warnings` clean for
+> dispatcher-p2p's sources, `cargo test -p dispatcher-p2p` 71 passed / 0 failed.
 
 **Severity**: Moderate
 

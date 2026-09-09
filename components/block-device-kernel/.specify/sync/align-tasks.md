@@ -135,7 +135,19 @@ Policy: `.specify/sync/PHASE_B_POLICY.md`. No `.rs` source was modified by this
 sync; the item below is the residual async-latency defect that the 2026-08-07
 "drafted on branch" fix did **not** fully cover.
 
-## Task: Align 001-block-device-kernel/FR-021 & SC-006 — async telemetry latency records 0 ns
+## Task: Align 001-block-device-kernel/FR-021 & SC-006 — async telemetry latency records 0 ns — ✅ RESOLVED 2026-09-03
+
+> **Resolved 2026-09-03 (Spec-Sync ALIGN apply).** `harvest_completions()` now
+> records the true elapsed latency `op.start.elapsed().as_nanos() as u64` (was a
+> hardcoded `0`), mirroring the already-correct `wait_for_cqe` completion site.
+> No new `InflightOp` field was needed — the existing `start: Instant` (set at
+> the two async insert sites) is reused. All five telemetry recording sites now
+> record real per-op latency, so FR-021/SC-006 hold for sync **and** async IO.
+> Verified: `cargo build`/`cargo clippy --all-targets` clean for both the default
+> and `--features telemetry` feature sets. **Still open**: the dedicated accuracy
+> test asserting non-zero `min/max/mean_latency_ns` for async ops remains a
+> hardware/loopback follow-up (the async harvest path needs a real io_uring
+> completion against a real device; all async integration tests are `#[ignore]`).
 
 **Severity**: moderate
 

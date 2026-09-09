@@ -318,6 +318,14 @@ impl IZyreNode for ZyreNode {
     /// Get the network address of a peer.
     fn peer_address(&self, peer: &PeerId) -> Option<String> {
         let peer_c = std::ffi::CString::new(peer.as_str()).ok()?;
+        // SAFETY: `self.ptr` is a valid `zyre_t` for the lifetime of `&self`
+        // and `peer_c` outlives the call. Per the zyre v2.0.1 contract,
+        // `zyre_peer_address` returns a heap-allocated `char*` that the caller
+        // owns and MUST destroy. We copy it into an owned `String`, then free
+        // the C allocation with `libc::free` (czmq v4.2.1 allocates these via
+        // the system allocator; this is what `zstr_free` does internally) to
+        // avoid leaking the string on every call. `addr` is not used after the
+        // free.
         unsafe {
             let addr = ffi::zyre_peer_address(self.ptr, peer_c.as_ptr());
             if addr.is_null() {
@@ -326,6 +334,7 @@ impl IZyreNode for ZyreNode {
                 let s = std::ffi::CStr::from_ptr(addr)
                     .to_string_lossy()
                     .into_owned();
+                libc::free(addr as *mut libc::c_void);
                 if s.is_empty() {
                     None
                 } else {
@@ -339,12 +348,20 @@ impl IZyreNode for ZyreNode {
     fn peer_header_value(&self, peer: &PeerId, key: &str) -> Option<String> {
         let peer_c = std::ffi::CString::new(peer.as_str()).ok()?;
         let key_c = std::ffi::CString::new(key).ok()?;
+        // SAFETY: `self.ptr` is a valid `zyre_t` for the lifetime of `&self`
+        // and `peer_c`/`key_c` outlive the call. Per the zyre v2.0.1 contract,
+        // `zyre_peer_header_value` returns a heap-allocated `char*` that the
+        // caller owns and MUST destroy. We copy it into an owned `String`,
+        // then free the C allocation with `libc::free` (matching czmq's
+        // `zstr_free`) to avoid leaking the string on every call. `val` is not
+        // used after the free.
         unsafe {
             let val = ffi::zyre_peer_header_value(self.ptr, peer_c.as_ptr(), key_c.as_ptr());
             if val.is_null() {
                 None
             } else {
                 let s = std::ffi::CStr::from_ptr(val).to_string_lossy().into_owned();
+                libc::free(val as *mut libc::c_void);
                 Some(s)
             }
         }
@@ -500,8 +517,17 @@ fn parse_group(event_ptr: *mut ffi::zyre_event_t) -> String {
 }
 
 fn parse_message(event_ptr: *mut ffi::zyre_event_t) -> Vec<u8> {
+    // SAFETY: `event_ptr` is a valid, non-null `zyre_event_t` owned by the
+    // caller (`recv`) for the duration of this call. We use the *borrowing*
+    // accessor `zyre_event_msg` (NOT `zyre_event_get_msg`): per the zyre
+    // v2.0.1 contract, `zyre_event_msg` returns a `zmsg_t` the event still
+    // owns and will free on `zyre_event_destroy` (node.rs recv()), whereas
+    // `zyre_event_get_msg` transfers ownership to the caller — which, without
+    // a matching `zmsg_destroy`, leaked the whole message on every
+    // Whisper/Shout. We only read the first frame's bytes into an owned `Vec`
+    // and never retain the borrowed pointer past this block.
     unsafe {
-        let msg = ffi::zyre_event_get_msg(event_ptr);
+        let msg = ffi::zyre_event_msg(event_ptr);
         if msg.is_null() {
             return Vec::new();
         }

@@ -39,20 +39,22 @@ shmq -> disp: lookup(key, IpcHandle)
 
 disp -> dm: lookup(key) + take_read
 dm --> disp: BlockDevice { offset }
-disp -> dm: release_read(key)
+note right of dm: read pin held for the\nwhole SSD->DRAM->GPU pipeline
 
-disp -> mt: evict_lru() if pool full
+disp -> mt: evict_lru() if pool full\n(try_evict_to_block)
 disp -> mt: insert(key, size)\n-> new_ptr
 
-disp -> pr: pipelined_read(offset, size)
-note right of pr: 8 CUDA-pinned SPDK-registered\nbuffers, 2 CUDA streams
+disp -> pr: ColdReadPool: pipelined_read(offset, size)
+note right of pr: StagingPool: CUDA-pinned SPDK-registered\nbuffers + per-device pipe streams
 pr -> ssd: NVMe read (chunked at MDTS)
 ssd --> pr: data chunks
 pr -> mt: copy chunks to new_ptr
 pr -> disp: cudaMemcpyAsync H2D\n(overlapped with I/O)
 
-disp -> dm: create_memory_tier_entry\n(key, new_ptr, size)
-note right of dm: Promoted: BlockDevice -> MemoryTier\nssd_offset preserved
+disp -> dm: promote_block_to_memory_tier\n(key, new_ptr, size)
+note right of dm: In-place BlockDevice -> MemoryTier\nssd_offset preserved
+
+disp -> dm: release_read(key)
 
 disp --> shmq: Ok(stream_handle)
 shmq --> client: BatchLookupResponse\n(success)

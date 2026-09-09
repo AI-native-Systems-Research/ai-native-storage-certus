@@ -663,6 +663,12 @@ impl IGpuServices for GpuServicesComponent {
 
         #[cfg(feature = "gpu")]
         {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
             // SAFETY: stream.0 was obtained from cudaStreamCreate.
             let err = unsafe { cuda_ffi::cudaStreamDestroy(stream.0) };
             if err != cuda_ffi::CUDA_SUCCESS {
@@ -708,6 +714,12 @@ impl IGpuServices for GpuServicesComponent {
 
         #[cfg(feature = "gpu")]
         {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
             // SAFETY: stream.0 was obtained from cudaStreamCreate.
             let err = unsafe { cuda_ffi::cudaStreamSynchronize(stream.0) };
             if err != cuda_ffi::CUDA_SUCCESS {

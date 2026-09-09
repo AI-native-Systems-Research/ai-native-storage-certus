@@ -3,6 +3,7 @@
 **Feature Branch**: `001-gpu-cuda-services`
 **Created**: 2026-04-29
 **Status**: Draft
+**Last-Synced**: 2026-09-03 (spec-sync: FR-017 ALIGN — `destroy_stream` and `stream_synchronize` now enforce the "require prior initialization" guard the FR promises, matching their sibling stream/device methods; FR-008 exception extended to document `pub mod cuda_ffi` and the `dma`-module cleanup free-functions as deliberate public surface.)
 **Input**: User description: "GPU Services component providing CUDA library initialization, GPU hardware scanning, IPC handle deserialization, memory pinning, and DMA buffer creation for SSD-to-GPU data transfer"
 
 ## Clarifications
@@ -271,6 +272,20 @@ by a verification read-back.
   scope applies to the CUDA-services operations of spec 001; the p2p
   module helpers are a documented, deliberate exception. This resolves
   the FR-008-vs-002/003 conflict noted in the 2026-08-07 drift report.
+  *Additional exception (clarified 2026-09-03):* the raw CUDA FFI module
+  `pub mod cuda_ffi` (`src/lib.rs:26`, gated behind `--features gpu`) is
+  intentionally public — it is consumed directly as
+  `gpu_services::cuda_ffi::*` by the `gpu-p2p-server` binary and by sibling
+  apps (`certus-server`, `certus-server-yaml`, `gpu-bb-vs-p2p`,
+  `nvme-bar1-bench`) for low-level CUDA calls (e.g. `cudaHostRegister`) that
+  are not surfaced through `IGpuServices`. Like the `dma` helpers it is a
+  documented, deliberate `pub` exception, not interface surface. The
+  `dma`-module cleanup free-functions paired with the builders above (e.g.
+  `spdk_unregister_and_ipc_close`, `spdk_unregister_unpin_and_ipc_close`,
+  `spdk_unregister_and_cuda_free_host`, `spdk_unregister_gdr_unmap_and_close`,
+  `vfio_unmap_extmem_munmap`, `vfio_unmap_extmem_only`) are likewise
+  deliberate `pub` counterparts, used as `DmaBuffer` free-fn pointers rather
+  than `IGpuServices` methods.
 - **FR-009**: Component build MUST be gated behind `--features gpu`
   feature flag.
 - **FR-010**: Component MUST include unit tests and Criterion benchmarks

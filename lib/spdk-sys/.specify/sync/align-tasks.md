@@ -8,10 +8,10 @@ or ambiguities that should not be resolved by silently weakening spec claims).
 
 - **Severity**: Medium
 - **Type**: align-task (test-coverage gap)
-- **Spec**: `components/spdk-sys/specs/001-spdk-sys/spec.md` — Success Criteria
+- **Spec**: `lib/spdk-sys/specs/001-spdk-sys/spec.md` — Success Criteria
   ("`cargo test -p spdk-sys` passes all sanity tests (type sizes, field access,
   function pointer existence)") and FR-3/FR-4/FR-5.
-- **Source**: `components/spdk-sys/.specify/sync/drift-report.md` — Drifted Items,
+- **Source**: `lib/spdk-sys/.specify/sync/drift-report.md` — Drifted Items,
   "Success Criteria (sanity test coverage)" (severity: medium).
 - **Description**: `tests/bindings_sanity.rs` currently only exercises
   `spdk_env_opts`, `spdk_pci_addr`, `spdk_pci_id`, `spdk_pci_device` and their
@@ -26,7 +26,7 @@ or ambiguities that should not be resolved by silently weakening spec claims).
   the Success Criteria bullet — the criteria remain the target and the test
   suite must be brought up to meet them.
 - **Pre-existing linkage**: This duplicates/confirms the still-open task in
-  `components/spdk-sys/specs/001-spdk-sys/tasks.md` ("Validate that sanity
+  `lib/spdk-sys/specs/001-spdk-sys/tasks.md` ("Validate that sanity
   tests cover all critical types used by downstream consumers"). No new
   tasks.md entry was added since one already exists; this align-task tracks
   it for the sync-apply record and links it to the drift report.

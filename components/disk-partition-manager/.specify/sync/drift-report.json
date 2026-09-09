@@ -1,40 +1,50 @@
 {
-  "generated": "2026-08-07T15:30:30Z",
+  "generated": "2026-09-04T17:42:15Z",
   "project": "disk-partition-manager",
+  "spec": "specs/001-gpt-partition-management/spec.md",
   "summary": {
-    "aligned": 18,
-    "drifted": 2,
+    "aligned": 20,
+    "drifted": 0,
+    "resolved_prior_sweeps": 2,
     "not_implemented": 0,
-    "unspecced": 2
+    "unspecced": 0,
+    "parked_non_drift": 3,
+    "result": "clean"
   },
+  "note": "2026-09-04 sweep: independently re-verified all FR/IR/PR/SC + entities against current src/{gpt,lib}.rs and ipartition_table.rs; relocated spec tree .specify/specs/ -> top-level specs/ (git mv, no content change) so the component is now CI-gated and the spec markdown is hashed; refreshed drifted SC-004 dispatcher-p2p anchors; build/clippy(-D warnings)/fmt re-run green. This regenerates the stale 2026-08-07 JSON, which still (incorrectly) marked FR-003/PR-002 Drifted after they were resolved in the 2026-08-20 and 2026-08-07 syncs respectively.",
   "specs": [
-    {"id": "FR-001", "status": "Aligned", "location": "gpt.rs:9,197,206,344", "severity": "", "notes": "Rev 1.0, 128x128B entries, primary@LBA1, backup@last, protective MBR@LBA0."},
-    {"id": "FR-002", "status": "Aligned", "location": "gpt.rs:97-119,416", "severity": "", "notes": "CRC32 (crc32fast=IEEE) on header and entry array."},
-    {"id": "FR-003", "status": "Drifted", "location": "gpt.rs:66-86,73,353-357", "severity": "Medium", "notes": "Backup fallback only fires on CorruptTable (CRC). Corrupt primary signature returns NoPartitionTable and is propagated without trying backup; initialize_or_format then reformats destructively."},
-    {"id": "FR-004", "status": "Aligned", "location": "gpt.rs:240-267,270", "severity": "", "notes": "size_bytes=0 rest-of-disk supported."},
-    {"id": "FR-005", "status": "Aligned", "location": "gpt.rs:246-250", "severity": "", "notes": ">1 rest-of-disk rejected."},
-    {"id": "FR-006", "status": "Aligned", "location": "gpt.rs:260-265", "severity": "", "notes": "Overflow of fixed partitions rejected."},
-    {"id": "FR-007", "status": "Aligned", "location": "gpt.rs:329,344", "severity": "", "notes": "Protective MBR type 0xEE at LBA 0."},
-    {"id": "FR-008", "status": "Aligned", "location": "gpt.rs:554-564", "severity": "", "notes": "RFC 4122 v4 GUIDs; see unspecced urandom-failure fallback."},
-    {"id": "FR-009", "status": "Aligned", "location": "gpt.rs:566-585", "severity": "", "notes": "UTF-16LE encode/decode capped at 36 chars."},
-    {"id": "FR-010", "status": "Aligned", "location": "lib.rs:30-36,91", "severity": "", "notes": "Configurable ns_id via set_ns_id and config.ns_id."},
-    {"id": "FR-011", "status": "Aligned", "location": "gpt.rs:314-317,437-543", "severity": "", "notes": "Sector size parameterized; no explicit 512/4096 validation."},
-    {"id": "IR-001", "status": "Aligned", "location": "ipartition_table.rs:116-128;lib.rs:67-120", "severity": "", "notes": "initialize/format/partition_info/num_partitions provided."},
-    {"id": "IR-002", "status": "Aligned", "location": "lib.rs:17-19", "severity": "", "notes": "block_device: IBlockDevice receptacle."},
-    {"id": "IR-003", "status": "Aligned", "location": "lib.rs:45-64", "severity": "", "notes": "initialize_or_format returns (PartitionTable, formatted:bool)."},
-    {"id": "PR-001", "status": "Aligned", "location": "gpt.rs:194-206", "severity": "", "notes": "Fixed set of sector writes independent of device size."},
-    {"id": "PR-002", "status": "Drifted", "location": "gpt.rs:441-485,68,110", "severity": "Medium", "notes": "read_bytes does one ReadSync/recv per sector; entry array (16KiB=32 sectors @512B) plus header = 33 round-trips, not the specified <=2."},
-    {"id": "SC-001", "status": "Aligned", "location": "gpt.rs:142-227,88-140", "severity": "", "notes": "Round-trip offsets identical; no automated test."},
-    {"id": "SC-002", "status": "Aligned", "location": "gpt.rs:66-86", "severity": "", "notes": "CRC-corrupt primary falls back to backup; signature corruption does not (see FR-003). No test."},
-    {"id": "SC-003", "status": "Aligned", "location": "gpt.rs:566-585", "severity": "", "notes": "ASCII names preserved on round-trip; no test."},
-    {"id": "SC-004", "status": "Aligned", "location": "dispatcher/src/lib.rs:1517,1670", "severity": "", "notes": "Dispatcher wires format_on_init -> initialize_or_format; false path avoids reformat."}
+    {"id": "FR-001", "status": "Aligned", "location": "gpt.rs:9,11-12,180,196,207,216;write_protective_mbr:329", "notes": "Rev 1.0 (0x0001_0000), 128x128B entries, primary@LBA1, backup@last LBA, protective MBR@LBA0."},
+    {"id": "FR-002", "status": "Aligned", "location": "try_read_gpt_at:98-150 (header CRC :110, entry CRC :124); serialize_header_with_crc:407,426", "notes": "CRC32 (crc32fast=IEEE) over header and entry array, on read and write."},
+    {"id": "FR-003", "status": "Aligned", "location": "read_gpt:66-96 (fallback arm :79-80, backup read :87-95); parse_header signature->NoPartitionTable :364", "notes": "Resolved (2026-08-20 backfill). Backup fallback fires on BOTH CorruptTable (CRC) and NoPartitionTable (signature). Blank disk still returns NoPartitionTable after both reads fail, preserving initialize_or_format reformat path. Re-confirmed 2026-09-04."},
+    {"id": "FR-004", "status": "Aligned", "location": "compute_partition_layout:239-322 (size_bytes==0 :254,:280,:277)", "notes": "size_bytes=0 -> rest-of-disk consumes remaining usable LBAs."},
+    {"id": "FR-005", "status": "Aligned", "location": "gpt.rs:256-260", "notes": "rest_count>1 -> LayoutError."},
+    {"id": "FR-006", "status": "Aligned", "location": "gpt.rs:245,270-275 (per-partition remaining :286)", "notes": "Fixed partitions exceeding usable space rejected."},
+    {"id": "FR-007", "status": "Aligned", "location": "write_protective_mbr:329, 0xEE at :339, write_sector(0) :354", "notes": "Protective MBR type 0xEE at LBA 0."},
+    {"id": "FR-008", "status": "Aligned", "location": "generate_guid:564-574 (version :571, variant :572); disk_guid :174, unique_guid :298", "notes": "RFC 4122 v4 GUIDs. See parked #3 on /dev/urandom zero-fallback."},
+    {"id": "FR-009", "status": "Aligned", "location": "encode_utf16le_name:576-587 (take(36) :578), decode_utf16le_name:589-595", "notes": "UTF-16LE encode/decode capped at 36 chars."},
+    {"id": "FR-010", "status": "Aligned", "location": "lib.rs:30-36 (set_ns_id/get_ns_id default 1); format uses config.ns_id lib.rs:91", "notes": "Configurable NVMe namespace ID."},
+    {"id": "FR-011", "status": "Aligned", "location": "read_bytes:451, write_bytes:501 (sector-size parameterized); entry_sectors:324", "notes": "512B and 4096B supported; no explicit member-of {512,4096} validation (any size accepted; documented in spec Implementation Notes)."},
+    {"id": "IR-001", "status": "Aligned", "location": "ipartition_table.rs:118,121,124,127; lib.rs:68,86,97,113", "notes": "initialize/format/partition_info/num_partitions provided."},
+    {"id": "IR-002", "status": "Aligned", "location": "lib.rs:17-19 (define_component! receptacle)", "notes": "block_device: IBlockDevice receptacle."},
+    {"id": "IR-003", "status": "Aligned", "location": "lib.rs:45-64 (reformat arm :57-58)", "notes": "initialize_or_format returns (PartitionTable, formatted:bool)."},
+    {"id": "PR-001", "status": "Aligned", "location": "write_gpt:152-237", "notes": "Format writes a fixed sector set (MBR + 2 headers + 2x entry arrays), independent of device size -> O(1) vs device size."},
+    {"id": "PR-002", "status": "Aligned", "location": "read_bytes:451-495 (per-sector ReadSync)", "notes": "Resolved (2026-08-07 backfill). Spec describes actual per-sector read (33 round-trips @512B / 5 @4096B), O(1) in device size. Batching into one multi-sector read is a deliberate future perf task, not drift."},
+    {"id": "SC-001", "status": "Aligned", "location": "write_gpt:152-237 <-> try_read_gpt_at:98-150", "notes": "Write/read share identical LBA<->sector math; round-trip offsets identical. No automated test (parked #1)."},
+    {"id": "SC-002", "status": "Aligned", "location": "read_gpt:66-96", "notes": "CRC-corrupt AND signature-damaged primary both fall back to backup transparently. No automated test (parked #1)."},
+    {"id": "SC-003", "status": "Aligned", "location": "encode/decode_utf16le_name:576-595", "notes": "ASCII names round-trip UTF-8->UTF-16LE->UTF-8. No automated test (parked #1)."},
+    {"id": "SC-004", "status": "Aligned", "location": "dispatcher/src/lib.rs:1611 (guard :1764); dispatcher-p2p/src/lib.rs:1042 (guard :1164)", "notes": "Dispatchers wire config.format_on_init -> initialize_or_format(format_on_init, partition_config); when false, a non-Certus layout is not reformatted. Anchors refreshed 2026-09-04 (dispatcher-p2p moved from :1025/:1147)."}
   ],
-  "unspecced": [
-    {"item": "Hardcoded primary entry LBA on read", "location": "gpt.rs:68", "notes": "try_read_gpt_at(1,2) ignores parsed header.partition_entry_lba (gpt.rs:370); breaks reading externally-created GPTs. Low."},
-    {"item": "generate_guid silent zero-fallback on /dev/urandom failure", "location": "gpt.rs:556-559", "notes": "Non-random collision-prone GUID if urandom unavailable; only in Implementation Notes, not any FR. Low."}
+  "key_entities": [
+    {"entity": "PartitionConfig", "status": "Aligned", "location": "ipartition_table.rs:37-47"},
+    {"entity": "PartitionSpec", "status": "Aligned", "location": "ipartition_table.rs:26-34"},
+    {"entity": "PartitionTable", "status": "Aligned", "location": "ipartition_table.rs:50-56"},
+    {"entity": "PartitionInfo", "status": "Aligned", "location": "ipartition_table.rs:9-23"}
   ],
-  "conflicts": [
-    {"description": "SC-001/SC-002/SC-003 have no automated tests; plan.md and tasks.md confirm no test files exist and [dev-dependencies] is empty.", "location": "spec.md:119-121"},
-    {"description": "FR-003/US2 scenario 2 requires backup fallback for a 'corrupt primary', but only CRC corruption is covered; signature corruption is not.", "location": "spec.md:64"}
-  ]
+  "parked_non_drift": [
+    {"id": "no-automated-tests", "severity": "medium", "location": "Cargo.toml (empty [dev-dependencies]); no #[test]/#[cfg(test)] in crate", "notes": "SC-001/002/003 behaviorally aligned but have zero automated verification. Test-coverage gap, not a spec-text contradiction; SC remain the target and are not weakened. Adding tests edits src/Cargo.toml, out of scope for a spec-sync apply."},
+    {"id": "hardcoded-primary-entry-lba", "severity": "low", "location": "gpt.rs:68 (try_read_gpt_at(1,2)); parsed but unused header.partition_entry_lba :380", "notes": "Read assumes primary entry array at LBA 2; every Certus-written GPT uses LBA 2 (write_gpt :185). Externally-authored GPT with different offset read incorrectly. Documented in spec Implementation Notes; future robustness change."},
+    {"id": "generate-guid-zero-fallback", "severity": "low", "location": "gpt.rs:564-574", "notes": "If /dev/urandom cannot be opened, generate_guid returns an all-zero GUID except version/variant bits. Documented in spec Implementation Notes as known behavior, not an FR-level guarantee. Not a spec<->impl contradiction."}
+  ],
+  "unspecced": [],
+  "conflicts": []
 }
