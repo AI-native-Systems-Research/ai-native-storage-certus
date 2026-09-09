@@ -78,6 +78,32 @@ SHM_PATH=/dev/shm/certus-shmq SLAB_SIZE_BYTES=2097152 ./run-docker-otel-shmq.sh
 Writes `otel_shmq_results.json` (`"backend": "certus-shmq"`); log teed to
 `otel_shmq_<HHMMSS>.log`.
 
+## Prometheus metrics (`*-prom.sh`)
+
+The OTel counterpart of `../kv-offload-replay/run-docker-*-prom.sh`. The bench
+drives vLLM through the offline `LLM(...)` engine (no OpenAI server), so there is
+no `/metrics` endpoint unless the driver opens one — which the OTel driver does
+(`run_otel_async` calls `start_prom_exporter()`, **baked into both images**). So
+exposing metrics needs no rebuild: set `PROM_PORT` + `LOG_STATS=1` and publish
+the port. The `*-prom.sh` wrappers set those defaults and delegate to the base
+runners; the base runners also honor `PROM_PORT` directly.
+
+```bash
+cd benchmarks/kv-offload-otel-replay
+./run-docker-otel-offload-prom.sh                 # CPUOffload + exporter on :8000
+OFFLOAD_MODE=none ./run-docker-otel-offload-prom.sh
+SECONDARY_TIER=fs CPU_BYTES=$((8*(1<<30))) ./run-docker-otel-offload-prom.sh
+./run-docker-otel-shmq-prom.sh                    # shmq client + exporter (host server up)
+PROM_PORT=9100 ./run-docker-otel-offload-prom.sh  # pick another port
+```
+
+Scrape from the host at `http://127.0.0.1:${PROM_PORT}/metrics` (podman
+publishes IPv4 only — use `127.0.0.1`, not `localhost`/`::1`). For shmq these are
+the **client-side** vLLM + KV-offload metrics; the SPDK/SSD counters live in the
+host `certus-server` and are not in this registry. All base-script knobs pass
+through unchanged; `DRIVER_SRC=<dir>` optionally re-mounts the repo drivers over
+the baked copies so driver edits take effect without a rebuild.
+
 ## Common knobs (both backends)
 
 | Env | Default | Meaning |
@@ -92,6 +118,9 @@ Writes `otel_shmq_results.json` (`"backend": "certus-shmq"`); log teed to
 
 Offload-only: `OFFLOAD_MODE=none`, `SECONDARY_TIER=fs`, `CPU_BYTES`, `DISK_DIR_HOST`.
 shmq-only: `SHM_PATH`, `SLAB_SIZE_BYTES`, `WAIT_SECS`.
+Prometheus (both): `PROM_PORT` (unset = off; the `*-prom.sh` wrappers default it
+to `8000`), `LOG_STATS` (default `1` under `*-prom.sh`), `DRIVER_SRC` (no-rebuild
+driver re-mount).
 
 > **Real timing runs long.** At `TIME_SCALE=1.0` the deepest conversations carry
 > ~2000–2800 s of recorded think/tool-call delay, so a full-corpus run's

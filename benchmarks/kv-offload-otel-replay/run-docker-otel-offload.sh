@@ -29,6 +29,30 @@ LOG="${LOG:-${SCRIPT_DIR}/otel_offload_$(stamp).log}"
 
 require_image "$IMAGE"
 
+# ── Optional Prometheus exporter (gated on PROM_PORT) ─────────────────────────
+# The OTel driver already opens the exporter itself (run_otel_async calls
+# common.start_prom_exporter() after building the engine — it is BAKED into the
+# image), so exposing metrics needs no rebuild: just set PROM_PORT + LOG_STATS
+# and publish the port. run-docker-otel-offload-prom.sh is a thin wrapper that
+# sets these. Appended to COMMON_RUN_ARGS so it applies to all three modes below.
+#   Scrape from the host at:  http://127.0.0.1:${PROM_PORT}/metrics
+#   (podman publishes IPv4 only — use 127.0.0.1, not localhost/::1.)
+# Optional DRIVER_SRC=<dir of run_otel_replay.py> bind-mounts the repo driver set
+# over the baked copies so driver edits take effect without a rebuild.
+PROM_ARGS=()
+if [[ -n "${PROM_PORT:-}" ]]; then
+  LOG_STATS="${LOG_STATS:-1}"     # 1 = register vLLM metrics (empty /metrics otherwise)
+  PROM_ARGS=(-p "${PROM_PORT}:${PROM_PORT}" -e "PROM_PORT=${PROM_PORT}" -e "LOG_STATS=${LOG_STATS}")
+  if [[ -n "${DRIVER_SRC:-}" ]]; then
+    for f in run_otel_replay.py run_otel_async.py otel_corpus.py \
+             run_multiturn_common.py run_multiturn_async.py; do
+      [[ -f "${DRIVER_SRC}/${f}" ]] && PROM_ARGS+=(-v "${DRIVER_SRC}/${f}:/workspace/bench/${f}:z")
+    done
+  fi
+  COMMON_RUN_ARGS+=("${PROM_ARGS[@]}")
+  echo "[otel-offload] prometheus exporter -> http://127.0.0.1:${PROM_PORT}/metrics"
+fi
+
 # ── NoOffload: GPU-only baseline, nothing extra to wire ───────────────────────
 if [ "$OFFLOAD_MODE" = "none" ]; then
   run_container "$LOG" "$IMAGE" -e "OFFLOAD_MODE=none"

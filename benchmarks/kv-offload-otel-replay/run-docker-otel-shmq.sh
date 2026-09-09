@@ -37,6 +37,31 @@ LOG="${LOG:-${SCRIPT_DIR}/otel_shmq_$(stamp).log}"
 
 require_image "$IMAGE" "${STORE_FLAGS[@]}"
 
+# ── Optional Prometheus exporter (gated on PROM_PORT) ─────────────────────────
+# CLIENT-side vLLM + KV-offload metrics only — the SPDK/SSD counters live in the
+# host certus-server and are NOT in this registry. The driver opens the exporter
+# itself (run_otel_async calls common.start_prom_exporter(), baked into the
+# image), so this just sets PROM_PORT + LOG_STATS and publishes the port — no
+# rebuild. run-docker-otel-shmq-prom.sh is a thin wrapper that sets these.
+#   Scrape from the host at:  http://127.0.0.1:${PROM_PORT}/metrics
+# Optional DRIVER_SRC=<repo root> re-mounts the repo driver + shared modules over
+# the baked copies so edits take effect without a rebuild.
+PROM_ARGS=()
+if [[ -n "${PROM_PORT:-}" ]]; then
+  LOG_STATS="${LOG_STATS:-1}"     # 1 = register vLLM metrics (empty /metrics otherwise)
+  PROM_ARGS=(-p "${PROM_PORT}:${PROM_PORT}" -e "PROM_PORT=${PROM_PORT}" -e "LOG_STATS=${LOG_STATS}")
+  if [[ -n "${DRIVER_SRC:-}" ]]; then
+    d="${DRIVER_SRC}/certus-shmq-connector/run_otel_shmq_certus.py"
+    [[ -f "$d" ]] && PROM_ARGS+=(-v "${d}:/workspace/certus-shmq-connector/run_otel_shmq_certus.py:z")
+    for f in run_multiturn_common.py run_multiturn_async.py run_otel_async.py otel_corpus.py; do
+      s="${DRIVER_SRC}/benchmarks/kv-offload-replay/${f}"
+      [[ -f "$s" ]] && PROM_ARGS+=(-v "${s}:/workspace/benchmarks/kv-offload-replay/${f}:z")
+    done
+  fi
+  COMMON_RUN_ARGS+=("${PROM_ARGS[@]}")
+  echo "[otel-shmq] prometheus exporter (client-side) -> http://127.0.0.1:${PROM_PORT}/metrics"
+fi
+
 if [[ ! -e "$SHM_PATH" ]]; then
   echo "warning: mailbox ${SHM_PATH} does not exist yet — is certus-server running?" >&2
   echo "         the client waits up to ${WAIT_SECS}s for it (see header for server start)." >&2
