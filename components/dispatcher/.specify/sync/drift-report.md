@@ -1,113 +1,112 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T18:54:21Z
-spec_sync_git_commit: b220a1c8
-spec_sync_inputs_sha256: 5a309317d598ec6681d629f951ccc4d566156e0be4c96b4907661ac75086d738
+spec_sync_synced_at: 2026-09-09T21:33:18Z
+spec_sync_git_commit: 5bb71702
+spec_sync_inputs_sha256: af0388391aea2f22dc103ed59e028b2b2dd20eff09db928bdd0867811d96ac0e
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Spec Drift Report — dispatcher
 
-> **Digest refreshed 2026-09-03 (interfaces-only hash change).** This branch
-> reworded a doc comment on `IMemoryTier::evict_next_for_key`
-> (`components/interfaces/src/imemory_tier.rs`) as part of the memory-tier
-> spec-sync. `scripts/spec-sync-hash.sh` folds the whole `components/interfaces`
-> tree into every component's hash, so this component's digest moved even though
-> no interface signature or behavior changed and dispatcher was not otherwise
-> re-synced. The interface delta is confined to documentation and cannot affect
-> dispatcher's spec↔implementation alignment; the report body below stands
-> unchanged and drift status remains `clean`. Digest recomputed against the
-> current interface tree.
-
-Generated: 2026-09-02
+Generated: 2026-09-09
 Project: dispatcher (spec: specs/001-dispatcher-cache-interface/spec.md)
 Mode: Read-only drift analysis, then BACKFILL apply to `spec.md` (code authoritative).
-Branch: `evolve-dispatcher-dw`
+Branch: `fix-dispatcher-store-backpressure`
 
 ## Summary
 
 | Category | Count |
 |----------|-------|
 | Specs Analyzed | 1 |
-| Drift findings this sweep | 4 |
-| ⚠️ Drifted → resolved by backfill | 4 |
+| Drift findings this sweep | 1 (two-layer store-backpressure feature) |
+| ⚠️ Drifted → resolved by backfill | 1 |
 | ✗ Not Implemented | 0 |
 | 🆕 Unspecced Code | 0 |
 
-Scope of this sweep: the only hashed input that changed since the last clean
-sync (`f3967e82`) is `components/dispatcher/src/lib.rs`. The net diff comes from
-two bug-fix commits on this branch — `9b83ebe1` (populate stream) and `1d55b9c2`
-(graceful degrade under the Check→Pin eviction race) — plus a cosmetic comment
-touch from the `8f494f8d` sharding revert. All four behavioral findings are
-**code-authoritative** (shipped fixes; aligning code→spec would reintroduce
-vLLM-crashing failures), so each was resolved by backfilling `spec.md`.
+Scope of this sweep (2026-09-09): since the last clean sync (spec commit
+`787b8263`, 2026-09-02, inputs `2886506a…`) the hashed inputs changed in two
+places, both introducing the **same feature**:
 
-## Detailed Findings (all resolved by BACKFILL)
+- `components/dispatcher/src/lib.rs` — `reserve_memory` now applies bounded
+  store backpressure, and `populate`/`batch_populate` best-effort **drop on
+  full** after the backpressure budget is spent (commits `39ffee9b`,
+  `c400ced8`).
+- `components/interfaces/src/idispatcher.rs` — `DispatcherConfig` gained
+  `store_backpressure_ms: u64` (default 5000); `TierEventStats` gained two `u64`
+  counters `store_backpressure_events` and `store_drops_on_full`.
 
-### 1. Eviction of unpinned-but-unpersisted victims: drop → skip — severity: major
-- Commit: `1d55b9c2`. Location: `src/lib.rs` `evict_one_clean` (~945-965).
-- Spec had said (FR-024, User Story eviction narrative, acceptance scenario 3,
-  edge cases, Session Q&A): an unpinned candidate with incomplete write-through
-  is **dropped entirely** via `dm.remove` + `mt.remove` (data loss accepted).
-- Code now **skips** such a candidate and tries the next; if nothing is
-  demotable the scan returns `AllocationFailed`, which degrades the caller to an
-  uncached serve. Rationale: a key a connector has just Checked resident but not
-  yet Pinned has `read_ref == 0`, so `dm.remove` succeeds and silently drops it;
-  the connector's ensuing load then misses → remote-forward → fatal `IoError`
-  (`EngineDeadError`) in the vLLM connector. Demotion keeps the key resolvable
-  (BlockDevice); a full remove does not.
-- Backfill: FR-024 (§Functional Requirements), User Story eviction narrative,
-  acceptance scenario 3, edge-case bullet, and Session Q&A entry all rewritten to
-  "skip, never drop" with the Check→Pin rationale.
-- Locked in by regression test `evict_never_drops_unpersisted_unpinned_victim`
-  (commit `787b8263`): filling the tier with unpersisted, unpinned entries and
-  forcing eviction must surface `AllocationFailed` and leave every key
-  resolvable (never `NotExist`); reverting the fix fails the test.
+The single behavioral finding is **code-authoritative** (shipped fix; aligning
+code→spec would reintroduce the fatal vLLM `assert transfer_result.success` →
+`EngineDeadError` on a full tier), so it was resolved by backfilling `spec.md`.
 
-### 2. `batch_lookup` dm.lookup Err retried, not misclassified — severity: minor
-- Commit: `1d55b9c2`. Location: `src/lib.rs` `batch_lookup` entry classification (~2181).
-- Spec (FR-039 step 1) said only "classifies all entries by dispatch-map state."
-- Code now retries a `dm.lookup` `Err` locally up to 5 times — an `Err` is a
-  transient `write_ref` timeout (concurrent store-commit/promote), not a miss —
-  instead of collapsing it into `KeyNotFound` (which would forward a live key to
-  remote-lookup and fail fatally). Defensive: the comment notes this does not
-  fire under the current workload (`write_ref` windows are sub-millisecond); the
-  observed degrade is restored by findings 1 and 3.
-- Backfill: FR-039 step (1) extended to describe the Err = transient-timeout
-  retry and why misclassification would be fatal.
+## Detailed Findings (resolved by BACKFILL)
 
-### 3. Single-key cold inline `promote_and_serve` fast path removed — severity: moderate
-- Commit: `1d55b9c2`. Location: `src/lib.rs` `batch_lookup` cold dispatch (~2291).
-- Spec (FR-039 step 3, User Story 11 narrative) documented a single-entry cold
-  inline bypass that skipped the cold-pool thread hop.
-- Code now routes **all** cold entries, including a lone single-key load, through
-  the pooled path. The inline fast path had no staging fallback (FR-053), so
-  under memory-tier pressure it turned a survivable cold miss into a fatal load
-  failure; the pooled path defers `AllocationFailed` to the staging post-pass.
-- Backfill: FR-039 step (3) rewritten (single-key not special-cased; fast path
-  removed) — steps (4)-(6) kept in place so the `step (5)` cross-references at
-  User Story 11 remain valid — and the User Story 11 narrative updated.
-
-### 4. `populate_from_gpu` D2H stream: warm → store — severity: moderate
-- Commit: `9b83ebe1`. Location: `src/lib.rs` `populate` (~2941).
-- Spec (FR-037, FR-056, Assumptions) said `populate_from_gpu` uses the `warm`
-  stream for its D2H copy (rationale: it syncs before returning, so no concurrent
-  H2D to overlap with).
-- Code now uses the dedicated `store` stream so the D2H does not serialize behind
-  concurrent H2D lookups on `warm` (PCIe full-duplex via the GPU's two copy
-  engines). The prior "no concurrent H2D" rationale held only in isolation.
-- Backfill: FR-037, FR-056, and the Assumptions/Implementation-Notes bullet all
-  updated so both `populate_from_gpu` and `batch_populate` resolve `store`.
+### 1. Two-layer store backpressure + best-effort drop-on-full — severity: major
+- Commits: `39ffee9b` (bounded store backpressure), `c400ced8` (best-effort
+  drop on full after budget).
+- Locations:
+  - `reserve_memory` `src/lib.rs:3115` — retry loop: on `evict_and_insert`
+    returning `AllocationFailed`, sleep 20 ms and retry until the
+    `store_backpressure_ms` budget is exhausted, then fail fast with a final
+    `evict_and_insert(...)?`. `budget.is_zero()` (config `= 0`) restores the
+    original single-shot fail-fast path.
+  - `populate` `src/lib.rs:2950` and `batch_populate` `src/lib.rs:3017` — after
+    `reserve_memory` ultimately fails with `AllocationFailed`, both callers
+    **unconditionally** treat the store as a best-effort drop: they log, bump
+    `store_drops_on_full`, and return `Ok(())` **without caching**, rather than
+    propagating `AllocationFailed`. This prevents the connector's fatal
+    `assert transfer_result.success`.
+  - `DispatcherConfig.store_backpressure_ms` and the two `TierEventStats`
+    counters: `components/interfaces/src/idispatcher.rs`.
+- Spec (pre-sync) documented only the read-path staging deferral (FR-053) and a
+  four-field `TierEventStats` (FR-058); the store path had no backpressure or
+  drop semantics, and `populate`/`batch_populate` were specified to surface
+  `AllocationFailed` on a full tier.
+- Why code is authoritative: dropping (not erroring) on a genuinely full tier is
+  the load-bearing behavior that keeps the vLLM connector alive under store
+  pressure; the bounded backpressure gives the async evictor a window to free
+  space before the drop. Reverting to spec (return `AllocationFailed`) reintroduces
+  the crash. See memory `certus-async-full-tier-crash` for the failure this fix
+  addresses.
+- **Accuracy note (verified against `src/lib.rs:3150-3202` this sweep):** the
+  drop-on-full in `populate`/`batch_populate` is *unconditional* — it does not
+  depend on `store_backpressure_ms`. Setting `store_backpressure_ms = 0` disables
+  only the **retry** inside `reserve_memory` (fail fast on first
+  `AllocationFailed`); the caller still catches that failure and drops. The spec
+  text (FR-033, FR-056, FR-060, edge case) was worded to state this precisely and
+  does **not** claim that `store_backpressure_ms = 0` restores an
+  `AllocationFailed`-returning `populate`.
+- Backfill applied to `spec.md` this sweep:
+  - **New FR-060** — the two-layer store-backpressure requirement:
+    (1) bounded store backpressure in `reserve_memory`; (2) best-effort
+    drop-on-full in `populate`/`batch_populate` (unconditional). Complements the
+    FR-053 read-path staging deferral.
+  - **FR-003** (populate) — appended backpressure/drop note referencing FR-060.
+  - **FR-033** (config) — added `store_backpressure_ms` (u64, default 5000) to
+    the field list plus disable semantics (0 = `reserve_memory` fails fast, but
+    drop-on-full per FR-060 still applies).
+  - **FR-056** (`reserve_memory`) — bounded store-backpressure description,
+    deadlock-free rationale, `store_backpressure_ms = 0` restores fail-fast.
+  - **FR-058** — "four `u64` fields" → "six `u64` fields"; added
+    `store_backpressure_events` and `store_drops_on_full`.
+  - **FR-059** (`batch_populate`) — appended the drop-on-full note (`c400ced8`).
+  - **Edge case** bullet — populate applies bounded backpressure then
+    best-effort drops (returns `Ok(())`), does NOT return `AllocationFailed`.
+  - **User Story 1** — new acceptance scenario 5 (drop-on-full returns success,
+    no dispatch-map entry, increments `store_drops_on_full`).
+  - New **Last Synced: 2026-09-09** metadata line summarizing the backfill.
 
 ## Not Implemented
 None.
 
 ## Unspecced Code
-None. (The previously-unspecced single-key inline bypass was removed in code this
-sweep; the previously-unspecced `batch_populate` remains documented as FR-059.)
+None. The store-backpressure config field, both new counters, and the
+drop-on-full behavior are now covered by FR-033/FR-056/FR-058/FR-059/FR-060.
 
 ## Recommendations
 1. Commit this `drift-report.md` (with the freshness stamp above) together with
-   the `spec.md` backfill so the CI Spec-Sync Gate sees a fresh report.
-2. Follow-up (out of this sweep's scope): the source still carries two "gRPC
-   handler" comments in `src/lib.rs`; a source-comment cleanup remains pending.
+   the `spec.md` backfill and the `src/lib.rs` + `idispatcher.rs` inputs it
+   certifies so the CI Spec-Sync Gate sees a fresh, matching report.
+2. Follow-up (out of this sweep's scope, carried over): the source still carries
+   two "gRPC handler" comments in `src/lib.rs`; a source-comment cleanup remains
+   pending.

@@ -1,28 +1,32 @@
 ---
 spec_sync_component: dispatch-map
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T18:54:21Z
-spec_sync_git_commit: b220a1c8
-spec_sync_inputs_sha256: a64000f6e71a1bc91b86aecf42c99bd5aaab16fdb1d0fa1756f9606f5b8e3b54
+spec_sync_synced_at: 2026-09-09T21:33:18Z
+spec_sync_git_commit: 5bb71702
+spec_sync_inputs_sha256: 7f74b8e980be9afe665117e3ba9100092073f8f7960e78ad9620f0656cb810a7
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 # Dispatch-Map — Spec ↔ Implementation Drift Report
 
-> **Digest refreshed 2026-09-03 (interfaces-only hash change).** This branch
-> reworded a doc comment on `IMemoryTier::evict_next_for_key`
-> (`components/interfaces/src/imemory_tier.rs`) as part of the memory-tier
-> spec-sync. `scripts/spec-sync-hash.sh` folds the whole `components/interfaces`
-> tree into every component's hash, so this component's digest moved even though
-> no interface signature or behavior changed and dispatch-map was not otherwise
-> re-synced. The interface delta is confined to documentation and cannot affect
-> dispatch-map's spec↔implementation alignment; the report body below stands
-> unchanged and drift status remains `clean`. Digest recomputed against the
-> current interface tree.
-
-**Generated**: 2026-09-02
+**Generated**: 2026-09-02 (last analysis); **Restamped**: 2026-09-09
 **Component**: `components/dispatch-map`
-**Branch**: `evolve-dispatcher-dw`
+**Branch**: `fix-dispatcher-store-backpressure` (restamp); `evolve-dispatcher-dw` (analysis)
 **Mode**: Read-only drift analysis, then BACKFILL apply to `spec.md` (code authoritative).
+
+> **Refresh 2026-09-09 (restamp only — no drift, no spec change):** the stamp was
+> refreshed to input hash
+> `7f74b8e980be9afe665117e3ba9100092073f8f7960e78ad9620f0656cb810a7` at commit
+> `5bb71702`. The previous stamp (`2dbb7666…`) went stale for two reasons, neither
+> of which is dispatch-map drift: (1) `components/dispatch-map/specs/001-dispatch-map/spec.md`
+> was already backfilled to the global-lock design in commit `6a3d801c` (the sweep
+> documented below), and (2) `scripts/spec-sync-hash.sh` folds **all** of
+> `components/interfaces/` into every component's hash, so the dispatcher-only
+> `idispatcher.rs` store-backpressure change (`39ffee9b`/`c400ced8`, new
+> `DispatcherConfig::store_backpressure_ms` + two `TierEventStats` counters)
+> re-hashed dispatch-map even though it references none of those types. Re-verified
+> this sweep: `src/state.rs` still uses a single global `Mutex<Inner>` + `Condvar`
+> (matches FR-002/FR-013); no `IDispatchMap` method or type changed. **Drift status
+> remains `clean`; no `spec.md` edit was needed.**
 
 ## Summary
 

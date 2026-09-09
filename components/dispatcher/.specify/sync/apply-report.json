@@ -1,26 +1,25 @@
 {
-  "applied": "2026-08-31",
+  "applied": "2026-09-09T21:33:18Z",
   "project": "dispatcher",
   "spec": "001-dispatcher-cache-interface",
-  "branch": "sync-tmp",
-  "backup": ".specify/sync/backups/specs/001-dispatcher-cache-interface/spec.md.bak",
+  "branch": "fix-dispatcher-store-backpressure",
+  "backup": ".specify/sync/backups/spec-001-20260909T212936Z.md.bak",
   "edits": [
-    { "requirement": "FR-006", "direction": "BACKFILL", "result": "applied", "note": "H2D warm-path copy -> memcpy_batch_async on warm_load (scatter)" },
-    { "requirement": "FR-037", "direction": "BACKFILL", "result": "applied", "note": "single warm stream -> per-device warm_load (H2D) + warm_store (D2H)" },
-    { "requirement": "FR-039(2)", "direction": "BACKFILL", "result": "applied", "note": "MemoryTier-hit H2D -> batched memcpy_batch_async on warm_load" },
-    { "requirement": "FR-040", "direction": "BACKFILL", "result": "applied", "note": "gRPC handler -> shm-queue control transport" },
-    { "requirement": "FR-042", "direction": "BACKFILL", "result": "applied", "note": "gRPC TakeEvents -> shm-queue TakeEvents" },
-    { "requirement": "FR-052", "direction": "BACKFILL", "result": "applied", "note": "stream inventory -> two warm streams + pipeline pair per device" },
-    { "requirement": "FR-056", "direction": "BACKFILL", "result": "applied", "note": "copy_gpu_to_memory_async -> batched memcpy_batch_async gather on warm_store" },
-    { "requirement": "Implementation-Notes", "direction": "BACKFILL", "result": "applied", "note": "warm-path APIs -> memcpy_batch_async scatter/gather; warm_load/warm_store split" },
-    { "requirement": "FR-058", "direction": "BACKFILL-UNSPECCED", "result": "applied", "note": "new: tier_event_stats() + TierEventCounters" },
-    { "requirement": "SC-017", "direction": "BACKFILL-UNSPECCED", "result": "applied", "note": "new: counters zero at startup, monotonic, delta = tier events" },
-    { "requirement": "Last-Synced", "direction": "bookkeeping", "result": "applied", "note": "2026-08-31 sync note appended" }
+    { "requirement": "FR-060", "direction": "BACKFILL", "result": "applied", "note": "new: two-layer store backpressure (bounded backpressure in reserve_memory + unconditional best-effort drop-on-full in populate/batch_populate); complements FR-053" },
+    { "requirement": "FR-003", "direction": "BACKFILL", "result": "applied", "note": "populate: appended backpressure/drop note referencing FR-060" },
+    { "requirement": "FR-033", "direction": "BACKFILL", "result": "applied", "note": "config: added store_backpressure_ms (u64, default 5000) + disable semantics (0 = reserve_memory fails fast; drop-on-full FR-060 still applies)" },
+    { "requirement": "FR-056", "direction": "BACKFILL", "result": "applied", "note": "reserve_memory: bounded store backpressure + deadlock-free rationale; store_backpressure_ms=0 restores fail-fast" },
+    { "requirement": "FR-058", "direction": "BACKFILL", "result": "applied", "note": "four u64 fields -> six; added store_backpressure_events, store_drops_on_full" },
+    { "requirement": "FR-059", "direction": "BACKFILL", "result": "applied", "note": "batch_populate: appended drop-on-full note (c400ced8)" },
+    { "requirement": "edge-case", "direction": "BACKFILL", "result": "applied", "note": "populate applies bounded backpressure then best-effort drops (returns Ok(())), does NOT return AllocationFailed" },
+    { "requirement": "US1-scenario-5", "direction": "BACKFILL", "result": "applied", "note": "new acceptance scenario: drop-on-full returns success, no dispatch-map entry, increments store_drops_on_full" },
+    { "requirement": "Last-Synced", "direction": "bookkeeping", "result": "applied", "note": "2026-09-09 sync note added" }
   ],
   "source_files_modified": [],
   "cargo_run": false,
+  "accuracy_verified": "Drop-on-full in populate/batch_populate is unconditional (src/lib.rs:3150-3202); store_backpressure_ms=0 disables only the reserve_memory retry. Spec text does not claim store_backpressure_ms=0 makes populate return AllocationFailed.",
   "deferred_out_of_scope": [
-    "Two src/lib.rs 'gRPC handler' source comments (~lib.rs:2983) — code-side follow-up in align-tasks.md; source outside editing scope."
+    "Two src/lib.rs 'gRPC handler' source comments — code-side follow-up; source outside editing scope (carried over)."
   ],
   "drift_status": "clean"
 }
