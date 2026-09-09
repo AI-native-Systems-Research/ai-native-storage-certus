@@ -159,7 +159,7 @@ mod verification {
     /// One BTreeMap insert only.
     #[kani::proof]
     #[kani::unwind(4)]
-    fn wall_freelist_new_establishes() {
+    fn verify_freelist_new_establishes() {
         let cap: usize = 2 * ALIGNMENT;
         let fl = FreeList::new(cap);
         assert!(fl.used() == 0, "INIT-EMPTY: fresh allocator has used==0");
