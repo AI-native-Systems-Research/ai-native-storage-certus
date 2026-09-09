@@ -231,8 +231,11 @@ show_status() {
 
     local total_mem node0_mem node1_mem
     total_mem=$(free -g | awk '/Mem:/{print $2}')
-    node0_mem=$(numactl -H 2>/dev/null | grep "node 0 size" | awk '{print $4}')
-    node1_mem=$(numactl -H 2>/dev/null | grep "node 1 size" | awk '{print $4}')
+    # `|| true`: on a host without numactl (or a different NUMA layout) the grep
+    # matches nothing -> exit 1 -> pipefail+set -e would abort show_status
+    # silently. Downstream code already treats an empty value as "unknown".
+    node0_mem=$(numactl -H 2>/dev/null | grep "node 0 size" | awk '{print $4}' || true)
+    node1_mem=$(numactl -H 2>/dev/null | grep "node 1 size" | awk '{print $4}' || true)
 
     # --- Display checks ---
     # Each check is tagged with which connector(s) it currently SATISFIES.
@@ -369,7 +372,10 @@ show_status() {
 
     header "Kernel (next boot)"
     local next_boot_args
-    next_boot_args=$(grubby --info=DEFAULT 2>/dev/null | grep ^args= | sed 's/^args="//' | sed 's/"$//')
+    # `|| true`: grubby is RHEL/Fedora-only and the grep matches nothing when it
+    # is absent -> pipefail+set -e would abort here. An empty result is handled
+    # just below (prompts for sudo / skips the next-boot diff).
+    next_boot_args=$(grubby --info=DEFAULT 2>/dev/null | grep ^args= | sed 's/^args="//' | sed 's/"$//' || true)
     if [[ -z "$next_boot_args" && $EUID -ne 0 ]]; then
         echo -e "  ${YELLOW}Run with sudo to see next-boot kernel args${NC}"
     elif [[ -n "$next_boot_args" ]]; then
