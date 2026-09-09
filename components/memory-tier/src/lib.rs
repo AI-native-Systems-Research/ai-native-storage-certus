@@ -635,6 +635,34 @@ impl IMemoryTier for MemoryTierComponent {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Kani formal-verification harnesses (clean-slate re-run, verif/kani/memory-tier-rerun).
+//
+// TOOL-BOUNDARY HARNESS (RUN, signature captured): every IMemoryTier method is
+// reached only through a `MemoryTierComponent`, whose `MemoryTierState::default()`
+// constructs a `HashMap<CacheKey, Slot>` (FR-007). `HashMap::new()` seeds
+// `RandomState` via `std::sys::random::linux::getrandom` (a foreign function) and
+// hashes through `core::hash::sip` (SipHash). CBMC cannot execute the getrandom
+// syscall retry loop or the SipHash machinery tractably. This harness exercises the
+// cheapest gated accessor (`capacity()` on an *uninitialized* component, which
+// returns 0 before touching the pool at all) — yet even *constructing* the component
+// hits the wall. It is authored and RUN to capture that signature; INIT-GATE and all
+// method-level obligations inherit this boundary. See memory-tier_properties.md.
+// -----------------------------------------------------------------------------
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    /// INIT-GATE (representative) — capacity()==0 before initialize. RUN to capture
+    /// the getrandom/SipHash construction wall.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn wall_init_gate_capacity_uninit() {
+        let c = MemoryTierComponent::new(RwLock::new(MemoryTierState::default()));
+        assert!(c.capacity() == 0, "INIT-GATE: capacity()==0 before initialize");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
