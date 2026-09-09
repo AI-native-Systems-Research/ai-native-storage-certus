@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_align_up": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_align_up_idempotent": { "prover": "alt-ergo", "time": 0.026 }
+      "vc_align_up_idempotent": { "prover": "alt-ergo", "time": 0.012 }
     }
   }
 }

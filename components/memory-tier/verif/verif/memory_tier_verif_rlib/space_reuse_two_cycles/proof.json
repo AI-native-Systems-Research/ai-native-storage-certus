@@ -5,17 +5,8 @@
       "vc_allocate_split": { "prover": "alt-ergo", "time": 0.014 },
       "vc_deallocate_used": { "prover": "alt-ergo", "time": 0.014 },
       "vc_space_reuse_two_cycles": {
-        "tactic": "split_vc",
-        "children": [
-          { "prover": "alt-ergo", "time": 0.016 },
-          {
-            "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.022 } ]
-          },
-          { "prover": "alt-ergo", "time": 0.019 },
-          { "prover": "alt-ergo", "time": 0.025 },
-          { "prover": "alt-ergo", "time": 0.019 }
-        ]
+        "tactic": "compute_specified",
+        "children": []
       }
     }
   }

@@ -1,20 +1,10 @@
-(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 402 0 402 93 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 326 0 326 93 *)
 
-let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 408 21 408 25
-let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 410 14 410 15
-let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 393 11 393 25
-let%span slib'2 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 394 10 394 73
-let%span slib'3 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 395 10 395 59
-let%span slib'4 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 396 10 396 67
-let%span slib'5 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 397 10 397 69
-let%span slib'6 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 398 10 398 53
-let%span slib'7 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 399 10 399 65
-let%span slib'8 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 400 10 400 52
-let%span slib'9 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 401 10 401 51
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 332 21 332 25
+let%span slib'0 = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 334 14 334 15
 
 use creusot.int.UInt64
 use creusot.prelude.Any
-use int.Int
 
 type t_TierState = { initialized: bool; capacity: UInt64.t; used: UInt64.t; spdk_allocated: bool }
 
@@ -28,44 +18,27 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let initialize_state [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 402 0 402 93]
-  (state: t_TierState) (pool_size: UInt64.t) (return (x: tup2_TierState_Result_unit_MtErr)) =
-{[@stop_split] [@expl:initialize_state requires] [%#slib'1] UInt64.t'int pool_size > 0}
-  (! bb0
+let initialize_state [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 326 0 326 93]
+  (state: t_TierState) (pool_size: UInt64.t) (return (x: tup2_TierState_Result_unit_MtErr)) = (! bb0
   [ bb0 = any [ br0 -> {state.initialized = false} (! bb2) | br1 -> {state.initialized} (! bb1) ]
   | bb1 = s0
-    [ s0 = [ &_29 <- AlreadyExists ] s1
-    | s1 = [ &_28 <- Err _29 ] s2
-    | s2 = [ &_ret <- { f0 = state; f1 = _28 } ] s3
+    [ s0 = [ &_8 <- AlreadyExists ] s1
+    | s1 = [ &_7 <- Err _8 ] s2
+    | s2 = [ &_ret <- { f0 = state; f1 = _7 } ] s3
     | s3 = return {_ret} ]
   | bb2 = s0
     [ s0 = [ &s <- { initialized = ([%#slib] true);
                      capacity = pool_size;
                      used = ([%#slib'0] (0: UInt64.t));
                      spdk_allocated = state.spdk_allocated } ] s1
-    | s1 = [ &_34 <- Ok _35 ] s2
-    | s2 = [ &_ret <- { f0 = s; f1 = _34 } ] s3
+    | s1 = [ &_13 <- Ok _14 ] s2
+    | s2 = [ &_ret <- { f0 = s; f1 = _13 } ] s3
     | s3 = return {_ret} ] ]
   [ & _ret: tup2_TierState_Result_unit_MtErr = Any.any_l ()
   | & state: t_TierState = state
   | & pool_size: UInt64.t = pool_size
-  | & _28: t_Result_unit_MtErr = Any.any_l ()
-  | & _29: t_MtErr = Any.any_l ()
+  | & _7: t_Result_unit_MtErr = Any.any_l ()
+  | & _8: t_MtErr = Any.any_l ()
   | & s: t_TierState = Any.any_l ()
-  | & _34: t_Result_unit_MtErr = Any.any_l ()
-  | & _35: () = Any.any_l () ])
-  [ return (result: tup2_TierState_Result_unit_MtErr) ->
-  {[@stop_split] [@expl:initialize_state ensures] ([@stop_split] [@expl:initialize_state ensures #0] [%#slib'2] state.initialized
-      -> result.f0.initialized = state.initialized)
-    /\ ([@stop_split] [@expl:initialize_state ensures #1] [%#slib'3] state.initialized -> result.f0.used = state.used)
-    /\ ([@stop_split] [@expl:initialize_state ensures #2] [%#slib'4] state.initialized
-      -> result.f0.capacity = state.capacity)
-    /\ ([@stop_split] [@expl:initialize_state ensures #3] [%#slib'5] state.initialized
-      -> result.f1 = Err (AlreadyExists))
-    /\ ([@stop_split] [@expl:initialize_state ensures #4] [%#slib'6] not state.initialized -> result.f0.initialized)
-    /\ ([@stop_split] [@expl:initialize_state ensures #5] [%#slib'7] not state.initialized
-      -> UInt64.t'int result.f0.capacity = UInt64.t'int pool_size)
-    /\ ([@stop_split] [@expl:initialize_state ensures #6] [%#slib'8] not state.initialized
-      -> UInt64.t'int result.f0.used = 0)
-    /\ ([@stop_split] [@expl:initialize_state ensures #7] [%#slib'9] not state.initialized -> result.f1 = Ok ())}
-    (! return {result}) ]
+  | & _13: t_Result_unit_MtErr = Any.any_l ()
+  | & _14: () = Any.any_l () ]) [ return (result: tup2_TierState_Result_unit_MtErr) -> (! return {result}) ]

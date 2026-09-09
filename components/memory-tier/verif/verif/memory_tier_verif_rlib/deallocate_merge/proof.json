@@ -4,7 +4,7 @@
     "Coma": {
       "vc_coalesce_next": { "prover": "alt-ergo", "time": 0.012 },
       "vc_coalesce_prev": { "prover": "alt-ergo", "time": 0.012 },
-      "vc_deallocate_merge": { "prover": "alt-ergo", "time": 0.027 }
+      "vc_deallocate_merge": { "prover": "alt-ergo", "time": 0.013 }
     }
   }
 }

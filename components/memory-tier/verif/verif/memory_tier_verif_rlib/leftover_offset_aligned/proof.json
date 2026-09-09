@@ -3,14 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_align_up": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_leftover_offset_aligned": {
-        "tactic": "split_vc",
-        "children": [
-          { "prover": "alt-ergo", "time": 0.031 },
-          { "prover": "alt-ergo", "time": 0.028 },
-          { "prover": "alt-ergo", "time": 0.052 }
-        ]
-      }
+      "vc_leftover_offset_aligned": null
     }
   }
 }

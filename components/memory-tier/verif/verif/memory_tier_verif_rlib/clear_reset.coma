@@ -1,8 +1,6 @@
-(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 263 0 263 54 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 209 0 209 54 *)
 
-let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 264 19 264 20
-let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 261 10 261 24
-let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 262 10 262 33
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 210 19 210 20
 
 use creusot.int.UInt64
 use creusot.prelude.Any
@@ -13,8 +11,8 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clear_reset [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 263 0 263 54] (pool_size: UInt64.t)
-  (return (x: tup2_usize_usize)) = (! bb0
+let clear_reset [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 209 0 209 54]
+  (pool_size: UInt64.t) (return (x: tup2_usize_usize)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &new_used <- [%#slib] (0: UInt64.t) ] s1
     | s1 = [ &new_capacity <- pool_size ] s2
@@ -23,9 +21,4 @@ let clear_reset [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.
   [ & _ret: tup2_usize_usize = Any.any_l ()
   | & pool_size: UInt64.t = pool_size
   | & new_used: UInt64.t = Any.any_l ()
-  | & new_capacity: UInt64.t = Any.any_l () ])
-  [ return (result: tup2_usize_usize) ->
-  {[@stop_split] [@expl:clear_reset ensures] ([@stop_split] [@expl:clear_reset ensures #0] [%#slib'0] UInt64.t'int result.f0
-      = 0)
-    /\ ([@stop_split] [@expl:clear_reset ensures #1] [%#slib'1] UInt64.t'int result.f1 = UInt64.t'int pool_size)}
-    (! return {result}) ]
+  | & new_capacity: UInt64.t = Any.any_l () ]) [ return (result: tup2_usize_usize) -> (! return {result}) ]

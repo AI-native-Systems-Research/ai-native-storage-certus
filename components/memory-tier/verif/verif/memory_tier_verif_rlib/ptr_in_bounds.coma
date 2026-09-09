@@ -1,32 +1,19 @@
-(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 537 0 537 103 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 438 0 438 103 *)
 
-let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 538 4 538 25
-let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 533 11 533 40
-let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 534 11 534 47
-let%span slib'2 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 535 10 535 44
-let%span slib'3 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 536 10 536 31
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 439 4 439 25
 
 use creusot.int.UInt64
 use creusot.prelude.Any
-use int.Int
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let ptr_in_bounds [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 537 0 537 103] (offset: UInt64.t)
-  (region_size: UInt64.t) (aligned_size: UInt64.t) (pool_size: UInt64.t) (return (x: UInt64.t)) =
-{[@stop_split] [@expl:ptr_in_bounds requires] ([@stop_split] [@expl:ptr_in_bounds requires #0] [%#slib'0] UInt64.t'int region_size
-    >= UInt64.t'int aligned_size)
-  /\ ([@stop_split] [@expl:ptr_in_bounds requires #1] [%#slib'1] UInt64.t'int offset + UInt64.t'int region_size
-  <= UInt64.t'int pool_size)}
-  (! bb0
+let ptr_in_bounds [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 438 0 438 103]
+  (offset: UInt64.t) (region_size: UInt64.t) (aligned_size: UInt64.t) (pool_size: UInt64.t) (return (x: UInt64.t)) =
+(! bb0
   [ bb0 = s0
     [ s0 = UInt64.add [%#slib] {offset} {aligned_size} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1)
     | s1 = return {_ret} ] ]
   [ & _ret: UInt64.t = Any.any_l () | & offset: UInt64.t = offset | & aligned_size: UInt64.t = aligned_size ])
-  [ return (result: UInt64.t) ->
-  {[@stop_split] [@expl:ptr_in_bounds ensures] ([@stop_split] [@expl:ptr_in_bounds ensures #0] [%#slib'2] UInt64.t'int result
-      = UInt64.t'int offset + UInt64.t'int aligned_size)
-    /\ ([@stop_split] [@expl:ptr_in_bounds ensures #1] [%#slib'3] UInt64.t'int result <= UInt64.t'int pool_size)}
-    (! return {result}) ]
+  [ return (result: UInt64.t) -> (! return {result}) ]

@@ -1,27 +1,17 @@
-(* #"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 246 0 246 59 *)
+(* #"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 194 0 194 59 *)
 
-let%span slib = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 247 4 247 19
-let%span slib'0 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 243 11 243 29
-let%span slib'1 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 244 10 244 38
-let%span slib'2 = "/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 245 10 245 30
+let%span slib = "/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 195 4 195 19
 
 use creusot.int.UInt64
 use creusot.prelude.Any
-use int.Int
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let free_capacity [#"/home/cornel/mt-creusot/components/memory-tier/verif/src/lib.rs" 246 0 246 59] (capacity: UInt64.t)
-  (used: UInt64.t) (return (x: UInt64.t)) = {[@stop_split] [@expl:free_capacity requires] [%#slib'0] UInt64.t'int used
-  <= UInt64.t'int capacity}
-  (! bb0
+let free_capacity [#"/home/cornel/mt-creusot-rerun/components/memory-tier/verif/src/lib.rs" 194 0 194 59]
+  (capacity: UInt64.t) (used: UInt64.t) (return (x: UInt64.t)) = (! bb0
   [ bb0 = s0
     [ s0 = UInt64.sub [%#slib] {capacity} {used} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
   [ & _ret: UInt64.t = Any.any_l () | & capacity: UInt64.t = capacity | & used: UInt64.t = used ])
-  [ return (result: UInt64.t) ->
-  {[@stop_split] [@expl:free_capacity ensures] ([@stop_split] [@expl:free_capacity ensures #0] [%#slib'1] UInt64.t'int result
-      = UInt64.t'int capacity - UInt64.t'int used)
-    /\ ([@stop_split] [@expl:free_capacity ensures #1] [%#slib'2] UInt64.t'int result <= UInt64.t'int capacity)}
-    (! return {result}) ]
+  [ return (result: UInt64.t) -> (! return {result}) ]

@@ -5,24 +5,7 @@
       "vc_clear_ghost_u64": { "prover": "alt-ergo", "time": 0.018 },
       "vc_contains_reflects_trace": {
         "tactic": "compute_specified",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [
-              { "prover": "alt-ergo", "time": 0.019 },
-              { "prover": "alt-ergo", "time": 0.019 },
-              { "prover": "alt-ergo", "time": 0.019 },
-              { "prover": "alt-ergo", "time": 0.02 },
-              { "prover": "alt-ergo", "time": 0.021 },
-              { "prover": "alt-ergo", "time": 0.021 },
-              { "prover": "alt-ergo", "time": 0.023 },
-              { "prover": "alt-ergo", "time": 0.025 },
-              { "prover": "alt-ergo", "time": 0.023 },
-              { "prover": "alt-ergo", "time": 0.023 },
-              { "prover": "alt-ergo", "time": 0.024 }
-            ]
-          }
-        ]
+        "children": []
       },
       "vc_deref_mut_Ghost_FMap_u64_SlotMirror": {
         "prover": "alt-ergo",

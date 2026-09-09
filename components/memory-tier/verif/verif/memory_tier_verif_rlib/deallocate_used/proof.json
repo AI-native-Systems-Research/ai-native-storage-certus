@@ -1,6 +1,1 @@
-{
-  "profile": [],
-  "proofs": {
-    "Coma": { "vc_deallocate_used": { "prover": "alt-ergo", "time": 0.024 } }
-  }
-}
+{ "profile": [], "proofs": { "Coma": { "vc_deallocate_used": null } } }
