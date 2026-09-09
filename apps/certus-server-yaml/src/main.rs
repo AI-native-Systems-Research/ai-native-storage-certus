@@ -43,11 +43,14 @@ extern "C" fn handle_signal(_sig: libc::c_int) {
 /// for; keep it in sync with `tools/render_kvprofile.py`'s `TIER_RE`.
 fn format_tier_stats(s: &interfaces::TierEventStats) -> String {
     format!(
-        "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]",
+        "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]  \
+         store[backpressure {sb}, drops-on-full {sd}]",
         pm = s.promotions_to_memory,
         pg = s.promotions_to_gpu,
         em = s.evictions_from_memory,
         es = s.evictions_from_ssd,
+        sb = s.store_backpressure_events,
+        sd = s.store_drops_on_full,
     )
 }
 
@@ -97,6 +100,12 @@ struct Cli {
     #[arg(long = "shmq-poller-cpu")]
     shmq_poller_cpu: Option<usize>,
 
+    /// Log periodic shm-queue poller fairness/backlog stats (per-channel
+    /// serviced counts, low/high channel split, worker-queue depth). Diagnostic
+    /// only; off by default.
+    #[arg(long = "shmq-poller-stats")]
+    shmq_poller_stats: bool,
+
     /// Memory-tier pool size (e.g. 256M, 1G, 512K). Defaults to 2G.
     #[arg(long = "memory-tier-size", value_parser = parse_size)]
     memory_tier_size: Option<usize>,
@@ -112,6 +121,12 @@ struct Cli {
     /// Maximum eviction attempts before failing with pool-full error.
     #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
     max_eviction_attempts: usize,
+
+    /// Milliseconds a store allocation backpressures on a momentarily full
+    /// memory tier (retrying eviction while the background evictor drains)
+    /// before surfacing AllocationFailed. 0 disables (fail fast).
+    #[arg(long = "store-backpressure-ms", default_value_t = 5000)]
+    store_backpressure_ms: u64,
 
     /// Memory-tier utilization threshold (0.0–1.0) for background DRAM→SSD demotion.
     /// Disabled by default (0.0). Set to e.g. 0.8 to start demoting at 80% full.
@@ -200,6 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         format: cli.format,
         poller_base_cpu: cli.poller_base_cpu,
         max_eviction_attempts: cli.max_eviction_attempts,
+        store_backpressure_ms: cli.store_backpressure_ms,
         memory_tier_eviction_threshold: cli.memory_tier_eviction_threshold,
         rl_group: cli.rl_group.clone(),
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
@@ -336,6 +352,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         channels: cli.channels,
         reserve_timeout: Duration::from_secs(cli.reserve_timeout_secs),
         poller_cpu: cli.shmq_poller_cpu,
+        poller_stats: cli.shmq_poller_stats,
     };
     tokio::task::spawn_blocking(move || {
         serve(server, translator, serve_config, &SHUTDOWN, serve_logger)

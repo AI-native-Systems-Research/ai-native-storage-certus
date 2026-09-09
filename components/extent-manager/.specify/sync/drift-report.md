@@ -1,11 +1,24 @@
 ---
 spec_sync_component: extent-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T18:54:21Z
-spec_sync_git_commit: b220a1c8
-spec_sync_inputs_sha256: a5d3c1ebb3b1f1ffac31fc9f4bb9b15dfb52fe785afbedf4170f5387d44cd02e
+spec_sync_synced_at: 2026-09-09T22:27:18Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: 30fc1ff63d11bcf5b8224178c2128ce4a153ebaf22d855a65ba1b27996c3993f
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
 # Spec ↔ Implementation Drift Report — extent-manager
 
 > **Digest refreshed 2026-09-03 (interfaces-only hash change).** This branch
@@ -22,8 +35,19 @@ spec_sync_hash_tool: scripts/spec-sync-hash.sh
 
 **Generated**: 2026-09-01T22:59:04Z (re-stamped 2026-09-02 for an interfaces-only hash change)
 **Spec**: `specs/001-extent-manager-v2/spec.md` (Updated 2026-08-20)
-**Commit**: 787b8263
+**Commit**: 5bb71702
 
+> **2026-09-09 re-stamp (no content change).** Still byte-for-byte unchanged in
+> this component's own `src/` and `specs/`. Since the 2026-09-02 stamp the only
+> hashed input to move was `components/interfaces/src/idispatcher.rs` (branch
+> `fix-dispatcher-store-backpressure`, commits `39ffee9b`/`c400ced8`: new
+> `DispatcherConfig::store_backpressure_ms` field + two `TierEventStats`
+> counters). extent-manager references none of those dispatcher types — it
+> implements `IExtentManager` and consumes `IBlockDevice` — so there is no new
+> drift; only the folded-in interfaces hash moved (`5e8ff021…` → `3817ba9e…`).
+> Re-stamped at commit `5bb71702` so the CI Spec-Sync Gate sees a fresh report;
+> the drift analysis below still holds verbatim.
+>
 > **2026-09-02 re-stamp (no content change).** This component's own `src/` and
 > `specs/` are byte-for-byte unchanged since its `fbc2fc24` sync, which stamped
 > the correct hash for that tree. The freshness hash folds in all of

@@ -11,6 +11,36 @@
 # from the as-shipped arm is which image tag is run, so any change in
 # reliability/throughput is attributable to the patch alone. Build both tags
 # with build_026.sh.
+# Data-parallel fan-out (shared-server DP's cputier counterpart). cputier
+# replicas are fully independent — each is its own vLLM engine + isolated CPU/fs
+# tier — so DP is just N concurrent containers on N GPUs, each replaying a
+# disjoint conversation shard. When DP_SIZE>1 and this is not already a per-
+# replica child, re-exec self once per GPU with a distinct GPU / DP_RANK / fs-tier
+# dir / log, then wait for all. Runs BEFORE sourcing common so each child builds
+# its own COMMON_RUN_ARGS with its own GPU. DP_SIZE=1 skips all of this.
+if [[ "${DP_SIZE:-1}" -gt 1 && -z "${_DP_REPLICA:-}" ]]; then
+  _SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  _GPUS="${GPUS:-$(seq -s' ' 0 $(( ${DP_SIZE} - 1 )))}"
+  read -r -a _gpu_arr <<< "$_GPUS"
+  _base_log="${LOG:-cputier_patched_dp}"; _base_log="${_base_log%.log}"
+  _base_disk="${DISK_DIR_HOST:-/mnt/certus1/kv-fs-tier}"
+  echo "[patched] DP fan-out: DP_SIZE=${DP_SIZE} GPUS='${_GPUS}'"
+  declare -a _pids=()
+  for _r in $(seq 0 $(( ${DP_SIZE} - 1 ))); do
+    _g="${_gpu_arr[$_r]}"
+    _DP_REPLICA="$_r" GPU="$_g" DP_RANK="$_r" DP_SIZE="$DP_SIZE" \
+      DISK_DIR_HOST="${_base_disk}/gpu${_g}" \
+      LOG="${_base_log}.gpu${_g}.log" \
+      bash "$_SELF" &
+    _pids[$_r]=$!
+  done
+  _rc=0
+  for _r in $(seq 0 $(( ${DP_SIZE} - 1 ))); do
+    wait "${_pids[$_r]}" || _rc=1
+  done
+  exit "$_rc"
+fi
+
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
 IMAGE="${IMAGE:-certus-offload-bench-fix026}"

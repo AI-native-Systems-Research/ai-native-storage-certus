@@ -1,15 +1,15 @@
 {
-  "generated": "2026-09-02T20:45:00Z",
+  "generated": "2026-09-09T21:33:18Z",
   "project": "dispatcher",
   "spec": "specs/001-dispatcher-cache-interface/spec.md",
-  "branch": "evolve-dispatcher-dw",
-  "git_commit": "787b8263",
+  "branch": "fix-dispatcher-store-backpressure",
+  "git_commit": "5bb71702",
   "drift_status": "clean",
-  "inputs_sha256": "2886506afcb1d6dbaa9505fa7e3c01405c045fbf588dfd2003be84865ea63deb",
+  "inputs_sha256": "af0388391aea2f22dc103ed59e028b2b2dd20eff09db928bdd0867811d96ac0e",
   "summary": {
     "specs_analyzed": 1,
-    "drift_findings": 4,
-    "drifted_resolved_by_backfill": 4,
+    "drift_findings": 1,
+    "drifted_resolved_by_backfill": 1,
     "not_implemented": 0,
     "unspecced_features": 0
   },
@@ -19,44 +19,15 @@
       "title": "Dispatcher Cache Interface",
       "drifted": [
         {
-          "requirement": "FR-024",
-          "spec_text": "unpinned+unpersisted eviction candidate is dropped via dm.remove + mt.remove",
-          "actual": "candidate is skipped (never dropped); dropping raced fatally with Check->Pin (read_ref==0 drop -> miss -> EngineDeadError)",
-          "location": "components/dispatcher/src/lib.rs:945-965",
+          "requirement": "FR-060,FR-003,FR-033,FR-056,FR-058,FR-059",
+          "spec_text": "store path had no backpressure or drop semantics; populate/batch_populate surface AllocationFailed on a full tier; TierEventStats has four u64 fields",
+          "actual": "reserve_memory applies bounded store backpressure (retry evict_and_insert on 20ms poll until store_backpressure_ms budget, default 5000ms); populate/batch_populate unconditionally best-effort drop on full (return Ok(()) without caching, bump store_drops_on_full) to avoid fatal vLLM assert transfer_result.success; DispatcherConfig gained store_backpressure_ms; TierEventStats gained store_backpressure_events + store_drops_on_full (six u64 fields)",
+          "location": "components/dispatcher/src/lib.rs:3115 (reserve_memory), :2950 (populate), :3017 (batch_populate); components/interfaces/src/idispatcher.rs",
           "severity": "major",
-          "commit": "1d55b9c2",
+          "commit": "39ffee9b,c400ced8",
           "resolution": "backfill",
-          "outcome": "fixed"
-        },
-        {
-          "requirement": "FR-039#1",
-          "spec_text": "classifies all entries by dispatch-map state",
-          "actual": "dm.lookup Err (transient write_ref timeout) retried locally x5 rather than misclassified as KeyNotFound -> remote-forward -> fatal",
-          "location": "components/dispatcher/src/lib.rs:2181",
-          "severity": "minor",
-          "commit": "1d55b9c2",
-          "resolution": "backfill",
-          "outcome": "fixed"
-        },
-        {
-          "requirement": "FR-039#3",
-          "spec_text": "single-entry cold batch calls promote_and_serve inline, bypassing the cold pool",
-          "actual": "all cold entries (incl. single-key) go through the pooled path; inline fast path removed (no staging fallback -> fatal load failure under tier pressure)",
-          "location": "components/dispatcher/src/lib.rs:2291",
-          "severity": "moderate",
-          "commit": "1d55b9c2",
-          "resolution": "backfill",
-          "outcome": "fixed"
-        },
-        {
-          "requirement": "FR-037,FR-056,Assumptions",
-          "spec_text": "populate_from_gpu uses the warm stream for its D2H copy",
-          "actual": "populate_from_gpu uses the dedicated store stream (PCIe full-duplex; do not serialize D2H behind concurrent H2D lookups)",
-          "location": "components/dispatcher/src/lib.rs:2941",
-          "severity": "moderate",
-          "commit": "9b83ebe1",
-          "resolution": "backfill",
-          "outcome": "fixed"
+          "outcome": "fixed",
+          "notes": "drop-on-full is unconditional; store_backpressure_ms=0 disables only the reserve_memory retry, not the caller-side drop. Verified against src/lib.rs:3150-3202."
         }
       ],
       "not_implemented": []

@@ -589,6 +589,10 @@ fn setup_with_failing_mt() -> (Arc<DispatcherComponent>, Arc<MockDispatchMap>) {
     let d = query_interface!(c, IDispatcher).unwrap();
     d.initialize(DispatcherConfig {
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        // Fail fast: this helper backs tests that assert the immediate
+        // AllocationFailed path. The mock tier never recovers, so any
+        // backpressure budget would only make the test sleep for nothing.
+        store_backpressure_ms: 0,
         ..Default::default()
     })
     .unwrap();
@@ -654,6 +658,102 @@ fn reserve_memory_full_pool_returns_allocation_failed() {
     assert!(
         matches!(err, DispatcherError::AllocationFailed(_)),
         "expected AllocationFailed, got: {err:?}"
+    );
+    d.shutdown().unwrap();
+}
+
+#[test]
+fn reserve_memory_backpressures_then_surfaces_allocation_failed() {
+    // A store against a genuinely-wedged (always-failing) tier must still
+    // surface AllocationFailed, but only after backpressuring for the whole
+    // configured budget — it must not fail fast when a budget is set, and it
+    // must record having backpressured. Uses a small budget so the test is
+    // quick while still proving the retry loop engaged.
+    let dm = Arc::new(MockDispatchMap::new());
+    let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+    let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
+    let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::always_fails());
+    let c = DispatcherComponent::new_default();
+    c.dispatch_map
+        .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+        .unwrap();
+    c.logger.connect(logger).unwrap();
+    c.gpu_services.connect(gpu).unwrap();
+    c.memory_tier.connect(mt).unwrap();
+    let d = query_interface!(c, IDispatcher).unwrap();
+    d.initialize(DispatcherConfig {
+        data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        store_backpressure_ms: 300,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let start = std::time::Instant::now();
+    let err = d
+        .reserve_memory(1, 4096, 0)
+        .expect_err("wedged tier must eventually fail");
+    let elapsed = start.elapsed();
+
+    assert!(
+        matches!(err, DispatcherError::AllocationFailed(_)),
+        "expected AllocationFailed, got: {err:?}"
+    );
+    // It retried across the budget rather than failing immediately. Allow slack
+    // below the 300 ms budget for the last poll landing early.
+    assert!(
+        elapsed >= std::time::Duration::from_millis(250),
+        "expected backpressure to hold ~budget, only waited {elapsed:?}"
+    );
+    assert!(
+        d.tier_event_stats().store_backpressure_events > 0,
+        "expected store_backpressure_events to be recorded"
+    );
+    d.shutdown().unwrap();
+}
+
+#[test]
+fn populate_drops_best_effort_when_tier_full() {
+    // Best-effort drop: when the tier is genuinely full (always-failing mock)
+    // and the backpressure budget is 0 (fail fast), a `populate` must NOT
+    // surface AllocationFailed — it drops the store, reports success (so vLLM's
+    // `assert transfer_result.success` never fires), and records the drop.
+    let dm = Arc::new(MockDispatchMap::new());
+    let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+    let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
+    let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::always_fails());
+    let c = DispatcherComponent::new_default();
+    c.dispatch_map
+        .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+        .unwrap();
+    c.logger.connect(logger).unwrap();
+    c.gpu_services.connect(gpu).unwrap();
+    c.memory_tier.connect(mt).unwrap();
+    let d = query_interface!(c, IDispatcher).unwrap();
+    d.initialize(DispatcherConfig {
+        data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        store_backpressure_ms: 0,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let mut buf = [7u8; 4096];
+    let handle = IpcHandle {
+        address: buf.as_mut_ptr(),
+        size: buf.len() as u32,
+    };
+
+    // reserve_memory fails first, before any GPU op, so the drop path is taken
+    // regardless of the mock GPU. The store reports success.
+    d.populate(1, handle).expect("full-tier store must drop, not fail");
+
+    // The key was not cached: a subsequent check misses.
+    assert!(
+        !d.check(1).expect("check must succeed"),
+        "dropped store must not be visible in the cache"
+    );
+    assert!(
+        d.tier_event_stats().store_drops_on_full > 0,
+        "expected store_drops_on_full to be recorded"
     );
     d.shutdown().unwrap();
 }

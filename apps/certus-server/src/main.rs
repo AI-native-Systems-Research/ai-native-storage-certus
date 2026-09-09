@@ -109,6 +109,22 @@ fn format_io_stats(s: &interfaces::ReadWriteStats) -> String {
     )
 }
 
+/// Format the cumulative KV-cache tier-movement counters for the server log,
+/// including the store-path backpressure/drop counters that report whether the
+/// memory tier saturated under load. Always available (not gated by a feature).
+fn format_tier_stats(s: &interfaces::TierEventStats) -> String {
+    format!(
+        "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]  \
+         store[backpressure {sb}, drops-on-full {sd}]",
+        pm = s.promotions_to_memory,
+        pg = s.promotions_to_gpu,
+        em = s.evictions_from_memory,
+        es = s.evictions_from_ssd,
+        sb = s.store_backpressure_events,
+        sd = s.store_drops_on_full,
+    )
+}
+
 /// Certus shared-memory-queue server exposing the IDispatcher control plane.
 #[derive(Parser)]
 #[command(
@@ -150,6 +166,12 @@ struct Cli {
     #[arg(long = "shmq-poller-cpu")]
     shmq_poller_cpu: Option<usize>,
 
+    /// Log periodic shm-queue poller fairness/backlog stats (per-channel
+    /// serviced counts, low/high channel split, worker-queue depth). Diagnostic
+    /// only; off by default.
+    #[arg(long = "shmq-poller-stats")]
+    shmq_poller_stats: bool,
+
     /// Memory-tier pool size (e.g. 256M, 1G, 512K). Defaults to 2G.
     #[arg(long = "memory-tier-size", value_parser = parse_size)]
     memory_tier_size: Option<usize>,
@@ -165,6 +187,12 @@ struct Cli {
     /// Maximum eviction attempts before failing with pool-full error.
     #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
     max_eviction_attempts: usize,
+
+    /// Milliseconds a store allocation backpressures on a momentarily full
+    /// memory tier (retrying eviction while the background evictor drains)
+    /// before surfacing AllocationFailed. 0 disables (fail fast).
+    #[arg(long = "store-backpressure-ms", default_value_t = 5000)]
+    store_backpressure_ms: u64,
 
     /// Memory-tier utilization threshold (0.0–1.0) for background DRAM→SSD demotion.
     #[arg(long = "memory-tier-eviction-threshold", default_value_t = 0.0)]
@@ -244,6 +272,7 @@ fn initialize_component_stack(
     format: bool,
     poller_base_cpu: Option<usize>,
     max_eviction_attempts: usize,
+    store_backpressure_ms: u64,
     memory_tier_eviction_threshold: f64,
 ) -> Result<
     (
@@ -415,6 +444,7 @@ fn initialize_component_stack(
             format_on_init: format,
             poller_base_cpu,
             max_eviction_attempts,
+            store_backpressure_ms,
             memory_tier_eviction_threshold,
             ..Default::default()
         })
@@ -438,6 +468,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli.format,
         cli.poller_base_cpu,
         cli.max_eviction_attempts,
+        cli.store_backpressure_ms,
         cli.memory_tier_eviction_threshold,
     )?;
 
@@ -523,6 +554,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             channels: cli.channels,
             reserve_timeout: Duration::from_secs(cli.reserve_timeout_secs),
             poller_cpu: cli.shmq_poller_cpu,
+            poller_stats: cli.shmq_poller_stats,
         },
         &SHUTDOWN,
         Arc::clone(&logger),
@@ -538,6 +570,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format_io_stats(&dispatcher.read_write_stats())
         ));
     }
+
+    // Always-on: the cumulative KV-cache tier-movement counts for this run,
+    // logged before teardown while the dispatcher's counters are still live.
+    logger.info(&format!(
+        "certus-server: FINAL tier-events {}",
+        format_tier_stats(&dispatcher.tier_event_stats())
+    ));
 
     let _ = dispatcher.shutdown();
     logger.info("certus-server: shutdown complete");

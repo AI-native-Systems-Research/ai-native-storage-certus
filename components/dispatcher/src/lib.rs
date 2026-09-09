@@ -119,6 +119,15 @@ pub struct TierEventCounters {
     evictions_from_memory: AtomicU64,
     /// Extents freed on SSD by the background extent evictor.
     evictions_from_ssd: AtomicU64,
+    /// Store-allocation retries taken while backpressuring on a momentarily
+    /// full memory tier (see `reserve_memory`). Bumped once per retry sleep.
+    store_backpressure_events: AtomicU64,
+    /// Stores dropped best-effort because the memory tier was still full after
+    /// the backpressure budget elapsed (see `populate`/`batch_populate`). The
+    /// KV block is not cached — a later load misses and recomputes — but the
+    /// store reports success so the vLLM offloading connector does not treat a
+    /// full cache as a fatal transfer failure.
+    store_drops_on_full: AtomicU64,
 }
 
 impl TierEventCounters {
@@ -147,6 +156,23 @@ impl TierEventCounters {
         self.evictions_from_ssd.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record one store-backpressure retry. Returns the count *before* this
+    /// call, so a caller can log a one-shot line on the first engagement
+    /// (return value `0`).
+    #[inline]
+    pub fn record_store_backpressure(&self) -> u64 {
+        self.store_backpressure_events
+            .fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Record one best-effort store drop (tier full after backpressure). Returns
+    /// the count *before* this call, so a caller can log a one-shot line on the
+    /// first drop (return value `0`).
+    #[inline]
+    pub fn record_store_drop_on_full(&self) -> u64 {
+        self.store_drops_on_full.fetch_add(1, Ordering::Relaxed)
+    }
+
     /// Read the cumulative counters without resetting them.
     pub fn snapshot(&self) -> TierEventStats {
         TierEventStats {
@@ -154,6 +180,8 @@ impl TierEventCounters {
             promotions_to_gpu: self.promotions_to_gpu.load(Ordering::Relaxed),
             evictions_from_memory: self.evictions_from_memory.load(Ordering::Relaxed),
             evictions_from_ssd: self.evictions_from_ssd.load(Ordering::Relaxed),
+            store_backpressure_events: self.store_backpressure_events.load(Ordering::Relaxed),
+            store_drops_on_full: self.store_drops_on_full.load(Ordering::Relaxed),
         }
     }
 }
@@ -311,6 +339,7 @@ define_component! {
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             max_eviction_attempts: AtomicUsize,
+            store_backpressure_ms: AtomicU64,
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
             eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
             eviction_dropped: AtomicU64,
@@ -1738,6 +1767,8 @@ impl IDispatcher for DispatcherComponent {
 
         self.max_eviction_attempts
             .store(config.max_eviction_attempts, Ordering::Relaxed);
+        self.store_backpressure_ms
+            .store(config.store_backpressure_ms, Ordering::Relaxed);
 
         self.dispatch_map
             .get()
@@ -2931,7 +2962,25 @@ impl IDispatcher for DispatcherComponent {
         // Phase 1: Evict if needed and allocate memory-tier slot.
         let t_alloc = std::time::Instant::now();
         // Internal populate path has no client session context.
-        let _mem_ptr = self.reserve_memory(key, size, 0)?;
+        match self.reserve_memory(key, size, 0) {
+            Ok(_) => {}
+            Err(DispatcherError::AllocationFailed(_)) => {
+                // Best-effort drop: the tier is still full after the
+                // backpressure budget elapsed. Skip caching this block and
+                // report success — a later load simply misses and recomputes.
+                // Reporting an error here would trip vLLM's
+                // `assert transfer_result.success` and kill the engine, so a
+                // full cache must never be fatal to the store path.
+                if self.tier_counters.record_store_drop_on_full() == 0 {
+                    self.log_info(
+                        "store drop-on-full engaged: memory tier full after backpressure \
+                         budget; dropping store (not cached, load will recompute)",
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
         let alloc_us = t_alloc.elapsed().as_micros() as f64;
 
         // Phase 2: Async DMA copy from GPU into the reserved slot, then sync.
@@ -3017,6 +3066,18 @@ impl IDispatcher for DispatcherComponent {
                         }
                     }
                 }
+                Err(DispatcherError::AllocationFailed(_)) => {
+                    // Best-effort drop (see `populate`): tier still full after
+                    // the backpressure budget. Skip this key and report success
+                    // so a full cache is never fatal to vLLM's store path.
+                    if self.tier_counters.record_store_drop_on_full() == 0 {
+                        self.log_info(
+                            "store drop-on-full engaged: memory tier full after backpressure \
+                             budget; dropping store (not cached, load will recompute)",
+                        );
+                    }
+                    results[i] = Some(Ok(()));
+                }
                 Err(e) => { results[i] = Some(Err(e)); }
             }
         }
@@ -3091,9 +3152,53 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        let mem_ptr = self.evict_and_insert(&dm, &mt, key, size, max_attempts)?;
 
-        Ok(mem_ptr)
+        // Bounded store backpressure. Under a sustained async offload burst the
+        // memory tier can hit genuine 100% utilization: the oldest entries are
+        // *transiently* un-evictable (pinned by an in-flight load, or not yet
+        // written through by the bg_writer), so `evict_and_insert` surfaces
+        // `AllocationFailed`. The saturation is momentary — the background
+        // `MemoryTierEvictor` demotes ~512 slabs / 200 ms tick and in-flight
+        // write-throughs land within ~1-2 s — so we retry the allocation for a
+        // bounded budget instead of failing the store. Failing is fatal here:
+        // the shmq worker replies STATUS_ERROR and vLLM's offloading connector
+        // does `assert transfer_result.success` -> EngineDeadError. Retrying
+        // also applies natural backpressure to the synchronous vLLM store,
+        // throttling the producer rather than killing the engine. Deadlock-free:
+        // the threads we wait on (evictor, bg_writer, other workers' loads) are
+        // all independent of this store worker. `budget = 0` restores the
+        // original fail-fast behavior.
+        let budget =
+            std::time::Duration::from_millis(self.store_backpressure_ms.load(Ordering::Relaxed));
+        if budget.is_zero() {
+            let mem_ptr = self.evict_and_insert(&dm, &mt, key, size, max_attempts)?;
+            return Ok(mem_ptr);
+        }
+
+        const POLL: std::time::Duration = std::time::Duration::from_millis(20);
+        let deadline = std::time::Instant::now() + budget;
+        loop {
+            match self.evict_and_insert(&dm, &mt, key, size, max_attempts) {
+                Ok(mem_ptr) => return Ok(mem_ptr),
+                Err(DispatcherError::AllocationFailed(_))
+                    if std::time::Instant::now() < deadline =>
+                {
+                    if self.tier_counters.record_store_backpressure() == 0 {
+                        // One-shot: the memory tier saturated and the store path
+                        // began backpressuring rather than failing. Runs are
+                        // otherwise silent about this path (certus-server does
+                        // not dump tier stats), so surface it once.
+                        self.log_info(&format!(
+                            "store backpressure engaged: memory tier full, \
+                             retrying reserve (budget {} ms)",
+                            budget.as_millis()
+                        ));
+                    }
+                    std::thread::sleep(POLL);
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     fn copy_gpu_to_memory_async(
@@ -4401,6 +4506,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4561,6 +4667,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4609,6 +4716,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4630,6 +4738,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4653,6 +4762,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4681,6 +4791,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4710,6 +4821,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4739,6 +4851,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4763,6 +4876,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4787,6 +4901,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4816,6 +4931,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4848,6 +4964,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4871,6 +4988,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4895,6 +5013,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4950,6 +5069,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -4984,6 +5104,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5044,7 +5165,7 @@ mod tests {
     }
 
     #[test]
-    fn populate_allocation_failure() {
+    fn populate_drops_best_effort_on_allocation_failure() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
         let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices::default());
@@ -5062,6 +5183,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5073,15 +5195,26 @@ mod tests {
         c.memory_tier.connect(mt).unwrap();
 
         let d = query_interface!(c, IDispatcher).unwrap();
+        // Budget 0 = fail fast (no backpressure wait); the full tier then
+        // triggers the best-effort drop rather than surfacing AllocationFailed.
         d.initialize(DispatcherConfig {
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            store_backpressure_ms: 0,
             ..Default::default()
         })
         .unwrap();
 
+        // A store against a full tier is dropped best-effort: populate reports
+        // success (so vLLM's transfer assert never fires), the key is not
+        // cached, and the drop is recorded.
         let mut buf = vec![0u8; 4096];
-        let err = d.populate(1, make_handle(&mut buf));
-        assert!(matches!(err, Err(DispatcherError::AllocationFailed(_))));
+        d.populate(1, make_handle(&mut buf))
+            .expect("full-tier store must drop, not fail");
+        assert!(!d.check(1).unwrap(), "dropped store must not be cached");
+        assert!(
+            d.tier_event_stats().store_drops_on_full > 0,
+            "expected store_drops_on_full to be recorded"
+        );
         d.shutdown().unwrap();
     }
 
@@ -5613,6 +5746,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5649,6 +5783,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5720,6 +5855,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5790,6 +5926,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5842,6 +5979,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5911,6 +6049,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            AtomicU64::new(0),
             RwLock::new(None),
             Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
@@ -5924,8 +6063,11 @@ mod tests {
         c.memory_tier.connect(mt).unwrap();
 
         let d = query_interface!(c, IDispatcher).unwrap();
+        // Budget 0 = fail fast, so the full-tier store takes the best-effort
+        // drop path immediately instead of backpressuring.
         d.initialize(DispatcherConfig {
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            store_backpressure_ms: 0,
             ..Default::default()
         })
         .unwrap();
@@ -5942,13 +6084,16 @@ mod tests {
         dm.take_read(1).unwrap();
 
         // Populating key 2 needs the only slot, held by pinned key 1. Eviction
-        // must refuse and surface pool-full rather than free the pinned slot.
+        // must refuse to free the pinned slot; the store is then dropped
+        // best-effort (reports success, not cached) rather than failing.
         let mut buf2 = vec![0u8; 4096];
-        let res = d.populate(2, make_handle(&mut buf2));
+        d.populate(2, make_handle(&mut buf2))
+            .expect("full-of-pinned store must drop, not fail");
         assert!(
-            matches!(res, Err(DispatcherError::AllocationFailed(_))),
-            "populate should fail (pool full of pinned data), got: {res:?}"
+            d.tier_event_stats().store_drops_on_full > 0,
+            "expected store_drops_on_full to be recorded"
         );
+        assert!(!d.check(2).unwrap(), "dropped store must not be cached");
 
         // The critical invariant: key 1's slot was NOT reclaimed.
         assert!(
