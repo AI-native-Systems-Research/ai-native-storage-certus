@@ -1,0 +1,42 @@
+    Updating crates.io index
+   Compiling autocfg v1.5.1
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.189
+   Compiling getrandom v0.4.3
+   Compiling cfg-if v1.0.4
+   Compiling num-traits v0.2.19
+   Compiling syn v2.0.119
+    Checking num-integer v0.1.47
+    Checking num-bigint v0.4.8
+   Compiling uuid v1.26.1
+    Checking num-rational v0.4.2
+   Compiling pearlite-syn v0.12.0-dev (/home/cornel/ai-native-storage-certus/tools/creusot/creusot/pearlite-syn)
+   Compiling creusot-std-proc v0.12.0-dev (/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std-proc)
+    Checking creusot-std v0.12.0-dev (/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std)
+    Checking extent-manager-verif v0.1.0 (/home/cornel/em-creusot-rerun/components/extent-manager/verif)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 23.81s
+	Command being timed: "cargo creusot"
+	User time (seconds): 262.93
+	System time (seconds): 10.41
+	Percent of CPU this job got: 477%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:57.30
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 962740
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 50
+	Minor (reclaiming a frame) page faults: 2145105
+	Voluntary context switches: 23899
+	Involuntary context switches: 624
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 226216
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

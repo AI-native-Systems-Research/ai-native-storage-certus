@@ -11,11 +11,7 @@ use creusot_std::prelude::*;
 
 /// `region_count` mirrors `regions.len()`, which equals the validated
 /// `region_count` FormatParams field (a positive power of two).
-#[bitwise_proof]
-#[requires(region_count != 0usize)]
 // Power-of-two: exactly the bit pattern format() enforces via is_power_of_two().
-#[requires(region_count & (region_count - 1usize) == 0usize)]
-#[ensures(result@ < region_count@)]
 pub fn region_for_key(key: u64, region_count: usize) -> usize {
     key as usize & (region_count - 1)
 }

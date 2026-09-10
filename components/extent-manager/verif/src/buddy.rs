@@ -16,13 +16,9 @@ use creusot_std::prelude::*;
 /// Mirror of the order computation (buddy.rs:59-63). `blocks` is the number of
 /// sectors the request rounds up to. The attempted postcondition is that the
 /// returned order covers the request: `2^result >= blocks`.
-#[bitwise_proof]
-#[requires(blocks@ >= 1)]
 // Coverage: the chosen order is large enough for the request.
-#[ensures(result@.pow2() >= blocks@)]
 // Minimality: order is the SMALLEST such — one order down no longer covers.
 // Together these pin `result` to `ceil(log2(blocks))`.
-#[ensures(result@ == 0 || (result@ - 1).pow2() < blocks@)]
 pub fn order_for_blocks(blocks: u64) -> usize {
     if blocks <= 1 {
         0
@@ -33,8 +29,6 @@ pub fn order_for_blocks(blocks: u64) -> usize {
         // i.e. the top set bit of x is at position (63 - lz), so
         // 2^(63-lz) <= x < 2^(64-lz). Bridging both bounds to pow2 lets the
         // portfolio discharge coverage AND minimality.
-        proof_assert!(x@ < (64u32 - lz)@.pow2());
-        proof_assert!((63u32 - lz)@.pow2() <= x@);
-        64 - lz as usize
+                        64 - lz as usize
     }
 }

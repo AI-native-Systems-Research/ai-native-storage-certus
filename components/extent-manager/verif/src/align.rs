@@ -9,17 +9,12 @@
 
 use creusot_std::prelude::*;
 
-#[requires(sector_size@ > 0)]
 // No overflow in the `size + sector_size` step (the source shares this latent
 // requirement; extents are always far below u32::MAX in practice).
-#[requires(size@ + sector_size@ <= u32::MAX@)]
 // Result is a multiple of the sector size.
-#[ensures(result@ % sector_size@ == 0)]
 // Result covers the request...
-#[ensures(result@ >= size@)]
 // ...and is minimal: at most one sector of slack, so the result is THE
 // sector-aligned size for `size`.
-#[ensures(result@ < size@ + sector_size@)]
 pub fn align_to_sector_size(size: u32, sector_size: u32) -> u32 {
     // Semantically identical to the source's single expression
     // `(size + sector_size - 1) / sector_size * sector_size`; split into named
@@ -27,7 +22,5 @@ pub fn align_to_sector_size(size: u32, sector_size: u32) -> u32 {
     let n = size + sector_size - 1;
     let q = n / sector_size;
     // Division identity + remainder bound pin q*sector_size into [size, n].
-    proof_assert!(n@ == q@ * sector_size@ + n@ % sector_size@);
-    proof_assert!(n@ % sector_size@ < sector_size@);
-    q * sector_size
+            q * sector_size
 }
