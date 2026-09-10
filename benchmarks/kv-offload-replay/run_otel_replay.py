@@ -4,7 +4,7 @@ of run_multiturn_offloading.py.
 
 Where run_multiturn_offloading.py replays ShareGPT human-turn streams as fast as
 the engine will take them, this driver replays the `otel_trace_replay` corpus
-produced by configs/trace_to_otel.py (default
+produced by benchmarks/kv-offload-otel-replay/trace-gen/trace_to_otel.py (default
 /mnt/certus1/inference-perf-syn-data/otel_1k) and **reproduces the recorded turn
 timing**: every conversation is one async coroutine, and before each turn the
 coroutine sleeps the recorded inter-turn gap (start_time[k] - end_time[k-1], the
