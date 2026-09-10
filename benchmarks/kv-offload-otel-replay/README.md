@@ -99,6 +99,30 @@ SECONDARY_TIER=fs CPU_BYTES=$((8*(1<<30))) DISK_DIR_HOST=/mnt/certus1/kv-fs-tier
 Writes `otel_replay_results.json` inside the container; the run log is teed to
 `otel_offload_<HHMMSS>.log`.
 
+## Run — cputier (`run-docker-otel-cputier.sh`)
+
+Dedicated entry point for the **CPU+Disk tiered** arm (vLLM 0.26 native
+`OffloadingConnector` → `TieringOffloadingSpec`: CPU primary tier backed by an
+`fs` disk secondary tier) — the OTel counterpart of
+`../kv-offload-replay/run-docker-cputier.sh`. It is a thin wrapper that pins
+`SECONDARY_TIER=fs` and execs `run-docker-otel-offload.sh` (which owns the
+tiering mechanics: `--shm-size` for the `/dev/shm` CPU-tier mmap, the fs-tier
+bind, disk IO threads), so it's equivalent to the `SECONDARY_TIER=fs` invocation
+above but with sensible cputier defaults and its own log name.
+
+```bash
+cd benchmarks/kv-offload-otel-replay
+./run-docker-otel-cputier.sh                                    # CPU 8G primary + fs disk tier
+CPU_BYTES=$((32*(1<<30))) DISK_DIR_HOST=/mnt/certus1/kv-fs-tier ./run-docker-otel-cputier.sh
+NUM_CONVS=8 TIME_SCALE=0 ./run-docker-otel-cputier.sh           # quick smoke
+```
+
+`CPU_BYTES` (primary tier, default 8 GiB), `DISK_DIR_HOST` (fs-tier backing dir,
+default `/mnt/certus1/kv-fs-tier`, must be writable by the mapped container uid),
+`SHM_BYTES` (default `CPU_BYTES + 4 GiB`), and `DISK_{READ,WRITE}_THREADS`
+(default 16) tune the tiers. Writes `otel_replay_results.json`; log teed to
+`otel_cputier_<HHMMSS>.log`.
+
 ## Run — Certus shmq (`run-docker-otel-shmq.sh`)
 
 Client-only: start a `certus-server` on the host first (vfio-pci + hugepages +
@@ -129,7 +153,7 @@ runners; the base runners also honor `PROM_PORT` directly.
 cd benchmarks/kv-offload-otel-replay
 ./run-docker-otel-offload-prom.sh                 # CPUOffload + exporter on :8000
 OFFLOAD_MODE=none ./run-docker-otel-offload-prom.sh
-SECONDARY_TIER=fs CPU_BYTES=$((8*(1<<30))) ./run-docker-otel-offload-prom.sh
+./run-docker-otel-cputier-prom.sh                 # cputier (CPU+fs tiered) + exporter
 ./run-docker-otel-shmq-prom.sh                    # shmq client + exporter (host server up)
 PROM_PORT=9100 ./run-docker-otel-offload-prom.sh  # pick another port
 ```
