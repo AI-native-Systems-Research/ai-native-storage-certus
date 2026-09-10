@@ -1,7 +1,7 @@
 # kv-offload-otel-replay — containerized
 
 Container harness for **kv-offload-otel-replay**: the timestamp-scheduled replay
-of the `otel_trace_replay` corpus (built by `configs/trace_to_otel.py`, default
+of the `otel_trace_replay` corpus (built by `benchmarks/kv-offload-otel-replay/trace-gen/trace_to_otel.py`, default
 `/mnt/certus1/inference-perf-syn-data/otel_1k`) across the KV-offload backends.
 The drivers live in `../kv-offload-replay/` (`run_otel_replay.py`,
 `run_otel_async.py`, `otel_corpus.py`) and `../../certus-shmq-connector/`
