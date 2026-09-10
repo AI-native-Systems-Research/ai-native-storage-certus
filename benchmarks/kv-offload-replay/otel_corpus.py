@@ -1,4 +1,4 @@
-"""otel_corpus.py — load the `otel_trace_replay` corpus (configs/trace_to_otel.py)
+"""otel_corpus.py — load the `otel_trace_replay` corpus (benchmarks/kv-offload-otel-replay/trace-gen/trace_to_otel.py)
 into the per-conversation turn streams the OTel replay drivers consume.
 
 Shared by every OTel-replay backend driver (``run_otel_replay.py`` for the
