@@ -49,5 +49,5 @@ NUM_CONVS=10 OTEL_HOST=/mnt/certus1/inference-perf-syn-data/otel_1k ACTIVE_SESSI
 Time scale 0, which is immediate schedule.
 
 ```bash
-kv-offload-otel-replay]$ NUM_CONVS=10 OTEL_HOST=/mnt/certus1/inference-perf-syn-data/otel_1k MAX_NUM_SEQ=64 TIME_SCALE=0 DISK_DIR_HOST=/mnt/certus1/kv-fs-tier ./run-docker-otel-cputier-prom.sh
+kv-offload-otel-replay]$ NUM_CONVS=10 CPU_BYTES=$((13*(1<<30))) OTEL_HOST=/mnt/certus1/inference-perf-syn-data/otel_1k MAX_NUM_SEQ=64 TIME_SCALE=0 DISK_DIR_HOST=/mnt/certus1/kv-fs-tier ./run-docker-otel-cputier-prom.sh
 ```
