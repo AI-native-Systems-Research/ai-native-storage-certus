@@ -41,5 +41,13 @@ ACTIVE_SESSIONS and MAX_NUM_SEQ:
 └───────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────┘
 
 ```bash
-NUM_CONVS=10 OTEL_HOST=/mnt/certus1/inference-perf-syn-data/otel_1k ACTIVE_SESSIONS=32 TIME_SCALE=1.0 ./run-docker-otel-shmq-prom.sh
+NUM_CONVS=10 OTEL_HOST=/mnt/certus1/inference-perf-syn-data/otel_1k ACTIVE_SESSIONS=0 MAX_NUM_SEQ=64 TIME_SCALE=1.0 ./run-docker-otel-shmq-prom.sh
+```
+
+# Run Cputier plugin with Prometheus
+
+Time scale 0, which is immediate schedule.
+
+```bash
+kv-offload-otel-replay]$ NUM_CONVS=10 OTEL_HOST=/mnt/certus1/inference-perf-syn-data/otel_1k MAX_NUM_SEQ=64 TIME_SCALE=0 DISK_DIR_HOST=/mnt/certus1/kv-fs-tier ./run-docker-otel-cputier-prom.sh
 ```
