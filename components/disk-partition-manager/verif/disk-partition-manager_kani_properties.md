@@ -1,211 +1,119 @@
 # Verified properties — disk-partition-manager (Kani)
 
-**Role 2 (Kani lane).** Verified from the property inventory
-`disk-partition-manager_property_inventory.md` (Role 1, commit `c87f1e25`, N=4 methods,
-M=35 properties) against code `components/disk-partition-manager/src/gpt.rs` +
-`src/lib.rs`. Harnesses live in `#[cfg(kani)] mod verification` at the end of `gpt.rs`.
-Toolchain: **Kani 0.67.0 / CBMC**. Branch `verif/kani/disk-partition-manager`
-(base `unstable-kani` @ `b160a3ae`). Consumed by `id`; no properties re-extracted or
-invented. This file **under-claims**: only what a green harness establishes is marked proved.
+**Role 2 (Kani lane), CLEAN-SLATE RE-RUN 2026-09-09 under TIGHT knobs.** Verified from the
+property inventory `disk-partition-manager_property_inventory.md` (Role 1, N=4 methods, M=35)
+against code `src/gpt.rs` + `src/lib.rs`. Harnesses: `#[cfg(kani)] mod verification` in both
+files. Toolchain **Kani 0.67.0 / CBMC**; command
+`cargo kani -Z unstable-options --output-format=terse --harness-timeout 90s -j 24 --default-unwind 3`.
+Branch `verif/kani/disk-partition-manager-rerun` (baseline `31f92e61`). Consumed by `id`; no
+property re-extracted or invented. **Under-claims:** only a green harness marks an id proved.
 
-## Backing-structure scout (done FIRST, before any harness)
+## Backing-structure scout (done FIRST)
 
-Confirmed the component is a **good Kani target for arithmetic**: GPT state is a 92-byte
-header + a **128 × 128-byte entry array modeled as byte slices** (`[u8]`), CRC32 taken over
-byte ranges, and all layout/LBA logic is **integer arithmetic** over `u32`/`u64` with a
-UTF-16LE name codec. `Vec` is used but **bounded ≤ 128**; **no `BTreeMap`/`HashMap`** anywhere.
-Pure-arithmetic harnesses run in ~0.05–0.2 s / ~170 MB. This scout avoided the memory-tier
-time sink — no unbounded map was ever handed to CBMC.
+GPT state = 92-byte header + 128×128B entry array **as byte slices** (`[u8]`); CRC32 over byte
+ranges; layout/LBA logic is **integer arithmetic**; a UTF-16LE name codec. **No BTreeMap/HashMap/
+raw-pointer** in gpt logic; `Vec` bounded ≤128. Arithmetic core ≈ 0.03–0.17 s / ~170 MB. Four
+intrinsic Kani/CBMC walls are captured by `wall_*`/gate harnesses (not asserted): `_xgetbv` from
+`crc32fast`; integer `format!` non-termination; the 128-slot entry-array zero-pad (unwind≥129);
+and macro-component construction (std HashMap getrandom/SipHash seeding).
 
-Three **intrinsic Kani/CBMC boundaries** were then hit and are documented as TOOL residuals
-(not agent gaps): (1) `crc32fast::hash` lowers to the `_xgetbv` intrinsic CBMC does not
-support; (2) integer `format!` in error arms does not terminate under CBMC; (3) the
-production 128-slot entry-array zero-pad forces `#[kani::unwind(≥129)]`, which SAT-explodes.
+## Scoreboard (per method; globals counted in each bundle)
 
----
+| method | bundle | proved (green) ids | strict | relaxed |
+|---|:--:|---|:--:|:--:|
+| `initialize` | 12 | G6 (offset roundtrip, arithmetic core `✓~`) | ✗ | **✓** |
+| `format` | 24 | ERR-MULTI-REST, DISK-GUID-V4, PART-GUID-V4, NAME-LEN-36, PART-SIZE-CEIL, PART-NONOVERLAP, PART-WITHIN-USABLE, RESTOFDISK-REMAINING, BACKUP-MIRRORS-PRIMARY, G6 core | ✗ | **✓** |
+| `partition_info` | 6 | — (gate wall G2; populated-state rows I/O-walled) | ✗ | ✗ |
+| `num_partitions` | 4 | — (gate wall G2; RETURNS-LEN I/O-walled) | ✗ | ✗ |
 
-## Scoreboard (per method: proved m / bundle B, globals counted in each bundle)
+**Headline: strict 0/4, relaxed 2/4. 10 unique inventory ids proved** (baseline 11; G7 regressed
+to ⊘ under the 90 s cap — see below). Status markers: `✓` green · `✓~` arithmetic-core/bounded ·
+`⊘` tool-boundary (real run + reproducible signature) · `✎` not-expressible bounded · `⊘pre`
+assumed precondition.
 
-| method | B | proved m | proved property ids |
-|---|:--:|:--:|---|
-| `initialize` | 12 | **2** | G6 (arithmetic core), G7 |
-| `format` | 24 | **11** | G6 (core), G7, FORMAT-ERR-MULTI-REST, FORMAT-DISK-GUID-V4, FORMAT-PART-GUID-V4, FORMAT-NAME-LEN-36, FORMAT-PART-SIZE-CEIL, FORMAT-RESTOFDISK-REMAINING, FORMAT-PART-NONOVERLAP, FORMAT-PART-WITHIN-USABLE, FORMAT-BACKUP-MIRRORS-PRIMARY |
-| `partition_info` | 6 | **0** | — (all lib.rs Vec/Option logic; AGENT, see ledger) |
-| `num_partitions` | 4 | **0** | — (lib.rs `len()`; AGENT) |
+## Global invariants (§1)
 
-**Unique properties proved: 11 of M=35.** (G6/G7 are globals shared by `initialize`+`format`,
-counted in each bundle but once here.)
-
-**Status legend (the 6 markers):**
-`✓` proved by a green harness · `✓~` proved at bounded geometry / arithmetic-core only ·
-`⊘` precondition, assumed (not a Kani obligation) · `⤴T-io` TOOL: effects Kani cannot model
-(I/O, FFI/`_xgetbv`, `format!` non-termination, 128-Vec SAT) · `⤴T-x` TOOL: not expressible
-for a bounded checker (resource/frame) · `⧗A` AGENT: bounded-checkable, harness not authored.
-
----
-
-## Global invariants (§1) — proved once, propagate by id
-
-- `DPM-ROUNDTRIP-OFFSETS` (G6) **[Invariant]** `✓~` — the offset↔sector-count inverse at the
-  heart of read-back (`ending = start + num_sectors − 1  ⟺  num_sectors = ending − start + 1`)
-  is proved symbolically over the full `u64` range with overflow guarded — harness
-  `verify_ending_lba_inverse` (SUCCESSFUL). The **full byte+CRC read-back** (offsets/GUIDs/names
-  identical after write→read) is `⤴T-io` — it runs through `crc32fast`/`_xgetbv` and block I/O.
-- `DPM-ROUNDTRIP-NAME` (G7) **[Invariant]** `✓` — a name UTF-8→UTF-16LE→UTF-8 preserves ASCII —
-  harness `verify_name_roundtrip_ascii` (SUCCESSFUL, symbolic ASCII length ≤ 5 under
-  `#[kani::unwind(6)]`) + `verify_name_len_36` (SUCCESSFUL, the ≤36-code-unit truncation).
-  Bound: proved for symbolic ASCII strings up to the unwind cap, not all 36 code units.
-- `DPM-SECTOR-SIZE-512-4096` (G1) **[Precondition]** `⊘` — assumed (`kani::any() ∈ {512,4096}`)
-  in every arithmetic harness. Per inventory R3 the code is sector-size-generic and does not
-  *enforce* it, so it is a precondition, not a Kani postcondition obligation.
-- `DPM-STATE-CACHED` (G3) `⤴T-io`; `DPM-IO-PROPAGATE` (G4) `⤴T-io`; `DPM-CRC-INTEGRITY` (G8)
-  `⤴T-io` (`_xgetbv`); `DPM-NAMESPACE-ID` (G9) `⤴T-io` — see residual ledger.
-- `DPM-INIT-GATE` (G2) `⧗A`; `DPM-COUNT-INDEX-AGREE` (G5) `⧗A` — lib.rs Option/Vec logic.
+- `DPM-ROUNDTRIP-OFFSETS` (G6) **[Invariant]** `✓~` — the offset↔sector inverse
+  (`ending = start + n − 1 ⟺ n = ending − start + 1`) proved symbolically with overflow guarded —
+  `verify_ending_lba_inverse` (SUCCESSFUL, anti-vacuity anchored). Full byte+CRC read-back is ⊘
+  (`_xgetbv` + block I/O).
+- `DPM-ROUNDTRIP-NAME` (G7) **[Invariant]** `⊘` — **REGRESSED from baseline SUCCESSFUL.** The
+  identical `verify_name_roundtrip_ascii` (ASCII, ≤5 code units, `#[kani::unwind(6)]`) now
+  **times out at the 90 s harness cap (rc=124)**; prior run: 592.9 s CBMC / 19.5 GB. Symbolic
+  `from_utf16_lossy` cost, not unwind depth. Route: raise this harness's timeout, or Creusot.
+- `DPM-SECTOR-SIZE-512-4096` (G1) **[Precondition]** `⊘pre` — assumed `∈{512,4096}` in every
+  harness; code is sector-size-generic (inventory R3), so a precondition, not an obligation.
+- `DPM-STATE-CACHED` (G3), `DPM-IO-PROPAGATE` (G4), `DPM-NAMESPACE-ID` (G9) `⊘` — reached only via
+  the initialize/format I/O path (block I/O effects Kani cannot model).
+- `DPM-CRC-INTEGRITY` (G8) **[Invariant]** `⊘` — `wall_crc32_xgetbv`: `crc32fast::hash` →
+  `unsupported constructs: InlineAsm, caller_location, catch_unwind, foreign function` (`_xgetbv`).
+- `DPM-INIT-GATE` (G2) **[Precondition]** `⊘` — `verify_init_gate_num_partitions` (lib.rs):
+  `DiskPartitionManager::new_default()` construction times out at 90 s (rc=124) on the `InterfaceMap`
+  std-HashMap getrandom/SipHash seeding. **Attempted + captured** (baseline had left it unauthored).
+  Route: Creusot.
+- `DPM-COUNT-INDEX-AGREE` (G5) `⊘` — query logic reachable only via a populated table (I/O wall).
 
 ## initialize
-
-- `DPM-ROUNDTRIP-OFFSETS` / `DPM-ROUNDTRIP-NAME` — proved as above (G6 core, G7 bounded).
-- All 5 initialize-local properties are residuals (I/O + CRC read path). See ledger.
-  *Bonus (panic-freedom, not an M id):* `verify_parse_entries_bounds` and
-  `verify_parse_header_too_short` prove the pure parse guards that `DPM-INIT-RETURNS-CORRECT-LAYOUT`
-  and `DPM-INIT-BACKUP-FALLBACK` rely on; R4 harnesses (below) discharge the backup-LBA
-  underflow that the fallback path assumes.
+- `DPM-ROUNDTRIP-OFFSETS` (G6) `✓~`; `DPM-ROUNDTRIP-NAME` (G7) `⊘` (was ✓ — 90 s cap).
+- `DPM-INIT-REQUIRES-BLOCKDEV` `⊘` (receptacle binding, trusted boundary §7).
+- `DPM-INIT-BACKUP-FALLBACK`, `-BOTH-CORRUPT-NOPTBL`, `-RETURNS-CORRECT-LAYOUT` `⊘` (CRC/`format!`
+  read path). Supporting green (not M ids): `verify_parse_header_too_short` (PARSE-HDR-TOO-SHORT),
+  `verify_parse_entries_bounds` (PARSE-ENTRY-BOUNDS) — both real-call, anti-vacuity anchored; the
+  three R4 harnesses discharge the backup-LBA / ending-LBA underflows the read path assumes.
+- `DPM-INIT-IO-2RT` **[Frame]** `✎` — ≤2 read round-trips: resource/frame, not bounded-expressible.
 
 ## format
-
-- `DPM-FORMAT-ERR-MULTI-REST` **[Error-case]** `✓` — > 1 `size_bytes==0` spec → `LayoutError`
-  (FR-005) — harness `verify_layout_multi_rest_err` (SUCCESSFUL, real `compute_partition_layout`
-  call, early-return before the entry-array pad, `#[kani::unwind(4)]`).
-- `DPM-FORMAT-DISK-GUID-V4` **[Postcondition]** `✓` — disk GUID carries the RFC-4122 v4 version
-  nibble (`byte6 = _4x`) + variant bits (`byte8 = 10xx_xxxx`) (FR-008) — harness
-  `verify_guid_v4_nibbles` (SUCCESSFUL, symbolic re-derivation of the nibble masking over
-  `[u8;16] = kani::any()`).
-- `DPM-FORMAT-PART-GUID-V4` **[Postcondition]** `✓` — same masking logic (`generate_guid` is
-  shared for disk + partition GUIDs); covered by `verify_guid_v4_nibbles`.
-- `DPM-FORMAT-NAME-LEN-36` **[Precondition]** `✓` — configured name ≤ 36 UTF-16 code units
-  (FR-009) — harness `verify_name_len_36` (SUCCESSFUL).
-- `DPM-FORMAT-PART-SIZE-CEIL` **[Postcondition]** `✓` — fixed partition sector count =
-  `ceil(size_bytes / sector_size)` (FR-004) — harness `verify_layout_placement_arithmetic`
-  (SUCCESSFUL, pure re-derivation mirroring the production placement loop).
-- `DPM-FORMAT-RESTOFDISK-REMAINING` **[Postcondition]** `✓` — the single `size_bytes==0`
-  partition consumes all remaining usable sectors (FR-004) — harness
-  `verify_layout_restofdisk_arithmetic` (SUCCESSFUL).
-- `DPM-FORMAT-PART-NONOVERLAP` **[Invariant]** `✓` — placed partitions contiguous & disjoint
-  (`start == prev.end + 1`, starts strictly increasing) (US1-AS1) — harness
-  `verify_layout_placement_arithmetic` (SUCCESSFUL).
-- `DPM-FORMAT-PART-WITHIN-USABLE` **[Invariant]** `✓` — every partition in
-  `[first_usable_lba, last_usable_lba]` (US1-AS1/FR-006) — harness
-  `verify_layout_placement_arithmetic` (SUCCESSFUL).
-- `DPM-FORMAT-BACKUP-MIRRORS-PRIMARY` **[Invariant]** `✓` — backup header `my_lba`/`alternate_lba`
-  mirror the primary's (FR-003) — harness `verify_backup_mirror` (SUCCESSFUL, arithmetic).
-- Remaining 8 format-local properties are residuals — see ledger.
-  *Supporting green (not an M id):* `verify_entry_sectors_real` proves
-  `entry_sectors == (128·128).div_ceil(sector_size)` (512→32, 4096→4), the base for
-  FIRST/LAST-USABLE and PART-SIZE-CEIL.
+- `DPM-FORMAT-ERR-MULTI-REST` `✓` — `verify_layout_multi_rest_err` (real `compute_partition_layout`,
+  early-return before the 128-pad, `#[kani::unwind(4)]`; anchored in prod: guard `>1`→`>2` flips it).
+- `DPM-FORMAT-DISK-GUID-V4` / `-PART-GUID-V4` `✓` — `verify_guid_v4_nibbles` (symbolic `[u8;16]`
+  version/variant masking; anchored: `|0x40`→`|0x30` flips it).
+- `DPM-FORMAT-NAME-LEN-36` `✓` — `verify_name_len_36` (SUCCESSFUL, 41.3 s). **Disclosed: structural
+  tautology** (`[u8;72]` return type), not independently anti-vacuity-anchorable.
+- `DPM-FORMAT-PART-SIZE-CEIL`, `-PART-NONOVERLAP`, `-PART-WITHIN-USABLE` `✓` —
+  `verify_layout_placement_arithmetic` (placement arithmetic mirroring gpt.rs:270-296; anchored).
+- `DPM-FORMAT-RESTOFDISK-REMAINING` `✓` — `verify_layout_restofdisk_arithmetic` (same-class anchored).
+- `DPM-FORMAT-BACKUP-MIRRORS-PRIMARY` `✓` — `verify_backup_mirror` (anchored).
+- `DPM-FORMAT-REQUIRES-BLOCKDEV` `⊘` (receptacle); `-DEVICE-TOO-SMALL` `⊘` (guard arithmetic proved
+  by R4; live path crosses write/`format!`); `-ERR-OVERSUBSCRIBED` `⊘` (error-arm `format!`
+  non-termination).
+- `DPM-FORMAT-WRITES-5-STRUCTURES`, `-ENTRY-ARRAY-128x128`, `-TYPEGUID-PRESERVED` `⊘` —
+  `wall_layout_happy_path_pad`: the 128-slot zero-pad trips an **unwinding assertion** at
+  `--default-unwind 3` (would SAT-explode at unwind≥129). Route: Creusot.
+- `DPM-FORMAT-HEADER-CONSTANTS` `⊘` (CRC-blocked write path).
+- `DPM-FORMAT-IO-O1` **[Frame]** `✎` — write count O(1): resource/frame, not bounded-expressible.
+- Supporting green: `verify_entry_sectors_real` (512→32, 4096→4; anchored in prod).
 
 ## partition_info / num_partitions
-
-No Kani-proved properties. Both bundles are lib.rs logic over `Mutex<Option<PartitionTable>>`
-and `Vec<PartitionInfo>` — bounded-checkable in principle but harnesses were not authored
-(AGENT); see ledger.
-
----
+No green id. Both bundles are `Mutex<Option<PartitionTable>>` / `Vec` logic reachable only through a
+constructed `DiskPartitionManager` (gate wall G2, `⊘`) or a populated table via initialize/format
+(I/O+CRC wall). `DPM-PINFO-INDEX-RANGE`, `-RETURNS-ENTRY`, `-READONLY`, `DPM-NUMP-RETURNS-LEN`,
+`DPM-COUNT-INDEX-AGREE` (G5) all `⊘` for that reason.
 
 ## R4 — latent unguarded-underflow obligations (panic-freedom; inventory R4, not M ids)
+Kani **confirmed all three underflows exist** and proved the guarded code safe above the implied
+preconditions: gpt.rs:148 `verify_r4_last_usable_underflows_below_min` (anchored) +
+`_safe_above_min`; gpt.rs:77-79 `verify_r4_backup_lba_underflows_tiny`; gpt.rs:129
+`verify_r4_ending_minus_starting` (also found `+1` overflow at `diff==u64::MAX`). Recommendation:
+`checked_sub`/`checked_add` or hoist the too-small guard above gpt.rs:148.
 
-The directive's priority target. Kani **confirmed all three latent underflows exist** (found the
-counterexample regions) **and proved the implied preconditions make the guarded code safe**:
+## Assumptions / bounds
+- `kani::assume(sector_size ∈ {512,4096})` — mirrors inventory G1 (not code-enforced, R3).
+- `#[kani::unwind(6)]` on name harnesses; `(4)` on parse/layout early-return harnesses;
+  `--default-unwind 3` elsewhere.
+- Associated fns (`entry_sectors`, `parse_header`, `parse_entries`, `compute_partition_layout`)
+  called directly — no `GptManager`/`ClientChannels` instance (I/O construction is a wall).
+- SPDK build accommodation: gitignored `deps/spdk`, `deps/spdk-build` symlinks; no code changed.
 
-- **gpt.rs:148** `last_usable_lba = num_sectors − 1 − entry_sectors − 1` (computed *before* the
-  too-small guard at :150): the checked chain is `None` throughout `num_sectors < entry_sectors + 2`
-  (`verify_r4_last_usable_underflows_below_min`, SUCCESSFUL); at/above that bound it is
-  underflow-free and the :150 guard is the correct sufficient gate
-  (`verify_r4_last_usable_safe_above_min`, SUCCESSFUL). Implied precondition
-  `num_sectors ≥ entry_sectors + 2` confirmed.
-- **gpt.rs:77-79** backup-LBA arithmetic on the read path: `backup_lba − entry_sectors`
-  underflows for `num_sectors ≤ entry_sectors` (including `num_sectors == 0`)
-  (`verify_r4_backup_lba_underflows_tiny`, SUCCESSFUL).
-- **gpt.rs:129** `num_sectors = ending_lba − starting_lba + 1` on a CRC-valid-but-hostile entry:
-  underflows when `ending < starting`, **and a second finding** — even with `ending ≥ starting`
-  the `+ 1` overflows exactly at `diff == u64::MAX` (`verify_r4_ending_minus_starting`, SUCCESSFUL).
+## Not verified — attempted, tool boundary hit (⊘, with signatures)
+- **G7 DPM-ROUNDTRIP-NAME** — timeout `rc=124` at the 90 s cap (was 592.9 s SUCCESSFUL).
+- **G8 DPM-CRC-INTEGRITY** — `unsupported constructs` (`_xgetbv`: InlineAsm + foreign function).
+- **PARSE-SIGNATURE / DPM-INIT-BOTH-CORRUPT-NOPTBL** — `format!` non-termination, `rc=124` at 90 s.
+- **DPM-FORMAT-ENTRY-ARRAY-128x128 / -TYPEGUID-PRESERVED / -WRITES-5** — unwinding assertion (128-pad).
+- **G2 DPM-INIT-GATE** — `new_default` HashMap/getrandom construction wall, `rc=124` at 90 s.
+- I/O-effect ids (G3, G4, G9, INIT-REQUIRES-BLOCKDEV, FORMAT-REQUIRES-BLOCKDEV, FORMAT-DEVICE-TOO-SMALL,
+  FORMAT-ERR-OVERSUBSCRIBED, WRITES-5, HEADER-CONSTANTS, INIT-BACKUP-FALLBACK, INIT-RETURNS-LAYOUT) —
+  block I/O / CRC / `format!` paths. Route: Creusot + fault-injection/integration tests.
 
-Recommendation: replace the three raw expressions with `checked_sub`/`checked_add` (or hoist the
-:150 guard above :148) to make panic-freedom unconditional.
-
----
-
-## Residual ledger — 24 unproved of 35, each with reason + TOOL/AGENT label
-
-### TOOL — effects Kani cannot model or bounded-checker limits (15)
-
-| id | reason (reproducible signature) | route |
-|---|---|---|
-| `DPM-CRC-INTEGRITY` (G8) | `crc32fast::hash` → `unsupported_construct: _xgetbv` | Creusot / integration test |
-| `DPM-ROUNDTRIP-OFFSETS` (G6, full byte+CRC) | CRC + block I/O (`_xgetbv`); arithmetic core proved | Creusot + fault-injection test |
-| `DPM-STATE-CACHED` (G3) | reached only via initialize/format I/O + CRC | integration test |
-| `DPM-IO-PROPAGATE` (G4) | models block-device send/completion failure (I/O effect) | fault-injection test |
-| `DPM-NAMESPACE-ID` (G9) | I/O-target frame property | integration test |
-| `DPM-FORMAT-REQUIRES-BLOCKDEV` | component-framework receptacle binding (trusted boundary §7) | integration test |
-| `DPM-INIT-REQUIRES-BLOCKDEV` | same receptacle binding | integration test |
-| `DPM-FORMAT-DEVICE-TOO-SMALL` | real-call path crosses the write/`format!` region; guard arithmetic covered by R4 | R4 proof above + integration test |
-| `DPM-FORMAT-ERR-OVERSUBSCRIBED` | error arm builds integer `format!` → CBMC non-termination (timeout >300 s, ~14 MB RSS, stuck in symex) | Creusot |
-| `DPM-INIT-BOTH-CORRUPT-NOPTBL` | origin PARSE-SIGNATURE; reject arm `format!("...{:#x}", sig)` non-terminating; poisons whole `parse_header` (accept side also times out >300 s) | Creusot |
-| `DPM-FORMAT-WRITES-5-STRUCTURES` | write ordering / block I/O | integration test |
-| `DPM-FORMAT-ENTRY-ARRAY-128x128` | 128-slot zero-pad forces `#[kani::unwind(≥129)]` → SAT explosion (VERIFICATION FAILED / timeout) | Creusot |
-| `DPM-FORMAT-IO-O1` | resource/frame: write count O(1) — not expressible for a bounded checker | Creusot / cost model |
-| `DPM-INIT-BACKUP-FALLBACK` | read primary + CRC + backup I/O; backup-LBA arithmetic proved (R4) | integration test |
-| `DPM-INIT-IO-2RT` | resource/frame: ≤2 read round-trips — not expressible bounded | integration test |
-
-### AGENT — bounded-checkable, harness not authored (8)
-
-| id | reason | note |
-|---|---|---|
-| `DPM-INIT-GATE` (G2) | `state.as_ref().ok_or(NotInitialized)` over `Mutex<Option<_>>` | needs a minimal `DiskPartitionManager` built with `state = None`; the `define_component!` macro + `Mutex` construction risks the same std-library spurious-check class seen with `SpscChannel` — attempt but may reclassify TOOL |
-| `DPM-COUNT-INDEX-AGREE` (G5) | `partition_info(i)` Ok iff `i < len` over a bounded `Vec` | harnessable over a small `PartitionTable` |
-| `DPM-FORMAT-HEADER-CONSTANTS` | assert the header literals (sig "EFI PART", rev 0x00010000, hdr_size 92, 128 entries, entry_size 128) | production path is CRC-blocked; a direct struct-build harness is authorable |
-| `DPM-FORMAT-TYPEGUID-PRESERVED` | `entry.type_guid == spec.type_guid` copy | real call hits the 128-Vec pad; a pure re-derivation (like the placement harness) can assert the copy |
-| `DPM-PINFO-INDEX-RANGE` | `index >= len → InvalidPartition` over bounded `Vec` | lib.rs; harnessable |
-| `DPM-PINFO-RETURNS-ENTRY` | in-range → clone of `partitions[index]` | lib.rs; harnessable |
-| `DPM-PINFO-READONLY` | frame: no `state` mutation / no I/O | expressible as a bounded no-write assertion |
-| `DPM-NUMP-RETURNS-LEN` | returns `partitions.len() as u32` | lib.rs; harnessable |
-
-### Precondition, assumed (1)
-
-`DPM-SECTOR-SIZE-512-4096` (G1) `⊘` — assumed in every harness; code is generic (R3).
-
-**Tally: proved 11 · TOOL 15 · AGENT 8 · precondition 1 = 35.**
-
----
-
-## Timing & peak RSS (`/usr/bin/time -v`, per-harness CBMC solve)
-
-**15 green harnesses** (all VERIFICATION SUCCESSFUL):
-
-| harness | CBMC solve | wall | peak RSS |
-|---|--:|--:|--:|
-| `verify_name_roundtrip_ascii` (G7) | 592.9 s | 9:56.5 | **~19.5 GB** |
-| `verify_name_len_36` | 41.4 s | 0:44.7 | 1.22 GB |
-| `verify_layout_multi_rest_err` | 1.65 s | 0:07.9 | 479 MB |
-| `verify_parse_entries_bounds` | 0.92 s | 0:03.6 | 316 MB |
-| `verify_parse_header_too_short` | 0.83 s | 0:04.0 | 330 MB |
-| `verify_layout_placement_arithmetic` | 0.16 s | <1 s | 174 MB |
-| `verify_ending_lba_inverse` (G6) | 0.086 s | 0:00.8 | 172 MB |
-| `verify_layout_restofdisk_arithmetic` | 0.082 s | <1 s | 172 MB |
-| `verify_r4_last_usable_underflows_below_min` | 0.065 s | 0:00.8 | 174 MB |
-| `verify_r4_last_usable_safe_above_min` | 0.064 s | 0:00.8 | 172 MB |
-| `verify_r4_backup_lba_underflows_tiny` | 0.051 s | 0:00.8 | 174 MB |
-| `verify_entry_sectors_real` | 0.050 s | 0:00.8 | 172 MB |
-| `verify_guid_v4_nibbles` | 0.043 s | 0:00.8 | 170 MB |
-| `verify_backup_mirror` | 0.029 s | 0:00.8 | 171 MB |
-| `verify_r4_ending_minus_starting` | 0.050 s | 0:00.8 | 168 MB |
-
-**Blowups / timeouts recorded (all TOOL, killed at the 300 s cap, ~14–16 MB RSS — stuck in
-symex/instrumentation, never reached the solver):** `verify_parse_header_signature_gate` /
-`verify_parse_header_valid_ok` (`format!` in reject arm), `verify_layout_oversubscribed_err`
-(`format!`), `verify_layout_single_fixed` (128-Vec unroll → also seen as VERIFICATION FAILED at
-~2 s once codegen completed). These harnesses were removed from the suite; their boundaries are
-documented as TOOL residuals above so the committed suite stays green.
-
-**Cost lesson:** pure integer arithmetic ≈ 0.05 s / 170 MB; `String`/`from_utf16_lossy` symbolic
-execution is the dominant driver (623 s / 22.7 GB for the name round-trip, which still SUCCEEDED).
-The scout's "byte-slice + integer" confirmation is why the arithmetic core was cheap.
+## Not verified — not expressible for a bounded checker (✎)
+- `DPM-INIT-IO-2RT`, `DPM-FORMAT-IO-O1` — resource/round-trip-count frame properties. Route: cost
+  model / integration test.
