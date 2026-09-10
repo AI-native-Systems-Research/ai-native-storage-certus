@@ -63,6 +63,104 @@ impl AllocationBitmap {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Kani harnesses (re-authored from the property inventory, clean-slate re-run).
+//
+// The AllocationBitmap is the slot-occupancy record underneath every slab. In
+// inventory terms it is the implementing machinery for:
+//   * EM-KEYVEC-MEMBERSHIP  (a slot is allocated iff its bit is set; parallel to keys)
+//   * EM-RESERVE-SIZECLASS  (alloc_slot finds a free bit; full slab => no free bit)
+// The bitmap is a plain Vec<u64> with pure integer/bit arithmetic — the
+// tractable core Kani proves exhaustively at a bounded slot count.
+// ---------------------------------------------------------------------------
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // Bounded slot count. `find_free_from` scans 0..num_slots, so this bounds the
+    // loop; 8 slots exercise the sub-word (< 64) packing path in one u64 word.
+    const N: u32 = 8;
+
+    // [EM-KEYVEC-MEMBERSHIP impl] set(idx) on a free slot marks exactly that slot
+    // allocated and increments the allocated count by one; is_set agrees with set.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_set_marks_slot() {
+        let mut bm = AllocationBitmap::new(N);
+        let idx: usize = kani::any();
+        kani::assume(idx < N as usize); // production guard: idx < num_slots (debug_assert in set)
+        assert!(!bm.is_set(idx));
+        let before = bm.count_set();
+        bm.set(idx);
+        assert!(bm.is_set(idx));
+        assert!(bm.count_set() == before + 1);
+    }
+
+    // [EM-KEYVEC-MEMBERSHIP impl] set then clear returns the bitmap to the original
+    // (empty) state — slot free again, count restored to zero.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_set_clear_round_trip() {
+        let mut bm = AllocationBitmap::new(N);
+        let idx: usize = kani::any();
+        kani::assume(idx < N as usize);
+        bm.set(idx);
+        assert!(bm.is_set(idx));
+        bm.clear(idx);
+        assert!(!bm.is_set(idx));
+        assert!(bm.is_all_free());
+        assert!(bm.count_set() == 0);
+    }
+
+    // [EM-KEYVEC-MEMBERSHIP impl] distinct slots do not alias — setting one slot
+    // never marks a different slot.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_set_independent() {
+        let mut bm = AllocationBitmap::new(N);
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i < N as usize && j < N as usize && i != j);
+        bm.set(i);
+        assert!(bm.is_set(i));
+        assert!(!bm.is_set(j)); // j was never set; must remain free
+        assert!(bm.count_set() == 1);
+    }
+
+    // [EM-RESERVE-SIZECLASS impl] find_free_from on a fresh (all-free) bitmap returns
+    // a valid, in-bounds, genuinely-free slot for any start index.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_find_free_from_valid() {
+        let bm = AllocationBitmap::new(N);
+        let start: usize = kani::any();
+        kani::assume(start < N as usize);
+        let found = bm.find_free_from(start);
+        match found {
+            Some(idx) => {
+                assert!(idx < N as usize);
+                assert!(!bm.is_set(idx));
+            }
+            None => assert!(false), // an all-free bitmap must always find a slot
+        }
+    }
+
+    // [EM-RESERVE-SIZECLASS impl / EM-RESERVE-OUTOFSPACE] a fully-allocated bitmap
+    // yields no free slot (find_free_from == None) and the count equals num_slots.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn verify_find_free_from_full() {
+        let mut bm = AllocationBitmap::new(N);
+        for i in 0..N as usize {
+            bm.set(i);
+        }
+        assert!(bm.count_set() == N as usize);
+        let start: usize = kani::any();
+        kani::assume(start < N as usize);
+        assert!(bm.find_free_from(start).is_none());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

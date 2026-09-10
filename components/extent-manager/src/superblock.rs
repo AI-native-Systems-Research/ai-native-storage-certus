@@ -168,6 +168,33 @@ impl Superblock {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Kani harnesses (re-authored from the property inventory, clean-slate re-run).
+//
+// The superblock is a fixed 4096-byte on-disk record. deserialize() validates
+// length -> magic -> CRC. In inventory terms:
+//   * EM-INIT-VALIDATE-MAGIC / -CRC, EM-FORMAT-WRITES-SUPERBLOCK truncation guard.
+// Only the length (truncation) reject is tractable here: the magic-reject path
+// builds `format!("...{magic:#x}")` over a SYMBOLIC value (string-format blow-up),
+// and both serialize() and the CRC path call `crc32fast::hash`, whose runtime SIMD
+// feature detection lowers to `_xgetbv` (unsupported_construct). Those two are
+// recorded as tool-boundary walls in the report, not harnessed green.
+// ---------------------------------------------------------------------------
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // [EM-INIT-VALIDATE / truncation guard] deserialize rejects a buffer shorter than
+    // SUPERBLOCK_SIZE rather than reading past the end. Static error message => no
+    // symbolic hex formatting, no crc32fast — this reject path is fully tractable.
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn verify_deserialize_rejects_short_buffer() {
+        let buf = vec![0u8; SUPERBLOCK_SIZE - 1];
+        assert!(Superblock::deserialize(&buf).is_err());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

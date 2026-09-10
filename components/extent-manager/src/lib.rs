@@ -760,3 +760,42 @@ impl IExtentManager for ExtentManager {
         result
     }
 }
+
+// ---------------------------------------------------------------------------
+// Kani harnesses (re-authored from the property inventory, clean-slate re-run).
+//
+// The ExtentManager DRIVER level (EM-INIT-GATE, EM-DATABASE-ROUNDTRIP, and every
+// method-level obligation) requires constructing the component. Two hard blocks:
+//   1. `new_inner()` calls `std::thread::spawn` for the background checkpoint timer
+//      (unsupported by a bounded checker).
+//   2. `new_default()` avoids the thread but its generated `new()` builds a
+//      `component_core::InterfaceMap`, a `HashMap<TypeId, ..>` whose `RandomState`
+//      seeding calls `getrandom` (foreign fn) + SipHash — the identical
+//      construction wall memory-tier hit.
+// So the driver-level properties are captured as a ONE-SHOT wall probe here (run
+// once for the reproducible rc=124 / getrandom signature) and documented ⊘; their
+// tractable cores live at the data-structure level (buddy = EM-USED-LE-CAP core,
+// region::align = EM-SECTOR-ALIGN, slab = EM-KEYVEC-MEMBERSHIP). Route: Creusot.
+// ---------------------------------------------------------------------------
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // [EM-DATABASE-ROUNDTRIP + EM-INIT-GATE] WALL PROBE — run once.
+    // Constructing the component drags in InterfaceMap's HashMap<TypeId> RandomState
+    // (getrandom + SipHash). Expected: no verdict, rc=124 at the per-harness timeout,
+    // CBMC unwinding std::sys::random::* / SipHash. The get/set roundtrip on the
+    // Mutex<u64> data_base_lba field is trivial IF construction were reachable.
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn wall_data_base_lba_roundtrip() {
+        let em = ExtentManager::new_default();
+        assert!(em.data_base_lba() == 0); // EM-DATABASE-ROUNDTRIP: default 0
+        let v: u64 = kani::any();
+        em.set_data_base_lba(v);
+        assert!(em.data_base_lba() == v); // roundtrip
+        // EM-INIT-GATE: before format/initialize, accessors return empty/0.
+        assert!(em.used_bytes() == 0);
+        assert!(em.capacity_bytes() == 0);
+    }
+}

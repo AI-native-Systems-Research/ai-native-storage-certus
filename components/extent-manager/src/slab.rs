@@ -120,6 +120,124 @@ impl SizeClassManager {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Kani harnesses (re-authored from the property inventory, clean-slate re-run).
+//
+// A Slab packs same-size extents. Its dense per-slot key Vec<u64> (FREE_KEY
+// sentinel) parallel to the bitmap is the sole membership record. In inventory
+// terms the Slab implements:
+//   * EM-KEYVEC-MEMBERSHIP (slot enumerable iff key != FREE_KEY; set/get/free_slot)
+//   * EM-SECTOR-ALIGN      (slot_offset = start + idx*element_size, in range)
+//   * EM-REMOVE-OFFSET-ROUTING (slot_for_offset / contains_offset locate the slot;
+//                               reject out-of-range / misaligned offsets)
+//   * EM-RESERVE-INVISIBLE-UNTIL-PUBLISH (alloc_slot allocates a bit but leaves
+//                               key == FREE_KEY, so the extent is not yet enumerable)
+// Backing data: a small Vec<u64> + the bitmap — pure arithmetic, tractable.
+// The HashMap-backed SizeClassManager is NOT harnessed here (std HashMap wall).
+// ---------------------------------------------------------------------------
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // Small slab: 4 slots of 4096 bytes each, at a non-zero start offset so the
+    // offset arithmetic (start + idx*element_size) is genuinely exercised.
+    const START: u64 = 8192;
+    const ELEM: u32 = 4096;
+    const SLAB_SIZE: u64 = 4096 * 4; // => 4 slots
+    const NSLOTS: usize = 4;
+
+    // [EM-KEYVEC-MEMBERSHIP] a freshly created slab has every key slot set to
+    // FREE_KEY — i.e. nothing is enumerable until a key is published.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_new_keys_all_free() {
+        let s = Slab::new(START, SLAB_SIZE, ELEM);
+        assert!(s.num_slots() as usize == NSLOTS);
+        let idx: usize = kani::any();
+        kani::assume(idx < NSLOTS);
+        assert!(s.get_key(idx) == FREE_KEY);
+    }
+
+    // [EM-SECTOR-ALIGN / EM-REMOVE-OFFSET-ROUTING] slot_offset and slot_for_offset are
+    // exact inverses over the slot domain, and slot_offset = start + idx*element_size
+    // lies inside the slab range. This is what lets remove_extent(offset) recover the
+    // correct slot.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_slot_offset_roundtrip() {
+        let s = Slab::new(START, SLAB_SIZE, ELEM);
+        let idx: usize = kani::any();
+        kani::assume(idx < NSLOTS);
+        let off = s.slot_offset(idx);
+        assert!(off == START + idx as u64 * ELEM as u64);
+        assert!(s.contains_offset(off));
+        assert!(s.slot_for_offset(off) == Some(idx));
+    }
+
+    // [EM-REMOVE-OFFSET-ROUTING / EM-REMOVE-NOTFOUND] slot_for_offset REJECTS a byte
+    // offset that is below the slab, past the last slot, or misaligned — over a fully
+    // symbolic offset. This is the reject half of remove-routing (=> OffsetNotFound).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_slot_for_offset_rejects_invalid() {
+        let s = Slab::new(START, SLAB_SIZE, ELEM);
+        let off: u64 = kani::any();
+        match s.slot_for_offset(off) {
+            Some(idx) => {
+                // A resolved slot must be in bounds AND the offset must be the exact
+                // aligned slot start — never a rounded-down or out-of-range hit.
+                assert!(idx < NSLOTS);
+                assert!(off >= START);
+                assert!((off - START) % ELEM as u64 == 0);
+                assert!(off == s.slot_offset(idx));
+            }
+            None => {
+                // Rejected: offset was below start, misaligned, or past the last slot.
+                let below = off < START;
+                let misaligned = off >= START && (off - START) % ELEM as u64 != 0;
+                let past_end = off >= START
+                    && (off - START) % ELEM as u64 == 0
+                    && ((off - START) / ELEM as u64) as usize >= NSLOTS;
+                assert!(below || misaligned || past_end);
+            }
+        }
+    }
+
+    // [EM-RESERVE-INVISIBLE-UNTIL-PUBLISH / EM-SECTOR-ALIGN] alloc_slot yields an
+    // in-bounds slot whose reported offset matches slot_offset and lies within the
+    // slab's disk range, and the slot's key is still FREE_KEY (not yet enumerable).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_alloc_slot_offset_valid() {
+        let mut s = Slab::new(START, SLAB_SIZE, ELEM);
+        if let Some((idx, off)) = s.alloc_slot() {
+            assert!(idx < NSLOTS);
+            assert!(off == s.slot_offset(idx));
+            assert!(off >= START && off < START + SLAB_SIZE);
+            assert!(s.get_key(idx) == FREE_KEY); // reserved, not yet published
+        }
+    }
+
+    // [EM-KEYVEC-MEMBERSHIP / EM-PUBLISH-VISIBLE / EM-ABORT-RELEASES] publishing a
+    // (non-sentinel) key then reading it back is consistent, and free_slot resets the
+    // slot's key to the FREE_KEY sentinel (making it non-enumerable / reusable again).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_set_key_then_free() {
+        let mut s = Slab::new(START, SLAB_SIZE, ELEM);
+        let (idx, _off) = match s.alloc_slot() {
+            Some(v) => v,
+            None => return,
+        };
+        let key: u64 = kani::any();
+        kani::assume(key != FREE_KEY); // FREE_KEY is the reserved sentinel, never a live key
+        s.set_key(idx, key);
+        assert!(s.get_key(idx) == key);
+        s.free_slot(idx);
+        assert!(s.get_key(idx) == FREE_KEY);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -159,3 +159,75 @@ impl RegionState {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Kani harnesses (re-authored from the property inventory, clean-slate re-run).
+//
+// RegionState is the composition layer: BTreeMap<u64, Slab> + a HashMap-backed
+// SizeClassManager + the BuddyAllocator. Two very different tractability regimes:
+//   * `align_to_sector_size` is PURE ARITHMETIC — the EM-SECTOR-ALIGN global proved
+//     here over a symbolic size and sector size (tractable, green).
+//   * `alloc_extent` / `remove_extent_by_offset` / `flush_pending_frees` walk the
+//     std BTreeMap and HashMap — the same container-modeling SAT wall memory-tier hit.
+//     One wall probe below is run once to capture the reproducible timeout signature
+//     (EM-DEFERRED-FREE / region-level EM-KEYVEC-MEMBERSHIP) and then moved on.
+// ---------------------------------------------------------------------------
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // Build a RegionState with a trivial buddy so we can call the real private
+    // `align_to_sector_size`. The buddy geometry is irrelevant to the alignment math.
+    fn tiny_region() -> RegionState {
+        let buddy = BuddyAllocator::new(0, 8, 1);
+        RegionState::new(buddy, FormatParams::default())
+    }
+
+    // [EM-SECTOR-ALIGN, global rank 3] every reserved extent's element_size is rounded
+    // UP to a whole number of sectors: result is sector-aligned, >= size, within one
+    // sector of size, and a no-op on an already-aligned size. Proved over a SYMBOLIC
+    // size and sector_size (bounded so the u32 rounding `size + ss - 1` cannot
+    // spuriously overflow — see the report's note on the unguarded production add).
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn verify_align_to_sector_size() {
+        let r = tiny_region();
+        let size: u32 = kani::any();
+        let ss: u32 = kani::any();
+        // Mirror the real domain: sector_size > 0 (format rejects 0), and keep the
+        // rounding sum within u32 so we test the ALIGNMENT property, not overflow.
+        kani::assume(ss >= 1 && ss <= 4096);
+        kani::assume(size <= 1u32 << 20);
+        let aligned = r.align_to_sector_size(size, ss);
+        assert!(aligned % ss == 0); // result is sector-aligned
+        assert!(aligned >= size); // never shrinks below the request
+        assert!(aligned - size < ss); // rounds up by strictly less than one sector
+        if size % ss == 0 {
+            assert!(aligned == size); // already-aligned => identity
+        }
+    }
+
+    // [EM-DEFERRED-FREE / region-level EM-KEYVEC-MEMBERSHIP] WALL PROBE — run once.
+    // alloc_extent composes BTreeMap<u64,Slab>::insert, HashMap entry/get, and
+    // buddy.alloc. Expected: CBMC stalls unwinding std BTreeMap/HashMap navigation
+    // (find_key_index / node links) or hits the getrandom/SipHash RandomState seed of
+    // the HashMap — captured as rc=124 at the per-harness timeout. Documented ⊘.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn wall_region_alloc_extent() {
+        let buddy = BuddyAllocator::new(0, 4096 * 4, 4096);
+        let mut params = FormatParams::default();
+        params.sector_size = 4096;
+        params.slab_size = 4096 * 4;
+        let mut r = RegionState::new(buddy, params);
+        let size: u32 = kani::any();
+        kani::assume(size >= 1 && size <= 4096);
+        if let Ok((slab_start, slot_idx, offset)) = r.alloc_extent(size) {
+            // If the composition IS tractable, this is the deferred-free core:
+            // a freed-then-flushed slot returns the extent to reusable state.
+            r.publish_slot(slab_start, slot_idx, 42);
+            assert!(r.remove_extent_by_offset(offset).is_ok());
+            r.flush_pending_frees();
+        }
+    }
+}

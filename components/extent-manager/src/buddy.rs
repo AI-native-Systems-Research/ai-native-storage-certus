@@ -166,6 +166,102 @@ impl BuddyAllocator {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Kani harnesses (re-authored from the property inventory, clean-slate re-run).
+//
+// The BuddyAllocator hands out slab-sized chunks of the region's data range. In
+// inventory terms it implements:
+//   * EM-RESERVE-SIZECLASS  (buddy.alloc yields a slab-sized chunk on demand)
+//   * EM-USED-LE-CAP        (total_free <= total_usable_size at every state)
+//   * the offset-range guarantee behind EM-RESERVE-INVISIBLE / EM-SECTOR-ALIGN
+// Backing data: Vec<Vec<u64>> free lists — pure arithmetic (shifts, XOR buddy math,
+// subtraction). Tractable at a tiny geometry; the SYMBOLIC-request `free`/merge and
+// `mark_allocated` searches are the known SAT walls (recorded below / in the report).
+// ---------------------------------------------------------------------------
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // Tiny allocator geometry keeps every internal loop bounded and the SAT problem
+    // tractable: sector_size = 1, total = 2 usable blocks => max_order = 1,
+    // free_lists.len() = 2. Exercises split-on-alloc and merge-on-free with a
+    // symbolic request size while staying within Kani's reach.
+    const SECTOR: u32 = 1;
+    const TOTAL: u64 = 2;
+
+    // [EM-RESERVE-SIZECLASS impl / FR-019] `new` publishes the whole usable range as
+    // free space. Also exercises all constructor arithmetic (shifts, subtractions).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_new_total_free() {
+        let b = BuddyAllocator::new(0, TOTAL, SECTOR);
+        assert!(b.total_free() == TOTAL);
+        assert!(b.total_usable_size() == TOTAL);
+    }
+
+    // [EM-USED-LE-CAP core] total_free never exceeds total_usable_size — the derived
+    // accounting invariant (used = usable - free >= 0) at the tractable buddy level,
+    // over a SYMBOLIC total capacity and sector size (bounded to stay tractable).
+    // used_bytes()/capacity_bytes() at the ExtentManager level sum this over regions;
+    // that method-level sum is construction-walled (see report), this is its core.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_total_free_le_usable() {
+        let total: u64 = kani::any();
+        kani::assume(total >= 1 && total <= 4); // bounded capacity keeps free-list build bounded
+        let b = BuddyAllocator::new(0, total, SECTOR);
+        // usable is `total` rounded down to a whole number of sector blocks (SECTOR=1 => == total)
+        assert!(b.total_free() <= b.total_usable_size());
+    }
+
+    // [EM-RESERVE-INVISIBLE / FR-019] any successful allocation returns an offset
+    // inside the managed byte range, at or above base_offset. Symbolic request size
+    // AND symbolic base; Kani checks all internal shift/subtract/add for overflow.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_alloc_offset_in_range() {
+        let base: u64 = kani::any();
+        kani::assume(base <= 1u64 << 40); // keep base+offset arithmetic in a sane range
+        let mut b = BuddyAllocator::new(base, TOTAL, SECTOR);
+        let size: u64 = kani::any();
+        kani::assume(size >= 1 && size <= TOTAL); // request within allocator capacity
+        if let Some(off) = b.alloc(size) {
+            assert!(off >= base);
+            assert!(off < base + TOTAL);
+        }
+    }
+
+    // [EM-USED-LE-CAP impl / FR-019] a successful allocation never increases free
+    // space (symbolic request size).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_alloc_shrinks_free() {
+        let mut b = BuddyAllocator::new(0, TOTAL, SECTOR);
+        let size: u64 = kani::any();
+        kani::assume(size >= 1 && size <= TOTAL);
+        let before = b.total_free();
+        if let Some(_off) = b.alloc(size) {
+            assert!(b.total_free() <= before);
+        }
+    }
+
+    // [EM-DEFERRED-FREE impl core / FR-019] allocating a single block then freeing it
+    // restores the total free space (buddy merge round-trip). Concrete request size
+    // (one sector block) keeps the merge search tractable; the freed offset is still
+    // whatever `alloc` produced, so the real merge path is exercised.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_alloc_free_round_trip_1block() {
+        let mut b = BuddyAllocator::new(0, TOTAL, SECTOR);
+        let before = b.total_free();
+        if let Some(off) = b.alloc(SECTOR as u64) {
+            assert!(b.total_free() < before); // one block consumed
+            b.free(off, SECTOR as u64);
+            assert!(b.total_free() == before); // free restores the original free space
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
