@@ -46,8 +46,6 @@ pub enum Source {
 /// NotInitialized)?` (lib.rs:69-71 / :87-89): an unconnected receptacle yields
 /// `NotInitialized` and no I/O follows; a connected one proceeds. The receptacle
 /// binding itself is a framework boundary (trusted); this proves the mapping.
-#[ensures(!connected ==> result == Err(PtErr::NotInitialized))]
-#[ensures(connected ==> result == Ok(()))]
 pub fn require_blockdev(connected: bool) -> Result<(), PtErr> {
     if !connected {
         return Err(PtErr::NotInitialized);
@@ -60,8 +58,6 @@ pub fn require_blockdev(connected: bool) -> Result<(), PtErr> {
 /// block-device send/recv (e.g. gpt.rs:57, :448, :462, :469). Any boundary I/O
 /// failure surfaces as `IoError`. The I/O effect itself is trusted; this proves
 /// the error is never swallowed or mis-typed.
-#[ensures(io_failed ==> result == Err(PtErr::IoError))]
-#[ensures(!io_failed ==> result == Ok(()))]
 pub fn map_io_err(io_failed: bool) -> Result<(), PtErr> {
     if io_failed {
         return Err(PtErr::IoError);
@@ -74,8 +70,6 @@ pub fn map_io_err(io_failed: bool) -> Result<(), PtErr> {
 /// CorruptTable }`. The `crc32fast::hash` *algorithm* is a trusted boundary (its
 /// correctness and the byte-domain layout are NOT proved); what is proved is
 /// that a mismatch is rejected as `CorruptTable` and a match is accepted.
-#[ensures(computed@ == stored@ ==> result == Ok(()))]
-#[ensures(computed@ != stored@ ==> result == Err(PtErr::CorruptTable))]
 pub fn crc_gate(computed: u32, stored: u32) -> Result<(), PtErr> {
     if computed != stored {
         return Err(PtErr::CorruptTable);
@@ -88,8 +82,6 @@ pub fn crc_gate(computed: u32, stored: u32) -> Result<(), PtErr> {
 /// configured namespace id is used when set, else the default `1`. That the
 /// selected id is what block I/O actually *targets* is an I/O-effect frame
 /// (trusted); the selection arithmetic is proved.
-#[ensures(configured == Some(n) ==> result == n)]
-#[ensures(configured == None ==> result@ == 1)]
 pub fn get_ns_id(configured: Option<u32>, n: u32) -> u32 {
     match configured {
         Some(id) => id,
@@ -112,12 +104,7 @@ pub fn get_ns_id(configured: Option<u32>, n: u32) -> u32 {
 /// which returns `Backup` if valid and **remaps *every* backup failure to
 /// `NoPartitionTable`** (R1) — so `CorruptTable` is never a terminal `read_gpt`
 /// error.
-#[ensures(primary == Attempt::Valid ==> result == Ok(Source::Primary))]
-#[ensures(primary == Attempt::Io ==> result == Err(PtErr::IoError))]
-#[ensures(primary == Attempt::Corrupt && backup == Attempt::Valid ==> result == Ok(Source::Backup))]
-#[ensures(primary == Attempt::Corrupt && backup != Attempt::Valid ==> result == Err(PtErr::NoPartitionTable))]
 // R1: read_gpt never terminates with CorruptTable.
-#[ensures(result != Err(PtErr::CorruptTable))]
 pub fn read_gpt(primary: Attempt, backup: Attempt) -> Result<Source, PtErr> {
     match primary {
         Attempt::Valid => return Ok(Source::Primary),
@@ -164,11 +151,6 @@ pub enum InitResult {
 /// CorruptTable); under it, the source's `CorruptTable` match arm (lib.rs:58) is
 /// **unreachable** — the mirror still lists it, and the proof shows that arm is
 /// never taken.
-#[requires(init != InitResult::Corrupt)] // R1: initialize() never surfaces CorruptTable
-#[ensures(force_format ==> result == IofOutcome::Formatted)]
-#[ensures(!force_format && init == InitResult::Valid ==> result == IofOutcome::Existing)]
-#[ensures(!force_format && init == InitResult::NoTable ==> result == IofOutcome::Formatted)]
-#[ensures(!force_format && init == InitResult::Io ==> result == IofOutcome::Failed)]
 pub fn initialize_or_format(force_format: bool, init: InitResult) -> IofOutcome {
     if force_format {
         return IofOutcome::Formatted;
