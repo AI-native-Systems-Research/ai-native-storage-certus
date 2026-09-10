@@ -118,3 +118,37 @@ impl IPartitionTable for DiskPartitionManager {
         Ok(table.partitions.len() as u32)
     }
 }
+
+// ============================================================================
+// Kani verification harnesses (Role 2) — component-level (lib.rs) obligations.
+// Clean-slate re-run 2026-09-09, tight knobs (--default-unwind 3,
+// --harness-timeout 90s, -j 24).
+//
+// `partition_info` / `num_partitions` are &self methods on the macro-generated
+// `DiskPartitionManager`. Constructing one (new_default) builds an InterfaceMap
+// (std HashMap -> getrandom/SipHash seeding) plus Arc self-references — the same
+// construction class memory-tier documented as a wall. This harness ATTEMPTS the
+// DPM-INIT-GATE (G2) establishment (fresh state == None -> NotInitialized) so the
+// outcome is evidence-backed (proof or captured signature), never "not attempted".
+// Populated-state gates (DPM-COUNT-INDEX-AGREE, DPM-PINFO-*, DPM-NUMP-RETURNS-LEN
+// on a non-empty table) are only reachable by initialize/format, whose CRC+I/O
+// path is a wall — recorded in the property file, not harnessed here.
+// ============================================================================
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    /// `DPM-INIT-GATE` (G2). A query on a freshly-constructed manager (state None,
+    /// never initialize/format-ed) returns NotInitialized. EXPECT: either a green
+    /// establishment proof, or a construction wall (getrandom/SipHash via the
+    /// InterfaceMap HashMap seeding) captured as rc=124 / unsupported_construct.
+    #[kani::proof]
+    fn verify_init_gate_num_partitions() {
+        let dpm = DiskPartitionManager::new_default();
+        let r = dpm.num_partitions();
+        assert!(
+            matches!(r, Err(PartitionTableError::NotInitialized(_))),
+            "G2: query before initialize -> NotInitialized"
+        );
+    }
+}

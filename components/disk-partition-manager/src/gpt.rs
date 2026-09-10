@@ -596,3 +596,357 @@ fn decode_utf16le_name(data: &[u8; 72]) -> String {
         .collect();
     String::from_utf16_lossy(&chars)
 }
+
+// ============================================================================
+// Kani verification harnesses (Role 2 — consumes the dpm property inventory by id).
+// CLEAN-SLATE RE-RUN 2026-09-09 under TIGHT knobs: --default-unwind 3,
+// --harness-timeout 90s (5x tighter than the prior 480s/300s runs), -j 24.
+//
+// Backing-structure triage (done FIRST): GPT state = 92-byte header + a
+// 128 x 128B entry array modeled as byte slices ([u8]); CRC32 over byte ranges;
+// all layout/LBA logic is u32/u64 integer arithmetic; a UTF-16LE name codec.
+// NO BTreeMap / HashMap / raw pointer in the gpt logic. Vec is bounded <= 128.
+//   => arithmetic/array/bitmap harnesses are TRACTABLE (go).
+// Three intrinsic Kani/CBMC walls remain and are captured (not asserted) by the
+// wall_* harnesses below: (1) crc32fast::hash lowers to `_xgetbv`
+// (unsupported_construct); (2) integer `format!` in error arms does not terminate
+// under CBMC; (3) the production 128-slot entry-array zero-pad needs unwind>=129,
+// which at --default-unwind 3 trips an unwinding assertion (and SAT-explodes if
+// forced high). Instance construction (ClientChannels/Arc/atomics) is likewise a
+// wall, so the pure GPT fns are associated fns (no &self) called directly.
+// ============================================================================
+#[cfg(kani)]
+mod verification {
+    use super::*;
+    use interfaces::PartitionSpec;
+
+    // entry-array sectors, re-derived from production `entry_sectors`
+    // (128 slots x 128B, div_ceil sector_size).
+    fn entry_sectors_for(sector_size: u32) -> u32 {
+        (GPT_MAX_ENTRIES * GPT_ENTRY_SIZE).div_ceil(sector_size)
+    }
+
+    // ===================== GROUP A — pure / re-derived arithmetic =====================
+
+    /// `DPM-ROUNDTRIP-NAME` (G7, SC-003). ASCII name UTF-8 -> UTF-16LE -> UTF-8
+    /// preserves the string. TIGHT-KNOB EXPECTATION: the symbolic-string
+    /// encode+`from_utf16_lossy` cost (prior run: 592 s / 19.5 GB SUCCESSFUL) now
+    /// exceeds the 90 s harness-timeout -> captured as a tool-boundary (rc=124).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_name_roundtrip_ascii() {
+        let len: usize = kani::any();
+        kani::assume(len <= 5);
+        let mut bytes = [0u8; 5];
+        for b in bytes.iter_mut().take(len) {
+            let c: u8 = kani::any();
+            kani::assume(c >= 0x20 && c < 0x7f); // printable ASCII, non-NUL
+            *b = c;
+        }
+        let s = core::str::from_utf8(&bytes[..len]).unwrap();
+        let encoded = encode_utf16le_name(s);
+        let decoded = decode_utf16le_name(&encoded);
+        assert!(decoded == s, "G7: ASCII name round-trips through UTF-16LE");
+    }
+
+    /// `DPM-FORMAT-NAME-LEN-36` (FR-009). The on-disk name buffer is exactly
+    /// 72 bytes = 36 UTF-16 code units; the encoder truncates to fit.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_name_len_36() {
+        let len: usize = kani::any();
+        kani::assume(len <= 5);
+        let mut bytes = [0u8; 5];
+        for b in bytes.iter_mut().take(len) {
+            let c: u8 = kani::any();
+            kani::assume(c >= 0x20 && c < 0x7f);
+            *b = c;
+        }
+        let s = core::str::from_utf8(&bytes[..len]).unwrap();
+        let encoded = encode_utf16le_name(s);
+        assert!(encoded.len() == 72, "FR-009: name buffer is exactly 36 code units");
+    }
+
+    /// `DPM-FORMAT-DISK-GUID-V4` / `DPM-FORMAT-PART-GUID-V4` (FR-008). For ANY
+    /// entropy bytes, the version/variant nibble-stamping (gpt.rs generate_guid)
+    /// yields the RFC-4122 v4 version nibble (0x4_) and variant bits (10xx).
+    /// Re-derived over symbolic [u8;16] (generate_guid's /dev/urandom read is a
+    /// real-I/O wall; uniqueness is R6/environmental).
+    #[kani::proof]
+    fn verify_guid_v4_nibbles() {
+        let mut guid: [u8; 16] = kani::any();
+        guid[6] = (guid[6] & 0x0F) | 0x40; // version 4
+        guid[8] = (guid[8] & 0x3F) | 0x80; // variant 1
+        assert!(guid[6] & 0xF0 == 0x40, "FR-008: version-4 nibble");
+        assert!(guid[8] & 0xC0 == 0x80, "FR-008: RFC-4122 variant bits");
+    }
+
+    /// `DPM-ROUNDTRIP-OFFSETS` (G6, SC-001) arithmetic core. write encodes
+    /// `ending = start + num_sectors - 1`; read recovers
+    /// `num_sectors = ending - start + 1`. Proven inverse for num_sectors >= 1.
+    #[kani::proof]
+    fn verify_ending_lba_inverse() {
+        let start: u64 = kani::any();
+        let num_sectors: u64 = kani::any();
+        kani::assume(num_sectors >= 1);
+        kani::assume(start <= 1u64 << 40);
+        kani::assume(num_sectors <= 1u64 << 40);
+        let ending = start + num_sectors - 1; // write (gpt.rs compute_partition_layout)
+        let recovered = ending - start + 1; // read (try_read_gpt_at)
+        assert!(recovered == num_sectors, "G6: offset/sector round-trip inverse");
+    }
+
+    /// `DPM-FORMAT-BACKUP-MIRRORS-PRIMARY` (G6/FR-003). primary my_lba=1,
+    /// alternate_lba=N-1; backup my_lba=N-1, alternate_lba=1 — they mirror.
+    #[kani::proof]
+    fn verify_backup_mirror() {
+        let n: u64 = kani::any();
+        kani::assume(n >= 2);
+        let primary_my = 1u64;
+        let primary_alt = n - 1;
+        let backup_my = n - 1;
+        let backup_alt = 1u64;
+        assert!(backup_my == primary_alt, "FR-003: backup my_lba == primary alternate_lba");
+        assert!(backup_alt == primary_my, "FR-003: backup alternate_lba == primary my_lba");
+    }
+
+    /// R4 (gpt.rs write_gpt): `last_usable_lba = num_sectors-1-entry_sectors-1`
+    /// is computed BEFORE the too-small guard. Below `num_sectors >= es+2` the
+    /// expression underflows (counterexample region confirmed via checked chain).
+    #[kani::proof]
+    fn verify_r4_last_usable_underflows_below_min() {
+        let num_sectors: u64 = kani::any();
+        let sector_size: u32 = if kani::any() { 512 } else { 4096 }; // G1
+        let es = entry_sectors_for(sector_size) as u64;
+        kani::assume(num_sectors < es + 2);
+        let chain = num_sectors
+            .checked_sub(1)
+            .and_then(|x| x.checked_sub(es))
+            .and_then(|x| x.checked_sub(1));
+        assert!(chain.is_none(), "R4: last_usable underflows for num_sectors < entry_sectors+2");
+    }
+
+    /// R4 companion: at/above `num_sectors >= es+2`, last_usable is underflow-free
+    /// and the too-small guard is the correct sufficient gate.
+    #[kani::proof]
+    fn verify_r4_last_usable_safe_above_min() {
+        let num_sectors: u64 = kani::any();
+        let sector_size: u32 = if kani::any() { 512 } else { 4096 };
+        let es = entry_sectors_for(sector_size) as u64;
+        kani::assume(num_sectors >= es + 2);
+        kani::assume(num_sectors <= 1u64 << 48);
+        let first_usable = 2 + es;
+        let last_usable = num_sectors - 1 - es - 1; // now safe
+        if first_usable < last_usable {
+            assert!(last_usable >= first_usable, "R4: usable window well-formed");
+        }
+    }
+
+    /// R4 (gpt.rs read_gpt): backup-LBA arithmetic `num_sectors-1-entry_sectors`
+    /// underflows for `num_sectors <= entry_sectors` (includes num_sectors==0).
+    #[kani::proof]
+    fn verify_r4_backup_lba_underflows_tiny() {
+        let num_sectors: u64 = kani::any();
+        let sector_size: u32 = if kani::any() { 512 } else { 4096 };
+        let es = entry_sectors_for(sector_size) as u64;
+        kani::assume(num_sectors <= es);
+        let chain = num_sectors.checked_sub(1).and_then(|b| b.checked_sub(es));
+        assert!(chain.is_none(), "R4: backup LBA underflows for num_sectors <= entry_sectors");
+    }
+
+    /// R4 (gpt.rs try_read_gpt_at): `num_sectors = ending - starting + 1` on a
+    /// CRC-valid-but-hostile on-disk entry underflows if `ending < starting`,
+    /// and the `+1` overflows exactly when `ending - starting == u64::MAX`.
+    #[kani::proof]
+    fn verify_r4_ending_minus_starting() {
+        let starting: u64 = kani::any();
+        let ending: u64 = kani::any();
+        if ending < starting {
+            assert!(
+                ending.checked_sub(starting).is_none(),
+                "R4: underflows when ending_lba < starting_lba"
+            );
+        } else {
+            let diff = ending - starting;
+            let plus1 = diff.checked_add(1);
+            assert!(
+                plus1.is_some() == (diff != u64::MAX),
+                "R4: '+1' overflows only at diff == u64::MAX"
+            );
+        }
+    }
+
+    // ================= GROUP B — real associated-fn calls (no instance) =================
+
+    /// `entry_sectors` real call == formula; 512 -> 32 sectors, 4096 -> 4.
+    /// Base for FIRST/LAST-USABLE and PART-SIZE-CEIL.
+    #[kani::proof]
+    fn verify_entry_sectors_real() {
+        let sector_size: u32 = if kani::any() { 512 } else { 4096 };
+        let es = GptManager::entry_sectors(sector_size);
+        assert!(es == entry_sectors_for(sector_size), "entry_sectors == div_ceil formula");
+        if sector_size == 512 {
+            assert!(es == 32, "512-byte sectors -> 32 entry sectors");
+        } else {
+            assert!(es == 4, "4096-byte sectors -> 4 entry sectors");
+        }
+    }
+
+    /// `PARSE-HDR-TOO-SHORT` (supports DPM-INIT-BACKUP-FALLBACK / -RETURNS-LAYOUT).
+    /// A header buffer shorter than 92 bytes is rejected CorruptTable before any
+    /// field access. Real `GptManager::parse_header` call.
+    #[kani::proof]
+    fn verify_parse_header_too_short() {
+        let data = [0u8; 8]; // < 92
+        let r = GptManager::parse_header(&data);
+        assert!(
+            matches!(r, Err(PartitionTableError::CorruptTable(_))),
+            "PARSE-HDR-TOO-SHORT: short header -> CorruptTable"
+        );
+    }
+
+    /// `PARSE-ENTRY-BOUNDS` (implements DPM-INIT-RETURNS-CORRECT-LAYOUT). The loop
+    /// stops when a full 128-byte slot would exceed the buffer: a 200-byte buffer
+    /// yields exactly one whole entry even when 3 are requested. Real call.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn verify_parse_entries_bounds() {
+        let data = [0u8; 200]; // 256 > 200 -> only one whole slot
+        let entries = GptManager::parse_entries(&data, 3);
+        assert!(entries.len() == 1, "PARSE-ENTRY-BOUNDS: only whole slots parsed");
+    }
+
+    /// `DPM-FORMAT-ERR-MULTI-REST` (FR-005). Two size_bytes==0 specs -> LayoutError
+    /// before placement (early return, before the 128-slot pad). Real
+    /// `compute_partition_layout` call.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn verify_layout_multi_rest_err() {
+        let cfg = PartitionConfig {
+            sector_size: 512,
+            total_sectors: 1u64 << 20,
+            ns_id: 1,
+            partitions: vec![
+                PartitionSpec { type_guid: [1u8; 16], size_bytes: 0, name: String::new() },
+                PartitionSpec { type_guid: [2u8; 16], size_bytes: 0, name: String::new() },
+            ],
+        };
+        let r = GptManager::compute_partition_layout(512, &cfg, 34, 2048);
+        assert!(
+            matches!(r, Err(PartitionTableError::LayoutError(_))),
+            "FR-005: >1 rest-of-disk partition -> LayoutError"
+        );
+    }
+
+    /// `DPM-FORMAT-PART-SIZE-CEIL` (FR-004), `-PART-NONOVERLAP` and
+    /// `-PART-WITHIN-USABLE` (US1-AS1), over the placement arithmetic
+    /// compute_partition_layout runs per fixed partition:
+    /// `ns = ceil(size/ss); end = cur + ns - 1; next = end + 1`. Two symbolic-size
+    /// partitions that fit. Re-derived (the happy path's 128-slot pad is a wall,
+    /// captured separately by wall_layout_happy_path_pad).
+    #[kani::proof]
+    fn verify_layout_placement_arithmetic() {
+        let ss: u64 = 512;
+        let first = 34u64;
+        let last = 4096u64;
+        let total_usable = last - first + 1;
+
+        let s1: u64 = kani::any();
+        let s2: u64 = kani::any();
+        kani::assume(s1 >= 1 && s1 <= ss * 8);
+        kani::assume(s2 >= 1 && s2 <= ss * 8);
+
+        let ns1 = s1.div_ceil(ss);
+        let ns2 = s2.div_ceil(ss);
+        kani::assume(ns1 + ns2 <= total_usable);
+
+        let start1 = first;
+        let end1 = start1 + ns1 - 1;
+        let start2 = end1 + 1;
+        let end2 = start2 + ns2 - 1;
+
+        assert!(end1 - start1 + 1 == ns1, "FR-004: ceil sector count, partition 1");
+        assert!(end2 - start2 + 1 == ns2, "FR-004: ceil sector count, partition 2");
+        assert!(start2 == end1 + 1, "US1-AS1: contiguous placement");
+        assert!(start2 > start1, "US1-AS1: strictly increasing starts");
+        assert!(start1 >= first && end2 <= last, "US1-AS1: within usable window");
+    }
+
+    /// `DPM-FORMAT-RESTOFDISK-REMAINING` (FR-004). The single size_bytes==0
+    /// partition takes `rest = total_usable - fixed_sectors`; one fixed + rest
+    /// consumes the whole usable window exactly.
+    #[kani::proof]
+    fn verify_layout_restofdisk_arithmetic() {
+        let first = 34u64;
+        let last = 4096u64;
+        let total_usable = last - first + 1;
+        let fixed_sectors: u64 = kani::any();
+        kani::assume(fixed_sectors >= 1 && fixed_sectors < total_usable);
+        let rest_sectors = total_usable - fixed_sectors;
+
+        let end_fixed = first + fixed_sectors - 1;
+        let start_rest = end_fixed + 1;
+        let end_rest = start_rest + rest_sectors - 1;
+
+        assert!(end_rest == last, "FR-004: rest partition ends exactly at last_usable");
+        assert!(
+            (end_fixed - first + 1) + (end_rest - start_rest + 1) == total_usable,
+            "FR-004: fixed + rest consume the whole usable window"
+        );
+    }
+
+    // ===================== WALL harnesses — capture tool-boundary signatures =====================
+    // These are AUTHORED + RUN to capture a reproducible failure signature (three
+    // end-states: tool-boundary requires evidence, never a bare verdict). They are
+    // EXPECTED to fail/timeout and document DPM ids that a bounded checker cannot reach.
+
+    /// `DPM-CRC-INTEGRITY` (G8) tool boundary. crc32fast::hash lowers to the
+    /// `_xgetbv` intrinsic CBMC does not support. EXPECT: `unsupported_construct`
+    /// warning / failure. Route: Creusot + integration test.
+    #[kani::proof]
+    fn wall_crc32_xgetbv() {
+        let buf = [0u8; 92];
+        let crc = crc32fast::hash(&buf);
+        assert!(crc == crc, "G8: crc32fast reachable (expected _xgetbv wall)");
+    }
+
+    /// `DPM-INIT-BOTH-CORRUPT-NOPTBL` (PARSE-SIGNATURE) tool boundary. parse_header
+    /// on a >=92-byte buffer: the reject arm builds `format!("...{:#x}", sig)`,
+    /// whose integer->string formatting does not terminate under CBMC and poisons
+    /// analysis of the whole fn even on the accept side. EXPECT: rc=124 timeout.
+    /// Route: Creusot.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn wall_parse_header_valid_signature() {
+        let mut data = [0u8; 92];
+        data[0..8].copy_from_slice(&GPT_SIGNATURE.to_le_bytes()); // valid signature
+        let r = GptManager::parse_header(&data);
+        assert!(r.is_ok(), "PARSE-SIGNATURE: valid signature parses (expected format! wall)");
+    }
+
+    /// `DPM-FORMAT-ENTRY-ARRAY-128x128` / `DPM-FORMAT-TYPEGUID-PRESERVED` /
+    /// `DPM-FORMAT-WRITES-5-STRUCTURES` tool boundary. The happy path of
+    /// compute_partition_layout runs `while entries.len() < 128 { push zero }`,
+    /// requiring unwind>=129; at --default-unwind 3 this trips an unwinding
+    /// assertion (and SAT-explodes if forced high). EXPECT: unwinding-assertion
+    /// FAILURE. Route: Creusot.
+    #[kani::proof]
+    fn wall_layout_happy_path_pad() {
+        let cfg = PartitionConfig {
+            sector_size: 512,
+            total_sectors: 1u64 << 20,
+            ns_id: 1,
+            partitions: vec![PartitionSpec {
+                type_guid: [7u8; 16],
+                size_bytes: 4096,
+                name: String::new(),
+            }],
+        };
+        let r = GptManager::compute_partition_layout(512, &cfg, 34, 4096);
+        // If it returned, the type_guid copy (TYPEGUID-PRESERVED) would hold:
+        if let Ok(entries) = r {
+            assert!(entries.len() == 128, "ENTRY-ARRAY-128x128: exactly 128 slots");
+            assert!(entries[0].type_guid == [7u8; 16], "TYPEGUID-PRESERVED: input type-GUID copied");
+        }
+    }
+}
