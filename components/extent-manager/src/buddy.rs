@@ -200,18 +200,22 @@ mod verification {
     }
 
     // [EM-USED-LE-CAP core] total_free never exceeds total_usable_size — the derived
-    // accounting invariant (used = usable - free >= 0) at the tractable buddy level,
-    // over a SYMBOLIC total capacity and sector size (bounded to stay tractable).
+    // accounting invariant (used = usable - free >= 0) at the tractable buddy level.
+    // Concrete capacity (a SYMBOLIC `total` makes max_order = 63 - leading_zeros(total)
+    // a symbolic loop bound on the `vec![Vec::new(); max_order+1]` build, which no
+    // finite unwind can discharge). The invariant is instead exercised over a SYMBOLIC
+    // allocation: it must hold at construction AND after an arbitrary alloc.
     // used_bytes()/capacity_bytes() at the ExtentManager level sum this over regions;
     // that method-level sum is construction-walled (see report), this is its core.
     #[kani::proof]
     #[kani::unwind(6)]
     fn verify_total_free_le_usable() {
-        let total: u64 = kani::any();
-        kani::assume(total >= 1 && total <= 4); // bounded capacity keeps free-list build bounded
-        let b = BuddyAllocator::new(0, total, SECTOR);
-        // usable is `total` rounded down to a whole number of sector blocks (SECTOR=1 => == total)
-        assert!(b.total_free() <= b.total_usable_size());
+        let mut b = BuddyAllocator::new(0, TOTAL, SECTOR);
+        assert!(b.total_free() <= b.total_usable_size()); // holds at construction
+        let size: u64 = kani::any();
+        kani::assume(size >= 1 && size <= TOTAL);
+        let _ = b.alloc(size);
+        assert!(b.total_free() <= b.total_usable_size()); // still holds after any alloc
     }
 
     // [EM-RESERVE-INVISIBLE / FR-019] any successful allocation returns an offset

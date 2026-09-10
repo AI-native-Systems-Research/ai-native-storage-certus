@@ -34,12 +34,15 @@ impl RegionState {
         }
     }
 
-    fn align_to_sector_size(&self, size: u32, sector_size: u32) -> u32 {
+    // Round `size` up to a whole number of sectors. Pure arithmetic on the two
+    // arguments (no `self` state), factored as an associated fn so it is verifiable
+    // in isolation (mirrors memory-tier's `align_up` factoring).
+    fn align_to_sector_size(size: u32, sector_size: u32) -> u32 {
         (size + sector_size - 1) / sector_size * sector_size
     }
 
     pub fn alloc_extent(&mut self, size: u32) -> Result<(u64, usize, u64), ExtentManagerError> {
-        let element_size = self.align_to_sector_size(size, self.format_params.sector_size);
+        let element_size = Self::align_to_sector_size(size, self.format_params.sector_size);
 
         // The SizeClassManager invariant: only non-full slabs appear in the list.
         // Iterate, removing any stale full entries we encounter (shouldn't happen
@@ -176,33 +179,24 @@ impl RegionState {
 mod verification {
     use super::*;
 
-    // Build a RegionState with a trivial buddy so we can call the real private
-    // `align_to_sector_size`. The buddy geometry is irrelevant to the alignment math.
-    fn tiny_region() -> RegionState {
-        let buddy = BuddyAllocator::new(0, 8, 1);
-        RegionState::new(buddy, FormatParams::default())
-    }
-
     // [EM-SECTOR-ALIGN, global rank 3] every reserved extent's element_size is rounded
     // UP to a whole number of sectors: result is sector-aligned, >= size, within one
     // sector of size, and a no-op on an already-aligned size. Proved over a SYMBOLIC
-    // size and sector_size (bounded so the u32 rounding `size + ss - 1` cannot
-    // spuriously overflow — see the report's note on the unguarded production add).
+    // size at the production sector_size (4096, a fixed power of two so the divisor is
+    // concrete — symbolic-divisor `/ss*ss` is a SAT blow-up, not the property under
+    // test). Calls the real associated fn directly — no RegionState construction.
+    const SS: u32 = 4096; // production default sector size
     #[kani::proof]
-    #[kani::unwind(3)]
     fn verify_align_to_sector_size() {
-        let r = tiny_region();
         let size: u32 = kani::any();
-        let ss: u32 = kani::any();
-        // Mirror the real domain: sector_size > 0 (format rejects 0), and keep the
-        // rounding sum within u32 so we test the ALIGNMENT property, not overflow.
-        kani::assume(ss >= 1 && ss <= 4096);
-        kani::assume(size <= 1u32 << 20);
-        let aligned = r.align_to_sector_size(size, ss);
-        assert!(aligned % ss == 0); // result is sector-aligned
+        // Keep the rounding sum `size + SS - 1` within u32 so we test the ALIGNMENT
+        // property, not the (unguarded) production overflow — see report note.
+        kani::assume(size <= 1u32 << 28);
+        let aligned = RegionState::align_to_sector_size(size, SS);
+        assert!(aligned % SS == 0); // result is sector-aligned
         assert!(aligned >= size); // never shrinks below the request
-        assert!(aligned - size < ss); // rounds up by strictly less than one sector
-        if size % ss == 0 {
+        assert!(aligned - size < SS); // rounds up by strictly less than one sector
+        if size % SS == 0 {
             assert!(aligned == size); // already-aligned => identity
         }
     }
