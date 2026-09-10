@@ -21,3 +21,13 @@ pub mod align;
 pub mod shard;
 pub mod bitmap;
 pub mod buddy;
+
+// Global invariants (ordered by attachment count), then per-method obligations.
+pub mod gate;             // EM-INIT-GATE (#1, 8)
+pub mod keyvec;           // EM-KEYVEC-MEMBERSHIP (#2, 4)
+pub mod deferred_free;    // EM-DEFERRED-FREE (#4, 3)
+pub mod config;           // EM-DATABASE-ROUNDTRIP (#5, 2)
+pub mod accounting;       // EM-USED-LE-CAP (#6, 2)
+pub mod format_validate;  // EM-FORMAT-VALIDATE-*, DATA-LAYOUT, RESERVE-OVERSIZE
+pub mod checkpoint_gate;  // EM-CKPT-SKIP-CLEAN
+pub mod recovery_model;   // EM-RECOVER-ROUNDTRIP, EM-INIT-VALIDATE-MAGIC/CRC
