@@ -185,12 +185,17 @@ mod verification {
     use super::*;
 
     // [EM-INIT-VALIDATE / truncation guard] deserialize rejects a buffer shorter than
-    // SUPERBLOCK_SIZE rather than reading past the end. Static error message => no
-    // symbolic hex formatting, no crc32fast — this reject path is fully tractable.
+    // SUPERBLOCK_SIZE rather than reading past the end. The buffer carries a VALID
+    // magic so the reject is attributable to the length guard alone (an all-zero short
+    // buffer would also be caught by the magic check, leaving the truncation guard
+    // untested / anti-vacuity-blind). With the guard removed, deserialize walks past
+    // magic+version and indexes out of bounds — so this harness genuinely anchors the
+    // guard. Static "too short" message => no symbolic hex formatting, no crc32fast.
     #[kani::proof]
     #[kani::unwind(2)]
     fn verify_deserialize_rejects_short_buffer() {
-        let buf = vec![0u8; SUPERBLOCK_SIZE - 1];
+        let mut buf = vec![0u8; 16]; // < SUPERBLOCK_SIZE and < the field read span
+        buf[0..8].copy_from_slice(&SUPERBLOCK_MAGIC.to_le_bytes());
         assert!(Superblock::deserialize(&buf).is_err());
     }
 }
