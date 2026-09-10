@@ -23,6 +23,43 @@ Unlike the ShareGPT images (small JSON `COPY`'d in), the OTel corpus is **~22 GB
 The run wrappers mount `OTEL_HOST` (default
 `/mnt/certus1/inference-perf-syn-data/otel_1k`) for you.
 
+## Generating the corpus (`trace-gen/`)
+
+The corpus is derived from an **inference-perf `conversation_replay` workload**,
+not captured from a live service, so it is fully reproducible from `(seed,
+config)`. `trace-gen/` holds the exact scripts and configs used to build the
+shipped `otel_1k`, plus a wrapper that chains them:
+
+| File | Role |
+|---|---|
+| `conversation_replay_50turn.yaml` | inference-perf `conversation_replay` workload (seed 42, 1000 convs, ~50 turns/conv, lognormal input / normal output token sizes, skew-normal tool-call delays). |
+| `gen_conversation_trace.py` | **Stage 1.** Runs inference-perf's `ConversationReplayDataGenerator` and dumps the workload **plan** — per-turn `[input_tokens, output_tokens, tool_call_latency_sec]` — as a compact JSON. Filler *text* is not materialised here (only sizes), so this stays small and fast. |
+| `trace_to_otel.py` | **Stage 2.** Expands the plan into the `otel_trace_replay` corpus: one JSON file per conversation, each turn an LLM span with `gen_ai.usage.*` token sizes; user messages carry Qwen-tokenised random filler, assistant messages are short markers substituted at replay; inter-turn delays become timestamp gaps; a 120k sliding window caps context. |
+| `otel_replay_1k.yaml` | The inference-perf `otel_trace_replay` config that replays the resulting corpus (`trace_directory`, `concurrent_sessions 50`, `max_wait_ms`). Reference config; the container drivers here replay the same corpus directly. |
+| `generate-otel-corpus.sh` | Convenience wrapper that runs both stages with the defaults that reproduce `otel_1k`. |
+
+```bash
+cd benchmarks/kv-offload-otel-replay/trace-gen
+
+# Reproduce the shipped otel_1k (seed 42, 1000 convs, 120k cap, Qwen2.5-7B):
+./generate-otel-corpus.sh
+# -> writes /mnt/certus1/inference-perf-syn-data/otel_1000/ (+ .plan.json alongside)
+
+# Smaller corpus / different knobs (all env-overridable):
+NUM_CONVS=100 CAP=120000 OUT_DIR=/mnt/certus1/inference-perf-syn-data/otel_100 \
+    ./generate-otel-corpus.sh
+
+# Or the two stages by hand:
+python3.12 gen_conversation_trace.py conversation_replay_50turn.yaml plan.json 1000
+python3.12 trace_to_otel.py plan.json /mnt/certus1/inference-perf-syn-data/otel_1k \
+    --num 1000 --cap 120000 --model Qwen/Qwen2.5-7B-Instruct
+```
+
+Requires the `inference-perf` package importable under `python3.12` and the
+model tokenizer available to `transformers` (HF cache or network). The corpus is
+large (~22 GB at 1000 convs / 120k cap) — write it to `/mnt/certus1`, then point
+a run at it with `OTEL_HOST=<out_dir>` (see below).
+
 ## Two images
 
 | Image | Backend(s) | Driver | Notes |
