@@ -4,7 +4,7 @@ kv-offload-otel-replay tool.
 This is the OTel-corpus analogue of :mod:`run_multiturn_async`. Where that module
 replays ShareGPT human-turn streams as fast as the engine will take them (one
 coroutine per conversation, turns issued back-to-back), this one replays the
-``otel_trace_replay`` corpus produced by ``configs/trace_to_otel.py`` and
+``otel_trace_replay`` corpus produced by ``benchmarks/kv-offload-otel-replay/trace-gen/trace_to_otel.py`` and
 **honors the recorded per-turn timing**: within a conversation coroutine, before
 issuing turn ``k`` it sleeps the recorded inter-turn gap
 ``start_time[k] - end_time[k-1]`` (the tool-call / think delay the trace
