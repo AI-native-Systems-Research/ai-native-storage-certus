@@ -243,6 +243,11 @@ if __name__ == "__main__":
         disable_log_stats=not CAPTURE_METRICS,
         **_mfu_kwargs,
     )
+    # Qwen2.x native window is 32768; the corpus needs 131072, so enable YaRN
+    # when MAX_MODEL_LEN exceeds native (no-op otherwise). ROPE_YARN=0 opts out.
+    _yarn = common.yarn_hf_overrides(MODEL, MAX_MODEL_LEN)
+    if _yarn:
+        engine_kwargs["hf_overrides"] = _yarn
 
     # Base sampling params; per-turn max_tokens is set from each span in run_otel.
     sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=256)
