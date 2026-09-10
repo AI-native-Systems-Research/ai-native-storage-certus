@@ -18,6 +18,8 @@ use creusot_std::prelude::*;
 /// Encode a single UTF-16 code unit to its low/high little-endian bytes, matching
 /// `ch.to_le_bytes()` (gpt.rs:574) at the arithmetic level: `lo = c % 256`,
 /// `hi = c / 256`.
+#[ensures(result.0@ == c@ % 256)]
+#[ensures(result.1@ == c@ / 256)]
 pub fn encode_unit_le(c: u16) -> (u8, u8) {
     let lo = (c % 256) as u8;
     let hi = (c / 256) as u8;
@@ -27,6 +29,7 @@ pub fn encode_unit_le(c: u16) -> (u8, u8) {
 /// Decode a low/high little-endian byte pair back to a code unit, matching
 /// `u16::from_le_bytes([lo, hi])` (gpt.rs:581) at the arithmetic level:
 /// `lo + hi * 256`.
+#[ensures(result@ == lo@ + hi@ * 256)]
 pub fn decode_unit_le(lo: u8, hi: u8) -> u16 {
     lo as u16 + (hi as u16) * 256
 }
@@ -35,9 +38,11 @@ pub fn decode_unit_le(lo: u8, hi: u8) -> u16 {
 /// pair recovers `c` exactly: `decode(encode(c)) == c`. Bridged by the division
 /// identity `c == (c/256)*256 + c%256`. This is the arithmetic core the full
 /// UTF-16LE name round-trip is built on.
+#[ensures(result@ == c@)]
 pub fn utf16le_unit_roundtrip(c: u16) -> u16 {
     let (lo, hi) = encode_unit_le(c);
     // Division identity pins lo + hi*256 back to c.
+    proof_assert!(c@ == (c@ / 256) * 256 + c@ % 256);
     decode_unit_le(lo, hi)
 }
 
@@ -45,8 +50,14 @@ pub fn utf16le_unit_roundtrip(c: u16) -> u16 {
 /// unit (`0 < c <= 0x7F`) round-trips *and* has a zero high byte — so it is a
 /// single code unit and survives `decode`'s `take_while(|&c| c != 0)` NUL
 /// terminator (gpt.rs:582): the unit is non-zero, so it is not truncated.
+#[requires(c@ > 0 && c@ <= 0x7F)]
+#[ensures(result.0@ == c@)] // recovered value equals the original
+#[ensures(result.1@ == 0)] // high byte is zero ⇒ one code unit, ASCII sub-range
+#[ensures(result.0@ != 0)] // non-NUL ⇒ not dropped by the take_while terminator
 pub fn ascii_unit_roundtrip(c: u16) -> (u16, u8) {
     let (lo, hi) = encode_unit_le(c);
+    proof_assert!(c@ == (c@ / 256) * 256 + c@ % 256);
+    proof_assert!(c@ < 256); // c <= 0x7F < 256, so hi == 0
     let recovered = decode_unit_le(lo, hi);
     (recovered, hi)
 }
@@ -57,6 +68,9 @@ pub fn ascii_unit_roundtrip(c: u16) -> (u16, u8) {
 /// write index stays within the 72-byte buffer for every admitted unit: for
 /// `i < 36`, `i*2 + 2 <= 72`, so no code unit within the 36-unit cap is dropped
 /// by the bounds guard.
+#[requires(i@ < 36)] // .take(36) admits indices 0..36
+#[ensures(result@ == i@ * 2)] // byte offset of code unit i
+#[ensures(result@ + 2 <= 72)] // write stays within the 72-byte name buffer
 pub fn name_unit_offset(i: u64) -> u64 {
     i * 2
 }

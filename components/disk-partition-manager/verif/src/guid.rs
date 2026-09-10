@@ -17,12 +17,24 @@ use creusot_std::logic::ops::NthBitLogic;
 
 /// Version nibble: `(b & 0x0F) | 0x40`. The version nibble (bits 4..7) becomes
 /// `0100` = 4, and the low nibble (bits 0..3, clock-seq high) is preserved.
+#[bitwise_proof]
+#[ensures(!result.nth_bit(7))] // bits 4..7 == 0100 == version 4
+#[ensures(result.nth_bit(6))]
+#[ensures(!result.nth_bit(5))]
+#[ensures(!result.nth_bit(4))]
+#[ensures(result.nth_bit(0) == b.nth_bit(0))] // low nibble preserved (representative bits)
+#[ensures(result.nth_bit(3) == b.nth_bit(3))]
 pub fn guid_version4(b: u8) -> u8 {
     (b & 0x0F) | 0x40
 }
 
 /// Variant bits: `(b & 0x3F) | 0x80`. The top two bits (7,6) become `10`
 /// (RFC-4122 variant 1), and the low six bits are preserved.
+#[bitwise_proof]
+#[ensures(result.nth_bit(7))] // bits 7,6 == 10 == variant 1
+#[ensures(!result.nth_bit(6))]
+#[ensures(result.nth_bit(0) == b.nth_bit(0))] // low six bits preserved (representative bits)
+#[ensures(result.nth_bit(5) == b.nth_bit(5))]
 pub fn guid_variant(b: u8) -> u8 {
     (b & 0x3F) | 0x80
 }
