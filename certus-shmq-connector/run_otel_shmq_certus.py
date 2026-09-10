@@ -2,7 +2,7 @@
 """run_otel_shmq_certus.py — kv-offload-otel-replay on the Certus shmq backend.
 
 The shmq analogue of ``benchmarks/kv-offload-replay/run_otel_replay.py``: replays
-the ``otel_trace_replay`` corpus (built by ``configs/trace_to_otel.py``) with the
+the ``otel_trace_replay`` corpus (built by ``benchmarks/kv-offload-otel-replay/trace-gen/trace_to_otel.py``) with the
 recorded per-turn timing against the *shared-memory* connector
 (CertusShmqOffloadingSpec) driving a running certus-server over a /dev/shm
 mailbox — the same connector/compat/session-id/SSD-telemetry setup as
