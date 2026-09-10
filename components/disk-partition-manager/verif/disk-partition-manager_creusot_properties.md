@@ -4,8 +4,12 @@ Proven from the Role-1 inventory `disk-partition-manager_property_inventory.md`
 (N=4 trait methods, M=35 properties) against code
 `components/disk-partition-manager/src/{gpt.rs,lib.rs}` and
 `components/interfaces/src/ipartition_table.rs`. Artifacts: this `verif/` crate.
-Branch `verif/creusot/disk-partition-manager`, based on `unstable-creusot`
-@ `c87f1e25`.
+Branch `verif/creusot/disk-partition-manager-rerun`, clean-slate re-run based on
+baseline `verif/creusot/disk-partition-manager @ 2acb0dce`. The baseline branch is
+left **untouched**; this re-run stripped the proof crate to bare signatures
+(`92056f46`), re-authored every contract from the id-keyed inventory (`dea72b06`),
+then closed the two obligations the baseline left authorable-but-unwritten
+(`d42c364f`, `verif/src/loops.rs`).
 
 **Method.** Each function in `src/*.rs` is a *faithful whole-function mirror* of
 a shipped function: the disk-partition-manager crate cannot be built under
@@ -20,24 +24,33 @@ source, discharged **by inspection** against the cited line ranges. There are
 **no `#[trusted]` items inside this crate** — every VC is discharged by the
 prover portfolio.
 
-**Result.** `cargo creusot` → `Proved (43 files) ✔`.
-**57 VCs discharged across 43 `.coma` files**, of which **6 files (6 VCs) are
-auto-derived `Clone` impls**; the **37 property-bearing `.coma` files carry 51
-VCs**. Solver portfolio **alt-ergo / z3 / cvc5 / cvc4** (most goals closed by
-alt-ergo or cvc5), tactics `split_vc` + `compute_specified`
-(`why3find.json`: fast 0.2, time 8, depth 6).
+**Result.** `cargo creusot` → `Proved (48 files) ✔`.
+**70 named VCs across 48 `.coma` files** (baseline: 57 VCs / 43 files; +13 VCs /
++5 files, all from the new `loops.rs` whole-`Vec` induction). Under the
+`compute_specified` + `split_vc` tactics those 70 named VCs expand into **136 leaf
+goals discharged by the SMT portfolio: alt-ergo 126, cvc5 7, z3 3** (cvc5 carries
+the two `#[bitwise_proof]` GUID VCs; z3 carries three error-path booleans). Six of
+the 48 files are auto-derived `Clone` impls (1 leaf each). `why3find.json`: fast
+0.2, time 8, depth 6.
 
-**Measurement** (`/usr/bin/time -v cargo creusot`):
-- **Cold / clean run:** wall-clock **24.33 s**, peak RSS **≈ 803 MB** (821 956 KB).
-- **Cached replay:** wall-clock **0.68 s**, peak RSS **≈ 66 MB** (66 052 KB).
+**Measurement** (`/usr/bin/time -v cargo creusot`, this re-run):
+- **Cold / clean run:** wall-clock **24.91 s**, peak RSS **≈ 803 MB** (822 220 KB).
+- **Cached replay:** wall-clock **0.80 s**, peak RSS **≈ 72 MB** (73 732 KB).
+- Baseline `2acb0dce` for comparison: cold **24.33 s** / 821 956 KB.
 
-**Anti-vacuity (fault injection).** Three representative proofs across the three
-proof styles were fault-injected and confirmed to go **red**, then reverted:
-- G6 arithmetic — dropping the `-1` in `ending_lba` reddened `vc_ending_lba`;
-- GUID bit-level — `0x40 → 0x50` (version 5) reddened `vc_guid_version4`;
-- state gate — removing the `!present → NotInitialized` guard reddened
-  `vc_partition_info`.
-Re-running clean restored `Proved (43 files) ✔`.
+**Anti-vacuity (fault injection).** The clean-slate **strip** step is itself the
+first anti-vacuity witness: with contracts removed the tree was honestly RED
+(11 unproved files — the layout/roundtrip arithmetic mirrors losing their
+overflow/underflow `#[requires]`), proving those preconditions are load-bearing.
+On top of that, **six representative proofs across all proof styles** were
+fault-injected, each confirmed to turn its VC **red**, then reverted:
+- **FI-1** count-fold — `count_rest` body `if x == 0` → `if x != 0` reddened `vc_count_rest`;
+- **FI-2** whole-`Vec` placement — `place_all` cursor step `current + n` → `current + n + 1` (breaks the budget invariant) reddened `vc_place_all`;
+- **FI-3** G6 arithmetic — dropping the `-1` in `ending_lba` reddened `vc_ending_lba`;
+- **FI-4** GUID bit-level — `0x40 → 0x50` (would-be version 5, sets bit 4) reddened `vc_guid_version4`;
+- **FI-5** state gate — disabling the `!present → NotInitialized` guard reddened `vc_partition_info`;
+- **FI-6** multi-rest guard — `multi_rest_ok` `rest_count > 1` → `> 2` reddened `vc_multi_rest_ok`.
+Re-running clean after all reverts restored `Proved (48 files) ✔`.
 
 Build (creusot-std is not vendored on this branch; `Cargo.toml` patches it to
 `/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std` — a
@@ -60,11 +73,16 @@ precondition the code does not enforce — R3), the two I/O-effect frames
 
 | method | bundle B | proved m | not counted |
 |--------|:---:|:---:|-------------|
-| `initialize` | 12 | **10** | G1 (R3); `DPM-INIT-IO-2RT` (TOOL) |
-| `format` | 24 | **21** | G1 (R3); `DPM-FORMAT-ERR-MULTI-REST` (AGENT); `DPM-FORMAT-IO-O1` (TOOL) |
+| `initialize` | 12 | **10** | G1 (R3); `DPM-INIT-IO-2RT` (TOOL ⊘) |
+| `format` | 24 | **22** | G1 (R3); `DPM-FORMAT-IO-O1` (TOOL ⊘) |
 | `partition_info` | 6 | **5** | G1 (R3) |
 | `num_partitions` | 4 | **3** | G1 (R3) |
 | *(helper, out-of-N)* `initialize_or_format` | 4 | **4** | — |
+
+`format` rose **21 → 22** this re-run: `DPM-FORMAT-ERR-MULTI-REST` was the sole
+baseline AGENT ⧗ item and is now **Proved** (`loops/multi_rest_layout_ok`, see
+below). Only `DPM-FORMAT-IO-O1` (a TOOL ⊘ I/O-count frame) and the G1 R3-note
+remain non-native. There are **no remaining AGENT ⧗ items** in this component.
 
 The `G1` deduction is the *same* global appearing in all four bundles (attach 4);
 it is not four separate misses (see G1 note below).
@@ -100,7 +118,7 @@ it is not four separate misses (see G1 note below).
 
 - `DPM-FORMAT-REQUIRES-BLOCKDEV` **[error]** — ★ `errors/require_blockdev`.
 - `DPM-FORMAT-DEVICE-TOO-SMALL` **[error]** `first_usable >= last_usable` → `LayoutError` before any write. — ✓ `layout/device_large_enough` + `layout/usable_lbas` (with the R4 panic-freedom precondition).
-- `DPM-FORMAT-ERR-MULTI-REST` **[error]** >1 `size_bytes==0` → `LayoutError`. — **⧗ AGENT**: the guard predicate is trivial, but counting zero-size specs over `config.partitions: Vec<PartitionSpec>` needs a `Seq`-fold count model that is *not yet authored*. Creusot **can** express it. Route: model the count with `Seq::fold`/an index loop invariant.
+- `DPM-FORMAT-ERR-MULTI-REST` **[error]** >1 `size_bytes==0` → `LayoutError`. — ✓ **Proved this re-run** (`loops/multi_rest_layout_ok`, 3 VC; `loops/count_rest`, `loops/count_zeros`, `loops/multi_rest_ok`). The `size_bytes==0` tally is modelled by a right-recursive `#[logic]` `count_zeros` over `Seq<u64>` plus an index-free `for`-loop (`count_rest`) whose invariant `count@ == count_zeros(specs@, 0, produced.len())` ties the running counter to the fold; `multi_rest_ok` proves the `> 1` guard is `rest_count <= 1`, and `multi_rest_layout_ok` composes them so the observable decision is `count_zeros(whole Vec) <= 1`. (Was baseline's sole AGENT ⧗; now closed.)
 - `DPM-FORMAT-ERR-OVERSUBSCRIBED` **[error]** fixed partitions exceed usable → `LayoutError` (two guards). — ✓ `layout/fixed_fits` + `layout/placement_fits`.
 - `DPM-FORMAT-WRITES-5-STRUCTURES` **[post]** MBR@0, primary hdr@1, entries@2, backup entries@last_usable+1, backup hdr@last. — ✓ (LBA-target arithmetic) `layout/usable_lbas`, `header/backup_mirrors_primary`, `header/mbr_protective_type`. Write **ordering/effect** is TCB (★).
 - `DPM-FORMAT-ENTRY-ARRAY-128x128` **[inv]** exactly 128×128 B, unused zero. — ✓ `layout/entry_array_128`.
@@ -111,8 +129,8 @@ it is not four separate misses (see G1 note below).
 - `DPM-FORMAT-TYPEGUID-PRESERVED` **[post]** written type-GUID == input spec's. — ✓ `roundtrip/typeguid_roundtrip`.
 - `DPM-FORMAT-PART-SIZE-CEIL` **[post]** `ceil(size_bytes / sector_size)`. — ✓ `layout/part_size_ceil`.
 - `DPM-FORMAT-RESTOFDISK-REMAINING` **[post]** rest partition consumes all remaining usable. — ✓ `layout/restofdisk_remaining`.
-- `DPM-FORMAT-PART-NONOVERLAP` **[inv]** `start==prev.end+1`, starts strictly increasing. — ✓ `layout/place_step` + `layout/two_partitions_disjoint` (2 VC). *The observable statement is proved as the inductive step + a two-partition instance; the full N-partition `Vec` loop invariant is an authorable extension (AGENT).*
-- `DPM-FORMAT-PART-WITHIN-USABLE` **[inv]** every partition in `[first_usable, last_usable]`. — ✓ `layout/within_usable_step` (same AGENT note on the full loop).
+- `DPM-FORMAT-PART-NONOVERLAP` **[inv]** `start==prev.end+1`, starts strictly increasing. — ✓ inductive step `layout/place_step` + two-partition instance `layout/two_partitions_disjoint` (2 VC), **and now the full N-partition `Vec` loop** `loops/place_all`: the loop invariant `current@ >= first_usable@ + produced.len()` proves partition starts strictly increase across the *whole* sequence ⇒ pairwise disjoint. (Baseline's authorable-extension note is now closed.)
+- `DPM-FORMAT-PART-WITHIN-USABLE` **[inv]** every partition in `[first_usable, last_usable]`. — ✓ step `layout/within_usable_step` **and** whole-`Vec` `loops/place_all`: the invariant `current@ + remaining@ == first_usable@ + total@` with `remaining@ >= 0` keeps the cursor `<= last_usable + 1`, so every placed partition ends `<= last_usable`.
 - `DPM-FORMAT-BACKUP-MIRRORS-PRIMARY` **[inv]** backup `my_lba`/`alternate_lba` mirror primary. — ✓ `header/backup_mirrors_primary`.
 - `DPM-FORMAT-IO-O1` **[frame]** write count O(1) in device size. — **⊘ TOOL**: I/O write-count is an effect count, not expressible in Creusot. Route: instrumented integration test.
 - + globals G1(R3), G3✓, G4★, G6✓, G7★, G8★, G9★.
@@ -144,13 +162,13 @@ it is not four separate misses (see G1 note below).
   sequential logic has no notion of "number of I/O operations." Route:
   instrumented integration test.
 
-**AGENT — Creusot could, proof not yet authored (1 property + 1 extension, ⧗):**
-- `DPM-FORMAT-ERR-MULTI-REST` — counting `size_bytes==0` specs over
-  `Vec<PartitionSpec>`; needs a `Seq`-fold / index-loop count model. Expressible;
-  unauthored.
+**AGENT — Creusot could, proof not yet authored (⧗): NONE.** Both baseline
+authorable items were **closed this re-run** (`verif/src/loops.rs`):
+- `DPM-FORMAT-ERR-MULTI-REST` — now Proved: `count_zeros` (`#[logic]` fold) +
+  `count_rest` (loop-invariant tally) + `multi_rest_ok`/`multi_rest_layout_ok`.
 - Full **N-partition loop induction** for `DPM-FORMAT-PART-NONOVERLAP` /
-  `-WITHIN-USABLE` — proved here as the inductive **step** + a two-partition
-  instance; the whole-`Vec` loop invariant is an authorable extension.
+  `-WITHIN-USABLE` — now Proved over the whole `Vec` by `loops/place_all`, not
+  just the step + two-partition instance.
 
 **Trusted boundaries disclosed inside proved mirrors (★ — the TCB for this
 component, §7 of the inventory):**
@@ -165,10 +183,11 @@ component, §7 of the inventory):**
 - `/dev/urandom` entropy and GUID **uniqueness** (R6) — only the structural v4
   version/variant nibbles are proved (bit-level), not uniqueness.
 
-**Tally:** 2 TOOL (not-expressible) · 2 AGENT (authorable) · the remainder of the
-M=35 set has its Creusot-expressible core **proved green** (✓ pure, ★ mirror with
-disclosed TCB). No property was punted on lane/effort grounds — every one was
-attempted and its outcome recorded by id.
+**Tally:** 2 TOOL ⊘ (not-expressible I/O-count frames) · **0 AGENT ⧗** (both
+baseline authorable items closed this re-run) · the remainder of the M=35 set has
+its Creusot-expressible core **proved green** (✓ pure, ★ mirror with disclosed
+TCB). No property was punted on lane/effort grounds — every one was attempted and
+its outcome recorded by id.
 
 ---
 
