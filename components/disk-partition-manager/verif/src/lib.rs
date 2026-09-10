@@ -22,6 +22,7 @@
 #![cfg_attr(creusot, allow(unused))]
 
 pub mod layout; // format layout arithmetic: entry_sectors, usable LBAs, ceil, non-overlap, within-usable, 128x128
+pub mod loops; // whole-Vec loop proofs: MULTI-REST zero-count + N-partition NONOVERLAP/WITHIN-USABLE
 pub mod roundtrip; // G6 DPM-ROUNDTRIP-OFFSETS + DPM-INIT-RETURNS-CORRECT-LAYOUT
 pub mod name; // G7 DPM-ROUNDTRIP-NAME (per-code-unit LE round-trip) + name-len-36 bound
 pub mod guid; // DPM-FORMAT-{DISK,PART}-GUID-V4 (bit-level v4 version/variant)
