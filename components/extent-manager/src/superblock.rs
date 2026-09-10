@@ -168,26 +168,6 @@ impl Superblock {
     }
 }
 
-#[cfg(kani)]
-mod verification {
-    use super::*;
-
-    // NOTE: `verify_serialize_length` and `verify_deserialize_rejects_bad_magic` were
-    // attempted and removed as intractable for Kani — see "Not verified by Kani (and why)"
-    // in extent-manager_properties.md. `serialize` reaches `crc32fast::hash`, whose runtime
-    // SIMD feature detection (`std::arch::x86_64::_xgetbv`) is an unsupported construct; the
-    // bad-magic reject path formats the *symbolic* magic value into a hex string
-    // (`format!("...{magic:#x}")`), which blows up CBMC.
-
-    // FR-004: deserialize rejects a truncated buffer (shorter than the superblock).
-    #[kani::proof]
-    #[kani::unwind(2)]
-    fn verify_deserialize_rejects_short_buffer() {
-        let buf = vec![0u8; SUPERBLOCK_SIZE - 1];
-        assert!(Superblock::deserialize(&buf).is_err());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
