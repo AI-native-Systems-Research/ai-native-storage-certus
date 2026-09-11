@@ -1,0 +1,99 @@
+# inference-perf `conversation_replay` workload
+# ---------------------------------------------
+# Synthetic multi-turn conversations generated in-memory from distributions
+# (no materialised trace file — the "replay" is deterministic given `seed`).
+#
+# Requirements captured here:
+#   - turns_per_conversation:  mean 50, min 25, max 75
+#   - inter-turn delay:        broad 0..200s, ~equal mass in 0s / 0-10s / 10-50s /
+#                              50-100s / 100-200s (moderately skewed)
+#
+# Inter-turn delay target: roughly equal mass across 0s / 0-10s / 10-50s /
+# 50-100s / 100-200s (a broad, only-moderately-skewed think/tool-time). No single
+# parametric distribution matches this exactly — the 20% spike at *exactly* 0s
+# plus reach to 200s is really a mixture. The closest single-distribution fit
+# (grid-searched over all supported types) is the skew_normal below; whole-second
+# rounding in the sampler is harmless at this multi-second scale.
+#
+# Realised buckets (simulated, n=300k): 0s 20% | 0-10s 8% | 10-50s 27% |
+# 50-100s 24% | 100-200s 21%  (mean ~56s, median ~42s). The 0-10s band is thin
+# because clipping a negative-mean normal at 0 makes the 20% spike at 0s but
+# leaves low density just above it. For an exact 20/20/20/20/20 profile ask for
+# the piecewise/mixture sampler (small source patch) instead.
+
+api:
+  # conversation_replay ONLY supports the Completion API (get_supported_apis).
+  type: completion
+  streaming: true
+
+data:
+  type: conversation_replay
+  conversation_replay:
+    seed: 42                          # deterministic / replayable
+    num_conversations: 50             # = concurrency: one live conversation per slot
+    shared_system_prompt_len: 2000    # shared prefix (prefix-cache + offload pressure)
+
+    # ~50 turns per conversation, bounded [25, 75].
+    # std_dev 12 keeps ~2sigma inside the bounds so clipping at min/max is light
+    # and the realised mean stays ~50.
+    turns_per_conversation:
+      type: normal
+      min: 25
+      max: 75
+      mean: 50
+      std_dev: 12
+
+    # Per-turn input/output token lengths (tune for your KV working-set target).
+    input_tokens_per_turn:
+      type: lognormal
+      min: 500
+      max: 15000
+      mean: 3000
+      std_dev: 2500
+    output_tokens_per_turn:
+      type: normal
+      min: 50
+      max: 2000
+      mean: 300
+      std_dev: 400
+
+    # Inter-turn ("think" / tool round-trip) delay: broad spread 0..200s, only
+    # moderately skewed. Best single-distribution fit to the target quintiles
+    # (see header). The negative mean + clip at 0 produces the ~20% zero-delay
+    # spike; skew stretches the right tail to 200s.
+    tool_call_latency_sec:
+      type: skew_normal
+      min: 0
+      max: 200
+      mean: -25                        # negative: ~20% of mass clips to the 0s spike
+      std_dev: 100
+      skew: 12
+
+load:
+  # Closed-loop: each of the `concurrency_level` slots owns one conversation and
+  # replenishes with a fresh one when its turns are exhausted.
+  #   num_requests ~= num_conversations * mean_turns * num_rounds
+  #   -> 50 * 50 * 2 = 5000 (first round is warmup; report from round 2 on).
+  type: concurrent
+  stages:
+    - num_requests: 5000
+      concurrency_level: 50
+  num_workers: 1
+
+server:
+  type: vllm
+  model_name: "${MODEL}"              # e.g. meta-llama/Meta-Llama-3-8B-Instruct
+  base_url: "${BASE_URL}"             # e.g. http://localhost:8000
+
+tokenizer:
+  pretrained_model_name_or_path: "${MODEL}"
+
+storage:
+  local_storage:
+    path: "reports-conversation-replay-{timestamp}"
+
+report:
+  request_lifecycle:
+    summary: true
+    per_stage: true
+    per_request: false

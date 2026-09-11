@@ -1,0 +1,62 @@
+# inference-perf `otel_trace_replay` workload — file-driven replay of the
+# 1000-conversation corpus produced by trace_to_otel.py.
+#
+# Corpus: /mnt/certus1/inference-perf-syn-data/otel_1k/  (1000 files, one per
+# conversation; each file = one replay session; ~48k LLM spans total).
+# Derived from configs/conversation_replay_50turn.yaml (seed 42) then capped to a
+# 120k-token sliding context window so every turn fits Qwen2.5's 131072 ctx.
+#
+# The KV backend (NoOffload / CPUOffload / Tiered-CPU-FS / Certus) is chosen on
+# the vLLM SERVER (--kv-transfer-config); this client config is backend-agnostic.
+# ${BASE_URL} / ${MODEL} are rendered by the container entrypoint (envsubst).
+#
+# Multi-turn semantics on the wire:
+#   * user / shared-prefix messages are sent as recorded (real token-sized text),
+#   * assistant "output" segments are SUBSTITUTED at replay with the real
+#     predecessor generations (their sizes come from gen_ai.usage.output_tokens),
+#   * inter-turn think/tool delay is encoded as the span timestamp gap and applied
+#     as wait_ms — up to 200s, hence max_wait_ms below.
+
+api:
+  # otel_trace_replay replays chat-completion calls.
+  type: chat
+  streaming: true
+
+data:
+  type: otel_trace_replay
+  otel_trace_replay:
+    trace_directory: /mnt/certus1/inference-perf-syn-data/otel_1k
+    # Ignore the model recorded in the spans; drive whatever the server serves.
+    use_static_model: true
+    static_model_name: "${MODEL}"          # e.g. Qwen/Qwen2.5-7B-Instruct
+    # Delays reach 200s; default cap is 15000ms and would clamp them. Raise it so
+    # the recorded think/tool gaps replay faithfully.
+    max_wait_ms: 210000
+    include_errors: false                  # all spans are status.code=1 anyway
+    skip_invalid_files: false              # fail loud if a file is malformed
+    default_max_tokens: 1000               # fallback; each span carries its own max_tokens
+
+load:
+  # Required for all *_replay datagens. Each session = one conversation file;
+  # concurrent_sessions live conversations replay at once (closed-loop).
+  type: trace_session_replay
+  stages:
+    - concurrent_sessions: 50
+
+server:
+  type: vllm
+  base_url: "${BASE_URL}"
+  model_name: "${MODEL}"
+
+tokenizer:
+  pretrained_model_name_or_path: "${MODEL}"
+
+storage:
+  local_storage:
+    path: "reports-otel-replay-1k-{timestamp}"
+
+report:
+  request_lifecycle:
+    summary: true
+    per_stage: true
+    per_request: false
