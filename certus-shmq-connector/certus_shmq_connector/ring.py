@@ -338,7 +338,7 @@ class Ring:
         ready_timeout: float = 30.0,
         spin_iters: int = 512,
         attempt_timeout: float = 0.05,
-        deadline: float = 30.0,
+        deadline: float | None = None,
         log=None,
         claim_slot: int = 0,
         claim_slots: int = 1,
@@ -347,6 +347,15 @@ class Ring:
         self._path = path
         self._spin_iters = int(spin_iters)
         self._attempt_timeout = float(attempt_timeout)
+        # Per-request deadline. A full server memory tier makes OP_RESERVE
+        # backpressure on the server side; that backpressure is now bounded per
+        # reserve *batch* (Translator::op_reserve), but on a persistently
+        # saturated tier a legitimate request can still take longer than the
+        # 30 s default. CERTUS_SHMQ_DEADLINE_S lets an operator widen it without
+        # a code change so a slow-but-alive server is not misreported as dead.
+        # An explicit `deadline=` argument still wins over the env var.
+        if deadline is None:
+            deadline = float(os.environ.get("CERTUS_SHMQ_DEADLINE_S", "30.0"))
         self._deadline = float(deadline)
         self._log = log or (lambda msg: print(f"[certus-shmq] {msg}", file=sys.stderr, flush=True))
 
@@ -615,7 +624,11 @@ class Ring:
             if cur == seq:
                 return self._read_response(rc)
             if time.monotonic() - start > self._deadline:
-                raise RingError("shmq request deadline exceeded (server dead?)")
+                raise RingError(
+                    f"shmq request deadline exceeded after {self._deadline:g}s "
+                    "(server dead, or tier saturated and backpressuring longer "
+                    "than the deadline — raise CERTUS_SHMQ_DEADLINE_S)"
+                )
             # Val-guarded park: the kernel returns EAGAIN immediately if seq
             # already moved off `cur`, closing the check-then-wait race.
             self._futex_wait(resp_seq_addr, cur, self._attempt_timeout)

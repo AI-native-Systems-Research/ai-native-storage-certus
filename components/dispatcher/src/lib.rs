@@ -2961,8 +2961,9 @@ impl IDispatcher for DispatcherComponent {
 
         // Phase 1: Evict if needed and allocate memory-tier slot.
         let t_alloc = std::time::Instant::now();
-        // Internal populate path has no client session context.
-        match self.reserve_memory(key, size, 0) {
+        // Internal populate path has no client session context, and no shared
+        // batch deadline — use this call's own backpressure budget (None).
+        match self.reserve_memory(key, size, 0, None) {
             Ok(_) => {}
             Err(DispatcherError::AllocationFailed(_)) => {
                 // Best-effort drop: the tier is still full after the
@@ -3055,7 +3056,7 @@ impl IDispatcher for DispatcherComponent {
                 )));
                 continue;
             }
-            match self.reserve_memory(*key, ipc_handle.size, 0) {
+            match self.reserve_memory(*key, ipc_handle.size, 0, None) {
                 Ok(_) => {
                     // Slot reserved — immediately issue async D2H copy.
                     match self.copy_gpu_to_memory_async(*key, std::slice::from_ref(ipc_handle), store_stream) {
@@ -3117,6 +3118,7 @@ impl IDispatcher for DispatcherComponent {
         key: CacheKey,
         size: u32,
         session_id: u64,
+        deadline: Option<std::time::Instant>,
     ) -> Result<*mut u8, DispatcherError> {
         self.ensure_initialized()?;
 
@@ -3168,15 +3170,31 @@ impl IDispatcher for DispatcherComponent {
         // the threads we wait on (evictor, bg_writer, other workers' loads) are
         // all independent of this store worker. `budget = 0` restores the
         // original fail-fast behavior.
-        let budget =
-            std::time::Duration::from_millis(self.store_backpressure_ms.load(Ordering::Relaxed));
-        if budget.is_zero() {
-            let mem_ptr = self.evict_and_insert(&dm, &mt, key, size, max_attempts)?;
-            return Ok(mem_ptr);
-        }
+        //
+        // `deadline` selects whose clock bounds the retry:
+        //   * None      — this call's own `store_backpressure_ms` budget, measured
+        //                 from now (legacy per-call behavior).
+        //   * Some(inst) — a deadline shared across a reserve *batch*. The caller
+        //                 (shmq `op_reserve`) computes it once for the whole batch
+        //                 so total backpressure is bounded rather than paying the
+        //                 full budget per key; if `inst` is already in the past we
+        //                 make a single best-effort attempt and fail fast, so the
+        //                 client refuses caching the key and recomputes it.
+        let deadline = match deadline {
+            Some(inst) => inst,
+            None => {
+                let budget = std::time::Duration::from_millis(
+                    self.store_backpressure_ms.load(Ordering::Relaxed),
+                );
+                if budget.is_zero() {
+                    let mem_ptr = self.evict_and_insert(&dm, &mt, key, size, max_attempts)?;
+                    return Ok(mem_ptr);
+                }
+                std::time::Instant::now() + budget
+            }
+        };
 
         const POLL: std::time::Duration = std::time::Duration::from_millis(20);
-        let deadline = std::time::Instant::now() + budget;
         loop {
             match self.evict_and_insert(&dm, &mt, key, size, max_attempts) {
                 Ok(mem_ptr) => return Ok(mem_ptr),
@@ -3188,11 +3206,9 @@ impl IDispatcher for DispatcherComponent {
                         // began backpressuring rather than failing. Runs are
                         // otherwise silent about this path (certus-server does
                         // not dump tier stats), so surface it once.
-                        self.log_info(&format!(
-                            "store backpressure engaged: memory tier full, \
-                             retrying reserve (budget {} ms)",
-                            budget.as_millis()
-                        ));
+                        self.log_info(
+                            "store backpressure engaged: memory tier full, retrying reserve",
+                        );
                     }
                     std::thread::sleep(POLL);
                 }

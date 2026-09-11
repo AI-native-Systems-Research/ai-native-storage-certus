@@ -2236,8 +2236,8 @@ impl IDispatcher for DispatcherP2pComponent {
         let size: u32 = ipc_handle.size;
 
         // Phase 1: Evict if needed and allocate memory-tier slot.
-        // Internal populate path has no client session context.
-        let _mem_ptr = self.reserve_memory(key, size, 0)?;
+        // Internal populate path has no client session context or batch deadline.
+        let _mem_ptr = self.reserve_memory(key, size, 0, None)?;
 
         // Phase 2: Async DMA into the reserved slot, then synchronize.
         let gpu = self
@@ -2264,6 +2264,10 @@ impl IDispatcher for DispatcherP2pComponent {
         key: CacheKey,
         size: u32,
         session_id: u64,
+        // dispatcher-p2p allocates straight-through (no store-backpressure retry
+        // loop), so it neither backpressures nor consults a batch deadline; the
+        // parameter exists only to satisfy the IDispatcher signature.
+        _deadline: Option<std::time::Instant>,
     ) -> Result<*mut u8, DispatcherError> {
         self.ensure_initialized()?;
 

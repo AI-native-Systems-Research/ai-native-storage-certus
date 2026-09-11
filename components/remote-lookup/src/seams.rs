@@ -697,6 +697,7 @@ impl IDispatcher for MockDispatcher {
         _key: CacheKey,
         _size: u32,
         _session_id: u64,
+        _deadline: Option<std::time::Instant>,
     ) -> Result<*mut u8, DispatcherError> {
         unimplemented!("mock: IDispatcher::reserve_memory not needed by remote-lookup tests")
     }

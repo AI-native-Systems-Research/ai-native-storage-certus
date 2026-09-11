@@ -588,7 +588,7 @@ impl EngineInner {
         let all_reserved = reserve_slots_with_rollback(
             &to_store_cache_keys,
             size,
-            |key, sz| self.dispatcher.reserve_memory(key, sz, 0).is_ok(),
+            |key, sz| self.dispatcher.reserve_memory(key, sz, 0, None).is_ok(),
             |key| {
                 let _ = self.dispatcher.release_memory(key);
             },

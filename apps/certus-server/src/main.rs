@@ -493,6 +493,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&dispatcher),
         eviction_rx,
         Arc::clone(&eviction_dropped),
+        // Total OP_RESERVE-batch backpressure budget, shared across all keys in
+        // the batch (see Translator::op_reserve).
+        std::time::Duration::from_millis(cli.store_backpressure_ms),
     );
 
     // Create the shared-memory mailbox.

@@ -462,7 +462,18 @@ component_macros::define_interface! {
         /// `session_id` is an opaque per-request identifier (0 = unset) supplied
         /// by the client (e.g. a hash of vLLM's `session_id`). It carries no
         /// allocation semantics today and is used only for observability.
-        fn reserve_memory(&self, key: CacheKey, size: u32, session_id: u64) -> Result<*mut u8, DispatcherError>;
+        ///
+        /// `deadline` bounds how long a full-tier allocation may backpressure
+        /// (retry LRU eviction) before surfacing [`DispatcherError::AllocationFailed`]:
+        /// - `None` — use the dispatcher's own `store_backpressure_ms` budget,
+        ///   measured from the start of *this* call (legacy per-call behavior).
+        /// - `Some(instant)` — retry only until `instant`, a deadline the caller
+        ///   shares across a batch of reserves. Once the instant has passed, make
+        ///   a single best-effort attempt and fail fast. This lets a multi-key
+        ///   reserve batch bound its *total* backpressure (rather than paying the
+        ///   full budget per key) so the client's request deadline is not exceeded;
+        ///   keys that fail fast are refused caching and recomputed by the client.
+        fn reserve_memory(&self, key: CacheKey, size: u32, session_id: u64, deadline: Option<std::time::Instant>) -> Result<*mut u8, DispatcherError>;
 
         /// DMA-copy from GPU into a previously reserved memory-tier slot.
         ///
