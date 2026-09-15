@@ -121,19 +121,42 @@ output containers.
 
 ### Key derivation (test vectors first)
 
-- [ ] T013 [P] Write the key-derivation tests **before** the implementation, in
+- [x] T013 [P] Write the key-derivation tests **before** the implementation, in
   `crates/workload-model/tests/keys.rs`, asserting the three normative
   `splitmix64` vectors from `contracts/key-derivation.md` (`splitmix64(0) =
   e220a8397b1dcdaf`, `splitmix64(1) = 910a2dec89025cc1`, `splitmix64(u64::MAX)
   = e4d971771b652c20`)
-- [ ] T014 Implement `splitmix64`, the chain `key(parent, salt) =
+- [x] T014 Implement `splitmix64`, the chain `key(parent, salt) =
   splitmix64(splitmix64(parent) ^ salt)`, and the tag-partitioned salt space in
   `crates/workload-model/src/keys.rs` per `contracts/key-derivation.md`. No
   hashing crate: `DefaultHasher` and `ahash` are unstable across versions and
   would break cross-node key consistency
-- [ ] T015 Pin the chain test vectors in `crates/workload-model/tests/keys.rs`
+- [x] T015 Pin the chain test vectors in `crates/workload-model/tests/keys.rs`
   — once committed these values must never change, since changing them
   invalidates every previously generated trace
+
+**Found while implementing T014 — the salt layout imposes hard ceilings the
+contract does not state, and T017/T033 must enforce them at load time.** The
+salt is assembled with **XOR** over fixed-width fields, so a field that
+overflows does not saturate: it corrupts its neighbour and aliases two
+different blocks onto one key, which would surface only as an inexplicable
+cache hit. `keys.rs` therefore asserts each field's width rather than
+truncating, which converts the hazard into a loud panic. The ceilings are:
+
+| Field | Width | Ceiling |
+| --- | --- | --- |
+| `class_id` | 16 bits | 65 536 shared classes |
+| `instance_index` | 16 bits | 65 536 live instances per pool |
+| `block_ordinal` | 16 bits | 65 536 blocks per instance, and per session's input and output stream |
+| `session_id` | 32 bits | 4 294 967 296 sessions per run |
+
+Only `block_ordinal` is reachable in practice: SC-012 targets hour-long runs,
+and a long session's input stream grows every turn, so `turns ×
+E[input_growth]` can pass 65 536. **A panic mid-run would destroy the run's
+output**, so the description validator must refuse it up front from the
+projected per-session block count, and the projection already computes exactly
+that quantity. Recorded here rather than only in the code because the fix
+belongs in a different task from the discovery.
 
 ### Description parsing and validation
 
