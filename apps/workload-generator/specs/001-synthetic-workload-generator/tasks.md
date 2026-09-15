@@ -43,27 +43,44 @@ Per `plan.md`, five crates under `apps/workload-generator/crates/`:
 **Purpose**: Crate skeletons, dependencies, and the build split that the rest
 depends on.
 
-- [ ] T001 Create the five crate skeletons under `crates/` and register them in
+- [x] T001 Create the five crate skeletons under `crates/` and register them in
   the root `Cargo.toml`: add `workload-model`, `workload-trace`,
   `workload-wire` to both `members` and `default-members`; add `workload-gen`
   and `workload-node-agent` to `members` only, following
   `apps/remote-lookup-bench`
-- [ ] T002 [P] Declare dependencies per `plan.md` Technical Context in each
+- [x] T002 [P] Declare dependencies per `plan.md` Technical Context in each
   `crates/*/Cargo.toml`: `clap` 4 with `derive`, `serde` + `serde_yaml` 0.9,
   `rand` 0.8 + `rand_chacha`, `criterion` for benches
-- [ ] T003 [P] Add the `parquet` dependency to
+- [x] T003 [P] Add the `parquet` dependency to
   `crates/workload-trace/Cargo.toml` behind a **non-default** `parquet`
   feature, so the default workspace build never pulls arrow (`research.md` D4)
-- [ ] T004 Add the default-on `live` feature to
+- [x] T004 Add the default-on `live` feature to
   `crates/workload-gen/Cargo.toml`, gating `shm-queue`, `shmq-dispatcher`, and
   the CUDA link, and confirm `cargo build -p workload-gen
   --no-default-features` succeeds on a machine with no CUDA
-- [ ] T005 [P] Verify the repo quality gates pass on the empty skeletons:
+- [x] T005 [P] Verify the repo quality gates pass on the empty skeletons:
   `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo doc --no-deps`,
   `cargo test --all -- --test-threads 1`
 
 **Checkpoint**: the workspace builds, and the CUDA-free/CUDA split is real
 rather than intended.
+
+**Two pre-existing gate failures found at T005, neither caused by this feature
+— do not chase them from inside it, and expect them again at T086:**
+
+1. `cargo test --all` fails in `dispatcher-p2p` with `libgdrapi.so.2: cannot
+   open shared object file`. `--all` is `--workspace`, which *overrides*
+   `default-members` and selects every member, so it reaches SPDK/GDRCopy
+   crates. The gate this feature can actually hold is plain `cargo test`
+   (default members) plus `-p` on the two non-default-member crates.
+2. `cargo clippy -p workload-gen -- -D warnings` fails on **two
+   `manual_checked_ops` lints in `components/interfaces`**, a lint new in this
+   toolchain (rustc 1.96). It is latent, not ours: it fires only when
+   `interfaces/spdk` is enabled, which `shmq-dispatcher` does, so
+   `cargo clippy -p shmq-dispatcher` and `cargo clippy -p remote-lookup-bench`
+   — the precedent crate — fail identically on an unmodified tree. Our own
+   crates are clean: `cargo clippy -p workload-gen --no-default-features`
+   passes, as does the whole default-member workspace.
 
 ---
 

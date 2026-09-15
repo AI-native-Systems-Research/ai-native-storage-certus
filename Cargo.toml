@@ -44,7 +44,12 @@ members = [
     "components/zyre",
     "lib/shm-queue",
     "lib/shmq-dispatcher",
-    "apps/certus-server"
+    "apps/certus-server",
+    "apps/workload-generator/crates/workload-model",
+    "apps/workload-generator/crates/workload-trace",
+    "apps/workload-generator/crates/workload-wire",
+    "apps/workload-generator/crates/workload-gen",
+    "apps/workload-generator/crates/workload-node-agent"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -73,7 +78,15 @@ default-members = [
     "components/eviction-policy-lru",
     "components/eviction-policy-session-lists",
     "apps/eviction-replay-benchmark",
-    "lib/shm-queue"
+    "lib/shm-queue",
+    # Workload generator: the three CUDA-free library crates are default
+    # members so `cargo test --all` covers the simulation core, trace writing,
+    # and wire framing with no accelerator. `workload-gen` and
+    # `workload-node-agent` are members only, like `apps/remote-lookup-bench`,
+    # because they link CUDA and attach to the mailbox.
+    "apps/workload-generator/crates/workload-model",
+    "apps/workload-generator/crates/workload-trace",
+    "apps/workload-generator/crates/workload-wire"
 ]
 
 resolver = "2"
@@ -113,4 +126,7 @@ zyre = { path = "components/zyre" }
 certus-connector = { path = "certus-connector" }
 shm-queue = { path = "lib/shm-queue" }
 shmq-dispatcher = { path = "lib/shmq-dispatcher" }
+workload-model = { path = "apps/workload-generator/crates/workload-model" }
+workload-trace = { path = "apps/workload-generator/crates/workload-trace" }
+workload-wire = { path = "apps/workload-generator/crates/workload-wire" }
 libloading = "0.8"
