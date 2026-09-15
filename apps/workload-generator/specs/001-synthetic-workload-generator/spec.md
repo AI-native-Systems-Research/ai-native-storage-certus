@@ -1,0 +1,609 @@
+# Feature Specification: Synthetic Workload Generator
+
+**Feature Directory**: `specs/001-synthetic-workload-generator`
+
+**Git Branch**: `synthetic-workload-generator-rewrite` (independent of the
+feature directory name)
+
+**Created**: 2026-09-15
+
+**Status**: Draft
+
+**Input**: `specify-prompt.md` in this directory, which is the reviewed feature
+description. The workload input schema in
+`contracts/workload-input.example.yml` is normative.
+
+## Overview
+
+A measurement instrument that drives realistic LLM KV-cache traffic into one or
+more Certus nodes, and can emit the same workload to a file instead of a
+server. Its purpose is performance testing and, specifically, evaluating
+Certus's cache eviction policy — so the credibility of its numbers is the
+product, not a side effect.
+
+Two programs plus shared framing: a **generator** that reads a workload
+description, simulates it in virtual time, and issues or records the resulting
+operations; and a **per-node daemon** that exists because Certus's only ingress
+is a host-local shared-memory queue, so remote nodes cannot be driven directly.
+Only keys cross the network — the daemon reconstructs block payloads from the
+key — so the transport carries roughly 8 bytes per key rather than block data.
+
+## Clarifications
+
+### Session 2026-09-15
+
+- Q: What scale must a single generator instance sustain, as a design target? →
+  A: ~10K concurrent sessions, ~10M live keys, runs of hours
+- Q: When a node or its daemon becomes unreachable mid-run, what should happen?
+  → A: Abort immediately, report the run invalid, name the node
+- Q: What form must the run report take? → A: Both — human-readable summary to
+  the terminal plus a structured file per run
+- Q: Is throughput measured against wallclock time? → A: Yes; virtual time
+  orders operations, wallclock measures execution, and their ratio is itself a
+  reported metric
+- Q: What was "lookahead occupancy"? → A: Renamed to plan-queue depth: how many
+  operations are built and waiting; reaching zero invalidates the run
+- Q: How is the number of keys per request determined? → A: A command-line
+  option with a documented default, sweepable independently of the workload
+- Q: What latency measurement must the run report provide? → A: Per-request
+  latency into a histogram, reporting p50/p90/p99/max
+- Q: Do the throughput, latency, and plan-queue measurements apply when writing
+  to a file? → A: No. They are scoped to live runs; an emit run reports
+  completeness instead, and omits the fields it cannot measure
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Drive a local Certus node (Priority: P1)
+
+A performance engineer with a running Certus server on the same host points the
+generator at that server's mailbox and a workload description file, and gets
+sustained, realistic cache traffic plus a run report that says both what the
+throughput was and whether the run was valid.
+
+**Why this priority**: This is the tool's primary purpose and the smallest
+configuration that delivers it. It requires no daemon, no remote nodes, and no
+network, so it is both the MVP and the substrate every other story builds on.
+
+**Independent Test**: Start a Certus server locally, run the generator against
+the shipped example workload, and confirm sustained traffic plus a run report
+carrying throughput, plan-queue depth, and lane utilisation. Delivers value on
+its own: a repeatable load for any single-node experiment.
+
+**Acceptance Scenarios**:
+
+1. **Given** a running local Certus server and a valid workload file, **When**
+   the engineer runs the generator with no node list, **Then** operations are
+   issued continuously until stopped, and a run report is produced.
+2. **Given** a run in progress, **When** Certus applies backpressure, **Then**
+   the generator blocks rather than dropping or reordering work, virtual time
+   stops advancing for the duration of the stall, and the workload's shape is
+   unchanged.
+3. **Given** a workload file whose configuration is contradictory, **When** the
+   engineer runs the generator, **Then** it refuses to start and names the
+   offending parameter rather than silently reshaping it.
+4. **Given** a completed run in which the generator could not keep the lanes
+   fed, **When** the report is produced, **Then** the run is reported as
+   **invalid** and its throughput number is not presented as a result.
+
+---
+
+### User Story 2 - Emit a workload trace to a file (Priority: P2)
+
+The same engineer writes a workload to a file instead of issuing it, in either
+of two containers, so that a generated workload and a real serving trace are
+interchangeable inputs to third-party analysis.
+
+**Why this priority**: Independently valuable and independently testable — it
+needs no server, no accelerator, and no cluster, so it is the cheapest way to
+inspect and share a workload. It also exercises the whole simulation core,
+which makes it the natural place to pin determinism.
+
+**Independent Test**: Emit the shipped example workload to both containers with
+a fixed seed and no server present; confirm the two contain identical records,
+that every row satisfies the trace schema's own invariants, and that repeating
+the run reproduces the output byte for byte.
+
+**Acceptance Scenarios**:
+
+1. **Given** a workload file and an explicit run length, **When** the engineer
+   requests file output, **Then** a self-describing trace is written whose
+   manifest declares its own encoding and identifier conventions.
+2. **Given** the same workload file, seed, and length, **When** the run is
+   repeated, **Then** the output is byte-identical.
+3. **Given** a request for file output with no run length, **When** the
+   generator starts, **Then** it refuses and explains that file output must be
+   bounded.
+4. **Given** an emit run, **When** its report is produced, **Then** it states
+   completeness — sessions, turns, blocks, virtual-time span, records written —
+   and omits latency, lane utilisation, and the virtual-to-wallclock ratio
+   entirely rather than reporting them as zero.
+
+---
+
+### User Story 3 - Drive a multi-node cluster (Priority: P3)
+
+The engineer supplies several node targets. Sessions are placed across nodes
+and migrate between them during their lifetime, so a migrated session's prefix
+is cold on its new node and must be fetched from the node that holds it.
+
+**Why this priority**: This is what exercises the remote path, but it depends
+on the daemon and its transport, so it is the largest increment and the last to
+land. Single-node work is unaffected by its absence.
+
+**Independent Test**: With two or more nodes configured, run a workload whose
+migration interval is short relative to session lifetime, and confirm that
+migrated sessions produce remote fetches on their new node while local hit rate
+on the origin node is unchanged.
+
+**Acceptance Scenarios**:
+
+1. **Given** a node list, **When** sessions are created, **Then** they are
+   distributed uniformly across the configured nodes.
+2. **Given** a session on one node, **When** its migration interval elapses,
+   **Then** its subsequent turns are issued to a different node chosen
+   uniformly among the others, while its previously stored blocks stay where
+   they were.
+3. **Given** a node whose daemon was built from different sources than the
+   generator, **When** the run starts, **Then** the generator refuses to
+   proceed rather than producing measurements against a mismatched peer.
+4. **Given** a daemon left behind by a crashed run, **When** a new run starts,
+   **Then** the leftover is detected and replaced rather than silently reused.
+
+---
+
+### User Story 4 - Compare eviction policies (Priority: P4)
+
+The engineer runs the same workload against two Certus configurations that
+differ only in eviction policy, and gets hit-rate curves that actually
+discriminate between them.
+
+**Why this priority**: It is the reason the tool exists, but it is a *use* of
+the earlier stories rather than new machinery — it needs only that the
+popularity and reuse structure be real. It is listed separately because it is
+the acceptance test for that structure.
+
+**Independent Test**: Sweep cache size against hit rate for one workload under
+two policies, and separately under both instance-ranking modes; confirm the
+curves are smooth and concave rather than step-shaped, and that the two ranking
+modes reorder the policies.
+
+**Acceptance Scenarios**:
+
+1. **Given** a workload with a concentrated working set, **When** cache size is
+   swept, **Then** hit rate rises smoothly and concavely rather than jumping at
+   a single threshold.
+2. **Given** the same workload under position-based and recency-based
+   popularity, **When** two eviction policies are compared, **Then** the
+   measured ranking of those policies differs between the two modes.
+
+---
+
+### Edge Cases
+
+- **The generator cannot keep up.** The plan queue drains. The run is invalid
+  and must be reported as such; a throughput number without its validity
+  evidence is not a result.
+- **Requested concurrency exceeds the server's capacity for it.** Detected at
+  startup and refused or reported, never silently serialised.
+- **A session asks for more shared instances than currently exist.** Under a
+  fluctuating population the count draw is bounded by the live count, so the
+  request always succeeds; how often that bound binds is reported, because it
+  silently narrows the requested distribution.
+- **A count distribution cannot fit its pool.** If the implied maximum discards
+  more than 5% of the distribution's mass, the configuration is refused with
+  the effective and requested means both named.
+- **A class has many instances and no popularity distribution.** Selection is
+  uniform, working set equals key space, and every eviction policy scores the
+  same. Permitted, but the implied working-set size is reported so it cannot
+  pass unnoticed.
+- **A class has an unbounded lifetime.** Birth rate derived from mean lifetime
+  is undefined, so such a class is minted once and never turns over.
+- **Two sessions race to mint the same shared prefix.** Both may miss and both
+  may store; the protocol's in-flight state means the later one may instead see
+  a store in progress. This is faithful to production and is preserved, so
+  hit/miss outcomes vary run to run even at a fixed seed.
+- **Migration is configured but only one node is.** Migration is inert, not an
+  error.
+- **A node vanishes mid-run.** The run aborts and is reported invalid with the
+  lost node named. Continuing on the survivors would quietly change the
+  workload rather than degrade it visibly.
+- **An emit run is asked for system measurements it cannot make.** Latency,
+  lane utilisation, and the virtual-to-wallclock ratio are absent from an emit
+  report rather than present and zero, because a zero would be
+  indistinguishable from a measured result.
+- **The generator crashes mid-run.** Remote resources must still be released; a
+  teardown that leaves them held has previously invalidated whole measurement
+  series, and did so nondeterministically rather than visibly.
+- **A discrete quantity is drawn from a bimodal sample set with interpolation
+  on.** Interpolation places mass in gaps the data says are empty. Permitted
+  and documented; discrete draws are available and are the default for block
+  counts.
+- **A truncated distribution's effective mean differs from the written one.**
+  Reported at load time rather than applied silently.
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+**Workload description**
+
+- **FR-001**: System MUST accept a workload description file defining shared
+  object classes and session classes, per the normative schema in
+  `contracts/workload-input.example.yml`.
+- **FR-002**: System MUST validate the whole description before issuing any
+  operation, and MUST refuse a contradictory configuration naming the offending
+  parameter.
+- **FR-003**: System MUST report, at load time, the effective distribution for
+  every parameter whose effective value differs from what was written —
+  including truncation that shifts a mean and an implied maximum that discards
+  tail mass.
+- **FR-004**: System MUST refuse a configuration in which an implied maximum
+  discards more than 5% of a distribution's mass.
+- **FR-005**: A workload description MUST NOT contain host-specific or tuning
+  settings; node targets, run length, output destination, concurrency, keys per
+  request, and seed are supplied per invocation, so one description is portable
+  across clusters unchanged.
+- **FR-006**: System MUST carry a schema version in the description and reject
+  versions it does not understand.
+
+**Distributions**
+
+- **FR-007**: System MUST support constant, uniform, empirical, normal, and
+  exponential distributions, all treated as continuous.
+- **FR-008**: System MUST truncate distributions by inverse transform between
+  the cumulative probabilities at the stated bounds — a true truncation — and
+  MUST NOT clamp, which would pile mass at a boundary and shift the mean.
+- **FR-009**: For integer-valued quantities, System MUST truncate on bounds
+  extended by half a unit at each end and round to nearest, so that every
+  integer in range carries equal weight.
+- **FR-010**: System MUST accept empirical distributions from inline samples or
+  from a file, and MUST support both interpolated and discrete draws,
+  defaulting to discrete for counts of blocks or objects.
+- **FR-011**: System MUST accept an unbounded value wherever a number is
+  accepted.
+- **FR-012**: All sampling MUST be reproducible from a stated seed.
+
+**Shared object populations**
+
+- **FR-013**: Each shared object class MUST have a target population expressed
+  either as a fluctuating population — free-running births at a rate derived
+  from the target and the mean lifetime, giving a live count whose relative
+  spread falls as the inverse square root of the target — or as an exact
+  population held constant by replacing each death immediately.
+- **FR-014**: The fluctuating form MUST be the default; the exact form MUST be
+  available and is the appropriate choice for small populations.
+- **FR-015**: System MUST seed every population at start from the equilibrium
+  residual-lifetime distribution, NOT from the lifetime distribution itself,
+  which synchronises the population into cohorts whose periodic churn persists
+  for many lifetimes.
+- **FR-016**: System MUST NOT use a feedback controller or expose a control
+  gain for population regulation.
+- **FR-017**: A class whose lifetime is unbounded MUST be minted once at start
+  and never turn over.
+- **FR-018**: When a shared object reaches end of life it MUST stop being
+  selectable for new sessions; its bookkeeping MUST be released once the last
+  session using it ends. System MUST NOT tell Certus anything about this.
+
+**Popularity and selection**
+
+- **FR-019**: Each shared object class MAY carry a selection distribution over
+  the instance index, whose spread sets the working-set size independently of
+  the population's key-space size.
+- **FR-020**: System MUST support popularity attached to a position, which a
+  newly created instance inherits and holds for life, and popularity attached
+  to newness, where heat decays as newer instances arrive. Both MUST exist,
+  because that is the axis on which recency-based and frequency-based eviction
+  policies disagree.
+- **FR-021**: Selection MUST default to uniform, and System MUST report the
+  implied working-set size when a class has more than one instance and no
+  selection distribution.
+- **FR-022**: A session MUST draw instances without replacement within a class,
+  bounded by the smaller of the nominal population and the live count, so the
+  draw always succeeds without waiting or failing.
+- **FR-023**: System MUST report how often that bound binds, because it narrows
+  the requested count distribution.
+
+**Sessions, turns, and keys**
+
+- **FR-024**: Each session class MUST have a target population interpreted as
+  concurrent sessions, taking the same fluctuating and exact forms as a shared
+  object population; session arrival rate is therefore an output, settling at
+  the target divided by the mean session lifetime.
+- **FR-025**: A session's context MUST be append-only: turn *n* reads its whole
+  prefix — its shared objects plus every input and output block minted by turns
+  1 through *n*-1 — so per-turn cost grows linearly with turn index.
+- **FR-026**: Input and output block growth MUST be separate distributions;
+  both are stored and both extend the prefix.
+- **FR-027**: Keys MUST be prefix-chained: a block's key depends on that block
+  and everything ahead of it, so reuse between sessions requires a matching
+  leading run and an object held in common at a differing position yields no
+  reuse.
+- **FR-028**: The ordering of a session's shared objects MUST be canonical:
+  classes in the order the session class lists them, and instances sorted by
+  index within a class. This makes a session's prefix a pure function of the
+  set it chose, so sessions with overlapping sets produce nested rather than
+  divergent chains.
+- **FR-029**: Keys MUST be globally consistent across nodes, so the same object
+  has the same identity everywhere; this is what makes a remote hit possible.
+- **FR-030**: A session's own growth blocks MUST chain onto that session's
+  unique prefix, making them private by construction and reusable only within
+  that session.
+
+**Virtual time and execution**
+
+- **FR-031**: Virtual time MUST exist only to decide the order of operations,
+  and MUST NOT be mapped to wallclock time.
+- **FR-032**: The virtual clock MUST be the minimum timestamp among operations
+  still in flight. When the server applies backpressure, a lane blocks and the
+  clock holds — it MUST NOT advance, skip, or dilate unevenly.
+- **FR-033**: Think time MUST be consumed entirely when the plan is built,
+  where it determines interleaving, and MUST NOT reappear during execution as
+  server idle time.
+- **FR-034**: For a fixed description and seed, the plan MUST be identical
+  regardless of how fast or slow the server is.
+- **FR-035**: Ordering within a session MUST be strict. Operations from
+  different sessions MAY overlap freely, including two sessions racing to mint
+  the same shared prefix.
+- **FR-036**: System MUST document that hit/miss outcomes are consequently not
+  reproducible even where the plan is, and MUST NOT present single-run
+  comparisons of hit-dependent metrics as conclusive.
+- **FR-037**: System MUST produce the plan ahead of the lanes that consume it,
+  and MUST detect and report when that plan queue reaches zero.
+- **FR-038**: No per-operation work may be proportional to payload size; block
+  payloads MUST be pre-filled reusable buffers carrying at most a small
+  identifying stamp.
+
+**Interaction with Certus**
+
+- **FR-039**: The operation stream MUST be what the production client would
+  emit for the same workload — no more and no less.
+- **FR-040**: Stores MUST follow the production client's reserve, transfer,
+  then commit-or-abort sequence, and MUST NOT use the single-shot store
+  operation that the production client does not have.
+- **FR-041**: System MUST report block references the way the production client
+  does, without requesting tier promotion.
+- **FR-042**: System MUST poll for cache events, because the production client
+  does and it costs the server real work.
+- **FR-043**: System MUST NOT send removal, pinning, unpinning, or promotion
+  requests. A single cache clear at startup is permitted.
+- **FR-044**: System MUST NOT supply the eviction policy with information the
+  production client would not supply, and MUST NOT withhold information the
+  production client would supply.
+
+**Multiple nodes and the node daemon**
+
+- **FR-045**: System MUST drive Certus on the local host with no daemon and no
+  node list configured.
+- **FR-046**: System MUST drive Certus on remote hosts by way of a per-node
+  daemon that accepts work and submits it to that node's local ingress.
+- **FR-047**: Only keys MUST cross the network; the daemon MUST reconstruct
+  block payloads from the key.
+- **FR-048**: New sessions MUST be placed uniformly across configured nodes; a
+  migrating session MUST move to a node chosen uniformly among the others, and
+  its already-stored blocks MUST stay where they were.
+- **FR-049**: With fewer than two nodes configured, migration MUST be inert
+  rather than an error.
+- **FR-050**: The daemon MUST be started before a run and stopped after it,
+  with startup and teardown outside the measured window.
+- **FR-051**: System MUST verify that each daemon was built from the same
+  sources as the generator, and MUST refuse to run otherwise.
+- **FR-052**: Daemon startup MUST be idempotent: a leftover daemon from a
+  crashed run MUST be detected and replaced, never silently reused.
+- **FR-053**: Teardown MUST release the daemon's resources even when the
+  generator exits abnormally, and MUST be verified rather than assumed.
+- **FR-054**: Continuous load MUST be driven over the fast transport, not by
+  repeated remote command invocation, which cannot sustain it.
+- **FR-064**: When a configured node or its daemon becomes unreachable during a
+  run, System MUST abort the run immediately, report it invalid, and name the
+  node that was lost. System MUST NOT continue on the surviving nodes, because
+  a lost node silently alters the workload — its sessions' prefixes become
+  unreachable, the set of migration targets shrinks, and the survivors absorb
+  its load — so any subsequent measurement describes a different experiment
+  than the one requested.
+
+**File output**
+
+- **FR-055**: System MUST emit a workload trace at the same level of
+  abstraction as a real serving trace — sessions, turns, block lists, token
+  counts — in two containers holding identical records.
+- **FR-056**: The trace MUST be self-describing: a reader MUST learn what it
+  supports by reading its manifest, never by recognising which trace it is.
+- **FR-057**: The manifest MUST declare the identifier space in use, since
+  identifiers are chained keys rather than dense values in creation order.
+- **FR-058**: Every emitted row MUST satisfy the trace schema's stated
+  invariants for the encoding it declares, including the convention for a
+  trailing partial block.
+- **FR-059**: File output MUST require an explicit length, while generation
+  against a live server MUST be unbounded by default.
+- **FR-060**: System MUST provide a canonical serialisation of the operation
+  plan, as the artifact the reproducibility property is asserted against.
+
+**Reporting and validity**
+
+- **FR-061**: For a **live run**, every run report MUST carry plan-queue depth,
+  lane utilisation, and request-latency percentiles alongside throughput. These
+  measure the system under test and have no meaning in an **emit run**, which
+  has no lanes, no requests, and no server; see FR-071.
+- **FR-062**: A **live run** whose plan queue reached zero MUST be reported as
+  invalid, and its throughput MUST NOT be presented as a result. In an emit run
+  a drained plan queue carries no such meaning — it means only that the writer
+  outran the simulation — and MUST NOT be treated as invalidity.
+- **FR-063**: Run reports MUST record the seed, the description file identity,
+  and the effective parameter values after truncation, so a run can be
+  reproduced from its own report.
+- **FR-065**: System MUST emit the run report in two forms: a human-readable
+  summary to the terminal, and a structured machine-readable file per run at a
+  caller-specified path, carrying the same facts. Both are required because the
+  acceptance criteria for popularity structure (SC-005, SC-006) are inherently
+  multi-run sweeps, so aggregation across runs must not require scraping
+  human-formatted text.
+- **FR-066**: For a **live run**, throughput MUST be denominated in wallclock
+  time, and System MUST report both keys per second and bytes per second, plus
+  the ratio of virtual time advanced to wallclock elapsed. Reporting wallclock
+  throughput does not conflict with FR-031: virtual time decides the *order* of
+  operations while wallclock measures how fast that order was executed, and
+  because the virtual clock holds during a stall (FR-032) the ratio between
+  them is a measurement rather than an identity. Keys and bytes per second are
+  comparable across workload descriptions; the virtual-time ratio is not, since
+  it depends on the description's own virtual-time density.
+- **FR-067**: For a **live run**, the timed window MUST exclude daemon startup
+  and teardown and any startup cache clear, so setup cost is never attributed
+  to the system under test.
+- **FR-068**: For a **live run**, plan-queue depth MUST be reported as, at
+  minimum, its minimum over the run and the fraction of the run spent at zero —
+  the evidence for FR-062 — rather than as an average, which would conceal a
+  brief exhaustion.
+- **FR-069**: The number of keys grouped into one request MUST be a per-run
+  option with a documented default, not a constant and not part of the workload
+  description. It is a property of the client's request scheduling rather than
+  of the workload, so putting it in the description would break FR-005
+  portability; but it is also the largest measured performance lever on this
+  class of hardware — the remote penalty is per batch, not per key — so it MUST
+  be explicit and independently sweepable rather than hidden. The effective
+  value MUST appear in the run report under FR-063.
+- **FR-070**: For a **live run**, System MUST measure latency per request and
+  report it as a distribution — at minimum the 50th, 90th, and 99th percentiles
+  and the maximum — not as a mean, which hides the tail that matters. Timing
+  MUST be taken per request and MUST NOT add per-key measurement work, so that
+  instrumentation cannot itself put the generator on the critical path (FR-038,
+  and Principle I of the constitution).
+- **FR-071**: An **emit run** MUST report its own completeness rather than
+  borrowed system metrics: sessions started and completed, turns and blocks
+  emitted, the virtual-time span covered, the records written per container,
+  and the reproduction parameters of FR-063. It MAY additionally report the
+  generator's own wallclock rate, explicitly labelled as generation speed and
+  not as a measurement of any system under test. It MUST NOT report lane
+  utilisation, request latency, or a virtual-to-wallclock ratio, because no
+  system was exercised and a number in those fields would invite comparison
+  against live results.
+- **FR-072**: The plan and the emitted trace MUST be identical for the same
+  description and seed whether the run is live or emit, and MUST NOT vary with
+  the tuning options of FR-069 or with lane count. Batching and concurrency
+  govern only how operations are grouped and dispatched on the wire, never what
+  the workload is. Without this, a trace would not be a function of description
+  and seed, and SC-003 would be false; with it, a trace generated on a laptop
+  is known to be the workload a cluster would have been driven with.
+
+### Key Entities
+
+- **Workload description**: the user's input; a set of shared object classes
+  and session classes with their distributions. Portable across clusters.
+- **Shared object class**: a named population of interchangeable objects with a
+  size distribution, a lifetime distribution, a population target and form, and
+  optionally a popularity distribution and ranking mode.
+- **Shared object instance**: one member of that population, with an index that
+  determines both its selection probability and its position in a prefix.
+- **Session class**: a named population of conversations, with an ordered list
+  of shared object classes and per-session counts, plus turn count, input and
+  output growth, think time, migration interval, and population target.
+- **Session**: one conversation. Owns an ordered prefix, a growing private
+  continuation, a current node, and a turn cursor.
+- **Turn**: one request within a session. Reads the whole current prefix, mints
+  new input and output blocks, extends the prefix.
+- **Block**: the unit of cache residency. Identified by a chained key derived
+  from itself and everything ahead of it.
+- **Operation plan**: the totally ordered sequence of cache operations with
+  virtual timestamps. Deterministic from description and seed.
+- **Lane**: one unit of execution concurrency, holding one session's turn at a
+  time.
+- **Node target**: a host plus the name of its local ingress.
+- **Node daemon**: the per-node process that receives keys and submits work to
+  that node's ingress. Holds no persistent state.
+- **Workload trace**: the emitted, self-describing record of the workload, at
+  serving-trace level.
+- **Live run**: a run that issues operations to one or more Certus nodes. The
+  only kind that measures a system under test, and therefore the only kind to
+  which throughput, latency, lane utilisation, and plan-queue validity apply.
+- **Emit run**: a run that writes the workload to a file and contacts no
+  server. Needs no accelerator, no daemon, and no cluster. Reports
+  completeness, not performance.
+- **Run report**: for a live run, throughput plus the validity evidence and the
+  reproduction parameters; for an emit run, completeness plus the same
+  reproduction parameters. Emitted both as a terminal summary and as a
+  structured per-run file.
+- **Plan queue**: the bounded buffer of built-but-not-yet-issued operations
+  that sits between the simulation and the lanes. Its depth is the evidence
+  that the generator stayed ahead of the system under test; reaching zero means
+  the lanes idled waiting for the generator, which invalidates the run.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: An engineer can drive a local Certus node from the shipped
+  example workload with a single command and no daemon or node list configured.
+- **SC-002**: Every live run reports throughput together with its validity
+  evidence, and a live run that could not keep its lanes fed, or that lost a
+  configured node mid-run, is labelled invalid rather than reported as a
+  measurement. An emit run reports its own completeness instead, and is never
+  labelled with a system measurement it did not make.
+- **SC-003**: Repeating a run with the same description and seed reproduces the
+  operation plan byte for byte — including when the server is deliberately
+  slowed, when the run is an emit run with no server at all, and across
+  differing request-batching and lane settings — so the workload is provably
+  independent of server speed, of execution mode, and of tuning.
+- **SC-004**: A workload written to both containers yields identical records,
+  and 100% of rows satisfy the trace schema's invariants for the encoding
+  declared in the manifest.
+- **SC-005**: Sweeping cache size across at least five points spanning a
+  hundredfold range produces a monotonically rising hit rate in which no single
+  step contributes more than half of the total rise — the evidence that the
+  workload's popularity structure is concentrated rather than flat. A uniform
+  workload fails this by construction, which is what makes it a real test.
+- **SC-006**: Holding workload and cache size fixed, the two popularity ranking
+  modes reverse the measured ranking of two eviction policies, with the
+  difference significant across repeated runs — demonstrating the tool can
+  discriminate between policies rather than merely load them.
+- **SC-007**: A migrated session's turns produce remote fetches on its new
+  node, confirming the multi-node path is exercised rather than nominally
+  configured.
+- **SC-008**: A configuration whose requested counts cannot fit their
+  population is refused before any operation is issued, with both the requested
+  and effective means named.
+- **SC-009**: A run against a node whose daemon does not match the generator's
+  build is refused rather than measured.
+- **SC-010**: Remote resources are released after every live run, including
+  runs that ended abnormally, verified rather than assumed.
+- **SC-011**: The generator's own per-operation cost stays far enough below the
+  end-to-end cost of the path it feeds that the plan queue never reaches zero
+  anywhere within the scale target of SC-012.
+- **SC-012**: A single generator instance sustains 10,000 concurrent sessions
+  and 10,000,000 live keys for a run lasting hours, with no unbounded growth in
+  resident memory, and — for a live run — without the plan queue ever reaching
+  zero, and steady throughput between the first and last hour.
+
+## Assumptions
+
+- **Users are performance engineers**, not end users; the interface is a
+  command line plus a description file, and technical vocabulary in reports is
+  appropriate.
+- **Scale is a design target, not just configuration.** SC-012 fixes it at 10K
+  concurrent sessions and 10M live keys over runs of hours. Two consequences
+  follow and constrain the design rather than merely describing it: per-session
+  state grows linearly with turn count while per-turn *work* grows linearly
+  with turn index, so total work is quadratic in session length; and live key
+  tracking at 10M keys must stay within a few hundred megabytes, which rules
+  out per-key allocation and heavyweight per-key bookkeeping. Workloads larger
+  than the target are permitted to run — the tool reports the limit it reached
+  rather than refusing — but are not guaranteed to satisfy SC-011.
+- **A Certus server is already running and configured** by other means.
+  Starting or configuring Certus is not this feature's responsibility.
+- **The production client's behaviour is the fidelity reference.** Where this
+  specification says "what the production client would emit", the current
+  client in this repository is the authority, and a change to it is a change to
+  this feature's requirements.
+- **Nodes are symmetric enough to compare.** Cross-socket asymmetry between a
+  node's network device and its accelerator has previously produced large
+  variance between otherwise identical nodes; workload placement does not
+  attempt to correct for it.
+- **Hit-dependent comparisons need repetition.** Because mint races are
+  preserved deliberately, A/B work uses repeated runs and a stated significance
+  test rather than single runs.
+- **Fitting a description from real traces is out of scope**, but the trace
+  format is chosen so that flow can read the same shape when it returns.
+- **An open-loop paced mode is out of scope.** The consequence is accepted:
+  this feature cannot produce a saturation or latency-versus-offered-load
+  curve, because there is no fixed offered load to hold.
+- **Fan-in is out of scope**: a session's chain is a path, not a graph.
+- **Linux on x86-64 only.** The ingress transport's correctness depends on that
+  platform's memory ordering.
