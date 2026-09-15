@@ -99,10 +99,7 @@ impl ActorHandler<GreetRequest> for GreeterHandler {
 
     fn on_stop(&mut self) {
         if let Some(log) = &self.logger {
-            log.info(&format!(
-                "greeter stopped after {} greetings",
-                self.count
-            ));
+            log.info(&format!("greeter stopped after {} greetings", self.count));
         }
         eprintln!("[greeter] Greeter stopped after {} greetings", self.count);
     }

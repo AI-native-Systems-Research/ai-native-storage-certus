@@ -289,6 +289,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&stack.dispatcher),
         stack.eviction_rx.clone(),
         Arc::clone(&stack.eviction_dropped),
+        // Total OP_RESERVE-batch backpressure budget, shared across all keys in
+        // the batch (see Translator::op_reserve). Sourced from the same knob the
+        // dispatcher uses per-call so a saturated tier does not overrun the
+        // client's ring deadline.
+        std::time::Duration::from_millis(cli.store_backpressure_ms),
     )
     .with_observer(Arc::new(CountersObserver::new(counters)));
 

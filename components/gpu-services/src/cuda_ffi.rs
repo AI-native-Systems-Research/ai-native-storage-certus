@@ -88,10 +88,8 @@ extern "C" {
     pub fn cudaGetDevice(device: *mut c_int) -> cudaError_t;
     pub fn cudaSetDevice(device: c_int) -> cudaError_t;
     pub fn cudaDeviceSynchronize() -> cudaError_t;
-    pub fn cudaIpcGetMemHandle(
-        handle: *mut cudaIpcMemHandle_t,
-        devptr: *mut c_void,
-    ) -> cudaError_t;
+    pub fn cudaIpcGetMemHandle(handle: *mut cudaIpcMemHandle_t, devptr: *mut c_void)
+        -> cudaError_t;
     pub fn cudaIpcOpenMemHandle(
         devptr: *mut *mut c_void,
         handle: cudaIpcMemHandle_t,

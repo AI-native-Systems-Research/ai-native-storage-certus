@@ -74,8 +74,7 @@ fn handle_client(
     let mut payload = vec![0u8; payload_len];
     stream.read_exact(&mut payload).map_err(|e| e.to_string())?;
 
-    let base64_str =
-        std::str::from_utf8(&payload).map_err(|e| format!("Invalid UTF-8: {}", e))?;
+    let base64_str = std::str::from_utf8(&payload).map_err(|e| format!("Invalid UTF-8: {}", e))?;
 
     println!("Received payload: {} bytes", payload_len);
 

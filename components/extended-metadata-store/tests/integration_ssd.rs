@@ -66,12 +66,11 @@ fn get_test_context() -> Option<&'static SsdTestContext> {
         let block_dev = BlockDeviceSpdkNvmeComponent::new_default();
         let logger = logger::LoggerComponent::new_default();
 
-        bind(&*spdk_env, "ISPDKEnv", &*block_dev, "spdk_env")
-            .expect("bind spdk_env → block_dev");
+        bind(&*spdk_env, "ISPDKEnv", &*block_dev, "spdk_env").expect("bind spdk_env → block_dev");
         bind(&*logger, "ILogger", &*block_dev, "logger").expect("bind logger → block_dev");
 
-        let ienv = query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env)
-            .expect("ISPDKEnv query");
+        let ienv =
+            query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env).expect("ISPDKEnv query");
         if let Err(e) = ienv.init() {
             eprintln!("[extended-metadata-store] SPDK init failed: {e}");
             return None;
@@ -91,10 +90,9 @@ fn get_test_context() -> Option<&'static SsdTestContext> {
             func: spdk_addr.func,
         };
 
-        let admin = query::<dyn interfaces::iblock_device::IBlockDeviceAdmin + Send + Sync>(
-            &*block_dev,
-        )
-        .expect("IBlockDeviceAdmin query");
+        let admin =
+            query::<dyn interfaces::iblock_device::IBlockDeviceAdmin + Send + Sync>(&*block_dev)
+                .expect("IBlockDeviceAdmin query");
         admin.set_pci_address(addr);
 
         if let Err(e) = admin.initialize() {
@@ -162,8 +160,7 @@ fn spdk_dma_alloc(numa_node: i32) -> DmaAllocFn {
 
 /// Create a BlockDeviceClient connected to the real SSD for the test partition.
 fn make_client(ctx: &'static SsdTestContext) -> BlockDeviceClient {
-    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
-        .expect("IBlockDevice query");
+    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev).expect("IBlockDevice query");
     let channels = ibd.connect_client().expect("connect_client");
     let sector_size = ibd.block_size();
     let numa_node = ibd.numa_node();
@@ -214,7 +211,9 @@ fn flush_store(ctx: &'static SsdTestContext, comp: &Arc<ExtendedMetadataStoreCom
 
 /// Generate a deterministic byte pattern from a key for verification.
 fn test_value(key: &str, size: usize) -> Vec<u8> {
-    let seed = key.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    let seed = key
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
     (0..size)
         .map(|i| ((seed.wrapping_add(i as u64)) & 0xFF) as u8)
         .collect()
@@ -314,7 +313,10 @@ fn test_delete_existing_key() {
 
     store.put("del_key", b"to_delete").unwrap();
     store.delete("del_key").unwrap();
-    assert_eq!(store.get("del_key"), Err(ExtendedMetadataStoreError::NotFound));
+    assert_eq!(
+        store.get("del_key"),
+        Err(ExtendedMetadataStoreError::NotFound)
+    );
 }
 
 #[test]
@@ -346,7 +348,10 @@ fn test_delete_not_in_iterate() {
     let entries = store.iterate_all().unwrap();
     let keys: Vec<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
     assert!(keys.contains(&"iter_1"));
-    assert!(!keys.contains(&"iter_2"), "Deleted key should not appear in iterate_all");
+    assert!(
+        !keys.contains(&"iter_2"),
+        "Deleted key should not appear in iterate_all"
+    );
     assert!(keys.contains(&"iter_3"));
 }
 
@@ -498,7 +503,11 @@ fn test_bulk_write_integrity() {
             Ok(got) => {
                 if got != *exp_value {
                     failures += 1;
-                    eprintln!("INTEGRITY FAILURE: key={key} expected_len={} got_len={}", exp_value.len(), got.len());
+                    eprintln!(
+                        "INTEGRITY FAILURE: key={key} expected_len={} got_len={}",
+                        exp_value.len(),
+                        got.len()
+                    );
                 }
             }
             Err(e) => {
@@ -507,7 +516,10 @@ fn test_bulk_write_integrity() {
             }
         }
     }
-    assert_eq!(failures, 0, "{failures}/{entry_count} entries failed integrity check");
+    assert_eq!(
+        failures, 0,
+        "{failures}/{entry_count} entries failed integrity check"
+    );
 }
 
 #[test]
@@ -542,6 +554,9 @@ fn test_capacity_exhaustion() {
         let got = store.get(&key).unwrap_or_else(|e| {
             panic!("Entry {key} lost after capacity exhaustion: {e}");
         });
-        assert_eq!(got, expected, "Entry {key} corrupted after capacity exhaustion");
+        assert_eq!(
+            got, expected,
+            "Entry {key} corrupted after capacity exhaustion"
+        );
     }
 }

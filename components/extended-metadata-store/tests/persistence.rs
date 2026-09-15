@@ -426,9 +426,15 @@ fn concurrent_stress_8_threads() {
             for i in 0..1000u64 {
                 let key = format!("t{tid}_k{i}");
                 match i % 3 {
-                    0 => { s.put(&key, &i.to_le_bytes()).unwrap(); }
-                    1 => { let _ = s.get(&key); }
-                    2 => { let _ = s.delete(&key); }
+                    0 => {
+                        s.put(&key, &i.to_le_bytes()).unwrap();
+                    }
+                    1 => {
+                        let _ = s.get(&key);
+                    }
+                    2 => {
+                        let _ = s.delete(&key);
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -578,7 +584,10 @@ fn flush_manager_dirty_threshold_triggers() {
     // Wait for the timer to fire and flush
     std::thread::sleep(Duration::from_millis(200));
 
-    assert!(mgr.completed_seq() >= 1, "dirty threshold should have triggered flush");
+    assert!(
+        mgr.completed_seq() >= 1,
+        "dirty threshold should have triggered flush"
+    );
     drop(mgr);
 }
 
@@ -656,7 +665,10 @@ fn capacity_exhaustion_detected() {
             Err(e) => panic!("unexpected flush error: {e}"),
         }
     }
-    assert!(written > 1, "should have written at least some entries before capacity hit");
+    assert!(
+        written > 1,
+        "should have written at least some entries before capacity hit"
+    );
 }
 
 /// T052: Put with zero-length value succeeds.
@@ -693,9 +705,12 @@ fn crash_mid_flush_recovers_previous_state() {
     drop(client);
 
     // Create mock that fails after 2 writes (partial region write)
-    let faulty_mock = MockBlockDevice::with_fault_config(DISK_SIZE, FaultConfig {
-        fail_after_n_writes: Some(2),
-    });
+    let faulty_mock = MockBlockDevice::with_fault_config(
+        DISK_SIZE,
+        FaultConfig {
+            fail_after_n_writes: Some(2),
+        },
+    );
     // Copy existing blocks into the faulty mock's state
     {
         let src = shared.lock().unwrap();
@@ -758,7 +773,9 @@ fn recovery_fresh_partition_formats_empty() {
 
     assert_eq!(sb.flush_seq, 0);
     assert!(
-        warnings.iter().any(|w| w.contains("fresh") || w.contains("format")),
+        warnings
+            .iter()
+            .any(|w| w.contains("fresh") || w.contains("format")),
         "expected fresh format warning, got: {warnings:?}"
     );
 

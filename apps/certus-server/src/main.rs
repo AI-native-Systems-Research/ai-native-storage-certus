@@ -12,9 +12,9 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 #[cfg(feature = "rw-telemetry")]
 use std::thread;
+use std::time::Duration;
 
 use clap::Parser;
 
@@ -480,9 +480,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cli.format {
         logger.info("certus-server: --format specified, extent managers will be reformatted");
     } else {
-        logger.info(
-            "certus-server: recovering extents from disk (use --format for clean slate)",
-        );
+        logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
     }
 
     // Eviction event channel drained by the TakeEvents op.
@@ -493,6 +491,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&dispatcher),
         eviction_rx,
         Arc::clone(&eviction_dropped),
+        // Total OP_RESERVE-batch backpressure budget, shared across all keys in
+        // the batch (see Translator::op_reserve).
+        std::time::Duration::from_millis(cli.store_backpressure_ms),
     );
 
     // Create the shared-memory mailbox.

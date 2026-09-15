@@ -40,11 +40,7 @@ pub struct ClientSession {
 
 impl ClientSession {
     /// Create a session with an empty backlog.
-    pub fn new(
-        id: u64,
-        ingress_rx: Receiver<Command>,
-        callback_tx: Sender<Completion>,
-    ) -> Self {
+    pub fn new(id: u64, ingress_rx: Receiver<Command>, callback_tx: Sender<Completion>) -> Self {
         Self {
             id,
             ingress_rx,
@@ -336,7 +332,14 @@ impl KernelHandler {
             NvmeBlockError::BlockDevice(interfaces::BlockDeviceError::ReadFailed(msg))
         });
 
-        self.send_completion(client_id, Completion::ReadDone { handle, tag: 0, result });
+        self.send_completion(
+            client_id,
+            Completion::ReadDone {
+                handle,
+                tag: 0,
+                result,
+            },
+        );
     }
 
     /// Submit a write via io_uring and block until completion.
@@ -401,7 +404,14 @@ impl KernelHandler {
             NvmeBlockError::BlockDevice(interfaces::BlockDeviceError::WriteFailed(msg))
         });
 
-        self.send_completion(client_id, Completion::WriteDone { handle, tag: 0, result });
+        self.send_completion(
+            client_id,
+            Completion::WriteDone {
+                handle,
+                tag: 0,
+                result,
+            },
+        );
     }
 
     fn handle_read_async(
@@ -598,11 +608,10 @@ impl KernelHandler {
             ptr
         };
 
-        let write_sqe =
-            opcode::Write::new(fd, zeros_ptr as *const u8, total_bytes as u32)
-                .offset(offset)
-                .build()
-                .user_data(handle.0);
+        let write_sqe = opcode::Write::new(fd, zeros_ptr as *const u8, total_bytes as u32)
+            .offset(offset)
+            .build()
+            .user_data(handle.0);
 
         // SAFETY: SQE is valid, fd + zeros_ptr are valid. O_DSYNC guarantees durability.
         unsafe {

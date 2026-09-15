@@ -53,12 +53,8 @@ impl BlockDeviceClient {
                 .map_err(|e| format!("send ReadSync failed: {e}"))?;
 
             match self.channels.completion_rx.recv() {
-                Ok(Completion::ReadDone {
-                    result: Ok(()), ..
-                }) => {}
-                Ok(Completion::ReadDone {
-                    result: Err(e), ..
-                }) => {
+                Ok(Completion::ReadDone { result: Ok(()), .. }) => {}
+                Ok(Completion::ReadDone { result: Err(e), .. }) => {
                     return Err(format!("ReadSync error at LBA {abs_lba}: {e}"));
                 }
                 Ok(other) => {
@@ -109,12 +105,8 @@ impl BlockDeviceClient {
                 .map_err(|e| format!("send WriteSync failed: {e}"))?;
 
             match self.channels.completion_rx.recv() {
-                Ok(Completion::WriteDone {
-                    result: Ok(()), ..
-                }) => {}
-                Ok(Completion::WriteDone {
-                    result: Err(e), ..
-                }) => {
+                Ok(Completion::WriteDone { result: Ok(()), .. }) => {}
+                Ok(Completion::WriteDone { result: Err(e), .. }) => {
                     return Err(format!("WriteSync error at LBA {abs_lba}: {e}"));
                 }
                 Ok(other) => {

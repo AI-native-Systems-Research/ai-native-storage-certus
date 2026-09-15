@@ -293,7 +293,6 @@ impl IMemoryTier for MockMemoryTier {
         inner.slots.keys().copied().take(n).collect()
     }
 
-
     fn evict_next(&self) -> Option<CacheKey> {
         let mut inner = self.inner.lock().unwrap();
         let key = inner.slots.keys().next().copied()?;
@@ -620,7 +619,7 @@ fn reserve_memory_happy_path_returns_nonnull_pointer() {
     let d = query_interface!(c, IDispatcher).unwrap();
 
     let ptr = d
-        .reserve_memory(1, 4096, 0)
+        .reserve_memory(1, 4096, 0, None)
         .expect("reserve_memory should succeed");
 
     assert!(
@@ -636,7 +635,7 @@ fn reserve_memory_zero_size_returns_invalid_parameter() {
     let d = query_interface!(c, IDispatcher).unwrap();
 
     let err = d
-        .reserve_memory(1, 0, 0)
+        .reserve_memory(1, 0, 0, None)
         .expect_err("size=0 must be rejected");
 
     assert!(
@@ -652,7 +651,7 @@ fn reserve_memory_full_pool_returns_allocation_failed() {
     let d = query_interface!(c, IDispatcher).unwrap();
 
     let err = d
-        .reserve_memory(1, 4096, 0)
+        .reserve_memory(1, 4096, 0, None)
         .expect_err("exhausted pool must fail");
 
     assert!(
@@ -690,7 +689,7 @@ fn reserve_memory_backpressures_then_surfaces_allocation_failed() {
 
     let start = std::time::Instant::now();
     let err = d
-        .reserve_memory(1, 4096, 0)
+        .reserve_memory(1, 4096, 0, None)
         .expect_err("wedged tier must eventually fail");
     let elapsed = start.elapsed();
 
@@ -707,6 +706,74 @@ fn reserve_memory_backpressures_then_surfaces_allocation_failed() {
     assert!(
         d.tier_event_stats().store_backpressure_events > 0,
         "expected store_backpressure_events to be recorded"
+    );
+    d.shutdown().unwrap();
+}
+
+#[test]
+fn reserve_memory_shared_deadline_bounds_backpressure() {
+    // The `deadline` argument overrides the per-call budget: it is the clock a
+    // reserve *batch* shares across all its keys. Against a wedged tier a large
+    // per-call budget (5 s) would backpressure for the full 5 s, but an already-
+    // elapsed shared deadline must fail fast (single best-effort attempt), and a
+    // near-future shared deadline must stop retrying at that instant, NOT at the
+    // per-call budget. This is what keeps a K-key OP_RESERVE batch from paying
+    // K × budget and overrunning the client's ring deadline.
+    let dm = Arc::new(MockDispatchMap::new());
+    let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+    let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
+    let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::always_fails());
+    let c = DispatcherComponent::new_default();
+    c.dispatch_map
+        .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+        .unwrap();
+    c.logger.connect(logger).unwrap();
+    c.gpu_services.connect(gpu).unwrap();
+    c.memory_tier.connect(mt).unwrap();
+    let d = query_interface!(c, IDispatcher).unwrap();
+    d.initialize(DispatcherConfig {
+        data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        // A large per-call budget: if the deadline arg were ignored, both calls
+        // below would block for ~5 s.
+        store_backpressure_ms: 5000,
+        ..Default::default()
+    })
+    .unwrap();
+
+    // (1) Already-elapsed shared deadline -> fail fast, well under the budget.
+    let past = std::time::Instant::now();
+    let start = std::time::Instant::now();
+    let err = d
+        .reserve_memory(1, 4096, 0, Some(past))
+        .expect_err("wedged tier must fail");
+    let elapsed = start.elapsed();
+    assert!(
+        matches!(err, DispatcherError::AllocationFailed(_)),
+        "expected AllocationFailed, got: {err:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "elapsed shared deadline must fail fast, not honor the 5 s budget (waited {elapsed:?})"
+    );
+
+    // (2) Near-future shared deadline -> retries until that instant, then fails.
+    let budget = std::time::Duration::from_millis(300);
+    let start = std::time::Instant::now();
+    let err = d
+        .reserve_memory(2, 4096, 0, Some(start + budget))
+        .expect_err("wedged tier must fail");
+    let elapsed = start.elapsed();
+    assert!(
+        matches!(err, DispatcherError::AllocationFailed(_)),
+        "expected AllocationFailed, got: {err:?}"
+    );
+    assert!(
+        elapsed >= std::time::Duration::from_millis(250),
+        "expected backpressure to hold ~shared deadline, only waited {elapsed:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(2000),
+        "must stop at the shared deadline, not the 5 s per-call budget (waited {elapsed:?})"
     );
     d.shutdown().unwrap();
 }
@@ -744,7 +811,8 @@ fn populate_drops_best_effort_when_tier_full() {
 
     // reserve_memory fails first, before any GPU op, so the drop path is taken
     // regardless of the mock GPU. The store reports success.
-    d.populate(1, handle).expect("full-tier store must drop, not fail");
+    d.populate(1, handle)
+        .expect("full-tier store must drop, not fail");
 
     // The key was not cached: a subsequent check misses.
     assert!(
@@ -763,10 +831,10 @@ fn reserve_memory_duplicate_key_returns_error() {
     let (c, _dm) = setup_initialized();
     let d = query_interface!(c, IDispatcher).unwrap();
 
-    d.reserve_memory(42, 4096, 0).unwrap();
+    d.reserve_memory(42, 4096, 0, None).unwrap();
 
     let err = d
-        .reserve_memory(42, 4096, 0)
+        .reserve_memory(42, 4096, 0, None)
         .expect_err("duplicate key must fail");
 
     assert!(
@@ -781,7 +849,7 @@ fn release_memory_frees_reserved_slot() {
     let (c, _dm) = setup_initialized();
     let d = query_interface!(c, IDispatcher).unwrap();
 
-    d.reserve_memory(10, 4096, 0).unwrap();
+    d.reserve_memory(10, 4096, 0, None).unwrap();
     d.release_memory(10)
         .expect("release_memory on a reserved slot must succeed");
 
@@ -807,7 +875,7 @@ fn copy_gpu_to_memory_completed_makes_key_visible() {
     let key: CacheKey = 7;
     let size: u32 = 4096;
 
-    d.reserve_memory(key, size, 0).unwrap();
+    d.reserve_memory(key, size, 0, None).unwrap();
 
     let mut src = vec![0u8; size as usize];
     d.copy_gpu_to_memory_async(key, &[make_handle(&mut src)], null_stream())
@@ -846,7 +914,7 @@ fn copy_gpu_to_memory_async_copies_data_to_dram_slot() {
     let size: u32 = 512;
 
     // Reserve the DRAM slot; keep the returned pointer for readback.
-    let ptr = d.reserve_memory(key, size, 0).unwrap();
+    let ptr = d.reserve_memory(key, size, 0, None).unwrap();
     assert!(!ptr.is_null());
 
     // Fill source buffer with a deterministic pattern.
@@ -880,7 +948,7 @@ fn full_three_phase_store_lifecycle() {
     let size: u32 = 4096;
 
     // Phase 1: reserve — allocates DRAM slot, does NOT register in dispatch-map.
-    let ptr = d.reserve_memory(key, size, 0).unwrap();
+    let ptr = d.reserve_memory(key, size, 0, None).unwrap();
     assert!(!ptr.is_null());
     assert!(
         !d.check(key).unwrap(),
@@ -916,7 +984,7 @@ fn reserve_release_re_reserve_sequence() {
     let key: CacheKey = 5;
 
     // First reservation.
-    let ptr1 = d.reserve_memory(key, 4096, 0).unwrap();
+    let ptr1 = d.reserve_memory(key, 4096, 0, None).unwrap();
     assert!(!ptr1.is_null());
 
     // Release — slot is freed.
@@ -924,7 +992,7 @@ fn reserve_release_re_reserve_sequence() {
 
     // Re-reserve the same key; must succeed after release.
     let ptr2 = d
-        .reserve_memory(key, 4096, 0)
+        .reserve_memory(key, 4096, 0, None)
         .expect("re-reserve after release must succeed");
     assert!(!ptr2.is_null(), "re-reserved pointer must be non-null");
 

@@ -475,7 +475,6 @@ impl IMemoryTier for MockMemoryTier {
         inner.slots.keys().take(n).copied().collect()
     }
 
-
     fn evict_next(&self) -> Option<CacheKey> {
         let mut inner = self.inner.lock().unwrap();
         let key = inner.slots.keys().next().copied()?;

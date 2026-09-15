@@ -152,7 +152,6 @@ impl CertusEngine {
     fn shutdown(&self) -> PyResult<()> {
         self.inner.shutdown()
     }
-
 }
 
 /// Python module definition.

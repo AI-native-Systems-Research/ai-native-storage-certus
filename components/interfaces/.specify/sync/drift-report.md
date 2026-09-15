@@ -1,3 +1,13 @@
+---
+spec_sync_component: interfaces
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-09-15T21:09:38Z
+spec_sync_git_commit: bec6c6ec
+spec_sync_inputs_sha256: 383f8d8fae8670140987297b02261bfafbe08f38212669e4dc607ec20ec02e94
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+> **Sync 2026-09-15 (IDispatcher::reserve_memory signature — code authoritative).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `reserve_memory` in `src/idispatcher.rs`. The method inventory in `specs/001-interfaces/spec.md` was updated to the new signature and documents the two modes (`None` = dispatcher's own `store_backpressure_ms` budget; `Some(instant)` = a deadline shared across a reserve batch, bounding the batch's total backpressure). First adoption of the spec-sync freshness stamp for this component. Digest recomputed over a clean tree matching CI.
+
 # Drift Report: interfaces
 
 **Generated**: pending
