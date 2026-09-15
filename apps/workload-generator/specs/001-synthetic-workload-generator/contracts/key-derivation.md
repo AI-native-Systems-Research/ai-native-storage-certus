@@ -118,13 +118,13 @@ SC-012), so none is reachable by a description anyone would write.
 
 **An earlier revision of this contract placed the tag at bit 48 and gave every
 field 16 bits.** That spent 16 bits on a 3-value tag while capping
-`block_ordinal` at 65 536 — reachable, since a session's input stream grows every
-turn and `turns × E[input_growth]` passes it in a long run — and
+`block_ordinal` at 65 536 — reachable, since a session's input stream grows
+every turn and `turns × E[input_growth]` passes it in a long run — and
 `instance_index` at 65 536, which a document pool written as `size: 100000`
 would exceed. Both would have surfaced only as an inexplicable cache hit. The
 tag was moved to the top 2 bits and the 14 freed bits given to the two fields
-that needed them. This changed every salt-derived key, which was acceptable only
-because no trace had yet been generated; see *Versioning* below.
+that needed them. This changed every salt-derived key, which was acceptable
+only because no trace had yet been generated; see *Versioning* below.
 
 An implementation MUST reject an out-of-range coordinate rather than truncating
 it. Because the salt is assembled with XOR, truncation does not saturate — it
@@ -172,8 +172,8 @@ key(parent=08b4fda8c892b50e, salt=2)
 ```
 
 Those five depend only on the mix function and the chain rule, so they are
-unaffected by the salt layout. The three below pin the **layout** as well, and a
-change to any field offset would alter them while leaving everything above
+unaffected by the salt layout. The three below pin the **layout** as well, and
+a change to any field offset would alter them while leaving everything above
 intact:
 
 ```text
@@ -206,10 +206,11 @@ rebalanced (see *Field widths* above), and that was only defensible because no
 trace existed yet.
 
 If the key function ever has to change once traces exist, the change is a **new
-version**, not an edit: the old function stays, the trace manifest records which
-version produced it, and a consumer refuses a trace whose version it cannot
-compute. Editing these values in place is never the answer, because the failure
-it produces is invisible — a trace that loads, replays, and quietly misses.
+version**, not an edit: the old function stays, the trace manifest records
+which version produced it, and a consumer refuses a trace whose version it
+cannot compute. Editing these values in place is never the answer, because the
+failure it produces is invisible — a trace that loads, replays, and quietly
+misses.
 
 ## Collision posture
 

@@ -16,6 +16,7 @@
 //! with no accelerator and no server.
 #![warn(missing_docs)]
 
+pub mod description;
 pub mod distribution;
 mod error;
 pub mod keys;

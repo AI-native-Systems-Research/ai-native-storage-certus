@@ -96,6 +96,36 @@ const SESSION_LIMIT: u64 = 1 << 38;
 /// per session stream.
 const ORDINAL_LIMIT: u64 = 1 << 24;
 
+/// Most shared classes a description may declare.
+///
+/// These four limits are what the salt layout can encode. They exist as public
+/// constants so the description validator can refuse an over-large description
+/// at load time, which turns what would be a panic part-way through a run —
+/// destroying its output — into an error before anything is issued. All four are
+/// orders of magnitude beyond the scale target of 10 000 concurrent sessions and
+/// 10 000 000 live keys, so a description that trips one is a mistake rather
+/// than an ambition.
+///
+/// # Examples
+///
+/// ```
+/// use workload_model::keys;
+///
+/// assert_eq!(keys::MAX_CLASSES, 4_096);
+/// assert_eq!(keys::MAX_BLOCKS_PER_STREAM, 16_777_216);
+/// ```
+pub const MAX_CLASSES: u64 = CLASS_LIMIT;
+
+/// Most live instances a single shared pool may hold.
+pub const MAX_INSTANCES_PER_POOL: u64 = INSTANCE_LIMIT;
+
+/// Most blocks in one shared instance, or in one session's input or output
+/// stream.
+pub const MAX_BLOCKS_PER_STREAM: u64 = ORDINAL_LIMIT;
+
+/// Most sessions one run may create.
+pub const MAX_SESSIONS_PER_RUN: u64 = SESSION_LIMIT;
+
 // Compile-time proof that the fields tile the word exactly, with each field's
 // width equal to the gap to the next. If a later edit moves one shift without
 // moving its neighbour, this fails to *compile* rather than silently overlapping

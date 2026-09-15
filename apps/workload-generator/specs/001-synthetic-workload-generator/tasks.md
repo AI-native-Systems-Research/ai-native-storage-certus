@@ -166,25 +166,25 @@ salts are exactly `7fff…`, `bfff…` and `ffff…`, and
 constants, so moving one shift without its neighbour fails a test instead of
 silently overlapping.
 
-**Every ceiling is now unreachable** against SC-012's 10 000 concurrent sessions
-and 10 000 000 live keys, so **T017 does not need a load-time check for these**
-— the asserts are cheap insurance on a path nothing should reach. Re-pinning was
-free only because no trace had yet been generated; the contract now carries a
-*Versioning* section saying that a later change must be a new version recorded
-in the manifest, never an edit.
+**Every ceiling is now unreachable** against SC-012's 10 000 concurrent
+sessions and 10 000 000 live keys, so **T017 does not need a load-time check
+for these** — the asserts are cheap insurance on a path nothing should reach.
+Re-pinning was free only because no trace had yet been generated; the contract
+now carries a *Versioning* section saying that a later change must be a new
+version recorded in the manifest, never an edit.
 
 ### Description parsing and validation
 
-- [ ] T016 Implement the YAML schema and parser in
+- [x] T016 Implement the YAML schema and parser in
   `crates/workload-model/src/description.rs`, matching
   `contracts/workload-input.example.yml`, which is normative
-- [ ] T017 Implement validation in `crates/workload-model/src/description.rs`:
+- [x] T017 Implement validation in `crates/workload-model/src/description.rs`:
   reject an unknown `version`; reject a `uses` entry naming an undeclared
   class; refuse when a count distribution truncated to its pool discards more
   than 5% of its mass, naming both the requested and effective mean; reject the
   `poisson` population form for an unbounded lifetime; reject any host-specific
   or tuning field
-- [ ] T018 [P] Tests in `crates/workload-model/tests/description.rs`: the
+- [x] T018 [P] Tests in `crates/workload-model/tests/description.rs`: the
   shipped example validates and reports `long_document`'s effective count mean
   (**5.1435** at pool 20, discarding 1.83%); lowering that pool to 10 is
   **refused** naming both 5 and **3.9515**, having discarded 13.53%
@@ -203,6 +203,37 @@ in the manifest, never an edit.
   widening cancels, because `exp(-(p + 0.5)/5) / exp(-0.5/5) = exp(-p/5)`. The
   gate outcome is also unchanged under either definition — pool 10 refuses,
   pool 20 passes — so this corrects a reported number, not a decision.
+
+**Two schema decisions settled while implementing T016/T017, because the spec
+does not state them and both change behaviour:**
+
+1. **An absent `pool:` means `exact: 1`, NOT the Poisson default.** FR-014
+   makes the fluctuating form the default *for an explicit size*, and the
+   example's `pool.size` comment confirms a bare integer is shorthand for
+   `{poisson: N}`. But the shipped example's `system_prompt1` and
+   `system_prompt2` have no `pool:` at all and an infinite lifetime, and a
+   Poisson birth rate of `size / E[lifetime]` is undefined there — so a Poisson
+   default would refuse the normative example. Absent means one immortal
+   instance, exactly as its comment says. `exact` with an unbounded lifetime is
+   accepted (FR-017's mint-once case); `poisson` with one is refused, and the
+   refusal names `{exact: N}` as the fix.
+2. **`rank_by` defaults to `slot`, and the default is reported.** FR-020
+   requires both forms to exist but names no default. `slot` is chosen because
+   it leaves the written `lifetime` doing what its author expects, whereas
+   `recency` makes `lifetime` nearly inert. Following FR-021's precedent for a
+   missing `selection`, a defaulted `rank_by` on a multi-instance pool is
+   *reported* at load rather than refused.
+
+**Also done early:** the four salt ceilings are now **load-time refusals**
+rather than mid-run panics — a pool beyond 67 108 864 instances, an instance or
+a `turns x input_growth` product at or beyond 16 777 216 blocks, or more than 4
+096 shared classes. `keys.rs` exposes them as `MAX_CLASSES`,
+`MAX_INSTANCES_PER_POOL`, `MAX_BLOCKS_PER_STREAM` and `MAX_SESSIONS_PER_RUN`.
+This satisfies the T015 note's requirement without waiting for the projection.
+
+**T083 is effectively already done**: `tests/description.rs` asserts the
+shipped example parses and validates, which is what T083 asked a doc test to
+do. Keep T083 only if a *doc* test is wanted specifically.
 
 ### Populations
 
@@ -622,6 +653,12 @@ path exists; US4 last, since it measures rather than builds.
 ## Notes
 
 - `[P]` means different files and no dependency on incomplete work.
+- **Reflow these documents with `scripts/reflow.py`, not by hand.** Three
+  separate manual or throwaway-script attempts have corrupted them, each
+  differently: merging adjacent list items, duplicating a numbered list marker,
+  and joining the contracts' `**Version**:` / `**Status**:` headers. All three
+  traps are encoded in the script, and it refuses to write unless the
+  whitespace-collapsed word stream is byte-identical to the input's.
 - Commit after each task or logical group.
 - **The projection (T033–T035) is load-bearing, not a nicety.** It is the
   justification for removing four output-length caps, so if it slips, `emit`
