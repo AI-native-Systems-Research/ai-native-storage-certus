@@ -95,25 +95,25 @@ output containers.
 
 ### Distributions and sampling
 
-- [ ] T006 Implement the `Distribution` enum and sampling in
+- [x] T006 Implement the `Distribution` enum and sampling in
   `crates/workload-model/src/distribution.rs` for `constant`, `uniform`,
   `empirical`, `normal`, `exponential`, drawing from `rand_chacha::ChaCha20Rng`
   — **not** `StdRng`, which is not reproducible across `rand` releases
-- [ ] T007 Implement inverse-transform truncation between `F(min)` and `F(max)`
+- [x] T007 Implement inverse-transform truncation between `F(min)` and `F(max)`
   in `crates/workload-model/src/distribution.rs` — a real truncation, never
   clamping
-- [ ] T008 Implement integral draws in
+- [x] T008 Implement integral draws in
   `crates/workload-model/src/distribution.rs`: truncate on `[min − 0.5, max +
   0.5]` and round to nearest, so every integer in range carries equal weight
-- [ ] T009 Implement `empirical` from inline samples and from a file, with
+- [x] T009 Implement `empirical` from inline samples and from a file, with
   `interpolate: false` as the default for counts, in
   `crates/workload-model/src/distribution.rs`
-- [ ] T010 Accept `inf` in any numeric position in
+- [x] T010 Accept `inf` in any numeric position in
   `crates/workload-model/src/distribution.rs`
-- [ ] T011 Implement effective-mean and quantile reporting after truncation in
+- [x] T011 Implement effective-mean and quantile reporting after truncation in
   `crates/workload-model/src/distribution.rs`, the value FR-003 reports and
   FR-004 gates on
-- [ ] T012 [P] Tests in `crates/workload-model/tests/distribution.rs`:
+- [x] T012 [P] Tests in `crates/workload-model/tests/distribution.rs`:
   truncation is not clamping (no mass piled at bounds); `uniform{0,5}` as a
   count yields six equiprobable values rather than half-weight endpoints; a
   fixed seed reproduces a draw sequence exactly; `empirical` discrete never
@@ -171,8 +171,23 @@ belongs in a different task from the discovery.
   or tuning field
 - [ ] T018 [P] Tests in `crates/workload-model/tests/description.rs`: the
   shipped example validates and reports `long_document`'s effective count mean
-  (~5.57 at pool 20); lowering that pool to 10 is **refused** naming both 5 and
-  4.218
+  (**5.1435** at pool 20, discarding 1.83%); lowering that pool to 10 is
+  **refused** naming both 5 and **3.9515**, having discarded 13.53%
+
+  **Corrected while implementing T011.** The figures originally written here
+  and in the example YAML — 5.565 and 4.218 — are the *continuous* truncated
+  means. A count is integral (FR-009), so the draw is truncated on
+  `[0.5, pool + 0.5]` and rounded to nearest, and the realised mean is lower.
+  Reporting the continuous figure would report a quantity no draw realises,
+  which Principle VIII forbids. Both values are now asserted against an
+  independently computed reference by
+  `example_count_statistics_match_the_shipped_description` in
+  `tests/distribution.rs`, and the example's comment is corrected.
+
+  The **percentages were already right** and are unchanged: the half-unit
+  widening cancels, because `exp(-(p + 0.5)/5) / exp(-0.5/5) = exp(-p/5)`. The
+  gate outcome is also unchanged under either definition — pool 10 refuses,
+  pool 20 passes — so this corrects a reported number, not a decision.
 
 ### Populations
 
