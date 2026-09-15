@@ -49,17 +49,53 @@ pub type CacheKey = u64;
 /// The parent of a chain root.
 pub const ROOT_PARENT: CacheKey = 0;
 
-/// Tag for a shared-object block, occupying bits 48 and above of the salt.
+// Salt field layout, per `contracts/key-derivation.md`. Both arrangements use
+// all 64 bits exactly: 2 + 12 + 26 + 24 for a shared block, 2 + 38 + 24 for a
+// session block. Each field's *width is the gap to the next*, which is why the
+// widths are part of the contract rather than an implementation detail — an
+// overflowing field would alias two different blocks onto one key.
+//
+// The tag deliberately sits in the top 2 bits. An earlier revision put it at
+// bit 48 with every field 16 bits wide, which spent 16 bits on a 3-value tag
+// while capping `block_ordinal` and `instance_index` at 65 536 — both reachable,
+// and both aliasing silently when exceeded.
+
+/// Bit position of the block-kind tag.
+const TAG_SHIFT: u32 = 62;
+/// Tag for a shared-object block. Tag `0` is unused and reserved.
 const SHARED_TAG: u64 = 1;
 /// Tag for a session input block.
 const INPUT_TAG: u64 = 2;
 /// Tag for a session output block.
 const OUTPUT_TAG: u64 = 3;
 
-/// Width of the `block_ordinal` field, and of `instance_index` and `class_id`.
-const FIELD16: u64 = 1 << 16;
-/// Width of the `session_id` field, which spans bits 16..48.
-const FIELD32: u64 = 1 << 32;
+/// `class_id` occupies bits 50..61 — 4 096 shared classes.
+const CLASS_SHIFT: u32 = 50;
+const CLASS_LIMIT: u64 = 1 << 12;
+/// `instance_index` occupies bits 24..49 — 67 108 864 live instances per pool.
+const INSTANCE_SHIFT: u32 = 24;
+const INSTANCE_LIMIT: u64 = 1 << 26;
+/// `session_id` occupies bits 24..61 — 274 877 906 944 sessions per run.
+const SESSION_SHIFT: u32 = 24;
+const SESSION_LIMIT: u64 = 1 << 38;
+/// `block_ordinal` occupies bits 0..23 — 16 777 216 blocks per instance or
+/// per session stream.
+const ORDINAL_LIMIT: u64 = 1 << 24;
+
+// Compile-time proof that the fields tile the word exactly, with each field's
+// width equal to the gap to the next. If a later edit moves one shift without
+// moving its neighbour, this fails to *compile* rather than silently overlapping
+// two fields and aliasing keys — which is the one failure mode here that no test
+// would notice, because both fields would still round-trip on their own.
+const _: () = {
+    assert!(CLASS_SHIFT + CLASS_LIMIT.trailing_zeros() == TAG_SHIFT);
+    assert!(INSTANCE_SHIFT + INSTANCE_LIMIT.trailing_zeros() == CLASS_SHIFT);
+    assert!(SESSION_SHIFT + SESSION_LIMIT.trailing_zeros() == TAG_SHIFT);
+    assert!(ORDINAL_LIMIT.trailing_zeros() == INSTANCE_SHIFT);
+    assert!(ORDINAL_LIMIT.trailing_zeros() == SESSION_SHIFT);
+    // The tag has room for its three values and no more.
+    assert!(OUTPUT_TAG < 1 << (64 - TAG_SHIFT));
+};
 
 /// The `splitmix64` mix function, verbatim from the contract.
 ///
@@ -113,41 +149,50 @@ pub fn key(parent: CacheKey, salt: u64) -> CacheKey {
 ///
 /// # Panics
 ///
-/// If any coordinate exceeds its 16-bit field. The salt is assembled with XOR,
-/// so an overflowing field does not saturate: it corrupts its neighbour and
-/// aliases two different blocks onto one key, which would show up only as an
+/// If any coordinate exceeds its field: `class_id` 12 bits, `instance_index`
+/// 26 bits, `block_ordinal` 24 bits. The salt is assembled with XOR, so an
+/// overflowing field does not saturate — it corrupts its neighbour and aliases
+/// two different blocks onto one key, which would show up only as an
 /// inexplicable cache hit. Failing loudly is the point.
+///
+/// This is not the same posture as the deliberately-unhandled birthday
+/// collision. That is random, happens at a rate of 10^-6 per run, and cannot
+/// bias a measurement; an overflowing coordinate aliases two *specific* blocks
+/// on every run for as long as the description is used.
 ///
 /// # Examples
 ///
 /// ```
 /// use workload_model::keys::shared_salt;
 ///
-/// // Tag 1 in the high bits, then class, instance, ordinal.
-/// assert_eq!(shared_salt(0, 0, 0) >> 48, 1);
+/// // Tag 1 in the top two bits, then class, instance, ordinal.
+/// assert_eq!(shared_salt(0, 0, 0) >> 62, 1);
 /// ```
 #[inline]
 pub fn shared_salt(class_id: u64, instance_index: u64, block_ordinal: u64) -> u64 {
     assert!(
-        class_id < FIELD16,
-        "class_id {class_id} exceeds its 16-bit salt field; keys would alias"
+        class_id < CLASS_LIMIT,
+        "class_id {class_id} exceeds its 12-bit salt field; keys would alias"
     );
     assert!(
-        instance_index < FIELD16,
-        "instance_index {instance_index} exceeds its 16-bit salt field; keys would alias"
+        instance_index < INSTANCE_LIMIT,
+        "instance_index {instance_index} exceeds its 26-bit salt field; keys would alias"
     );
     assert!(
-        block_ordinal < FIELD16,
-        "block_ordinal {block_ordinal} exceeds its 16-bit salt field; keys would alias"
+        block_ordinal < ORDINAL_LIMIT,
+        "block_ordinal {block_ordinal} exceeds its 24-bit salt field; keys would alias"
     );
-    (SHARED_TAG << 48) ^ (class_id << 32) ^ (instance_index << 16) ^ block_ordinal
+    (SHARED_TAG << TAG_SHIFT)
+        ^ (class_id << CLASS_SHIFT)
+        ^ (instance_index << INSTANCE_SHIFT)
+        ^ block_ordinal
 }
 
 /// Salt for a session **input** block.
 ///
 /// # Panics
 ///
-/// If `session_id` exceeds its 32-bit field or `block_ordinal` its 16-bit one —
+/// If `session_id` exceeds its 38-bit field or `block_ordinal` its 24-bit one —
 /// see [`shared_salt`] for why this is an assertion rather than a truncation.
 ///
 /// # Examples
@@ -155,7 +200,7 @@ pub fn shared_salt(class_id: u64, instance_index: u64, block_ordinal: u64) -> u6
 /// ```
 /// use workload_model::keys::input_salt;
 ///
-/// assert_eq!(input_salt(7, 3) >> 48, 2);
+/// assert_eq!(input_salt(7, 3) >> 62, 2);
 /// ```
 #[inline]
 pub fn input_salt(session_id: u64, block_ordinal: u64) -> u64 {
@@ -176,7 +221,7 @@ pub fn input_salt(session_id: u64, block_ordinal: u64) -> u64 {
 /// ```
 /// use workload_model::keys::output_salt;
 ///
-/// assert_eq!(output_salt(7, 3) >> 48, 3);
+/// assert_eq!(output_salt(7, 3) >> 62, 3);
 /// ```
 #[inline]
 pub fn output_salt(session_id: u64, block_ordinal: u64) -> u64 {
@@ -186,14 +231,14 @@ pub fn output_salt(session_id: u64, block_ordinal: u64) -> u64 {
 #[inline]
 fn session_salt(tag: u64, session_id: u64, block_ordinal: u64) -> u64 {
     assert!(
-        session_id < FIELD32,
-        "session_id {session_id} exceeds its 32-bit salt field; keys would alias"
+        session_id < SESSION_LIMIT,
+        "session_id {session_id} exceeds its 38-bit salt field; keys would alias"
     );
     assert!(
-        block_ordinal < FIELD16,
-        "block_ordinal {block_ordinal} exceeds its 16-bit salt field; keys would alias"
+        block_ordinal < ORDINAL_LIMIT,
+        "block_ordinal {block_ordinal} exceeds its 24-bit salt field; keys would alias"
     );
-    (tag << 48) ^ (session_id << 16) ^ block_ordinal
+    (tag << TAG_SHIFT) ^ (session_id << SESSION_SHIFT) ^ block_ordinal
 }
 
 #[cfg(test)]
@@ -209,18 +254,22 @@ mod tests {
 
     #[test]
     fn tags_do_not_overlap_coordinates() {
-        // Every tag must survive in the high bits for every legal coordinate.
-        assert_eq!(
-            shared_salt(u16::MAX as u64, u16::MAX as u64, u16::MAX as u64) >> 48,
-            SHARED_TAG
-        );
-        assert_eq!(
-            input_salt(u32::MAX as u64, u16::MAX as u64) >> 48,
-            INPUT_TAG
-        );
-        assert_eq!(
-            output_salt(u32::MAX as u64, u16::MAX as u64) >> 48,
-            OUTPUT_TAG
-        );
+        // Every tag must survive in the top bits for every legal coordinate.
+        // With all fields at their maximum the three salts are 7fff..., bfff...
+        // and ffff..., which is what "the layout uses all 64 bits exactly and
+        // the fields are disjoint" looks like written down.
+        let shared = shared_salt(CLASS_LIMIT - 1, INSTANCE_LIMIT - 1, ORDINAL_LIMIT - 1);
+        let input = input_salt(SESSION_LIMIT - 1, ORDINAL_LIMIT - 1);
+        let output = output_salt(SESSION_LIMIT - 1, ORDINAL_LIMIT - 1);
+        assert_eq!(shared, 0x7fff_ffff_ffff_ffff);
+        assert_eq!(input, 0xbfff_ffff_ffff_ffff);
+        assert_eq!(output, 0xffff_ffff_ffff_ffff);
+        assert_eq!(shared >> TAG_SHIFT, SHARED_TAG);
+        assert_eq!(input >> TAG_SHIFT, INPUT_TAG);
+        assert_eq!(output >> TAG_SHIFT, OUTPUT_TAG);
     }
+
+    // The field *arithmetic* is checked by the `const _` block near the top of
+    // this file rather than here. That is strictly stronger than a test: a
+    // layout whose fields overlap does not compile at all.
 }
