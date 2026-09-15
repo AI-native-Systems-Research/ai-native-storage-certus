@@ -40,6 +40,22 @@
 //! is checked at load (T017); the mint total depends on the run's span and so
 //! belongs to the pre-flight projection.
 //!
+//! # Retirement is not deletion (FR-018)
+//!
+//! An instance whose lifetime expires stops being *selectable* immediately: its
+//! slot is freed for the next occupant and it leaves both index spaces. It does
+//! not stop *existing*. A session that already holds it keeps reading its blocks
+//! to the end of its own life, because a real workload does not abandon a
+//! document mid-conversation because the document aged out of the popular set.
+//! So a hold is refcounted — [`SharedPool::acquire`] returns a [`Held`] token,
+//! [`SharedPool::release`] gives it back, and only the last release of a retired
+//! instance frees its bookkeeping.
+//!
+//! Nothing about any of this reaches Certus. There is no eviction message and no
+//! delete: a retired object's keys simply stop being requested, and the cache
+//! decides on its own when to drop them. That is the whole point of the
+//! mechanism — it is what gives the cache a working set that moves.
+//!
 //! # Examples
 //!
 //! ```
@@ -129,6 +145,38 @@ impl SharedInstance {
     /// still usable by the sessions already holding it (FR-018).
     pub fn retired(&self) -> bool {
         self.retired
+    }
+}
+
+/// One session's hold on one shared instance.
+///
+/// Returned by [`SharedPool::acquire`] and consumed by [`SharedPool::release`].
+/// It is deliberately neither `Clone` nor `Copy`, because the token *is* the
+/// refcount: a copy would be an extra decrement and a leak of the original.
+///
+/// A hold cannot be a slot number. Slots are reused the moment their occupant
+/// retires, so by the time a holder came back to a slot it could be looking at
+/// the replacement — which is exactly the confusion the `slot`/`mint` split
+/// exists to prevent. The `mint` recorded here is what pins the identity, and
+/// [`SharedPool::held`] checks it.
+#[derive(Debug, PartialEq, Eq)]
+#[must_use = "a dropped hold leaks its instance's bookkeeping; pass it to release()"]
+pub struct Held {
+    class_id: u64,
+    handle: usize,
+    mint: u64,
+}
+
+impl Held {
+    /// Key identity of the held instance — the salt's `instance_index`.
+    pub fn mint(&self) -> u64 {
+        self.mint
+    }
+
+    /// Class this hold belongs to. [`SharedPool::release`] refuses a hold from
+    /// another class, since the handle would name an unrelated instance.
+    pub fn class_id(&self) -> u64 {
+        self.class_id
     }
 }
 
@@ -283,6 +331,9 @@ pub struct SharedPool {
     /// Arena of instances that are either selectable or retired-but-still-used.
     instances: Vec<Option<SharedInstance>>,
     free_handles: Vec<usize>,
+    /// Retired instances still held by at least one session (FR-018). Counted
+    /// rather than derived, because deriving it is a scan of the whole arena.
+    retained: usize,
     /// Selection index space: slot -> arena handle. Reused on death.
     slots: Vec<Option<usize>>,
     free_slots: Vec<u32>,
@@ -339,6 +390,7 @@ impl SharedPool {
             residual,
             instances: Vec::new(),
             free_handles: Vec::new(),
+            retained: 0,
             slots: Vec::new(),
             free_slots: Vec::new(),
             recency: std::collections::VecDeque::new(),
@@ -421,8 +473,9 @@ impl SharedPool {
                 );
                 self.now = at;
                 self.deaths.pop();
-                self.kill(slot);
-                if let Population::Exact(_) = self.form {
+                let replace = matches!(self.form, Population::Exact(_));
+                self.kill(slot, !replace);
+                if replace {
                     // Immediate replacement, in the SAME slot, so popularity
                     // attached to that position carries to the new occupant —
                     // with a fresh mint, so the keys churn.
@@ -491,6 +544,134 @@ impl SharedPool {
         self.birth_rate
     }
 
+    /// Take a hold on the instance occupying `slot`, keeping its bookkeeping
+    /// alive across retirement for as long as the holder needs it (FR-018).
+    ///
+    /// `None` means the slot is empty, which is the only way this fails: a slot's
+    /// occupant is always selectable, because retirement frees the slot.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use workload_model::description::Population;
+    /// use workload_model::distribution::{Distribution, Kind};
+    /// use workload_model::pool::SharedPool;
+    /// use workload_model::rng;
+    ///
+    /// let life = Distribution::new(Kind::Constant { value: 10.0 }).resolve(None).unwrap();
+    /// let len = Distribution::new(Kind::Constant { value: 4.0 }).resolve_integral(None).unwrap();
+    /// let mut rng = rng::substream(1, "pools");
+    /// let mut pool = SharedPool::new(0, Population::Exact(1), life, len, &mut rng);
+    /// pool.seed(0.0, &mut rng);
+    ///
+    /// let held = pool.acquire(0).unwrap();
+    /// let blocks = pool.held(&held).length_blocks();
+    ///
+    /// // Long enough that the instance has retired and been replaced...
+    /// pool.advance_to(100.0, &mut rng);
+    /// assert!(pool.held(&held).retired());
+    /// assert_ne!(pool.by_slot(0).unwrap().mint(), held.mint());
+    /// // ...but the holder still sees the same object it started with.
+    /// assert_eq!(pool.held(&held).length_blocks(), blocks);
+    /// assert_eq!(pool.retained(), 1);
+    ///
+    /// pool.release(held);
+    /// assert_eq!(pool.retained(), 0);
+    /// ```
+    #[must_use = "a dropped hold leaks its instance's bookkeeping; pass it to release()"]
+    pub fn acquire(&mut self, slot: u32) -> Option<Held> {
+        let handle = *self.slots.get(slot as usize)?.as_ref()?;
+        let class_id = self.class_id;
+        let inst = self.instances[handle].as_mut()?;
+        debug_assert!(
+            !inst.retired,
+            "a retired instance still occupies slot {slot}; retirement must free it"
+        );
+        inst.users += 1;
+        Some(Held {
+            class_id,
+            handle,
+            mint: inst.mint,
+        })
+    }
+
+    /// The instance a hold refers to, retired or not.
+    ///
+    /// # Panics
+    ///
+    /// If the hold has been released, or belongs to another pool — both are
+    /// programming errors rather than states the simulation can reach.
+    pub fn held(&self, held: &Held) -> &SharedInstance {
+        assert_eq!(
+            held.class_id, self.class_id,
+            "hold from class {} read in class {}",
+            held.class_id, self.class_id
+        );
+        let inst = self.instances[held.handle]
+            .as_ref()
+            .expect("a held instance is never freed while the hold exists");
+        assert_eq!(
+            inst.mint, held.mint,
+            "hold on mint {} now names mint {}: the arena entry was reused early",
+            held.mint, inst.mint
+        );
+        inst
+    }
+
+    /// Give up a hold.
+    ///
+    /// The last release of a *retired* instance frees its bookkeeping and returns
+    /// its arena entry for reuse, which is the `Released` transition in
+    /// `data-model.md`. Releasing a still-live instance only drops the refcount.
+    /// Certus is told nothing either way (FR-018).
+    ///
+    /// # Panics
+    ///
+    /// If the hold belongs to another pool, or names an instance that has already
+    /// been freed.
+    pub fn release(&mut self, held: Held) {
+        assert_eq!(
+            held.class_id, self.class_id,
+            "hold from class {} released into class {}",
+            held.class_id, self.class_id
+        );
+        let handle = held.handle;
+        let inst = self.instances[handle]
+            .as_mut()
+            .expect("a held instance is never freed while the hold exists");
+        assert_eq!(
+            inst.mint, held.mint,
+            "hold on mint {} now names mint {}: the arena entry was reused early",
+            held.mint, inst.mint
+        );
+        debug_assert!(inst.users > 0, "release without a matching acquire");
+        inst.users -= 1;
+        if inst.users == 0 && inst.retired {
+            self.instances[handle] = None;
+            self.free_handles.push(handle);
+            // Before the handle can be reused, or the reused entry would appear
+            // twice in the recency index and be selectable at two ranks at once.
+            self.recency.retain(|h| *h != handle);
+            self.retained -= 1;
+        }
+    }
+
+    /// Retired instances still held by at least one session — the population that
+    /// exists but cannot be selected.
+    pub fn retained(&self) -> usize {
+        self.retained
+    }
+
+    /// Arena entries reserved for instances.
+    ///
+    /// A freed entry is reused rather than removed, so this is the high-water mark
+    /// of `live() + retained()`. It is exposed because "bookkeeping is freed" is a
+    /// claim about this number staying bounded, and a test should be able to check
+    /// it rather than take it on trust.
+    pub fn arena_len(&self) -> usize {
+        self.instances.len()
+    }
+
     /// The earliest pending death, left on the heap.
     fn peek_death(&self) -> Option<(u32, u64, f64)> {
         self.deaths
@@ -509,30 +690,48 @@ impl SharedPool {
             .is_some_and(|i| i.mint == mint && !i.retired)
     }
 
-    /// Retire the occupant of `slot` and free the slot for reuse.
+    /// Retire the occupant of `slot`, optionally returning the slot for reuse.
     ///
     /// The instance itself survives while sessions still hold it (FR-018); only
     /// its selectability ends. Certus is told nothing.
-    fn kill(&mut self, slot: u32) {
+    ///
+    /// `free_slot` is false when the caller is about to refill the same slot, as
+    /// an exact pool does. Freeing it unconditionally is wrong there: the slot
+    /// would sit in `free_slots` while occupied, so `free_slots` would grow by one
+    /// per death for the life of the run, and a later birth would hand out a slot
+    /// that already had an occupant.
+    fn kill(&mut self, slot: u32, free_slot: bool) {
         let Some(handle) = self.slots[slot as usize].take() else {
             return;
         };
         if let Some(inst) = self.instances[handle].as_mut() {
             inst.retired = true;
             if inst.users == 0 {
+                // The common case: nobody is reading it, so retirement and release
+                // happen at the same instant.
                 self.instances[handle] = None;
                 self.free_handles.push(handle);
                 self.recency.retain(|h| *h != handle);
+            } else {
+                self.retained += 1;
             }
         }
-        self.free_slots.push(slot);
+        if free_slot {
+            self.free_slots.push(slot);
+        }
     }
 
     fn mint<R: Rng + ?Sized>(&mut self, born_at: f64, dies_at: f64, rng: &mut R) -> u32 {
         // Lowest free slot, so the index space stays compact instead of growing
         // with the number of births.
         let slot = match self.free_slots.pop() {
-            Some(s) => s,
+            Some(s) => {
+                debug_assert!(
+                    self.slots[s as usize].is_none(),
+                    "slot {s} was free-listed while still occupied"
+                );
+                s
+            }
             None => {
                 self.slots.push(None);
                 (self.slots.len() - 1) as u32
@@ -806,6 +1005,204 @@ mod tests {
             );
             assert!(got >= t, "next event {got} is in the past at t={t}");
         }
+    }
+
+    #[test]
+    fn a_held_instance_survives_retirement_but_is_unselectable() {
+        // FR-018, both halves in one test: retirement ends selectability at once,
+        // and does not end existence while a session is still reading it.
+        let (mut p, mut r) = pool(Population::Exact(1), Kind::Constant { value: 10.0 });
+        p.seed(0.0, &mut r);
+        let held = p.acquire(0).unwrap();
+        let (mint, blocks) = (held.mint(), p.held(&held).length_blocks());
+
+        p.advance_to(100.0, &mut r);
+
+        assert!(p.held(&held).retired(), "the hold's instance never retired");
+        assert_eq!(p.held(&held).length_blocks(), blocks, "the object changed");
+        assert_eq!(p.retained(), 1);
+        // Unselectable: it is in neither index space, and its slot has a new
+        // occupant with a different key identity.
+        assert!(p.selectable().all(|i| i.mint() != mint));
+        assert!(p.by_recency().all(|i| i.mint() != mint));
+        assert_ne!(p.by_slot(0).unwrap().mint(), mint);
+        assert_eq!(p.live(), 1, "the pool did not stay at its exact size");
+
+        p.release(held);
+        assert_eq!(p.retained(), 0);
+    }
+
+    #[test]
+    fn the_last_release_frees_the_bookkeeping() {
+        // The refcount is what decides, not the first release: two sessions on one
+        // instance means one of them can outlive the other.
+        let (mut p, mut r) = pool(Population::Exact(1), Kind::Constant { value: 10.0 });
+        p.seed(0.0, &mut r);
+        let a = p.acquire(0).unwrap();
+        let b = p.acquire(0).unwrap();
+        assert_eq!(a.mint(), b.mint());
+        assert_eq!(p.held(&a).users(), 2);
+
+        p.advance_to(100.0, &mut r);
+        assert_eq!(p.retained(), 1);
+
+        p.release(a);
+        assert_eq!(
+            p.retained(),
+            1,
+            "freed while a session was still reading it"
+        );
+        assert_eq!(p.held(&b).users(), 1);
+        p.release(b);
+        assert_eq!(p.retained(), 0);
+    }
+
+    #[test]
+    fn releasing_a_live_instance_only_drops_the_refcount() {
+        // A session can finish before the object it was reading ages out. That must
+        // not retire the object.
+        let (mut p, mut r) = pool(Population::Exact(1), Kind::Constant { value: 1e9 });
+        p.seed(0.0, &mut r);
+        let held = p.acquire(0).unwrap();
+        let mint = held.mint();
+        p.release(held);
+        assert_eq!(p.retained(), 0);
+        assert_eq!(p.live(), 1);
+        assert_eq!(p.by_slot(0).unwrap().mint(), mint, "the object was retired");
+        assert_eq!(p.by_slot(0).unwrap().users(), 0);
+    }
+
+    #[test]
+    fn a_full_pool_stays_deliverable_when_every_object_is_a_zombie() {
+        // The worry this answers: if a retired-but-still-held instance kept its
+        // selection slot until its last reader left, then a session asking for the
+        // whole class could not be served — one slot would be occupied by something
+        // unselectable, and FR-022's draw would come up short through no fault of
+        // the population process.
+        //
+        // It cannot happen, because retirement and release are separate events. The
+        // slot is freed at the instant of death and an exact pool refills it in the
+        // same instant; only the *bookkeeping* waits for the refcount. So the pool
+        // is at full strength even with every one of its objects zombied.
+        let n = 6;
+        let (mut p, mut r) = pool(Population::Exact(n), Kind::Constant { value: 10.0 });
+        p.seed(0.0, &mut r);
+
+        // One session holding the entire class, as FR-022's largest draw would.
+        let holds: Vec<Held> = (0..n as u32).map(|s| p.acquire(s).unwrap()).collect();
+        let held_mints: std::collections::BTreeSet<u64> = holds.iter().map(|h| h.mint()).collect();
+        assert_eq!(held_mints.len(), n as usize);
+
+        // Past every one of their lifetimes, so all six are zombies at once.
+        p.advance_to(50.0, &mut r);
+        assert_eq!(p.retained(), n as usize, "not every object zombied");
+        assert!(holds.iter().all(|h| p.held(h).retired()));
+
+        // The class can still deliver a full draw, from live replacements only.
+        assert_eq!(p.live(), n as usize, "a zombie cost the pool a slot");
+        assert_eq!(p.selectable().count(), n as usize);
+        assert_eq!(p.by_recency().count(), n as usize);
+        let now: std::collections::BTreeSet<u64> = p.selectable().map(|i| i.mint()).collect();
+        assert_eq!(now.len(), n as usize, "two slots share an instance");
+        assert!(
+            now.is_disjoint(&held_mints),
+            "a zombie is still selectable: {now:?} meets {held_mints:?}"
+        );
+        // And the slots are still the same compact index space, so `rank_by: slot`
+        // means the same thing before and after.
+        assert_eq!(p.slot_capacity(), n as usize);
+
+        for h in holds {
+            p.release(h);
+        }
+        assert_eq!(p.retained(), 0);
+        assert_eq!(p.live(), n as usize);
+    }
+
+    #[test]
+    fn bookkeeping_stays_bounded_across_many_generations() {
+        // "Released" has to mean something: an entry must come back for reuse. With
+        // one hold outstanding at a time the arena needs the pool plus one, and if
+        // release leaked, this would grow with the number of deaths instead.
+        let (mut p, mut r) = pool(Population::Exact(4), Kind::Constant { value: 10.0 });
+        p.seed(0.0, &mut r);
+        for step in 1..=200 {
+            let held = p.acquire(step as u32 % 4).unwrap();
+            p.advance_to(step as f64 * 10.0, &mut r);
+            p.release(held);
+            assert_eq!(p.live(), 4);
+            assert_eq!(p.retained(), 0);
+        }
+        assert!(p.total_mints() > 50, "no turnover, so nothing was tested");
+        assert!(
+            p.arena_len() <= 5,
+            "arena grew to {} over {} mints: bookkeeping is not being freed",
+            p.arena_len(),
+            p.total_mints()
+        );
+        // And the recency index tracks it, rather than accumulating dead handles.
+        assert_eq!(p.by_recency().count(), 4);
+        assert_eq!(p.recency.len(), 4);
+        // The exact pool refills each slot itself, so nothing should ever have been
+        // put on the free list; an entry there while occupied would later hand out
+        // a slot that already has an occupant.
+        assert!(
+            p.free_slots.is_empty(),
+            "{} occupied slots were free-listed",
+            p.free_slots.len()
+        );
+        assert_eq!(p.slot_capacity(), 4);
+    }
+
+    #[test]
+    fn a_poisson_pool_frees_slots_and_reuses_them() {
+        // The other side of the same fix: here deaths are *not* replaced, so the
+        // slot genuinely does go back on the free list and must be reused rather
+        // than the index space growing with every birth.
+        let (mut p, mut r) = pool(Population::Poisson(20), Kind::Exponential { mean: 50.0 });
+        p.seed(0.0, &mut r);
+        for step in 1..=200 {
+            p.advance_to(step as f64 * 10.0, &mut r);
+            for (slot, handle) in p.slots.iter().enumerate() {
+                if let Some(h) = handle {
+                    assert_eq!(p.instances[*h].unwrap().slot(), slot as u32);
+                }
+            }
+        }
+        assert!(p.total_mints() > 100, "no turnover, so nothing was tested");
+        assert!(
+            p.slot_capacity() < 60,
+            "slot space grew to {} over {} mints: slots are not being reused",
+            p.slot_capacity(),
+            p.total_mints()
+        );
+    }
+
+    #[test]
+    fn acquiring_an_empty_slot_gives_nothing() {
+        let (mut p, mut r) = pool(Population::Poisson(5), Kind::Exponential { mean: 20.0 });
+        p.seed(0.0, &mut r);
+        let beyond = p.slot_capacity() as u32 + 10;
+        assert!(p.acquire(beyond).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "released into class")]
+    fn a_hold_cannot_cross_classes() {
+        // Handles are per-pool, so a hold used in the wrong pool would decrement an
+        // unrelated instance's refcount and free it under its own users.
+        let (mut a, mut r) = pool(Population::Exact(1), Kind::Constant { value: 1e9 });
+        let mut b = SharedPool::new(
+            1,
+            Population::Exact(1),
+            resolved(Kind::Constant { value: 1e9 }, false),
+            resolved(Kind::Constant { value: 4.0 }, true),
+            &mut r,
+        );
+        a.seed(0.0, &mut r);
+        b.seed(0.0, &mut r);
+        let held = a.acquire(0).unwrap();
+        b.release(held);
     }
 
     #[test]
