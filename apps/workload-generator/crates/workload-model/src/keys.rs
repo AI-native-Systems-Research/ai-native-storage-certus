@@ -86,7 +86,7 @@ const OUTPUT_TAG: u64 = 3;
 /// `class_id` occupies bits 50..61 — 4 096 shared classes.
 const CLASS_SHIFT: u32 = 50;
 const CLASS_LIMIT: u64 = 1 << 12;
-/// `instance_index` occupies bits 24..49 — 67 108 864 live instances per pool.
+/// `instance_index` occupies bits 24..49 — 67 108 864 mints per class per run.
 const INSTANCE_SHIFT: u32 = 24;
 const INSTANCE_LIMIT: u64 = 1 << 26;
 /// `session_id` occupies bits 24..61 — 274 877 906 944 sessions per run.
@@ -116,7 +116,13 @@ const ORDINAL_LIMIT: u64 = 1 << 24;
 /// ```
 pub const MAX_CLASSES: u64 = CLASS_LIMIT;
 
-/// Most live instances a single shared pool may hold.
+/// Most instances a single shared class may ever mint in one run.
+///
+/// This bounds *total mints*, not the live count: the salt's `instance_index` is
+/// an instance's monotonic mint counter, because a replacement must not inherit
+/// its dead predecessor's keys. The live count is bounded by this too, being no
+/// larger, and that much is checkable at load; the mint total depends on the
+/// run's span and so belongs to the pre-flight projection.
 pub const MAX_INSTANCES_PER_POOL: u64 = INSTANCE_LIMIT;
 
 /// Most blocks in one shared instance, or in one session's input or output

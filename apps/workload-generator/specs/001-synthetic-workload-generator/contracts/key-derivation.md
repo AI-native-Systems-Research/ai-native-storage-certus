@@ -92,6 +92,13 @@ partitioned so that no two block kinds can collide by construction.
 with `SHARED_TAG = 1`, `INPUT_TAG = 2`, `OUTPUT_TAG = 3`. Tag `0` is unused and
 reserved.
 
+`instance_index` is the instance's **mint counter** within its class — a
+monotonic count of every instance that class has ever created — and *not* its
+bounded selection slot. A replacement must not inherit its predecessor's keys,
+or a finite `lifetime` would produce no key churn. So this field bounds total
+mints per class per run, which depends on the run's span and therefore belongs
+to the pre-flight projection rather than to load-time validation.
+
 `class_id` is the shared class's **declaration index** in the description file,
 not a hash of its name — so renaming a class does not change keys, but
 reordering declarations does. That is the intended trade: declaration order is
@@ -107,7 +114,7 @@ blocks onto one key. So the widths are part of this contract.
 | --- | --- | --- | --- |
 | tag | 62–63 | 2 | 3 kinds (`0` reserved) |
 | `class_id` | 50–61 | 12 | 4 096 shared classes |
-| `instance_index` | 24–49 | 26 | 67 108 864 live instances per pool |
+| `instance_index` | 24–49 | 26 | 67 108 864 instances **minted per class per run** |
 | `block_ordinal` | 0–23 | 24 | 16 777 216 blocks per instance or stream |
 | `session_id` | 24–61 | 38 | 274 877 906 944 sessions per run |
 
