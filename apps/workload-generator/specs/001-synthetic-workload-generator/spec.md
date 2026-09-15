@@ -282,7 +282,23 @@ modes reorder the policies.
   which synchronises the population into cohorts whose periodic churn persists
   for many lifetimes.
 - **FR-016**: System MUST NOT use a feedback controller or expose a control
-  gain for population regulation.
+  gain for population regulation. A regulator suppresses the very fluctuation
+  FR-013 asks for: measured, it holds the live count's `var/mean` at 0.48 where
+  an uncontrolled birth-death population sits at 1.00, so tight regulation is a
+  fidelity loss rather than a gain. It would also add two tuning parameters
+  that FR-005 forbids a portable description from carrying.
+
+  *Note.* This requirement was originally justified by a measured "8-23%
+  positive population bias from the non-negative creation rate". **That
+  justification was wrong** and is retracted. Checked against the reference C
+  implementation in `~scooter/birth-death/`, whose own `xystats` reports
+  `y_mean = 99.1974` against a target of 100, the controller regulates the mean
+  to under 1%, and at those parameters the non-negative constraint never binds
+  at all. The 8-23% figure came from a badly-scaled parameter sweep — the
+  per-sample loop gain scales as the square of the sampling period — not from a
+  property of feedback. The requirement stands on the variance argument above,
+  which the same measurements support. Both the corrected study and the
+  retracted one are reproducible in `research/population/controller.py`.
 - **FR-017**: A class whose lifetime is unbounded MUST be minted once at start
   and never turn over.
 - **FR-018**: When a shared object reaches end of life it MUST stop being

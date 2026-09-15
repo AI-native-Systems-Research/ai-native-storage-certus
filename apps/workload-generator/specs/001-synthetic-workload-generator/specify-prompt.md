@@ -87,6 +87,15 @@ controller was designed, simulated, and rejected on measurement (8-23% positive
 population bias from the non-negative creation rate, plus a spectral
 resonance).
 
+> **Correction, recorded after this prompt was written.** The parenthesis above
+> is wrong, and is left in place because this file is the provenance record of
+> what `spec.md` was generated from rather than a live document. The controller
+> regulates the mean to under 1%, and the non-negative constraint never binds
+at > the parameters where it was checked; the 8-23% came from a badly-scaled >
+parameter sweep. FR-016 survives on the variance argument instead — a >
+regulator holds `var/mean` at 0.48 where a real population sits at 1.00. See >
+`research/population/README.md`.
+
 **Instance selection is non-uniform.** Each class may carry a `selection`
 distribution over the instance index, so its spread sets the *working set* size
 independently of the pool's *key-space* size. `rank_by: slot` attaches
