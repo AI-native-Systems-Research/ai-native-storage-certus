@@ -16,4 +16,10 @@
 //! with no accelerator and no server.
 #![warn(missing_docs)]
 
+pub mod distribution;
+mod error;
 pub mod keys;
+pub mod rng;
+mod special;
+
+pub use error::{Error, Result};

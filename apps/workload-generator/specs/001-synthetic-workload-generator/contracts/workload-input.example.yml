@@ -138,8 +138,17 @@ shared_classes:
       # Raised from 10. `doc_analysis` draws its long_document count from
       # exponential(mean 5), and the implied max is the pool size: truncating
       # that to [1,10] discards 13.5% of the mass and drops the effective mean
-      # from 5 to 4.218. At 20 it discards 1.8% (mean 5.565). The alternative is
+      # from 5 to 3.95. At 20 it discards 1.8% (mean 5.14). The alternative is
       # to keep the pool at 10 and lower the count mean instead.
+      #
+      # Those means are the means of the ROUNDED variable, because a count is
+      # integral: the draw is truncated on [0.5, pool + 0.5] and rounded to
+      # nearest. The continuous truncated means of the same distribution are
+      # 4.218 and 5.565 — higher, and quoted in an earlier draft of this file —
+      # but no draw ever realises them, so reporting them would describe a
+      # quantity nothing observes. (The percentages are unaffected: the
+      # half-unit widening cancels, since
+      # exp(-(p+0.5)/5) / exp(-0.5/5) = exp(-p/5).)
       size: 20
       rank_by: recency
       selection: {exponential: {mean: 6}}
