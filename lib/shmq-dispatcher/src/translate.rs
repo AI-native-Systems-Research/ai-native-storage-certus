@@ -775,6 +775,8 @@ mod tests {
     struct MockDispatcher {
         resident: Mutex<HashSet<u64>>,
         reserve_fail: Mutex<HashSet<u64>>,
+        reserve_deadlines: Mutex<Vec<Option<std::time::Instant>>>,
+        block_until_deadline: Mutex<bool>,
     }
 
     impl IDispatcher for MockDispatcher {
@@ -819,8 +821,17 @@ mod tests {
             key: CacheKey,
             _size: u32,
             _session_id: u64,
-            _deadline: Option<std::time::Instant>,
+            deadline: Option<std::time::Instant>,
         ) -> Result<*mut u8, DispatcherError> {
+            self.reserve_deadlines.lock().unwrap().push(deadline);
+            if *self.block_until_deadline.lock().unwrap() {
+                if let Some(wait) =
+                    deadline.and_then(|d| d.checked_duration_since(std::time::Instant::now()))
+                {
+                    std::thread::sleep(wait);
+                }
+                return Err(DispatcherError::AllocationFailed("test".into()));
+            }
             if self.reserve_fail.lock().unwrap().contains(&key) {
                 Err(DispatcherError::AllocationFailed("test".into()))
             } else {
@@ -983,5 +994,38 @@ mod tests {
         // never a permanent PENDING.
         assert_eq!(tr.reap_stale_reservations(Duration::from_secs(0)), 1);
         assert_eq!(tr.dispatch(op::CHECK, &enc_keys(&[5])).unwrap(), vec![MISS]);
+    }
+
+    #[test]
+    fn op_reserve_shares_one_deadline_across_batch() {
+        let disp = Arc::new(MockDispatcher::default());
+        *disp.block_until_deadline.lock().unwrap() = true;
+        let (_tx, rx) = crossbeam_channel::unbounded::<dispatcher::EvictionEvent>();
+        std::mem::forget(_tx);
+        let budget = Duration::from_millis(300);
+        let tr = Translator::new(disp.clone(), rx, Arc::new(AtomicU64::new(0)), budget);
+
+        let start = std::time::Instant::now();
+        assert_eq!(
+            tr.dispatch(op::RESERVE, &enc_reserve(&[(11, 4096, 0), (12, 4096, 0)]))
+                .unwrap(),
+            vec![0, 0]
+        );
+        let elapsed = start.elapsed();
+
+        let deadlines = disp.reserve_deadlines.lock().unwrap().clone();
+        assert_eq!(deadlines.len(), 2, "expected one reserve call per key");
+        assert_eq!(
+            deadlines[0], deadlines[1],
+            "all keys in one RESERVE batch must share the same deadline"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(250),
+            "first key should consume approximately one shared budget (elapsed {elapsed:?})"
+        );
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "batch must be bounded by one budget, not per-key budgets (elapsed {elapsed:?})"
+        );
     }
 }

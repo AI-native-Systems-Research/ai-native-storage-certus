@@ -3015,7 +3015,10 @@ impl IDispatcher for DispatcherComponent {
 
     /// Batch populate: issue all D2H copies asynchronously on a dedicated store
     /// stream, synchronize once, then register all entries in the dispatch-map.
-    fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+    fn batch_populate(
+        &self,
+        entries: &[(CacheKey, IpcHandle)],
+    ) -> Vec<Result<(), DispatcherError>> {
         if entries.is_empty() {
             return Vec::new();
         }
@@ -3059,7 +3062,11 @@ impl IDispatcher for DispatcherComponent {
             match self.reserve_memory(*key, ipc_handle.size, 0, None) {
                 Ok(_) => {
                     // Slot reserved — immediately issue async D2H copy.
-                    match self.copy_gpu_to_memory_async(*key, std::slice::from_ref(ipc_handle), store_stream) {
+                    match self.copy_gpu_to_memory_async(
+                        *key,
+                        std::slice::from_ref(ipc_handle),
+                        store_stream,
+                    ) {
                         Ok(()) => submitted.push((i, *key, ipc_handle.size)),
                         Err(e) => {
                             let _ = self.release_memory(*key);
@@ -3079,7 +3086,9 @@ impl IDispatcher for DispatcherComponent {
                     }
                     results[i] = Some(Ok(()));
                 }
-                Err(e) => { results[i] = Some(Err(e)); }
+                Err(e) => {
+                    results[i] = Some(Err(e));
+                }
             }
         }
 
@@ -3761,7 +3770,6 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             inner.slots.keys().take(n).copied().collect()
         }
-
 
         fn evict_next(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
@@ -5958,7 +5966,11 @@ mod tests {
             "a slot should have been freed by demotion",
         );
         // No entry was dropped from the dispatch map (demotion keeps the key).
-        assert_eq!(dm_concrete.entry_count(), N as usize, "no key should be removed");
+        assert_eq!(
+            dm_concrete.entry_count(),
+            N as usize,
+            "no key should be removed"
+        );
         // The persisted neighbour was demoted and is now resolvable on SSD.
         assert!(
             matches!(dm.lookup(PERSISTED), Ok(LookupResult::BlockDevice { .. })),

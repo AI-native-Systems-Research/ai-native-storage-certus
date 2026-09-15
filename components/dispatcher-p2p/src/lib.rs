@@ -2255,8 +2255,14 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
-    fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
-        entries.iter().map(|(k, h)| self.populate(*k, h.clone())).collect()
+    fn batch_populate(
+        &self,
+        entries: &[(CacheKey, IpcHandle)],
+    ) -> Vec<Result<(), DispatcherError>> {
+        entries
+            .iter()
+            .map(|(k, h)| self.populate(*k, h.clone()))
+            .collect()
     }
 
     fn reserve_memory(
@@ -2831,7 +2837,6 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             inner.slots.keys().take(n).copied().collect()
         }
-
 
         fn evict_next(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();

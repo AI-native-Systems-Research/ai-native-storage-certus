@@ -48,8 +48,14 @@ fn main() {
     for dev in &devices {
         let arch = architecture_name(dev.compute_major, dev.compute_minor);
         println!("  [{}] {}", dev.device_index, dev.name);
-        println!("      Architecture:       {} (sm_{}{})", arch, dev.compute_major, dev.compute_minor);
-        println!("      Memory:             {}", format_memory(dev.memory_bytes));
+        println!(
+            "      Architecture:       {} (sm_{}{})",
+            arch, dev.compute_major, dev.compute_minor
+        );
+        println!(
+            "      Memory:             {}",
+            format_memory(dev.memory_bytes)
+        );
         println!("      PCI Bus ID:         {}", dev.pci_bus_id);
         println!();
     }

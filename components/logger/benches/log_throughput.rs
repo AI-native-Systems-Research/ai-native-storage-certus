@@ -16,8 +16,7 @@ impl Write for NullWriter {
 }
 
 fn bench_log_info(c: &mut Criterion) {
-    let component =
-        LoggerComponent::new_with_writer(Box::new(NullWriter), LogLevel::Debug, false);
+    let component = LoggerComponent::new_with_writer(Box::new(NullWriter), LogLevel::Debug, false);
     c.bench_function("log_info", |b| {
         b.iter(|| {
             component.info(black_box("benchmark message"));
@@ -35,8 +34,7 @@ fn bench_log_info_colored(c: &mut Criterion) {
 }
 
 fn bench_log_filtered_out(c: &mut Criterion) {
-    let component =
-        LoggerComponent::new_with_writer(Box::new(NullWriter), LogLevel::Error, false);
+    let component = LoggerComponent::new_with_writer(Box::new(NullWriter), LogLevel::Error, false);
     c.bench_function("log_filtered_out", |b| {
         b.iter(|| {
             component.debug(black_box("this will be filtered"));
@@ -45,8 +43,7 @@ fn bench_log_filtered_out(c: &mut Criterion) {
 }
 
 fn bench_log_concurrent(c: &mut Criterion) {
-    let component =
-        LoggerComponent::new_with_writer(Box::new(NullWriter), LogLevel::Debug, false);
+    let component = LoggerComponent::new_with_writer(Box::new(NullWriter), LogLevel::Debug, false);
     c.bench_function("log_concurrent_4_threads", |b| {
         b.iter(|| {
             let threads: Vec<_> = (0..4)

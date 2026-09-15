@@ -91,8 +91,7 @@ fn release_slots_on_failure<Rem, Rel>(
     cache_keys: &[CacheKey],
     mut remove_fn: Rem,
     mut release_fn: Rel,
-)
-where
+) where
     Rem: FnMut(CacheKey) -> bool,
     Rel: FnMut(CacheKey),
 {
@@ -212,7 +211,10 @@ mod tests {
         );
 
         assert!(!ok);
-        assert!(released.is_empty(), "no slots were reserved so none should be released");
+        assert!(
+            released.is_empty(),
+            "no slots were reserved so none should be released"
+        );
     }
 
     /// When a mid-batch reservation fails all previously reserved keys must be
@@ -611,7 +613,11 @@ impl EngineInner {
 
         if success {
             notify_slots_populated(&cache_keys, size, |key, sz| {
-                if self.dispatcher.copy_gpu_to_memory_completed(key, sz).is_ok() {
+                if self
+                    .dispatcher
+                    .copy_gpu_to_memory_completed(key, sz)
+                    .is_ok()
+                {
                     self.entry_count.fetch_add(1, Ordering::Release);
                 }
             });

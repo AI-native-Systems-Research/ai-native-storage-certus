@@ -293,7 +293,6 @@ impl IMemoryTier for MockMemoryTier {
         inner.slots.keys().copied().take(n).collect()
     }
 
-
     fn evict_next(&self) -> Option<CacheKey> {
         let mut inner = self.inner.lock().unwrap();
         let key = inner.slots.keys().next().copied()?;
@@ -812,7 +811,8 @@ fn populate_drops_best_effort_when_tier_full() {
 
     // reserve_memory fails first, before any GPU op, so the drop path is taken
     // regardless of the mock GPU. The store reports success.
-    d.populate(1, handle).expect("full-tier store must drop, not fail");
+    d.populate(1, handle)
+        .expect("full-tier store must drop, not fail");
 
     // The key was not cached: a subsequent check misses.
     assert!(

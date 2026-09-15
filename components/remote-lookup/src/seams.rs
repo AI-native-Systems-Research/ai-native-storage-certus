@@ -599,7 +599,6 @@ impl IMemoryTier for MockMemoryTier {
         unimplemented!("mock: IMemoryTier::oldest_keys not needed by remote-lookup tests")
     }
 
-
     fn touch(&self, _key: CacheKey) {
         unimplemented!("mock: IMemoryTier::touch not needed by remote-lookup tests")
     }
@@ -688,7 +687,10 @@ impl IDispatcher for MockDispatcher {
         unimplemented!("mock: IDispatcher::populate not needed by remote-lookup tests")
     }
 
-    fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+    fn batch_populate(
+        &self,
+        entries: &[(CacheKey, IpcHandle)],
+    ) -> Vec<Result<(), DispatcherError>> {
         entries.iter().map(|(k, h)| self.populate(*k, *h)).collect()
     }
 

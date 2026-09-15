@@ -30,7 +30,12 @@ impl Superblock {
             if partition_sectors > superblock_sectors {
                 let usable = partition_sectors - superblock_sectors;
                 let region = usable / 2;
-                (usable, region, superblock_sectors, superblock_sectors + region)
+                (
+                    usable,
+                    region,
+                    superblock_sectors,
+                    superblock_sectors + region,
+                )
             } else {
                 (0, 0, 0, 0)
             };
@@ -207,7 +212,11 @@ impl EntryRecord {
     const HEADER_SIZE: usize = 2 + 4 + 2 + 4; // key_len + value_len + flags + crc32 = 12
 
     pub fn new(key: String, value: Vec<u8>) -> Self {
-        Self { key, value, flags: 0 }
+        Self {
+            key,
+            value,
+            flags: 0,
+        }
     }
 
     pub fn serialized_size(&self, sector_size: usize) -> usize {
@@ -266,7 +275,8 @@ impl EntryRecord {
         // Verify CRC
         let mut crc_data = Vec::with_capacity(needed - 4);
         crc_data.extend_from_slice(&data[..Self::HEADER_SIZE - 4]); // header sans CRC
-        crc_data.extend_from_slice(&data[Self::HEADER_SIZE..Self::HEADER_SIZE + key_len + value_len]);
+        crc_data
+            .extend_from_slice(&data[Self::HEADER_SIZE..Self::HEADER_SIZE + key_len + value_len]);
         let computed_crc = crc32_of(&crc_data);
         if computed_crc != stored_crc {
             return None;
@@ -309,10 +319,7 @@ pub type KvEntry = (String, Vec<u8>);
 
 /// Deserialize a region blob into key-value pairs. Skips corrupt entries.
 #[allow(clippy::type_complexity)]
-pub fn deserialize_region(
-    data: &[u8],
-    sector_size: usize,
-) -> Option<(RegionHeader, Vec<KvEntry>)> {
+pub fn deserialize_region(data: &[u8], sector_size: usize) -> Option<(RegionHeader, Vec<KvEntry>)> {
     if data.len() < sector_size {
         return None;
     }

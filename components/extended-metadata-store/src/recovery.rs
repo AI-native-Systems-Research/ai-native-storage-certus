@@ -44,7 +44,12 @@ pub fn recover_from_disk(client: &BlockDeviceClient) -> Result<RecoveryResult, S
     let mut warnings = Vec::new();
 
     // Try active region first
-    match try_read_region(client, sb.active_region_offset(), sb.region_a_size, sector_size) {
+    match try_read_region(
+        client,
+        sb.active_region_offset(),
+        sb.region_a_size,
+        sector_size,
+    ) {
         Ok((header, entries)) if header.flush_seq == sb.flush_seq => {
             return Ok(RecoveryResult {
                 superblock: sb,
@@ -72,7 +77,9 @@ pub fn recover_from_disk(client: &BlockDeviceClient) -> Result<RecoveryResult, S
             })
         }
         Err(e) => {
-            warnings.push(format!("inactive region also corrupt: {e}, formatting fresh"));
+            warnings.push(format!(
+                "inactive region also corrupt: {e}, formatting fresh"
+            ));
             format_fresh(client)
         }
     }
@@ -96,7 +103,10 @@ pub fn format_fresh(client: &BlockDeviceClient) -> Result<RecoveryResult, String
 }
 
 /// Format the partition with the given total sector count and write the superblock.
-pub fn format_partition(client: &BlockDeviceClient, total_sectors: u64) -> Result<Superblock, String> {
+pub fn format_partition(
+    client: &BlockDeviceClient,
+    total_sectors: u64,
+) -> Result<Superblock, String> {
     let sb = Superblock::new(client.sector_size, total_sectors);
     client.write_superblock(&sb)?;
     Ok(sb)

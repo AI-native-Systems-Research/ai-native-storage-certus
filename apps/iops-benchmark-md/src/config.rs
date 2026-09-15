@@ -123,7 +123,6 @@ pub struct BenchConfig {
     /// Suppress per-second progress output.
     #[arg(long, default_value_t = false)]
     pub quiet: bool,
-
 }
 
 impl BenchConfig {

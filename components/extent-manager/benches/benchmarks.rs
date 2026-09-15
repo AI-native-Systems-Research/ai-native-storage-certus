@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 use interfaces::{FormatParams, IExtentManager};
 
@@ -52,17 +52,15 @@ fn bench_enumerate(c: &mut Criterion) {
             h.publish().expect("publish");
         }
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, _| {
-                b.iter(|| {
-                    let mut n = 0usize;
-                    component.for_each_extent(&mut |_| { n += 1; });
-                    n
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, _| {
+            b.iter(|| {
+                let mut n = 0usize;
+                component.for_each_extent(&mut |_| {
+                    n += 1;
                 });
-            },
-        );
+                n
+            });
+        });
     }
     group.finish();
 }
@@ -101,18 +99,17 @@ fn bench_checkpoint(c: &mut Criterion) {
             h.publish().expect("publish");
         }
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, _| {
-                b.iter(|| {
-                    let ext = component.reserve_extent(count + 1, 4096).unwrap()
-                        .publish().unwrap();
-                    component.checkpoint().expect("checkpoint");
-                    component.remove_extent(ext.offset).unwrap();
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, _| {
+            b.iter(|| {
+                let ext = component
+                    .reserve_extent(count + 1, 4096)
+                    .unwrap()
+                    .publish()
+                    .unwrap();
+                component.checkpoint().expect("checkpoint");
+                component.remove_extent(ext.offset).unwrap();
+            });
+        });
     }
     group.finish();
 }

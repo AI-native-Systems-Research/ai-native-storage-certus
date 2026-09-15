@@ -83,7 +83,9 @@ fn free_key_publish_is_silent_discard() {
     // The extent must not appear in enumeration.
     assert!(c.get_extents().is_empty());
     // The slot must be freed: a subsequent reserve should succeed.
-    let h2 = c.reserve_extent(1, 4096).expect("reserve after silent discard");
+    let h2 = c
+        .reserve_extent(1, 4096)
+        .expect("reserve after silent discard");
     h2.publish().expect("publish after silent discard");
     assert_eq!(c.get_extents().len(), 1);
 }

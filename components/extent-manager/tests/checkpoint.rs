@@ -194,12 +194,19 @@ fn uncheckpointed_extents_lost_after_restart() {
     c2.initialize().expect("initialize");
 
     let recovered_keys: HashSet<u64> = c2.get_extents().iter().map(|e| e.key).collect();
-    assert_eq!(recovered_keys.len(), 5, "only 5 checkpointed extents should survive");
+    assert_eq!(
+        recovered_keys.len(),
+        5,
+        "only 5 checkpointed extents should survive"
+    );
     for k in 1..=5u64 {
         assert!(recovered_keys.contains(&k), "checkpointed key {k} missing");
     }
     for k in 6..=10u64 {
-        assert!(!recovered_keys.contains(&k), "uncheckpointed key {k} should be lost");
+        assert!(
+            !recovered_keys.contains(&k),
+            "uncheckpointed key {k} should be lost"
+        );
     }
 }
 
@@ -264,7 +271,10 @@ fn corrupt_active_falls_back_to_previous() {
 
     let recovered_keys: HashSet<u64> = c2.get_extents().iter().map(|e| e.key).collect();
     for k in 1..=5u64 {
-        assert!(recovered_keys.contains(&k), "key {k} from previous checkpoint missing");
+        assert!(
+            recovered_keys.contains(&k),
+            "key {k} from previous checkpoint missing"
+        );
     }
 }
 

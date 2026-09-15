@@ -16,7 +16,10 @@ use interfaces::{ClientChannels, Command, Completion};
 use spdk_env::SPDKEnvComponent;
 
 #[derive(Parser)]
-#[command(name = "nvme-ns-manager", about = "Interactive NVMe namespace manager via SPDK")]
+#[command(
+    name = "nvme-ns-manager",
+    about = "Interactive NVMe namespace manager via SPDK"
+)]
 struct Cli {
     /// NVMe controller PCI BDF address (e.g. 0000:03:00.0). Uses first device if omitted.
     #[arg(long)]
@@ -79,10 +82,7 @@ fn main() {
         &devices[0]
     };
 
-    println!(
-        "Device: {}  Driver: v2",
-        device.address
-    );
+    println!("Device: {}  Driver: v2", device.address);
 
     // --- Initialize block device ---
     let admin = query::<dyn interfaces::IBlockDeviceAdmin + Send + Sync>(&*block_dev)
@@ -103,10 +103,11 @@ fn main() {
         std::process::exit(2);
     }
 
-    let ibd = query::<dyn interfaces::IBlockDevice + Send + Sync>(&*block_dev).unwrap_or_else(|| {
-        eprintln!("error: failed to query IBlockDevice");
-        std::process::exit(2);
-    });
+    let ibd =
+        query::<dyn interfaces::IBlockDevice + Send + Sync>(&*block_dev).unwrap_or_else(|| {
+            eprintln!("error: failed to query IBlockDevice");
+            std::process::exit(2);
+        });
 
     let channels = ibd.connect_client().unwrap_or_else(|e| {
         eprintln!("error: failed to connect client: {e}");
@@ -131,7 +132,8 @@ fn main() {
         match line.trim() {
             "1" => cmd_list(&channels),
             "2" => {
-                let size_sectors = match prompt_value::<u64>(&stdin, &mut stdout, "Size in sectors") {
+                let size_sectors = match prompt_value::<u64>(&stdin, &mut stdout, "Size in sectors")
+                {
                     Some(v) => v,
                     None => continue,
                 };
