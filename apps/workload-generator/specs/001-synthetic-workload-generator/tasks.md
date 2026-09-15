@@ -135,28 +135,43 @@ output containers.
   — once committed these values must never change, since changing them
   invalidates every previously generated trace
 
-**Found while implementing T014 — the salt layout imposes hard ceilings the
-contract does not state, and T017/T033 must enforce them at load time.** The
-salt is assembled with **XOR** over fixed-width fields, so a field that
-overflows does not saturate: it corrupts its neighbour and aliases two
-different blocks onto one key, which would surface only as an inexplicable
-cache hit. `keys.rs` therefore asserts each field's width rather than
-truncating, which converts the hazard into a loud panic. The ceilings are:
+**Found while implementing T014, and RESOLVED by re-balancing the salt layout
+(`contracts/key-derivation.md` updated, T015 vectors re-pinned).** The salt is
+assembled with **XOR** over fixed-width fields, so a field that overflows does
+not saturate: it corrupts its neighbour and aliases two different blocks onto
+one key, which would surface only as an inexplicable cache hit. `keys.rs`
+asserts each field's width rather than truncating, which converts the hazard
+into a loud panic.
 
-| Field | Width | Ceiling |
-| --- | --- | --- |
-| `class_id` | 16 bits | 65 536 shared classes |
-| `instance_index` | 16 bits | 65 536 live instances per pool |
-| `block_ordinal` | 16 bits | 65 536 blocks per instance, and per session's input and output stream |
-| `session_id` | 32 bits | 4 294 967 296 sessions per run |
+The contract's original layout put the tag at bit 48 and gave every field 16
+bits — spending 16 bits on a 3-value tag while capping `block_ordinal` **and
+`instance_index`** at 65 536. Both were reachable: a session's input stream
+grows every turn, so `turns × E[input_growth]` passes 65 536 in a long run, and
+a document pool written as `size: 100000` exceeds the instance field. The tag
+moved to the top 2 bits and the 14 freed bits went to the two fields that
+needed them:
 
-Only `block_ordinal` is reachable in practice: SC-012 targets hour-long runs,
-and a long session's input stream grows every turn, so `turns ×
-E[input_growth]` can pass 65 536. **A panic mid-run would destroy the run's
-output**, so the description validator must refuse it up front from the
-projected per-session block count, and the projection already computes exactly
-that quantity. Recorded here rather than only in the code because the fix
-belongs in a different task from the discovery.
+| Field | Bits | Was | Now | Ceiling |
+| --- | --- | --- | --- | --- |
+| tag | 62–63 | 16 bits | 2 bits | 3 kinds (`0` reserved) |
+| `class_id` | 50–61 | 16 bits | 12 bits | 4 096 shared classes |
+| `instance_index` | 24–49 | 16 bits | 26 bits | 67 108 864 per pool |
+| `block_ordinal` | 0–23 | 16 bits | 24 bits | 16 777 216 per instance or stream |
+| `session_id` | 24–61 | 32 bits | 38 bits | 274 877 906 944 per run |
+
+Both arrangements now use all 64 bits exactly (`2 + 12 + 26 + 24` and
+`2 + 38 + 24`), which `field_maxima_are_accepted` pins by asserting the all-max
+salts are exactly `7fff…`, `bfff…` and `ffff…`, and
+`field_widths_sum_to_the_whole_word` checks by arithmetic on the shift
+constants, so moving one shift without its neighbour fails a test instead of
+silently overlapping.
+
+**Every ceiling is now unreachable** against SC-012's 10 000 concurrent sessions
+and 10 000 000 live keys, so **T017 does not need a load-time check for these**
+— the asserts are cheap insurance on a path nothing should reach. Re-pinning was
+free only because no trace had yet been generated; the contract now carries a
+*Versioning* section saying that a later change must be a new version recorded
+in the manifest, never an edit.
 
 ### Description parsing and validation
 

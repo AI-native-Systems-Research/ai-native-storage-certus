@@ -93,15 +93,15 @@ fn chain_vectors_are_pinned() {
     // field offsets would otherwise pass every test above.
     assert_eq!(
         keys::key(ROOT_PARENT, keys::shared_salt(0, 0, 0)),
-        0xfe2a_2f8c_f6b4_b5e8
+        0xfb26_9438_518a_37a0
     );
     assert_eq!(
         keys::key(ROOT_PARENT, keys::input_salt(7, 3)),
-        0x832b_1e8e_ded7_c7c4
+        0x5330_5e28_21f0_4364
     );
     assert_eq!(
         keys::key(ROOT_PARENT, keys::output_salt(7, 3)),
-        0xea27_55ea_6282_6b56
+        0x6247_41cd_5024_ca0e
     );
 }
 
@@ -132,10 +132,10 @@ fn salt_space_is_partitioned_by_block_kind() {
     assert_ne!(shared, output);
     assert_ne!(input, output);
 
-    // Tags, read back out of the top bits.
-    assert_eq!(shared >> 48, 1, "SHARED_TAG");
-    assert_eq!(input >> 48, 2, "INPUT_TAG");
-    assert_eq!(output >> 48, 3, "OUTPUT_TAG");
+    // Tags, read back out of the top two bits.
+    assert_eq!(shared >> 62, 1, "SHARED_TAG");
+    assert_eq!(input >> 62, 2, "INPUT_TAG");
+    assert_eq!(output >> 62, 3, "OUTPUT_TAG");
 }
 
 #[test]
@@ -151,23 +151,34 @@ fn salt_fields_are_distinct_positions() {
 
 #[test]
 fn shared_salt_layout_matches_the_contract() {
-    // (SHARED_TAG << 48) ^ (class_id << 32) ^ (instance_index << 16) ^ ordinal
+    // (SHARED_TAG << 62) ^ (class_id << 50) ^ (instance_index << 24) ^ ordinal
+    // Probe values chosen so every field is distinct and none is a prefix of
+    // another, and each fits its own width.
     assert_eq!(
-        keys::shared_salt(0x1234, 0x5678, 0x9abc),
-        (1u64 << 48) ^ (0x1234u64 << 32) ^ (0x5678u64 << 16) ^ 0x9abc
+        keys::shared_salt(0xabc, 0x123456, 0xdef012),
+        (1u64 << 62) ^ (0xabcu64 << 50) ^ (0x123456u64 << 24) ^ 0xdef012
+    );
+    assert_eq!(
+        keys::shared_salt(0xabc, 0x123456, 0xdef012),
+        0x6af0_1234_56de_f012
     );
 }
 
 #[test]
 fn session_salt_layout_matches_the_contract() {
-    // (TAG << 48) ^ (session_id << 16) ^ ordinal
+    // (TAG << 62) ^ (session_id << 24) ^ ordinal
     assert_eq!(
         keys::input_salt(0x1234_5678, 0x9abc),
-        (2u64 << 48) ^ (0x1234_5678u64 << 16) ^ 0x9abc
+        (2u64 << 62) ^ (0x1234_5678u64 << 24) ^ 0x9abc
     );
     assert_eq!(
         keys::output_salt(0x1234_5678, 0x9abc),
-        (3u64 << 48) ^ (0x1234_5678u64 << 16) ^ 0x9abc
+        (3u64 << 62) ^ (0x1234_5678u64 << 24) ^ 0x9abc
+    );
+    assert_eq!(keys::input_salt(0x1234_5678, 0x9abc), 0x8012_3456_7800_9abc);
+    assert_eq!(
+        keys::output_salt(0x1234_5678, 0x9abc),
+        0xc012_3456_7800_9abc
     );
 }
 
@@ -180,31 +191,42 @@ fn session_salt_layout_matches_the_contract() {
 #[test]
 #[should_panic(expected = "block_ordinal")]
 fn shared_ordinal_beyond_its_field_panics() {
-    keys::shared_salt(0, 0, 1 << 16);
+    keys::shared_salt(0, 0, 1 << 24);
 }
 
 #[test]
 #[should_panic(expected = "instance_index")]
 fn instance_index_beyond_its_field_panics() {
-    keys::shared_salt(0, 1 << 16, 0);
+    keys::shared_salt(0, 1 << 26, 0);
 }
 
 #[test]
 #[should_panic(expected = "class_id")]
 fn class_id_beyond_its_field_panics() {
-    keys::shared_salt(1 << 16, 0, 0);
+    keys::shared_salt(1 << 12, 0, 0);
 }
 
 #[test]
 #[should_panic(expected = "session_id")]
 fn session_id_beyond_its_field_panics() {
-    keys::input_salt(1 << 32, 0);
+    keys::input_salt(1 << 38, 0);
 }
 
 #[test]
 fn field_maxima_are_accepted() {
     // The boundary on the legal side, so the assertions are not off by one.
-    let _ = keys::shared_salt(u16::MAX as u64, u16::MAX as u64, u16::MAX as u64);
-    let _ = keys::input_salt(u32::MAX as u64, u16::MAX as u64);
-    let _ = keys::output_salt(u32::MAX as u64, u16::MAX as u64);
+    // All fields at maximum must give exactly the top of each tag's range,
+    // which is what proves the layout covers all 64 bits with no overlap.
+    assert_eq!(
+        keys::shared_salt((1 << 12) - 1, (1 << 26) - 1, (1 << 24) - 1),
+        0x7fff_ffff_ffff_ffff
+    );
+    assert_eq!(
+        keys::input_salt((1 << 38) - 1, (1 << 24) - 1),
+        0xbfff_ffff_ffff_ffff
+    );
+    assert_eq!(
+        keys::output_salt((1 << 38) - 1, (1 << 24) - 1),
+        0xffff_ffff_ffff_ffff
+    );
 }

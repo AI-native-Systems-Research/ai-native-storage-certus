@@ -63,16 +63,50 @@ partitioned so that no two block kinds can collide by construction.
 
 | Block kind | Salt |
 | --- | --- |
-| Shared-object block | `(SHARED_TAG << 48) ^ (class_id << 32) ^ (instance_index << 16) ^ block_ordinal` |
-| Session input block | `(INPUT_TAG << 48) ^ (session_id << 16) ^ block_ordinal` |
-| Session output block | `(OUTPUT_TAG << 48) ^ (session_id << 16) ^ block_ordinal` |
+| Shared-object block | `(SHARED_TAG << 62) ^ (class_id << 50) ^ (instance_index << 24) ^ block_ordinal` |
+| Session input block | `(INPUT_TAG << 62) ^ (session_id << 24) ^ block_ordinal` |
+| Session output block | `(OUTPUT_TAG << 62) ^ (session_id << 24) ^ block_ordinal` |
 
-with `SHARED_TAG = 1`, `INPUT_TAG = 2`, `OUTPUT_TAG = 3`.
+with `SHARED_TAG = 1`, `INPUT_TAG = 2`, `OUTPUT_TAG = 3`. Tag `0` is unused and
+reserved.
 
 `class_id` is the shared class's **declaration index** in the description file,
 not a hash of its name — so renaming a class does not change keys, but
 reordering declarations does. That is the intended trade: declaration order is
 already semantic (spec FR-028).
+
+### Field widths, and why they are what they are
+
+The shifts above are not arbitrary spacing: each field's **width is the gap to
+the next field**, and an overflowing field would silently alias two different
+blocks onto one key. So the widths are part of this contract.
+
+| Field | Bits | Width | Ceiling |
+| --- | --- | --- | --- |
+| tag | 62–63 | 2 | 3 kinds (`0` reserved) |
+| `class_id` | 50–61 | 12 | 4 096 shared classes |
+| `instance_index` | 24–49 | 26 | 67 108 864 live instances per pool |
+| `block_ordinal` | 0–23 | 24 | 16 777 216 blocks per instance or stream |
+| `session_id` | 24–61 | 38 | 274 877 906 944 sessions per run |
+
+Both layouts use all 64 bits exactly: `2 + 12 + 26 + 24` for a shared block and
+`2 + 38 + 24` for a session block. Every ceiling is orders of magnitude beyond
+the scale target of 10 000 concurrent sessions and 10 000 000 live keys (spec
+SC-012), so none is reachable by a description anyone would write.
+
+**An earlier revision of this contract placed the tag at bit 48 and gave every
+field 16 bits.** That spent 16 bits on a 3-value tag while capping
+`block_ordinal` at 65 536 — reachable, since a session's input stream grows every
+turn and `turns × E[input_growth]` passes it in a long run — and
+`instance_index` at 65 536, which a document pool written as `size: 100000`
+would exceed. Both would have surfaced only as an inexplicable cache hit. The
+tag was moved to the top 2 bits and the 14 freed bits given to the two fields
+that needed them. This changed every salt-derived key, which was acceptable only
+because no trace had yet been generated; see *Versioning* below.
+
+An implementation MUST reject an out-of-range coordinate rather than truncating
+it. Because the salt is assembled with XOR, truncation does not saturate — it
+corrupts the neighbouring field.
 
 ## Chain construction
 
@@ -109,15 +143,51 @@ splitmix64(0)                    = e220a8397b1dcdaf
 splitmix64(1)                    = 910a2dec89025cc1
 splitmix64(0xffffffffffffffff)   = e4d971771b652c20
 
-key(parent=0, salt=0)            = splitmix64(splitmix64(0) ^ 0)
-key(parent=0, salt=1)            = splitmix64(splitmix64(0) ^ 1)
+key(parent=0, salt=0)            = a706dd2f4d197e6f
+key(parent=0, salt=1)            = 08b4fda8c892b50e
+key(parent=08b4fda8c892b50e, salt=2)
+                                 = bedb5bf1cd5ec111
 ```
 
-The implementation MUST ship a unit test asserting the three `splitmix64`
-values above, and a test that a two-element chain built from `(parent=0,
-salt=1)` then `(parent=that, salt=2)` is stable across runs. The concrete chain
-values are to be pinned by that test on first implementation and then never
-changed — changing them invalidates every previously generated trace.
+Those five depend only on the mix function and the chain rule, so they are
+unaffected by the salt layout. The three below pin the **layout** as well, and a
+change to any field offset would alter them while leaving everything above
+intact:
+
+```text
+key(0, shared_salt(class=0, instance=0, ordinal=0))  = fb269438518a37a0
+key(0, input_salt(session=7, ordinal=3))             = 53305e2821f04364
+key(0, output_salt(session=7, ordinal=3))            = 624741cd5024ca0e
+```
+
+The salt encodings themselves, as three probes with every field distinct:
+
+```text
+shared_salt(class=0xabc, instance=0x123456, ordinal=0xdef012)
+                                 = 6af0123456def012
+input_salt(session=0x12345678, ordinal=0x9abc)
+                                 = 8012345678009abc
+output_salt(session=0x12345678, ordinal=0x9abc)
+                                 = c012345678009abc
+```
+
+The implementation MUST ship unit tests asserting all of the above, and MUST
+assert each field's width so that an out-of-range coordinate panics rather than
+aliasing.
+
+## Versioning
+
+The concrete values above are pinned and must not change: changing them
+invalidates every previously generated trace and silently destroys every
+cross-node hit. They were revised exactly once, when the field widths were
+rebalanced (see *Field widths* above), and that was only defensible because no
+trace existed yet.
+
+If the key function ever has to change once traces exist, the change is a **new
+version**, not an edit: the old function stays, the trace manifest records which
+version produced it, and a consumer refuses a trace whose version it cannot
+compute. Editing these values in place is never the answer, because the failure
+it produces is invisible — a trace that loads, replays, and quietly misses.
 
 ## Collision posture
 
@@ -127,3 +197,9 @@ per run. Collisions are therefore not handled: a collision would appear as an
 unexpected cache hit, and at that rate it cannot bias a measurement. This is a
 deliberate decision rather than an oversight, and it is the reason the key
 width does not need to grow with the scale target.
+
+A **field overflow** is a different thing and is not tolerated. A birthday
+collision is a random event at a rate of 10^-6 per run and cannot bias a
+measurement. An overflowing coordinate aliases two specific blocks
+*systematically*, on every run, for as long as that description is in use. The
+first is accepted; the second panics.
