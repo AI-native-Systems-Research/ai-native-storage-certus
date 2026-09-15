@@ -126,10 +126,21 @@ live.
 
 | Field | Notes |
 | --- | --- |
-| `index` | selection probability *and* prefix position |
+| `slot` | **bounded selection index**, reused after death — popularity attaches here |
+| `mint` | **key identity**, monotonic per class — the salt's `instance_index` |
 | `length_blocks` | drawn once at creation |
 | `born_at`, `dies_at` | virtual seconds |
 | `users` | refcount, for the release transition |
+
+**These are two different identifiers, and an earlier revision of this table
+conflated them into one `index` doing both jobs.** It cannot. If the key salt
+used the bounded, reused selection index, a replacement would inherit its dead
+predecessor's keys *exactly* — `lifetime` would produce no key churn at all,
+and the churn rate a cache actually sees, which
+`research/population/seeding.py` exists to measure, would be identically zero.
+Selection must be bounded so that heat does not attach permanently to the
+earliest instances; key identity must be unique per instance ever created. The
+two requirements are incompatible in one field.
 
 ## SessionClass and SessionPool
 

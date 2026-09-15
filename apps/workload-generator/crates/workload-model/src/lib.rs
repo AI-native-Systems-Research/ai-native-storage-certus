@@ -20,6 +20,7 @@ pub mod description;
 pub mod distribution;
 mod error;
 pub mod keys;
+pub mod pool;
 pub mod rng;
 mod special;
 

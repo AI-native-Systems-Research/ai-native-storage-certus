@@ -237,11 +237,31 @@ do. Keep T083 only if a *doc* test is wanted specifically.
 
 ### Populations
 
-- [ ] T019 Implement `SharedPool` with the `exact` and `poisson` forms in
+- [x] T019 Implement `SharedPool` with the `exact` and `poisson` forms in
   `crates/workload-model/src/pool.rs` — no feedback controller and no gain
   parameter (FR-016)
-- [ ] T020 Implement equilibrium residual-life seeding in
-  `crates/workload-model/src/pool.rs`, used for both forms at `t = 0`
+- [x] T020 Implement equilibrium residual-life seeding in
+  `crates/workload-model/src/pool.rs`, used for both forms at `t = 0` **Found
+  while implementing T019/T020 — `data-model.md` conflated two indices, and
+  both the data model and the key contract are corrected.** A shared instance
+  needs a **bounded selection index** (reused on death, so popularity attaches
+  to a position) *and* a **unique key identity** (so a replacement does not
+  inherit its predecessor's keys). One field cannot do both: if the salt used
+  the reused slot, a finite `lifetime` would produce no key churn at all and
+  the churn rate `research/population/seeding.py` measures would be identically
+  zero. `SharedInstance` therefore carries `slot` and `mint`. A consequence:
+  the salt's 26-bit `instance_index` bounds **total mints per class per run**,
+  not the live count, so **T033's projection must check it** — the load-time
+  check in T017 covers only the live count.
+
+**Also in T019:** pending deaths are a binary heap rather than a scan of the
+slots, because a scan costs O(pool size) per event against a 10 000-instance
+scale target. Two notes for whoever touches it: `BinaryHeap::iter` is in
+*arbitrary* order, not sorted order, so the earliest entry can only be had from
+`peek`; and the heap deliberately has no lazy deletion, because every entry is
+popped exactly at its death — a `debug_assert` in `advance_to` pins that
+assumption rather than leaving dead defensive code that no test exercises.
+
 - [ ] T021 Implement retirement and release in
   `crates/workload-model/src/pool.rs`: an expired instance becomes unselectable
   while existing users continue, and its bookkeeping is freed when the last
