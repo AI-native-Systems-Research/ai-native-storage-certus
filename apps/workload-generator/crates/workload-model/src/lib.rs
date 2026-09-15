@@ -15,3 +15,5 @@
 //! by convention, and the whole determinism and distribution test surface runs
 //! with no accelerator and no server.
 #![warn(missing_docs)]
+
+pub mod keys;
