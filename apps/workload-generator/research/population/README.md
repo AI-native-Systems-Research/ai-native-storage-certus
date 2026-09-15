@@ -68,12 +68,21 @@ ranges from excellent to catastrophic (the over-gained rows reach +23% bias and
 15× the target variance). FR-005 requires a description to be portable across
 clusters unchanged, so it must not carry tuning parameters.
 
+**The reference controller has no clamp inside it, by design.** Its state
+variables are free to produce a negative rate, and nothing rectifies them.
+Non-negativity of births is enforced only *indirectly*, by the birth test `y *
+(t - t0) >= 1.0`, which a negative `y` never satisfies. That is the right place
+for it — a rate that cannot be acted on is still the correct control signal,
+and suppressing it in the state is the classic windup mistake. The port
+matches, and using `max(y, 0)` versus raw `y` in that test is provably
+equivalent (both fail for negative `y`) and measured identical to every digit.
+
 **Two things I suspected and measurement refuted**, recorded so they are not
-re-suspected: feeding the *clamped* rate back into the controller state instead
-of the commanded one is a real anti-windup mistake, but it changes nothing here
-because the clamp never fires; and spacing births deterministically at `1/y`
-rather than as a Poisson process leaves the mean alone while inflating the
-variance 25× (var/mean 11.8 instead of 0.48).
+re-suspected: feeding the *clamped* rate back into the controller state — the
+windup mistake the reference avoids — changes nothing here, because the clamp
+never fires; and spacing births deterministically at `1/y` rather than as a
+Poisson process leaves the mean alone while inflating the variance 25×
+(var/mean 11.8 instead of 0.48).
 
 ## FR-015 — the recorded rationale was RIGHT
 
