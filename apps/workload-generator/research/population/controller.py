@@ -66,16 +66,29 @@ low-pass at pole `alpha`:
     y_k = (1+A) y_{k-1} - A y_{k-2} + p1 u_{k-1} + p2 u_{k-2}      u = N* - n
 
 The C version writes it as a state-space biquad and this one as the difference
-equation; expanding the former gives the latter exactly. Two switches select the
-*old* Python behaviour so the retracted result is reproducible rather than merely
-described:
+equation; expanding the former gives the latter exactly.
+
+**There is no clamp inside the reference controller, by design.** Its state
+variables are free to produce a negative rate, and nothing rectifies them. The
+non-negativity of births is enforced only *indirectly*, by the birth test
+`y * (t - t0) >= 1.0`, which a negative `y` simply never satisfies. That is the
+right place for it: a rate that cannot be acted on is still the correct control
+signal, and suppressing it in the state would be the classic windup mistake.
+
+This port matches that. `y` goes into the controller state unmodified; the
+`max(y, 0)` appearing below is used only in the birth test, where it is provably
+equivalent to using `y` raw — for `y < 0` and `t > t0`, `y*(t-t0)` is negative and
+`0*(t-t0)` is zero, and neither reaches 1. Verified empirically as well: both
+forms agree to every digit of the mean and variance at alpha in {0.01, 0.1, 1}.
+
+Two switches select the *old* Python behaviour so the retracted result is
+reproducible rather than merely described:
 
   `feedback_clamped`     feed the clamped rate back into the controller state
-                         instead of the commanded one. A real anti-windup
-                         mistake, but inert at sane parameters — the clamp does
-                         not fire.
-  `one_birth_per_tick`   the C rule: births when the integral of the rate since
-                         the last birth reaches 1, at most one per tick. The
+                         instead of the commanded one — i.e. the windup mistake
+                         the reference deliberately avoids. Inert at sane
+                         parameters, because the clamp never fires there.
+  `one_birth_per_tick`   the C rule above, at most one birth per tick. The
                          alternative spaces births deterministically at 1/y,
                          which leaves the mean alone but inflates the variance by
                          25x, because deterministic spacing is not a Poisson
