@@ -557,11 +557,34 @@ step-shaped, and the two ranking modes reorder the policies.
 - [ ] T086 Final gate: `cargo fmt --check`, `cargo clippy -- -D warnings`,
   `cargo doc --no-deps`, `cargo test --all -- --test-threads 1`, plus the two
   non-default-member crates built and tested explicitly with `-p`
-- [ ] T087 [P] Consider landing the population simulation from
-  `~scooter/popsim/` as a repo test under `crates/workload-model/tests/`, which
-  would make the controller-rejection and cohort-seeding measurements
-  reproducible rather than external. **Ask first** — this was offered twice and
-  never decided
+- [x] T087 [P] Land the population simulation from `~scooter/popsim/` in the
+  repository so the controller-rejection and cohort-seeding measurements are
+  reproducible rather than external. **DONE, as `research/population/`** rather
+  than as a gated test, per the user's decision: it is research provenance for
+  FR-013 to FR-016, not a check on the implementation.
+
+  **Porting it found that FR-016's recorded rationale was WRONG.** The claimed
+  "8-23% positive population bias from the non-negative creation rate" does not
+  reproduce: checked against the reference C implementation in
+  `~scooter/birth-death/` (whose `xystats` reports `y_mean = 99.1974` against a
+  target of 100), the controller regulates the mean to under 1%, and at those
+  parameters the non-negative constraint never binds at all. The figure came
+  from a badly-scaled parameter sweep — the per-sample loop gain goes as the
+  square of the sampling period. FR-016 now stands on the variance argument
+  instead: a regulator holds `var/mean` at 0.48 where an uncontrolled
+  birth-death population sits at 1.00, so it suppresses exactly the fluctuation
+  FR-013 asks for. Corrected in `spec.md`, the constitution, `plan.md`, and
+  annotated in `specify-prompt.md` (provenance, so annotated rather than
+  rewritten).
+
+  **FR-015's rationale was right** and is now reproducible. `seeding.py`'s
+  `residual_sampler` is the algorithm **T020 must implement**: a length-biased
+  pick of a lifetime, then a uniform point within it — general over all five
+  distribution kinds, no closed form needed. Its per-generation table is
+  **T024's reference measurement**: seeded from the lifetime distribution the
+  first three windows see exactly zero churn and modulation is still 0.44 after
+  eight generations, against 0.04 for residual-life seeding. T024 should assert
+  that structure rather than the digits, so it cannot go flaky.
 
 ---
 

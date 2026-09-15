@@ -236,10 +236,17 @@ as signal.
 
 **Rationale**: Silent reshaping of a user's stated intent is a defect, not a
 convenience — and it is undetectable downstream, because the workload still
-runs and still produces numbers. Requiring traceability is not pedantry: during
-design, plausible-sounding control theory was proposed, simulated, and found to
-carry an 8-23% population bias and a spectral resonance that inspection had
-missed.
+runs and still produces numbers. Requiring traceability is not pedantry, and
+this principle has already caught its own first error. During design, an
+integral controller was proposed, simulated, and rejected on the strength of a
+measured "8-23% population bias". Re-running it against a reference C
+implementation showed **that measurement did not support that conclusion**: the
+controller regulates the mean to under 1%, and the bias came from a
+badly-scaled parameter sweep. The requirement survives on a different and
+better ground — a regulator halves the population's dispersion, where the
+instrument needs the Poisson `var = mean` of a real population — but the
+rationale on record was wrong for a week. The evidence now lives in
+`research/population/`, runnable, which is what would have caught it sooner.
 
 ## Platform and Tooling Requirements
 

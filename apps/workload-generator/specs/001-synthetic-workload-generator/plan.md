@@ -84,7 +84,7 @@ this section.*
 | **VI. Documentation Standards** | Doc comments with runnable examples; warning-free `cargo doc`; input schema documented in contracts and the example validated as a test | **PASS** — `contracts/workload-input.example.yml` is exercised by Scenario 1 |
 | **VII. Maintainability** | YAGNI; minimal justified dependencies; explicit `Result`; readable structure | **PASS with one item to watch** — five crates is the largest structure here, justified below; `parquet` is a genuinely new dependency and is justified and feature-gated in `research.md` D4 |
 | **VIII. Measurement Validity** (NON-NEGOTIABLE) | Plan-queue depth asserted per run; virtual clock holds on backpressure; plan reproducible; races preserved and their consequence documented | **PASS** — exit code 3 puts invalidity in the process status, not only the report (`contracts/cli.md`); FR-072 enforced by the crate boundary |
-| **IX. Specified Statistical Machinery** | Inverse-transform truncation; half-open integer bounds; residual-life seeding; effective distributions reported; claims traceable | **PASS** — all four are invariants in `data-model.md`; the rejected controller's measurements are recorded in `spec.md` and `~scooter/popsim/` |
+| **IX. Specified Statistical Machinery** | Inverse-transform truncation; half-open integer bounds; residual-life seeding; effective distributions reported; claims traceable | **PASS** — all four are invariants in `data-model.md`; the population measurements are reproducible in `research/population/`, which is also where the controller rationale's own retraction is recorded |
 
 **Five crates versus YAGNI (Principle VII).** Justified rather than waved
 through: the split is not modularity for its own sake, it is what makes two
