@@ -1,0 +1,203 @@
+# Synthetic workload generator input — schema version 1.
+#
+# TIME. All times are VIRTUAL seconds. Virtual time exists only to decide the
+# ORDER in which operations reach Certus; it is never mapped to wallclock. A
+# stall on Certus backpressure HOLDS the virtual clock rather than advancing it,
+# so the workload is identical whether Certus is fast or slow.
+#
+# DISTRIBUTIONS. Every statistical value is written as {kind: params}. Optional
+# `min`/`max` truncate the distribution properly — inverse-transform between
+# F(min) and F(max) — never by clamping. Integer-valued quantities truncate on
+# [min - 0.5, max + 0.5] and round to nearest, so every integer in range carries
+# equal weight (without the half-open bounds, the endpoints get half weight).
+#
+# WHERE CACHE HITS COME FROM. Two independent sources, driven by different
+# parameters, so they can be tuned separately:
+#
+#   1. INTRA-SESSION reuse, from multi-turn. A session's context is append-only,
+#      so turn n re-reads its whole prefix: its shared objects plus every input
+#      and output block minted by turns 1..n-1. How MUCH there is to reuse
+#      comes from `turns` and the growth distributions; how FAR apart the
+#      reuses land — the reuse distance, which decides whether they survive to
+#      be hits — comes from `think_time` and the session `pool.size`, since
+#      those set how many other sessions interleave between one turn and the
+#      next.
+#
+#   2. INTER-SESSION reuse, from common PREFIXES. The unit of sharing is the
+#      prefix, not the object: because keys are chained, one session hits
+#      another session's block only if that block AND everything ahead of it
+#      in the chain match. Two sessions therefore share exactly the leading
+#      run of shared objects they happened to choose identically, and diverge
+#      permanently at the first difference — holding an object in common but
+#      at a different position buys nothing at all. How long that common run
+#      is comes from the `uses` counts and from `selection`, which concentrates
+#      draws onto a working set much smaller than the pool. See the note on
+#      `uses` below for why the canonical ordering is what makes any of this
+#      reachable.
+#
+# The split is clean, and by construction: a session's own growth blocks chain
+# onto that session's unique prefix, so they are PRIVATE and can only ever be
+# reused intra-session. Everything shared between sessions is shared-object
+# prefix. So sweeping `turns` moves source 1 without touching source 2, and
+# sweeping `selection` moves source 2 without touching source 1 — which is how
+# you find out which kind of reuse an eviction policy is actually good at.
+#
+# NOT IN THIS FILE. Node list and per-node shm name, run length, output format,
+# and lane count are command-line options, so one workload file is portable
+# across clusters. Generation is unbounded by default when driving Certus
+# directly; writing a file requires an explicit length.
+
+version: 1
+
+blocks:
+  tokens: 16          # tokens per KV block
+  bytes: 65536        # bytes per block on the wire
+
+
+# ---------------------------------------------------------------------------
+# Shared object classes: pools of objects that sessions reference in common.
+# These are the INTER-SESSION source of cache hits (source 2 above). They say
+# nothing about intra-session reuse, which comes from the session classes'
+# `turns` and growth distributions further down.
+#
+# `pool.size` accepts either a bare integer (shorthand for {poisson: N}) or an
+# explicit {poisson: N} / {exact: N}:
+#   poisson  free-running births at rate N/E[lifetime]; live count is
+#            Poisson(N), so sd = sqrt(N) and cv = 1/sqrt(N). This is what a
+#            real population does. DEFAULT.
+#   exact    exactly N alive at all times, each death replaced immediately;
+#            variance 0. Worth choosing for SMALL pools, where Poisson's
+#            cv = 1/sqrt(N) is large (32% at N=10, vs 3.2% at N=1000).
+#
+# Either way the pool is seeded at t=0 from the EQUILIBRIUM RESIDUAL-LIFE
+# distribution, not from `lifetime` itself. Seeding from `lifetime` gives every
+# object the same birthday, which makes the pool turn over in synchronised
+# cohorts: measured on `tool` below, that means zero key churn for the first
+# 6000 virtual seconds followed by a burst, with ~40% peak-to-trough modulation
+# still present 80 000 virtual seconds later. For exponential lifetimes the two
+# seedings coincide (memoryless), so doing it right is free.
+#
+# `rank_by` decides what popularity attaches to, and it is the axis on which
+# recency- and frequency-based eviction policies disagree:
+#   slot     popularity attaches to a position; an object inherits its slot's
+#            heat and keeps it for life. Models a stable set of roles whose
+#            incumbents change. `lifetime` is then the only thing that retires
+#            a key.
+#   recency  popularity attaches to newness; each new object pushes the others
+#            back, so heat decays with age. Models document/feed access. Objects
+#            go cold long before their TTL, which makes `lifetime` nearly inert.
+#
+# `selection` is a distribution over the instance INDEX, truncated to the live
+# instances. Its spread is the WORKING SET size, independently of `pool.size`,
+# which is the key-space size. Omitting it means uniform selection — which makes
+# working set equal key space, flattens popularity, and leaves every eviction
+# policy scoring the same. Prefer to set it explicitly.
+# ---------------------------------------------------------------------------
+
+shared_classes:
+
+  system_prompt1:
+    length:   {constant: 10}
+    lifetime: {constant: inf}
+    # No `pool:` at all means exactly one immortal instance. With an infinite
+    # lifetime nothing ever dies, so the pool is minted once at t=0 and never
+    # turns over — no special case needed in the pool logic.
+
+  system_prompt2:
+    length:   {uniform: {min: 1, max: 100}}
+    lifetime: {constant: inf}
+
+  tool:
+    length:
+      empirical:
+        # These 20 observations are bimodal: eleven in 1..12, nine in 98..100,
+        # nothing between. Interpolating puts ~5% of draws in the empty 12..98
+        # gap, so block counts are drawn discretely instead.
+        interpolate: false
+        samples: [1, 8, 9, 9, 10, 10, 10, 11, 11, 12,
+                  12, 98, 99, 99, 100, 100, 100, 99, 99, 98]
+        # or, for a large sample set:  file: tool-lengths.txt
+    lifetime: {normal: {mean: 10000, sigma: 1000, min: 1}}
+    pool:
+      size: {exact: 10}         # small pool: Poisson would swing it by cv 32%
+      rank_by: slot             # a tool's popularity is a property of its role
+      selection: {exponential: {mean: 3}}    # ~3 hot tools out of 10 live
+
+  short_document:
+    length:   {exponential: {mean: 10,  min: 1}}
+    lifetime: {exponential: {mean: 100, min: 1}}
+    pool:
+      size: 50                  # shorthand for {poisson: 50}
+      rank_by: recency          # recent uploads are hot, then cool
+      selection: {exponential: {mean: 8}}
+
+  long_document:
+    length:   {exponential: {mean: 100, min: 1}}
+    lifetime: {exponential: {mean: 100, min: 1}}
+    pool:
+      # Raised from 10. `doc_analysis` draws its long_document count from
+      # exponential(mean 5), and the implied max is the pool size: truncating
+      # that to [1,10] discards 13.5% of the mass and drops the effective mean
+      # from 5 to 4.218. At 20 it discards 1.8% (mean 5.565). The alternative is
+      # to keep the pool at 10 and lower the count mean instead.
+      size: 20
+      rank_by: recency
+      selection: {exponential: {mean: 6}}
+
+
+# ---------------------------------------------------------------------------
+# Session classes.
+#
+# `uses` is an ORDERED list, because keys are prefix-chained: a session's shared
+# objects are concatenated in the order the classes appear here, and within a
+# class the chosen instances are sorted by index. Sorting is not tidiness — it
+# makes a session's prefix a pure function of the SET it chose, so a session
+# drawing tools {0,1} and one drawing {0,1,4} produce NESTED chains rather than
+# divergent ones, and the `count` distribution builds a proper prefix tree.
+#
+# A consequence to be aware of: `chat` leads with system_prompt1 and
+# `doc_analysis` with system_prompt2, so under chained keys these two classes
+# share nothing whatever, however many tools they have in common. Cross-class
+# sharing requires a common LEADING class.
+#
+# `pool.size` means CONCURRENT SESSIONS and takes the same poisson/exact forms
+# as a shared pool. Session arrival rate is therefore an output, not an input:
+# by Little's law it settles at size / E[session lifetime], where that lifetime
+# is `turns` think-times long.
+# ---------------------------------------------------------------------------
+
+session_classes:
+
+  chat:
+    uses:
+      - class: system_prompt1
+        count: {constant: 1}
+      - class: tool
+        count: {uniform: {min: 0, max: 5}}    # 6 equally likely values, 0..5
+
+    turns:         {exponential: {mean: 10, min: 1}}
+    input_growth:  {normal: {mean: 5, sigma: 1, min: 1}}
+    output_growth: {normal: {mean: 2, sigma: 1, min: 1}}
+    think_time:    {exponential: {mean: 10}}
+    migration_interval: {exponential: {mean: 100}}
+
+    pool:
+      size: 1000                # shorthand for {poisson: 1000}; cv 3.2%
+
+  doc_analysis:
+    uses:
+      - class: system_prompt2
+        count: {constant: 1}
+      - class: tool
+        count: {constant: 2}
+      - class: long_document
+        count: {exponential: {mean: 5, min: 1}}
+
+    turns:         {constant: 1}
+    input_growth:  {exponential: {mean: 10, min: 1}}
+    output_growth: {exponential: {mean: 3,  min: 1}}
+    think_time:    {exponential: {mean: 10}}
+    # No migration_interval: this class never migrates.
+
+    pool:
+      size: 1000
