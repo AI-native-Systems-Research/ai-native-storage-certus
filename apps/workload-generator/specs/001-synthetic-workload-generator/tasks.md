@@ -262,10 +262,36 @@ scale target. Two notes for whoever touches it: `BinaryHeap::iter` is in
 popped exactly at its death — a `debug_assert` in `advance_to` pins that
 assumption rather than leaving dead defensive code that no test exercises.
 
-- [ ] T021 Implement retirement and release in
+- [x] T021 Implement retirement and release in
   `crates/workload-model/src/pool.rs`: an expired instance becomes unselectable
   while existing users continue, and its bookkeeping is freed when the last
   user ends. Certus is told nothing
+
+**T021's design question, asked and answered: retirement frees the slot at
+once; it does not wait for the refcount.** A dying instance is moved out of its
+selection slot in the same virtual instant, and an exact pool refills that slot
+immediately; only the instance's *bookkeeping* waits for its last reader. The
+alternative — holding the slot until the refcount reaches zero — would mean a
+session asking for a whole class could not be served, because a slot would be
+occupied by something unselectable and FR-022's draw would come up short for a
+reason that has nothing to do with the population process. So `live()` counts
+slot occupancy, a retired instance occupies no slot, and
+`a_full_pool_stays_deliverable_when_every_object_is_a_zombie` pins it with
+every object in the class zombied at once. The `slot`/`mint` split is what
+makes this possible: the zombie keeps the key identity its reader still needs,
+the replacement takes over the selection position.
+
+**Also fixed in T021 — a latent defect in the exact-replacement path.** `kill`
+pushed the dead slot onto the free list unconditionally, and the exact branch
+then refilled that same slot without popping it, so `free_slots` grew by one
+entry per death for the whole run and every entry named an *occupied* slot. It
+was inert only because an exact pool never calls `mint` after seeding; the
+first birth that did would have handed out a slot that already had an occupant,
+putting two instances at one selection index. `kill` now takes a `free_slot`
+flag, `mint` carries a `debug_assert` that a free-listed slot is really empty,
+and the test asserts the free list stays empty — verified by reintroducing the
+bug, which reports 800 occupied slots free-listed.
+
 - [ ] T022 Implement uniform instance selection with a bounded index space in
   `crates/workload-model/src/selection.rs`, and report the implied working-set
   size when a pool has more than one instance and no `selection` (FR-021).
