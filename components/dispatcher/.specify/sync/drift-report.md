@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-15T21:09:38Z
-spec_sync_git_commit: bec6c6ec
-spec_sync_inputs_sha256: 045a0c9b408ebf04718cd2e44c52e0eb2a2d065c36632e2cef722c6b4e8f361e
+spec_sync_synced_at: 2026-09-15T22:04:08Z
+spec_sync_git_commit: f9bcd965
+spec_sync_inputs_sha256: dc05c51fa11d2deaf80a3dd086d07fc248292e2716211947be4b6a757741122b
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-15 (workspace `cargo fmt` sweep; no drift).** Commit `f9bcd965` ("Add shmq RESERVE batch shared-deadline regression test") ran `cargo fmt` across the whole workspace, reflowing this component's `src/*.rs` (multi-line ↔ single-line argument lists and struct literals, import reordering). `git diff -w` confirms no token-level logic, signature, or contract change — the only substantive addition in that commit is a regression test in `lib/shmq-dispatcher/src/translate.rs`, which is outside this component and outside the spec-sync gate's `components/` scope. The formatting moved this component's `spec_sync_inputs_sha256`, but its spec↔implementation alignment is unchanged. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
 > **Sync 2026-09-15 (reserve_memory `deadline` parameter — code authoritative).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `reserve_memory`. `None` preserves the legacy per-call `store_backpressure_ms` budget (still used by this dispatcher's own `populate`/`batch_populate`); `Some(instant)` lets a caller share one backpressure deadline across a whole reserve batch so total wait is bounded by a single budget rather than `K ×` the budget. FR-056 (reserve_memory) and FR-060 layer 1 (bounded store backpressure) were updated to document the parameter and the per-batch refuse-to-cache-on-deadline behavior. No dispatcher behavior change on the `None` path. Digest recomputed over a clean tree matching CI.
 
 > **Re-stamp 2026-09-09 (merged-branch; store-backpressure implementer).** This

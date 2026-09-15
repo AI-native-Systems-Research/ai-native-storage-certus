@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-15T21:09:38Z
-spec_sync_git_commit: bec6c6ec
-spec_sync_inputs_sha256: f88cef33959165cf063464efa0fe5e796a5896ecde597a472ad74d13787fdf43
+spec_sync_synced_at: 2026-09-15T22:04:08Z
+spec_sync_git_commit: f9bcd965
+spec_sync_inputs_sha256: 242cbe0e0e25b403cf8143e06cf629f213c289e015c29e0f16a74a022f6142dd
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-15 (workspace `cargo fmt` sweep; no drift).** Commit `f9bcd965` ("Add shmq RESERVE batch shared-deadline regression test") ran `cargo fmt` across the whole workspace, reflowing this component's `src/*.rs` (multi-line ↔ single-line argument lists and struct literals, import reordering). `git diff -w` confirms no token-level logic, signature, or contract change — the only substantive addition in that commit is a regression test in `lib/shmq-dispatcher/src/translate.rs`, which is outside this component and outside the spec-sync gate's `components/` scope. The formatting moved this component's `spec_sync_inputs_sha256`, but its spec↔implementation alignment is unchanged. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
 > **Re-stamp 2026-09-15 (interface signature threaded; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory`. This component's `src/` was touched only to thread that parameter through to satisfy the trait — it is ignored here (this dispatcher allocates straight-through / the mock is `unimplemented!()`), so there is no behavioral or contract change. This component's spec does not describe `reserve_memory`. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
 
 > **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
