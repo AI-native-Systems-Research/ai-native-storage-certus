@@ -1,11 +1,13 @@
 ---
 spec_sync_component: block-device-filesys
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-09T22:27:18Z
-spec_sync_git_commit: 3411518a
-spec_sync_inputs_sha256: 42be1e6908bfadf4a54e256d1b7e98681fc113115af52d2dfbc54cbb4d6ae307
+spec_sync_synced_at: 2026-09-15T21:09:38Z
+spec_sync_git_commit: bec6c6ec
+spec_sync_inputs_sha256: c96abeeef6bff979317d2e5cb8311077810f3854102b92019b8bef21ea4215be
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
 > **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
 > `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
 > branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`

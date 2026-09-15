@@ -1,11 +1,13 @@
 ---
 spec_sync_component: remote-lookup
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-09T22:27:18Z
-spec_sync_git_commit: 3411518a
-spec_sync_inputs_sha256: 68a723ed58fffe1d7e6e5ea6cad0f9dbc1be8e0344fd91f8a553823c477c9b5d
+spec_sync_synced_at: 2026-09-15T21:09:38Z
+spec_sync_git_commit: bec6c6ec
+spec_sync_inputs_sha256: d190ed7343c2ea27ebca75d9eeaee79fb8277b159c6ebf6f894835f8a2ee0c0b
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-15 (interface signature threaded; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory`. This component's `src/` was touched only to thread that parameter through to satisfy the trait — it is ignored here (this dispatcher allocates straight-through / the mock is `unimplemented!()`), so there is no behavioral or contract change. This component's spec does not describe `reserve_memory`. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
 > **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
 > `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
 > branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
