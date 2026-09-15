@@ -215,8 +215,10 @@ space.
   an object held in common at a differing position yields nothing.
 - Derived by the specified splitmix64 mix over (parent key, salt) — see
   `contracts/key-derivation.md`. Not a general-purpose hasher: `DefaultHasher`
-  (SipHash) and `ahash` are unstable across versions and would make keys differ
-  between toolchains, breaking FR-029's cross-node consistency.
+  (SipHash) and `ahash` are unstable across versions, which would leave a
+  trace verifiable only by the exact binary that wrote it (FR-029). Deriving
+  rather than minting is what makes a prefix stateless; it is *not* about
+  cross-node agreement, since one generator owns the whole simulation.
 - Growth blocks chain onto the session's unique prefix, making them private by
   construction and reusable only intra-session (FR-030). This is what makes the
   two sources of cache hits separable.

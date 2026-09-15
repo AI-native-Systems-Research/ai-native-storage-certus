@@ -6,26 +6,48 @@
 reproduce a generated trace's keys.
 
 A block's `CacheKey` is a `u64` derived from the block's identity **and its
-parent's key**. This document specifies the derivation exactly, because two
-independent programs must be able to compute the same key: the generator that
-issues it, and any consumer that checks a trace it did not produce.
+parent's key**. This document specifies the derivation exactly, because a
+consumer that checks a trace it did not produce must be able to compute the
+same keys as the generator that wrote it.
 
 ## Why this is specified rather than left to the implementation
 
 Certus treats `CacheKey` as an opaque `u64`
 (`components/interfaces/src/idispatch_map.rs:6`), so the generator is free to
-choose any key function. That freedom is exactly why the choice must be pinned:
+choose any key function. Two things make the choice worth pinning — and it is
+worth being precise about which, because the obvious answer is wrong.
 
-- **Cross-node consistency (spec FR-029).** The same object must have the same
-  key on every node, or a remote hit is impossible.
+**It is *not* for cross-node agreement.** A run has exactly one generator
+process, which owns the whole simulation. The per-node daemons are submission
+relays that receive keys and never derive them, and Certus itself treats a
+key as opaque. During a live run no second party ever computes a key, so two
+nodes cannot disagree about one whatever function is used. That property is a
+consequence of the single-generator architecture, not of this contract.
+
+What the derivation actually buys:
+
+- **Stateless prefix derivation — the load-bearing reason.** Because a key is
+  a function of its parent's key and its own identity, "two sessions share
+  exactly their matching leading run" falls out of arithmetic (spec FR-027,
+  FR-028). The alternative — mint keys from a counter and remember which
+  prefix path got which key — needs a global prefix *trie* in the generator,
+  with a lookup on the per-key hot path, against a budget of a few hundred
+  megabytes of live-key state and a per-key cost far below Certus's own
+  5.6-14 us. This is a cost argument rather than a correctness one, and it is
+  the strongest of the three.
+- **Offline trace verifiability.** This is the one place a genuine second
+  implementation exists: a consumer analysing a trace it did not produce must
+  be able to recompute its keys and check them. That consumer is a separate
+  tool, possibly a separate language, certainly a separate toolchain — and it
+  is offline, not a node.
 - **Cross-toolchain reproducibility (spec FR-034, FR-072).** A plan must be
   byte-identical on any machine and any compiler version.
 
-Both rule out the convenient options.
-`std::collections::hash_map::DefaultHasher` (SipHash) is not stable across Rust
-versions. `ahash` is not stable across its own versions. Either would produce
-keys that differ between toolchains while appearing to work, which is the worst
-failure mode available: a silent loss of every cross-node hit.
+The second and third rule out the convenient options.
+`std::collections::hash_map::DefaultHasher` (SipHash) is not stable across
+Rust versions and `ahash` is not stable across its own, so either would make
+a trace unverifiable by anything but the exact binary that wrote it — and
+would do so silently, since the trace still loads and still replays.
 
 ## The mix function
 

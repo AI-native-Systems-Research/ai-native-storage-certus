@@ -7,16 +7,30 @@
 //! no reuse at all. That is the whole sharing mechanism, and it is why the key
 //! function is specified in a contract rather than left to this file.
 //!
+//! # Why derive a key at all, rather than mint one
+//!
+//! Not for cross-node agreement — that is worth stating, because it is the
+//! intuitive answer and it is wrong. A run has exactly one generator process;
+//! the per-node daemons relay keys and never derive them, and Certus treats a
+//! key as opaque. During a live run no second party ever computes a key, so two
+//! nodes cannot disagree about one whatever function is used.
+//!
+//! The reason is that deriving makes a prefix **stateless**. The alternative —
+//! mint keys from a counter and remember which prefix path got which key — needs
+//! a global prefix trie with a lookup on the per-key hot path, where the budget
+//! is a few hundred megabytes of live-key state and a per-key cost far below
+//! Certus's own 5.6–14 µs.
+//!
 //! # Why not a hashing crate
 //!
-//! Certus treats a key as an opaque `u64`, so any function would work
-//! *locally*. It would not work across machines:
+//! Because of the one genuine *second* implementation: an offline consumer
+//! analysing a trace it did not produce must recompute its keys to check them.
 //! [`std::collections::hash_map::DefaultHasher`] (SipHash) is not stable across
-//! Rust releases and `ahash` is not stable across its own. Either would give
-//! two nodes different keys for the same object while appearing to work, which
-//! costs every cross-node hit and reports no error (FR-029). So the mix
-//! function is written out here, zero-dependency, and pinned by test vectors
-//! that any other tool can reimplement against.
+//! Rust releases and `ahash` is not stable across its own, so either would make
+//! a trace verifiable only by the exact binary that wrote it — and silently, since
+//! the trace still loads and replays. So the mix function is written out here,
+//! zero-dependency, and pinned by test vectors any other tool can reimplement
+//! against.
 //!
 //! # Examples
 //!

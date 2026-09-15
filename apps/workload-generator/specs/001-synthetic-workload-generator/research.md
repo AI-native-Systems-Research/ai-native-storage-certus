@@ -144,8 +144,10 @@ of the obvious choices silently break it:
   plan.
 - `std::collections::hash_map::DefaultHasher` (SipHash) is not stable across
   Rust versions, and `ahash` is not stable across its own versions. Either
-  would make keys differ between toolchains, breaking FR-029's requirement that
-  keys be globally consistent across nodes.
+  would make keys differ between toolchains, so a trace would be verifiable
+  only by the exact binary that wrote it (FR-029, FR-034). This is *not* a
+  cross-node argument: one generator owns the whole simulation, so nodes
+  cannot disagree about a key however keys are chosen.
 
 Since Certus treats `CacheKey` as an opaque u64
 (`components/interfaces/src/idispatch_map.rs:6`), the generator is free to
