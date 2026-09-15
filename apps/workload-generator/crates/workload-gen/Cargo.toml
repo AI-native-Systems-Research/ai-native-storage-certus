@@ -1,0 +1,43 @@
+[package]
+name = "workload-gen"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# The generator binary. NOT a workspace default member: with the default `live`
+# feature on it links CUDA, so a plain `cargo build` of the workspace must not
+# reach it. Build it explicitly with `-p workload-gen`.
+#
+# Like `apps/remote-lookup-bench`, this deliberately does NOT depend on
+# `gpu-services`. That crate's `IGpuServices` impl is only complete when its own
+# `spdk` feature is on, so any cargo invocation that also builds a crate
+# enabling `interfaces/spdk` would unify features and leave it an incomplete
+# impl. The handful of CUDA symbols needed here are declared locally instead
+# (Principle II, and plan.md's Constitution Check).
+
+[features]
+# `live` is default-ON, and gates the mailbox transport and the CUDA link.
+# `cargo build -p workload-gen --no-default-features` therefore yields an
+# emit-only tool that builds and runs on a machine with no accelerator and no
+# server, which is what makes User Story 2 and quickstart Scenarios 1-3
+# runnable anywhere.
+default = ["live"]
+live = ["dep:shm-queue", "dep:shmq-dispatcher"]
+# Pass-through for the trace crate's non-default parquet container.
+parquet = ["workload-trace/parquet"]
+
+[dependencies]
+workload-model.workspace = true
+workload-trace.workspace = true
+workload-wire.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Latency percentiles live in the binary only, never in the simulation core.
+hdrhistogram = "7"
+# Live path only: the /dev/shm mailbox and its wire framing, so the generator
+# speaks exactly what the server serves.
+shm-queue = { workspace = true, optional = true }
+shmq-dispatcher = { workspace = true, optional = true }

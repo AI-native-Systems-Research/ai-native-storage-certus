@@ -1,0 +1,22 @@
+[package]
+name = "workload-node-agent"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# The per-node relay daemon for multi-node runs. NOT a workspace default member:
+# it attaches to the local mailbox and links CUDA. Build it explicitly with
+# `-p workload-node-agent`.
+#
+# The agent is a relay and holds no simulation state: it never decides *what* to
+# issue. Everything it does is driven by `Submit` frames from the generator, so
+# the single simulation core stays single (FR-072).
+
+[dependencies]
+workload-model.workspace = true
+workload-wire.workspace = true
+shm-queue.workspace = true
+shmq-dispatcher.workspace = true
+clap = { version = "4", features = ["derive", "env"] }

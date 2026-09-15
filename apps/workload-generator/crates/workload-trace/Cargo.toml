@@ -1,0 +1,27 @@
+[package]
+name = "workload-trace"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Trace output containers and the simulator projection. CUDA-free and a
+# workspace default member, so container equivalence and schema invariants are
+# testable with no accelerator and no server.
+
+[features]
+# `parquet` is NOT default: nothing in this repo used parquet before this
+# feature, and enabling it by default would pull arrow into every plain
+# `cargo build` of the workspace (research.md D4).
+default = []
+parquet = ["dep:parquet"]
+
+[dependencies]
+workload-model.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parquet = { version = "53", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
