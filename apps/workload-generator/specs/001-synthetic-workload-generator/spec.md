@@ -50,6 +50,11 @@ key — so the transport carries roughly 8 bytes per key rather than block data.
 - Q: Do the throughput, latency, and plan-queue measurements apply when writing
   to a file? → A: No. They are scoped to live runs; an emit run reports
   completeness instead, and omits the fields it cannot measure
+- Q: How is output length specified, and should there be several stop criteria?
+  → A: One control only — a virtual-second span, required for emit and optional
+  for live. Record/key/session caps and a wallclock cap were considered and
+  rejected; a pre-flight projection with a free-space check does the work they
+  were meant to do
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -413,8 +418,37 @@ modes reorder the policies.
 - **FR-058**: Every emitted row MUST satisfy the trace schema's stated
   invariants for the encoding it declares, including the convention for a
   trailing partial block.
-- **FR-059**: File output MUST require an explicit length, while generation
-  against a live server MUST be unbounded by default.
+- **FR-059**: Run length is bounded by exactly one control, a span in **virtual
+  seconds**. An emit run MUST require it, because an unbounded file has no
+  meaning. A live run MUST be unbounded by default and MAY be given the same
+  bound; an unbounded live run is a legitimate mode, useful for exercising code
+  paths and for giving Certus's own statistics collection a window. System MUST
+  reject wallclock-looking notation for the span (FR-031), and MUST NOT offer a
+  wallclock bound at all: an unbounded run stops cleanly on interruption
+  (FR-074), so an external `timeout` supplies a real-time window without giving
+  the tool a wallclock concept.
+- **FR-073**: Before writing anything, an emit run MUST project the output from
+  the description's own rates — invocations, distinct keys minted, key
+  references, and bytes per container — and MUST refuse if the projection
+  exceeds either the free space on the output filesystem or a documented size
+  ceiling, naming both figures. Requiring a span is not sufficient protection
+  on its own: a legal span on the shipped example costs tens of gigabytes. The
+  projection MUST report minted keys and key references separately, since the
+  first grows linearly with the span and the second quadratically with session
+  length. The byte figure MUST be the uncompressed single-container size, used
+  as a conservative upper bound; a compressed container's actual size cannot be
+  projected and will be smaller. If a write nonetheless fails for lack of
+  space, the ordinary error MUST propagate — no completeness flag is needed,
+  because the manifest is written last, so a trace directory without one is
+  incomplete by construction (FR-056). The same projection MUST be available
+  without writing, and MUST warn when the span is short relative to the longest
+  finite lifetime in the description, because such a trace cannot exhibit the
+  pool turnover the description specifies.
+- **FR-074**: An unbounded live run MUST stop cleanly on interruption: drain
+  in-flight requests, tear down node agents (FR-053), write both report forms,
+  and classify itself valid or invalid on the ordinary criteria. Interruption
+  is not a failure — an interrupted run whose plan queue never reached zero is
+  valid.
 - **FR-060**: System MUST provide a canonical serialisation of the operation
   plan, as the artifact the reproducibility property is asserted against.
 

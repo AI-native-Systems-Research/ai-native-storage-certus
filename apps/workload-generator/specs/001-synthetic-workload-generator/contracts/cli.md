@@ -13,7 +13,7 @@ The workload description file says *what* the workload is. Everything here says
 ```text
 workload-gen run     <description.yml> [target options] [tuning] [reporting]
 workload-gen emit    <description.yml> --output <dir> --format jsonl|parquet|both
-                                       --length <virtual-seconds | turns | sessions>
+                                       --until <virtual-seconds>
 workload-gen plan    <description.yml> --output <file>
 workload-gen convert <trace-dir> --to simulator --output <file.jsonl>
 workload-gen validate <description.yml>
@@ -22,8 +22,8 @@ workload-gen validate <description.yml>
 - **`run`** is a *live run*: issues operations to Certus. Unbounded by default
   (spec FR-059); stops on signal.
 - **`emit`** is an *emit run*: writes a trace, contacts no server, needs no
-  accelerator. `--length` is **required** (FR-059) because an unbounded file is
-  not a thing.
+  accelerator. `--until` is **required** (FR-059) — an unbounded file is not a
+  thing.
 - **`plan`** writes the canonical operation-plan serialisation — the artifact
   the byte-identity property is asserted against (FR-060, SC-003).
 - **`convert`** projects an emitted trace into the shape
@@ -38,6 +38,86 @@ An **emit-only build** is available: `--no-default-features` drops the `live`
 feature, so `run` disappears along with the CUDA and mailbox dependencies, and
 `emit`/`plan`/`convert`/`validate` build on a machine with no accelerator and
 no Certus.
+
+## Run length
+
+**One cap: `--until <virtual-seconds>`.** It is optional for `run` and required
+for `emit`.
+
+| | `run` (live) | `emit` |
+| --- | --- | --- |
+| No `--until` | **allowed — the default.** Runs until interrupted | **refused** (FR-059) |
+| `--until <n>` | optional; makes the run deterministic in length | required |
+
+Virtual seconds is the only unit with intrinsic meaning here, because it is the
+unit the description itself is written in: lifetimes, think times, and
+migration intervals are all virtual seconds, so "long enough for the `tool`
+pool to turn over" is sayable only this way. A trace short relative to
+`E[lifetime]` does not contain the turnover the description specifies, however
+many records it holds, and no record count reveals that.
+
+`--until` takes plain virtual seconds and MUST reject wallclock-looking
+suffixes such as `1h` or `30m`. Virtual time is not wallclock (FR-031), and
+notation that implies otherwise invites exactly the confusion that requirement
+exists to prevent.
+
+### There is no wallclock cap, deliberately
+
+To bound a live run by real time — to give Certus's own statistics collection a
+fixed window, say — use `timeout 300 workload-gen run …`. That works because an
+unbounded run stops cleanly on `SIGINT`/`SIGTERM`: it drains in-flight
+requests, tears down node agents (FR-053), writes both report forms, and
+classifies itself valid or invalid on the usual criteria. Being interrupted is
+not a failure — an interrupted run whose plan queue never reached zero is
+**valid** and exits 0.
+
+The tool therefore has **no wallclock concept anywhere**, which is a stronger
+guarantee than a wallclock flag with an explanation of why it is exempt from
+FR-031. A `timeout`-driven run is honestly an interrupted run, and is reported
+as one.
+
+### No other caps, and why
+
+Caps on invocations, minted keys, key references, or sessions were considered
+and **rejected**. Their justification was size control, and the pre-flight
+projection below covers that completely — query, adjust `--until`, run — as
+well as covering the runaway case of a mis-specified description. What remained
+was matching a real trace's record count, which is a crude fidelity match and
+does not warrant a flag.
+
+Against that: five flags for one job, and a first-to-fire rule under which two
+runs nominally using "the same cap" can stop for different reasons, which the
+manifest would then have to disambiguate. Richness belongs on the query side
+instead, where `validate` can invert the projection and suggest a span for a
+target record count.
+
+### Pre-flight projection, and why a required cap is not enough on its own
+
+Requiring `--until` does not by itself protect the filesystem: `--until 100000`
+is legal on the shipped example and costs roughly 27 GB. So before writing
+anything, `emit` MUST project the run from the description's own rates —
+invocations, distinct keys minted, key references, and bytes per container —
+compare that against free space on the output filesystem, and **refuse** if the
+projection exceeds either the free space or a documented size ceiling, naming
+both numbers. `--force` overrides the ceiling but never the free-space check.
+
+Note the two projected key quantities are not interchangeable and are reported
+separately: minted keys grow linearly with the span while references grow
+quadratically with session length. On the shipped example a 100,000-second span
+mints ~2 × 10^8 keys but makes ~3.4 × 10^9 references.
+
+The byte figure is the **uncompressed** single-container size, quoted as a
+conservative upper bound — a compressed container's real size depends on its
+compression ratio and is not projected, only guaranteed to be smaller. If a
+write fails for lack of space anyway, the error simply propagates; no
+completeness flag is needed, because the manifest is written **last**, so a
+trace directory without one is incomplete by construction (FR-056).
+
+`validate --until <n>` reports the same projection without writing, turning
+"pick a number, wait, discover it was 27 GB" into a one-second query. It also
+warns when the span is short relative to the longest finite lifetime in the
+description, and can invert the projection to suggest a span for a target
+record count.
 
 ## Target options (`run` only)
 

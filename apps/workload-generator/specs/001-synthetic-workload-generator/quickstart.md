@@ -73,7 +73,7 @@ through, which would look like determinism while being its opposite.
 ## Scenario 3 — Emit a trace, both containers, and feed the simulator
 
 ```bash
-$G emit $E --seed 42 --length 3600 --format both --output /tmp/trace
+$G emit $E --seed 42 --until 3600 --format both --output /tmp/trace
 ls /tmp/trace                            # manifest.json, invocations/, blocks/
 ```
 
