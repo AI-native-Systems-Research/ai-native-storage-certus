@@ -129,8 +129,8 @@ output containers.
 - [x] T014 Implement `splitmix64`, the chain `key(parent, salt) =
   splitmix64(splitmix64(parent) ^ salt)`, and the tag-partitioned salt space in
   `crates/workload-model/src/keys.rs` per `contracts/key-derivation.md`. No
-  hashing crate: `DefaultHasher` and `ahash` are unstable across versions and
-  would break cross-node key consistency
+  hashing crate: `DefaultHasher` and `ahash` are unstable across versions,
+  which would leave a trace verifiable only by the binary that wrote it
 - [x] T015 Pin the chain test vectors in `crates/workload-model/tests/keys.rs`
   — once committed these values must never change, since changing them
   invalidates every previously generated trace

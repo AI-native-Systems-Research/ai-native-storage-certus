@@ -328,8 +328,22 @@ modes reorder the policies.
   index within a class. This makes a session's prefix a pure function of the
   set it chose, so sessions with overlapping sets produce nested rather than
   divergent chains.
-- **FR-029**: Keys MUST be globally consistent across nodes, so the same object
-  has the same identity everywhere; this is what makes a remote hit possible.
+- **FR-029**: A key MUST be a pure function of the block's identity and its
+  parent's key, computable by any tool from the description and the seed
+  alone, with no shared state and no lookup table. This is what lets a
+  session's prefix be derived rather than remembered, and lets a consumer
+  verify the keys in a trace it did not produce.
+
+  *Note.* An earlier wording made this a requirement about keys being
+  "globally consistent across nodes, so a remote hit is possible". That is
+  true, but it is not a requirement on the key function: a run has one
+  generator process, the per-node daemons relay keys without deriving them
+  (FR-046, FR-047), and Certus treats a key as opaque, so during a live run
+  no second party computes a key and two nodes cannot disagree about one
+  however keys are chosen. Cross-node consistency is a consequence of the
+  single-generator architecture. The real cost of abandoning derived keys is
+  a global prefix trie in the generator, and the real second implementation
+  is an offline trace consumer.
 - **FR-030**: A session's own growth blocks MUST chain onto that session's
   unique prefix, making them private by construction and reusable only within
   that session.
