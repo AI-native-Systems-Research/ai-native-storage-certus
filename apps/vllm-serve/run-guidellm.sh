@@ -23,6 +23,14 @@
 #   RATE_TYPE=constant RATE=8 ./run-guidellm.sh        # fixed 8 req/s
 #   PORT=9000 MODEL=qwen2.5-7b ./run-guidellm.sh       # match a non-default serve port
 #   DATA="prompt_tokens=512,output_tokens=512,prefix_tokens=4096,prefix_count=16" ./run-guidellm.sh
+#
+#   # Replay a Mooncake trace file (flat JSONL: timestamp,input_length,output_length,hash_ids).
+#   # A Certus "cc" conversation trace must first be flattened with
+#   # benchmarks/kv-offload-replay/cc_trace_to_mooncake.py (see that script). Point DATA at
+#   # the resulting file; RATE_TYPE=replay reproduces the trace's inter-arrival timing.
+#   DATA=/mnt/certus1/cc-traces-weka-062126.mooncake-131k.jsonl RATE_TYPE=replay ./run-guidellm.sh
+#   DATA=/path/trace.jsonl HASH_ID_BLOCK_SIZE=64 RATE_TYPE=throughput ./run-guidellm.sh
+#   DATA="kind=mooncake,path=/path/trace.jsonl,hash_id_block_size=64,timestamp_column=t" ./run-guidellm.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,18 +46,26 @@ PROCESSOR="${PROCESSOR:-Qwen/Qwen2.5-7B-Instruct}"  # tokenizer for token accoun
 
 # ── Load profile ─────────────────────────────────────────────────────────────────
 # rate-type: sweep (auto low->saturation), throughput (max), synchronous (1 at a
-# time), constant/poisson (need RATE). Bound each stage by time or request count.
+# time), constant/poisson (need RATE), replay (reproduce a trace's inter-arrival
+# timing — pair with a Mooncake DATA file). Bound each stage by time or request count.
 RATE_TYPE="${RATE_TYPE:-sweep}"
 RATE="${RATE:-}"                       # req/s — only used by constant/poisson
+MAX_CONCURRENCY="${MAX_CONCURRENCY:-256}"  # concurrency cap — REQUIRED by the throughput profile (guidellm >= 0.7)
+TIME_SCALE="${TIME_SCALE:-1.0}"        # replay profile: multiply trace timestamps (2.0 = 2x slower arrivals)
 MAX_SECONDS="${MAX_SECONDS:-120}"      # per-stage wall-clock budget
 MAX_REQUESTS="${MAX_REQUESTS:-}"       # alternative bound; if set, overrides MAX_SECONDS
 
-# ── Workload (guidellm synthetic spec) — the BENCHMARKING.md smoke test ─────────
-#   prefix_tokens : shared system prompt per group
-#   prefix_count  : distinct prefix groups
-#   prompt_tokens : unique user question
-#   output_tokens : generated length
+# ── Workload — either a synthetic spec OR a trace file ──────────────────────────
+# DATA is interpreted three ways (see "Translate the DATA spec" below):
+#   * a "kind=...,key=val" spec        -> passed to guidellm --data verbatim (any kind)
+#   * a path to an existing file       -> replayed as a Mooncake trace (kind=mooncake)
+#   * a comma-separated synthetic spec -> the BENCHMARKING.md smoke test (default):
+#       prefix_tokens : shared system prompt per group
+#       prefix_count  : distinct prefix groups
+#       prompt_tokens : unique user question
+#       output_tokens : generated length
 DATA="${DATA:-prompt_tokens=256,output_tokens=256,prefix_tokens=2048,prefix_count=32}"
+HASH_ID_BLOCK_SIZE="${HASH_ID_BLOCK_SIZE:-64}"  # tokens per hash id, for Mooncake file replay
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
 OUTPUT="${OUTPUT:-${SCRIPT_DIR}/guidellm_${RATE_TYPE}_${STAMP}.json}"
@@ -93,7 +109,23 @@ build_data_json() {
   fi
   printf '%s}' "$json"
 }
-DATA_JSON="$(build_data_json "$DATA")"
+# Resolve DATA into the single --data spec guidellm receives.
+#   kind=...  -> verbatim (mooncake with custom columns, csv_file, huggingface, ...)
+#   a file    -> Mooncake trace replay (flat JSONL/JSON/CSV/parquet of
+#                timestamp,input_length,output_length,hash_ids)
+#   otherwise -> synthetic_text (folded from the comma-separated spec above)
+if [[ "$DATA" == kind=* ]]; then
+  DATA_SPEC="$DATA"
+elif [[ -f "$DATA" ]]; then
+  DATA_SPEC="kind=mooncake,path=${DATA},hash_id_block_size=${HASH_ID_BLOCK_SIZE}"
+elif [[ "$DATA" == */* || "$DATA" == *.jsonl || "$DATA" == *.json || "$DATA" == *.csv || "$DATA" == *.parquet ]]; then
+  # Looks like a path but does not exist — fail clearly rather than mis-parsing it as synthetic.
+  echo "error: DATA looks like a trace file but was not found: ${DATA}" >&2
+  echo "       flatten a Certus cc-trace first: benchmarks/kv-offload-replay/cc_trace_to_mooncake.py" >&2
+  exit 1
+else
+  DATA_SPEC="$(build_data_json "$DATA")"
+fi
 
 # ── Assemble guidellm args ──────────────────────────────────────────────────────
 # guidellm >= 0.7 replaced the flat flags (--target/--model/--rate-type/--output-path)
@@ -102,13 +134,22 @@ ARGS=(
   run
   --backend "kind=openai_http,target=${TARGET},model=${MODEL}"
   --tokenizer "kind=huggingface_auto,model=${PROCESSOR}"
-  --data "$DATA_JSON"
+  --data "$DATA_SPEC"
   --output "kind=json,path=${OUTPUT}"
 )
-# constant/poisson require a numeric rate; sweep/throughput/synchronous ignore it.
+# constant/poisson require a numeric rate; throughput requires a max_concurrency;
+# sweep/synchronous take no extra field.
 if [[ "$RATE_TYPE" == "constant" || "$RATE_TYPE" == "poisson" ]]; then
   [[ -n "$RATE" ]] || { echo "error: RATE_TYPE=${RATE_TYPE} needs RATE=<req/s>" >&2; exit 1; }
   ARGS+=(--profile "kind=${RATE_TYPE},rate=${RATE}")
+elif [[ "$RATE_TYPE" == "throughput" ]]; then
+  # guidellm >= 0.7's throughput profile rejects a bare kind=throughput with
+  # "Field required (at 'profile.throughput.max_concurrency')"; supply the cap.
+  ARGS+=(--profile "kind=throughput,max_concurrency=${MAX_CONCURRENCY}")
+elif [[ "$RATE_TYPE" == "replay" ]]; then
+  # Reproduce the trace's inter-arrival timing from each row's relative_timestamp
+  # (arrival = start + time_scale * relative_timestamp). Needs a trace DATA source.
+  ARGS+=(--profile "kind=replay,time_scale=${TIME_SCALE}")
 else
   ARGS+=(--profile "kind=${RATE_TYPE}")
 fi

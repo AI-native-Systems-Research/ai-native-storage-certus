@@ -963,6 +963,27 @@ class OffloadingConnectorScheduler:
                 num_chunks = req_status.storable_chunks(
                     group_config, num_offloadable_tokens
                 )
+                # fix#3: offload_keys advances with token/hash progress in
+                # _update_req_states (update_offload_keys is called every step),
+                # but block_ids only grows when the scheduler reports newly
+                # allocated blocks (new_block_id_groups). On the finished path
+                # num_offloadable_tokens jumps to req.num_tokens, so num_chunks
+                # can cross a chunk boundary whose blocks_per_chunk GPU blocks
+                # were never appended to block_ids (the finishing decode reused
+                # an already-allocated block). The strided block_ids slice below
+                # then comes up short and the len() assert fatally kills the
+                # engine (EngineDeadError). Clamp num_chunks to the chunks we
+                # actually have both a key and backing GPU blocks for; any
+                # unbacked trailing chunk is simply not stored this step. This
+                # is correctness-preserving (a dropped trailing chunk only costs
+                # a future prefix-cache hit, per the fix2 PR's accepted
+                # tradeoff) and gates new_offload_keys/keys_to_store so the
+                # job-build pass below cannot index block_ids out of range.
+                num_chunks = min(
+                    num_chunks,
+                    len(group_state.offload_keys),
+                    len(group_state.block_ids) // blocks_per_chunk,
+                )
 
                 start_chunk_idx = group_state.next_stored_chunk_idx
                 if num_chunks <= start_chunk_idx:

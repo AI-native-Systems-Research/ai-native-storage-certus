@@ -12,7 +12,7 @@ built image instead of relying on runtime bind-mounts.
 |---|---|
 | Fork repo | `github.com/dwaddington/vllm` (fork of `vllm-project/vllm`) |
 | Branch | `fix/tiering-deferred-finalize-v0.26.0` |
-| Commit | `5e20aeb5` |
+| Commit | `83571bcb` (deferred-finalize `5e20aeb5` + fix#3 clamp) |
 | Cut from tag | `v0.26.0` (exactly the version shipped by `vllm/vllm-openai:v0.26.0`) |
 
 ## What the fix does
@@ -26,6 +26,38 @@ that made the as-shipped tiering plugin complete 0/10 runs at 450 convs.
 
 Validated locally: patched build completes 10/10 (450 convs × 12 turns) vs 0/10
 for the stock base image.
+
+## fix#3 — `scheduler.py` `_build_store_jobs` length clamp (fork commit `83571bcb`)
+
+A **second, independent** tiering bug, surfaced under a guidellm shared-prefix
+sweep against `run-serve-cputier.sh` (reproduced on the fix026 image, so the
+handshake above does not cover it):
+
+```
+offloading/scheduler.py  _build_store_jobs()
+    assert len(offload_keys) == len(offload_block_ids)   # AssertionError → EngineDeadError
+```
+
+`offload_keys` advances every step in `_update_req_states` (`update_offload_keys`
+is unconditional) but `block_ids` only grows when the scheduler reports newly
+allocated blocks. On the finished path `num_offloadable_tokens` jumps to
+`req.num_tokens`, so `num_chunks` can cross a chunk boundary whose
+`blocks_per_chunk` GPU blocks were never appended to `block_ids` (the finishing
+decode reused an already-allocated block). The strided `block_ids` slice then
+comes up short and the `assert` fatally kills the engine. Load-dependent: fired
+after ~1500 requests in a saturating sweep.
+
+**Fix:** clamp `num_chunks` to `min(num_chunks, len(offload_keys),
+len(block_ids)//blocks_per_chunk)` before the slice/assert. Correctness-
+preserving — only chunks with both a stable hash and backing GPU blocks are
+stored; an unbacked trailing chunk (on a finishing request, with no future step
+to flush it) is dropped, costing at most a future prefix-cache hit, matching the
+tradeoff the fix2 PR already accepted for its "defensive guard" alternative.
+
+Verified: the workload that killed the engine after ~1500 requests now sustains
+a full guidellm sweep (>6000 requests) with zero crashes. Upstreamed to the fork
+in commit `83571bcb`, so the vendored copy here is byte-identical to the fork
+again and the re-sync command below is safe.
 
 ## Files and their in-image destinations
 
