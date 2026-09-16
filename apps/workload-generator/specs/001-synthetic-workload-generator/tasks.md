@@ -1966,6 +1966,34 @@ discovered in a moment, not after the default.
   makes its sessions' prefixes unreachable, shrinks the migration target set,
   and redistributes load, so any later number describes a different experiment
 
+**The agent now exits on disconnect, not on idleness** — raised as a question about paced
+mode and it found a real gap.
+
+Two things were checked before changing anything. An established connection has **no idle
+timeout**: `read_header` treats a read timeout with nothing received as a gap, polls the
+stop flag and loops, so arbitrarily long think time is fine. And the client's 30-second
+timeout only applies while a read is outstanding, which in paced mode it is not during
+think time. So a quiet node was never at risk.
+
+The gap was the other end. `serve` looped on `accept` until stopped, so when the control
+process died the connection threads saw EOF and exited while **the agent kept listening
+forever**, holding its mailbox channels and device allocation. Only the next run's leftover
+replacement cleaned that up, which means FR-053's "release resources even when the
+generator exits abnormally" was *deferred* rather than satisfied.
+
+A closed socket is the right signal, and better than a timeout: TCP reports that the
+control process is gone — exited, panicked or killed — without anyone having to guess how
+long silence is acceptable. The agent now exits when every connection it once had has
+closed, with two guards so it cannot fire wrongly: a `--linger-secs` grace (default 5) for
+a generator opening its lanes one at a time, and the rule applying only *after* a first
+connection, so a freshly launched agent is not killed for having no clients yet. That case
+has its own much longer `--first-connect-secs` (default 300), because an agent nobody
+connects to was launched for a run that never came.
+
+Verified live: an agent whose peer vanished without a `Shutdown` logged *"every connection
+closed and none reopened within 3s; the control process is gone, so releasing this node's
+resources"* and exited. FR-053 amended to require it, and to forbid an idle timeout.
+
 **T072 done, 3 more tests; 142 in gen+wire.** `NodeLost` carries the node, what the run
 was doing, and the transport's own words, and its message spells out all three reasons
 continuing is wrong — because "carry on with the survivors" is the tempting thing to do

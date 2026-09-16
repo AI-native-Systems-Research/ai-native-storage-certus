@@ -448,7 +448,21 @@ modes reorder the policies.
 - **FR-052**: Daemon startup MUST be idempotent: a leftover daemon from a
   crashed run MUST be detected and replaced, never silently reused.
 - **FR-053**: Teardown MUST release the daemon's resources even when the
-  generator exits abnormally, and MUST be verified rather than assumed.
+  generator exits abnormally, and MUST be verified rather than assumed. The
+  daemon MUST therefore exit when **every connection it once had has closed**: a
+  closed socket is TCP reporting that the control process is gone, however it
+  went, and it is more reliable than any silence-based guess. Without it a
+  generator killed outright would leave a daemon holding mailbox channels and a
+  device allocation until someone next started a run.
+
+  A daemon MUST NOT exit merely because it is **idle**. Under FR-078's paced mode
+  a session's think time is real waiting, so a node may legitimately receive
+  nothing for minutes; a daemon that took silence for failure would exit in the
+  middle of the workload it was serving. A grace period after the last
+  disconnection is permitted, and is needed because a generator opening its lanes
+  one at a time passes briefly through zero connections. A daemon nobody ever
+  connects to MUST also give up eventually, since it was launched for a run that
+  never came.
 - **FR-054**: Continuous load MUST be driven over the fast transport, not by
   repeated remote command invocation, which cannot sustain it.
 - **FR-064**: When a configured node or its daemon becomes unreachable during a
