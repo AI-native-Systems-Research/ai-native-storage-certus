@@ -1594,6 +1594,37 @@ local hit rate on the origin node is unchanged.
   server, in `crates/workload-wire/tests/conformance.rs`, covering all six
   cases listed in `contracts/node-agent-wire.md`
 
+**T066 done, 10 server tests; 37 in the crate.** Transport only — it reads a
+frame, dispatches and replies, and knows nothing of mailboxes or keys. The work is
+a `Service` the agent implements, which is what lets the whole protocol be driven
+in-process with no agent and no accelerator, including a full client↔server
+conversation over an in-memory pipe and a live one over TCP.
+
+**`&mut self` is how the causal ordering rule became structural.** `Service` takes
+`&mut self` and is built per connection by `ServiceFactory::accept`, so a handler
+cannot be shared across a connection's frames without the compiler objecting — the
+thread pool that would silently reorder a session's turns cannot be written by
+accident rather than merely being warned against. Per connection also because a
+connection is a lane and a lane claims its own mailbox channel, which is depth-1.
+
+**A design flaw found by a test that hung.** `serve` joined its connection threads
+on the way out, but a connection thread blocks reading the next frame, so one idle
+peer prevented teardown indefinitely — and FR-053 requires teardown to be *verified*,
+a teardown bug having already invalidated an A/B series in this repository. Accepted
+sockets now carry a read timeout, and a timeout **between** frames is the moment to
+check whether the run stopped, while a timeout **part-way through** a frame is
+retried because the peer is mid-send and giving up there would make a slow network
+indistinguishable from a broken one. The same test now finishes in 0.01 s instead of
+never.
+
+A protocol violation closes the connection rather than replying: there is no error
+frame, and inventing one would let a peer keep a connection alive by sending
+nonsense. A close *between* frames is how a run ends; a close *mid-frame* is
+`UnexpectedEof`, and conflating the two would end a run quietly as though the
+generator had finished. `Shutdown` is answered **before** the loop returns, since a
+close is what FR-064 reads as a lost node and an orderly stop would otherwise be
+reported as a failure.
+
 **T065 done, 12 client tests.** Two properties are asserted rather than assumed.
 Pipelining depth is proved not to change what is submitted — the frames at depth
 1, 8 and 32 are byte-identical bar their correlation ids, which is FR-072 in its
@@ -1641,7 +1672,7 @@ operation's key list and issue something plausible.
 - [x] T065 [US3] Implement the client half in
   `crates/workload-wire/src/client.rs`: `TCP_NODELAY`, configurable pipelining
   depth independent of lane count, correlation ids
-- [ ] T066 [US3] Implement the server half in
+- [x] T066 [US3] Implement the server half in
   `crates/workload-wire/src/server.rs`
 - [ ] T067 [US3] Implement the `Hello` handshake in
   `crates/workload-wire/src/client.rs` and `server.rs`, **fail-closed** on
