@@ -42,8 +42,31 @@ fn main() {
         include_dir.join("zyre.h").display()
     );
 
+    let header = include_dir.join("zyre.h");
+    if !header.exists() {
+        let workspace_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let build_script = workspace_root.join("deps").join("build_zyre.sh");
+        eprintln!();
+        eprintln!("error: zyre native dependency not found");
+        eprintln!("  expected header: {}", header.display());
+        eprintln!();
+        if build_script.exists() {
+            eprintln!("  To build it, run:");
+            eprintln!("    cd {} && bash deps/build_zyre.sh", workspace_root.display());
+        } else {
+            eprintln!("  Set ZYRE_BUILD_DIR to the directory containing include/zyre.h");
+        }
+        eprintln!();
+        std::process::exit(1);
+    }
+
     let bindings = bindgen::Builder::default()
-        .header(include_dir.join("zyre.h").to_string_lossy())
+        .header(header.to_string_lossy())
         .clang_arg(format!("-I{}", include_dir.display()))
         .allowlist_function("zyre_.*")
         .allowlist_function("zyre_event_.*")
