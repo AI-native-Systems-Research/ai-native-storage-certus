@@ -686,7 +686,7 @@ percentiles.
 - [ ] T039 [US1] Implement the pre-filled reusable payload buffer with an
   optional key stamp in `crates/workload-gen/src/payload.rs`. No per-operation
   byte construction (FR-038)
-- [ ] T040 [US1] Implement the local mailbox client in
+- [x] T040 [US1] Implement the local mailbox client in
   `crates/workload-gen/src/live.rs` over `shm-queue`, framing with
   `shmq-dispatcher::wire`
 - [x] T041 [US1] Map plan operations to the production client's stream, in
@@ -725,36 +725,36 @@ classification could be *written* but not *run*. Writing them and reporting
 them as done would be the one thing this feature's own Principle VIII forbids.
 What is needed to proceed: a Certus server on a local mailbox (SPDK, hugepages
 and VFIO per README.md), or a decision to accept unverified code.
-- [ ] T042 [US1] Implement lanes in `crates/workload-gen/src/lanes.rs`: one
+- [x] T042 [US1] Implement lanes in `crates/workload-gen/src/lanes.rs`: one
   session's turn at a time, per-session order strict, cross-session overlap
   allowed
-- [ ] T043 [US1] Reject a lane count exceeding the node's channel count at
+- [x] T043 [US1] Reject a lane count exceeding the node's channel count at
   startup in `crates/workload-gen/src/lanes.rs` — the mailbox is depth-1 per
   channel, so over-subscription would silently serialise
 - [ ] T044 [US1] Implement the plan queue in
   `crates/workload-gen/src/lanes.rs`, produced ahead of the lanes, recording
   **minimum depth** and **fraction of the run at zero** rather than an average,
   which would conceal a brief exhaustion
-- [ ] T045 [US1] Add per-request latency into an `hdrhistogram` in
+- [x] T045 [US1] Add per-request latency into an `hdrhistogram` in
   `crates/workload-gen/src/report.rs`, timed per request and never per key, so
   instrumentation cannot itself put the generator on the critical path
-- [ ] T046 [US1] Implement throughput measurement in
+- [x] T046 [US1] Implement throughput measurement in
   `crates/workload-gen/src/report.rs`: keys/second, bytes/second, and the ratio
   of virtual time advanced to wallclock elapsed, with the timed window
   excluding any startup cache clear
-- [ ] T047 [US1] Implement the live run report in
+- [x] T047 [US1] Implement the live run report in
   `crates/workload-gen/src/report.rs` in both forms — terminal summary and
   structured file — carrying the same facts, plus the reproduction parameters
   (seed, description identity, effective parameters, batch size, lane count)
-- [ ] T048 [US1] Implement run validity in `crates/workload-gen/src/report.rs`:
+- [x] T048 [US1] Implement run validity in `crates/workload-gen/src/report.rs`:
   a run whose plan queue reached zero is **invalid**, its throughput is not
   presented as a result, and the process exits 3 — distinct from success, so a
   sweep driver cannot mistake it for a data point
-- [ ] T049 [US1] Implement clean interruption in
+- [x] T049 [US1] Implement clean interruption in
   `crates/workload-gen/src/main.rs`: on `SIGINT`/`SIGTERM`, drain in-flight
   requests, write both reports, and classify validity. An interrupted run whose
   plan queue never reached zero is valid and exits 0
-- [ ] T050 [US1] Wire the `run` subcommand in `crates/workload-gen/src/cli.rs`
+- [x] T050 [US1] Wire the `run` subcommand in `crates/workload-gen/src/cli.rs`
   per `contracts/cli.md`: unbounded by default, optional `--until`,
   `--shm-path`, `--lanes`, `--batch-keys`, `--seed`, `--report`,
   `--clear-cache`, and the documented exit codes
@@ -762,8 +762,59 @@ and VFIO per README.md), or a decision to accept unverified code.
   a mock mailbox, the issued operation sequence matches the production client's
   for the same plan, and contains no forbidden operation
 
-**Checkpoint**: US1 is functional and independently testable against a live
-local server.
+**US1 IS RUNNING AGAINST A REAL SERVER on node2.** No root was needed:
+`/dev/hugepages` is owned by `scooter` and group-writable, so the server starts
+unprivileged. Launch used:
+
+```text
+CERTUS_PROFILE=full-fs-block cargo build --release -p certus-server-yaml \
+    --features filesys --no-default-features
+LD_LIBRARY_PATH=/usr/local/lib ./target/release/certus-server-yaml \
+    --device-path /tmp/certus-fs/blockdev.bin --shm-path /dev/shm/certus-shmq \
+    --channels 8 --memory-tier-size 2147483648 --format
+```
+
+**Measured, 8 lanes of 8 channels, real mailbox round trips**: p50 16 us, p90 21 us,
+p99 38 us, max 12.6 ms; 112 requests; plan queue min depth 1 with 0% of samples
+at zero, so the run is **valid** and exits 0. The `--lanes 32` refusal was
+verified live: it names the node's 8 channels and exits 2.
+
+**Two profile facts worth keeping.** `full-fs-block` is the right profile for
+the local path — the only profile needing zyre and RDMA is `full-remote`, and
+**`libzyre.so.2` is not installed on node2**, which is why a previously-built
+binary would not start. That is a blocker for US3, which needs `full-remote`.
+`full-fs-block` needs `--features filesys --no-default-features`; the build
+script says so if you omit them.
+
+**T041 found the defect, and running found a second one.** Reading the opcode
+table suggested `LOOKUP` takes a key list. The live server answered
+*"truncated: need 64 bytes at offset 4, have 32"*: `op_lookup` reads a **handle
+batch** — `(key, IpcHandle)` pairs — because a load DMAs into a GPU buffer, and
+`COPY_TO_STORE` copies out of one. **Those two operations genuinely need
+CUDA**, which is T038/T039's payload buffer. The other six do not.
+
+So the run is **partial and says so in both report forms**: 48 of 160
+operations were not issued, and the terminal output states that no data moved
+and the throughput is not comparable with a complete run's. Skipping them
+silently would have produced a keys-per-second figure from a run that never
+transferred a block — the kind of number that gets quoted.
+
+**Two honest limitations, recorded rather than implied:**
+
+1. **T044's plan queue is currently vacuous.** The plan is built in full before
+   the drive loop, so depth only falls to zero at the very end and FR-062's
+   invalidity can never fire. The metric is wired, reported and tested, but it
+   is not yet *load-bearing* — that needs a producer running ahead of the
+   lanes, which is T044's real intent.
+2. **The run does not pace to virtual time.** It replays as fast as the mailbox
+   allows, so `virtual/wallclock` of 2743 means "2743x faster than the
+   workload's own clock", not a sustained-load figure. Sustained pacing is what
+   makes the throughput number mean what an operator expects.
+
+**Still open in US1**: T038 (CUDA FFI), T039 (payload buffer), T051 (mock-mailbox op
+stream test), plus the two limitations above.
+
+**Checkpoint**: US1 is functional against a live local server for the control path.
 
 ---
 
