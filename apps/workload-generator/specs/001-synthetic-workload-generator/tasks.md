@@ -305,13 +305,47 @@ so it can carry neither cross-session interleaving nor cross-session reuse.
 **Mooncake is the standard export**, verified to satisfy both. An OTel writer
 is out of scope with the reasoning recorded so it need not be re-derived.
 
-- [ ] T022 Implement uniform instance selection with a bounded index space in
+- [x] T022 Implement uniform instance selection with a bounded index space in
   `crates/workload-model/src/selection.rs`, and report the implied working-set
   size when a pool has more than one instance and no `selection` (FR-021).
   Non-uniform selection is US4
-- [ ] T023 Implement drawing without replacement bounded by `min(nominal pool
+- [x] T023 Implement drawing without replacement bounded by `min(nominal pool
   size, live count)` in `crates/workload-model/src/selection.rs`, and count how
   often that bound binds
+**T022/T023 notes.** FR-021's working-set report already existed from T017, so
+T022 was the mechanism only. Three things worth recording:
+
+**`rank_by` is inert under uniform selection**, and the code says so rather
+than implying otherwise. A uniform draw over the live instances is the same
+distribution however the ranks are numbered, so no test here can distinguish
+`slot` from `recency` by outcome — one asserts they agree, which is the honest
+form. `rank_by` still fixes the index space, because that is what US4 draws
+over.
+
+**The draw returns slots in slot order, never rank order.** A session's `uses`
+order fixes where each instance's blocks land in its prefix chain, so the order
+must be stable for the session's life; a recency rank changes every time
+another instance is born, so ordering by rank would silently rearrange a live
+session's prefix. This also satisfies T026's within-class ordering at the
+source.
+
+**The two bounds are counted apart** (FR-023), because they mean opposite
+things: bound by *nominal* is an authoring error the load-time gate should have
+caught, while bound by *live* is a Poisson population doing its job.
+Attribution is pinned by a test — verified by flipping the two branches, which
+fails it. A third counter, `empty_pool`, covers the `e^-N` case raised while
+building T021: a nominal-2 Poisson pool is empty 13.5% of the time, and there
+the draw delivers nothing at all. Two ratios are reported, `binding_fraction`
+and `shortfall_fraction`, because a bound that binds always and costs one
+instance is a different distortion from one that binds rarely and costs most of
+the draw.
+
+**Still open from T021's discussion**: FR-004's 5% truncation gate is computed
+against the *nominal* size, so for a Poisson pool it under-reports how much the
+count distribution is really narrowed. The run-time counters above now measure
+it after the fact; projecting it at load time is a closed-form Poisson tail and
+belongs with T033.
+
 - [ ] T024 [P] Test in `crates/workload-model/tests/pool.rs`: residual-life
   seeding produces flat churn from `t = 0`, whereas seeding from `lifetime`
   itself produces the cohort artifact — zero churn early then a burst, with
