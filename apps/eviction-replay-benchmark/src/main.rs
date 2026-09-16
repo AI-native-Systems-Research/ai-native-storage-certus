@@ -27,8 +27,11 @@ enum PolicyArg {
     /// Session-lineage policy (`eviction-policy-session-lists`).
     #[value(name = "eviction-policy-session-lists", alias = "session-lists")]
     SessionLists,
-    /// Run both and print them side by side (default).
-    Both,
+    /// Run all policies and print them side by side.
+    #[value(alias = "both")]
+    All,
+    /// Run all policies, print only the best hit rate per cache size.
+    Best,
 }
 
 /// Which Qwen-Bailian trace to replay. Downloaded to `/tmp` on first use.
@@ -134,7 +137,7 @@ struct Cli {
     max_conversations: Option<usize>,
 
     /// Which policy to run.
-    #[arg(long, value_enum, default_value_t = PolicyArg::Both)]
+    #[arg(long, value_enum, default_value_t = PolicyArg::All)]
     policy: PolicyArg,
 }
 
@@ -194,11 +197,13 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    let all_kinds: &[PolicyKind] = &[PolicyKind::Lru, PolicyKind::SessionLists];
     let kinds: &[PolicyKind] = match cli.policy {
         PolicyArg::Lru => &[PolicyKind::Lru],
         PolicyArg::SessionLists => &[PolicyKind::SessionLists],
-        PolicyArg::Both => &[PolicyKind::Lru, PolicyKind::SessionLists],
+        PolicyArg::All | PolicyArg::Best => all_kinds,
     };
+    let best_only = cli.policy == PolicyArg::Best;
 
     println!("{source}");
     println!(
@@ -220,8 +225,17 @@ fn main() -> ExitCode {
     println!("{}", "-".repeat(100));
 
     for &size in &cli.cache_sizes {
-        for &kind in kinds {
-            let s = kind.run(&trace, size);
+        let mut results: Vec<(PolicyKind, SimStats)> = kinds
+            .iter()
+            .map(|&kind| (kind, kind.run(&trace, size)))
+            .collect();
+
+        if best_only {
+            results.sort_by(|a, b| b.1.hit_rate().partial_cmp(&a.1.hit_rate()).unwrap());
+            results.truncate(1);
+        }
+
+        for (kind, s) in &results {
             println!(
                 "{:<14} {:>7} {:>9} {:>6.1}% {:>9} {:>12.1} {:>12.1} {:>12.1} {:>12}",
                 kind.label(),
