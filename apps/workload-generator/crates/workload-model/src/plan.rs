@@ -11,13 +11,30 @@
 //! One turn produces the operations the production client would issue for it
 //! (FR-039), in this order:
 //!
-//! 1. **`Check`** over the turn's whole prefix — the reference report a client
-//!    makes before deciding what it must compute (FR-041).
-//! 2. **`Load`** over the same keys, for whatever the check found.
-//! 3. **`Reserve` → `Transfer` → `Commit`** over the turn's new **input** blocks.
-//! 4. The same three over its new **output** blocks.
-//! 5. **`PollEvents`**, because the production client polls and it costs the
+//! 1. **`Check`** over the turn's whole prefix — which blocks are present.
+//! 2. **`Touch`** over the same keys: the **reference report**, with no promotion
+//!    requested (FR-041).
+//! 3. **`Load`** over the same keys, for whatever the check found.
+//! 4. **`Reserve` → `Transfer` → `Commit`** over the turn's new **input** blocks.
+//! 5. The same three over its new **output** blocks.
+//! 6. **`PollEvents`**, because the production client polls and it costs the
 //!    server real work (FR-042).
+//!
+//! # `Touch` is separate from `Check`, and leaving it out was a real defect
+//!
+//! An earlier version of this module had no `Touch`, on the reading that a `Check`
+//! *is* the reference report. It is not. In the shipped client they are different
+//! calls against different opcodes: `batch_check` asks which blocks are present,
+//! while `touch` is documented as "update eviction ordering for the given keys" —
+//! and `certus_offload_manager.py` invokes it as its own step.
+//!
+//! Omitting it does not lose an operation so much as lose a *signal*: the eviction
+//! policy would never learn that a read happened, so recency-based policies would
+//! be scored against a workload in which nothing is ever recently used. For an
+//! instrument whose stated purpose is evaluating that policy, that is the worst
+//! available bug, and nothing in the emitted trace or the plan's own invariants
+//! would have shown it. FR-044 — "MUST NOT withhold information the production
+//! client would supply" — is exactly this requirement.
 //!
 //! Input and output get **separate store sequences** rather than one covering
 //! both: a real engine stores the prompt's new blocks when prefill completes and
@@ -31,7 +48,7 @@
 //!
 //! # What the plan cannot know, and why that is not a defect
 //!
-//! `Load` carries the same keys as its `Check`. It has to: which of them were
+//! `Touch` and `Load` carry the same keys as their `Check`. They have to: which of them were
 //! present is a run-time outcome, and two sessions racing to mint the same shared
 //! prefix means the answer legitimately differs between runs at a fixed seed
 //! (FR-035, FR-036). So the plan states the **candidate** set and the executor
@@ -117,20 +134,23 @@ pub const CANONICAL_VERSION: u16 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum OpKind {
-    /// Report block references and learn which are present (FR-041).
+    /// Learn which blocks are present.
     Check = 0,
+    /// Report the reference, updating eviction ordering, **without** requesting
+    /// promotion (FR-041, FR-043). The signal a recency policy runs on.
+    Touch = 1,
     /// Fetch blocks the check found.
-    Load = 1,
+    Load = 2,
     /// First step of a store: ask for space (FR-040).
-    Reserve = 2,
+    Reserve = 3,
     /// Second step: move the payload.
-    Transfer = 3,
+    Transfer = 4,
     /// Third step, success branch.
-    Commit = 4,
+    Commit = 5,
     /// Third step, failure branch. **Never planned** — the executor chooses it.
-    Abort = 5,
+    Abort = 6,
     /// Poll for cache events, which the production client does (FR-042).
-    PollEvents = 6,
+    PollEvents = 7,
 }
 
 impl OpKind {
@@ -140,9 +160,10 @@ impl OpKind {
     }
 
     /// Every kind, in wire order. Useful for exhaustiveness in tests and reports.
-    pub fn all() -> [OpKind; 7] {
+    pub fn all() -> [OpKind; 8] {
         [
             OpKind::Check,
+            OpKind::Touch,
             OpKind::Load,
             OpKind::Reserve,
             OpKind::Transfer,
@@ -295,6 +316,9 @@ impl OperationPlan {
         if !reads.is_empty() {
             let range = self.intern(reads);
             self.push(at_bits, id, OpKind::Check, range.clone());
+            // The reference report. Separate from the check because the shipped
+            // client's is — see the module docs on why omitting it was a defect.
+            self.push(at_bits, id, OpKind::Touch, range.clone());
             self.push(at_bits, id, OpKind::Load, range);
         }
 
@@ -475,9 +499,10 @@ session_classes:
         let plan = plan_of(&d, 1, 6.0);
         let kinds: Vec<OpKind> = plan.operations().iter().map(|o| o.kind()).collect();
         assert_eq!(
-            &kinds[..9],
+            &kinds[..10],
             &[
                 OpKind::Check,
+                OpKind::Touch,
                 OpKind::Load,
                 OpKind::Reserve,
                 OpKind::Transfer,
@@ -492,10 +517,12 @@ session_classes:
         // Check and Load carry the same keys; the two store runs carry input then
         // output.
         let ops = plan.operations();
+        // Check, Touch and Load share one key range.
         assert_eq!(plan.keys_of(&ops[0]), plan.keys_of(&ops[1]));
-        assert_eq!(ops[2].key_count(), 2, "input store covers input growth");
-        assert_eq!(ops[5].key_count(), 3, "output store covers output growth");
-        assert_eq!(ops[8].key_count(), 0, "a poll carries no keys");
+        assert_eq!(plan.keys_of(&ops[1]), plan.keys_of(&ops[2]));
+        assert_eq!(ops[3].key_count(), 2, "input store covers input growth");
+        assert_eq!(ops[6].key_count(), 3, "output store covers output growth");
+        assert_eq!(ops[9].key_count(), 0, "a poll carries no keys");
     }
 
     #[test]
@@ -620,10 +647,10 @@ session_classes:
 
     #[test]
     fn op_kind_discriminants_match_the_wire_contract() {
-        // `contracts/node-agent-wire.md` lists check, load, reserve, transfer,
-        // commit, abort, poll-events in that order. If these drift, the agent
-        // executes a different operation from the one planned.
-        let wire = [0u8, 1, 2, 3, 4, 5, 6];
+        // `contracts/node-agent-wire.md` lists check, touch, load, reserve,
+        // transfer, commit, abort, poll-events in that order. If these drift, the
+        // agent executes a different operation from the one planned.
+        let wire = [0u8, 1, 2, 3, 4, 5, 6, 7];
         for (kind, want) in OpKind::all().iter().zip(wire) {
             assert_eq!(kind.as_u8(), want, "{kind:?} has the wrong wire value");
         }
@@ -633,12 +660,12 @@ session_classes:
     fn one_sessions_key_references_are_exactly_the_arithmetic_of_fr_025() {
         // The quadratic figure the projection needs, asserted as a closed form
         // rather than a ratio. With a 4-block shared instance and growth 1 + 1, turn
-        // k checks and loads a prefix of 4 + 2k keys and stores 1 + 1 through three
-        // steps each, so a T-turn session references
+        // k checks, touches and loads a prefix of 4 + 2k keys and stores 1 + 1
+        // through three steps each, so a T-turn session references
         //
-        //     sum over k < T of [2*(4 + 2k) + 6]  =  14T + 2T(T - 1)
+        //     sum over k < T of [3*(4 + 2k) + 6]  =  18T + 3T(T - 1)
         //
-        // which is 80 at T = 4 and 224 at T = 8.
+        // which is 108 at T = 4 and 312 at T = 8.
         let per_session = |turns: u32| -> usize {
             let d = description(turns, 1, 1, 1);
             let plan = plan_of(&d, 31, 4_000.0);
@@ -650,7 +677,7 @@ session_classes:
             // largest.
             *by_session.values().max().expect("at least one session")
         };
-        let expect = |t: usize| 14 * t + 2 * t * (t - 1);
+        let expect = |t: usize| 18 * t + 3 * t * (t - 1);
         assert_eq!(per_session(4), expect(4), "T = 4");
         assert_eq!(per_session(8), expect(8), "T = 8");
         // Super-linear: doubling the turns more than doubles the references. Linear
