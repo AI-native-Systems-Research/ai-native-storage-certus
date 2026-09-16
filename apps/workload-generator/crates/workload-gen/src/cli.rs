@@ -1324,6 +1324,11 @@ fn live_report(
         cleared_entries: stats.cleared_entries,
         // `None` locally; the remote driver passes the node it lost (FR-064).
         lost_node,
+        // Filled by the caller when a sweep asked for them: a distinct-key count costs an insert
+        // per key reference on the producer's path, and the working set comes from the
+        // simulation rather than from the run.
+        distinct_keys: None,
+        working_set: Vec::new(),
         producer_completed: stats.producer_completed,
         lanes: stats.lanes.len(),
         node_channels,

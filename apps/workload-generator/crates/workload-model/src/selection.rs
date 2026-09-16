@@ -245,6 +245,21 @@ impl Selector {
         self.selection.is_some()
     }
 
+    /// Ranks the spread effectively covers, or `None` under uniform selection.
+    ///
+    /// The spread's **p90 after truncation**, which is the rank band carrying most of the mass.
+    /// It is deliberately *not* a count of ranks ever drawn: that would grow with the length of
+    /// the run and so would describe the run rather than the description. p90 rather than the
+    /// mean because a concentrated distribution's mean sits near rank 0 and says nothing about
+    /// how far the references reach.
+    ///
+    /// `None` means the working set is the whole key space — the regime in which a capacity sweep
+    /// cannot discriminate between eviction policies, and which a report has to be able to say
+    /// rather than leave to be inferred from the shape of the curve.
+    pub fn effective_ranks(&self) -> Option<f64> {
+        self.selection.as_ref().map(|d| d.effective().p90.max(0.0))
+    }
+
     /// The index space this selector draws over.
     pub fn rank_by(&self) -> RankBy {
         self.rank_by

@@ -429,6 +429,32 @@ impl Simulation {
         self.nodes
     }
 
+    /// What each shared class's `selection` spread effectively covers, by declaration index.
+    ///
+    /// `None` for a class drawing uniformly, which is the case a capacity sweep must be able to
+    /// recognise: the working set is then the whole key space, so the curve steps rather than
+    /// slopes and no eviction policy can be distinguished however it is swept (FR-021).
+    ///
+    /// Measured as twice the spread's effective standard deviation — the ranks carrying most of
+    /// the mass — rather than as a count of ranks ever drawn, which would depend on how long the
+    /// run happened to be.
+    pub fn working_set(&self) -> Vec<(u64, u64, Option<f64>)> {
+        self.shared_pools
+            .iter()
+            .zip(self.selectors.iter())
+            .enumerate()
+            .map(|(index, (pool, selector))| {
+                (
+                    index as u64,
+                    pool.nominal(),
+                    selector
+                        .effective_ranks()
+                        .map(|r| r.min(pool.nominal() as f64)),
+                )
+            })
+            .collect()
+    }
+
     /// Migrations performed so far.
     ///
     /// Reported because a run whose migration interval is long relative to session lifetime

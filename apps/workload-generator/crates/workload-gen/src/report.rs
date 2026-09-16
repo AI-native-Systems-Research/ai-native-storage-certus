@@ -342,6 +342,28 @@ pub struct LiveReport {
     pub cleared_entries: Option<u64>,
     /// Whether the producer reached the end of its span rather than being interrupted.
     pub producer_completed: bool,
+    /// Distinct keys the run referenced, when it was asked to count them.
+    ///
+    /// # Why this is the generator's count and not the nodes'
+    ///
+    /// Distinct counts do **not** sum. A shared prefix block referenced by sessions on two nodes
+    /// is one key, and adding each node's count would double it — the same arithmetic mistake as
+    /// averaging two nodes' percentiles, one type along. So it is counted once, by the producer,
+    /// over the paths it built.
+    ///
+    /// `None` unless `--count-distinct` was given: maintaining the set is one insert per key
+    /// reference on the producer's own path, which a throughput run should not pay and a capacity
+    /// sweep needs. A sweep needs it because hit rate is only interpretable against the size of
+    /// the key space it was measured over.
+    pub distinct_keys: Option<u64>,
+    /// The effective working set the `selection` spread produced, per shared class.
+    ///
+    /// The point of a capacity sweep is hit rate against capacity *relative to the working set*,
+    /// and under uniform selection the working set is the whole key space — which is why the
+    /// curve has a step rather than a slope and no policy is distinguishable. Reporting the
+    /// spread's effective size is what lets a sweep say which regime it was in rather than
+    /// leaving it to be guessed from the shape of the answer.
+    pub working_set: Vec<WorkingSet>,
     /// The node that was lost, if one was (FR-064).
     ///
     /// Separate from `invalid_reason` so a sweep driver can act on it without parsing prose: a
@@ -583,6 +605,21 @@ pub fn opcode_name(opcode: u32) -> &'static str {
         op::TAKE_EVENTS => "TAKE_EVENTS",
         _ => "other",
     }
+}
+
+/// What one shared class's `selection` spread actually covers.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WorkingSet {
+    /// The shared class.
+    pub class: String,
+    /// Instances the pool holds — the key space's size in instances.
+    pub nominal: u64,
+    /// Ranks the spread effectively covers, or `None` under uniform selection.
+    ///
+    /// `None` is the case a sweep must be able to recognise: it means the working set *is* the
+    /// key space, so the curve will step rather than slope and the run cannot discriminate
+    /// between policies however it is swept.
+    pub effective_ranks: Option<f64>,
 }
 
 /// Request latency, in microseconds.
