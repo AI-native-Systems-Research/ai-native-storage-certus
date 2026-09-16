@@ -459,10 +459,36 @@ can land at two prefix positions, where prefix chaining gives it two different
 keys — which breaks FR-028's "the prefix is a function of the set it drew".
 `count` expresses the intent without the ambiguity, and the refusal says so.
 
-- [ ] T027 Implement the append-only turn model in
+- [x] T027 Implement the append-only turn model in
   `crates/workload-model/src/session.rs`: turn *n* reads the whole prefix,
   mints separate input and output growth, both stored and both extending the
-  chain
+  chain **T027 notes.** `PrefixChain` holds the session's keys and `Turn` holds
+  **ranges into it**, not copies — a turn's read list is the whole prefix, so
+  copying would make FR-025's quadratic *iteration* cost a quadratic allocation
+  cost too.
+
+**`Session::take_turn` was made private** (as `advance_cursor`) and replaced by
+a free `take_turn(session, growth, rng)`. A public method that advanced the
+cursor without minting would let the cursor and the chain drift apart, so a
+session could report turns it never minted blocks for. One way to take a turn,
+and it always keeps both in step.
+
+**The shared run is laid onto the chain at bind time**, since it is the
+*leading* part of the prefix — that is what makes two sessions with the same
+set derive the same keys for it, and it is the whole of cross-session reuse.
+
+**Three load-bearing claims, each verified by reintroducing its bug:**
+
+- *Reads exclude the turn's own new blocks* (FR-025). Moving the read boundary
+  past the new input fails with "turn 0 read 11 keys, expected 8".
+- *Growth is private to its session* (FR-030). Salting growth with a constant
+  id instead of the session id fails with "growth blocks leaked between
+  sessions".
+- *Keys are chained* (FR-027). Deriving from the salt alone fails with "keys
+  coincide past the common leading run of [3] and [1, 3]" — and note that the
+  leading-run *length* assertion alone did **not** catch it, which is why the
+  test also asserts disjointness past the common run.
+
 - [ ] T028 [P] Test in `crates/workload-model/tests/session.rs`: sessions
   drawing overlapping instance sets produce **nested** chains, not divergent
   ones — `{0,1}` versus `{0,1,4}` share the first two objects' blocks

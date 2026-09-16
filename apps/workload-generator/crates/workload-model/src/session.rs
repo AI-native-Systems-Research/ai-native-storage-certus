@@ -88,7 +88,7 @@
 //! use workload_model::description::Population;
 //! use workload_model::distribution::{Distribution, Kind};
 //! use workload_model::rng;
-//! use workload_model::session::{bind, SessionIds, SessionPool};
+//! use workload_model::session::{bind, take_turn, Growth, SessionIds, SessionPool};
 //!
 //! let turns = Distribution::new(Kind::Constant { value: 10.0 })
 //!     .resolve_integral(None)
@@ -119,8 +119,16 @@
 //! }
 //!
 //! // Turns belong to the loop; a session ends when its last one is taken.
+//! let growth = Growth {
+//!     input: Distribution::new(Kind::Constant { value: 2.0 })
+//!         .resolve_integral(None)
+//!         .unwrap(),
+//!     output: Distribution::new(Kind::Constant { value: 1.0 })
+//!         .resolve_integral(None)
+//!         .unwrap(),
+//! };
 //! let first = pool.handles().next().unwrap();
-//! while pool.session_mut(first).take_turn().is_some() {}
+//! while take_turn(pool.session_mut(first), &growth, &mut rng).is_some() {}
 //! let done = pool.finish(first, &mut ids, &mut rng);
 //!
 //! assert_eq!(done.turns_remaining(), 0);
@@ -133,7 +141,9 @@ use rand::Rng;
 
 use crate::description::Population;
 use crate::distribution::Resolved;
-use crate::keys::MAX_SESSIONS_PER_RUN;
+use crate::keys::{
+    input_salt, key, output_salt, shared_salt, CacheKey, MAX_SESSIONS_PER_RUN, ROOT_PARENT,
+};
 use crate::pool::{exponential, poisson, Held, ResidualLife, SharedPool};
 use crate::selection::Selector;
 
@@ -230,11 +240,227 @@ impl Bound {
     }
 }
 
+/// A session's ordered block keys, each chained onto the one ahead of it.
+///
+/// A key is `key(parent_key, salt)`, so a block's identity depends on **the whole
+/// run leading up to it** and not just on itself (FR-027). That is what makes
+/// reuse between sessions require a matching *leading* run: an object two sessions
+/// hold in common but at differing positions yields no reuse at all, because the
+/// parent differs and so does every key from there on.
+///
+/// Appending is O(1). A turn's read list is a slice of keys already computed, so
+/// the quadratic growth in FR-025 is in *iteration*, never in rehashing.
+#[derive(Debug, Default)]
+pub struct PrefixChain {
+    keys: Vec<CacheKey>,
+}
+
+impl PrefixChain {
+    /// The keys, in chain order.
+    pub fn keys(&self) -> &[CacheKey] {
+        &self.keys
+    }
+
+    /// Blocks in the chain.
+    pub fn len(&self) -> usize {
+        self.keys.len()
+    }
+
+    /// Whether the chain is empty — true for a session that binds no shared
+    /// instances and has taken no turn.
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+
+    /// The last key, which is the parent of whatever is appended next.
+    ///
+    /// [`ROOT_PARENT`] for an empty chain, so a session with no shared instances
+    /// starts from the same root every time rather than from something arbitrary.
+    pub fn tip(&self) -> CacheKey {
+        self.keys.last().copied().unwrap_or(ROOT_PARENT)
+    }
+
+    /// Append one block with the given salt and return its key.
+    fn push(&mut self, salt: u64) -> CacheKey {
+        let k = key(self.tip(), salt);
+        self.keys.push(k);
+        k
+    }
+}
+
+/// One turn of one session.
+///
+/// Holds ranges into the session's [`PrefixChain`] rather than copies of the keys,
+/// because a turn's read list is the whole prefix and copying it would make the
+/// quadratic cost in FR-025 a quadratic *allocation* cost too. Read the keys back
+/// with [`Session::reads_of`], [`Session::new_input_of`] and
+/// [`Session::new_output_of`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Turn {
+    index: usize,
+    at_bits: u64,
+    reads: usize,
+    input: std::ops::Range<usize>,
+    output: std::ops::Range<usize>,
+}
+
+impl Turn {
+    /// 0-based position within the session.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Virtual time this turn happens at. A turn occupies a single instant;
+    /// virtual time advances only through think time.
+    pub fn at(&self) -> f64 {
+        f64::from_bits(self.at_bits)
+    }
+
+    /// How many keys this turn reads — its whole prefix, so this grows linearly
+    /// with the turn index (FR-025).
+    pub fn reads_len(&self) -> usize {
+        self.reads
+    }
+
+    /// How many input blocks this turn minted.
+    pub fn new_input_len(&self) -> usize {
+        self.input.len()
+    }
+
+    /// How many output blocks this turn minted.
+    pub fn new_output_len(&self) -> usize {
+        self.output.len()
+    }
+}
+
+/// The per-turn growth of one session class.
+///
+/// Two distributions, not one, because input and output grow independently and a
+/// workload's ratio between them is a property worth setting (FR-026). Both are
+/// stored and both extend the chain: a turn's output is part of the context the
+/// next turn reads.
+#[derive(Debug, Clone)]
+pub struct Growth {
+    /// Input blocks minted per turn. Integral.
+    pub input: Resolved,
+    /// Output blocks minted per turn. Integral.
+    pub output: Resolved,
+}
+
+/// Take one turn of `session`, minting its new blocks onto the chain.
+///
+/// Returns `None` when the session's schedule is spent — which is also when the
+/// caller should hand it to [`SessionPool::finish`].
+///
+/// # What a turn does, in order (FR-025, FR-026)
+///
+/// 1. **Reads the whole prefix**: the session's shared objects plus every input
+///    and output block minted by turns before this one. Not this turn's own new
+///    blocks — those do not exist yet, which is why per-turn read cost is exactly
+///    the turn index's worth of blocks and total work is quadratic in session
+///    length.
+/// 2. **Mints input growth**, appended to the chain.
+/// 3. **Mints output growth**, appended after the input.
+///
+/// Both new runs chain onto the session's own prefix, and a session's salt carries
+/// its unique id, so growth blocks are **private by construction** — reusable
+/// within the session and by nobody else (FR-030). That is what keeps the two
+/// sources of cache hits separable: shared objects give cross-session reuse, growth
+/// gives intra-session reuse, and no block does both.
+///
+/// # Panics
+///
+/// If the session is not bound, since its prefix would be missing every shared
+/// block. Also if a block ordinal exceeds the salt's 24-bit field — the pre-flight
+/// projection checks `turns x growth` against that at load, so reaching it means
+/// the projection was bypassed.
+///
+/// # Examples
+///
+/// ```
+/// use workload_model::description::Population;
+/// use workload_model::distribution::{Distribution, Kind};
+/// use workload_model::rng;
+/// use workload_model::session::{bind, take_turn, Growth, SessionIds, SessionPool};
+///
+/// let count = |v: f64| {
+///     Distribution::new(Kind::Constant { value: v })
+///         .resolve_integral(None)
+///         .unwrap()
+/// };
+/// let think = Distribution::new(Kind::Constant { value: 1.0 })
+///     .resolve(None)
+///     .unwrap();
+/// let mut rng = rng::substream(1, "turns");
+/// let mut ids = SessionIds::new();
+/// let mut pool = SessionPool::new(0, Population::Exact(1), count(4.0), think, &mut rng);
+/// pool.seed(0.0, &mut ids, &mut rng);
+///
+/// let h = pool.handles().next().unwrap();
+/// bind(pool.session_mut(h), &[], &mut [], &mut [], &mut rng);
+/// let growth = Growth { input: count(2.0), output: count(3.0) };
+///
+/// // A *seeded* session starts part-way through its conversation, so its turn
+/// // count is a residual rather than the full 4.
+/// let turns = pool.session(h).turns_total();
+///
+/// // First turn: this class binds nothing, so there is no prefix to read yet.
+/// let first = take_turn(pool.session_mut(h), &growth, &mut rng).unwrap();
+/// assert_eq!(first.reads_len(), 0);
+/// assert_eq!(first.new_input_len(), 2);
+/// assert_eq!(first.new_output_len(), 3);
+///
+/// // Every later turn reads everything minted so far, then adds five more —
+/// // linear per-turn cost, quadratic total (FR-025).
+/// let mut expected = 5;
+/// while let Some(t) = take_turn(pool.session_mut(h), &growth, &mut rng) {
+///     assert_eq!(t.reads_len(), expected);
+///     expected += 5;
+/// }
+/// assert_eq!(pool.session(h).prefix().len(), 5 * turns);
+/// ```
+pub fn take_turn<R: Rng + ?Sized>(
+    session: &mut Session,
+    growth: &Growth,
+    rng: &mut R,
+) -> Option<Turn> {
+    assert!(
+        session.bound,
+        "session {} took a turn before its shared instances were bound; its prefix \
+         would be missing every shared block",
+        session.id
+    );
+    let at = session.advance_cursor()?;
+    let index = session.cursor - 1;
+    // The read list is the prefix as it stands *before* this turn adds anything.
+    let reads = session.chain.len();
+
+    let n_input = growth.input.sample_int(rng).max(0) as u64;
+    let input_start = session.chain.len();
+    for _ in 0..n_input {
+        let salt = input_salt(session.id, session.next_input_ordinal);
+        session.next_input_ordinal += 1;
+        session.chain.push(salt);
+    }
+    let output_start = session.chain.len();
+    let n_output = growth.output.sample_int(rng).max(0) as u64;
+    for _ in 0..n_output {
+        let salt = output_salt(session.id, session.next_output_ordinal);
+        session.next_output_ordinal += 1;
+        session.chain.push(salt);
+    }
+    Some(Turn {
+        index,
+        at_bits: at.to_bits(),
+        reads,
+        input: input_start..output_start,
+        output: output_start..session.chain.len(),
+    })
+}
+
 /// One live session.
 ///
-/// Its turn schedule is fixed at birth; see the module docs on why. Turn
-/// mechanics — the prefix chain and the blocks each turn mints — belong to the
-/// turn model, not here.
+/// Its turn schedule is fixed at birth; see the module docs on why.
 #[derive(Debug)]
 pub struct Session {
     id: u64,
@@ -247,6 +473,10 @@ pub struct Session {
     /// why `bound` is a separate flag — a class with no `uses` binds nothing.
     chosen: Vec<Bound>,
     bound: bool,
+    /// Every block this session has, shared run first then turn growth.
+    chain: PrefixChain,
+    next_input_ordinal: u64,
+    next_output_ordinal: u64,
 }
 
 impl Session {
@@ -299,17 +529,13 @@ impl Session {
             .expect("a session always has at least one turn")
     }
 
-    /// Consume the next turn, returning the virtual time it happens at.
+    /// Consume the next turn slot, returning the virtual time it happens at.
     ///
-    /// The turn model calls this; the population does not, because a session's
-    /// death time is already known from its schedule.
-    pub fn take_turn(&mut self) -> Option<f64> {
-        debug_assert!(
-            self.bound,
-            "session {} took a turn before its shared instances were bound; its \
-             prefix would be missing every shared block",
-            self.id
-        );
+    /// Private on purpose. A turn advances the cursor *and* mints blocks onto the
+    /// chain, and a public method that did only the first would let the cursor and
+    /// the chain drift apart — a session would report turns it never minted
+    /// anything for. [`take_turn`] is the one way to take a turn.
+    fn advance_cursor(&mut self) -> Option<f64> {
         let at = self.turn_at.get(self.cursor).copied()?;
         self.cursor += 1;
         Some(at)
@@ -329,6 +555,33 @@ impl Session {
     /// own pools. Called once, when the session has finished.
     pub fn take_chosen(&mut self) -> Vec<Bound> {
         std::mem::take(&mut self.chosen)
+    }
+
+    /// Every key this session holds, in chain order: its shared run first, then
+    /// each turn's input and output growth.
+    pub fn prefix(&self) -> &[CacheKey] {
+        self.chain.keys()
+    }
+
+    /// Blocks in the shared run — the leading part of the prefix that other
+    /// sessions can share.
+    pub fn shared_len(&self) -> usize {
+        self.chosen.iter().map(|b| b.length_blocks() as usize).sum()
+    }
+
+    /// The keys a turn reads: its whole prefix as it stood before the turn.
+    pub fn reads_of(&self, turn: &Turn) -> &[CacheKey] {
+        &self.chain.keys()[..turn.reads]
+    }
+
+    /// The input blocks a turn minted.
+    pub fn new_input_of(&self, turn: &Turn) -> &[CacheKey] {
+        &self.chain.keys()[turn.input.clone()]
+    }
+
+    /// The output blocks a turn minted.
+    pub fn new_output_of(&self, turn: &Turn) -> &[CacheKey] {
+        &self.chain.keys()[turn.output.clone()]
     }
 }
 
@@ -454,6 +707,15 @@ pub fn bind<R: Rng + ?Sized>(
                 .acquire(slot)
                 .expect("selection returned an unoccupied slot");
             let length_blocks = pools[idx].held(&held).length_blocks();
+            // The shared run is the *leading* part of the prefix, so it is laid
+            // down now: two sessions holding the same set in the same order derive
+            // the same keys for it, and that is the whole of cross-session reuse.
+            let mint = held.mint();
+            for ordinal in 0..length_blocks {
+                session
+                    .chain
+                    .push(shared_salt(held.class_id(), mint, ordinal));
+            }
             session.chosen.push(Bound {
                 held,
                 length_blocks,
@@ -799,6 +1061,9 @@ impl SessionPool {
             cursor: 0,
             chosen: Vec::new(),
             bound: false,
+            chain: PrefixChain::default(),
+            next_input_ordinal: 0,
+            next_output_ordinal: 0,
         };
         let handle = match self.free_handles.pop() {
             Some(h) => {
@@ -893,7 +1158,7 @@ mod tests {
             }
             for h in due {
                 while p.session_mut(h).next_turn_at().is_some_and(|a| a <= t) {
-                    p.session_mut(h).take_turn();
+                    take_turn(p.session_mut(h), &unit_growth(), rng);
                 }
                 if p.session(h).turns_remaining() == 0 {
                     let before = p.newly_born().len();
@@ -1096,8 +1361,9 @@ mod tests {
         let h = p.handles().next().unwrap();
         let total = p.session(h).turns_total();
         let mut seen = Vec::new();
-        while let Some(at) = p.session_mut(h).take_turn() {
-            seen.push(at);
+        let g = unit_growth();
+        while let Some(turn) = take_turn(p.session_mut(h), &g, &mut r) {
+            seen.push(turn.at());
         }
         assert_eq!(seen.len(), total);
         assert_eq!(p.session(h).turns_remaining(), 0);
@@ -1119,7 +1385,7 @@ mod tests {
         p.seed(0.0, &mut ids, &mut r);
         bind_new(&mut p, &mut r);
         let h = p.handles().next().unwrap();
-        p.session_mut(h).take_turn();
+        take_turn(p.session_mut(h), &unit_growth(), &mut r);
         p.finish(h, &mut ids, &mut r);
     }
 
@@ -1141,7 +1407,8 @@ mod tests {
         let watched_id = p.session(watched).id();
 
         let victim = handles[0];
-        while p.session_mut(victim).take_turn().is_some() {}
+        let g = unit_growth();
+        while take_turn(p.session_mut(victim), &g, &mut r).is_some() {}
         p.finish(victim, &mut ids, &mut r);
 
         assert_eq!(
@@ -1243,6 +1510,15 @@ mod tests {
         let mut p = SharedPool::new(class_id, Population::Exact(n), life, length, r);
         p.seed(0.0, r);
         (p, Selector::new(RankBy::Slot))
+    }
+
+    /// One input and one output block per turn, so a turn's arithmetic is easy to
+    /// read in an assertion.
+    fn unit_growth() -> Growth {
+        Growth {
+            input: resolved(Kind::Constant { value: 1.0 }, true),
+            output: resolved(Kind::Constant { value: 1.0 }, true),
+        }
     }
 
     fn uses_of(class_index: usize, count: f64) -> Uses {
@@ -1454,6 +1730,294 @@ mod tests {
         let (mut sp, h) = lone_session(&mut ids, &mut r);
         bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
         bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
+    }
+
+    // ---- T027: the append-only turn model (FR-025, FR-026, FR-027, FR-030) ----
+
+    /// A session bound to `shared_count` instances of one class, ready to turn.
+    fn turning_session(
+        shared_count: f64,
+        r: &mut rng::Rng,
+    ) -> (SessionPool, usize, Vec<SharedPool>, SessionIds) {
+        let mut ids = SessionIds::new();
+        let (p0, s0) = shared(0, 8, r);
+        let mut pools = vec![p0];
+        let mut sels = vec![s0];
+        let mut sp = SessionPool::new(
+            0,
+            Population::Exact(1),
+            resolved(Kind::Constant { value: 6.0 }, true),
+            resolved(Kind::Constant { value: 1.0 }, false),
+            r,
+        );
+        sp.seed(0.0, &mut ids, r);
+        let h = sp.handles().next().unwrap();
+        let uses = if shared_count > 0.0 {
+            vec![uses_of(0, shared_count)]
+        } else {
+            vec![]
+        };
+        bind(sp.session_mut(h), &uses, &mut pools, &mut sels, r);
+        (sp, h, pools, ids)
+    }
+
+    #[test]
+    fn a_turn_reads_its_whole_prefix_and_nothing_it_just_minted() {
+        // FR-025 exactly: turn n reads its shared objects plus every block minted
+        // by turns *before* it. Not its own new blocks, which is what makes the
+        // per-turn read count the turn index's worth of blocks.
+        let mut r = rng::substream(41, "turns");
+        let (mut sp, h, mut pools, _) = turning_session(2.0, &mut r);
+        let shared_blocks = sp.session(h).shared_len();
+        assert_eq!(shared_blocks, 8, "two instances of 4 blocks each");
+
+        let growth = Growth {
+            input: resolved(Kind::Constant { value: 3.0 }, true),
+            output: resolved(Kind::Constant { value: 2.0 }, true),
+        };
+        let mut expected_reads = shared_blocks;
+        let mut turns = 0;
+        while let Some(t) = take_turn(sp.session_mut(h), &growth, &mut r) {
+            assert_eq!(
+                t.reads_len(),
+                expected_reads,
+                "turn {} read {} keys, expected {expected_reads}",
+                t.index(),
+                t.reads_len()
+            );
+            // The reads are exactly the prefix that existed before this turn, so
+            // they cannot include anything it minted.
+            let reads = sp.session(h).reads_of(&t).to_vec();
+            let minted: Vec<CacheKey> = sp
+                .session(h)
+                .new_input_of(&t)
+                .iter()
+                .chain(sp.session(h).new_output_of(&t))
+                .copied()
+                .collect();
+            assert!(
+                minted.iter().all(|k| !reads.contains(k)),
+                "turn {} read a block it minted itself",
+                t.index()
+            );
+            expected_reads += 5;
+            turns += 1;
+        }
+        assert!(turns >= 1);
+        assert_eq!(sp.session(h).prefix().len(), shared_blocks + 5 * turns);
+        for b in sp.session_mut(h).take_chosen() {
+            pools[0].release(b.into_held());
+        }
+    }
+
+    #[test]
+    fn input_and_output_are_separate_and_both_extend_the_chain() {
+        // FR-026. Both are stored, and a turn's output is part of what the next
+        // turn reads — which is why the two counts add rather than one being
+        // discarded.
+        let mut r = rng::substream(42, "turns");
+        let (mut sp, h, mut pools, _) = turning_session(1.0, &mut r);
+        let growth = Growth {
+            input: resolved(Kind::Constant { value: 2.0 }, true),
+            output: resolved(Kind::Constant { value: 7.0 }, true),
+        };
+        let before = sp.session(h).prefix().len();
+        let t = take_turn(sp.session_mut(h), &growth, &mut r).unwrap();
+        assert_eq!(t.new_input_len(), 2);
+        assert_eq!(t.new_output_len(), 7);
+        assert_eq!(
+            sp.session(h).prefix().len(),
+            before + 9,
+            "both runs must extend the chain"
+        );
+        // Output follows input within the turn, and the two runs are disjoint.
+        let input = sp.session(h).new_input_of(&t).to_vec();
+        let output = sp.session(h).new_output_of(&t).to_vec();
+        assert!(input.iter().all(|k| !output.contains(k)));
+        let tail = &sp.session(h).prefix()[before..];
+        assert_eq!(&tail[..2], &input[..]);
+        assert_eq!(&tail[2..], &output[..]);
+        for b in sp.session_mut(h).take_chosen() {
+            pools[0].release(b.into_held());
+        }
+    }
+
+    #[test]
+    fn every_key_in_a_chain_is_distinct() {
+        // Chaining is what makes this true: the same shared instance at a different
+        // position, or the same ordinal under a different parent, gives a different
+        // key. A repeat would mean a session reading one block twice per turn.
+        let mut r = rng::substream(43, "turns");
+        let (mut sp, h, mut pools, _) = turning_session(3.0, &mut r);
+        let growth = Growth {
+            input: resolved(Kind::Constant { value: 4.0 }, true),
+            output: resolved(Kind::Constant { value: 4.0 }, true),
+        };
+        while take_turn(sp.session_mut(h), &growth, &mut r).is_some() {}
+        let keys = sp.session(h).prefix();
+        let distinct: std::collections::BTreeSet<&CacheKey> = keys.iter().collect();
+        assert_eq!(distinct.len(), keys.len(), "a key repeats within one chain");
+        assert!(keys.len() > 12);
+        for b in sp.session_mut(h).take_chosen() {
+            pools[0].release(b.into_held());
+        }
+    }
+
+    #[test]
+    fn growth_blocks_are_private_to_their_session() {
+        // FR-030, and the property that keeps the two sources of cache hits
+        // separable: shared objects give cross-session reuse, growth gives
+        // intra-session reuse, and no block does both. Two sessions bound to the
+        // *same* instances must still share only the shared run.
+        let mut r = rng::substream(44, "turns");
+        let mut ids = SessionIds::new();
+        // One instance, so both sessions necessarily draw the same one.
+        let (p0, s0) = shared(0, 1, &mut r);
+        let mut pools = vec![p0];
+        let mut sels = vec![s0];
+        let uses = vec![uses_of(0, 1.0)];
+        let growth = Growth {
+            input: resolved(Kind::Constant { value: 2.0 }, true),
+            output: resolved(Kind::Constant { value: 2.0 }, true),
+        };
+
+        let mut prefixes = Vec::new();
+        for _ in 0..2 {
+            let mut sp = SessionPool::new(
+                0,
+                Population::Exact(1),
+                resolved(Kind::Constant { value: 1.0 }, true),
+                resolved(Kind::Constant { value: 1.0 }, false),
+                &mut r,
+            );
+            sp.seed(0.0, &mut ids, &mut r);
+            let h = sp.handles().next().unwrap();
+            bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
+            let shared_len = sp.session(h).shared_len();
+            while take_turn(sp.session_mut(h), &growth, &mut r).is_some() {}
+            prefixes.push((sp.session(h).prefix().to_vec(), shared_len));
+            for b in sp.session_mut(h).take_chosen() {
+                pools[0].release(b.into_held());
+            }
+        }
+
+        let (a, a_shared) = &prefixes[0];
+        let (b, b_shared) = &prefixes[1];
+        assert_eq!(a_shared, b_shared);
+        assert!(*a_shared > 0);
+        // The shared run is identical...
+        assert_eq!(&a[..*a_shared], &b[..*b_shared], "shared run diverged");
+        // ...and nothing past it is, because growth is salted with the session id.
+        let a_growth: std::collections::BTreeSet<&CacheKey> = a[*a_shared..].iter().collect();
+        let b_growth: std::collections::BTreeSet<&CacheKey> = b[*b_shared..].iter().collect();
+        assert!(
+            a_growth.is_disjoint(&b_growth),
+            "growth blocks leaked between sessions; intra- and cross-session reuse \
+             are no longer separable"
+        );
+    }
+
+    #[test]
+    fn sessions_sharing_a_leading_run_share_exactly_that_run() {
+        // The block-level form of FR-028's consequence, and the reason keys are
+        // chained (FR-027): a common *leading* run gives reuse, and an object held
+        // in common at a differing position gives none.
+        let mut r = rng::substream(45, "turns");
+        let mut ids = SessionIds::new();
+        let (p0, s0) = shared(0, 6, &mut r);
+        let mut pools = vec![p0];
+        let mut sels = vec![s0];
+
+        let mut runs: Vec<(Vec<u32>, Vec<CacheKey>)> = Vec::new();
+        for count in [1.0, 2.0, 3.0, 4.0] {
+            let uses = vec![uses_of(0, count)];
+            for _ in 0..25 {
+                let mut sp = SessionPool::new(
+                    0,
+                    Population::Exact(1),
+                    resolved(Kind::Constant { value: 1.0 }, true),
+                    resolved(Kind::Constant { value: 1.0 }, false),
+                    &mut r,
+                );
+                sp.seed(0.0, &mut ids, &mut r);
+                let h = sp.handles().next().unwrap();
+                bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
+                let slots: Vec<u32> = sp
+                    .session(h)
+                    .chosen()
+                    .iter()
+                    .map(|b| pools[0].held(b.held()).slot())
+                    .collect();
+                let shared_keys = sp.session(h).prefix().to_vec();
+                runs.push((slots, shared_keys));
+                for b in sp.session_mut(h).take_chosen() {
+                    pools[0].release(b.into_held());
+                }
+            }
+        }
+
+        for (a, b) in runs.iter().zip(runs.iter().skip(1)) {
+            // Instances are immortal here, so a slot names one instance and each
+            // contributes 4 blocks.
+            let common_slots = a.0.iter().zip(&b.0).take_while(|(x, y)| x == y).count();
+            let common_keys = a.1.iter().zip(&b.1).take_while(|(x, y)| x == y).count();
+            assert_eq!(
+                common_keys,
+                common_slots * 4,
+                "sets {:?} and {:?} agree on {common_slots} leading instances, so \
+                 they must agree on {} leading keys, not {common_keys}",
+                a.0,
+                b.0,
+                common_slots * 4
+            );
+            // And nothing coincides *past* the common leading run. This is the
+            // assertion that actually tests chaining (FR-027): with unchained keys
+            // an instance held in common at differing positions would yield the
+            // same keys, so two sets like {1,3} and {3,5} would share instance 3's
+            // blocks despite agreeing on no leading instance at all.
+            let a_rest: std::collections::BTreeSet<&CacheKey> = a.1[common_keys..].iter().collect();
+            let b_rest: std::collections::BTreeSet<&CacheKey> = b.1[common_keys..].iter().collect();
+            assert!(
+                a_rest.is_disjoint(&b_rest),
+                "keys coincide past the common leading run of {:?} and {:?}: an \
+                 object held in common at a differing position is yielding reuse, \
+                 so keys are not chained",
+                a.0,
+                b.0
+            );
+        }
+    }
+
+    #[test]
+    fn a_chain_is_reproducible_and_seed_dependent() {
+        // FR-029: the whole chain is a function of the description and the seed.
+        let run = |seed: u64| {
+            let mut r = rng::substream(seed, "turns");
+            let (mut sp, h, mut pools, _) = turning_session(2.0, &mut r);
+            let growth = Growth {
+                input: resolved(Kind::Constant { value: 2.0 }, true),
+                output: resolved(Kind::Constant { value: 2.0 }, true),
+            };
+            while take_turn(sp.session_mut(h), &growth, &mut r).is_some() {}
+            let keys = sp.session(h).prefix().to_vec();
+            for b in sp.session_mut(h).take_chosen() {
+                pools[0].release(b.into_held());
+            }
+            keys
+        };
+        assert_eq!(run(3), run(3));
+        assert_ne!(run(3), run(4));
+    }
+
+    #[test]
+    #[should_panic(expected = "before its shared instances were bound")]
+    fn taking_a_turn_before_binding_is_refused() {
+        // An unbound session's prefix silently omits every shared block, so it
+        // would produce a workload with no cross-session reuse at all.
+        let mut r = rng::substream(46, "turns");
+        let mut ids = SessionIds::new();
+        let (mut p, h) = lone_session(&mut ids, &mut r);
+        take_turn(p.session_mut(h), &unit_growth(), &mut r);
     }
 
     #[test]
