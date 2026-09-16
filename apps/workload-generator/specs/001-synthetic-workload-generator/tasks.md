@@ -489,9 +489,33 @@ set derive the same keys for it, and it is the whole of cross-session reuse.
   leading-run *length* assertion alone did **not** catch it, which is why the
   test also asserts disjointness past the common run.
 
-- [ ] T028 [P] Test in `crates/workload-model/tests/session.rs`: sessions
+- [x] T028 [P] Test in `crates/workload-model/tests/session.rs`: sessions
   drawing overlapping instance sets produce **nested** chains, not divergent
-  ones — `{0,1}` versus `{0,1,4}` share the first two objects' blocks
+  ones — `{0,1}` versus `{0,1,4}` share the first two objects' blocks **T028
+  notes.** Aimed at what the unit tests cannot state, rather than repeating
+  them: the **named** `{0,1}` vs `{0,1,4}` case as a concrete pair; **strict
+  nesting** of a three-session family; **two shared classes**, where agreeing
+  on a later class buys nothing if an earlier one differs; and the sharp form
+  of FR-027 — `{0,1,4}` and `{0,2,4}` share only object 0's blocks **even
+  though both hold object 4**, because it is reached through a different
+  parent. All with turns taken, so growth is present and must be seen to
+  diverge right after the shared run.
+
+**THE VACUITY TRAP BIT AGAIN, IN A NEW FILE.** The general test compared
+leading *bound-order* slot agreement against leading key agreement — both
+following the bound order, so both change together and a missing canonical sort
+passed all six tests. `common_slots` now sorts each class's slots
+**independently**, and with `sort_unstable` deleted from `Selector::draw` the
+test fails with "[[2]] and [[3, 2]] agree on 1 leading instances, so 4 keys,
+not 0". **Second occurrence of the same mistake in three tasks — the rule to
+apply going forward is: derive the expected value from the specification, never
+from the code path under test.**
+
+Teeth verified per property: unchained keys fail only
+`an_object_held_in_common_at_a_differing_position_yields_nothing` (by design —
+it is the test for that), and a lost canonical sort fails only the general
+agreement test.
+
 - [ ] T029 Implement the virtual-time event loop in
   `crates/workload-model/src/sim.rs`: think time before each turn, session
   birth and death, pool events. Node placement and migration are US3
