@@ -949,7 +949,60 @@ figure taken that way is meaningless. Verify with
 note that `pkill -f <pattern>` matches the invoking shell's own command line,
 which killed this session's shell twice.
 
-**Still open in US1**: the pacing limitation above.
+**A DEFECT FOUND BY QUESTIONING THE HIT RATE: shared-prefix blocks are read
+but never stored.** The reported hit figures did not reconcile with the declined
+stores, and chasing that turned up two things.
+
+First, a real bug in the new accounting: `op_check` answers a **three-valued**
+`check_state` (`MISS` 0, `RESIDENT` 1, `PENDING` 2) while `op_lookup` answers a
+binary flag, and both were counted in one arm as "1 means hit". That made every
+`PENDING` key a miss, although `wire.rs` says explicitly that `byte != 0` is the
+correct existence test. `CHECK` and `LOOKUP` are now counted and reported
+separately, `PENDING` in its own column — excluded from the hit numerator because
+the key is not loadable at that instant, and kept in the denominator because the
+cache does hold it.
+
+Second, and structural. Measured on one fresh server, a **cold** and a **warm**
+run of the same seed report byte-identical results — 60 resident, 0 pending, 96
+miss of 156 checks — which cannot happen if the cache retains what the previous
+run stored. The plan explains it exactly:
+
+```
+312 read refs = 192 refs to 4 shared keys nothing ever stores  (always miss)
+              + 120 refs to session-private keys stored earlier (always hit)
+```
+
+and the measured misses are `96 + 96 = 192`. Every miss in the run is a reference
+to a shared-object block, and **no operation ever reserves one**. So
+cross-session prefix sharing — the phenomenon this generator exists to exercise —
+contributes **zero** cache hits, only intra-session prefix reuse does, and every
+live hit rate is structurally understated. Equilibrium seeding places shared
+objects as though they already existed, but nothing puts them into Certus.
+
+`spec.md`'s own race note ("two sessions race to mint the same shared prefix,
+both may miss and both store") presumes sessions *do* store shared prefixes, so
+this contradicts the spec rather than implementing it. The fix cannot be "store
+on miss", because a plan that reacts to run-time outcomes is no longer a function
+of description and seed (FR-072). The deterministic form is available: **the
+session that mints a shared instance stores its blocks**, minting already being a
+plan-time event on `SharedInstance::mint`. Later sessions read and hit. Left
+unfixed pending a decision, because it changes which operations a plan contains.
+
+**Keys derive from structural position, not from the seed.** A different seed
+declined 66 of 72 reserves, which measured out as exactly 66 of 72 stored keys
+shared between seed 7 and seed 99 (91.7%). Not a collision — keys are 64-bit
+`splitmix64` outputs and the salt encodes `(tag, class, instance_index,
+block_ordinal)`, all structural counters with no seed component, so the same
+coordinate yields the same key in every run. The seed changes which coordinates
+are used and when. Consequence for experiment hygiene: **a new seed does not give
+a fresh key space against a warm server.**
+
+Declines and hit rate were never comparable quantities, which was the smell worth
+following: declines concern the 72 session-private keys the run stores, misses
+concern the 4 shared keys it never stores. Disjoint populations.
+
+**Still open in US1**: the pacing limitation above, and the shared-block store
+defect.
 
 **Checkpoint**: US1 is functional against a live local server for the control path.
 

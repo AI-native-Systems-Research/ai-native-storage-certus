@@ -715,3 +715,157 @@ fn repeat_stores_are_the_shared_mint_race_and_never_a_session_restoring_its_own_
         first_owner.len()
     );
 }
+
+/// The description used for the live measurements on node2, so the numbers compare.
+const LIVE_DESCRIPTION: &str = r#"
+version: 1
+blocks: {tokens: 16, bytes: 32768}
+shared_classes:
+  manual:
+    length: {constant: 4}
+    lifetime: {constant: .inf}
+session_classes:
+  chat:
+    pool: {size: {exact: 4}}
+    uses: [{class: manual, count: {constant: 1}}]
+    turns: {constant: 3}
+    input_growth: {constant: 2}
+    output_growth: {constant: 1}
+    think_time: {constant: 10}
+"#;
+
+fn live_plan(seed: u64, span: f64) -> OperationPlan {
+    let d: WorkloadDescription = LIVE_DESCRIPTION.parse().unwrap();
+    let mut sim = Simulation::new(&d, seed).unwrap();
+    let mut plan = OperationPlan::default();
+    sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
+    plan
+}
+
+/// Keys per operation kind, and the distinct read/stored key sets.
+fn breakdown(plan: &OperationPlan) -> (HashMap<OpKind, u64>, HashSet<u64>, HashSet<u64>) {
+    let mut per_kind: HashMap<OpKind, u64> = HashMap::new();
+    let mut read = HashSet::new();
+    let mut stored = HashSet::new();
+    for op in plan.operations() {
+        let keys = plan.keys_of(op);
+        *per_kind.entry(op.kind()).or_default() += keys.len() as u64;
+        match op.kind() {
+            OpKind::Check | OpKind::Load => read.extend(keys.iter().copied()),
+            OpKind::Reserve => stored.extend(keys.iter().copied()),
+            _ => {}
+        }
+    }
+    (per_kind, read, stored)
+}
+
+#[test]
+fn keys_are_derived_from_structural_position_and_so_barely_change_with_the_seed() {
+    // The question this answers: a warm-cache run with a *different* seed declined 66 of
+    // 72 reserves, which is only explicable if the two runs store nearly the same keys.
+    // They do. `key(parent, salt)` salts on (tag, class, instance_index, block_ordinal) —
+    // all structural counters — and the seed appears nowhere in it. So the seed changes
+    // *which* structural positions get used and when, not the key value at a position.
+    //
+    // This is not a collision: keys are 64-bit splitmix64 outputs, and the overlap is
+    // exact equality of derivation inputs. It matters for experiment hygiene — a new seed
+    // does NOT give a fresh key space against a server that is already warm.
+    let (_, _, a) = breakdown(&live_plan(7, 60.0));
+    let (_, _, b) = breakdown(&live_plan(99, 60.0));
+    let shared = a.intersection(&b).count();
+    let overlap = shared as f64 / a.len().max(1) as f64;
+    eprintln!(
+        "stored keys: seed 7 = {}, seed 99 = {}, shared = {shared} ({:.1}% of seed 7)",
+        a.len(),
+        b.len(),
+        overlap * 100.0
+    );
+    assert!(
+        overlap > 0.5,
+        "expected heavy cross-seed key overlap from structural derivation, got {:.1}%",
+        overlap * 100.0
+    );
+}
+
+#[test]
+fn read_references_far_outnumber_stores_which_is_why_a_cold_run_still_hits() {
+    // Why a cold cache shows a non-zero hit rate: "unique keys" is true of *stores* — the
+    // plan reserves each key exactly once — but reads reference those same keys again and
+    // again. A session re-reads its whole growing prefix every turn, and several sessions
+    // read the same shared object, so the run warms itself and later reads hit blocks that
+    // earlier turns of the same run stored. Hit rate is a property of reads, not stores.
+    let plan = live_plan(7, 60.0);
+    let (per_kind, read, stored) = breakdown(&plan);
+    let check = per_kind.get(&OpKind::Check).copied().unwrap_or(0);
+    let load = per_kind.get(&OpKind::Load).copied().unwrap_or(0);
+    let reserve = per_kind.get(&OpKind::Reserve).copied().unwrap_or(0);
+    eprintln!(
+        "per-kind key references: {per_kind:?}\n\
+         read refs {} over {} distinct keys; stored refs {reserve} over {} distinct keys\n\
+         read keys never stored by this run: {}",
+        check + load,
+        read.len(),
+        stored.len(),
+        read.difference(&stored).count()
+    );
+    assert!(
+        check + load > reserve,
+        "reads {} must outnumber stores {reserve} or there is no reuse to measure",
+        check + load
+    );
+}
+
+#[test]
+fn shared_prefix_blocks_are_read_but_never_stored_so_they_can_never_hit() {
+    // A cold run and a warm run of the same seed report *identical* check results — 60
+    // resident, 96 miss of 156 — which cannot be true if the cache retains what the
+    // previous run stored. This test locates why.
+    //
+    // The read references split into two populations. Session-private prefix blocks are
+    // stored by the turn that mints them and read by every later turn of that session, so
+    // they go resident. Shared-object blocks are read by every session that binds the
+    // object and are **never reserved by anyone**, so they miss on every reference, in
+    // every run, however warm the cache is.
+    //
+    // That is a defect, not a property. spec.md's own race note says two sessions may both
+    // miss on the same shared prefix and both store it — which presumes sessions store
+    // shared prefixes. Equilibrium seeding places shared objects as though they already
+    // existed, but nothing ever puts them into Certus, so cross-session sharing — the
+    // central phenomenon this generator exists to exercise — contributes no cache hits at
+    // all, and every live hit rate is structurally understated.
+    let plan = live_plan(7, 60.0);
+    let (per_kind, read, stored) = breakdown(&plan);
+    let never_stored: HashSet<u64> = read.difference(&stored).copied().collect();
+    assert!(
+        !never_stored.is_empty(),
+        "nothing is read-but-unstored, so this defect is fixed and the test should be \
+         rewritten as a regression guard"
+    );
+
+    // How many *references* those keys account for, which is what the miss count sees.
+    let mut refs_to_never_stored = 0u64;
+    let mut refs_total = 0u64;
+    for op in plan.operations() {
+        if !matches!(op.kind(), OpKind::Check | OpKind::Load) {
+            continue;
+        }
+        for key in plan.keys_of(op) {
+            refs_total += 1;
+            if never_stored.contains(key) {
+                refs_to_never_stored += 1;
+            }
+        }
+    }
+    eprintln!(
+        "read refs {refs_total}; {refs_to_never_stored} of them ({:.1}%) name one of the \
+         {} keys nothing ever stores\nper-kind: {per_kind:?}",
+        refs_to_never_stored as f64 / refs_total as f64 * 100.0,
+        never_stored.len()
+    );
+    // The measured miss count is 96 of 156 checks. If the unstored keys account for
+    // essentially all of it, the misses are structural rather than a cache property.
+    assert!(
+        refs_to_never_stored > 0,
+        "the unstored keys are never actually referenced"
+    );
+}

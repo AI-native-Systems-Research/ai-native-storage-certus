@@ -144,10 +144,16 @@ pub struct LaneStats {
     pub skipped_needing_gpu: u64,
     /// Keys those skipped operations would have moved.
     pub skipped_keys: u64,
-    /// Keys a `CHECK` or `LOOKUP` found present.
-    pub hits: u64,
-    /// Keys a `CHECK` or `LOOKUP` found absent.
-    pub misses: u64,
+    /// `CHECK` keys reported `RESIDENT` — committed and loadable now.
+    pub check_resident: u64,
+    /// `CHECK` keys reported `PENDING` — reserved with a store in flight.
+    pub check_pending: u64,
+    /// `CHECK` keys reported `MISS`.
+    pub check_miss: u64,
+    /// `LOOKUP` keys that returned data.
+    pub lookup_hits: u64,
+    /// `LOOKUP` keys that did not.
+    pub lookup_misses: u64,
     /// Keys a `RESERVE` was asked for.
     pub reserves_attempted: u64,
     /// Keys a `COMMIT_STORE` was asked for.
@@ -232,14 +238,29 @@ impl LiveStats {
         self.lanes.iter().map(|l| l.skipped_keys).sum()
     }
 
-    /// Keys found present by a `CHECK` or `LOOKUP`.
-    pub fn hits(&self) -> u64 {
-        self.lanes.iter().map(|l| l.hits).sum()
+    /// `CHECK` keys reported `RESIDENT`.
+    pub fn check_resident(&self) -> u64 {
+        self.lanes.iter().map(|l| l.check_resident).sum()
     }
 
-    /// Keys found absent by a `CHECK` or `LOOKUP`.
-    pub fn misses(&self) -> u64 {
-        self.lanes.iter().map(|l| l.misses).sum()
+    /// `CHECK` keys reported `PENDING`.
+    pub fn check_pending(&self) -> u64 {
+        self.lanes.iter().map(|l| l.check_pending).sum()
+    }
+
+    /// `CHECK` keys reported `MISS`.
+    pub fn check_miss(&self) -> u64 {
+        self.lanes.iter().map(|l| l.check_miss).sum()
+    }
+
+    /// `LOOKUP` keys that returned data.
+    pub fn lookup_hits(&self) -> u64 {
+        self.lanes.iter().map(|l| l.lookup_hits).sum()
+    }
+
+    /// `LOOKUP` keys that did not.
+    pub fn lookup_misses(&self) -> u64 {
+        self.lanes.iter().map(|l| l.lookup_misses).sum()
     }
 
     /// Keys a `RESERVE` was asked for.
@@ -644,15 +665,30 @@ fn clear_memory_tier(client: &Client, channel: usize) -> Result<u64, String> {
 /// measure the very thing it is for.
 fn count_results(opcode: u32, body: &[u8], stats: &mut LaneStats) {
     match opcode {
-        // 1 = present, 0 = absent. `op_lookup` also reports a handle that failed to open
-        // as a 0, so a miss count is a lower bound on real misses — stated rather than
-        // hidden, because the server does not distinguish them on the wire.
-        op::CHECK | op::LOOKUP => {
+        // CHECK and LOOKUP do NOT share an encoding, and conflating them was a real
+        // defect here: `op_check` answers a three-valued `check_state`
+        // (MISS = 0, RESIDENT = 1, PENDING = 2) while `op_lookup` answers a binary flag.
+        // Treating `== 1` as a hit for both counted every PENDING key as a miss, although
+        // `wire.rs` says explicitly that `byte != 0` is the correct "exists" test.
+        // PENDING means another lane reserved the key and its store is in flight: coming,
+        // not absent, and never a miss.
+        op::CHECK => {
+            for b in body {
+                match *b {
+                    wire::check_state::RESIDENT => stats.check_resident += 1,
+                    wire::check_state::PENDING => stats.check_pending += 1,
+                    _ => stats.check_miss += 1,
+                }
+            }
+        }
+        // Binary, and a handle that failed to open is reported as a 0 too, so a miss count
+        // is an upper bound on true cache misses — the wire does not distinguish them.
+        op::LOOKUP => {
             for b in body {
                 if *b == 1 {
-                    stats.hits += 1;
+                    stats.lookup_hits += 1;
                 } else {
-                    stats.misses += 1;
+                    stats.lookup_misses += 1;
                 }
             }
         }
