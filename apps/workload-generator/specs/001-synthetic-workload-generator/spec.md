@@ -701,9 +701,40 @@ modes reorder the policies.
   - Lateness MUST be reported as percentiles with its request count, per FR-066a.
   - FR-072 and FR-072a MUST continue to hold: pacing changes *when* a request is
     submitted, never which keys a turn names or how sessions interleave.
-  - A rate multiplier SHOULD exist (1.0 being real time), since a paced run costs
-    wallclock equal to its virtual span divided by the rate, which makes long
-    descriptions expensive to run at 1.0.
+  - A **rate multiplier MUST exist**, expressed as virtual seconds per wallclock
+    second, and it is a calibration control rather than a convenience. A
+    description's durations are arbitrary with respect to any particular machine:
+    `think_time` and session lifetimes reflect whatever hardware the workload was
+    observed on or imagined for, so on faster hardware the same description
+    under-drives the system and on slower hardware it over-drives it. The
+    multiplier is how one description is aimed at different targets without being
+    rewritten, and it also controls cost, since a paced run takes wallclock equal
+    to its virtual span divided by the rate.
+
+    It belongs on the command line and **MUST NOT be a field of the description**,
+    for FR-069's reason exactly: it describes the target hardware rather than the
+    workload, so putting it in the YAML would conflate the two and break FR-005
+    portability.
+
+  - **The rate is the load knob, so a rate sweep is the capacity measurement.**
+    Offered load scales with the rate while the workload's shape does not, so
+    sweeping it and watching where lateness leaves zero gives the rate at which
+    this machine stops serving this workload on time — a load-versus-latency curve
+    rather than a single number. That is a better instrument for "can this machine
+    serve this workload" than the work-conserving ceiling, which reports a
+    saturated queue's latency; the work-conserving mode remains useful for a pure
+    bandwidth ceiling with no schedule to keep.
+
+  - **Rate MUST NOT change the workload.** It changes only the tempo at which the
+    plan is played: the same keys in the same order with the same virtual
+    interleaving and the same session concurrency, submitted faster or slower.
+    FR-072 continues to hold, and a run's plan fingerprint MUST be independent of
+    the rate.
+
+  - **In paced mode the reported `virtual/wallclock` ratio becomes a check on the
+    requested rate.** It should come out at approximately the rate asked for; a
+    measured ratio below the requested one is the same information as accumulated
+    lateness, arriving by a second route, and the two MUST agree.
   - FR-031 MUST be scoped to the work-conserving mode when this lands.
 
   **Paced MUST be the default, and the argument is the constitution's own.** Its
