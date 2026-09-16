@@ -105,7 +105,7 @@ struct Cli {
     dataset: Dataset,
 
     /// Use a local Qwen-format JSONL file instead of downloading a dataset.
-    #[arg(long)]
+    #[arg(long, alias = "file")]
     qwen_file: Option<PathBuf>,
 
     /// Use a local ShareGPT-format JSON file (array of {id, conversations}).
@@ -126,6 +126,7 @@ struct Cli {
     /// suffixes: K = ×1024, M = ×1024², G = ×1024³. Examples: 256K, 2M, 4096.
     #[arg(
         long = "cache-size-nelements",
+        alias = "cache-size",
         value_delimiter = ',',
         default_value = "10000",
         value_parser = parse_cache_size,
