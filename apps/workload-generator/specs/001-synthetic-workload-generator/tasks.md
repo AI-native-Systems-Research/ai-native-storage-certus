@@ -756,38 +756,68 @@ byte.
   virtual-time order and nothing is buffered) with the full encoding,
   `full_input_blocks` populated and the trailing-partial-block convention
   honoured, recording `partial_final_valid`. The six per-row invariants the
-  contract lists are what T055 asserts
-**T052/T053 notes, and a correction to `contracts/trace-io.md`.** I had written
-`input_length` in **blocks** and `block_size` as a count of blocks. That was wrong
-and is fixed: both now follow the corpus — `block_size` is **tokens per block** and
-`input_length` is `blocks * block_size` tokens. Deviating on those two fields would
-have broken exactly the field-level comparability with real traces that the format
-exists for.
+  contract lists are what T055 asserts **T052/T053 notes, and a correction to
+  `contracts/trace-io.md`.** I had written `input_length` in **blocks** and
+  `block_size` as a count of blocks. That was wrong and is fixed: both now
+  follow the corpus — `block_size` is **tokens per block** and `input_length`
+  is `blocks * block_size` tokens. Deviating on those two fields would have
+  broken exactly the field-level comparability with real traces that the format
+  exists for.
 
 **A turn's prompt is not a turn's reads.** `Turn` separates them because FR-025
 defines the read set as the prefix *before* the turn, but a trace's
-`full_input_blocks` is the request's prompt — that prefix **plus** the turn's own
-new input, since the new user text is part of what gets sent. Conflating them would
-understate every prompt by one turn's growth and would break the schema's own
-`len(full_input_blocks) * block_size == input_length` invariant.
+`full_input_blocks` is the request's prompt — that prefix **plus** the turn's
+own new input, since the new user text is part of what gets sent. Conflating
+them would understate every prompt by one turn's growth and would break the
+schema's own `len(full_input_blocks) * block_size == input_length` invariant.
 
-**`request_end` and `partial_final_valid` are null, not zero.** A turn occupies a
-single instant because no service time is modelled, so a zero duration would be a
-measurement never made; and this generator mints whole blocks, so there is no
-trailing partial. Both are **present and null** so a reader need not recognise
-which trace it is (FR-056) — the same rule as FR-071's omitted report fields.
+**`request_end` and `partial_final_valid` are null, not zero.** A turn occupies
+a single instant because no service time is modelled, so a zero duration would
+be a measurement never made; and this generator mints whole blocks, so there is
+no trailing partial. Both are **present and null** so a reader need not
+recognise which trace it is (FR-056) — the same rule as FR-071's omitted report
+fields.
 
 **Row verification is on by default** in the writer (FR-058), including the
-append-only check against the previous row of the same session, which is the one
-invariant a single row cannot express. Two tests build a broken row by hand,
-because the simulation cannot produce one.
+append-only check against the previous row of the same session, which is the
+one invariant a single row cannot express. Two tests build a broken row by
+hand, because the simulation cannot produce one.
 
-- [ ] T054 [US2] Implement the parquet writer in
+- [x] T054 [US2] Implement the parquet writer in
   `crates/workload-trace/src/parquet.rs` behind the `parquet` feature, emitting
   records identical to the JSONL writer's
-- [ ] T055 [P] [US2] Test in `crates/workload-trace/tests/containers.rs`: the
+- [x] T055 [P] [US2] Test in `crates/workload-trace/tests/containers.rs`: the
   two containers yield identical records, and every row satisfies the
-  full-encoding invariants declared in its own manifest
+  full-encoding invariants declared in its own manifest **T054/T055 notes.**
+  The feature gate is **verified, not asserted**: `cargo tree -p
+  workload-trace` shows **0** arrow crates by default and **28** with
+  `--features parquet`.
+
+**Parquet buffers, and that is the one place the emit path's bounded-memory
+property is weakened.** A column has to be assembled before it can be encoded,
+so the writer holds `ROW_GROUP_ROWS` = 8 192 rows. Weakened by a *constant*
+rather than by the run — peak buffered rows is the row-group size whatever the
+span — and recorded in the module header rather than left to be found on a
+memory graph.
+
+**Arrow's `ListBuilder` marks its item field nullable by default, and I told
+the builder rather than weakening the schema.** A trace's schema is part of its
+self-description (FR-056); declaring "possibly null" for items that never are
+would be a false claim about the data.
+
+**T055 compares the containers through their serialised forms**, reading the
+parquet back and rebuilding records from the JSONL text, rather than comparing
+what the two writers were handed. Each writer is convincing in isolation — the
+failure mode is a field that means something slightly different in one of them,
+and that only shows up on a round trip. A fifth test pins that parquet really
+is smaller than JSONL for the same records, since if that stopped holding the
+feature would be carrying arrow for nothing.
+
+**One gap recorded in the test file's header rather than hidden**: the whole file is
+`#![cfg(feature = "parquet")]`, so the *equivalence* claim is only tested with
+the feature on. CI must run `--features parquet` or SC-004 is untested — a
+feature-gated test nobody enables is indistinguishable from no test.
+
 - [ ] T056 [US2] Implement the emit report in
   `crates/workload-gen/src/report.rs`: completeness only — sessions started and
   completed, turns and blocks emitted, virtual-time span, records per
