@@ -346,10 +346,39 @@ count distribution is really narrowed. The run-time counters above now measure
 it after the fact; projecting it at load time is a closed-form Poisson tail and
 belongs with T033.
 
-- [ ] T024 [P] Test in `crates/workload-model/tests/pool.rs`: residual-life
+- [x] T024 [P] Test in `crates/workload-model/tests/pool.rs`: residual-life
   seeding produces flat churn from `t = 0`, whereas seeding from `lifetime`
   itself produces the cohort artifact — zero churn early then a burst, with
   periodic modulation persisting for several generations
+
+**T024 needed a way to reach the wrong behaviour**, since the shipped code only
+ever seeds from equilibrium — correctly. Added `SeedingPolicy` with
+`seed_with_policy`: `seed()` keeps its signature and always uses
+`Equilibrium`, so no production path can select the defect by accident, and
+`Lifetime` is documented as existing only to be the second arm of a controlled
+comparison. A requirement whose justification can be re-run is worth more than
+one whose justification is a comment.
+
+Four tests, on the same pool and windows as
+`research/population/seeding.py` so the two are directly comparable, asserting
+the **structure** and not the digits — the reference's "zero churn for three
+windows, modulation still 0.44 after eight generations against 0.04" would make
+this a flake detector for the RNG if pinned. Both arms were verified by
+reintroducing a bug:
+
+- **A missing length bias in the residual sampler is caught by the exponential
+  control, and by nothing else.** Injected it: the control fails (2.85 vs 1.91
+  per window) while both normal-lifetime tests still pass, because they only
+  ask that equilibrium seeding be *flat* and a wrong-but-flat sampler satisfies
+  them. The comment in the test says exactly this, and it is now a measured
+  claim.
+- **The defect arm is not vacuous.** Making `Lifetime` behave as `Equilibrium`
+  fails two tests, so the cohort artifact is really being reproduced rather
+  than asserted into existence.
+
+A third test compares the arms directly, so the pair cannot pass by both being
+broken the same way, and checks that **total** churn agrees across arms — the
+seeding must change *when* keys churn, not how many.
 
 ### Sessions, turns, and the plan
 

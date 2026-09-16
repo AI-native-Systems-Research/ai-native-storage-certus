@@ -148,6 +148,33 @@ impl SharedInstance {
     }
 }
 
+/// How a pool gives its instances their initial remaining life at `t = 0`.
+///
+/// There is only one correct answer, so this exists for a narrow reason: it lets
+/// the wrong answer be **measured** in this repository instead of asserted. See
+/// [`SharedPool::seed_with_policy`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SeedingPolicy {
+    /// Draw each instance's remaining life from the equilibrium residual-life
+    /// distribution. **Required** (FR-015), and what [`SharedPool::seed`] does.
+    #[default]
+    Equilibrium,
+    /// Draw each instance a full life from the lifetime distribution.
+    ///
+    /// **This is the defect FR-015 forbids, and no run may use it.** Every
+    /// instance gets the same birthday, so the pool turns over in synchronised
+    /// cohorts: a normal-lifetime pool then sees *zero* key churn for several
+    /// windows followed by a burst, with the periodicity still plainly visible
+    /// eight generations later.
+    ///
+    /// It is reachable only through [`SharedPool::seed_with_policy`], never
+    /// through [`SharedPool::seed`], so a production path cannot select it by
+    /// accident. Its purpose is to be the second arm of a controlled comparison —
+    /// a requirement whose justification can be re-run is worth more than one
+    /// whose justification is a comment.
+    Lifetime,
+}
+
 /// One session's hold on one shared instance.
 ///
 /// Returned by [`SharedPool::acquire`] and consumed by [`SharedPool::release`].
@@ -421,6 +448,26 @@ impl SharedPool {
     ///
     /// If called twice.
     pub fn seed<R: Rng + ?Sized>(&mut self, t0: f64, rng: &mut R) {
+        self.seed_with_policy(t0, SeedingPolicy::Equilibrium, rng)
+    }
+
+    /// Seed at `t0` under an explicit [`SeedingPolicy`].
+    ///
+    /// Callers in a run use [`SharedPool::seed`], which is this with
+    /// [`SeedingPolicy::Equilibrium`]. The other policy is the defect FR-015
+    /// forbids, and exists only so a test can measure it rather than take the
+    /// requirement on trust — see `research/population/seeding.py` for the same
+    /// comparison in Python, and `tests/pool.rs` for the assertions.
+    ///
+    /// # Panics
+    ///
+    /// If called twice.
+    pub fn seed_with_policy<R: Rng + ?Sized>(
+        &mut self,
+        t0: f64,
+        policy: SeedingPolicy,
+        rng: &mut R,
+    ) {
         assert!(!self.seeded, "pool seeded twice");
         self.seeded = true;
         self.now = t0;
@@ -430,8 +477,13 @@ impl SharedPool {
             Population::Poisson(n) => poisson(rng, n as f64),
         };
         for _ in 0..initial {
-            let residual = self.residual.sample(rng);
-            self.mint(t0, t0 + residual, rng);
+            let remaining = match policy {
+                SeedingPolicy::Equilibrium => self.residual.sample(rng),
+                // Deliberately wrong: a full life, so every instance shares a
+                // birthday and the pool turns over in cohorts.
+                SeedingPolicy::Lifetime => self.lifetime.sample(rng).max(0.0),
+            };
+            self.mint(t0, t0 + remaining, rng);
         }
         if self.birth_rate > 0.0 {
             self.next_birth_at = t0 + exponential(rng, 1.0 / self.birth_rate);
