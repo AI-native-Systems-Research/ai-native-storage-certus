@@ -429,9 +429,36 @@ makes sessions instantaneous, so no finite arrival rate can sustain any
 concurrency and `size / E[duration]` diverges. Now refused at load with the
 arithmetic named, rather than dividing by zero mid-run.
 
-- [ ] T026 Implement canonical ordering in
+- [x] T026 Implement canonical ordering in
   `crates/workload-model/src/session.rs`: shared classes in declaration order,
-  instances sorted by index within a class
+  instances sorted by index within a class **T026 notes.** `bind()` produces
+  the order in one place rather than letting the caller assemble it, because
+  assembling it wrongly yields a workload that runs, reports plausible numbers,
+  and has almost no cross-session reuse. `Bound` carries the `Held`, so a
+  session that is dropped without giving its instances back is a leak the type
+  system shows — and since `Held` is not `Clone`, `SessionPool` could no longer
+  derive `Clone` either. That is correct and worth keeping: cloning a pool
+  would duplicate every hold without incrementing its refcount, and releasing
+  both copies would free an instance still in use. `take_turn` now
+  **debug_asserts the session is bound**, since an unbound session's prefix
+  silently omits every shared block.
+
+**MY HEADLINE TEST WAS VACUOUS AND IS FIXED.** The nesting test compared the
+leading run of the bound *slots* against the leading run of the bound *mints* —
+both derived from the same list, with slot and mint in bijection for immortal
+instances — so it held whatever the order was. Proved vacuous by deleting
+`sort_unstable` from `Selector::draw`: `instances_are_sorted_within_a_class`
+failed, the nesting test still passed. It now compares the bound order against
+each set sorted **independently**, and with the sort removed it fails as it
+should. **The lesson generalises: a test that derives both sides of its
+assertion from the same computation cannot fail.**
+
+**Also found and refused (T017 follow-up):** a session class listing the same
+shared class twice in `uses`. The two draws are independent, so one instance
+can land at two prefix positions, where prefix chaining gives it two different
+keys — which breaks FR-028's "the prefix is a function of the set it drew".
+`count` expresses the intent without the ambiguity, and the refusal says so.
+
 - [ ] T027 Implement the append-only turn model in
   `crates/workload-model/src/session.rs`: turn *n* reads the whole prefix,
   mints separate input and output growth, both stored and both extending the
