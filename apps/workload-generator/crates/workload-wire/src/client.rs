@@ -52,6 +52,31 @@ use crate::frame::{
     opcode, DrainAck, Header, Hello, HelloAck, ShutdownAck, Stats, SubmitTurn, TurnOutcome,
     WireError, Writer, HEADER_BYTES,
 };
+use crate::handshake::{self, Refused};
+
+/// Why a verified handshake did not complete.
+///
+/// The two are kept apart because they call for different actions: a transport failure may be
+/// a network or a launch problem, while a refusal means the deployment is wrong and rerunning
+/// will not help.
+#[derive(Debug)]
+pub enum HandshakeError {
+    /// The exchange itself failed.
+    Transport(ClientError),
+    /// The peer was reached and is not acceptable.
+    Refused(Refused),
+}
+
+impl fmt::Display for HandshakeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Transport(e) => write!(f, "{e}"),
+            Self::Refused(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for HandshakeError {}
 
 /// Default pipelining depth.
 ///
@@ -210,10 +235,10 @@ impl<S: Read + Write> Client<S> {
         self.stream
     }
 
-    /// Perform the handshake and return the agent's reply.
+    /// Perform the handshake and return the agent's reply, unverified.
     ///
-    /// This sends and receives; the fail-closed comparison of `proto_version` and
-    /// `build_id` is the caller's, so that the refusal can name the node (T067).
+    /// Prefer [`Client::handshake`], which refuses a peer that is not this build. This exists
+    /// for tests that need to see an unacceptable reply rather than an error.
     ///
     /// # Errors
     ///
@@ -221,6 +246,34 @@ impl<S: Read + Write> Client<S> {
     pub fn hello(&mut self, hello: &Hello) -> Result<HelloAck, ClientError> {
         let body = self.request(opcode::HELLO, 0, &hello.encode())?;
         Ok(HelloAck::decode(&body)?)
+    }
+
+    /// Perform the handshake and **refuse** a peer that is not this build (FR-051).
+    ///
+    /// `node` appears in every refusal, because on a cluster the useful part of the message is
+    /// which machine is wrong. `lanes` and `block_bytes` are checked against the capacity the
+    /// agent reports: the mailbox is depth-1 per channel, so over-subscribing it does not fail
+    /// but serialises silently, which would read as a slow server rather than a misconfigured
+    /// run.
+    ///
+    /// # Errors
+    ///
+    /// [`HandshakeError::Transport`] if the exchange failed, or
+    /// [`HandshakeError::Refused`] if the peer is unacceptable. There is no lenient mode.
+    pub fn handshake(
+        &mut self,
+        node: &str,
+        mailbox: &str,
+        lanes: usize,
+        block_bytes: u32,
+    ) -> Result<HelloAck, HandshakeError> {
+        let ack = self
+            .hello(&handshake::hello(mailbox))
+            .map_err(HandshakeError::Transport)?;
+        handshake::verify(node, &ack).map_err(HandshakeError::Refused)?;
+        handshake::check_capacity(node, &ack, lanes, block_bytes)
+            .map_err(HandshakeError::Refused)?;
+        Ok(ack)
     }
 
     /// Submit one turn, pipelined.
