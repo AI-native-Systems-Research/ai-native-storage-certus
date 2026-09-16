@@ -6,4 +6,6 @@
 #![warn(missing_docs)]
 
 pub mod cli;
+#[cfg(feature = "live")]
+pub mod opstream;
 pub mod report;
