@@ -2185,7 +2185,7 @@ step-shaped, and the two ranking modes reorder the policies.
   a concentrated `selection`, the realised reference distribution is skewed as
   configured; under `rank_by: recency` an instance's reference rate decays with
   age, and under `slot` it does not
-- [ ] T078 [US4] Add the sweep-supporting fields to the structured report in
+- [x] T078 [US4] Add the sweep-supporting fields to the structured report in
   `crates/workload-gen/src/report.rs`: hit/miss/pending split, distinct keys
   touched, and the effective working-set size, so a sweep can be aggregated
   without scraping terminal text
@@ -2199,6 +2199,28 @@ step-shaped, and the two ranking modes reorder the policies.
   including that hit-dependent comparisons need repetition with a stated
   significance test because mint races are preserved deliberately, and that n ≥
   8 is the recorded floor on this hardware
+
+**T078 done.** The hit/miss/pending split was already there from FR-072a's work, so what this
+added were the two fields a sweep cannot do without.
+
+**`distinct_keys` is the generator's count, not the nodes'.** Distinct counts do **not** sum: a
+shared prefix block referenced by sessions on two nodes is one key, and adding each node's count
+would double it — the same arithmetic error as averaging two nodes' percentiles, one type along.
+So it is counted once, by the producer, over the paths it built. It is `None` unless asked for,
+because maintaining the set costs an insert per key reference on the producer's own path: a
+throughput run should not pay that, and a sweep needs it, since a hit rate is only interpretable
+against the size of the key space it was measured over.
+
+**`working_set` reports what the `selection` spread actually covers**, per shared class, as the
+spread's p90 after truncation — the rank band carrying most of the mass. Deliberately *not* a
+count of ranks ever drawn, which would grow with the run's length and so describe the run rather
+than the description; and p90 rather than the mean, because a concentrated distribution's mean
+sits near rank 0 and says nothing about how far its references reach.
+
+`None` there is the case a sweep must be able to recognise rather than infer: it means selection
+is uniform, so the working set *is* the key space, the curve will step rather than slope, and the
+run cannot discriminate between policies however it is swept. Reporting that as a field is what
+stops it being guessed from the shape of the answer.
 
 **T075-T077 done, 5 tests; 228 in `workload-model`.** The `selection` distribution is over
 **rank**, so a spread narrower than the pool makes the working set smaller than the key space
