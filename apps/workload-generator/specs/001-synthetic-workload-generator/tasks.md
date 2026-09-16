@@ -1594,6 +1594,49 @@ local hit rate on the origin node is unchanged.
   server, in `crates/workload-wire/tests/conformance.rs`, covering all six
   cases listed in `contracts/node-agent-wire.md`
 
+**T067 done, 12 handshake tests; 51 in the crate.**
+
+**`build_id` had to become a *source* identity, not a binary digest.** The contract
+called it "a 32-byte digest of the agent binary", but the generator and the agent are
+different binaries, so their digests differ by construction and the check could never
+pass. **FR-051 asks the right question** — whether the daemon "was built from the same
+**sources** as the generator" — so the identity is a build-time source id: commit,
+plus a hash of the tracked diff, plus a hash of the porcelain status.
+
+It is computed **once**, in `workload-wire`'s build script, and both binaries obtain
+it by depending on that crate. Two build scripts computing it independently could
+disagree — a stale cache on one, a different working directory on the other — and a
+provenance check that can disagree with itself is worse than none. Verified: the
+captured id begins with the exact commit of the preceding task, and the digest moves
+when the id changes.
+
+**One hole is stated rather than papered over:** the diff covers uncommitted edits to
+tracked files and the status covers additions by *name*, so the **contents of
+untracked files are not covered**. A new file present on one node and absent on the
+other changes behaviour without changing the id.
+
+**Unknown provenance is refused, not assumed.** If git cannot describe the tree the
+id is `unknown`, and a peer reporting it is refused — accepting it would make the
+check vacuous for exactly the deployments most likely to be stale. `WORKLOAD_SOURCE_ID`
+overrides it deliberately.
+
+**Both ends check**, which is what makes a refusal legible: the agent replies with a
+non-zero status *and always sends its own identity even while refusing*, so the
+generator's message can name both sides. Every refusal names the node, since on a
+cluster the useful part is which machine is wrong. The protocol version is checked
+**first**, because if the versions differ the rest of the reply may not mean what it
+appears to and reporting a build mismatch would send an operator after the wrong
+problem.
+
+Capacity is checked too: more lanes than channels is refused because the mailbox is
+depth-1 per channel, so over-subscription does not fail — it **serialises silently**,
+which reads as a slow server rather than a misconfigured run. A block-size
+disagreement is refused for the same shape of reason.
+
+Not cryptographic, and does not need to be: the failure being prevented is an
+accident — a node left running yesterday's build — and anyone able to replace the
+binary can replace the identity it reports.
+
 **T066 done, 10 server tests; 37 in the crate.** Transport only — it reads a
 frame, dispatches and replies, and knows nothing of mailboxes or keys. The work is
 a `Service` the agent implements, which is what lets the whole protocol be driven
@@ -1674,7 +1717,7 @@ operation's key list and issue something plausible.
   depth independent of lane count, correlation ids
 - [x] T066 [US3] Implement the server half in
   `crates/workload-wire/src/server.rs`
-- [ ] T067 [US3] Implement the `Hello` handshake in
+- [x] T067 [US3] Implement the `Hello` handshake in
   `crates/workload-wire/src/client.rs` and `server.rs`, **fail-closed** on
   `proto_version` and `build_id`, and carrying `channels` and `block_bytes`
   back so the generator can check its lane count against the node's real

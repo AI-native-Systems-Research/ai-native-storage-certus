@@ -416,3 +416,84 @@ fn the_factory_makes_one_service_per_connection() {
     let _ = factory.accept().unwrap();
     assert_eq!(made.load(Ordering::Relaxed), 2);
 }
+
+/// A service whose provenance disagrees with this build — a stale deployment.
+#[derive(Debug, Default)]
+struct StaleAgent;
+
+impl Service for StaleAgent {
+    fn hello(&mut self, hello: &Hello) -> HelloAck {
+        // The agent answers with `handshake::answer`, so it refuses us too and still reports
+        // its own identity. Here that identity is deliberately not this build's.
+        let mut ack = workload_wire::handshake::answer(hello, 8, 32768);
+        ack.build_id = workload_wire::handshake::digest("a stale tree");
+        ack.status = workload_wire::handshake::status::BUILD_MISMATCH;
+        ack
+    }
+    fn submit_turn(&mut self, turn: &SubmitTurn) -> TurnOutcome {
+        TurnOutcome {
+            resident: turn.path.len() as u32,
+            ..Default::default()
+        }
+    }
+}
+
+#[test]
+fn a_verified_handshake_refuses_a_stale_agent_over_tcp_and_names_the_node() {
+    // The end-to-end form of FR-051, and the failure it exists to stop: a stale remote binary
+    // that would otherwise complete the run and produce numbers.
+    let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(StaleAgent))).expect("bind");
+    let addr = server.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_server = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || server.serve(stop_for_server));
+
+    let mut client = Client::<TcpStream>::connect(addr, 4, None).expect("connect");
+    let err = client
+        .handshake("node5", "/dev/shm/certus-shmq", 4, 32768)
+        .expect_err("a stale agent must be refused");
+    let text = err.to_string();
+    assert!(
+        text.contains("node5"),
+        "the refusal must name the node: {text}"
+    );
+    assert!(text.contains("FR-051"), "and cite the requirement: {text}");
+
+    stop.store(true, Ordering::Relaxed);
+    handle.join().expect("server thread").expect("serve");
+}
+
+#[test]
+fn a_verified_handshake_accepts_a_matching_agent_and_checks_capacity() {
+    // The same path must succeed against an agent of this build, or the refusal above would
+    // prove nothing. And it must still refuse a lane count the node cannot serve.
+    struct Matching;
+    impl Service for Matching {
+        fn hello(&mut self, hello: &Hello) -> HelloAck {
+            workload_wire::handshake::answer(hello, 8, 32768)
+        }
+        fn submit_turn(&mut self, _t: &SubmitTurn) -> TurnOutcome {
+            TurnOutcome::default()
+        }
+    }
+    let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(Matching))).expect("bind");
+    let addr = server.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_server = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || server.serve(stop_for_server));
+
+    let mut ok = Client::<TcpStream>::connect(addr, 4, None).expect("connect");
+    let ack = ok
+        .handshake("node5", "/dev/shm/certus-shmq", 4, 32768)
+        .expect("this build must accept itself");
+    assert_eq!((ack.channels, ack.block_bytes), (8, 32768));
+
+    let mut greedy = Client::<TcpStream>::connect(addr, 4, None).expect("connect");
+    let err = greedy
+        .handshake("node5", "/dev/shm/certus-shmq", 16, 32768)
+        .expect_err("16 lanes of 8 channels must be refused");
+    assert!(err.to_string().contains("serialise"), "{err}");
+
+    stop.store(true, Ordering::Relaxed);
+    handle.join().expect("server thread").expect("serve");
+}
