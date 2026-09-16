@@ -840,13 +840,20 @@ MiB RSS across 28 420 batches, where pre-building would have retained every
 turn's prefixes. That is what makes `--until` genuinely optional (no
 `unwrap_or(60.0)` fallback) and an interrupted run a valid result under FR-074.
 
-**One honest limitation remains: the run does not pace to virtual time.** It
-replays as fast as the mailbox allows, so `virtual/wallclock` of 430 means
-"430x faster than the workload's own clock", not a sustained-load figure.
-Sustained pacing is what makes the throughput number mean what an operator
-expects. Latency also rose from p50 16 µs (pre-built) to p50 62 µs with a
-~13 ms p99, which is the producer thread's contention and is the honest cost of
-not lying about the queue.
+**On pacing — I mislabelled this, and the correction matters.** Earlier notes
+called "the run does not pace to virtual time" an open limitation. It is not: it
+is the specified design. **FR-031** says virtual time "MUST exist only to decide
+the order of operations, and MUST NOT be mapped to wallclock time", and the
+clarification record settles it — virtual time orders, wallclock measures, and
+their ratio is itself a reported metric (FR-066). So `virtual/wallclock` of 430
+is a *capability* figure, and FR-062's plan-queue check exists precisely to prove
+the generator was not the bottleneck while that ceiling was measured. Pacing is
+therefore a **change of experiment**, not a missing feature, and it is discussed
+under "If pacing is ever adopted" below rather than tracked as a task.
+
+Latency did rise from p50 16 µs (pre-built) to p50 62 µs with a ~13 ms p99, which
+is the producer thread's contention and is the honest cost of not lying about the
+queue.
 
 **T038/T039: the live path is now COMPLETE rather than partial.** The two
 data-moving operations are issued, and the `PARTIAL RUN` declaration is gone.
@@ -1050,7 +1057,27 @@ local Certus. The wire carries only what is deterministic (paths, session
 identity, virtual timing) and never cache outcomes, which keeps FR-072 intact
 across nodes while keeping the chatter host-local.
 
-**Still open in US1**: the pacing limitation above.
+**If pacing is ever adopted, it replaces a metric rather than adding a delay.**
+Today's run is work-conserving: it issues as fast as the mailbox allows and
+measures the ceiling. A paced run would issue each turn at a wallclock time
+proportional to its virtual timestamp, so think time becomes real waiting and the
+offered load equals the workload's own rate. That answers a different question —
+"can Certus serve *this* workload with acceptable latency?" instead of "how fast
+can Certus go?" — and it would buy realistic concurrency (today the in-flight
+session count is whatever the lanes allow, not arrival rate x duration) and put
+the server's time-dependent behaviour on the right timeline (eviction, background
+write-through and the 30-second checkpoints we observed all run on wallclock, and
+compressing 60 virtual seconds into 0.14 s means the cache never sees the idle
+periods the workload describes).
+
+The catch is FR-062. Under pacing an **empty plan queue is the normal, intended
+state** — no work is due yet — so "a lane found its queue empty" stops meaning
+"the generator was the constraint". The validity metric would have to become
+**schedule lateness**: how far past its due time each turn was actually issued.
+Adopting pacing therefore means replacing the underrun check, not adding a sleep,
+and it makes every experiment cost real time equal to its virtual span.
+
+**US1 is complete.** Nothing is open against it.
 
 **Checkpoint**: US1 is functional against a live local server for the control path.
 
