@@ -419,9 +419,28 @@ impl LiveStats {
 type Batch = OperationPlan;
 
 /// A lane: one bounded queue and the depth counter its consumer reads.
-struct Lane {
+pub(crate) struct Lane {
     tx: SyncSender<Batch>,
     depth: Arc<AtomicUsize>,
+}
+
+impl Lane {
+    /// A lane and the receiver its consumer takes from.
+    pub(crate) fn pair(capacity: usize) -> (Self, Receiver<Batch>) {
+        let (tx, rx) = sync_channel::<Batch>(capacity);
+        (
+            Self {
+                tx,
+                depth: Arc::new(AtomicUsize::new(0)),
+            },
+            rx,
+        )
+    }
+
+    /// The shared depth counter, so a consumer can report what it saw at pop time.
+    pub(crate) fn depth(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.depth)
+    }
 }
 
 /// Attach to a node's mailbox and claim `lanes` channels.
@@ -586,7 +605,17 @@ pub fn run(
     // The producer runs on this thread. Single-threaded and deterministic, so what it
     // builds is a function of description and seed alone (FR-072) — lane count changes
     // only who issues an operation, never which operations exist.
-    let produced = produce(description, seed, until, &senders, &stop);
+    // Local routing: a lane per session, which is what the mailbox's channels are.
+    let produced = produce(
+        description,
+        seed,
+        until,
+        // One node: this path is the local mailbox, so migration is inert (FR-049).
+        1,
+        &senders,
+        |session, n| (session.id() as usize) % n,
+        &stop,
+    );
     // Dropping the senders closes each queue, which is how a consumer tells "the run is
     // over" from "the queue is momentarily quiet" — the distinction the underrun count
     // depends on.
@@ -654,15 +683,37 @@ pub fn run(
 /// Returns `(batches, virtual span reached, completed)`. Blocking on a full queue is the
 /// point: it is the backpressure that bounds memory, and it is what leaves the producer's
 /// speed observable at the consumer instead of absorbed by an ever-growing buffer.
-fn produce(
+/// Build turns and route each to a target, blocking when a target's queue is full.
+///
+/// # Why the routing is a parameter
+///
+/// A target is "somewhere a turn can be sent", and what that means differs between the two
+/// execution paths: locally it is a lane on this node's mailbox, remotely it is a lane on some
+/// node's agent. Nothing else differs — the same simulation, the same turns, the same order —
+/// so the producer takes a routing closure rather than being written twice. Under FR-079 the
+/// local path becomes a special case of the remote one and this is the seam where they meet.
+///
+/// `route` MUST be a function of the session alone, and MUST NOT consult anything the cache
+/// reported: routing decides *where* a turn goes, never *what* it is (FR-072).
+pub(crate) fn produce<R>(
     description: &WorkloadDescription,
     seed: u64,
     until: Option<f64>,
+    nodes: usize,
     lanes: &[Lane],
+    route: R,
     stop: &Arc<AtomicBool>,
-) -> Result<(u64, f64, bool, u64), String> {
+) -> Result<(u64, f64, bool, u64), String>
+where
+    R: Fn(&workload_model::session::Session, usize) -> usize,
+{
+    // The node count belongs to the simulation, not to the routing: placement and migration are
+    // decisions it makes (FR-048), and the router only reads the answer. Omitting this left every
+    // session on node 0 and a three-node run driving one node — caught by a routing test, and
+    // invisible in any single-node one.
     let mut sim = Simulation::new(description, seed)
-        .map_err(|e| format!("cannot start the simulation: {e}"))?;
+        .map_err(|e| format!("cannot start the simulation: {e}"))?
+        .with_nodes(nodes);
     let n = lanes.len();
     let mut batches = 0u64;
     let mut blocked = 0u64;
@@ -685,7 +736,7 @@ fn produce(
             }
             let mut batch = Batch::default();
             batch.record_turn(session, turn);
-            let lane = (session.id() as usize) % n;
+            let lane = route(session, n).min(n - 1);
             lanes[lane].depth.fetch_add(1, Ordering::Relaxed);
             // `try_send` first so that blocking is *observable*: a full queue is
             // backpressure working, and the positive counterpart to an underrun. Falling
