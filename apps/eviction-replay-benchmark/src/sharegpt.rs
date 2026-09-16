@@ -70,7 +70,7 @@ fn text_to_block_keys(text: &str, block_chars: usize) -> Vec<CacheKey> {
 /// prefix blocks up to that turn (modeling a growing KV-cache). `block_chars`
 /// controls how many characters map to one cache block (default 64, roughly
 /// 16 tokens at ~4 chars/token).
-pub fn load(path: &Path, block_chars: Option<usize>) -> io::Result<Trace> {
+pub fn load(path: &Path, block_chars: Option<usize>, max_conversations: Option<usize>) -> io::Result<Trace> {
     let block_chars = block_chars.unwrap_or(DEFAULT_BLOCK_CHARS);
     assert!(block_chars >= 1, "block_chars must be >= 1");
 
@@ -82,11 +82,12 @@ pub fn load(path: &Path, block_chars: Option<usize>) -> io::Result<Trace> {
         )
     })?;
 
+    let limit = max_conversations.unwrap_or(convs.len());
     let mut ops = Vec::new();
     let mut total_key_refs = 0usize;
     let mut distinct: HashSet<CacheKey> = HashSet::new();
 
-    for conv in &convs {
+    for conv in convs.iter().take(limit) {
         let session_id = fnv1a_64(conv.id.as_bytes()) as SessionId;
         let turns = &conv.conversations;
         let mut cumulative = String::new();

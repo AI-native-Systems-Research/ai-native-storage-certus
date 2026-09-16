@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run -p eviction-replay-benchmark -- \
-//!     --dataset chat --cache-size 256KB,1MB,4MB --policy both
+//!     --dataset chat --cache-size-nelements 256K,1M,4M --policy both
 //! ```
 
 use std::path::PathBuf;
@@ -108,21 +108,30 @@ struct Cli {
     #[arg(long)]
     sharegpt: Option<PathBuf>,
 
+    /// Use a local Weka JSONL trace file (one conversation per line, with
+    /// hash_ids and hash_id_scope).
+    #[arg(long)]
+    weka_file: Option<PathBuf>,
+
     /// Characters per cache block when converting ShareGPT text to block keys
     /// (approximately 16 tokens at ~4 chars/token).
     #[arg(long, default_value_t = 64)]
     block_chars: usize,
 
-    /// Cache size(s) to evaluate (comma-separated). Accepts human-readable
-    /// suffixes: K/KB = ×1024, M/MB = ×1024², G/GB = ×1024³ blocks.
-    /// Examples: 256KB, 1MB, 4096.
+    /// Cache size(s) in elements to evaluate (comma-separated). Accepts
+    /// suffixes: K = ×1024, M = ×1024², G = ×1024³. Examples: 256K, 2M, 4096.
     #[arg(
-        long = "cache-size",
+        long = "cache-size-nelements",
         value_delimiter = ',',
-        default_value = "1MB",
+        default_value = "10000",
         value_parser = parse_cache_size,
     )]
     cache_sizes: Vec<usize>,
+
+    /// Maximum number of conversations to replay from the trace file.
+    /// When set, only the first N conversations are loaded.
+    #[arg(long)]
+    max_conversations: Option<usize>,
 
     /// Which policy to run.
     #[arg(long, value_enum, default_value_t = PolicyArg::Both)]
@@ -132,15 +141,23 @@ struct Cli {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // Resolve the trace: --sharegpt, --qwen-file, or --dataset (download-on-demand).
+    // Resolve the trace: --sharegpt, --weka-file, --qwen-file, or --dataset (download-on-demand).
     let (trace, source) = if let Some(ref p) = cli.sharegpt {
-        match eviction_replay_benchmark::sharegpt::load(p, Some(cli.block_chars)) {
+        match eviction_replay_benchmark::sharegpt::load(p, Some(cli.block_chars), cli.max_conversations) {
             Ok(t) => (
                 t,
                 format!("sharegpt {} (block_chars={})", p.display(), cli.block_chars),
             ),
             Err(e) => {
                 eprintln!("error: failed to load ShareGPT file {}: {e}", p.display());
+                return ExitCode::FAILURE;
+            }
+        }
+    } else if let Some(ref p) = cli.weka_file {
+        match eviction_replay_benchmark::weka::load(p, cli.max_conversations) {
+            Ok(t) => (t, format!("weka {}", p.display())),
+            Err(e) => {
+                eprintln!("error: failed to load Weka trace {}: {e}", p.display());
                 return ExitCode::FAILURE;
             }
         }
@@ -163,7 +180,7 @@ fn main() -> ExitCode {
             },
         };
         let src = format!("{src}\n  file: {}", path.display());
-        match replay::load(&path) {
+        match replay::load(&path, cli.max_conversations) {
             Ok(t) => (t, src),
             Err(e) => {
                 eprintln!("error: failed to load trace {}: {e}", path.display());
@@ -228,13 +245,7 @@ fn main() -> ExitCode {
 
 fn parse_cache_size(s: &str) -> Result<usize, String> {
     let s = s.trim();
-    let (num_part, multiplier) = if let Some(n) = s.strip_suffix("GB") {
-        (n, 1024 * 1024 * 1024)
-    } else if let Some(n) = s.strip_suffix("MB") {
-        (n, 1024 * 1024)
-    } else if let Some(n) = s.strip_suffix("KB") {
-        (n, 1024)
-    } else if let Some(n) = s.strip_suffix('G') {
+    let (num_part, multiplier) = if let Some(n) = s.strip_suffix('G') {
         (n, 1024 * 1024 * 1024)
     } else if let Some(n) = s.strip_suffix('M') {
         (n, 1024 * 1024)
@@ -254,15 +265,15 @@ fn parse_cache_size(s: &str) -> Result<usize, String> {
     Ok(result)
 }
 
-fn format_size(blocks: usize) -> String {
-    if blocks >= 1024 * 1024 * 1024 && blocks % (1024 * 1024 * 1024) == 0 {
-        format!("{}GB", blocks / (1024 * 1024 * 1024))
-    } else if blocks >= 1024 * 1024 && blocks % (1024 * 1024) == 0 {
-        format!("{}MB", blocks / (1024 * 1024))
-    } else if blocks >= 1024 && blocks % 1024 == 0 {
-        format!("{}KB", blocks / 1024)
+fn format_size(n: usize) -> String {
+    if n >= 1024 * 1024 * 1024 && n % (1024 * 1024 * 1024) == 0 {
+        format!("{}G", n / (1024 * 1024 * 1024))
+    } else if n >= 1024 * 1024 && n % (1024 * 1024) == 0 {
+        format!("{}M", n / (1024 * 1024))
+    } else if n >= 1024 && n % 1024 == 0 {
+        format!("{}K", n / 1024)
     } else {
-        blocks.to_string()
+        n.to_string()
     }
 }
 

@@ -31,3 +31,4 @@ pub mod dataset;
 pub mod replay;
 pub mod sharegpt;
 pub mod sim;
+pub mod weka;

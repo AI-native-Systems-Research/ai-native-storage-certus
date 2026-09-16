@@ -85,7 +85,7 @@ pub struct Trace {
 /// Lines that are blank or carry an empty `hash_ids` array (e.g. image/file
 /// requests with no cached token blocks) are skipped. Returns an error if the
 /// file cannot be read or a line is not valid JSON in the expected shape.
-pub fn load(path: &Path) -> io::Result<Trace> {
+pub fn load(path: &Path, max_conversations: Option<usize>) -> io::Result<Trace> {
     let reader = BufReader::new(File::open(path)?);
     let mut ops = Vec::new();
     let mut total_key_refs = 0usize;
@@ -93,6 +93,7 @@ pub fn load(path: &Path) -> io::Result<Trace> {
     // chat_id -> conversation root, so a turn's root can be resolved from its
     // parent in a single pass (parents always precede children in trace order).
     let mut root_of: HashMap<i64, i64> = HashMap::new();
+    let mut seen_roots: HashSet<i64> = HashSet::new();
 
     for (lineno, line) in reader.lines().enumerate() {
         let line = line?;
@@ -125,6 +126,15 @@ pub fn load(path: &Path) -> io::Result<Trace> {
                 .unwrap_or(&raw.parent_chat_id)
         };
         root_of.insert(raw.chat_id, root);
+
+        if let Some(limit) = max_conversations {
+            if !seen_roots.contains(&root) {
+                if seen_roots.len() >= limit {
+                    continue;
+                }
+                seen_roots.insert(root);
+            }
+        }
 
         let keys = raw.hash_ids;
         for &k in &keys {
