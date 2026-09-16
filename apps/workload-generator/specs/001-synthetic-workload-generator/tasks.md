@@ -603,27 +603,65 @@ been describing the table, not the tests.
 
 ### Projection
 
-- [ ] T033 Implement the run projection in
+- [x] T033 Implement the run projection in
   `crates/workload-model/src/project.rs`: invocations, distinct keys minted,
   key references, and uncompressed bytes, from the description's own rates,
   using a ~10k-session Monte Carlo draw for `E[K²]` since key references grow
   quadratically with session length
-- [ ] T034 Add span inversion to `crates/workload-model/src/project.rs`:
+- [x] T034 Add span inversion to `crates/workload-model/src/project.rs`:
   suggest a span for a target record count, and warn when a span is short
   relative to the longest finite lifetime in the description
-- [ ] T035 [P] Test in `crates/workload-model/tests/project.rs`: the projection
+- [x] T035 [P] Test in `crates/workload-model/tests/project.rs`: the projection
   for the shipped example at a 1000-second span is within a stated tolerance of
   an actual emit run's counts
 
 ### Benchmarks
 
-- [ ] T036 [P] Criterion benchmark of per-key plan-generation cost in
+- [x] T036 [P] Criterion benchmark of per-key plan-generation cost in
   `crates/workload-model/benches/plan.rs`, the measurement Principle I's
   never-the-bottleneck claim rests on
 - [x] T037 [P] Audit task: confirm each of the six cross-cutting invariants
   tabulated at the end of `data-model.md` has a named test, and record the
   mapping in a comment at the top of
   `crates/workload-model/tests/determinism.rs`
+
+**T033-T036 notes.** The projection is **rate-based, never a rehearsal** —
+Little's law plus the resolved distributions' moments — so `validate --until n`
+costs 102 µs on a 10 000-session description and can be offered as a query.
+`E[T²]` is the one moment no kind exposes in closed form (`turns` may be an
+empirical sample set), so it is a 10 000-draw Monte Carlo on its own substream;
+a test pins that the estimate moves the reference figure by under 1% across
+seeds, since otherwise a refusal would depend on the projection's own seed.
+
+**Three things it deliberately does not claim**, each stated in the module
+header rather than left for a reader to discover: bytes are for the **canonical
+plan only** (that layout is fixed, so the figure is exact — per-container
+*trace* bytes need T053's record shape, and guessing them would put an invented
+number in a refusal message); the **seeded generation is not modelled**, so a
+short span references fewer keys than projected, which is what the span warning
+is for; and **emptiness is assumed from means**, which over-projects a
+description whose growth is usually zero — the safe direction for a refusal.
+
+**T035's tolerances are stated, not tight** (25% invocations, 30% operations,
+60% references and bytes) because the projection is rate-based and a run is
+stochastic. A second test pins the operation count *exactly* for a constant
+description, which is where a real drift would show.
+
+**T036 measured, and the prediction held.** Per key reference: 19.0 ns for
+5-turn sessions, **6.6 ns for 40-turn** ones, 7.9 ns with a 2 000-instance pool
+and a 16-wide draw. Long sessions are **2.9x cheaper per key**, because
+per-turn overhead amortises over a longer prefix and nothing rescans it — a
+regression to *more* expensive per key would mean something in the turn path
+had gone superlinear. Against Certus's measured ~5.6 µs/key that is **0.1-0.3%
+of the budget, 300-850x headroom on one thread**, which is the quantitative
+form of Principle I's never-the-bottleneck claim and now a measurement rather
+than an expectation.
+
+**One expectation of mine corrected while writing T033's test**: I asserted the
+shipped example mints 10 shared instances' worth of keys. It declares no
+`pool:` for that class, and an absent pool means `exact: 1` — the `exact: 10`
+in that description is the *session* pool. The code was right; the arithmetic
+in my test was not.
 
 **Checkpoint**: the simulation core is complete and fully tested with no
 accelerator, no server, and no network. Story work can begin.
