@@ -525,7 +525,8 @@ everything, then `step`/`run_until` deliver turns through a `FnMut(&Session,
 taken its last turn is finished in the same step, and the callback is the only
 moment its chain can still be read. That is the seam T030 builds the plan on.
 
-**Event order at one instant is fixed and deliberate**: shared-pool events, then
+**Event order at one instant is fixed and deliberate**: shared-pool events,
+then
 session arrivals, then turns. A turn at `t` must see the population as of `t`;
 the reverse order would make a session's shared set depend on the order two
 pools happened to be declared in.
@@ -813,7 +814,8 @@ and that only shows up on a round trip. A fifth test pins that parquet really
 is smaller than JSONL for the same records, since if that stopped holding the
 feature would be carrying arrow for nothing.
 
-**One gap recorded in the test file's header rather than hidden**: the whole file is
+**One gap recorded in the test file's header rather than hidden**: the whole
+file is
 `#![cfg(feature = "parquet")]`, so the *equivalence* claim is only tested with
 the feature on. CI must run `--features parquet` or SC-004 is untested — a
 feature-gated test nobody enables is indistinguishable from no test.
@@ -894,7 +896,8 @@ example**, and running it found two real defects that no test had:
    **p99**, says the figure is an UPPER BOUND, and says not to compare it with
    a run's actual count. The direction is the safe one for a refusal.
 
-**FR-071 is enforced by the type, not by discipline**: `EmitReport` has **no fields**
+**FR-071 is enforced by the type, not by discipline**: `EmitReport` has **no
+fields**
 for latency, lane utilisation or the wallclock ratio — not `Option`, not zero.
 An `Option` left at `None` is one careless `unwrap_or(0.0)` from a published
 zero, and `skip_serializing_if` is avoided for the same reason. Generation
@@ -927,7 +930,8 @@ needs flags that arrive with US1. The property holds *structurally* —
 `workload-model` has no parameter to receive either — but a crate boundary is
 an argument, not a test, and the executable form is still owed.
 
-**Confirmed pre-existing, not ours**: `cargo clippy -p workload-gen` with the default
+**Confirmed pre-existing, not ours**: `cargo clippy -p workload-gen` with the
+default
 `live` feature fails on 4 `manual_checked_ops` lints in
 `components/interfaces`, reached through `shmq-dispatcher` enabling
 `interfaces/spdk`. Both `--no-default-features` states are clean.
@@ -1004,30 +1008,82 @@ conversion **reports** the block size it used as one of its declared losses
 and a reader that sorts on it would silently reorder the workload rather than
 fail.
 
-**Both entry points wired and verified byte-identical**: `emit --mooncake` writes in
+**Both entry points wired and verified byte-identical**: `emit --mooncake`
+writes in
 the same pass, `convert --to mooncake` reads a stored trace, `cmp` reports
 identical. A real emitted line:
 `{"timestamp":6,"input_length":7872,"output_length":64,"hash_ids":[0,1,...]}`
 with 492 identifiers and 492*16 = 7872 tokens.
 
-- [ ] T062d [P] [US2] Implement the libCacheSim CSV writer in
+- [x] T062d [P] [US2] Implement the libCacheSim CSV writer in
   `crates/workload-trace/src/cachesim.rs` as `(time, obj_id, size)` rows, and
   have `convert --to cachesim` **print the `--trace-type-params` string** for
   the layout it wrote — that reader's columns are configurable, so the layout
   is only meaningful alongside its parameter string. Traps from upstream:
   numeric ids require `obj-id-is-num=1` or the reader errors, and the CSV
   reader is **ASCII-only**
-- [ ] T062e [US2] Read the `oracleGeneral` struct layout from libCacheSim's
+- [x] T062e [US2] Read the `oracleGeneral` struct layout from libCacheSim's
   reader source and record it in `contracts/trace-interop.md` **before**
   writing any bytes. Upstream documents the four fields (time, obj-id, size,
   next-access-time in reference count) in prose only; widths and endianness are
   **unverified**. This task is the verification, not the writer
-- [ ] T062f [US2] Implement the `oracleGeneral` writer in
+- [x] T062f [US2] Implement the `oracleGeneral` writer in
   `crates/workload-trace/src/cachesim.rs` once T062e has pinned the layout,
   computing next-access-time in one **backward pass** over the plan. An emit
   run knows the whole future of its own trace, so this is the one thing we can
   give a cache simulator that a real trace cannot — it makes Belady/optimal
-  baselines available
+  baselines available **T062d-T062f notes. T062e paid for itself immediately.**
+  The prose in libCacheSim's own docs describes `oracleGeneral` as storing
+  "time, obj-id, size, next-access-time", which invites assuming 64-bit fields.
+  The **verified** layout, read from
+  `traceReader/customizedReader/oracle/oracleGeneralBin.h`, is 24 bytes
+  **packed**:
+
+```text
+offset 0   clock_time         uint32_t
+offset 4   obj_id             uint64_t
+offset 12  obj_size           uint32_t
+offset 16  next_access_vtime  int64_t
+```
+
+Four things the prose did not say, each fatal: `clock_time` and `obj_size` are
+**32-bit**, so writing 8 bytes for the timestamp shifts every later field; the
+record is **packed** (`obj_id` at offset 4 is not 8-aligned) and the reader
+casts pointers at fixed offsets, so there is no padding to reproduce; byte
+order is **native**; and `next_access_vtime` has **sentinels** (`-1` and
+`INT64_MAX` both mean "never again"), so a writer must use one rather than
+invent its own.
+
+**Also verified: `obj_id_t` is `uint64_t`** (`cacheObj.h`). Had it been signed,
+half our key space would have wrapped and we would have needed dense
+renumbering. A test pins a key of `u64::MAX - 1` surviving both containers.
+
+**`clock_time` being 32-bit is a real ceiling**, not a formality: millisecond
+timestamps overflow after **49.7 days** of virtual time. The writer **refuses**
+past that, naming the figure, because wrapping would make the trace appear to
+jump backwards and the reader would accept it. The CSV container has no such
+limit — its `clock_time` is `int64_t`.
+
+**The oracleGeneral writer cannot stream, and that is inherent.** Next-access
+requires the future, so it buffers the whole reference stream and resolves it
+in one backward pass. Peak memory is proportional to the **run** rather than a
+constant — 20 bytes per reference, so the shipped example's 18.6M references
+cost ~370 MB. It is the only writer here with that property, so a test asserts
+the buffering explicitly rather than leaving it to be discovered from a memory
+graph.
+
+**libCacheSim's CSV columns are configurable, so a CSV file cannot say what its
+own columns mean.** Every conversion prints the ready-to-run `-t "time-col=1,
+obj-id-col=2, obj-size-col=3, obj-id-is-num=1"` command. The two verified traps
+are handled: numeric ids need `obj-id-is-num=1` or the reader errors, and the
+CSV reader is ASCII-only (a test asserts every byte we write is ASCII).
+
+**Verified end to end**: `emit --cachesim` and `convert --to oracle-general` on
+the
+shipped example produced 1 929 451 accesses over 1 072 096 distinct objects,
+and the binary came to 46 306 824 bytes — **exactly 1 929 451 x 24**, which
+independently confirms the record size against real output.
+
 - [ ] T062h [US2] Implement loss declaration for every conversion (FR-077) in
   `crates/workload-trace/src/convert.rs`: each target names what it dropped
   (session grouping, input/output separation, `partial_final_valid`), and a
