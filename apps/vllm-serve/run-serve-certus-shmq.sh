@@ -23,7 +23,7 @@
 #
 #   ./run-serve-certus-shmq.sh                                  # Qwen2.5-7B, native 32k window, :8000
 #   PORT=9000 ./run-serve-certus-shmq.sh                        # publish on another port
-#   MAX_MODEL_LEN=131072 ./run-serve-certus-shmq.sh             # long context (auto-enables YaRN)
+#   MAX_MODEL_LEN=32768 ./run-serve-certus-shmq.sh             # native 32K window (no YaRN); default is 128K
 #   MODEL=Qwen/Qwen2.5-14B-Instruct GPU_MEM_UTIL=0.92 ./run-serve-certus-shmq.sh
 #
 # Clients then use:
@@ -40,10 +40,13 @@ PORT="${PORT:-8000}"
 MODEL="${MODEL:-Qwen/Qwen2.5-7B-Instruct}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen2.5-7b}"   # the name clients pass as "model"
 DTYPE="${DTYPE:-float16}"
-# Qwen2.5-7B native window is 32768. Default to it so no YaRN rope-scaling is
-# needed (a larger MAX_MODEL_LEN triggers a ModelConfig validation error unless
-# rope_scaling is supplied — handled below when it exceeds the native window).
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
+# Qwen2.5-7B's native window is 32768; default to a 131072 (128K) window so the
+# long-context cc/mooncake replay traces fit without 400s. Because this exceeds the
+# native window it auto-enables Qwen's static YaRN rope-scaling below (factor =
+# 131072/32768 = 4). YaRN degrades quality at long context — fine for a KV-offload
+# throughput/latency benchmark. Override MAX_MODEL_LEN=32768 (or ROPE_YARN=0) to
+# serve the native 32K window with no rope-scaling.
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
 QWEN_NATIVE_CTX="${QWEN_NATIVE_CTX:-32768}"
 GPU="${GPU:-all}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
