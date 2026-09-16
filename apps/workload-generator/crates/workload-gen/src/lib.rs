@@ -7,7 +7,11 @@
 
 pub mod cli;
 #[cfg(feature = "live")]
+pub mod cuda;
+#[cfg(feature = "live")]
 pub mod live;
 #[cfg(feature = "live")]
 pub mod opstream;
+#[cfg(feature = "live")]
+pub mod payload;
 pub mod report;

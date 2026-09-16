@@ -355,24 +355,31 @@ pub struct LiveReport {
 /// Counts of consumer stalls, not samples of a gauge: a sampled depth can miss a brief
 /// exhaustion between samples, which is the same failure as reporting an average one level
 /// down. Per-lane arrays are kept beside the totals because session sharding creates
-/// imbalance, and an aggregate would hide one lane starving constantly behind seven that
-/// never did.
+/// imbalance, and an aggregate would hide one lane underrunning constantly behind seven
+/// that never did.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct QueueStats {
     /// Turn batches the producer built.
     pub batches_produced: u64,
     /// Batches taken by lanes.
     pub pops: u64,
-    /// Pops that found an empty queue. **Non-zero invalidates the run.**
-    pub empty_pops: u64,
-    /// Fraction of pops that starved.
-    pub fraction_starved: f64,
+    /// Pops that found an empty queue — a buffer underrun. **Non-zero invalidates the
+    /// run.**
+    pub underruns: u64,
+    /// Fraction of pops that underran.
+    pub fraction_underrun: f64,
     /// Smallest depth any lane saw at pop time.
     pub min_depth: usize,
     /// Queue capacity per lane, in turn batches — what bounds memory instead of the span.
     pub capacity_per_lane: usize,
-    /// Starvations per lane.
-    pub per_lane_empty_pops: Vec<u64>,
+    /// Times the producer blocked on a full queue.
+    ///
+    /// The positive counterpart to an underrun: backpressure working, and the evidence
+    /// that the generator was ahead rather than merely keeping up. Zero underruns *and* a
+    /// non-zero block count is a queue that demonstrably did its job.
+    pub producer_blocked: u64,
+    /// Underruns per lane.
+    pub per_lane_underruns: Vec<u64>,
     /// Minimum depth per lane.
     pub per_lane_min_depth: Vec<usize>,
 }
@@ -436,22 +443,29 @@ impl LiveReport {
             self.latency_us.p50, self.latency_us.p90, self.latency_us.p99, self.latency_us.max
         ));
         out.push_str(&format!(
-            "  plan queue        {} batches produced, {} pops, {} starved ({:.3}%), \
+            "  plan queue        {} batches produced, {} pops, {} underran ({:.3}%), \
              min depth {} of {} per lane\n    \
-             per lane starved {:?}, min depth {:?}\n",
+             per lane underran {:?}, min depth {:?}\n    \
+             producer blocked on a full queue {} times{}\n",
             self.queue.batches_produced,
             self.queue.pops,
-            self.queue.empty_pops,
-            self.queue.fraction_starved * 100.0,
+            self.queue.underruns,
+            self.queue.fraction_underrun * 100.0,
             self.queue.min_depth,
             self.queue.capacity_per_lane,
-            self.queue.per_lane_empty_pops,
+            self.queue.per_lane_underruns,
             self.queue.per_lane_min_depth,
+            self.queue.producer_blocked,
+            if self.queue.producer_blocked > 0 {
+                " (backpressure working: the generator was ahead)"
+            } else {
+                " (the generator never got ahead of the lanes)"
+            },
         ));
         if !self.producer_completed {
             out.push_str(
                 "  interrupted       the producer was stopped before its span ended; an \
-                 interrupted run whose lanes never starved is still valid (FR-074)\n",
+                 interrupted run whose lanes never underran is still valid (FR-074)\n",
             );
         }
         out.push_str(&format!(

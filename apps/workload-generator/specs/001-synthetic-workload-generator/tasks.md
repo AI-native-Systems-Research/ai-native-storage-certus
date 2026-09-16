@@ -679,11 +679,11 @@ the shipped example with no node list, and confirm sustained traffic plus a
 report carrying throughput, plan-queue depth, lane utilisation, and latency
 percentiles.
 
-- [ ] T038 [P] [US1] Declare the CUDA FFI symbols locally in
+- [x] T038 [P] [US1] Declare the CUDA FFI symbols locally in
   `crates/workload-gen/src/cuda.rs` with `// SAFETY:` justifications, following
   `apps/remote-lookup-bench` rather than depending on `gpu-services`, which
   would unify cargo features across the workspace
-- [ ] T039 [US1] Implement the pre-filled reusable payload buffer with an
+- [x] T039 [US1] Implement the pre-filled reusable payload buffer with an
   optional key stamp in `crates/workload-gen/src/payload.rs`. No per-operation
   byte construction (FR-038)
 - [x] T040 [US1] Implement the local mailbox client in
@@ -814,9 +814,12 @@ implementation built the whole plan before the drive loop, which made FR-062's
 invalidity unable to fire — a vacuous check. It is now a producer thread
 stepping the simulation in windows of virtual time and pushing one turn at a
 time onto a bounded per-lane `sync_channel`, so a consumer that finds its queue
-empty is a real statement about the generator. Three measurements:
+empty is a real statement about the generator. The condition is named an
+**underrun**, not starvation: it is a bounded-buffer underrun, whereas
+starvation in scheduling names a *fairness* failure, and no lane here is denied
+by another lane. Three measurements:
 
-| producer | starved | valid | exit |
+| producer | underruns | valid | exit |
 | --- | --- | --- | --- |
 | normal | 0 of 24 pops | yes | 0 |
 | +3 ms per batch (injected) | 17 of 24 (70.8%) | **no** | **3** |
@@ -824,10 +827,12 @@ empty is a real statement about the generator. Three measurements:
 
 **The initial fill is excluded, and the reason is not convenience.** Counting a
 consumer's first look — necessarily at an empty queue, since nothing has been
-produced — made every lane starve exactly once, `[1, 1, 1, 1]`, and every run
+produced — made every lane underrun exactly once, `[1, 1, 1, 1]`, and every run
 invalid. One vacuous metric traded for another. A lane's first batch is now
-primed without counting, so starvation means "this lane had work and ran out",
-the condition FR-062 is about. Same principle as FR-046 excluding the startup
+primed without counting, so an underrun means "this lane had work and ran out",
+the condition FR-062 is about. The producer blocking on a full queue is counted
+as the positive counterpart, so a run can show that the queue *did* its job
+rather than only that it never quite failed. Same principle as FR-046 excluding the startup
 cache clear: a run properly begins once its pipeline is full.
 
 Streaming also **bounds memory**: the 20-second unbounded run above held 13.3
@@ -843,8 +848,46 @@ expects. Latency also rose from p50 16 µs (pre-built) to p50 62 µs with a
 ~13 ms p99, which is the producer thread's contention and is the honest cost of
 not lying about the queue.
 
-**Still open in US1**: T038 (CUDA FFI), T039 (payload buffer), T051 (mock-mailbox op
-stream test), plus the pacing limitation above.
+**T038/T039: the live path is now COMPLETE rather than partial.** The two
+data-moving operations are issued, and the `PARTIAL RUN` declaration is gone.
+Measured on node2 against a freshly started server, seed 7, 4 lanes, 60 s:
+
+| | requests | key references | throughput | max latency |
+| --- | --- | --- | --- | --- |
+| `--no-payload` (control only) | 168 | 456 | — *declared partial* | — |
+| with payload buffer | **240** | **684** | **5544 keys/s, 173.3 MiB/s** | 1627 µs |
+
+240 − 168 = 72 operations and 684 − 456 = 228 keys: exactly the shortfall the
+partial-run declaration had been reporting, now closed. p50 rose 38 → 286 µs,
+which is real — data actually moves now.
+
+**A defect found while wiring it: `--batch-keys` was inert.** It was parsed,
+reported in the run's own reproduction parameters, and never reached the live
+path, so FR-069's "largest measured performance lever on this path" did nothing
+and the report named a value that had no effect. Requests are now split to it,
+and the split is verified to change scheduling without changing the workload:
+
+| `--batch-keys` | requests | key references |
+| --- | --- | --- |
+| 64 | 240 | 684 |
+| 4 | **300** | **684** |
+
+Key references identical, request count different — FR-069 with FR-072 intact.
+
+**A measurement-hygiene trap, recorded because our report cannot see it.** The
+first complete run reported 68 keys/s with a 9.8 **second** p99. Nothing was
+wrong with the code: the server still held debris from an earlier run killed
+mid-flight — `reclaimed N stale reservation(s) (uncommitted > 30s)` repeating,
+158 267 accumulated store-backpressure events and 113 772 memory-tier evictions.
+Restarting the server gave 5544 keys/s and a 1627 µs max, an **81x** difference.
+The run was reported **valid** both times, because FR-062's validity is a
+property of *our* queue and says nothing about the state of the server. A
+future task should have a live run record the server's tier-event counters at
+start and end, so a contaminated baseline declares itself instead of being
+quoted.
+
+**Still open in US1**: T051 (mock-mailbox op stream test), plus the pacing
+limitation above.
 
 **Checkpoint**: US1 is functional against a live local server for the control path.
 
