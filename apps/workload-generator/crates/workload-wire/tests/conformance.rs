@@ -10,8 +10,8 @@
 //! be checked rarely.
 
 use workload_wire::frame::{
-    opcode, submit_flags, DrainAck, Header, Hello, HelloAck, OpHistogram, ShutdownAck, Stats,
-    SubmitTurn, TurnOutcome, WireError, BUILD_ID_BYTES, HEADER_BYTES, PROTO_VERSION,
+    opcode, submit_flags, Counters, DrainAck, Header, Hello, HelloAck, OpHistogram, ShutdownAck,
+    Stats, SubmitTurn, TurnOutcome, WireError, BUILD_ID_BYTES, HEADER_BYTES, PROTO_VERSION,
 };
 
 /// A recognisable digest, so a shifted or truncated copy is visible rather than plausible.
@@ -69,6 +69,7 @@ fn every_body_round_trips() {
     assert_eq!(TurnOutcome::decode(&outcome.encode()).unwrap(), outcome);
 
     let stats = Stats {
+        counters: Counters::default(),
         ops: vec![
             OpHistogram {
                 op_kind: 0,
@@ -309,6 +310,7 @@ fn every_body_truncated_at_every_length_is_an_error_never_a_partial_value() {
     }
 
     let stats = Stats {
+        counters: Counters::default(),
         ops: vec![OpHistogram {
             op_kind: 2,
             requests: 5,
@@ -368,6 +370,7 @@ fn the_stats_reply_carries_bytes_so_histograms_can_be_merged_not_percentiles() {
     // lossy summary — an `OpHistogram` whose payload were four u64 percentiles would make
     // a correct multi-node merge impossible at the protocol level.
     let stats = Stats {
+        counters: Counters::default(),
         ops: vec![
             OpHistogram {
                 op_kind: 0,
@@ -399,4 +402,80 @@ fn an_empty_stats_reply_is_legal() {
     let stats = Stats::default();
     assert_eq!(Stats::decode(&stats.encode()).unwrap(), stats);
     assert!(stats.ops.is_empty());
+}
+
+#[test]
+fn counters_round_trip_and_sum_across_nodes() {
+    // Counters are what make bandwidth aggregable where a percentile is not. They are
+    // collected by whatever code talks to the mailbox — the generator's executor locally,
+    // the agent's remotely — so that a local number and a remote number mean the same
+    // thing, and they travel back for reporting only.
+    let a = Counters {
+        requests: 10,
+        key_references: 100,
+        check_resident: 60,
+        check_pending: 1,
+        check_miss: 39,
+        lookup_hits: 60,
+        lookup_misses: 0,
+        reserves_attempted: 39,
+        reserves_declined: 2,
+        transfers_attempted: 37,
+        transfers_declined: 0,
+        commits_attempted: 37,
+        commits_declined: 0,
+        blocks_read: 60,
+        blocks_written: 37,
+    };
+    let stats = Stats {
+        counters: a,
+        ops: vec![OpHistogram {
+            op_kind: 0,
+            requests: 10,
+            histogram: vec![1, 2, 3],
+        }],
+    };
+    let back = Stats::decode(&stats.encode()).unwrap();
+    assert_eq!(back, stats, "every counter must survive the wire");
+
+    // Summing is exact, which is the property that lets bandwidth be totalled over nodes.
+    let mut total = a;
+    total.merge(&a);
+    assert_eq!(total.blocks_read, 120);
+    assert_eq!(total.blocks_written, 74);
+    assert_eq!(total.check_resident, 120);
+    assert_eq!(total.reserves_declined, 4);
+}
+
+#[test]
+fn every_counter_field_is_carried_rather_than_some() {
+    // A field added to the struct but forgotten in the codec would silently read as zero on
+    // the far side, and a bandwidth number computed from it would be too low with no sign
+    // that anything was missing. Distinct values per field catch a mis-ordered codec too.
+    let mut c = Counters::default();
+    let fields: [&mut u64; 15] = [
+        &mut c.requests,
+        &mut c.key_references,
+        &mut c.check_resident,
+        &mut c.check_pending,
+        &mut c.check_miss,
+        &mut c.lookup_hits,
+        &mut c.lookup_misses,
+        &mut c.reserves_attempted,
+        &mut c.reserves_declined,
+        &mut c.transfers_attempted,
+        &mut c.transfers_declined,
+        &mut c.commits_attempted,
+        &mut c.commits_declined,
+        &mut c.blocks_read,
+        &mut c.blocks_written,
+    ];
+    for (i, f) in fields.into_iter().enumerate() {
+        *f = 1000 + i as u64;
+    }
+    let stats = Stats {
+        counters: c,
+        ops: Vec::new(),
+    };
+    assert_eq!(Stats::decode(&stats.encode()).unwrap().counters, c);
 }

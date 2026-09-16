@@ -11,4 +11,5 @@
 //! rather than measured.
 #![warn(missing_docs)]
 
+pub mod client;
 pub mod frame;

@@ -554,10 +554,139 @@ pub struct OpHistogram {
     pub histogram: Vec<u8>,
 }
 
-/// `Stats`'s reply.
+/// What the mailbox-facing code counted.
+///
+/// # One collector, both paths
+///
+/// Latency and bandwidth are measured by whatever code talks to the shared-memory
+/// mailbox — the generator's own executor on a local node, the agent's on a remote one —
+/// and never inferred from the wire. The agent is the only thing near a remote mailbox, so
+/// it is the only thing that can time a `LOOKUP` or count a block that moved.
+///
+/// Because both paths run the *same* executor, these counters mean the same thing wherever
+/// they were gathered, which is what makes a local number and a remote number comparable.
+/// Had each path counted for itself, a local/remote difference would be unattributable
+/// between the cache and the instrument.
+///
+/// They travel back **for reporting only**. Nothing the generator does depends on them: they
+/// do not gate validity, steer submission, or re-enter the workload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Counters {
+    /// Requests issued to the mailbox.
+    pub requests: u64,
+    /// Key references across those requests.
+    pub key_references: u64,
+    /// `CHECK` keys reported resident.
+    pub check_resident: u64,
+    /// `CHECK` keys reported pending — another lane's store in flight.
+    pub check_pending: u64,
+    /// `CHECK` keys reported absent.
+    pub check_miss: u64,
+    /// `LOOKUP` keys that returned data.
+    pub lookup_hits: u64,
+    /// `LOOKUP` keys that did not.
+    pub lookup_misses: u64,
+    /// Keys `RESERVE` was asked for, so a decline has a denominator.
+    pub reserves_attempted: u64,
+    /// Keys `RESERVE` declined.
+    pub reserves_declined: u64,
+    /// Keys `COPY_TO_STORE` was asked for.
+    pub transfers_attempted: u64,
+    /// Keys it declined.
+    pub transfers_declined: u64,
+    /// Keys `COMMIT_STORE` was asked for.
+    pub commits_attempted: u64,
+    /// Keys it declined.
+    pub commits_declined: u64,
+    /// Blocks whose payload came out of the cache — `LOOKUP` hits, and only those.
+    pub blocks_read: u64,
+    /// Blocks whose payload went into it — accepted transfers, and only those.
+    pub blocks_written: u64,
+}
+
+impl Counters {
+    /// Add another node's counters.
+    ///
+    /// Counters sum exactly, which is why bandwidth can be aggregated across nodes while a
+    /// percentile cannot — see [`OpHistogram`].
+    pub fn merge(&mut self, other: &Self) {
+        self.requests += other.requests;
+        self.key_references += other.key_references;
+        self.check_resident += other.check_resident;
+        self.check_pending += other.check_pending;
+        self.check_miss += other.check_miss;
+        self.lookup_hits += other.lookup_hits;
+        self.lookup_misses += other.lookup_misses;
+        self.reserves_attempted += other.reserves_attempted;
+        self.reserves_declined += other.reserves_declined;
+        self.transfers_attempted += other.transfers_attempted;
+        self.transfers_declined += other.transfers_declined;
+        self.commits_attempted += other.commits_attempted;
+        self.commits_declined += other.commits_declined;
+        self.blocks_read += other.blocks_read;
+        self.blocks_written += other.blocks_written;
+    }
+
+    /// Encode, in declaration order.
+    pub fn encode(&self, w: &mut Writer) {
+        for v in self.fields() {
+            w.u64(v);
+        }
+    }
+
+    /// Decode, in declaration order.
+    ///
+    /// # Errors
+    ///
+    /// If truncated.
+    pub fn decode(r: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self {
+            requests: r.u64()?,
+            key_references: r.u64()?,
+            check_resident: r.u64()?,
+            check_pending: r.u64()?,
+            check_miss: r.u64()?,
+            lookup_hits: r.u64()?,
+            lookup_misses: r.u64()?,
+            reserves_attempted: r.u64()?,
+            reserves_declined: r.u64()?,
+            transfers_attempted: r.u64()?,
+            transfers_declined: r.u64()?,
+            commits_attempted: r.u64()?,
+            commits_declined: r.u64()?,
+            blocks_read: r.u64()?,
+            blocks_written: r.u64()?,
+        })
+    }
+
+    fn fields(&self) -> [u64; 15] {
+        [
+            self.requests,
+            self.key_references,
+            self.check_resident,
+            self.check_pending,
+            self.check_miss,
+            self.lookup_hits,
+            self.lookup_misses,
+            self.reserves_attempted,
+            self.reserves_declined,
+            self.transfers_attempted,
+            self.transfers_declined,
+            self.commits_attempted,
+            self.commits_declined,
+            self.blocks_read,
+            self.blocks_written,
+        ]
+    }
+}
+
+/// `Stats`'s reply: what the mailbox-facing code measured, for reporting only.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Stats {
-    /// One entry per operation kind the agent issued.
+    /// Counters, which sum across nodes.
+    pub counters: Counters,
+    /// One entry per operation kind the agent issued. Histograms, which merge; never
+    /// percentiles, which do not.
     pub ops: Vec<OpHistogram>,
 }
 
@@ -565,6 +694,7 @@ impl Stats {
     /// Encode the body.
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        self.counters.encode(&mut w);
         w.u16(u16::try_from(self.ops.len()).expect("few operation kinds"));
         for op in &self.ops {
             w.u8(op.op_kind)
@@ -582,6 +712,7 @@ impl Stats {
     /// If truncated.
     pub fn decode(body: &[u8]) -> Result<Self, WireError> {
         let mut r = Reader::new(body);
+        let counters = Counters::decode(&mut r)?;
         let n = r.u16()? as usize;
         let mut ops = Vec::with_capacity(n.min(64));
         for _ in 0..n {
@@ -595,7 +726,7 @@ impl Stats {
                 histogram,
             });
         }
-        Ok(Self { ops })
+        Ok(Self { counters, ops })
     }
 }
 

@@ -64,7 +64,7 @@ SubmitTurn  (2): req  { session:u64, flags:u16, n:u32, [key:u64]*n }
                         blocks_read:u32, blocks_written:u32, elapsed_ns:u64 }
 
 Stats       (5): req  { }
-                 resp { n_ops:u16,
+                 resp { counters:[u64;15], n_ops:u16,
                         [ op_kind:u8, requests:u64, hist_len:u32,
                           hist:[u8] ]*n_ops }
 
@@ -112,6 +112,31 @@ unify `interfaces/spdk` into the default build.
 reserve, transfer, commit, abort, poll-events. It is no longer what a submission
 names; it is the key space of the `Stats` reply, and the agent's own translation
 table to the mailbox's opcodes.
+
+### The mailbox-facing code is the only collector
+
+Latency and bandwidth MUST be measured by whatever code talks to the shared-memory
+mailbox — the generator's own executor on a local node, the agent's on a remote
+one — and MUST NOT be inferred from this wire. Only the agent is near a remote
+mailbox, so only the agent can time a `LOOKUP` or count a block that moved; a
+figure derived from wire timings would include the network and describe the
+transport rather than Certus.
+
+Because both paths run the **same** executor (see above), the counters mean the
+same thing wherever they were gathered, which is what makes a local number and a
+remote number comparable. Had each path counted for itself, a local/remote
+difference would be unattributable between the cache and the instrument.
+
+`Counters` carries the fifteen figures the report needs — requests, key
+references, the three `CHECK` states, `LOOKUP` hits and misses, attempted and
+declined counts for reserve, transfer and commit, and the blocks actually read and
+written. Bandwidth follows from the last two: a block is read on a `LOOKUP` hit
+and written on an accepted `COPY_TO_STORE`, and no control operation moves a byte
+(FR-066). Counters **sum** exactly across nodes, which is why bandwidth can be
+totalled where a percentile cannot.
+
+They travel back **for reporting only**. Nothing the generator does may depend on
+them: they do not gate validity, steer submission, or re-enter the workload.
 
 ### `Stats` returns histograms, because percentiles do not merge
 
