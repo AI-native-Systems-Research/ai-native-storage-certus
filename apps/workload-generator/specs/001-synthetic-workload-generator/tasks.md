@@ -423,7 +423,8 @@ CLASSES.** `keys::input_salt` takes a session id and a block ordinal and has
 *identical keys* for unrelated sessions — showing up as inexplicable
 cross-class hits.
 
-**Found and fixed in T017's validation**: a class whose `think_time` has mean zero
+**Found and fixed in T017's validation**: a class whose `think_time` has mean
+zero
 makes sessions instantaneous, so no finite arrival rate can sustain any
 concurrency and `size / E[duration]` diverges. Now refused at load with the
 arithmetic named, rather than dividing by zero mid-run.
