@@ -1001,8 +1001,56 @@ Declines and hit rate were never comparable quantities, which was the smell wort
 following: declines concern the 72 session-private keys the run stores, misses
 concern the 4 shared keys it never stores. Disjoint populations.
 
-**Still open in US1**: the pacing limitation above, and the shared-block store
-defect.
+**THE LIVE PATH IS NOW REACTIVE (FR-072a), which fixes the shared-block defect
+and one more nobody had raised.** A turn offers every key from the **root** of its
+prefix through the end of its new growth, then touches and loads what came back
+resident and stores what came back absent. Cache outcomes change the
+*interaction* and never the workload: the virtual clock, the session
+interleaving, the turn schedule and the key path remain functions of description
+and seed, which holds structurally because the producer builds turns from the
+simulation without seeing any response.
+
+Measured on node2, one fresh server, seed 7, 4 lanes, 60 s:
+
+| | check resident | lookup hit | stores declined |
+| --- | --- | --- | --- |
+| **before** — cold *and* warm, identical | 60 of 156 (38.5%) | 38.5% | 72 of 72 (100%) |
+| **after** — cold | 140, 8 pending, 84 miss of 232 (**60.3%**) | **100%** (140/140) | 8 of 84 (9.5%) |
+| **after** — warm, same seed | 228 of 228 (**100%**) | **100%** | *none needed* |
+
+A warm run is now 100% resident, which is what a re-run of the same seed should
+be and never was. `LOOKUP` is 100% because the executor loads only what `CHECK`
+reported resident — a client does not load what it knows is absent. Throughput
+7026 keys/s, 219.5 MiB/s.
+
+The 8 declined reserves pair exactly with the 8 `PENDING` checks, and that is
+FR-036's race actually occurring: two lanes both miss the same shared block and
+both store it, one wins. It is counted, not treated as an error.
+
+**Two properties a fixed operation list could not express**, both now guarded by
+tests:
+
+1. **An evicted block is stored again.** Certus may evict at any time; without a
+   re-store a run's hit rate can only decay and the generator measures a cache it
+   never refills.
+2. **Shared prefix blocks are stored at all.** No turn mints them, so the plan's
+   own `Reserve` operations exclude them and nothing stored them ever.
+
+The mock mailbox now answers `CHECK` from its own committed and pending sets, as
+`op_check` does, so the resident branch is actually exercised — a mock that
+always said `MISS` would store on every turn and test nothing. It also objects to
+a `LOOKUP` for a key it never committed, since the executor must load only what
+`CHECK` reported resident. 15 tests.
+
+**US3 architecture settled (FR-072b): the key path crosses the wire, not the
+operations.** The reactive rule costs several round trips per turn — fine at
+`/dev/shm` latency, unacceptable over a fabric — so `workload-node-agent`
+receives the turn's path and does the check, loads and stores against its own
+local Certus. The wire carries only what is deterministic (paths, session
+identity, virtual timing) and never cache outcomes, which keeps FR-072 intact
+across nodes while keeping the chatter host-local.
+
+**Still open in US1**: the pacing limitation above.
 
 **Checkpoint**: US1 is functional against a live local server for the control path.
 

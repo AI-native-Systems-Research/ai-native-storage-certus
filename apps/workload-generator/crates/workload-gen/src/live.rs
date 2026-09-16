@@ -91,10 +91,10 @@ use hdrhistogram::Histogram;
 use shm_queue::Client;
 use shmq_dispatcher::wire::{self, op};
 use workload_model::description::WorkloadDescription;
-use workload_model::plan::OperationPlan;
+use workload_model::plan::{OpKind, OperationPlan};
 use workload_model::sim::Simulation;
 
-use crate::opstream::{forbidden_opcode, Encoding, OpStream};
+use crate::opstream::{forbidden_opcode, Encoding, OpStream, TurnSplit};
 use crate::payload::PayloadBuffer;
 
 /// Turn batches a lane's queue holds before the producer blocks.
@@ -617,6 +617,118 @@ fn produce(
     }
 }
 
+/// What one lane needs to issue a request.
+struct Ctx<'a> {
+    client: &'a Client,
+    channel: usize,
+    stream: &'a mut OpStream,
+    batch_keys: usize,
+}
+
+/// Issue one opcode over `keys`, split into `--batch-keys` requests.
+///
+/// `collect` gathers the per-key response bytes in order across every chunk, which is what
+/// makes a `CHECK` answer usable as a decision over the whole path rather than per chunk.
+///
+/// An empty `keys` issues nothing **unless** the opcode is keyless (`TAKE_EVENTS`): a turn
+/// with nothing resident should not send an empty `LOAD`, but a poll carries no keys and
+/// must still be sent.
+///
+/// # Errors
+///
+/// If a request fails, returns a non-OK status, or names a forbidden opcode.
+fn issue_keyed(
+    ctx: &mut Ctx<'_>,
+    stats: &mut LaneStats,
+    latency: &mut Histogram<u64>,
+    opcode: u32,
+    keys: &[u64],
+    session: u64,
+    mut collect: Option<&mut Vec<u8>>,
+) -> Result<(), String> {
+    if let Some(why) = forbidden_opcode(opcode) {
+        return Err(format!("refusing to issue a forbidden operation: {why}"));
+    }
+    let keyless = opcode == op::TAKE_EVENTS;
+    if keys.is_empty() && !keyless {
+        return Ok(());
+    }
+    let kind = kind_of(opcode);
+    let mut start = 0usize;
+    loop {
+        let end = (start + ctx.batch_keys).min(keys.len());
+        let chunk = &keys[start..end];
+        let (op_code, payload) = match ctx.stream.encode_chunk(kind, chunk, session)? {
+            Encoding::Ready { opcode, payload } => (opcode, payload),
+            Encoding::NotPlanned => break,
+            Encoding::NeedsGpuPayload { keys: n, .. } => {
+                // No payload buffer: counted and declared, never silently dropped.
+                stats.skipped_needing_gpu += 1;
+                stats.skipped_keys += n as u64;
+                start = end;
+                if start >= keys.len() {
+                    break;
+                }
+                continue;
+            }
+        };
+        // One clock read per request, never per key: a batch of 64 keys is one round trip,
+        // so per-key timing would measure the same interval 64 times and put a clock on the
+        // per-key path (FR-038, FR-070).
+        let started = Instant::now();
+        let (status, body) = ctx
+            .client
+            .request(
+                ctx.channel,
+                op_code,
+                payload,
+                SPIN_ITERS,
+                ATTEMPT_TIMEOUT,
+                REQUEST_DEADLINE,
+            )
+            .map_err(|e| format!("shmq request (op {op_code}) failed: {e}"))?;
+        if status != wire::STATUS_OK {
+            return Err(format!(
+                "op {op_code} returned an error status: {}",
+                String::from_utf8_lossy(&body)
+            ));
+        }
+        let micros = started.elapsed().as_micros().clamp(1, 60_000_000) as u64;
+        latency
+            .record(micros)
+            .map_err(|e| format!("latency out of histogram range: {e}"))?;
+        stats.requests += 1;
+        stats.key_references += chunk.len() as u64;
+        count_results(op_code, &body, stats);
+        if let Some(out) = collect.as_deref_mut() {
+            out.extend_from_slice(&body);
+        }
+        start = end;
+        if start >= keys.len() {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// The plan kind that encodes as `opcode`.
+///
+/// The reactive executor works in opcodes, while [`OpStream`] encodes from plan kinds, so
+/// this is the one place the two vocabularies meet.
+fn kind_of(opcode: u32) -> OpKind {
+    match opcode {
+        op::CHECK => OpKind::Check,
+        op::TOUCH => OpKind::Touch,
+        op::LOOKUP => OpKind::Load,
+        op::RESERVE => OpKind::Reserve,
+        op::COPY_TO_STORE => OpKind::Transfer,
+        op::COMMIT_STORE => OpKind::Commit,
+        op::ABORT_STORE => OpKind::Abort,
+        op::TAKE_EVENTS => OpKind::PollEvents,
+        other => unreachable!("no plan kind encodes as opcode {other}"),
+    }
+}
+
 /// Clear the memory tier once, before the timed window (FR-046).
 ///
 /// Returns how many entries the server dropped. Issued on its own path rather than through
@@ -743,6 +855,10 @@ fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
     if let Some(buffer) = payload {
         stream = stream.with_payload(buffer, slot);
     }
+    // Reused across turns so the reactive path allocates nothing per turn.
+    let mut path: Vec<u64> = Vec::new();
+    let mut states: Vec<u8> = Vec::new();
+    let mut split = TurnSplit::default();
     let mut stats = LaneStats {
         min_depth: usize::MAX,
         ..LaneStats::default()
@@ -781,63 +897,76 @@ fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
         stats.pops += 1;
         stats.min_depth = stats.min_depth.min(observed);
 
-        for op in batch.operations() {
-            let all = batch.keys_of(op);
-            // Split to --batch-keys (FR-069). An operation with no keys — a poll — still
-            // issues exactly one request, which is why this is a loop over offsets rather
-            // than `chunks()`: `[].chunks(n)` yields nothing.
-            let mut start = 0usize;
-            loop {
-                let end = (start + batch_keys).min(all.len());
-                let chunk = &all[start..end];
-                let (opcode, payload) = match stream.encode_chunk(op.kind(), chunk, op.session())? {
-                    Encoding::Ready { opcode, payload } => (opcode, payload),
-                    Encoding::NotPlanned => break,
-                    Encoding::NeedsGpuPayload { keys, .. } => {
-                        stats.skipped_needing_gpu += 1;
-                        stats.skipped_keys += keys as u64;
-                        start = end;
-                        if start >= all.len() {
-                            break;
-                        }
-                        continue;
-                    }
-                };
-                if let Some(why) = forbidden_opcode(opcode) {
-                    return Err(format!("refusing to issue a forbidden operation: {why}"));
-                }
-                // One clock read per request, never per key: a batch of 64 keys is one
-                // round trip, so per-key timing would measure the same interval 64 times
-                // and put a clock on the per-key path (FR-038, FR-070).
-                let started = Instant::now();
-                let (status, body) = client
-                    .request(
-                        channel,
-                        opcode,
-                        payload,
-                        SPIN_ITERS,
-                        ATTEMPT_TIMEOUT,
-                        REQUEST_DEADLINE,
-                    )
-                    .map_err(|e| format!("shmq request (op {opcode}) failed: {e}"))?;
-                if status != wire::STATUS_OK {
-                    return Err(format!(
-                        "op {opcode} returned an error status: {}",
-                        String::from_utf8_lossy(&body)
-                    ));
-                }
-                let micros = started.elapsed().as_micros().clamp(1, 60_000_000) as u64;
-                latency
-                    .record(micros)
-                    .map_err(|e| format!("latency out of histogram range: {e}"))?;
-                stats.requests += 1;
-                stats.key_references += chunk.len() as u64;
-                count_results(opcode, &body, &mut stats);
-                start = end;
-                if start >= all.len() {
-                    break;
-                }
-            }
+        // Offer the whole path, root to the end of the new growth, then act on what the
+        // cache reports. See `TurnSplit`: the operations a turn issues are a function of
+        // the cache's state, which is what lets an evicted block be stored again and what
+        // stores shared prefix blocks that no turn mints.
+        let mut ctx = Ctx {
+            client: &client,
+            channel,
+            stream: &mut stream,
+            batch_keys,
+        };
+        batch.key_path(&mut path);
+        states.clear();
+        issue_keyed(
+            &mut ctx,
+            &mut stats,
+            &mut latency,
+            op::CHECK,
+            &path,
+            0,
+            Some(&mut states),
+        )?;
+        split.split(&path, &states);
+
+        // What is present: report the reference, then load it.
+        for opcode in [op::TOUCH, op::LOOKUP] {
+            issue_keyed(
+                &mut ctx,
+                &mut stats,
+                &mut latency,
+                opcode,
+                split.resident(),
+                0,
+                None,
+            )?;
+        }
+        // What is absent: store it. A session id is needed for the reservation, and every
+        // key in this batch belongs to one turn of one session.
+        let session = batch
+            .operations()
+            .first()
+            .map(|o| o.session())
+            .unwrap_or_default();
+        for opcode in [op::RESERVE, op::COPY_TO_STORE, op::COMMIT_STORE] {
+            issue_keyed(
+                &mut ctx,
+                &mut stats,
+                &mut latency,
+                opcode,
+                split.missing(),
+                session,
+                None,
+            )?;
+        }
+        stats.check_pending += split.pending();
+
+        // The event poll is not keyed, and the plan decides how often it happens.
+        if batch
+            .operations()
+            .iter()
+            .any(|o| o.kind() == OpKind::PollEvents)
+        {
+            issue_keyed(
+                &mut ctx,
+                &mut stats,
+                &mut latency,
+                op::TAKE_EVENTS,
+                &[],
+                0,
+                None,
+            )?;
         }
     }
 
