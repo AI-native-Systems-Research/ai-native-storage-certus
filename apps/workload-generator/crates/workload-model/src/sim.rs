@@ -27,8 +27,11 @@
 //! reverse order would make a session's shared set depend on the arbitrary order
 //! two pools were declared in.
 //!
-//! Ties within a kind break on `(time, class, handle)`, so a run is reproducible
-//! from its seed without depending on iteration order anywhere.
+//! Ties among turns break on **session id**, which is run-global and unique, so
+//! the delivered order is a total order and is reproducible from the seed without
+//! depending on iteration order anywhere. Breaking on a slab handle instead would
+//! also be deterministic, but handles depend on allocation history, so the
+//! resulting order could not be checked from outside the loop.
 //!
 //! # Turns come from a heap, not a scan
 //!
@@ -112,8 +115,13 @@ pub struct Simulation {
     sessions: Vec<SessionClassState>,
     ids: SessionIds,
     rng: rng::Rng,
-    /// Pending turns, earliest first, as `(at bits, class, handle)`.
-    turns: BinaryHeap<Reverse<(u64, usize, usize)>>,
+    /// Pending turns, earliest first, as `(at bits, session id, class, handle)`.
+    ///
+    /// Ordered on session id rather than on `(class, handle)` so the delivered
+    /// order is the one `plan.rs` asserts: by virtual time, then by session id
+    /// (FR-035). Session ids are unique run-wide, so the trailing fields never
+    /// participate in the comparison and are along only to locate the session.
+    turns: BinaryHeap<Reverse<(u64, u64, usize, usize)>>,
     now: f64,
     turns_taken: u64,
     blocks_read: u64,
@@ -279,7 +287,7 @@ impl Simulation {
         for c in &self.sessions {
             next = next.min(c.pool.next_event_at().unwrap_or(f64::INFINITY));
         }
-        if let Some(Reverse((bits, _, _))) = self.turns.peek() {
+        if let Some(Reverse((bits, _, _, _))) = self.turns.peek() {
             next = next.min(f64::from_bits(*bits));
         }
         if next.is_finite() {
@@ -327,9 +335,9 @@ impl Simulation {
         while self
             .turns
             .peek()
-            .is_some_and(|Reverse((bits, _, _))| f64::from_bits(*bits) <= t)
+            .is_some_and(|Reverse((bits, _, _, _))| f64::from_bits(*bits) <= t)
         {
-            let Reverse((bits, class, handle)) = self.turns.pop().expect("peeked");
+            let Reverse((bits, _, class, handle)) = self.turns.pop().expect("peeked");
             debug_assert_eq!(
                 f64::from_bits(bits).to_bits(),
                 self.sessions[class]
@@ -382,8 +390,12 @@ impl Simulation {
         self.blocks_minted += (turn.new_input_len() + turn.new_output_len()) as u64;
         on_turn(self.sessions[class].pool.session(handle), &turn);
 
-        match self.sessions[class].pool.session(handle).next_turn_at() {
-            Some(at) => self.turns.push(Reverse((at.to_bits(), class, handle))),
+        let session = self.sessions[class].pool.session(handle);
+        match session.next_turn_at() {
+            Some(at) => {
+                let id = session.id();
+                self.turns.push(Reverse((at.to_bits(), id, class, handle)));
+            }
             None => self.retire_session(class, handle),
         }
     }
@@ -434,7 +446,8 @@ impl Simulation {
                 &mut self.rng,
             );
             if let Some(at) = pool.session(handle).next_turn_at() {
-                self.turns.push(Reverse((at.to_bits(), class, handle)));
+                let id = pool.session(handle).id();
+                self.turns.push(Reverse((at.to_bits(), id, class, handle)));
             }
         }
     }
