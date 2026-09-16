@@ -325,10 +325,10 @@ pub struct LiveReport {
     pub elapsed_seconds: f64,
     /// Virtual seconds covered.
     pub virtual_span: f64,
-    /// Smallest plan-queue depth observed. Zero invalidates the run.
-    pub plan_queue_min_depth: usize,
-    /// Fraction of samples at zero depth.
-    pub plan_queue_fraction_at_zero: f64,
+    /// The plan queue between the producer and the lanes.
+    pub queue: QueueStats,
+    /// Whether the producer reached the end of its span rather than being interrupted.
+    pub producer_completed: bool,
     /// Lanes used, which equals channels claimed.
     pub lanes: usize,
     /// The node's channel count, for comparison with `lanes`.
@@ -348,6 +348,33 @@ pub struct LiveReport {
     pub skipped_needing_gpu: u64,
     /// Keys those skipped operations would have moved.
     pub skipped_keys: u64,
+}
+
+/// The plan queue's own figures (FR-037, FR-062).
+///
+/// Counts of consumer stalls, not samples of a gauge: a sampled depth can miss a brief
+/// exhaustion between samples, which is the same failure as reporting an average one level
+/// down. Per-lane arrays are kept beside the totals because session sharding creates
+/// imbalance, and an aggregate would hide one lane starving constantly behind seven that
+/// never did.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct QueueStats {
+    /// Turn batches the producer built.
+    pub batches_produced: u64,
+    /// Batches taken by lanes.
+    pub pops: u64,
+    /// Pops that found an empty queue. **Non-zero invalidates the run.**
+    pub empty_pops: u64,
+    /// Fraction of pops that starved.
+    pub fraction_starved: f64,
+    /// Smallest depth any lane saw at pop time.
+    pub min_depth: usize,
+    /// Queue capacity per lane, in turn batches — what bounds memory instead of the span.
+    pub capacity_per_lane: usize,
+    /// Starvations per lane.
+    pub per_lane_empty_pops: Vec<u64>,
+    /// Minimum depth per lane.
+    pub per_lane_min_depth: Vec<usize>,
 }
 
 /// Request latency, in microseconds.
@@ -409,10 +436,24 @@ impl LiveReport {
             self.latency_us.p50, self.latency_us.p90, self.latency_us.p99, self.latency_us.max
         ));
         out.push_str(&format!(
-            "  plan queue        min depth {}, {:.3}% of samples at zero\n",
-            self.plan_queue_min_depth,
-            self.plan_queue_fraction_at_zero * 100.0
+            "  plan queue        {} batches produced, {} pops, {} starved ({:.3}%), \
+             min depth {} of {} per lane\n    \
+             per lane starved {:?}, min depth {:?}\n",
+            self.queue.batches_produced,
+            self.queue.pops,
+            self.queue.empty_pops,
+            self.queue.fraction_starved * 100.0,
+            self.queue.min_depth,
+            self.queue.capacity_per_lane,
+            self.queue.per_lane_empty_pops,
+            self.queue.per_lane_min_depth,
         ));
+        if !self.producer_completed {
+            out.push_str(
+                "  interrupted       the producer was stopped before its span ended; an \
+                 interrupted run whose lanes never starved is still valid (FR-074)\n",
+            );
+        }
         out.push_str(&format!(
             "  lanes             {} of {} channels\n",
             self.lanes, self.node_channels
