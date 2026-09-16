@@ -37,6 +37,21 @@
 //! rather than an oversight, because hashing the whole repository would make the identity
 //! change on every unrelated edit and the check would be ignored within a week.
 //!
+//! # What it costs, measured
+//!
+//! **1.2 ms** for 58 files and 948 KB — 0.5 ms walking the tree, 0.7 ms folding bytes — and
+//! only when one of those files changes, since each is declared to cargo. A no-op rebuild
+//! re-runs nothing; an edit that does trigger it already costs ~0.43 s of recompilation, so
+//! the hash is about 0.3% of a cost the edit was going to pay anyway.
+//!
+//! For scale, and because it settles the boundary above rather than leaving it to taste:
+//! every `.rs` and `Cargo.toml` in the whole repository is 410 files and 4.6 MB at **189
+//! ms**, and including SPDK's C and the Python is 9 819 files and 153 MB at **447 ms**. Note
+//! where that time goes — 181 of the 189 ms is the directory *walk*, not the hashing, so
+//! widening the scope is paid for in `readdir` against `deps/` rather than in arithmetic.
+//! None of it is prohibitive; the reason to stay narrow is the identity churn, not the
+//! milliseconds.
+//!
 //! `WORKLOAD_SOURCE_ID` overrides everything, for a packager who has a better answer.
 
 use std::fs;

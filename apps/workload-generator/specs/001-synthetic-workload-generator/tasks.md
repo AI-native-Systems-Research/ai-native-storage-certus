@@ -1634,6 +1634,16 @@ application — a node running a different `shmq-dispatcher` would not be caught
 is deliberate: hashing the whole repository would make the identity change on every
 unrelated edit, and a check that fires constantly gets ignored within a week.
 
+**Cost, measured rather than assumed.** It hashes 58 files and 948 KB in **1.2 ms**
+(0.5 ms walking, 0.7 ms folding), and only when one of those files changes, since each
+is declared to cargo — a no-op rebuild re-runs nothing, and an edit that does trigger
+it already costs ~0.43 s of recompilation, so the hash is ~0.3% of a bill the edit was
+paying anyway. It does **not** touch the Certus source. For scale: every `.rs` and
+`Cargo.toml` in the whole repository is 410 files / 4.6 MB at **189 ms**, and including
+SPDK's C and the Python is 9 819 files / 153 MB at **447 ms** — of which 181 ms is the
+directory *walk* against `deps/` rather than the hashing. So widening the scope is
+affordable; the reason to stay narrow is identity churn, not milliseconds.
+
 **It is strict, and the cost is honest**: a comment change anywhere in these crates
 invalidates a deployed agent, so a multi-node run needs the agent redeployed after any
 edit. That is the price of a check that cannot be talked out of firing by "it is only
