@@ -1606,19 +1606,42 @@ plus a hash of the tracked diff, plus a hash of the porcelain status.
 It is computed **once**, in `workload-wire`'s build script, and both binaries obtain
 it by depending on that crate. Two build scripts computing it independently could
 disagree — a stale cache on one, a different working directory on the other — and a
-provenance check that can disagree with itself is worse than none. Verified: the
-captured id begins with the exact commit of the preceding task, and the digest moves
-when the id changes.
+provenance check that can disagree with itself is worse than none.
 
-**One hole is stated rather than papered over:** the diff covers uncommitted edits to
-tracked files and the status covers additions by *name*, so the **contents of
-untracked files are not covered**. A new file present on one node and absent on the
-other changes behaviour without changing the id.
+**The first version asked git, and that was the wrong instrument.** Asking "what
+happens to a build from a tarball?" exposed three faults at once, all fixed by
+hashing the source files directly instead:
 
-**Unknown provenance is refused, not assumed.** If git cannot describe the tree the
-id is `unknown`, and a peer reporting it is refused — accepting it would make the
-check vacuous for exactly the deployments most likely to be stale. `WORKLOAD_SOURCE_ID`
-overrides it deliberately.
+1. **A tarball has no git.** The build still succeeded, but the identity fell back to
+   `unknown` and every multi-node run from a release tarball would have been refused —
+   a cost imposed by the mechanism rather than by the requirement.
+2. **Untracked files were invisible.** A new file on one node and absent on the other
+   changed behaviour without changing the identity, which is precisely the divergence
+   the check exists to catch.
+3. **Cargo could not know when to re-run the script.** `.git/index` moves on
+   `git add`, not on a bare edit, so an uncommitted change could leave a stale
+   identity compiled in.
+
+The identity is now a digest of every `.rs` and `Cargo.toml` under
+`apps/workload-generator/crates/`, sorted by path, each file contributing its path as
+well as its bytes so that moving code between files changes it. Each file is declared
+to cargo, which closes fault 3. **Verified on a git-free copy**: the build succeeds
+and produces a real identity (`src:58:948426:…`) rather than `unknown`, a source edit
+of ten bytes moves the fold, and restoring the file brings it back.
+
+**The boundary that is not covered** is workspace dependencies outside this
+application — a node running a different `shmq-dispatcher` would not be caught. That
+is deliberate: hashing the whole repository would make the identity change on every
+unrelated edit, and a check that fires constantly gets ignored within a week.
+
+**It is strict, and the cost is honest**: a comment change anywhere in these crates
+invalidates a deployed agent, so a multi-node run needs the agent redeployed after any
+edit. That is the price of a check that cannot be talked out of firing by "it is only
+a constant", which is how staleness gets in.
+
+**Unknown provenance is refused, not assumed** — it now means the source files could
+not be read at all, which is a real problem rather than a portability case.
+`WORKLOAD_SOURCE_ID` overrides everything, for a packager with a better answer.
 
 **Both ends check**, which is what makes a refusal legible: the agent replies with a
 non-zero status *and always sends its own identity even while refusing*, so the
