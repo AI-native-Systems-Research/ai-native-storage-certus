@@ -53,13 +53,20 @@ fn fnv1a_64(data: &[u8]) -> u64 {
 }
 
 fn text_to_block_keys(text: &str, block_chars: usize) -> Vec<CacheKey> {
-    let bytes = text.as_bytes();
-    let mut keys = Vec::with_capacity(bytes.len() / block_chars + 1);
-    let mut offset = 0;
-    while offset < bytes.len() {
-        let end = (offset + block_chars).min(bytes.len());
-        keys.push(fnv1a_64(&bytes[offset..end]));
-        offset = end;
+    let mut keys = Vec::new();
+    let mut chunk = String::new();
+    let mut chars_in_chunk = 0;
+    for ch in text.chars() {
+        chunk.push(ch);
+        chars_in_chunk += 1;
+        if chars_in_chunk == block_chars {
+            keys.push(fnv1a_64(chunk.as_bytes()));
+            chunk.clear();
+            chars_in_chunk = 0;
+        }
+    }
+    if !chunk.is_empty() {
+        keys.push(fnv1a_64(chunk.as_bytes()));
     }
     keys
 }
