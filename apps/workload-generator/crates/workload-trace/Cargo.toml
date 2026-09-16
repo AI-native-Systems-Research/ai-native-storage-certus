@@ -32,6 +32,11 @@ arrow-schema = { version = "53", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+# T061 drives the simulator's own loader rather than a reimplementation of it. The
+# claim being tested is about *that* app's record shape (research.md D1), and the only
+# way to check such a claim is to run the code it is about. Test-only, so this does
+# not make the trace crate depend on an app.
+eviction-replay-benchmark = { path = "../../../eviction-replay-benchmark" }
 # Reading a parquet buffer back for the container-equivalence test needs the same
 # `Bytes` type the parquet reader takes. Test-only.
 bytes = "1"
