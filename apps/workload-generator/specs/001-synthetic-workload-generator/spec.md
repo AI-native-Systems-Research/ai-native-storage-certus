@@ -566,7 +566,26 @@ modes reorder the policies.
   human-formatted text.
 - **FR-066**: For a **live run**, throughput MUST be denominated in wallclock
   time, and System MUST report both keys per second and bytes per second, plus
-  the ratio of virtual time advanced to wallclock elapsed. Reporting wallclock
+  the ratio of virtual time advanced to wallclock elapsed. **Bytes per second
+  MUST count only payload that crossed the client boundary**, and MUST be
+  reported separately for each direction: a block is read on a `LOOKUP` **hit**
+  and written on an accepted `COPY_TO_STORE`, and nothing else moves a byte —
+  `CHECK`, `TOUCH`, `RESERVE` and `COMMIT_STORE` are control. Bandwidth is
+  therefore computable only from the hit/miss results, which is one reason
+  FR-072a requires capturing them. Deriving it from key references instead
+  charges a full block to every control operation and overstated bandwidth by
+  4.9x when measured.
+- **FR-066a**: Latency MUST be reported **per operation**, not only in aggregate.
+  A `CHECK` is control and costs tens of microseconds; a `COPY_TO_STORE` DMAs a
+  block per key and was measured at 5.5x that. An aggregate percentile therefore
+  describes the operation mix a description happens to produce rather than
+  anything about Certus, and changes when the hit rate changes even if the server
+  does not.
+- **FR-066b**: A store MUST transfer only into a reservation the server granted.
+  `RESERVE` answers per key, and transferring for a declined key sends a payload
+  to no slot and then fails its commit for want of a pending write. Measured
+  without the filter: 88 blocks written against 12 declined reserves and 12
+  declined commits; with it, 76 written and zero declined commits. Reporting wallclock
   throughput does not conflict with FR-031: virtual time decides the *order* of
   operations while wallclock measures how fast that order was executed, and
   because the virtual clock holds during a stall (FR-032) the ratio between

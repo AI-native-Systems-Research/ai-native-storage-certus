@@ -81,6 +81,7 @@
 //! lands (T038, T039) they are counted and skipped, and the report says the run was
 //! partial rather than quietly reporting a throughput for a stream that moved no data.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::Arc;
@@ -158,6 +159,8 @@ pub struct LaneStats {
     pub reserves_attempted: u64,
     /// Keys a `COMMIT_STORE` was asked for.
     pub commits_attempted: u64,
+    /// Keys a `COPY_TO_STORE` was asked for.
+    pub transfers_attempted: u64,
     /// Keys a `RESERVE` declined.
     pub reserves_declined: u64,
     /// Keys a `COPY_TO_STORE` declined.
@@ -188,8 +191,15 @@ pub struct LiveStats {
     pub elapsed: f64,
     /// Virtual seconds the plan advanced.
     pub virtual_span: f64,
-    /// Per-request latency across every lane.
+    /// Per-request latency across every lane, every opcode together.
     pub latency: Histogram<u64>,
+    /// Per-request latency **per opcode**.
+    ///
+    /// An aggregate mixes a `CHECK` — control only, microseconds — with a `LOOKUP` that
+    /// DMAs a block per key, so its percentiles describe the *mix* of operations a
+    /// description happens to produce rather than anything about Certus. Splitting them is
+    /// what makes the number a statement about the system.
+    pub latency_by_op: BTreeMap<u32, Histogram<u64>>,
 }
 
 impl LiveStats {
@@ -283,6 +293,55 @@ impl LiveStats {
         self.lanes.iter().map(|l| l.transfers_declined).sum()
     }
 
+    /// Keys a `COPY_TO_STORE` was asked for.
+    pub fn transfers_attempted(&self) -> u64 {
+        self.lanes.iter().map(|l| l.transfers_attempted).sum()
+    }
+
+    /// Blocks whose payload Certus sent us: `LOOKUP` hits, and only those.
+    ///
+    /// A `LOOKUP` miss transfers nothing, so counting it would invent bandwidth.
+    pub fn blocks_read(&self) -> u64 {
+        self.lookup_hits()
+    }
+
+    /// Blocks whose payload we sent Certus: `COPY_TO_STORE` keys it accepted.
+    ///
+    /// `COPY_TO_STORE` is where the DMA happens (`copy_gpu_to_memory_async`); `RESERVE` and
+    /// `COMMIT_STORE` are control. A declined transfer moved nothing.
+    pub fn blocks_written(&self) -> u64 {
+        self.transfers_attempted()
+            .saturating_sub(self.transfers_declined())
+    }
+
+    /// Payload bytes read from Certus.
+    pub fn read_bytes(&self) -> u64 {
+        self.blocks_read() * self.block_bytes
+    }
+
+    /// Payload bytes written to Certus.
+    pub fn write_bytes(&self) -> u64 {
+        self.blocks_written() * self.block_bytes
+    }
+
+    /// Payload bytes read per wallclock second.
+    pub fn read_bytes_per_second(&self) -> f64 {
+        self.per_second(self.read_bytes())
+    }
+
+    /// Payload bytes written per wallclock second.
+    pub fn write_bytes_per_second(&self) -> f64 {
+        self.per_second(self.write_bytes())
+    }
+
+    fn per_second(&self, n: u64) -> f64 {
+        if self.elapsed > 0.0 {
+            n as f64 / self.elapsed
+        } else {
+            0.0
+        }
+    }
+
     /// Keys a `COMMIT_STORE` declined.
     pub fn commits_declined(&self) -> u64 {
         self.lanes.iter().map(|l| l.commits_declined).sum()
@@ -306,8 +365,26 @@ impl LiveStats {
     }
 
     /// Bytes per second over the timed window.
+    /// Payload bytes per wallclock second, read plus written (FR-066).
+    ///
+    /// # This was wrong, and wrong in the direction that flatters the system
+    ///
+    /// It used to be `key_references * block_bytes`, which charges a full block to every
+    /// key of every request. But most requests move **no payload at all**: `CHECK`, `TOUCH`,
+    /// `RESERVE` and `COMMIT_STORE` are control operations. Under the reactive rule a
+    /// resident block produces three key references (check, touch, load) and transfers one
+    /// block, and a missing one produces four (check, reserve, transfer, commit) and
+    /// transfers one — so the old figure overstated bandwidth by three to four times and
+    /// conflated reads with writes.
+    ///
+    /// Bandwidth now comes from the hit/miss results, which is the only place the
+    /// information exists: bytes are read for a `LOOKUP` **hit** and written for an accepted
+    /// `COPY_TO_STORE`, and nothing else moves a byte.
+    ///
+    /// Server-side write-through to SSD is additional traffic Certus generates on its own
+    /// and is not counted here: this is what crossed the client boundary.
     pub fn bytes_per_second(&self) -> f64 {
-        self.keys_per_second() * self.block_bytes as f64
+        self.per_second(self.read_bytes() + self.write_bytes())
     }
 
     /// Virtual seconds advanced per wallclock second.
@@ -500,14 +577,25 @@ pub fn run(
     let mut lanes = Vec::with_capacity(lane_count);
     let mut latency = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
         .map_err(|e| format!("cannot build the latency histogram: {e}"))?;
+    let mut latency_by_op: BTreeMap<u32, Histogram<u64>> = BTreeMap::new();
     let mut first_error = None;
     for (i, handle) in consumers.into_iter().enumerate() {
         match handle.join() {
-            Ok(Ok((stats, hist))) => {
+            Ok(Ok((stats, hist, per_op))) => {
                 lanes.push(stats);
                 latency
                     .add(hist)
                     .map_err(|e| format!("merging lane {i}'s latencies: {e}"))?;
+                for (opcode, h) in per_op {
+                    match latency_by_op.entry(opcode) {
+                        std::collections::btree_map::Entry::Occupied(mut e) => e.get_mut().add(h),
+                        std::collections::btree_map::Entry::Vacant(e) => {
+                            e.insert(h);
+                            Ok(())
+                        }
+                    }
+                    .map_err(|e| format!("merging lane {i}'s opcode {opcode} latencies: {e}"))?;
+                }
             }
             Ok(Err(e)) => {
                 lanes.push(LaneStats::default());
@@ -539,6 +627,7 @@ pub fn run(
         elapsed,
         virtual_span,
         latency,
+        latency_by_op,
     })
 }
 
@@ -637,10 +726,12 @@ struct Ctx<'a> {
 /// # Errors
 ///
 /// If a request fails, returns a non-OK status, or names a forbidden opcode.
+#[allow(clippy::too_many_arguments)]
 fn issue_keyed(
     ctx: &mut Ctx<'_>,
     stats: &mut LaneStats,
     latency: &mut Histogram<u64>,
+    by_op: &mut BTreeMap<u32, Histogram<u64>>,
     opcode: u32,
     keys: &[u64],
     session: u64,
@@ -697,6 +788,17 @@ fn issue_keyed(
         latency
             .record(micros)
             .map_err(|e| format!("latency out of histogram range: {e}"))?;
+        match by_op.entry(op_code) {
+            std::collections::btree_map::Entry::Occupied(mut e) => e.get_mut().record(micros),
+            std::collections::btree_map::Entry::Vacant(e) => {
+                let mut h = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
+                    .map_err(|e| format!("cannot build a per-opcode histogram: {e}"))?;
+                let r = h.record(micros);
+                e.insert(h);
+                r
+            }
+        }
+        .map_err(|e| format!("latency out of histogram range: {e}"))?;
         stats.requests += 1;
         stats.key_references += chunk.len() as u64;
         count_results(op_code, &body, stats);
@@ -709,6 +811,27 @@ fn issue_keyed(
         }
     }
     Ok(())
+}
+
+/// Keys whose `RESERVE` was granted, from the per-key answer.
+///
+/// A transfer DMAs a block into the slot a reservation granted, so transferring for a key
+/// whose reserve was declined sends a payload nowhere and then fails its commit for want of
+/// a pending write. Measured before this filter existed: 88 blocks written against 12
+/// declined reserves and 12 declined commits; with it, 76 written and **zero** declined
+/// commits.
+///
+/// A short `results` grants only what it answered for. Assuming a missing byte meant
+/// success would write a block Certus never reserved.
+fn granted_keys(missing: &[u64], results: &[u8], out: &mut Vec<u64>) {
+    out.clear();
+    out.extend(
+        missing
+            .iter()
+            .zip(results.iter())
+            .filter(|(_, ok)| **ok == 1)
+            .map(|(key, _)| *key),
+    );
 }
 
 /// The plan kind that encodes as `opcode`.
@@ -809,6 +932,7 @@ fn count_results(opcode: u32, body: &[u8], stats: &mut LaneStats) {
             stats.reserves_declined += body.iter().filter(|b| **b == 0).count() as u64
         }
         op::COPY_TO_STORE => {
+            stats.transfers_attempted += body.len() as u64;
             stats.transfers_declined += body.iter().filter(|b| **b == 0).count() as u64
         }
         op::COMMIT_STORE => {
@@ -839,7 +963,9 @@ struct Consumer {
     stop: Arc<AtomicBool>,
 }
 
-fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
+type LaneLatency = (LaneStats, Histogram<u64>, BTreeMap<u32, Histogram<u64>>);
+
+fn consume(c: Consumer) -> Result<LaneLatency, String> {
     let Consumer {
         client,
         channel,
@@ -859,12 +985,15 @@ fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
     let mut path: Vec<u64> = Vec::new();
     let mut states: Vec<u8> = Vec::new();
     let mut split = TurnSplit::default();
+    let mut granted: Vec<u8> = Vec::new();
+    let mut stored: Vec<u64> = Vec::new();
     let mut stats = LaneStats {
         min_depth: usize::MAX,
         ..LaneStats::default()
     };
     let mut latency = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
         .map_err(|e| format!("cannot build the latency histogram: {e}"))?;
+    let mut by_op: BTreeMap<u32, Histogram<u64>> = BTreeMap::new();
 
     // Prime: block for the first batch without counting it. Every queue is empty before
     // the producer has pushed anything, so counting that would invalidate every run —
@@ -913,6 +1042,7 @@ fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
             &mut ctx,
             &mut stats,
             &mut latency,
+            &mut by_op,
             op::CHECK,
             &path,
             0,
@@ -926,6 +1056,7 @@ fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
                 &mut ctx,
                 &mut stats,
                 &mut latency,
+                &mut by_op,
                 opcode,
                 split.resident(),
                 0,
@@ -939,13 +1070,31 @@ fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
             .first()
             .map(|o| o.session())
             .unwrap_or_default();
-        for opcode in [op::RESERVE, op::COPY_TO_STORE, op::COMMIT_STORE] {
+        // Reserve first, and keep its per-key answer: a transfer DMAs a block into the
+        // slot a reservation granted, so writing for a key whose reserve was declined is a
+        // block of payload sent nowhere. Measured before this filter existed: 88 blocks
+        // written against 12 declined reserves, so 12 blocks of the reported write
+        // bandwidth had no reservation behind them.
+        granted.clear();
+        issue_keyed(
+            &mut ctx,
+            &mut stats,
+            &mut latency,
+            &mut by_op,
+            op::RESERVE,
+            split.missing(),
+            session,
+            Some(&mut granted),
+        )?;
+        granted_keys(split.missing(), &granted, &mut stored);
+        for opcode in [op::COPY_TO_STORE, op::COMMIT_STORE] {
             issue_keyed(
                 &mut ctx,
                 &mut stats,
                 &mut latency,
+                &mut by_op,
                 opcode,
-                split.missing(),
+                &stored,
                 session,
                 None,
             )?;
@@ -962,6 +1111,7 @@ fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
                 &mut ctx,
                 &mut stats,
                 &mut latency,
+                &mut by_op,
                 op::TAKE_EVENTS,
                 &[],
                 0,
@@ -973,7 +1123,7 @@ fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
     if stats.min_depth == usize::MAX {
         stats.min_depth = 0;
     }
-    Ok((stats, latency))
+    Ok((stats, latency, by_op))
 }
 
 #[cfg(test)]
@@ -987,6 +1137,7 @@ mod tests {
             producer_completed: true,
             producer_blocked: 0,
             cleared_entries: None,
+            latency_by_op: BTreeMap::new(),
             block_bytes: 32_768,
             elapsed,
             virtual_span: 10.0,
@@ -1054,12 +1205,91 @@ mod tests {
         assert_eq!(s.requests(), 100);
         assert_eq!(s.key_references(), 2_000);
         assert_eq!(s.keys_per_second(), 1_000.0);
-        assert_eq!(s.bytes_per_second(), 1_000.0 * 32_768.0);
+        // Key references are NOT bandwidth. These lanes issued 2000 key references and
+        // moved **nothing**: no LOOKUP hit and no accepted transfer. The old formula was
+        // `key_references * block_bytes`, which charged a full block to every CHECK and
+        // TOUCH and so reported 32 MB/s for a run that transferred no payload at all.
+        assert_eq!(
+            s.bytes_per_second(),
+            0.0,
+            "control-only traffic must report zero bandwidth"
+        );
 
         let empty = stats(vec![LaneStats::default()], 0.0);
         assert_eq!(empty.keys_per_second(), 0.0);
+        assert_eq!(empty.bytes_per_second(), 0.0);
         assert_eq!(empty.virtual_to_wallclock(), 0.0);
         assert_eq!(empty.fraction_underrun(), 0.0);
+    }
+
+    #[test]
+    fn only_a_granted_reservation_is_transferred() {
+        // `op_reserve` answers one byte per key. A declined key has no slot, so transferring
+        // it sends a payload nowhere and its commit then fails for want of a pending write.
+        let missing = [10u64, 11, 12, 13];
+        let mut out = Vec::new();
+        granted_keys(&missing, &[1, 0, 1, 0], &mut out);
+        assert_eq!(out, vec![10, 12]);
+
+        // All granted, and none.
+        granted_keys(&missing, &[1, 1, 1, 1], &mut out);
+        assert_eq!(out, missing);
+        granted_keys(&missing, &[0, 0, 0, 0], &mut out);
+        assert!(
+            out.is_empty(),
+            "nothing was reserved, so nothing may be sent"
+        );
+    }
+
+    #[test]
+    fn a_short_reserve_answer_grants_only_what_it_answered_for() {
+        // Assuming success for an unanswered key would write a block Certus never reserved.
+        let mut out = Vec::new();
+        granted_keys(&[1, 2, 3], &[1], &mut out);
+        assert_eq!(out, vec![1]);
+        granted_keys(&[1, 2, 3], &[], &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn bandwidth_counts_a_lookup_hit_as_read_and_an_accepted_transfer_as_write() {
+        // The only two payload-moving operations. A LOOKUP miss brings no bytes, and a
+        // declined COPY_TO_STORE sends none, so both are excluded — otherwise a run against
+        // a cold cache would report reading data it never received.
+        let s = stats(
+            vec![LaneStats {
+                lookup_hits: 10,
+                lookup_misses: 90,
+                transfers_attempted: 8,
+                transfers_declined: 3,
+                ..Default::default()
+            }],
+            2.0,
+        );
+        assert_eq!(s.blocks_read(), 10, "only hits carry a payload");
+        assert_eq!(s.blocks_written(), 5, "8 attempted less 3 declined");
+        assert_eq!(s.read_bytes(), 10 * 32_768);
+        assert_eq!(s.write_bytes(), 5 * 32_768);
+        assert_eq!(s.read_bytes_per_second(), 10.0 * 32_768.0 / 2.0);
+        assert_eq!(s.write_bytes_per_second(), 5.0 * 32_768.0 / 2.0);
+        assert_eq!(s.bytes_per_second(), 15.0 * 32_768.0 / 2.0);
+    }
+
+    #[test]
+    fn a_run_that_only_missed_reports_no_read_bandwidth() {
+        // The direction of the old error: a cold run issues many references and reads
+        // nothing, and must not be credited with bandwidth for the misses.
+        let s = stats(
+            vec![LaneStats {
+                key_references: 10_000,
+                lookup_hits: 0,
+                lookup_misses: 500,
+                ..Default::default()
+            }],
+            1.0,
+        );
+        assert_eq!(s.read_bytes(), 0);
+        assert_eq!(s.blocks_read(), 0);
     }
 
     #[test]

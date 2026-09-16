@@ -317,7 +317,12 @@ pub struct LiveReport {
     pub key_references: u64,
     /// Keys per second over the timed window.
     pub keys_per_second: f64,
-    /// Bytes per second over the timed window.
+    /// Payload bytes per second, read plus written.
+    ///
+    /// From the hit/miss results, since only a `LOOKUP` hit and an accepted
+    /// `COPY_TO_STORE` move a payload. It was previously `key_references * block_bytes`,
+    /// which charged a block to every control operation and overstated bandwidth three- to
+    /// fourfold.
     pub bytes_per_second: f64,
     /// Virtual seconds advanced per wallclock second.
     pub virtual_to_wallclock: f64,
@@ -329,6 +334,10 @@ pub struct LiveReport {
     pub queue: QueueStats,
     /// What Certus decided per key — outcomes, never failures.
     pub outcomes: CacheOutcomes,
+    /// Payload bandwidth, computed from the hit/miss results.
+    pub bandwidth: Bandwidth,
+    /// Latency per opcode, because an aggregate describes the operation mix.
+    pub latency_by_op: Vec<OpLatency>,
     /// Entries the startup memory-tier clear dropped, if `--clear-cache` was given.
     pub cleared_entries: Option<u64>,
     /// Whether the producer reached the end of its span rather than being interrupted.
@@ -501,6 +510,58 @@ fn pct(n: u64, d: u64) -> String {
     }
 }
 
+/// Payload bandwidth, split by direction.
+///
+/// Only two operations move a payload: a `LOOKUP` **hit** brings a block from Certus, and an
+/// accepted `COPY_TO_STORE` sends one to it. `CHECK`, `TOUCH`, `RESERVE` and `COMMIT_STORE`
+/// are control and move nothing, so bandwidth can only be computed from the hit/miss
+/// results — which is why they are captured. A `LOOKUP` miss transfers no bytes, and neither
+/// does a declined transfer.
+///
+/// Certus's own write-through to SSD is not counted: this is what crossed the client
+/// boundary.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Bandwidth {
+    /// Blocks Certus sent us.
+    pub blocks_read: u64,
+    /// Blocks we sent Certus.
+    pub blocks_written: u64,
+    /// Payload bytes read.
+    pub read_bytes: u64,
+    /// Payload bytes written.
+    pub write_bytes: u64,
+}
+
+/// Latency of one opcode, in microseconds.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OpLatency {
+    /// The opcode's name, as `shmq-dispatcher` calls it.
+    pub op: &'static str,
+    /// Requests timed.
+    pub requests: u64,
+    /// Percentiles.
+    pub us: LatencyPercentiles,
+}
+
+/// The dispatcher's name for an opcode, for a report a human reads.
+///
+/// Gated with the transport: an emit-only build has no opcodes to name.
+#[cfg(feature = "live")]
+pub fn opcode_name(opcode: u32) -> &'static str {
+    use shmq_dispatcher::wire::op;
+    match opcode {
+        op::CHECK => "CHECK",
+        op::TOUCH => "TOUCH",
+        op::LOOKUP => "LOOKUP",
+        op::RESERVE => "RESERVE",
+        op::COPY_TO_STORE => "COPY_TO_STORE",
+        op::COMMIT_STORE => "COMMIT_STORE",
+        op::ABORT_STORE => "ABORT_STORE",
+        op::TAKE_EVENTS => "TAKE_EVENTS",
+        _ => "other",
+    }
+}
+
 /// Request latency, in microseconds.
 ///
 /// Percentiles rather than a mean: a mean latency hides the tail that a cache's
@@ -548,10 +609,20 @@ impl LiveReport {
         ));
         if self.valid {
             out.push_str(&format!(
-                "  throughput        {:.0} keys/s, {:.1} MiB/s\n  \
+                "  payload bw        read {:.1} MiB/s ({} blocks), write {:.1} MiB/s ({} \
+                 blocks)\n                    control operations move no payload, so this \
+                 comes from the hit/miss results\n  \
+                 request rate      {:.0} key references/s\n  \
                  virtual/wallclock {:.2}\n",
+                self.bandwidth.read_bytes as f64
+                    / self.elapsed_seconds.max(1e-9)
+                    / (1024.0 * 1024.0),
+                self.bandwidth.blocks_read,
+                self.bandwidth.write_bytes as f64
+                    / self.elapsed_seconds.max(1e-9)
+                    / (1024.0 * 1024.0),
+                self.bandwidth.blocks_written,
                 self.keys_per_second,
-                self.bytes_per_second / (1024.0 * 1024.0),
                 self.virtual_to_wallclock
             ));
         }
@@ -629,6 +700,15 @@ impl LiveReport {
                     self.outcomes.commits_attempted
                 ),
             ));
+        }
+        if !self.latency_by_op.is_empty() {
+            out.push_str("  latency by op     (us)  requests    p50    p90    p99    max\n");
+            for l in &self.latency_by_op {
+                out.push_str(&format!(
+                    "    {:<14} {:>10} {:>6} {:>6} {:>6} {:>6}\n",
+                    l.op, l.requests, l.us.p50, l.us.p90, l.us.p99, l.us.max
+                ));
+            }
         }
         out.push_str(&format!(
             "  lanes             {} of {} channels\n",

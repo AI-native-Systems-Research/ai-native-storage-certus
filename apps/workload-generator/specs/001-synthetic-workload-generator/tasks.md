@@ -1077,6 +1077,46 @@ state** — no work is due yet — so "a lane found its queue empty" stops meani
 Adopting pacing therefore means replacing the underrun check, not adding a sleep,
 and it makes every experiment cost real time equal to its virtual span.
 
+**Bandwidth and latency were both measuring the wrong thing (FR-066, FR-066a,
+FR-066b).** Capturing hit/miss turned out to be *required* for bandwidth, not
+merely informative.
+
+`bytes_per_second` was `key_references * block_bytes`, which charges a full block
+to every key of every request — but `CHECK`, `TOUCH`, `RESERVE` and
+`COMMIT_STORE` move **no payload at all**. Under the reactive rule a resident
+block produces three key references and transfers one block, a missing one
+produces four and transfers one, so the figure overstated bandwidth **4.9x**
+(219.5 -> 45.1 MiB/s on the same run) and conflated reads with writes. Payload
+now comes from the only place the information exists — the hit/miss results — and
+is reported per direction: **read 32.7 MiB/s (140 blocks), write 17.8 MiB/s (76
+blocks)**.
+
+Aggregate latency was similarly a blend. Split per operation:
+
+| op | requests | p50 | p90 | p99 | max |
+| --- | --- | --- | --- | --- | --- |
+| CHECK | 24 | 79 | 300 | 470 | 470 |
+| RESERVE | 24 | 75 | 452 | 687 | 687 |
+| COMMIT_STORE | 24 | 144 | 495 | 788 | 788 |
+| TAKE_EVENTS | 24 | 225 | 441 | 677 | 677 |
+| TOUCH | 20 | 250 | 286 | 455 | 455 |
+| LOOKUP | 20 | 276 | 476 | 686 | 686 |
+| **COPY_TO_STORE** | 24 | **435** | 1230 | 1671 | 1671 |
+
+The aggregate p50 of 243 us is between `CHECK` at 79 and `COPY_TO_STORE` at 435,
+describing the mix rather than the server — and it would move with the hit rate
+even if Certus did not. `TOUCH` at 250 us is worth a look: it is control only,
+yet three times `CHECK`. `TOUCH` and `LOOKUP` show 20 requests to the others' 24
+because they are issued only when something is resident, and the first turn of
+each session has nothing.
+
+**A third defect the split exposed: we were transferring into reservations we did
+not hold.** 88 blocks written against 12 declined reserves — `RESERVE` answers
+per key and the executor ignored it, so 12 blocks of payload went to no slot and
+their commits then failed for want of a pending write. With the filter: 76
+written, **0 of 76 commits declined**, and the only remaining declines are the 8
+reserve declines that pair with the 8 `PENDING` — FR-036's mint race.
+
 **US1 is complete.** Nothing is open against it.
 
 **Checkpoint**: US1 is functional against a live local server for the control path.
