@@ -559,10 +559,6 @@ pub unsafe fn pipelined_multi_object_zero_copy(
     let mut t_sync_ns: u64 = 0;
     let mut _t_resub_ns: u64 = 0;
 
-    // Coalesced per-object H2D: track remaining segments per object.
-    // When an object's last segment completes, issue ONE H2D for the whole
-    // contiguous DRAM slot. NVMe resubmission happens BEFORE H2D launch to
-    // preserve NVMe/GPU overlap.
     let mut obj_remaining: Vec<usize> = all_objs.iter().map(|o| o.segments.len()).collect();
     let mut obj_failed: Vec<bool> = vec![false; num_jobs];
 
@@ -623,33 +619,32 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                     _t_resub_ns += tr.elapsed().as_nanos() as u64;
                 }
 
-                // Object fully read: issue ONE coalesced H2D for the entire slot.
+                // Per-segment streaming H2D: fire immediately for this segment.
                 if obj_idx < num_jobs
-                    && obj_remaining[obj_idx] == 0
                     && !obj_failed[obj_idx]
                     && !jobs[obj_idx].gpu_dst.is_null()
                 {
                     let tg = std::time::Instant::now();
                     let job = &jobs[obj_idx];
+                    let seg = &all_objs[obj_idx].segments[seg_idx];
+                    let copy_len = seg.length.min(job.total_bytes.saturating_sub(seg.buffer_offset));
                     let current_stream = streams[stream_idx % 2];
 
                     let dma_result = gpu.memcpy_h2d_async(
-                        job.mem_ptr as *const std::ffi::c_void,
-                        job.gpu_dst,
-                        job.total_bytes,
+                        unsafe { job.mem_ptr.add(seg.buffer_offset) as *const std::ffi::c_void },
+                        unsafe { (job.gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
+                        copy_len,
                         current_stream,
                     );
                     if let Err(e) = dma_result {
                         results[obj_idx] = Err(DispatcherError::IoError(format!(
-                            "GPU H2D obj={obj_idx}: {e}"
+                            "GPU H2D obj={obj_idx} seg={seg_idx}: {e}"
                         )));
                     }
                     t_gpu_ns += tg.elapsed().as_nanos() as u64;
 
                     stream_idx += 1;
 
-                    // Periodic sync to bound GPU queue depth. Threshold is per
-                    // completed-object H2D, not per segment.
                     if stream_idx % PIPELINE_RING_SIZE == 0 {
                         let ts = std::time::Instant::now();
                         let _ = gpu.stream_synchronize(streams[0]);

@@ -84,8 +84,8 @@ use component_core::binding::bind;
 use spdk_env::ISPDKEnv;
 
 use crate::background::{
-    BackgroundEvictor, EvictorConfig, MemoryTierEvictor, MemoryTierEvictorConfig,
-    ParallelBackgroundWriter, WriteJob,
+    BackgroundEvictor, EvictorConfig, FreeSlotReserve, FreeSlotReserveConfig, MemoryTierEvictor,
+    MemoryTierEvictorConfig, ParallelBackgroundWriter, WriteJob,
 };
 pub use crate::metrics::PipelineMetrics;
 
@@ -332,6 +332,7 @@ define_component! {
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             bg_mt_evictor: Mutex<Option<MemoryTierEvictor>>,
+            free_slot_reserve: Mutex<Option<FreeSlotReserve>>,
             cold_pool: Mutex<Option<cold_pool::ColdReadPool>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
@@ -2006,6 +2007,35 @@ impl IDispatcher for DispatcherComponent {
             *self.bg_mt_evictor.lock().unwrap() = Some(mt_evictor);
         }
 
+        // Start background free-slot reserve to pre-evict memory-tier capacity
+        // for cold loads, moving eviction off the batch_lookup critical path.
+        {
+            let dm_for_reserve = self
+                .dispatch_map
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+            let mt_for_reserve = self
+                .memory_tier
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+            let slot_size = config.cold_staging_buf_bytes as u32;
+            let target_slots: usize = 32;
+            let min_capacity = slot_size as usize * target_slots * 2;
+            if mt_for_reserve.capacity() >= min_capacity {
+                let reserve = FreeSlotReserve::start(
+                    dm_for_reserve,
+                    mt_for_reserve,
+                    FreeSlotReserveConfig {
+                        target_free_slots: target_slots,
+                        slot_size,
+                        poll_interval: std::time::Duration::from_micros(100),
+                    },
+                    Arc::clone(&self.tier_counters),
+                );
+                *self.free_slot_reserve.lock().unwrap() = Some(reserve);
+            }
+        }
+
         self.initialized.store(true, Ordering::Release);
 
         if let Ok(rl) = self.remote_lookup.get() {
@@ -2025,6 +2055,10 @@ impl IDispatcher for DispatcherComponent {
 
         if let Some(mut mt_evictor) = self.bg_mt_evictor.lock().unwrap().take() {
             mt_evictor.shutdown();
+        }
+
+        if let Some(mut reserve) = self.free_slot_reserve.lock().unwrap().take() {
+            reserve.shutdown();
         }
 
         if let Some(mut writer) = self.bg_writer.lock().unwrap().take() {
@@ -2434,8 +2468,36 @@ impl IDispatcher for DispatcherComponent {
                             let entry = &cold_entries[ci];
                             let ipc_size = entry.total_size;
 
-                            let prep =
-                                self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts);
+                            let claimed = self
+                                .free_slot_reserve
+                                .lock()
+                                .unwrap()
+                                .as_ref()
+                                .map_or(false, |r| r.try_claim(1) > 0);
+                            let prep = if claimed {
+                                mt.insert(entry.key, ipc_size)
+                                    .map_err(|e| match e {
+                                        interfaces::MemoryTierError::AlreadyExists(k) => {
+                                            DispatcherError::AlreadyExists(k)
+                                        }
+                                        _ => DispatcherError::AllocationFailed(e.to_string()),
+                                    })
+                                    .or_else(|e| {
+                                        if matches!(e, DispatcherError::AllocationFailed(_)) {
+                                            self.evict_and_insert(
+                                                &dm,
+                                                &mt,
+                                                entry.key,
+                                                ipc_size,
+                                                max_attempts,
+                                            )
+                                        } else {
+                                            Err(e)
+                                        }
+                                    })
+                            } else {
+                                self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts)
+                            };
 
                             match prep {
                                 Ok(mem_ptr) => {
@@ -2629,6 +2691,12 @@ impl IDispatcher for DispatcherComponent {
                         results[entry.idx] = Some(res);
                     }
                 }
+            }
+        }
+
+        if !cold_entries.is_empty() {
+            if let Some(ref reserve) = *self.free_slot_reserve.lock().unwrap() {
+                reserve.notify_refill();
             }
         }
 
@@ -4524,6 +4592,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4685,6 +4754,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4734,6 +4804,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4752,6 +4823,7 @@ mod tests {
     fn query_idispatcher() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4776,6 +4848,7 @@ mod tests {
     fn initialize_without_receptacles_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4805,6 +4878,7 @@ mod tests {
     fn initialize_with_empty_pci_addrs_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4839,6 +4913,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4869,6 +4944,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4894,6 +4970,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4915,6 +4992,7 @@ mod tests {
     fn populate_before_initialize_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4945,6 +5023,7 @@ mod tests {
     fn populate_with_zero_size_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4982,6 +5061,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5002,6 +5082,7 @@ mod tests {
     fn double_shutdown_succeeds() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5027,6 +5108,7 @@ mod tests {
     fn concurrent_pre_init_calls_from_multiple_threads() {
         let c = Arc::new(DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5087,6 +5169,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5118,6 +5201,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5197,6 +5281,7 @@ mod tests {
             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5764,6 +5849,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5797,6 +5883,7 @@ mod tests {
 
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5873,6 +5960,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5944,6 +6032,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5997,6 +6086,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -6067,6 +6157,7 @@ mod tests {
         let mt_probe = Arc::clone(&mt);
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
