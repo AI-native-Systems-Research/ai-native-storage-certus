@@ -1994,6 +1994,25 @@ Verified live: an agent whose peer vanished without a `Shutdown` logged *"every 
 closed and none reopened within 3s; the control process is gone, so releasing this node's
 resources"* and exited. FR-053 amended to require it, and to forbid an idle timeout.
 
+**T073 done: the flags and the exit code, and a gap in this list named rather than
+papered over.** `--node` (repeatable), `--agent-port` and `--agent-binary` are in, and a
+refused peer is **exit 4**, distinct from a completed-but-invalid run (3) because the actions
+differ: an invalid run may be worth repeating, while a refused peer means the deployment is
+wrong — a stale agent, a lane count the node cannot serve, a block size disagreeing with the
+description — and repeating it will fail identically. `exit`'s `dead_code` allowance is gone,
+since `PEER` is now used.
+
+**No task covered the remote driver**, which is an omission in this list rather than a
+deliberate deferral: T063-T074 cover the wire, the handshake, the agent, placement, lifecycle,
+node loss, the CLI and an equivalence test — but nothing routes turns to nodes. It is now
+T073a, and FR-079 makes it the *single* driver, so it should be built once in the shape the
+local path will adopt rather than as a second driver beside one that is about to be deleted.
+
+`--node` therefore starts and verifies the agents — startup is outside the timed window
+(FR-050) — and then **refuses plainly**, naming T073a. A flag that connected and drove
+nothing would report a run that never happened, which is the one outcome worse than an error.
+The agents are torn down on the way out, so the refusal leaves nothing holding channels.
+
 **T072 done, 3 more tests; 142 in gen+wire.** `NodeLost` carries the node, what the run
 was doing, and the transport's own words, and its message spells out all three reasons
 continuing is wrong — because "carry on with the survivors" is the tempting thing to do
@@ -2021,8 +2040,16 @@ first — because replacing a non-existent leftover calls `kill`. The real
 `SshLauncher::kill` is port-scoped precisely so it cannot kill another run's agent on the
 same host, and the fixture had to model that or it would pass tests the production
 launcher would fail.
-- [ ] T073 [US3] Add `--node` and `--agent-port` to
+- [x] T073 [US3] Add `--node` and `--agent-port` to
   `crates/workload-gen/src/cli.rs`, with exit code 4 for a refused peer
+- [ ] T073a [US3] **The remote driver itself**, which no task covered — an omission in this
+  list rather than work anybody chose to defer. It routes each turn to `session.node()`'s
+  agent, collects `TurnOutcome`s, and merges each node's `Counters` and **histograms** at the
+  end (counters sum; quantiles do not, so the merge is of distributions and the percentiles are
+  taken after). Under FR-079 this **is** the single driver, so it should be built once, in the
+  shape the local path will adopt, rather than as a second driver beside it. It also needs the
+  producer currently private to `live.rs` — that should be shared rather than copied, for
+  T068a's reason
 - [ ] T074 [P] [US3] Test in `crates/workload-wire/tests/loopback.rs`:
   submitting a plan through a loopback agent stub yields the same operation
   sequence as the local path — the transport-level form of FR-072

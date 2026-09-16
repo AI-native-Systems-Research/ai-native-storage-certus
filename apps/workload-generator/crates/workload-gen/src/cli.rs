@@ -56,10 +56,6 @@ pub const SIZE_CEILING_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 /// `INVALID` and `PEER` belong to the live path (US1) and are part of the contract
 /// now — defining the set in one place is what keeps a later addition from inventing
 /// a sixth code with an overlapping meaning.
-#[allow(
-    dead_code,
-    reason = "INVALID and PEER are the live path's, and it is US1"
-)]
 pub mod exit {
     /// Success; for a live run, a valid one.
     pub const OK: i32 = 0;
@@ -173,6 +169,20 @@ pub enum Command {
         /// per-key path (FR-070), so it is opt-in.
         #[arg(long)]
         stamp_keys: bool,
+        /// A node to drive, repeatable. Absent means the local mailbox only.
+        ///
+        /// Each node runs an agent, and the generator reaches it over TCP: only keys cross the
+        /// network (FR-047). Sessions are placed uniformly across the nodes given, and a
+        /// session with a `migration_interval` moves between them (FR-048) — so the node list
+        /// is a property of the deployment and deliberately not of the description.
+        #[arg(long = "node")]
+        nodes: Vec<String>,
+        /// Port each node's agent listens on.
+        #[arg(long, default_value_t = 7420)]
+        agent_port: u16,
+        /// Path to the agent binary **on each node**.
+        #[arg(long, default_value = "workload-node-agent")]
+        agent_binary: String,
         /// Structured report destination.
         #[arg(long)]
         report: Option<PathBuf>,
@@ -315,6 +325,9 @@ pub fn run(cli: Cli) -> i32 {
             clear_cache,
             stamp_keys,
             verify_payload,
+            nodes,
+            agent_port,
+            agent_binary,
             report,
         } => match live_run(
             &description,
@@ -327,6 +340,9 @@ pub fn run(cli: Cli) -> i32 {
             stamp_keys,
             verify_payload,
             clear_cache,
+            &nodes,
+            agent_port,
+            &agent_binary,
             report,
         ) {
             Ok((text, code)) => {
@@ -606,6 +622,19 @@ impl Failure {
         Self {
             message: message.into(),
             code: exit::CONFIG,
+        }
+    }
+
+    /// A peer refused the run: exit 4.
+    ///
+    /// Distinct from a run that completed and was invalid (3), because the actions differ. An
+    /// invalid run may be worth repeating; a refused peer means the deployment is wrong — a
+    /// stale agent, a lane count the node cannot serve, a block size that disagrees with the
+    /// description — and repeating it will fail identically.
+    pub fn peer(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            code: exit::PEER,
         }
     }
 
@@ -1017,11 +1046,47 @@ fn live_run(
     stamp_keys: bool,
     verify_payload: bool,
     clear_cache: bool,
+    nodes: &[String],
+    agent_port: u16,
+    agent_binary: &str,
     report_path: Option<PathBuf>,
 ) -> Result<(String, i32), Failure> {
     use crate::report::{LatencyPercentiles, LiveReport, QueueStats, Tuning};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+
+    // Remote mode starts and verifies the agents here — startup is outside the timed window
+    // (FR-050) — and the turn-routing driver that follows is T073a. Refusing plainly is the
+    // honest state: a `--node` that connected and then drove nothing would report a run that
+    // never happened.
+    if !nodes.is_empty() {
+        let specs: Vec<crate::agents::AgentSpec> = nodes
+            .iter()
+            .map(|node| crate::agents::AgentSpec {
+                node: node.clone(),
+                port: agent_port,
+                shm_path: shm_path.to_string(),
+                binary: agent_binary.to_string(),
+                lanes,
+                block_bytes: 0,
+                batch_keys,
+                extra_args: Vec::new(),
+            })
+            .collect();
+        let launcher = crate::agents::SshLauncher::default();
+        // A peer refused for provenance or capacity is exit 4, distinct from a run that
+        // completed and was invalid (3): the deployment is wrong, and rerunning will not help.
+        let agents = crate::agents::Agents::start_default(&launcher, &specs)
+            .map_err(|e| Failure::peer(e))?;
+        let count = agents.len();
+        // Torn down on the way out, so a refusal here leaves nothing holding channels.
+        drop(agents);
+        return Err(Failure::other(format!(
+            "started and verified {count} node agent(s), but the turn-routing driver is not \
+             built yet (T073a). Nothing was measured, and reporting a run here would report \
+             one that never happened. Use a local run until T073a lands."
+        )));
+    }
 
     let (description, text, effective) = load(description_path)?;
     let (client, channels) = crate::live::attach(shm_path, lanes).map_err(Failure::config)?;
