@@ -684,6 +684,43 @@ modes reorder the policies.
   cache outcomes, which keeps FR-072's guarantee intact across nodes while
   keeping the chatter host-local.
 
+### Agreed: proxy the local node through an agent too
+
+- **FR-079** *(AGREED, to be implemented after T074)*: The generator SHOULD reach every node
+  through its per-node agent, **including the local one**, rather than talking to a local
+  mailbox directly. One transport, one driver, one cleanup mechanism.
+
+  **The measurement objection does not apply**, which is what makes this affordable. A
+  loopback hop would normally inflate the latency being measured, but FR-066/FR-072a already
+  require the mailbox-facing code to be the sole collector: the agent times its own mailbox
+  requests, so reported per-op latency and bandwidth exclude the hop. It affects only how
+  fast the generator can *feed* work, which FR-062's plan-queue check already guards.
+  Loopback round trips at the pipelining depth of `contracts/node-agent-wire.md` are three
+  orders of magnitude above any rate measured on this hardware.
+
+  What it buys, in order:
+
+  1. **One driver.** FR-072a's *rule* already has one implementation, but the local and remote
+     paths are still two drivers. Collapsing them removes the divergence class FR-072 exists
+     to guard, rather than testing for it.
+  2. **One cleanup mechanism.** FR-052 and FR-053 are then satisfied the same way everywhere.
+     Two mechanisms have already produced two defects here — a mailbox channel not returned
+     when a connection closed, and an agent listening forever after its control process died.
+  3. **The generator stops depending on CUDA and on the mailbox**, and therefore stops
+     enabling `interfaces/spdk` transitively. It could become a workspace default member, and
+     the `live` feature's purpose largely disappears.
+  4. **The generator can run off-cluster**, on a host with no Certus and no accelerator. Not a
+     requirement; a consequence.
+
+  Costs, recorded rather than discovered later: an extra process for the simplest run, which
+  the generator SHOULD hide by launching a local agent itself without ssh; and
+  `CLEAR_MEMORY_TIER`, which the generator issues directly today and would need as a frame.
+
+  **Sequencing is part of the decision.** This MUST come after the loopback-equivalence test
+  (T074), not before. That test is what compares the two paths, so it is the instrument that
+  demonstrates the unification changed nothing — unifying first would collapse onto a path
+  never shown equivalent, and would destroy the means of showing it.
+
 ### Deferred: paced mode
 
 - **FR-078** *(DEFERRED — agreed design, to be implemented once everything else

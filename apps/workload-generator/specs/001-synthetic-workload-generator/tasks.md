@@ -2027,6 +2027,18 @@ launcher would fail.
   submitting a plan through a loopback agent stub yields the same operation
   sequence as the local path — the transport-level form of FR-072
 
+- [ ] T075 [US3] *(AGREED, after T074 — FR-079)* Proxy the **local** node through an agent
+  too, so there is one transport, one driver and one cleanup mechanism. Have the generator
+  launch a local agent itself without ssh, so `run description.yml` still needs no setup; add
+  `CLEAR_MEMORY_TIER` as a frame, since the generator issues it directly today; then delete
+  the direct mailbox path and let `workload-gen` drop its CUDA and `shm-queue` dependencies —
+  which also stops it enabling `interfaces/spdk` transitively, and lets it become a workspace
+  default member
+- [ ] T075a [US3] After T075, re-point the loopback-equivalence test (T074) at the *previous*
+  behaviour as a regression guard, and re-measure the live numbers to confirm the reported
+  per-op latency and bandwidth are unchanged — they should be, since the agent already times
+  its own mailbox requests, and if they move something else is wrong
+
 **Checkpoint**: all three execution paths work; US1 and US2 are unaffected by
 US3.
 
