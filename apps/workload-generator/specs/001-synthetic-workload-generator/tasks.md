@@ -1587,12 +1587,26 @@ prefix is cold on its new node and must be fetched remotely.
 interval, migrated sessions produce remote fetches on their new node while
 local hit rate on the origin node is unchanged.
 
-- [ ] T063 [P] [US3] Implement the 12-byte frame header and body codecs in
+- [x] T063 [P] [US3] Implement the 12-byte frame header and body codecs in
   `crates/workload-wire/src/frame.rs` per `contracts/node-agent-wire.md`, all
   integers little-endian, rejecting an oversized `len` without allocating
-- [ ] T064 [P] [US3] Write the wire conformance tests **before** the client and
+- [x] T064 [P] [US3] Write the wire conformance tests **before** the client and
   server, in `crates/workload-wire/tests/conformance.rs`, covering all six
   cases listed in `contracts/node-agent-wire.md`
+
+**T063/T064 done, 13 conformance tests, no agent and no accelerator needed.**
+Two allocation hazards are guarded rather than one: `len` is refused against a
+bound before anything is sized from it, and `SubmitTurn`'s **key count** is
+checked against the bytes actually present before the vector is reserved — a
+peer-supplied `u32` would otherwise let a 14-byte frame ask for 32 GB. Truncation
+is tested **exhaustively at every prefix length** of every body rather than at one
+illustrative cut, because a decoder that stops early returns a value with its
+remaining fields zeroed, and a half-decoded `SubmitTurn` submits a turn whose keys
+the generator never sent.
+
+`PROTO_VERSION` is pinned at 2 with a test that says why: version 1 sent one
+operation per frame, and an agent speaking it would read a key *path* as an
+operation's key list and issue something plausible.
 - [ ] T065 [US3] Implement the client half in
   `crates/workload-wire/src/client.rs`: `TCP_NODELAY`, configurable pipelining
   depth independent of lane count, correlation ids
