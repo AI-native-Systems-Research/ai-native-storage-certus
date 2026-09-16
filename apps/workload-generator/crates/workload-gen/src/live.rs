@@ -1035,6 +1035,9 @@ mod tests {
     }
 
     #[test]
+    // The constant value is the point: this is a guard against a later "let's make it bigger",
+    // and clippy's suggestion to drop it would remove the guard rather than simplify it.
+    #[allow(clippy::assertions_on_constants)]
     fn depth_is_in_turns_and_capped_so_memory_does_not_track_the_span() {
         // The property that makes an unbounded run possible. Stated as an assertion
         // because it is the reason the queue exists, and a later "let's make it bigger"

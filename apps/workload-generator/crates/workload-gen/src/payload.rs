@@ -585,6 +585,8 @@ mod tests {
     }
 
     #[test]
+    // As above: asserting a constant is the guard, not a redundancy.
+    #[allow(clippy::assertions_on_constants)]
     fn stamping_bytes_are_small_enough_to_be_the_stamp_fr_038_permits() {
         // FR-038 allows "at most a small identifying stamp". Eight bytes is one key; the
         // point of asserting it is that a future "improvement" to stamp more would be a
