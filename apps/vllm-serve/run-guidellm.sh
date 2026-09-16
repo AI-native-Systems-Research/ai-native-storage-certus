@@ -41,6 +41,7 @@ PROCESSOR="${PROCESSOR:-Qwen/Qwen2.5-7B-Instruct}"  # tokenizer for token accoun
 # time), constant/poisson (need RATE). Bound each stage by time or request count.
 RATE_TYPE="${RATE_TYPE:-sweep}"
 RATE="${RATE:-}"                       # req/s — only used by constant/poisson
+MAX_CONCURRENCY="${MAX_CONCURRENCY:-256}"  # concurrency cap — REQUIRED by the throughput profile (guidellm >= 0.7)
 MAX_SECONDS="${MAX_SECONDS:-120}"      # per-stage wall-clock budget
 MAX_REQUESTS="${MAX_REQUESTS:-}"       # alternative bound; if set, overrides MAX_SECONDS
 
@@ -105,10 +106,15 @@ ARGS=(
   --data "$DATA_JSON"
   --output "kind=json,path=${OUTPUT}"
 )
-# constant/poisson require a numeric rate; sweep/throughput/synchronous ignore it.
+# constant/poisson require a numeric rate; throughput requires a max_concurrency;
+# sweep/synchronous take no extra field.
 if [[ "$RATE_TYPE" == "constant" || "$RATE_TYPE" == "poisson" ]]; then
   [[ -n "$RATE" ]] || { echo "error: RATE_TYPE=${RATE_TYPE} needs RATE=<req/s>" >&2; exit 1; }
   ARGS+=(--profile "kind=${RATE_TYPE},rate=${RATE}")
+elif [[ "$RATE_TYPE" == "throughput" ]]; then
+  # guidellm >= 0.7's throughput profile rejects a bare kind=throughput with
+  # "Field required (at 'profile.throughput.max_concurrency')"; supply the cap.
+  ARGS+=(--profile "kind=throughput,max_concurrency=${MAX_CONCURRENCY}")
 else
   ARGS+=(--profile "kind=${RATE_TYPE}")
 fi
