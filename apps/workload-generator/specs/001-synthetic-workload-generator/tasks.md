@@ -1605,8 +1605,19 @@ local hit rate on the origin node is unchanged.
   capacity
 - [ ] T068 [US3] Implement the node agent binary in
   `crates/workload-node-agent/src/main.rs` and `agent.rs`: attach to the local
-  mailbox, serve `Submit` as a relay that never decides *what* to issue, exit
-  non-zero if the mailbox is absent
+  mailbox and serve `SubmitTurn` by applying FR-072a's rule against it — check the
+  path, load what is resident, store what is absent. It decides no *workload*:
+  which keys, which session and which virtual time all come from the generator.
+  Exit non-zero if the mailbox is absent
+- [ ] T068a [US3] Depend on `workload-gen`'s library for the split and encoders so
+  the reactive rule has **one** implementation. Two would let the local and remote
+  paths diverge and make FR-072's guarantee unverifiable. It cannot live in
+  `workload-wire`, a CUDA-free default member, since depending on `shmq-dispatcher`
+  there would unify `interfaces/spdk` into the default build
+- [ ] T068b [US3] Serve `Stats` returning **serialized histograms** per `op_kind`,
+  never percentiles: the median of two nodes' medians is not a median, so merging
+  percentiles yields a number belonging to no distribution. Needs
+  `hdrhistogram`'s `serialization` feature
 - [ ] T069 [US3] Implement the agent's pre-filled reusable payload buffer in
   `crates/workload-node-agent/src/payload.rs`, reconstructing block payloads
   from the key so only keys cross the network
