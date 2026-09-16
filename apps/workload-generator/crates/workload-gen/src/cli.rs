@@ -1082,6 +1082,26 @@ fn live_run(
             producer_blocked: stats.producer_blocked,
             per_lane_min_depth: stats.lanes.iter().map(|l| l.min_depth).collect(),
         },
+        bandwidth: crate::report::Bandwidth {
+            blocks_read: stats.blocks_read(),
+            blocks_written: stats.blocks_written(),
+            read_bytes: stats.read_bytes(),
+            write_bytes: stats.write_bytes(),
+        },
+        latency_by_op: stats
+            .latency_by_op
+            .iter()
+            .map(|(opcode, h)| crate::report::OpLatency {
+                op: crate::report::opcode_name(*opcode),
+                requests: h.len(),
+                us: LatencyPercentiles {
+                    p50: h.value_at_quantile(0.50),
+                    p90: h.value_at_quantile(0.90),
+                    p99: h.value_at_quantile(0.99),
+                    max: h.max(),
+                },
+            })
+            .collect(),
         outcomes: crate::report::CacheOutcomes {
             check_resident: stats.check_resident(),
             check_pending: stats.check_pending(),
