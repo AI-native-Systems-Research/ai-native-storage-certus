@@ -1079,6 +1079,20 @@ Deferred tasks, in order:
 - [ ] T088b [DEFERRED] Project a paced run's **wallclock cost** before starting,
   symmetrically with FR-073's size projection: at rate 1.0 a run costs its virtual
   span, so `--until 3600` is an hour and silence would look like a hang
+- [ ] T088c [DEFERRED] Make `--rate` a **calibration** control, in virtual seconds
+  per wallclock second: a description's durations are arbitrary with respect to any
+  machine, so the same description must be aimable at faster or slower hardware
+  without being rewritten. CLI only, never a description field — it describes the
+  target, not the workload (FR-069's reasoning, FR-005 portability). Assert the plan
+  fingerprint is independent of the rate
+- [ ] T088d [DEFERRED] Report the measured `virtual/wallclock` against the
+  requested rate as a **cross-check**: a shortfall is accumulated lateness arriving
+  by a second route, and the two must agree
+- [ ] T088e [DEFERRED] Add a **rate sweep** to find capacity: offered load scales
+  with rate while the workload's shape does not, so the rate at which lateness
+  leaves zero is where this machine stops serving this workload on time. A
+  load-versus-latency curve, which answers "can this machine serve this workload"
+  better than the work-conserving ceiling does
 - [ ] T089 [DEFERRED] Replace the validity metric under pacing with **lateness**
   in `crates/workload-gen/src/report.rs`: `lateness = submitted − due`, positive
   only, reported as percentiles with its request count (FR-066a). A run whose
