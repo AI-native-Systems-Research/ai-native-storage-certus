@@ -716,6 +716,31 @@ modes reorder the policies.
   the generator SHOULD hide by launching a local agent itself without ssh; and
   `CLEAR_MEMORY_TIER`, which the generator issues directly today and would need as a frame.
 
+  **When to do it.** After T074, which now exists — and the recommendation is to wait for
+  FR-078 rather than to do it next. Two reasons, one of which retires the original urgency:
+
+  * **The divergence it prevents is already guarded.** T074 compares the two paths and the
+    executor is single, so they cannot silently drift today. That was the argument for doing it
+    soon, and it is spent. What remains is structural tidiness and the dependency win — real,
+    but not time-critical, and paid for against a local path that is complete and *measured*.
+  * **FR-078 is the moment the cost becomes payable.** Pacing changes *when* a request is
+    submitted, which lives in the driver, so with two drivers it is built twice. Unify first,
+    then implement pacing once.
+
+  One rule holds either way: **do not add features to both paths while both exist.** That is
+  precisely how they diverge, and it is what would make T074 begin failing for a real reason.
+
+  A cost recorded in the interest of not overselling this: the loopback hop is free for reported
+  latency, since the agent times its own mailbox requests, but it is not free for the rate at
+  which the generator can *feed* work — and FR-078's rate sweep exists to push that rate until
+  something breaks. Measured: pipelining depth 8 at a ~30 µs loopback round trip is ~260 000
+  turns/second against ~1 000 turns/second observed, so roughly 250x headroom. Not binding, but
+  it is the number to re-check if a sweep ever reports the generator as the limit.
+
+  And one hazard it *removes* rather than adds: a generator killed outright leaks its mailbox
+  channel claims today, with no recovery path until the server restarts. Under FR-079 the
+  agent's leftover replacement covers that case.
+
   **Sequencing is part of the decision.** This MUST come after the loopback-equivalence test
   (T074), not before. That test is what compares the two paths, so it is the instrument that
   demonstrates the unification changed nothing — unifying first would collapse onto a path

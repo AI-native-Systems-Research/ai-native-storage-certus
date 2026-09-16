@@ -2117,7 +2117,10 @@ launcher would fail.
   submitting a plan through a loopback agent stub yields the same operation
   sequence as the local path — the transport-level form of FR-072
 
-- [ ] T075 [US3] *(AGREED, after T074 — FR-079)* Proxy the **local** node through an agent
+- [ ] T075 [US3] *(AGREED, after T074; **recommended trigger: do it with FR-078's paced mode**,
+  because pacing changes when a request is submitted and would otherwise be built in two drivers.
+  Not urgent on its own: T074 plus the single executor already prevent the divergence it guards
+  against. Rule while both paths exist: **add features to neither twice**.)* Proxy the **local** node through an agent
   too, so there is one transport, one driver and one cleanup mechanism. Have the generator
   launch a local agent itself without ssh, so `run description.yml` still needs no setup; add
   `CLEAR_MEMORY_TIER` as a frame, since the generator issues it directly today; then delete
