@@ -292,6 +292,19 @@ flag, `mint` carries a `debug_assert` that a free-listed slot is really empty,
 and the test asserts the free list stays empty — verified by reintroducing the
 bug, which reports 800 occupied slots free-listed.
 
+**Trace-format decision, taken between T021 and T022** and written up as
+`research.md` D8, `contracts/trace-io.md`, `contracts/trace-interop.md`, FR-075
+to FR-078, and tasks T062a-T062f. Nothing above the emit phase changes; the
+question was whether the emitted schema is a standard and whether we should
+emit someone else's instead. **It is not a standard** — it is another team's
+normalisation layer over roughly seven public formats, which is what makes it
+the right superset to emit and to convert from. **WekaTrace was rejected as an
+output and adopted as an input**: every session in that corpus starts at `t =
+0.0` with no field for session start, and its identifiers are session-scoped,
+so it can carry neither cross-session interleaving nor cross-session reuse.
+**Mooncake is the standard export**, verified to satisfy both. An OTel writer
+is out of scope with the reasoning recorded so it need not be re-derived.
+
 - [ ] T022 Implement uniform instance selection with a bounded index space in
   `crates/workload-model/src/selection.rs`, and report the implied working-set
   size when a pool has more than one instance and no `selection` (FR-021).
@@ -441,14 +454,18 @@ satisfies the schema's invariants, and repeating reproduces the output byte for
 byte.
 
 - [ ] T052 [P] [US2] Implement the self-describing manifest in
-  `crates/workload-trace/src/manifest.rs`: `source_class: pre_hashed`, full
-  encoding, block geometry, and `block_id_space` recording that identifiers are
-  chained u64 keys rather than dense mint-order integers. **Written last**
-  during emit, so a directory without one is incomplete by construction
+  `crates/workload-trace/src/manifest.rs` per `contracts/trace-io.md`:
+  `source_class: pre_hashed`, full encoding, block geometry, and
+  `block_id_space` recording that identifiers are chained u64 keys rather than
+  dense mint-order integers. **Written last** during emit, so a directory
+  without one is incomplete by construction
 - [ ] T053 [P] [US2] Implement the JSONL writer in
-  `crates/workload-trace/src/jsonl.rs`, emitting the full encoding with
+  `crates/workload-trace/src/jsonl.rs` per `contracts/trace-io.md`, emitting
+  **one record per invocation** (not per session, so the file streams in
+  virtual-time order and nothing is buffered) with the full encoding,
   `full_input_blocks` populated and the trailing-partial-block convention
-  honoured, recording `partial_final_valid`
+  honoured, recording `partial_final_valid`. The six per-row invariants the
+  contract lists are what T055 asserts
 - [ ] T054 [US2] Implement the parquet writer in
   `crates/workload-trace/src/parquet.rs` behind the `parquet` feature, emitting
   records identical to the JSONL writer's
@@ -487,6 +504,78 @@ byte.
 
 **Checkpoint**: US1 and US2 both work independently. US2 needs no hardware, so
 it is the CI-testable half of the feature.
+
+### Interoperability with other tools' formats (added by `research.md` D8)
+
+Every one of these is a **conversion**, not a new emit container (FR-075), and
+each is a projection of the emitted schema, so none of them touches the
+simulation. `contracts/trace-interop.md` carries the verified upstream details
+and is normative for all of them. All are [US2]-scoped: no hardware, no server.
+
+- [ ] T062a [P] [US2] Implement the Mooncake writer in
+  `crates/workload-trace/src/mooncake.rs`, emitting `{timestamp, input_length,
+  output_length, hash_ids}` one document per line per **request**, `timestamp`
+  in true milliseconds off the virtual clock (not quantised — upstream's 3 s
+  tick is its corpus's property, not the format's), and `len(hash_ids) ==
+  ceil(input_length / block_size)` per upstream's ceil convention. Wire as
+  `convert --to mooncake`
+- [ ] T062b [US2] Implement dense renumbering for the Mooncake writer in
+  `crates/workload-trace/src/mooncake.rs`: one dense identifier per distinct
+  key across the **whole output** (FR-078). **This is the one mistake that
+  would look like success** — renumbering per session yields a file that loads
+  and replays while cross-session reuse has silently vanished
+- [ ] T062c [P] [US2] Test in `crates/workload-trace/tests/mooncake.rs`: a
+  converted trace reproduces the upstream invariants measured on
+  `conversation_trace.jsonl` — `len(hash_ids) == ceil(input_length /
+  block_size)` on **every** row, `timestamp` non-decreasing, identifiers
+  globally dense (`distinct == max + 1`) — and, the load-bearing assertion,
+  **two sessions that shared a shared-object instance still share identifiers
+  after renumbering**
+- [ ] T062d [P] [US2] Implement the libCacheSim CSV writer in
+  `crates/workload-trace/src/cachesim.rs` as `(time, obj_id, size)` rows, and
+  have `convert --to cachesim` **print the `--trace-type-params` string** for
+  the layout it wrote — that reader's columns are configurable, so the layout
+  is only meaningful alongside its parameter string. Traps from upstream:
+  numeric ids require `obj-id-is-num=1` or the reader errors, and the CSV
+  reader is **ASCII-only**
+- [ ] T062e [US2] Read the `oracleGeneral` struct layout from libCacheSim's
+  reader source and record it in `contracts/trace-interop.md` **before**
+  writing any bytes. Upstream documents the four fields (time, obj-id, size,
+  next-access-time in reference count) in prose only; widths and endianness are
+  **unverified**. This task is the verification, not the writer
+- [ ] T062f [US2] Implement the `oracleGeneral` writer in
+  `crates/workload-trace/src/cachesim.rs` once T062e has pinned the layout,
+  computing next-access-time in one **backward pass** over the plan. An emit
+  run knows the whole future of its own trace, so this is the one thing we can
+  give a cache simulator that a real trace cannot — it makes Belady/optimal
+  baselines available
+- [ ] T062h [US2] Implement loss declaration for every conversion (FR-077) in
+  `crates/workload-trace/src/convert.rs`: each target names what it dropped
+  (session grouping, input/output separation, `partial_final_valid`), and a
+  converted file is refused as an input to the determinism check **T062i and
+  T062j are DEFERRED, not scheduled.** Reading a third-party corpus is a
+  different axis from emitting one, and this feature does not need it: 24 real
+  traces are already in the emitted schema. They are kept here with their
+  measurements because the analysis was done and should not be repeated.
+
+- [ ] T062i [DEFERRED] Implement the WekaTrace reader in
+  `crates/workload-trace/src/weka.rs`, reading one **session** per
+  line into emitted-schema invocation records. Read-only by decision. Must
+  **check** `hash_id_scope` rather than assume it — the corpus says `local`,
+  and a revision declaring a global scope would change what an import means.
+  Must not invent an input/output split, since the format does not distinguish
+  them
+- [ ] T062j [DEFERRED] Test in `crates/workload-trace/tests/weka.rs` against a
+  small committed fixture, not the 1.85 GB corpus: `len(hash_ids) * 64 == in`
+  on every main request, multi-megabyte lines parse (the real corpus's first
+  line is 2.76 MB), and a `subagent` group's nested `requests` are read in
+  trace order. A fixture whose sessions are prefix extensions of each other
+  must import as **nested** chains, matching T028's property from the other
+  direction
+- [ ] T062k [US2] Add a `convert` section to `quickstart.md`: emit the shipped
+  example, convert to Mooncake and to cachesim, and check the reuse-preserving
+  assertion by hand. Needs only a Rust toolchain, so it belongs with scenarios
+  1-3
 
 ---
 
