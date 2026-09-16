@@ -15,7 +15,8 @@ workload-gen run     <description.yml> [target options] [tuning] [reporting]
 workload-gen emit    <description.yml> --output <dir> --format jsonl|parquet|both
                                        --until <virtual-seconds>
 workload-gen plan    <description.yml> --output <file>
-workload-gen convert <trace-dir> --to simulator --output <file.jsonl>
+workload-gen convert <trace-dir> --to simulator|mooncake|cachesim
+                                 --output <file>
 workload-gen validate <description.yml>
 ```
 
@@ -26,10 +27,21 @@ workload-gen validate <description.yml>
   thing.
 - **`plan`** writes the canonical operation-plan serialisation — the artifact
   the byte-identity property is asserted against (FR-060, SC-003).
-- **`convert`** projects an emitted trace into the shape
-  `apps/eviction-replay-benchmark` reads. See `research.md` D1: the simulator
-  reads `{chat_id, parent_chat_id, hash_ids, type}`, not the trace-IO schema,
-  and the projection needs no information the trace lacks.
+- **`convert`** projects an emitted trace into another tool's format. Every
+  target is a projection of the emitted schema and none is an additional emit
+  container (FR-075); `contracts/trace-interop.md` specifies each one, what it
+  drops, and which candidates were rejected.
+  - `--to simulator` — the shape `apps/eviction-replay-benchmark` reads. See
+    `research.md` D1: the simulator reads `{chat_id, parent_chat_id, hash_ids,
+    type}`, not the emitted schema, and the projection needs no information the
+    trace lacks.
+  - `--to mooncake` — the Mooncake FAST'25 trace format, the recommended
+    standard-format export. Renumbers keys densely across the **whole output**
+    (FR-078), and reports the losses named in the interop contract.
+  - `--to cachesim` — libCacheSim CSV. Prints the `--trace-type-params` string
+    to use, since that reader's columns are configurable rather than fixed.
+  Every conversion MUST name what it dropped (FR-077), and a converted file is
+  never accepted in place of the native trace for a reproducibility check.
 - **`validate`** performs the load-time checks and the effective-distribution
   report (FR-002, FR-003, FR-004) and exits. Cheap, and the fastest way to find
   a configuration error.

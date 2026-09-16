@@ -109,7 +109,7 @@ specs/001-synthetic-workload-generator/
 ├── spec.md                              # complete, committed (a738ef39)
 ├── specify-prompt.md                    # provenance for spec.md
 ├── plan.md                              # this file
-├── research.md                          # Phase 0: eight decisions
+├── research.md                          # Phase 0: nine decisions (D8 added in Phase 1)
 ├── data-model.md                        # Phase 1: entities and invariants
 ├── quickstart.md                        # Phase 1: six validation scenarios
 ├── checklists/requirements.md           # spec quality, 16/16
@@ -117,6 +117,8 @@ specs/001-synthetic-workload-generator/
 │   ├── workload-input.example.yml       # NORMATIVE input schema
 │   ├── key-derivation.md               # Phase 1: keys, with test vectors
 │   ├── node-agent-wire.md              # Phase 1: TCP protocol
+│   ├── trace-io.md                     # Phase 1: the emitted trace
+│   ├── trace-interop.md                # Phase 1: convert targets, verified
 │   └── cli.md                          # Phase 1: subcommands, reports, exit codes
 └── tasks.md                             # Phase 2 — NOT created by /speckit-plan
 ```
@@ -177,5 +179,7 @@ Scenarios 1–3 runnable anywhere.
   repository. Zero `NEEDS CLARIFICATION` remaining. The one item clarify
   deferred (simulator consumability) is settled in D1.
 - [x] **Phase 1** — `data-model.md`, `contracts/key-derivation.md`,
-  `contracts/node-agent-wire.md`, `contracts/cli.md`, `quickstart.md`.
+  `contracts/node-agent-wire.md`, `contracts/cli.md`, `quickstart.md`, and —
+  added during implementation, see `research.md` D8 — `contracts/trace-io.md`
+  and `contracts/trace-interop.md`.
 - [ ] **Phase 2** — `tasks.md`, via `/speckit-tasks`. Not created here.

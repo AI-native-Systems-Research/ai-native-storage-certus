@@ -122,6 +122,9 @@ the run reproduces the output byte for byte.
    completeness — sessions, turns, blocks, virtual-time span, records written —
    and omits latency, lane utilisation, and the virtual-to-wallclock ratio
    entirely rather than reporting them as zero.
+5. **Given** an emitted trace, **When** it is converted to a third-party tool's
+   format, **Then** the conversion preserves cross-session key reuse and the
+   run-global clock, and names whatever the target cannot carry.
 
 ---
 
@@ -212,6 +215,12 @@ modes reorder the policies.
 - **A node vanishes mid-run.** The run aborts and is reported invalid with the
   lost node named. Continuing on the survivors would quietly change the
   workload rather than degrade it visibly.
+- **A conversion target cannot express something the trace holds.** The loss is
+  declared in the output or the report, never absorbed silently, and the
+  converted file is not accepted as a substitute for the native trace when
+  reproducibility is being checked. A conversion that quietly drops
+  cross-session reuse would still load and still replay, which is why this is a
+  stated rule rather than left to judgement.
 - **An emit run is asked for system measurements it cannot make.** Latency,
   lane utilisation, and the virtual-to-wallclock ratio are absent from an emit
   report rather than present and zero, because a zero would be
@@ -440,7 +449,9 @@ modes reorder the policies.
 
 - **FR-055**: System MUST emit a workload trace at the same level of
   abstraction as a real serving trace — sessions, turns, block lists, token
-  counts — in two containers holding identical records.
+  counts — in two containers holding identical records. Interoperability with
+  other tools' formats MUST be reached by conversion (FR-075) and MUST NOT add
+  further containers to what an emit run writes.
 - **FR-056**: The trace MUST be self-describing: a reader MUST learn what it
   supports by reading its manifest, never by recognising which trace it is.
 - **FR-057**: The manifest MUST declare the identifier space in use, since
@@ -481,6 +492,29 @@ modes reorder the policies.
   valid.
 - **FR-060**: System MUST provide a canonical serialisation of the operation
   plan, as the artifact the reproducibility property is asserted against.
+
+**Interoperability with other tools' trace formats**
+
+- **FR-075**: Every other trace format System speaks MUST be a **conversion**
+  of the emitted trace, not an additional thing an emit run writes. There is no
+  standards-body format at this level of abstraction, so the emitted schema is
+  chosen for being a superset of the public ones and every target is a
+  projection of it. See `research.md` D8 and `contracts/trace-interop.md`.
+- **FR-076**: A conversion target MUST be judged on two properties before it is
+  adopted, and System MUST NOT emit a workload in a format that lacks either:
+  identifiers scoped to the whole run, and timestamps on a run-global clock.
+  Cross-session interleaving and cross-session key reuse are the two things a
+  cache actually responds to, so a format that cannot carry them describes a
+  different workload however faithfully it records each session.
+- **FR-077**: A conversion MUST declare what it drops. Where a target cannot
+  carry something the trace holds — session grouping, the separation of input
+  from output blocks, the trailing-partial-block count — the conversion MUST
+  record the loss in its output or its report, and MUST NOT be usable as a
+  reproducibility check in place of the native trace.
+- **FR-078**: Where a target requires dense identifiers, the conversion MUST
+  renumber across the **whole output**, never per session. Per-session
+  numbering would destroy cross-session reuse while producing a file that loads
+  and replays, which is the failure mode this requirement exists to forbid.
 
 **Reporting and validity**
 
@@ -665,6 +699,19 @@ modes reorder the policies.
   test rather than single runs.
 - **Fitting a description from real traces is out of scope**, but the trace
   format is chosen so that flow can read the same shape when it returns.
+- **Reading third-party trace corpora is out of scope**, and so is the
+  `metadata_only` (arrival-plus-counts) export. The first is deferred rather
+  than rejected — the reasoning for the one corpus worth importing is preserved
+  in `contracts/trace-interop.md` so it need not be re-derived. The second was
+  rejected outright: it discards every trace of reuse, which is the one thing
+  this feature exists to model.
+- **An OpenTelemetry writer is out of scope**, though it is the only governed
+  standard in this space. It holds no block identity, so the reuse structure
+  would have to live in fabricated text whose every block tokenises to exactly
+  the block size — pinning one tokenizer and chat template into the artifact,
+  at roughly 50× the size, to arrive back at the keys we started from. Worth
+  building only if driving a real inference engine becomes a goal; the full
+  reasoning is in `contracts/trace-interop.md` so it need not be re-derived.
 - **An open-loop paced mode is out of scope.** The consequence is accepted:
   this feature cannot produce a saturation or latency-versus-offered-load
   curve, because there is no fixed offered load to hold.

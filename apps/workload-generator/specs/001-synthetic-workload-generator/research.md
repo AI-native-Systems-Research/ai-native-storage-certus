@@ -188,7 +188,101 @@ YAML is not a moving target — but it is a known future migration
 discovered later as a surprise. If it is ever migrated, it should be migrated
 repo-wide rather than only here.
 
-## D8. Open questions carried into Phase 1
+## D8. Standard trace formats: which to speak, and which not to emit
+
+**Added during Phase 1**, after the emitted trace's schema was questioned:
+whether it is a standard, and whether we should emit a standard one instead.
+
+**Decision**: Keep the adopted schema as the **only** thing an emit run writes,
+and reach every other format through `convert`, as D1 already established for
+the simulator. Add exactly **two**: a **Mooncake writer**, which is the
+standard block-level format, and a **libCacheSim CSV writer**, which serves
+this feature's stated purpose of evaluating eviction. Do **not** add an
+OpenTelemetry writer, a WekaTrace writer, or an arrival-only export, and defer
+reading third-party corpora. All specifics are in `contracts/trace-interop.md`.
+
+**Rationale**:
+
+First, what the schema is. It is **not a standard and not adopted from one** —
+it is the normalisation layer another team built over the public formats, and
+the evidence is in the corpus's own manifests: each of the 24 traces has a
+different `source_url` (Azure `AzurePublicDataset`, BurstGPT, Mooncake FAST'25,
+qwen-bailian, ragbench, SWE-agent, WildChat), and `field_status: native |
+reconstructed | unavailable` exists *only* because those sources disagree about
+what they carry. A standard would not need that field; a normaliser cannot work
+without it. Being a superset of seven upstream formats is exactly the property
+that makes it the right thing to emit and the right thing to convert *from*.
+
+Second, there is **no standards-body format at this level at all**.
+OpenTelemetry GenAI semantic conventions are the only governed standard nearby
+and they describe requests and text, not blocks. So "adopt the standard" is not
+an available move; the choice is only which de-facto formats to speak.
+
+Third, two properties decide any candidate, and both were learned by measuring
+a format that fails one:
+
+- **A run-global clock**, because cross-session interleaving *is* the workload
+  for a cache — it is what makes two sessions contend for one shared object and
+  what sets the concurrent footprint.
+- **A run-global key scope**, because shared-object pools exist to produce
+  reuse *between* sessions.
+
+Mooncake satisfies both, verified on 2 328 upstream rows: per-request lines on
+a millisecond global clock, and `hash_ids` globally dense over the whole file
+(0..44 683, 44 684 distinct) with identifier 0 opening every row as a shared
+system prefix. WekaTrace fails both: `first t = 0.0` for every session with no
+field for session start, and `hash_id_scope: "local"`.
+
+**Alternatives rejected**:
+
+- *Replace our schema with WekaTrace.* Considered seriously and rejected on the
+  measurements above: it would discard the interleaving, and being grouped by
+  session it also cannot be streamed — a session's line is unwritable until the
+  session ends, so emitting it means holding every in-flight session in memory
+  (hundreds of megabytes at this feature's concurrency) to produce a file we
+  are streaming anyway. Its first line is 2.76 MB for 135 requests.
+- *Emit Mooncake as a third container.* Same objection D1 made about the
+  simulator's shape: it contradicts FR-055's "two containers holding identical
+  records" and would put a consumer-specific format in the published contract.
+  Also lossy — its ceil convention discards `partial_final_valid`, so a round
+  trip could not serve as a determinism check.
+- *Emit OpenTelemetry.* The format itself is capable (absolute ISO 8601
+  timestamps carry interleaving fine), but it holds no block identity, so the
+  cache structure would have to live in fabricated text whose every block
+  tokenises to exactly `block_size` tokens — pinning one tokenizer and chat
+  template into the artifact, at roughly 50× the size, to arrive back at the
+  keys we started from. Worth it only to drive a real inference engine.
+- *Wait for a standard to emerge.* Rejected: `convert` targets are cheap
+  precisely because they are projections of a superset. Adding one later costs
+  a writer, not a redesign.
+
+**Consequence for the plan**: `convert` grows a `--to` selector rather than
+staying single-purpose; two writers become tasks; and the
+`oracleGeneral` binary layout needs reading from upstream source before any
+bytes are written, because upstream documents those fields in prose only.
+
+**Unexpected bonus, recorded because it is a capability the native format does
+not give anyone**: libCacheSim's preferred `oracleGeneral` format wants
+next-access-time, which a real trace can only obtain by a full offline pass. An
+emit run knows the entire future of its own trace, so it is one backward pass —
+making optimal-policy (Belady) baselines available for eviction comparisons.
+
+## D9. Open questions carried into Phase 1
 
 None. Every Technical Context field is resolved; no `NEEDS CLARIFICATION`
 markers remain.
+
+D8 was added *during* Phase 1 rather than before it, because the question was
+not asked until the writers were about to be built. Its facts are all
+measurements rather than recollections, and `contracts/trace-interop.md` names
+the exact upstream path, row count and figure behind each one so any of them
+can be re-derived.
+
+One honesty note on Principle IX's traceability rule: those measurements are
+traceable to **upstream** bytes at named paths, not to a measurement stored in
+this repository. That is weaker than the rule asks for. It is acceptable here
+because the claims are structural facts about third-party file formats rather
+than statistical claims about our own machinery, and because the contract
+records the procedure rather than only the conclusion — but if any of these
+formats becomes load-bearing for a *result*, the measurement should be landed
+as a script the way `research/population/` was.
