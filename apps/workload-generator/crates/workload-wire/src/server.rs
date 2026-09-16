@@ -24,6 +24,32 @@
 //! Everything past submission — the mailbox's parallel channels, the server's own threads —
 //! is Certus-internal reordering and is deliberately not this module's concern.
 //!
+//! # Idleness is not death, but a closed socket is
+//!
+//! An agent must survive arbitrarily long gaps between frames. Under paced mode a session's
+//! think time is real waiting, so a node can legitimately receive nothing for minutes; an agent
+//! that took silence for failure would exit in the middle of the workload it was serving. So
+//! there is **no idle timeout on an established connection** — the read timeout below exists
+//! only to poll the stop flag.
+//!
+//! What *does* mean the run is over is the **socket closing**. TCP tells the agent for free
+//! that the control process has gone, whether it exited, panicked or was killed, and that is
+//! more reliable than any timeout: a timeout has to guess how long silence is acceptable, while
+//! a closed socket is not a guess.
+//!
+//! So [`Server::serve`] exits when every connection it once had is gone. Without that, a
+//! generator killed with `SIGKILL` would leave the agent listening forever, holding mailbox
+//! channels and a device allocation — and FR-053's "release resources even when the generator
+//! exits abnormally" would be deferred to whenever someone next started a run rather than
+//! actually satisfied.
+//!
+//! Two details keep it from firing wrongly. A [`Server::with_linger`] grace period tolerates
+//! the gap while a generator opens its lanes one at a time, or reconnects one; and the exit only
+//! applies **after** at least one connection has been served, so a freshly launched agent is not
+//! killed by having no clients yet. For that case there is a separate and much longer
+//! [`Server::with_first_connect_timeout`]: an agent nobody ever connects to was launched for a
+//! run that never came, and sitting there forever is the same leak by a slower route.
+//!
 //! # An idle connection must not block teardown
 //!
 //! A connection thread spends most of its life blocked reading the next frame, so an agent
@@ -48,7 +74,7 @@
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -65,8 +91,24 @@ const ACCEPT_POLL: Duration = Duration::from_millis(2);
 /// How long a connection waits for the next frame before checking whether to stop.
 ///
 /// Short enough that teardown is prompt, long enough that an idle connection is not a
-/// busy-wait. It bounds only the *gap between* frames, never a frame in transit.
+/// busy-wait. It bounds only the *gap between* frames, never a frame in transit, and it is
+/// **not** an idle timeout: a connection that receives nothing for an hour stays open.
 pub const IDLE_POLL: Duration = Duration::from_millis(50);
+
+/// Grace period after the last connection closes before the agent exits.
+///
+/// A generator opens one connection per lane, and may reconnect one. Exiting the instant the
+/// count reached zero would race that, so the agent waits — briefly, because the common reason
+/// the count reached zero is that the run is over.
+pub const DEFAULT_LINGER: Duration = Duration::from_secs(5);
+
+/// How long a freshly launched agent waits for its first connection.
+///
+/// Long, because a generator may be starting agents on many nodes before it connects to any of
+/// them, and because the cost of being wrong is refusing a run. But finite: an agent nobody ever
+/// connects to was launched for a run that never came, and sitting there forever holds mailbox
+/// channels and a device allocation just as surely as a leaked one.
+pub const DEFAULT_FIRST_CONNECT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// What one connection does, in arrival order.
 ///
@@ -356,6 +398,8 @@ pub struct Server<F> {
     listener: TcpListener,
     factory: Arc<F>,
     max_body: u32,
+    linger: Duration,
+    first_connect_timeout: Duration,
 }
 
 impl<F: ServiceFactory> Server<F> {
@@ -369,6 +413,8 @@ impl<F: ServiceFactory> Server<F> {
             listener: TcpListener::bind(addr)?,
             factory: Arc::new(factory),
             max_body: DEFAULT_MAX_BODY,
+            linger: DEFAULT_LINGER,
+            first_connect_timeout: DEFAULT_FIRST_CONNECT_TIMEOUT,
         })
     }
 
@@ -387,6 +433,21 @@ impl<F: ServiceFactory> Server<F> {
         self
     }
 
+    /// How long to wait after the last connection closes before exiting.
+    ///
+    /// Zero exits as soon as the count reaches zero, which is what a test wants and what a run
+    /// does not: a generator opening its lanes one at a time would be cut off.
+    pub fn with_linger(mut self, linger: Duration) -> Self {
+        self.linger = linger;
+        self
+    }
+
+    /// How long to wait for the very first connection before giving up.
+    pub fn with_first_connect_timeout(mut self, timeout: Duration) -> Self {
+        self.first_connect_timeout = timeout;
+        self
+    }
+
     /// Accept connections until `stop` is set or a peer asks for shutdown.
     ///
     /// One thread per connection: a connection is a lane, and a lane's frames must be
@@ -401,6 +462,13 @@ impl<F: ServiceFactory> Server<F> {
     pub fn serve(&self, stop: Arc<AtomicBool>) -> io::Result<()> {
         self.listener.set_nonblocking(true)?;
         let mut threads = Vec::new();
+        // Connections currently open, and whether there has ever been one. Together they let a
+        // closed socket mean "the run is over" without a freshly launched agent exiting for
+        // having no clients yet.
+        let live = Arc::new(AtomicUsize::new(0));
+        let mut ever_connected = false;
+        let started = std::time::Instant::now();
+        let mut empty_since: Option<std::time::Instant> = None;
         while !stop.load(Ordering::Relaxed) {
             match self.listener.accept() {
                 Ok((stream, peer)) => {
@@ -420,6 +488,10 @@ impl<F: ServiceFactory> Server<F> {
                     stream.set_read_timeout(Some(IDLE_POLL))?;
                     let max_body = self.max_body;
                     let stop = Arc::clone(&stop);
+                    ever_connected = true;
+                    empty_since = None;
+                    live.fetch_add(1, Ordering::Relaxed);
+                    let live_for_thread = Arc::clone(&live);
                     threads.push(thread::spawn(move || {
                         let mut stream = stream;
                         let stopped = Arc::clone(&stop);
@@ -432,9 +504,43 @@ impl<F: ServiceFactory> Server<F> {
                             Ok(Served::Closed) => {}
                             Err(e) => eprintln!("connection from {peer} closed: {e}"),
                         }
+                        live_for_thread.fetch_sub(1, Ordering::Relaxed);
                     }));
                 }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(ACCEPT_POLL),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    thread::sleep(ACCEPT_POLL);
+                    let open = live.load(Ordering::Relaxed);
+                    if !ever_connected {
+                        // Nobody has ever connected. An agent launched for a run that never
+                        // came must not sit here holding channels indefinitely.
+                        if started.elapsed() > self.first_connect_timeout {
+                            eprintln!(
+                                "no generator connected within {:?}; exiting rather than \
+                                 holding this node's mailbox channels",
+                                self.first_connect_timeout
+                            );
+                            break;
+                        }
+                        continue;
+                    }
+                    if open == 0 {
+                        // Every connection is gone. TCP has told us the control process is no
+                        // longer there, which is more reliable than any silence-based guess —
+                        // but a generator opening its lanes one at a time can pass through zero,
+                        // so wait out the linger before believing it.
+                        let since = *empty_since.get_or_insert_with(std::time::Instant::now);
+                        if since.elapsed() >= self.linger {
+                            eprintln!(
+                                "every connection closed and none reopened within {:?}; the \
+                                 control process is gone, so releasing this node's resources",
+                                self.linger
+                            );
+                            break;
+                        }
+                    } else {
+                        empty_since = None;
+                    }
+                }
                 Err(e) => return Err(e),
             }
         }

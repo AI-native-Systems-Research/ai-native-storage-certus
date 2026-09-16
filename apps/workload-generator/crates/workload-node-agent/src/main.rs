@@ -83,6 +83,28 @@ struct Cli {
     #[arg(long)]
     stamp_keys: bool,
 
+    /// Seconds to wait for the first generator connection before giving up.
+    ///
+    /// An agent nobody ever connects to was launched for a run that never came, and sitting
+    /// there holds this node's mailbox channels and a device allocation. Long, because a
+    /// generator may be starting agents on many nodes before connecting to any; finite, because
+    /// forever is a leak.
+    #[arg(long, default_value_t = 300)]
+    first_connect_secs: u64,
+
+    /// Seconds to wait after the last connection closes before exiting.
+    ///
+    /// A closed socket means the control process is gone — more reliable than any
+    /// silence-based guess, since TCP tells us for free whether it exited, panicked or was
+    /// killed. The grace period exists only because a generator opening its lanes one at a
+    /// time, or reconnecting one, passes briefly through zero connections.
+    ///
+    /// There is deliberately **no idle timeout**: under paced mode a session's think time is
+    /// real waiting, so a node may legitimately receive nothing for minutes, and an agent that
+    /// took silence for failure would exit in the middle of the workload it was serving.
+    #[arg(long, default_value_t = 5)]
+    linger_secs: u64,
+
     /// Check each loaded block against its key, and count mismatches.
     ///
     /// Implies `--stamp-keys`. This is what separates "bytes arrived" from "the right bytes
@@ -153,14 +175,19 @@ fn run(cli: &Cli) -> Result<(), String> {
         cli.batch_keys,
     );
     let addr = format!("{}:{}", cli.bind, cli.port);
-    let server = Server::bind(&addr, factory).map_err(|e| format!("bind {addr}: {e}"))?;
+    let server = Server::bind(&addr, factory)
+        .map_err(|e| format!("bind {addr}: {e}"))?
+        .with_first_connect_timeout(std::time::Duration::from_secs(cli.first_connect_secs))
+        .with_linger(std::time::Duration::from_secs(cli.linger_secs));
     eprintln!("listening on {addr}; source id {}", handshake::SOURCE_ID);
 
-    // The generator stops the agent with a `Shutdown` frame, which is why there is no
-    // signal-driven loop here: teardown is part of the protocol so that it can be *verified*
-    // rather than assumed (FR-053). Detecting and replacing a leftover agent from a crashed
-    // run is T071's, and needs more than a signal handler — the channels it claimed and the
-    // device memory it held have to be reclaimed too.
+    // Three ways this ends, and none of them is an idle timeout. The generator sends a
+    // `Shutdown` frame, which is teardown as part of the protocol so it can be *verified*
+    // rather than assumed (FR-053). Or every connection closes, which is TCP telling us the
+    // control process is gone however it went — that is what makes FR-053 hold for a generator
+    // killed outright, rather than deferring the cleanup to whenever someone next starts a run.
+    // Or nobody ever connects, and the agent gives up rather than holding this node's channels
+    // for a run that never came.
     let stop = Arc::new(AtomicBool::new(false));
     server.serve(stop).map_err(|e| format!("serve: {e}"))?;
     eprintln!("stopped");

@@ -497,3 +497,156 @@ fn a_verified_handshake_accepts_a_matching_agent_and_checks_capacity() {
     stop.store(true, Ordering::Relaxed);
     handle.join().expect("server thread").expect("serve");
 }
+
+// ---------------------------------------------------------------------------
+// Idleness is not death, but a closed socket is.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_long_idle_connection_is_not_treated_as_a_failure() {
+    // Under paced mode a session's think time is real waiting, so a node can legitimately
+    // receive nothing for minutes. An agent that took silence for failure would exit in the
+    // middle of the workload it was serving. The read timeout on a connection exists only to
+    // poll the stop flag; it is not an idle timeout.
+    let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(Recorder::default())))
+        .expect("bind")
+        .with_linger(std::time::Duration::from_secs(60));
+    let addr = server.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_server = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || server.serve(stop_for_server));
+
+    let mut client = Client::<TcpStream>::connect(addr, 4, None).expect("connect");
+    client
+        .hello(&Hello {
+            proto_version: PROTO_VERSION,
+            build_id: [3u8; BUILD_ID_BYTES],
+            mailbox: "/dev/shm/x".to_string(),
+        })
+        .expect("hello");
+
+    // Silence for many multiples of the per-connection read timeout (50ms).
+    std::thread::sleep(std::time::Duration::from_millis(600));
+
+    // The connection must still work: a turn submitted after the gap is served normally.
+    client
+        .submit(&turn(1, &[1, 2]))
+        .expect("submit after idling");
+    let outcomes = client.finish().expect("the agent is still there");
+    assert_eq!(
+        outcomes[0].resident, 2,
+        "the agent dropped an idle connection"
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    handle.join().expect("thread").expect("serve");
+}
+
+#[test]
+fn the_agent_exits_when_every_connection_closes() {
+    // What a closed socket means: the control process is gone, however it went. Without this a
+    // generator killed with SIGKILL would leave the agent listening forever, holding mailbox
+    // channels and a device allocation — FR-053 deferred to whenever someone next ran, rather
+    // than satisfied.
+    let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(Recorder::default())))
+        .expect("bind")
+        .with_linger(std::time::Duration::from_millis(200));
+    let addr = server.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_server = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || server.serve(stop_for_server));
+
+    {
+        let mut client = Client::<TcpStream>::connect(addr, 4, None).expect("connect");
+        client
+            .hello(&Hello {
+                proto_version: PROTO_VERSION,
+                build_id: [3u8; BUILD_ID_BYTES],
+                mailbox: "/dev/shm/x".to_string(),
+            })
+            .expect("hello");
+    } // dropped: the socket closes, as it would if the generator were killed
+
+    // The serve loop must return on its own, with nobody setting the stop flag.
+    let joined = handle.join().expect("thread");
+    assert!(joined.is_ok(), "serve returned an error: {joined:?}");
+    assert!(
+        !stop.load(Ordering::Relaxed),
+        "the agent exited because someone set the stop flag, not because the peer vanished"
+    );
+}
+
+#[test]
+fn a_freshly_launched_agent_is_not_killed_for_having_no_clients_yet() {
+    // The exit applies only after at least one connection has been served. A generator may be
+    // starting agents on several nodes before it connects to any of them.
+    let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(Recorder::default())))
+        .expect("bind")
+        .with_linger(std::time::Duration::from_millis(50))
+        .with_first_connect_timeout(std::time::Duration::from_secs(60));
+    let addr = server.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_server = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || server.serve(stop_for_server));
+
+    // Well past the linger, with nothing ever connecting.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let mut client = Client::<TcpStream>::connect(addr, 4, None)
+        .expect("the agent should still be listening with no clients yet");
+    client
+        .hello(&Hello {
+            proto_version: PROTO_VERSION,
+            build_id: [3u8; BUILD_ID_BYTES],
+            mailbox: "/dev/shm/x".to_string(),
+        })
+        .expect("hello");
+
+    stop.store(true, Ordering::Relaxed);
+    handle.join().expect("thread").expect("serve");
+}
+
+#[test]
+fn an_agent_nobody_ever_connects_to_gives_up() {
+    // The other half of that: an agent launched for a run that never came must not hold this
+    // node's mailbox channels indefinitely. Finite, but much longer than the linger.
+    let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(Recorder::default())))
+        .expect("bind")
+        .with_first_connect_timeout(std::time::Duration::from_millis(200));
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_server = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || server.serve(stop_for_server));
+    let joined = handle.join().expect("thread");
+    assert!(joined.is_ok());
+    assert!(
+        !stop.load(Ordering::Relaxed),
+        "it exited on the stop flag rather than on its own timeout"
+    );
+}
+
+#[test]
+fn a_reconnect_within_the_linger_keeps_the_agent_alive() {
+    // A generator opening its lanes one at a time, or restarting one, passes through zero
+    // connections. Exiting the instant the count hit zero would race that.
+    let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(Recorder::default())))
+        .expect("bind")
+        .with_linger(std::time::Duration::from_secs(30));
+    let addr = server.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_server = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || server.serve(stop_for_server));
+
+    for _ in 0..3 {
+        let mut client = Client::<TcpStream>::connect(addr, 4, None).expect("connect");
+        client
+            .hello(&Hello {
+                proto_version: PROTO_VERSION,
+                build_id: [3u8; BUILD_ID_BYTES],
+                mailbox: "/dev/shm/x".to_string(),
+            })
+            .expect("the agent must survive a reconnect");
+        std::thread::sleep(std::time::Duration::from_millis(60));
+    }
+
+    stop.store(true, Ordering::Relaxed);
+    handle.join().expect("thread").expect("serve");
+}
