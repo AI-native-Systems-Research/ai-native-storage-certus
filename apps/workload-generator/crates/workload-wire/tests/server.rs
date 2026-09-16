@@ -56,7 +56,7 @@ impl Service for Recorder {
         Stats {
             counters: Counters {
                 requests: 3,
-                blocks_read: 9,
+                lookup_hits: 9,
                 ..Default::default()
             },
             ops: vec![OpHistogram {
@@ -351,7 +351,7 @@ fn a_live_client_and_server_agree_over_tcp() {
     }
 
     let stats = client.stats().expect("stats");
-    assert_eq!(stats.counters.blocks_read, 9, "counters must survive TCP");
+    assert_eq!(stats.counters.blocks_read(), 9, "counters must survive TCP");
     assert_eq!(stats.ops.len(), 1);
     assert_eq!(stats.ops[0].histogram, vec![1, 2, 3]);
 

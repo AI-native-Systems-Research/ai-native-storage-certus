@@ -15,8 +15,15 @@ publish = false
 # the single simulation core stays single (FR-072).
 
 [dependencies]
+# The agent depends on the generator's LIBRARY so the reactive rule of FR-072a has exactly
+# ONE implementation. Two would be free to drift, and a fix applied to the local path and
+# forgotten here would surface as a local/remote difference that looked like a property of
+# the network. The arrow is the wrong way round for a daemon and is accepted for that
+# stronger property; see contracts/node-agent-wire.md.
+workload-gen.workspace = true
 workload-model.workspace = true
 workload-wire.workspace = true
 shm-queue.workspace = true
 shmq-dispatcher.workspace = true
+hdrhistogram = { version = "7", features = ["serialization"] }
 clap = { version = "4", features = ["derive", "env"] }

@@ -9,6 +9,8 @@ pub mod cli;
 #[cfg(feature = "live")]
 pub mod cuda;
 #[cfg(feature = "live")]
+pub mod exec;
+#[cfg(feature = "live")]
 pub mod live;
 #[cfg(feature = "live")]
 pub mod opstream;

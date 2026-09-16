@@ -424,8 +424,6 @@ fn counters_round_trip_and_sum_across_nodes() {
         transfers_declined: 0,
         commits_attempted: 37,
         commits_declined: 0,
-        blocks_read: 60,
-        blocks_written: 37,
     };
     let stats = Stats {
         counters: a,
@@ -441,8 +439,9 @@ fn counters_round_trip_and_sum_across_nodes() {
     // Summing is exact, which is the property that lets bandwidth be totalled over nodes.
     let mut total = a;
     total.merge(&a);
-    assert_eq!(total.blocks_read, 120);
-    assert_eq!(total.blocks_written, 74);
+    // Derived rather than stored, so they cannot disagree with the counters they come from.
+    assert_eq!(total.blocks_read(), 120, "two nodes' lookup hits");
+    assert_eq!(total.blocks_written(), 74, "accepted transfers only");
     assert_eq!(total.check_resident, 120);
     assert_eq!(total.reserves_declined, 4);
 }
@@ -453,7 +452,7 @@ fn every_counter_field_is_carried_rather_than_some() {
     // the far side, and a bandwidth number computed from it would be too low with no sign
     // that anything was missing. Distinct values per field catch a mis-ordered codec too.
     let mut c = Counters::default();
-    let fields: [&mut u64; 15] = [
+    let fields: [&mut u64; 13] = [
         &mut c.requests,
         &mut c.key_references,
         &mut c.check_resident,
@@ -467,8 +466,6 @@ fn every_counter_field_is_carried_rather_than_some() {
         &mut c.transfers_declined,
         &mut c.commits_attempted,
         &mut c.commits_declined,
-        &mut c.blocks_read,
-        &mut c.blocks_written,
     ];
     for (i, f) in fields.into_iter().enumerate() {
         *f = 1000 + i as u64;

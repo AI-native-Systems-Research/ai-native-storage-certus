@@ -90,12 +90,12 @@ use std::time::{Duration, Instant};
 
 use hdrhistogram::Histogram;
 use shm_queue::Client;
-use shmq_dispatcher::wire::{self, op};
 use workload_model::description::WorkloadDescription;
 use workload_model::plan::{OpKind, OperationPlan};
 use workload_model::sim::Simulation;
+use workload_wire::frame::Counters;
 
-use crate::opstream::{forbidden_opcode, Encoding, OpStream, TurnSplit};
+use crate::exec::{clear_memory_tier, TurnExecutor};
 use crate::payload::PayloadBuffer;
 
 /// Turn batches a lane's queue holds before the producer blocks.
@@ -117,16 +117,6 @@ const PRODUCE_WINDOW: f64 = 5.0;
 /// How long `attach` waits for the server to publish its ready flag.
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Spin iterations before a request parks. Matches `apps/remote-lookup-bench`, so the two
-/// tools contend for the mailbox the same way.
-const SPIN_ITERS: u32 = 20_000;
-
-/// Per-attempt wait before retrying a response poll.
-const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(50);
-
-/// Overall deadline for one request.
-const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
-
 /// One lane's view of its own queue and its own traffic.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LaneStats {
@@ -137,36 +127,16 @@ pub struct LaneStats {
     pub underruns: u64,
     /// Smallest depth seen at pop time.
     pub min_depth: usize,
-    /// Requests issued.
-    pub requests: u64,
-    /// Key references issued.
-    pub key_references: u64,
     /// Operations skipped for want of a GPU payload buffer.
     pub skipped_needing_gpu: u64,
     /// Keys those skipped operations would have moved.
     pub skipped_keys: u64,
-    /// `CHECK` keys reported `RESIDENT` — committed and loadable now.
-    pub check_resident: u64,
-    /// `CHECK` keys reported `PENDING` — reserved with a store in flight.
-    pub check_pending: u64,
-    /// `CHECK` keys reported `MISS`.
-    pub check_miss: u64,
-    /// `LOOKUP` keys that returned data.
-    pub lookup_hits: u64,
-    /// `LOOKUP` keys that did not.
-    pub lookup_misses: u64,
-    /// Keys a `RESERVE` was asked for.
-    pub reserves_attempted: u64,
-    /// Keys a `COMMIT_STORE` was asked for.
-    pub commits_attempted: u64,
-    /// Keys a `COPY_TO_STORE` was asked for.
-    pub transfers_attempted: u64,
-    /// Keys a `RESERVE` declined.
-    pub reserves_declined: u64,
-    /// Keys a `COPY_TO_STORE` declined.
-    pub transfers_declined: u64,
-    /// Keys a `COMMIT_STORE` declined.
-    pub commits_declined: u64,
+    /// What this lane's mailbox-facing code counted.
+    ///
+    /// Held rather than duplicated: [`crate::exec::TurnExecutor`] gathers these, and the node
+    /// agent ships back the very same type, so a local figure and a remote figure are the
+    /// same measurement rather than two that happen to be named alike.
+    pub counters: Counters,
 }
 
 /// What a live run measured.
@@ -230,12 +200,12 @@ impl LiveStats {
 
     /// Requests issued.
     pub fn requests(&self) -> u64 {
-        self.lanes.iter().map(|l| l.requests).sum()
+        self.lanes.iter().map(|l| l.counters.requests).sum()
     }
 
     /// Key references issued.
     pub fn key_references(&self) -> u64 {
-        self.lanes.iter().map(|l| l.key_references).sum()
+        self.lanes.iter().map(|l| l.counters.key_references).sum()
     }
 
     /// Operations skipped for want of a GPU payload buffer.
@@ -250,52 +220,67 @@ impl LiveStats {
 
     /// `CHECK` keys reported `RESIDENT`.
     pub fn check_resident(&self) -> u64 {
-        self.lanes.iter().map(|l| l.check_resident).sum()
+        self.lanes.iter().map(|l| l.counters.check_resident).sum()
     }
 
     /// `CHECK` keys reported `PENDING`.
     pub fn check_pending(&self) -> u64 {
-        self.lanes.iter().map(|l| l.check_pending).sum()
+        self.lanes.iter().map(|l| l.counters.check_pending).sum()
     }
 
     /// `CHECK` keys reported `MISS`.
     pub fn check_miss(&self) -> u64 {
-        self.lanes.iter().map(|l| l.check_miss).sum()
+        self.lanes.iter().map(|l| l.counters.check_miss).sum()
     }
 
     /// `LOOKUP` keys that returned data.
     pub fn lookup_hits(&self) -> u64 {
-        self.lanes.iter().map(|l| l.lookup_hits).sum()
+        self.lanes.iter().map(|l| l.counters.lookup_hits).sum()
     }
 
     /// `LOOKUP` keys that did not.
     pub fn lookup_misses(&self) -> u64 {
-        self.lanes.iter().map(|l| l.lookup_misses).sum()
+        self.lanes.iter().map(|l| l.counters.lookup_misses).sum()
     }
 
     /// Keys a `RESERVE` was asked for.
     pub fn reserves_attempted(&self) -> u64 {
-        self.lanes.iter().map(|l| l.reserves_attempted).sum()
+        self.lanes
+            .iter()
+            .map(|l| l.counters.reserves_attempted)
+            .sum()
     }
 
     /// Keys a `COMMIT_STORE` was asked for.
     pub fn commits_attempted(&self) -> u64 {
-        self.lanes.iter().map(|l| l.commits_attempted).sum()
+        self.lanes
+            .iter()
+            .map(|l| l.counters.commits_attempted)
+            .sum()
     }
 
     /// Keys a `RESERVE` declined.
     pub fn reserves_declined(&self) -> u64 {
-        self.lanes.iter().map(|l| l.reserves_declined).sum()
+        self.lanes
+            .iter()
+            .map(|l| l.counters.reserves_declined)
+            .sum()
     }
 
     /// Keys a `COPY_TO_STORE` declined.
     pub fn transfers_declined(&self) -> u64 {
-        self.lanes.iter().map(|l| l.transfers_declined).sum()
+        self.lanes
+            .iter()
+            .map(|l| l.counters.transfers_declined)
+            .sum()
     }
 
     /// Keys a `COPY_TO_STORE` was asked for.
     pub fn transfers_attempted(&self) -> u64 {
-        self.lanes.iter().map(|l| l.transfers_attempted).sum()
+        self.lanes
+            .iter()
+            .map(|l| l.counters.transfers_attempted)
+            .sum()
     }
 
     /// Blocks whose payload Certus sent us: `LOOKUP` hits, and only those.
@@ -344,7 +329,7 @@ impl LiveStats {
 
     /// Keys a `COMMIT_STORE` declined.
     pub fn commits_declined(&self) -> u64 {
-        self.lanes.iter().map(|l| l.commits_declined).sum()
+        self.lanes.iter().map(|l| l.counters.commits_declined).sum()
     }
 
     /// Whether the run is valid: **no lane ever underran** (FR-062).
@@ -706,245 +691,6 @@ fn produce(
     }
 }
 
-/// What one lane needs to issue a request.
-struct Ctx<'a> {
-    client: &'a Client,
-    channel: usize,
-    stream: &'a mut OpStream,
-    batch_keys: usize,
-}
-
-/// Issue one opcode over `keys`, split into `--batch-keys` requests.
-///
-/// `collect` gathers the per-key response bytes in order across every chunk, which is what
-/// makes a `CHECK` answer usable as a decision over the whole path rather than per chunk.
-///
-/// An empty `keys` issues nothing **unless** the opcode is keyless (`TAKE_EVENTS`): a turn
-/// with nothing resident should not send an empty `LOAD`, but a poll carries no keys and
-/// must still be sent.
-///
-/// # Errors
-///
-/// If a request fails, returns a non-OK status, or names a forbidden opcode.
-#[allow(clippy::too_many_arguments)]
-fn issue_keyed(
-    ctx: &mut Ctx<'_>,
-    stats: &mut LaneStats,
-    latency: &mut Histogram<u64>,
-    by_op: &mut BTreeMap<u32, Histogram<u64>>,
-    opcode: u32,
-    keys: &[u64],
-    session: u64,
-    mut collect: Option<&mut Vec<u8>>,
-) -> Result<(), String> {
-    if let Some(why) = forbidden_opcode(opcode) {
-        return Err(format!("refusing to issue a forbidden operation: {why}"));
-    }
-    let keyless = opcode == op::TAKE_EVENTS;
-    if keys.is_empty() && !keyless {
-        return Ok(());
-    }
-    let kind = kind_of(opcode);
-    let mut start = 0usize;
-    loop {
-        let end = (start + ctx.batch_keys).min(keys.len());
-        let chunk = &keys[start..end];
-        let (op_code, payload) = match ctx.stream.encode_chunk(kind, chunk, session)? {
-            Encoding::Ready { opcode, payload } => (opcode, payload),
-            Encoding::NotPlanned => break,
-            Encoding::NeedsGpuPayload { keys: n, .. } => {
-                // No payload buffer: counted and declared, never silently dropped.
-                stats.skipped_needing_gpu += 1;
-                stats.skipped_keys += n as u64;
-                start = end;
-                if start >= keys.len() {
-                    break;
-                }
-                continue;
-            }
-        };
-        // One clock read per request, never per key: a batch of 64 keys is one round trip,
-        // so per-key timing would measure the same interval 64 times and put a clock on the
-        // per-key path (FR-038, FR-070).
-        let started = Instant::now();
-        let (status, body) = ctx
-            .client
-            .request(
-                ctx.channel,
-                op_code,
-                payload,
-                SPIN_ITERS,
-                ATTEMPT_TIMEOUT,
-                REQUEST_DEADLINE,
-            )
-            .map_err(|e| format!("shmq request (op {op_code}) failed: {e}"))?;
-        if status != wire::STATUS_OK {
-            return Err(format!(
-                "op {op_code} returned an error status: {}",
-                String::from_utf8_lossy(&body)
-            ));
-        }
-        let micros = started.elapsed().as_micros().clamp(1, 60_000_000) as u64;
-        latency
-            .record(micros)
-            .map_err(|e| format!("latency out of histogram range: {e}"))?;
-        match by_op.entry(op_code) {
-            std::collections::btree_map::Entry::Occupied(mut e) => e.get_mut().record(micros),
-            std::collections::btree_map::Entry::Vacant(e) => {
-                let mut h = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
-                    .map_err(|e| format!("cannot build a per-opcode histogram: {e}"))?;
-                let r = h.record(micros);
-                e.insert(h);
-                r
-            }
-        }
-        .map_err(|e| format!("latency out of histogram range: {e}"))?;
-        stats.requests += 1;
-        stats.key_references += chunk.len() as u64;
-        count_results(op_code, &body, stats);
-        if let Some(out) = collect.as_deref_mut() {
-            out.extend_from_slice(&body);
-        }
-        start = end;
-        if start >= keys.len() {
-            break;
-        }
-    }
-    Ok(())
-}
-
-/// Keys whose `RESERVE` was granted, from the per-key answer.
-///
-/// A transfer DMAs a block into the slot a reservation granted, so transferring for a key
-/// whose reserve was declined sends a payload nowhere and then fails its commit for want of
-/// a pending write. Measured before this filter existed: 88 blocks written against 12
-/// declined reserves and 12 declined commits; with it, 76 written and **zero** declined
-/// commits.
-///
-/// A short `results` grants only what it answered for. Assuming a missing byte meant
-/// success would write a block Certus never reserved.
-fn granted_keys(missing: &[u64], results: &[u8], out: &mut Vec<u64>) {
-    out.clear();
-    out.extend(
-        missing
-            .iter()
-            .zip(results.iter())
-            .filter(|(_, ok)| **ok == 1)
-            .map(|(key, _)| *key),
-    );
-}
-
-/// The plan kind that encodes as `opcode`.
-///
-/// The reactive executor works in opcodes, while [`OpStream`] encodes from plan kinds, so
-/// this is the one place the two vocabularies meet.
-fn kind_of(opcode: u32) -> OpKind {
-    match opcode {
-        op::CHECK => OpKind::Check,
-        op::TOUCH => OpKind::Touch,
-        op::LOOKUP => OpKind::Load,
-        op::RESERVE => OpKind::Reserve,
-        op::COPY_TO_STORE => OpKind::Transfer,
-        op::COMMIT_STORE => OpKind::Commit,
-        op::ABORT_STORE => OpKind::Abort,
-        op::TAKE_EVENTS => OpKind::PollEvents,
-        other => unreachable!("no plan kind encodes as opcode {other}"),
-    }
-}
-
-/// Clear the memory tier once, before the timed window (FR-046).
-///
-/// Returns how many entries the server dropped. Issued on its own path rather than through
-/// [`OpStream`], which refuses the opcode: clearing is setup, and a clear inside the
-/// operation stream would be the generator evicting on the eviction policy's behalf.
-///
-/// # Errors
-///
-/// If the request fails or the server answers with an error status.
-fn clear_memory_tier(client: &Client, channel: usize) -> Result<u64, String> {
-    let (status, body) = client
-        .request(
-            channel,
-            op::CLEAR_MEMORY_TIER,
-            &[],
-            SPIN_ITERS,
-            ATTEMPT_TIMEOUT,
-            REQUEST_DEADLINE,
-        )
-        .map_err(|e| format!("clearing the memory tier failed: {e}"))?;
-    if status != wire::STATUS_OK {
-        return Err(format!(
-            "clearing the memory tier returned an error status: {}",
-            String::from_utf8_lossy(&body)
-        ));
-    }
-    let mut r = wire::Reader::new(&body);
-    Ok(r.u64().unwrap_or(0))
-}
-
-/// Count one response's per-key results.
-///
-/// # These are Certus's decisions, not our failures
-///
-/// Every one of these opcodes answers with one byte per key — `Writer::with_capacity(n)`
-/// then a `w.u8` loop, in `translate.rs`. The generator used to ignore the body entirely
-/// and check only the overall status, so a run in which *every* reserve was declined
-/// reported full throughput: plausible numbers instead of an error, which is the failure
-/// mode this instrument exists to avoid.
-///
-/// They are counted and reported, and deliberately **not** treated as errors. We do not
-/// know when Certus will evict anything, and we must not: a block stored earlier and absent
-/// later is eviction working, which is the behaviour under measurement. A declined reserve
-/// is what a full tier looks like. A `LOOKUP` miss is a cache miss. None of that is a
-/// broken generator, and failing a run on any of it would make the instrument refuse to
-/// measure the very thing it is for.
-fn count_results(opcode: u32, body: &[u8], stats: &mut LaneStats) {
-    match opcode {
-        // CHECK and LOOKUP do NOT share an encoding, and conflating them was a real
-        // defect here: `op_check` answers a three-valued `check_state`
-        // (MISS = 0, RESIDENT = 1, PENDING = 2) while `op_lookup` answers a binary flag.
-        // Treating `== 1` as a hit for both counted every PENDING key as a miss, although
-        // `wire.rs` says explicitly that `byte != 0` is the correct "exists" test.
-        // PENDING means another lane reserved the key and its store is in flight: coming,
-        // not absent, and never a miss.
-        op::CHECK => {
-            for b in body {
-                match *b {
-                    wire::check_state::RESIDENT => stats.check_resident += 1,
-                    wire::check_state::PENDING => stats.check_pending += 1,
-                    _ => stats.check_miss += 1,
-                }
-            }
-        }
-        // Binary, and a handle that failed to open is reported as a 0 too, so a miss count
-        // is an upper bound on true cache misses — the wire does not distinguish them.
-        op::LOOKUP => {
-            for b in body {
-                if *b == 1 {
-                    stats.lookup_hits += 1;
-                } else {
-                    stats.lookup_misses += 1;
-                }
-            }
-        }
-        op::RESERVE => {
-            stats.reserves_attempted += body.len() as u64;
-            stats.reserves_declined += body.iter().filter(|b| **b == 0).count() as u64
-        }
-        op::COPY_TO_STORE => {
-            stats.transfers_attempted += body.len() as u64;
-            stats.transfers_declined += body.iter().filter(|b| **b == 0).count() as u64
-        }
-        op::COMMIT_STORE => {
-            stats.commits_attempted += body.len() as u64;
-            stats.commits_declined += body.iter().filter(|b| **b == 0).count() as u64
-        }
-        // A TOUCH answering 0 means the key was not there to reorder, which is eviction
-        // again; TAKE_EVENTS answers with events rather than per-key results.
-        _ => {}
-    }
-}
-
 /// Take batches from one lane's queue and issue them.
 ///
 /// A `try_recv` that returns empty **is** the underrun and is counted before the thread
@@ -977,27 +723,21 @@ fn consume(c: Consumer) -> Result<LaneLatency, String> {
         depth,
         stop,
     } = c;
-    let mut stream = OpStream::new(block_bytes, batch_keys);
+    // The shared executor, so the local path and the node agent apply one rule rather than
+    // two that could drift apart (see `crate::exec`).
+    let mut exec = TurnExecutor::new(block_bytes, batch_keys)?;
     if let Some(buffer) = payload {
-        stream = stream.with_payload(buffer, slot);
+        exec = exec.with_payload(buffer, slot);
     }
-    // Reused across turns so the reactive path allocates nothing per turn.
     let mut path: Vec<u64> = Vec::new();
-    let mut states: Vec<u8> = Vec::new();
-    let mut split = TurnSplit::default();
-    let mut granted: Vec<u8> = Vec::new();
-    let mut stored: Vec<u64> = Vec::new();
     let mut stats = LaneStats {
         min_depth: usize::MAX,
         ..LaneStats::default()
     };
-    let mut latency = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
-        .map_err(|e| format!("cannot build the latency histogram: {e}"))?;
-    let mut by_op: BTreeMap<u32, Histogram<u64>> = BTreeMap::new();
 
-    // Prime: block for the first batch without counting it. Every queue is empty before
-    // the producer has pushed anything, so counting that would invalidate every run —
-    // see the module docs.
+    // Prime: block for the first batch without counting it. Every queue is empty before the
+    // producer has pushed anything, so counting that would invalidate every run — see the
+    // module docs.
     let mut primed = false;
 
     loop {
@@ -1026,104 +766,29 @@ fn consume(c: Consumer) -> Result<LaneLatency, String> {
         stats.pops += 1;
         stats.min_depth = stats.min_depth.min(observed);
 
-        // Offer the whole path, root to the end of the new growth, then act on what the
-        // cache reports. See `TurnSplit`: the operations a turn issues are a function of
-        // the cache's state, which is what lets an evicted block be stored again and what
-        // stores shared prefix blocks that no turn mints.
-        let mut ctx = Ctx {
-            client: &client,
-            channel,
-            stream: &mut stream,
-            batch_keys,
-        };
+        // Everything about which keys, which session and when came from the producer; the
+        // executor decides only load-versus-store, from what the cache reports.
         batch.key_path(&mut path);
-        states.clear();
-        issue_keyed(
-            &mut ctx,
-            &mut stats,
-            &mut latency,
-            &mut by_op,
-            op::CHECK,
-            &path,
-            0,
-            Some(&mut states),
-        )?;
-        split.split(&path, &states);
-
-        // What is present: report the reference, then load it.
-        for opcode in [op::TOUCH, op::LOOKUP] {
-            issue_keyed(
-                &mut ctx,
-                &mut stats,
-                &mut latency,
-                &mut by_op,
-                opcode,
-                split.resident(),
-                0,
-                None,
-            )?;
-        }
-        // What is absent: store it. A session id is needed for the reservation, and every
-        // key in this batch belongs to one turn of one session.
         let session = batch
             .operations()
             .first()
             .map(|o| o.session())
             .unwrap_or_default();
-        // Reserve first, and keep its per-key answer: a transfer DMAs a block into the
-        // slot a reservation granted, so writing for a key whose reserve was declined is a
-        // block of payload sent nowhere. Measured before this filter existed: 88 blocks
-        // written against 12 declined reserves, so 12 blocks of the reported write
-        // bandwidth had no reservation behind them.
-        granted.clear();
-        issue_keyed(
-            &mut ctx,
-            &mut stats,
-            &mut latency,
-            &mut by_op,
-            op::RESERVE,
-            split.missing(),
-            session,
-            Some(&mut granted),
-        )?;
-        granted_keys(split.missing(), &granted, &mut stored);
-        for opcode in [op::COPY_TO_STORE, op::COMMIT_STORE] {
-            issue_keyed(
-                &mut ctx,
-                &mut stats,
-                &mut latency,
-                &mut by_op,
-                opcode,
-                &stored,
-                session,
-                None,
-            )?;
-        }
-        stats.check_pending += split.pending();
-
-        // The event poll is not keyed, and the plan decides how often it happens.
-        if batch
+        let polls = batch
             .operations()
             .iter()
-            .any(|o| o.kind() == OpKind::PollEvents)
-        {
-            issue_keyed(
-                &mut ctx,
-                &mut stats,
-                &mut latency,
-                &mut by_op,
-                op::TAKE_EVENTS,
-                &[],
-                0,
-                None,
-            )?;
-        }
+            .any(|o| o.kind() == OpKind::PollEvents);
+        exec.run_turn(&client, channel, session, &path, polls)?;
     }
 
     if stats.min_depth == usize::MAX {
         stats.min_depth = 0;
     }
-    Ok((stats, latency, by_op))
+    stats.counters = *exec.counters();
+    let (skipped, skipped_keys) = exec.skipped();
+    stats.skipped_needing_gpu = skipped;
+    stats.skipped_keys = skipped_keys;
+    Ok((stats, exec.latency().clone(), exec.latency_by_op().clone()))
 }
 
 #[cfg(test)]
@@ -1190,13 +855,19 @@ mod tests {
         let s = stats(
             vec![
                 LaneStats {
-                    requests: 50,
-                    key_references: 500,
+                    counters: Counters {
+                        requests: 50,
+                        key_references: 500,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
                 LaneStats {
-                    requests: 50,
-                    key_references: 1_500,
+                    counters: Counters {
+                        requests: 50,
+                        key_references: 1_500,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
             ],
@@ -1223,45 +894,19 @@ mod tests {
     }
 
     #[test]
-    fn only_a_granted_reservation_is_transferred() {
-        // `op_reserve` answers one byte per key. A declined key has no slot, so transferring
-        // it sends a payload nowhere and its commit then fails for want of a pending write.
-        let missing = [10u64, 11, 12, 13];
-        let mut out = Vec::new();
-        granted_keys(&missing, &[1, 0, 1, 0], &mut out);
-        assert_eq!(out, vec![10, 12]);
-
-        // All granted, and none.
-        granted_keys(&missing, &[1, 1, 1, 1], &mut out);
-        assert_eq!(out, missing);
-        granted_keys(&missing, &[0, 0, 0, 0], &mut out);
-        assert!(
-            out.is_empty(),
-            "nothing was reserved, so nothing may be sent"
-        );
-    }
-
-    #[test]
-    fn a_short_reserve_answer_grants_only_what_it_answered_for() {
-        // Assuming success for an unanswered key would write a block Certus never reserved.
-        let mut out = Vec::new();
-        granted_keys(&[1, 2, 3], &[1], &mut out);
-        assert_eq!(out, vec![1]);
-        granted_keys(&[1, 2, 3], &[], &mut out);
-        assert!(out.is_empty());
-    }
-
-    #[test]
     fn bandwidth_counts_a_lookup_hit_as_read_and_an_accepted_transfer_as_write() {
         // The only two payload-moving operations. A LOOKUP miss brings no bytes, and a
         // declined COPY_TO_STORE sends none, so both are excluded — otherwise a run against
         // a cold cache would report reading data it never received.
         let s = stats(
             vec![LaneStats {
-                lookup_hits: 10,
-                lookup_misses: 90,
-                transfers_attempted: 8,
-                transfers_declined: 3,
+                counters: Counters {
+                    lookup_hits: 10,
+                    lookup_misses: 90,
+                    transfers_attempted: 8,
+                    transfers_declined: 3,
+                    ..Default::default()
+                },
                 ..Default::default()
             }],
             2.0,
@@ -1281,9 +926,12 @@ mod tests {
         // nothing, and must not be credited with bandwidth for the misses.
         let s = stats(
             vec![LaneStats {
-                key_references: 10_000,
-                lookup_hits: 0,
-                lookup_misses: 500,
+                counters: Counters {
+                    key_references: 10_000,
+                    lookup_hits: 0,
+                    lookup_misses: 500,
+                    ..Default::default()
+                },
                 ..Default::default()
             }],
             1.0,

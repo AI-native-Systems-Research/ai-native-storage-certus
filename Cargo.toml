@@ -129,4 +129,6 @@ shmq-dispatcher = { path = "lib/shmq-dispatcher" }
 workload-model = { path = "apps/workload-generator/crates/workload-model" }
 workload-trace = { path = "apps/workload-generator/crates/workload-trace" }
 workload-wire = { path = "apps/workload-generator/crates/workload-wire" }
+# The node agent depends on this so the reactive rule has one implementation, not two.
+workload-gen = { path = "apps/workload-generator/crates/workload-gen" }
 libloading = "0.8"
