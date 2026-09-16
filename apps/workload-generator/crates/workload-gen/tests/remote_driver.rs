@@ -67,10 +67,16 @@ impl Service for Stub {
     }
 }
 
+/// What each stand-in agent recorded, keyed by the port it served on.
+type Observed = Arc<Mutex<Vec<(u16, Seen)>>>;
+
+/// Stop flags for the stand-in agents this launcher started, keyed by port.
+type Running = Arc<Mutex<Vec<(u16, Arc<AtomicBool>)>>>;
+
 #[derive(Clone)]
 struct LocalLauncher {
-    seen: Arc<Mutex<Vec<(u16, Seen)>>>,
-    running: Arc<Mutex<Vec<(u16, Arc<AtomicBool>)>>>,
+    seen: Observed,
+    running: Running,
 }
 
 impl LocalLauncher {

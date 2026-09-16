@@ -19,6 +19,9 @@ use workload_wire::frame::{Hello, HelloAck, ShutdownAck, SubmitTurn, TurnOutcome
 use workload_wire::handshake;
 use workload_wire::server::{FnFactory, Server, Service};
 
+/// Stop flags for the stand-in agents this launcher started, keyed by port.
+type Running = Arc<Mutex<Vec<(u16, Arc<AtomicBool>)>>>;
+
 /// The trivial service a stand-in agent serves.
 struct Stub {
     /// How the handshake should answer, so a stale leftover can be simulated.
@@ -59,7 +62,7 @@ struct LocalLauncher {
     /// killed everything would pass tests the production launcher would fail, and it did —
     /// starting a second agent stopped the first, because replacing a non-existent leftover
     /// calls `kill`.
-    running: Arc<Mutex<Vec<(u16, Arc<AtomicBool>)>>>,
+    running: Running,
     /// When set, `launch` starts nothing — for the "never comes up" case.
     refuse_to_launch: bool,
 }
