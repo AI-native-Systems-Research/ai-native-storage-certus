@@ -27,10 +27,10 @@
 //! and growth `g = E[input] + E[output]` per turn:
 //!
 //! ```text
-//! references = 2*H*T  +  g*T*(T-1)  +  3*g*T
-//!              └ check+load over the shared run
-//!                          └ check+load over accumulated growth
-//!                                        └ reserve+transfer+commit, both runs
+//! references = 3*H*T  +  1.5*g*T*(T-1)  +  3*g*T
+//!              └ check+touch+load over the shared run
+//!                             └ ...over accumulated growth
+//!                                            └ reserve+transfer+commit, both runs
 //! ```
 //!
 //! so the projection needs `E[T²]`, which no distribution here exposes in closed
@@ -341,7 +341,10 @@ pub fn project_with(
         // Operations per turn. See the module docs on the emptiness assumption.
         let mut ops_per_turn = 0.0;
         if shared_blocks > 0.0 || g > 0.0 {
-            ops_per_turn += 2.0; // check + load
+            // Check, touch and load, all over the same prefix. Three, not two: the
+            // reference report is its own operation in the shipped client, and
+            // `plan.rs` records why leaving it out was a defect.
+            ops_per_turn += 3.0;
         }
         if input.effective().mean > 0.0 {
             ops_per_turn += 3.0;
@@ -355,7 +358,8 @@ pub fn project_with(
         // References per *session*, then scaled by sessions completing in the span.
         // `E[T^2]` by Monte Carlo; see the module docs.
         let (e_t, e_t2) = turn_moments(&turns, &mut rng);
-        let per_session = 2.0 * shared_blocks * e_t + g * (e_t2 - e_t) + 3.0 * g * e_t;
+        // Three passes over the prefix (check, touch, load) rather than two.
+        let per_session = 3.0 * shared_blocks * e_t + 1.5 * g * (e_t2 - e_t) + 3.0 * g * e_t;
         let sessions_in_span = class_turns / e_t.max(1.0);
         key_references += (sessions_in_span * per_session).ceil() as u64;
     }

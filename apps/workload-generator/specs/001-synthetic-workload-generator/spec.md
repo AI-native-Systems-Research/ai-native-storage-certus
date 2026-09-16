@@ -406,6 +406,16 @@ modes reorder the policies.
   operation that the production client does not have.
 - **FR-041**: System MUST report block references the way the production client
   does, without requesting tier promotion.
+
+  *Note.* This is a **separate operation** from asking which blocks are
+  present, and an earlier implementation of the plan conflated the two. The
+  shipped client makes two distinct calls: one asking what is resident, and one
+  — documented as "update eviction ordering for the given keys" — reporting the
+  reference. Only the second informs a recency-based policy, so omitting it
+  scores every such policy against a workload in which nothing is ever recently
+  used. Nothing in the emitted trace or the plan's own invariants would reveal
+  that, which is why the requirement is called out here rather than left
+  implicit in FR-039.
 - **FR-042**: System MUST poll for cache events, because the production client
   does and it costs the server real work.
 - **FR-043**: System MUST NOT send removal, pinning, unpinning, or promotion

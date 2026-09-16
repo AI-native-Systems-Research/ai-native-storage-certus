@@ -69,10 +69,27 @@ Shutdown    (4): req  { }
                  resp { ops_submitted:u64, ops_failed:u64 }
 ```
 
-`op_kind` mirrors the plan's operation kinds — check, load, reserve, transfer,
-commit, abort, poll-events — so the agent is a submission relay and never
-decides *what* to issue. Deciding that on the agent would put workload
+`op_kind` mirrors the plan's operation kinds — check, **touch**, load, reserve,
+transfer, commit, abort, poll-events — so the agent is a submission relay and
+never decides *what* to issue. Deciding that on the agent would put workload
 semantics on two sides of a network boundary.
+
+**`touch` was missing from this list and from the plan, and that was a defect
+rather than an omission.** It is the reference report (FR-041), and in the
+shipped client it is a distinct call from the check: `batch_check` asks which
+blocks are present, while `touch` is documented as "update eviction ordering
+for the given keys". Without it the eviction policy never learns that a read
+happened, so a recency policy would be scored against a workload in which
+nothing is ever recently used — the worst available bug for an instrument built
+to evaluate that policy, and one no emitted trace would reveal.
+
+**These `op_kind` values are this protocol's own and are not the mailbox's.**
+The generator-to-agent wire numbers them from zero in the order above; Certus's
+shared-memory mailbox uses its own opcodes (`CHECK` 1, `TOUCH` 2, `RESERVE` 3,
+`COPY_TO_STORE` 4, `COMMIT_STORE` 5, `ABORT_STORE` 6, `LOOKUP` 9, `TAKE_EVENTS`
+10 — read from `lib/shmq-dispatcher/src/wire.rs`). The agent translates between
+them, and a table with the mapping belongs in the agent rather than in either
+protocol, so that neither can drift into silently meaning the other.
 
 ## The Hello handshake is mandatory and fail-closed
 
