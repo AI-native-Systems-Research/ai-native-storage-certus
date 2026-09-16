@@ -516,9 +516,35 @@ Teeth verified per property: unchained keys fail only
 it is the test for that), and a lost canonical sort fails only the general
 agreement test.
 
-- [ ] T029 Implement the virtual-time event loop in
+- [x] T029 Implement the virtual-time event loop in
   `crates/workload-model/src/sim.rs`: think time before each turn, session
   birth and death, pool events. Node placement and migration are US3
+**T029 notes.** `Simulation::new(&description, seed)` builds and seeds
+everything, then `step`/`run_until` deliver turns through a `FnMut(&Session,
+&Turn)` — a callback rather than a return value because a session that has just
+taken its last turn is finished in the same step, and the callback is the only
+moment its chain can still be read. That is the seam T030 builds the plan on.
+
+**Event order at one instant is fixed and deliberate**: shared-pool events, then
+session arrivals, then turns. A turn at `t` must see the population as of `t`;
+the reverse order would make a session's shared set depend on the order two
+pools happened to be declared in.
+
+**A real defect found by the same-instant test.** An empirical `think_time`
+with an atom at zero has a positive mean, so it is accepted, and draws of
+exactly zero let a session be born, run and finish **inside one step** — with
+its slab handle reused by its replacement in that same step. `admit_new`
+filtered unbound handles *before* binding, so a handle listed twice for two
+different sessions was bound twice. Fixed by checking immediately before each
+bind; verified by reinstating the filter, which fails with "session 57 bound
+twice".
+
+**One claim I made and then measured as WRONG.** A comment said the `while` in
+step 3 was needed for correctness — that an `if` would deliver a same-instant
+turn out of order. It would not: the next step picks it up at the same `t`.
+Changing it to an `if` breaks no test. The `while` batches an instant into one
+step, which is efficiency, not correctness. Corrected in place.
+
 - [ ] T030 Implement `OperationPlan` and `Operation` in
   `crates/workload-model/src/plan.rs`: the operation kinds from
   `data-model.md`, totally ordered by virtual time with a deterministic
