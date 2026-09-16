@@ -54,7 +54,7 @@
 use std::collections::{HashMap, HashSet};
 
 use shmq_dispatcher::wire::{self, op};
-use workload_gen::opstream::{forbidden_opcode, Encoding, OpStream};
+use workload_gen::opstream::{forbidden_opcode, Encoding, OpStream, TurnSplit};
 use workload_gen::payload::HandleBatchTemplate;
 use workload_model::description::WorkloadDescription;
 use workload_model::plan::{OpKind, OperationPlan};
@@ -139,9 +139,22 @@ impl Mailbox {
         match opcode {
             op::CHECK => {
                 let keys = self.read_keys(opcode, payload);
-                // A check is read-only: reporting every key a miss is deterministic and
-                // FR-036 makes real hit/miss outcomes non-reproducible anyway.
-                vec![0u8; keys.len()]
+                // Answers from the mock's own state, exactly as `op_check` does: a
+                // reservation in flight is PENDING, a committed key is RESIDENT, anything
+                // else MISS. Modelling this is what lets the reactive executor be tested —
+                // a mock that always said MISS would store on every turn and never
+                // exercise the resident path.
+                keys.iter()
+                    .map(|k| {
+                        if self.pending.contains_key(k) {
+                            wire::check_state::PENDING
+                        } else if self.committed.contains(k) {
+                            wire::check_state::RESIDENT
+                        } else {
+                            wire::check_state::MISS
+                        }
+                    })
+                    .collect()
             }
             op::TOUCH => {
                 let mut r = wire::Reader::new(payload);
@@ -194,6 +207,16 @@ impl Mailbox {
                 let keys = self.read_handle_batch(opcode, payload);
                 let mut out = Vec::with_capacity(keys.len());
                 for key in &keys {
+                    if opcode == op::LOOKUP && !self.committed.contains(key) {
+                        // A load of a key the cache does not hold. Under the reactive rule
+                        // this should never happen: the executor loads only what CHECK
+                        // reported resident, so a load of an absent key means it acted on
+                        // a decision the cache never gave it.
+                        self.violations.push(format!(
+                            "LOOKUP for key {key} that was never committed: the executor \
+                             must load only what CHECK reported RESIDENT"
+                        ));
+                    }
                     if opcode == op::COPY_TO_STORE {
                         // FR-040: a transfer belongs between a reserve and a commit.
                         if !self.pending.contains_key(key) {
@@ -359,35 +382,115 @@ impl Mailbox {
     }
 }
 
-/// Drive a whole plan through the encoder into the mock, chunked to `batch_keys`.
+/// Chunk a key list the way the driver does, yielding one empty chunk for a keyless
+/// operation so that a poll still produces a request.
+fn chunks_of(keys: &[u64], n: usize) -> Vec<&[u64]> {
+    if keys.is_empty() {
+        return vec![&[]];
+    }
+    keys.chunks(n).collect()
+}
+
+/// Drive a whole plan through the reactive executor into the mock.
+///
+/// This mirrors what `live::consume` does and shares the decision with it via
+/// [`TurnSplit`]: offer the turn's whole path root-to-growth with `CHECK`, then touch and
+/// load what came back resident and store what came back absent (FR-072a). The mock answers
+/// `CHECK` from its own committed and pending sets, so a warm path really does stop being
+/// stored — a mock that always said MISS would store on every turn and never exercise the
+/// resident branch at all.
 fn drive(plan: &OperationPlan, batch_keys: usize, with_gpu: bool) -> Mailbox {
     let mut stream = OpStream::new(BLOCK_BYTES, batch_keys);
     if with_gpu {
         stream = stream.with_template(template(batch_keys), None, 0);
     }
     let mut mailbox = Mailbox::default();
-    for op in plan.operations() {
-        let all = plan.keys_of(op);
-        let mut start = 0usize;
-        loop {
-            let end = (start + batch_keys).min(all.len());
-            let chunk = &all[start..end];
-            match stream
-                .encode_chunk(op.kind(), chunk, op.session())
-                .expect("encoding must not fail without stamping")
-            {
-                Encoding::Ready { opcode, payload } => {
-                    mailbox.request(opcode, payload);
+    let mut split = TurnSplit::default();
+    let mut path: Vec<u64> = Vec::new();
+    let mut states: Vec<u8> = Vec::new();
+
+    // One turn at a time, because the reactive rule is per turn. A turn is the run of
+    // operations sharing one (session, virtual instant), which is how `record_turn` emits.
+    let ops = plan.operations();
+    let mut i = 0usize;
+    while i < ops.len() {
+        let id = (ops[i].session(), ops[i].at().to_bits());
+        let mut j = i;
+        while j < ops.len() && (ops[j].session(), ops[j].at().to_bits()) == id {
+            j += 1;
+        }
+        let group = &ops[i..j];
+
+        // The path: root of the prefix through the end of the new growth. Check names the
+        // prefix and Reserve the growth; Touch/Load and Transfer/Commit only repeat them.
+        path.clear();
+        let mut seen = HashSet::new();
+        for op in group {
+            if matches!(op.kind(), OpKind::Check | OpKind::Reserve) {
+                for key in plan.keys_of(op) {
+                    if seen.insert(*key) {
+                        path.push(*key);
+                    }
                 }
-                Encoding::NeedsGpuPayload { .. } | Encoding::NotPlanned => {}
-            }
-            start = end;
-            if start >= all.len() {
-                break;
             }
         }
+
+        states.clear();
+        issue(
+            &mut mailbox,
+            &mut stream,
+            OpKind::Check,
+            &path,
+            0,
+            Some(&mut states),
+        );
+        split.split(&path, &states);
+        for kind in [OpKind::Touch, OpKind::Load] {
+            issue(&mut mailbox, &mut stream, kind, split.resident(), 0, None);
+        }
+        let session = group[0].session();
+        for kind in [OpKind::Reserve, OpKind::Transfer, OpKind::Commit] {
+            issue(
+                &mut mailbox,
+                &mut stream,
+                kind,
+                split.missing(),
+                session,
+                None,
+            );
+        }
+        if group.iter().any(|o| o.kind() == OpKind::PollEvents) {
+            issue(&mut mailbox, &mut stream, OpKind::PollEvents, &[], 0, None);
+        }
+        i = j;
     }
     mailbox
+}
+
+/// Issue one kind over `keys`, chunked, collecting response bytes when asked.
+fn issue(
+    mailbox: &mut Mailbox,
+    stream: &mut OpStream,
+    kind: OpKind,
+    keys: &[u64],
+    session: u64,
+    mut collect: Option<&mut Vec<u8>>,
+) {
+    if keys.is_empty() && kind != OpKind::PollEvents {
+        return;
+    }
+    let batch_keys = stream.batch_keys();
+    for chunk in chunks_of(keys, batch_keys) {
+        match stream.encode_chunk(kind, chunk, session).unwrap() {
+            Encoding::Ready { opcode, payload } => {
+                let body = mailbox.request(opcode, payload);
+                if let Some(out) = collect.as_deref_mut() {
+                    out.extend_from_slice(&body);
+                }
+            }
+            Encoding::NeedsGpuPayload { .. } | Encoding::NotPlanned => {}
+        }
+    }
 }
 
 #[test]
@@ -457,12 +560,18 @@ fn the_reference_report_is_issued_so_recency_policies_see_a_recent_workload() {
         "no TOUCH was issued: recency policies would be scored against a workload where \
          nothing is ever recently used"
     );
-    // And it must report the blocks that were read, not a token few.
-    assert!(
-        mailbox.keys(op::TOUCH) >= mailbox.keys(op::CHECK),
-        "TOUCH covered {} keys but CHECK covered {}",
+    // Under the reactive rule TOUCH covers the *resident* subset, not the whole path —
+    // touching a key the cache does not hold reorders nothing. The invariant that carries
+    // the recency signal is that every key we load, we also report: a load without a touch
+    // would read a block while leaving the policy believing it was never used.
+    assert_eq!(
         mailbox.keys(op::TOUCH),
-        mailbox.keys(op::CHECK)
+        mailbox.keys(op::LOOKUP),
+        "every loaded key must also be touched"
+    );
+    assert!(
+        mailbox.keys(op::TOUCH) < mailbox.keys(op::CHECK),
+        "the whole path was touched, so the resident split is not being applied"
     );
 }
 
@@ -816,56 +925,136 @@ fn read_references_far_outnumber_stores_which_is_why_a_cold_run_still_hits() {
 }
 
 #[test]
-fn shared_prefix_blocks_are_read_but_never_stored_so_they_can_never_hit() {
-    // A cold run and a warm run of the same seed report *identical* check results — 60
-    // resident, 96 miss of 156 — which cannot be true if the cache retains what the
-    // previous run stored. This test locates why.
+fn the_shared_root_is_stored_by_whichever_turn_first_finds_it_missing() {
+    // The regression guard for the defect that prompted FR-072a. Shared prefix blocks sit
+    // at the root of every path and **no turn mints them**, so the plan's own `Reserve`
+    // operations exclude them. Under a fixed operation list nothing stored them, ever:
+    // cross-session prefix sharing produced no cache hits at all, and a cold and a warm run
+    // reported byte-identical check results because 192 of 312 read references named 4 keys
+    // nothing would ever store.
     //
-    // The read references split into two populations. Session-private prefix blocks are
-    // stored by the turn that mints them and read by every later turn of that session, so
-    // they go resident. Shared-object blocks are read by every session that binds the
-    // object and are **never reserved by anyone**, so they miss on every reference, in
-    // every run, however warm the cache is.
-    //
-    // That is a defect, not a property. spec.md's own race note says two sessions may both
-    // miss on the same shared prefix and both store it — which presumes sessions store
-    // shared prefixes. Equilibrium seeding places shared objects as though they already
-    // existed, but nothing ever puts them into Certus, so cross-session sharing — the
-    // central phenomenon this generator exists to exercise — contributes no cache hits at
-    // all, and every live hit rate is structurally understated.
+    // Offering the whole path fixes it — the first turn to find them absent stores them.
     let plan = live_plan(7, 60.0);
-    let (per_kind, read, stored) = breakdown(&plan);
-    let never_stored: HashSet<u64> = read.difference(&stored).copied().collect();
+    let (_, read, planned_stores) = breakdown(&plan);
+    let never_planned: HashSet<u64> = read.difference(&planned_stores).copied().collect();
     assert!(
-        !never_stored.is_empty(),
-        "nothing is read-but-unstored, so this defect is fixed and the test should be \
-         rewritten as a regression guard"
+        !never_planned.is_empty(),
+        "this description has no shared blocks, so it cannot test the property"
     );
 
-    // How many *references* those keys account for, which is what the miss count sees.
-    let mut refs_to_never_stored = 0u64;
-    let mut refs_total = 0u64;
-    for op in plan.operations() {
-        if !matches!(op.kind(), OpKind::Check | OpKind::Load) {
-            continue;
+    let mailbox = drive(&plan, 64, true);
+    assert!(mailbox.violations.is_empty(), "{:?}", mailbox.violations);
+    for key in &never_planned {
+        assert!(
+            mailbox.committed.contains(key),
+            "shared root key {key} was never stored, so no session can ever hit it"
+        );
+    }
+}
+
+#[test]
+fn a_warm_path_stops_being_stored_and_an_evicted_block_is_stored_again() {
+    // Two properties of the reactive rule, both invisible under a fixed operation list.
+    //
+    // First: once a path is resident, later turns stop storing it. Under a fixed list every
+    // turn re-stored its new growth regardless, and the server answered `AlreadyExists`.
+    //
+    // Second, and the reason this matters beyond tidiness: a block **evicted mid-run** is
+    // stored again when a later turn finds it absent. Without that a run's hit rate can only
+    // decay, and the generator would be measuring a cache it never refills.
+    let plan = live_plan(7, 60.0);
+
+    // Drive once to warm the mock, then again over the same plan.
+    let mut warm = drive(&plan, 64, true);
+    let stored_first = warm.keys(op::RESERVE);
+    assert!(stored_first > 0, "the first pass stored nothing");
+    warm.counts.clear();
+    warm.keys_seen.clear();
+    warm.violations.clear();
+
+    // Re-drive the same turns against the now-warm mock: nothing should need storing.
+    let plan2 = live_plan(7, 60.0);
+    let ops = plan2.operations();
+    let mut split = TurnSplit::default();
+    let mut stream = OpStream::new(BLOCK_BYTES, 64).with_template(template(64), None, 0);
+    let mut path = Vec::new();
+    let mut states = Vec::new();
+    let mut i = 0usize;
+    while i < ops.len() {
+        let id = (ops[i].session(), ops[i].at().to_bits());
+        let mut j = i;
+        while j < ops.len() && (ops[j].session(), ops[j].at().to_bits()) == id {
+            j += 1;
         }
-        for key in plan.keys_of(op) {
-            refs_total += 1;
-            if never_stored.contains(key) {
-                refs_to_never_stored += 1;
+        path.clear();
+        let mut seen = HashSet::new();
+        for op in &ops[i..j] {
+            if matches!(op.kind(), OpKind::Check | OpKind::Reserve) {
+                for key in plan2.keys_of(op) {
+                    if seen.insert(*key) {
+                        path.push(*key);
+                    }
+                }
             }
         }
+        states.clear();
+        issue(
+            &mut warm,
+            &mut stream,
+            OpKind::Check,
+            &path,
+            0,
+            Some(&mut states),
+        );
+        split.split(&path, &states);
+        for kind in [OpKind::Reserve, OpKind::Transfer, OpKind::Commit] {
+            issue(
+                &mut warm,
+                &mut stream,
+                kind,
+                split.missing(),
+                ops[i].session(),
+                None,
+            );
+        }
+        i = j;
     }
-    eprintln!(
-        "read refs {refs_total}; {refs_to_never_stored} of them ({:.1}%) name one of the \
-         {} keys nothing ever stores\nper-kind: {per_kind:?}",
-        refs_to_never_stored as f64 / refs_total as f64 * 100.0,
-        never_stored.len()
+    assert_eq!(
+        warm.keys(op::RESERVE),
+        0,
+        "a fully resident path must need no stores, but {} keys were re-stored",
+        warm.keys(op::RESERVE)
     );
-    // The measured miss count is 96 of 156 checks. If the unstored keys account for
-    // essentially all of it, the misses are structural rather than a cache property.
+
+    // Now evict one key, as Certus may at any time, and confirm the next offer re-stores it.
+    let victim = *warm
+        .committed
+        .iter()
+        .next()
+        .expect("something is committed");
+    warm.committed.remove(&victim);
+    let mut split = TurnSplit::default();
+    let mut states2 = Vec::new();
+    issue(
+        &mut warm,
+        &mut stream,
+        OpKind::Check,
+        &[victim],
+        0,
+        Some(&mut states2),
+    );
+    split.split(&[victim], &states2);
+    assert_eq!(
+        split.missing(),
+        &[victim],
+        "an evicted block must be offered for storing again"
+    );
+    for kind in [OpKind::Reserve, OpKind::Transfer, OpKind::Commit] {
+        issue(&mut warm, &mut stream, kind, split.missing(), 1, None);
+    }
     assert!(
-        refs_to_never_stored > 0,
-        "the unstored keys are never actually referenced"
+        warm.committed.contains(&victim),
+        "the evicted block was not stored again, so the hit rate could only decay"
     );
+    assert!(warm.violations.is_empty(), "{:?}", warm.violations);
 }

@@ -342,6 +342,39 @@ impl OperationPlan {
         }
     }
 
+    /// Append this plan's ordered key path — every distinct key it references, in first
+    /// reference order — to `out`, which is cleared first.
+    ///
+    /// # Why the live path needs the path rather than the operations
+    ///
+    /// A real prefix-caching client does not know in advance what it must store. It offers
+    /// the whole path from the start of the prefix to the end of the new growth, and stores
+    /// whatever came back absent. Which keys those are depends on the cache, so the
+    /// *operations* a turn issues cannot be fixed ahead of time — only the path can.
+    ///
+    /// That is why `spec.md`'s race note ("two sessions race to mint the same shared
+    /// prefix, both may miss and both store") makes sense at all, and it is also what lets
+    /// a block evicted mid-run be stored again. With a fixed operation list nothing ever
+    /// re-stores an evicted block, so a run's hit rate can only decay.
+    ///
+    /// The path is taken from the `Check` and `Reserve` operations, which between them name
+    /// the prefix and the growth; `Touch`/`Load` repeat the check's keys and
+    /// `Transfer`/`Commit` repeat the reserve's, so including them would only duplicate.
+    pub fn key_path(&self, out: &mut Vec<u64>) {
+        out.clear();
+        let mut seen = std::collections::HashSet::new();
+        for op in &self.ops {
+            if !matches!(op.kind(), OpKind::Check | OpKind::Reserve) {
+                continue;
+            }
+            for key in self.keys_of(op) {
+                if seen.insert(*key) {
+                    out.push(*key);
+                }
+            }
+        }
+    }
+
     /// Check the ordering invariant: non-decreasing virtual time, and within one
     /// instant non-decreasing session id (FR-035).
     ///

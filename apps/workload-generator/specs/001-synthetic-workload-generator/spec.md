@@ -610,6 +610,35 @@ modes reorder the policies.
   the workload is. Without this, a trace would not be a function of description
   and seed, and SC-003 would be false; with it, a trace generated on a laptop
   is known to be the workload a cluster would have been driven with.
+- **FR-072a**: Cache outcomes MUST NOT change the workload, and MUST change the
+  interaction. The virtual clock, the session interleaving, the turn schedule and
+  the **key path** of each turn are functions of description and seed alone; a
+  hit or a miss may not perturb any of them. But the **operations issued** to
+  Certus are a function of that path *and of what the cache reports*, because a
+  real prefix-caching client does not know in advance what it must store: it
+  offers every key from the root of the prefix through the end of the turn's new
+  growth, loads what came back resident, and stores what came back absent.
+
+  This is what FR-036's race describes — two sessions racing to mint the same
+  shared prefix both miss and both store — and it is what a fixed operation list
+  cannot express. Two consequences follow, and both are requirements rather than
+  side effects. A block **evicted mid-run MUST be stored again** when a later turn
+  finds it absent; otherwise a run's hit rate can only decay and the generator
+  would be measuring a cache it never refills. And **shared prefix blocks MUST be
+  stored**, by whichever turn first finds them missing; no turn mints them, so a
+  fixed operation list stored them never, and cross-session prefix sharing — the
+  phenomenon this generator exists to exercise — produced no cache hits at all.
+
+  A key reported `PENDING` MUST NOT be re-stored or loaded: another lane's store
+  is in flight, so storing would duplicate it and loading would race the writer.
+- **FR-072b**: For a remote node, the **key path MUST cross the wire, not the
+  operations**. The reactive rule of FR-072a costs several round trips per turn,
+  which is nothing at `/dev/shm` latency and unacceptable over a fabric, so a
+  resident per-node agent receives the turn's path and performs the check, the
+  loads and the stores against its own local Certus. The wire therefore carries
+  what is deterministic — paths, session identity and virtual timing — and never
+  cache outcomes, which keeps FR-072's guarantee intact across nodes while
+  keeping the chatter host-local.
 
 ### Key Entities
 

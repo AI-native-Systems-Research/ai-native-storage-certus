@@ -59,7 +59,7 @@
 
 use std::sync::Arc;
 
-use shmq_dispatcher::wire::op;
+use shmq_dispatcher::wire::{self, op};
 
 use crate::payload::{HandleBatchTemplate, PayloadBuffer};
 use workload_model::plan::OpKind;
@@ -132,6 +132,72 @@ pub fn forbidden_opcode(opcode: u32) -> Option<&'static str> {
             Some("FLUSH_TO_SSD: a tiering decision the production client does not make")
         }
         _ => None,
+    }
+}
+
+/// How a turn's path divides once the cache has answered.
+///
+/// # A turn offers its whole path, root to the end of the new growth
+///
+/// A real prefix-caching client cannot know what it must store. It offers every key from
+/// the root of the prefix through the end of the turn's new growth, and then:
+///
+/// * what came back **resident** it touches and loads — the blocks it does not have to
+///   recompute;
+/// * what came back **missing** it stores — reserve, transfer, commit.
+///
+/// So the operations a turn issues are a function of the cache's state, not of the
+/// description alone. That is what `spec.md`'s race note describes (two sessions racing to
+/// mint the same shared prefix both miss and both store), and it is what lets a block
+/// **evicted mid-run be stored again**. With a fixed operation list nothing re-stores an
+/// evicted block, so a run's hit rate could only ever decay — and shared prefix blocks,
+/// which no turn mints, were never stored at all.
+///
+/// # `PENDING` is neither loaded nor stored
+///
+/// `op_check` answers `PENDING` when another lane has reserved the key and its store is in
+/// flight. `translate.rs` is explicit that "the client only reserves keys that Check
+/// reported absent", so re-storing a pending key would duplicate a store already under way,
+/// and loading it would race the writer. It is counted and skipped.
+#[derive(Debug, Default, Clone)]
+pub struct TurnSplit {
+    resident: Vec<u64>,
+    missing: Vec<u64>,
+    pending: u64,
+}
+
+impl TurnSplit {
+    /// Divide `path` by the `CHECK` states in `states`, reusing the buffers.
+    ///
+    /// `states` is one byte per key in `path`, in order — `wire::check_state`. A short
+    /// `states` leaves the remaining keys untouched rather than guessing, because guessing
+    /// would either invent a hit or invent a store.
+    pub fn split(&mut self, path: &[u64], states: &[u8]) {
+        self.resident.clear();
+        self.missing.clear();
+        self.pending = 0;
+        for (key, state) in path.iter().zip(states.iter()) {
+            match *state {
+                wire::check_state::RESIDENT => self.resident.push(*key),
+                wire::check_state::PENDING => self.pending += 1,
+                _ => self.missing.push(*key),
+            }
+        }
+    }
+
+    /// Keys to touch and load.
+    pub fn resident(&self) -> &[u64] {
+        &self.resident
+    }
+
+    /// Keys to reserve, transfer and commit.
+    pub fn missing(&self) -> &[u64] {
+        &self.missing
+    }
+
+    /// Keys another lane is already storing.
+    pub fn pending(&self) -> u64 {
+        self.pending
     }
 }
 
@@ -405,6 +471,82 @@ session_classes:
         let mut plan = OperationPlan::default();
         sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
         plan
+    }
+
+    #[test]
+    fn a_turn_stores_what_missed_and_loads_what_was_resident() {
+        // The reactive rule, from `wire::check_state`: RESIDENT is loadable, MISS must be
+        // stored, PENDING is another lane's store in flight and is neither.
+        use shmq_dispatcher::wire::check_state::{MISS, PENDING, RESIDENT};
+        let path = [10u64, 11, 12, 13, 14];
+        let states = [RESIDENT, MISS, PENDING, MISS, RESIDENT];
+        let mut split = TurnSplit::default();
+        split.split(&path, &states);
+        assert_eq!(split.resident(), &[10, 14]);
+        assert_eq!(split.missing(), &[11, 13]);
+        assert_eq!(split.pending(), 1);
+        // Every key is accounted for exactly once: a key both loaded and stored would be a
+        // wasted store, and a key in neither would be silently dropped from the workload.
+        assert_eq!(
+            split.resident().len() + split.missing().len() + split.pending() as usize,
+            path.len()
+        );
+    }
+
+    #[test]
+    fn a_pending_key_is_not_re_stored_because_another_lane_is_already_storing_it() {
+        // `translate.rs`: "the client only reserves keys that Check reported absent".
+        // Re-storing would duplicate a store already under way; loading would race the
+        // writer. This is the case a two-valued reading of CHECK gets wrong.
+        use shmq_dispatcher::wire::check_state::PENDING;
+        let mut split = TurnSplit::default();
+        split.split(&[7, 8], &[PENDING, PENDING]);
+        assert!(
+            split.missing().is_empty(),
+            "a pending key must not be re-stored"
+        );
+        assert!(
+            split.resident().is_empty(),
+            "a pending key must not be loaded"
+        );
+        assert_eq!(split.pending(), 2);
+    }
+
+    #[test]
+    fn a_cold_cache_stores_the_whole_path_including_the_shared_root() {
+        // The defect this design fixes. Shared prefix blocks sit at the root of the path
+        // and no turn mints them, so under a fixed operation list nothing ever stored them
+        // and cross-session sharing produced no hits at all. Offering the whole path means
+        // the first turn to miss on them stores them.
+        use shmq_dispatcher::wire::check_state::MISS;
+        let path = [1u64, 2, 3, 4];
+        let mut split = TurnSplit::default();
+        split.split(&path, &[MISS; 4]);
+        assert_eq!(split.missing(), &path, "a cold path must be stored entire");
+        assert!(split.resident().is_empty());
+    }
+
+    #[test]
+    fn a_short_answer_leaves_the_rest_alone_rather_than_guessing() {
+        // A truncated response must not invent a hit (which would skip a needed store) or
+        // invent a miss (which would store a block the cache already has).
+        use shmq_dispatcher::wire::check_state::RESIDENT;
+        let mut split = TurnSplit::default();
+        split.split(&[1, 2, 3], &[RESIDENT]);
+        assert_eq!(split.resident(), &[1]);
+        assert!(split.missing().is_empty());
+        assert_eq!(split.pending(), 0);
+    }
+
+    #[test]
+    fn the_split_buffers_are_reused_without_leaking_the_previous_turn() {
+        use shmq_dispatcher::wire::check_state::{MISS, RESIDENT};
+        let mut split = TurnSplit::default();
+        split.split(&[1, 2, 3], &[MISS, MISS, MISS]);
+        assert_eq!(split.missing().len(), 3);
+        split.split(&[9], &[RESIDENT]);
+        assert_eq!(split.missing().len(), 0, "stale misses survived");
+        assert_eq!(split.resident(), &[9]);
     }
 
     #[test]
