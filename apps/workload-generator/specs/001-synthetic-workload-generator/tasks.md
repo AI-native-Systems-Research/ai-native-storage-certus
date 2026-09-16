@@ -545,18 +545,61 @@ turn out of order. It would not: the next step picks it up at the same `t`.
 Changing it to an `if` breaks no test. The `while` batches an instant into one
 step, which is efficiency, not correctness. Corrected in place.
 
-- [ ] T030 Implement `OperationPlan` and `Operation` in
+- [x] T030 Implement `OperationPlan` and `Operation` in
   `crates/workload-model/src/plan.rs`: the operation kinds from
   `data-model.md`, totally ordered by virtual time with a deterministic
   tie-break on session id, and per-session order strict while cross-session
   operations may overlap
-- [ ] T031 Implement the canonical plan serialisation in
+- [x] T031 Implement the canonical plan serialisation in
   `crates/workload-model/src/plan.rs`, the artifact SC-003 asserts
   byte-identity against
-- [ ] T032 [P] Test in `crates/workload-model/tests/determinism.rs`: the plan
+- [x] T032 [P] Test in `crates/workload-model/tests/determinism.rs`: the plan
   is byte-identical across repeated runs at a fixed seed, **and differs** for a
   different seed — the second half catches a seed that is not wired through,
   which otherwise looks exactly like determinism
+
+**T030-T032 and T037 notes.** A turn becomes check, load, then
+reserve/transfer/ commit for **input** and again for **output**, then a poll.
+Two store sequences rather than one, because a real engine stores the prompt's
+new blocks at the end of prefill and the generated ones as decode produces
+them. `OpKind`'s discriminants **are** the wire `op_kind` values from
+`node-agent-wire.md`, pinned by a test, so the plan and the agent cannot come
+to mean different things.
+
+**`Load` carries the same keys as its `Check`, and must.** Which of them were
+present is a run-time outcome (FR-036), so the plan states the candidate set
+and the executor narrows it. A plan that recorded hits could not be reproduced.
+`Abort` exists for the executor and is **never planned**, asserted by a test.
+
+**Ordering holds by construction, not by sorting.** `sim.rs`'s turn heap now
+keys on `(time, session id)` rather than `(time, class, handle)`, which is
+exactly the order FR-035 specifies — so an emit run can stream without needing
+to hold the plan to sort it. Session ids are run-global and unique, so the
+trailing fields never enter the comparison.
+
+**Two corrections found by testing:**
+
+1. **`key_references()` was wrong.** It returned the key *arena* length, but
+   `Check` and `Load` share one range as a storage optimisation, so it under-
+   reported the figure FR-073 needs — a key mentioned by two operations crosses
+   the wire twice. Now summed over operations, with `interned_keys()` for the
+   arena.
+2. **"References grow quadratically with the span" was wrong.** Per *session*
+   the growth is quadratic, but a fixed span holds proportionally fewer long
+   sessions, so the run total is **linear** in turn count — measured at 1.4x
+   when turns double, not 4x. A projection assuming otherwise would oversize
+   every estimate. Both facts now have tests, the per-session one asserting the
+   closed form `14T + 2T(T-1)` exactly (80 at T=4, 224 at T=8) rather than a
+   ratio.
+
+**T037's audit is in the header of `tests/determinism.rs`, and it reports gaps
+rather than a clean sweep**: of the six invariants, batch-size/lane-count
+independence is unreachable until the live path (T062), cross-machine key
+identity is partial (the vectors pin the key function, but `f64::exp`/`ln` are
+not guaranteed bit-identical across libm versions, so a plan *digest* can still
+differ across machines), and the emit report's omissions have no test because
+the report does not exist until T056. An audit reporting six of six would have
+been describing the table, not the tests.
 
 ### Projection
 
@@ -577,7 +620,7 @@ step, which is efficiency, not correctness. Corrected in place.
 - [ ] T036 [P] Criterion benchmark of per-key plan-generation cost in
   `crates/workload-model/benches/plan.rs`, the measurement Principle I's
   never-the-bottleneck claim rests on
-- [ ] T037 [P] Audit task: confirm each of the six cross-cutting invariants
+- [x] T037 [P] Audit task: confirm each of the six cross-cutting invariants
   tabulated at the end of `data-model.md` has a named test, and record the
   mapping in a comment at the top of
   `crates/workload-model/tests/determinism.rs`
