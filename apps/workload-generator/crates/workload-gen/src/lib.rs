@@ -18,4 +18,6 @@ pub mod live;
 pub mod opstream;
 #[cfg(feature = "live")]
 pub mod payload;
+#[cfg(feature = "live")]
+pub mod remote;
 pub mod report;

@@ -1994,6 +1994,32 @@ Verified live: an agent whose peer vanished without a `Shutdown` logged *"every 
 closed and none reopened within 3s; the control process is gone, so releasing this node's
 resources"* and exited. FR-053 amended to require it, and to forbid an idle timeout.
 
+**T073a done: the remote driver, 3 tests.** Written in the shape FR-079's single driver will
+take, not as a counterpart to `live::run`. The producer is now **shared**, with routing as a
+closure — locally session-id-modulo-lanes, remotely `session.node()` — because the only thing
+that differs between the paths is where a turn is sent. Scoped threads hand each lane a
+distinct `&mut Agent`, so the compiler establishes what a raw-pointer split would have had a
+comment promise.
+
+**Two defects the tests caught, both invisible in a single-node run:**
+
+1. **`produce` created the simulation without the node count**, so every session was placed on
+   node 0 and a three-node run drove one node. Placement belongs to the simulation (FR-048) and
+   the router only reads the answer — the node count had to be passed in.
+2. **Each node's counters were merged into a local total but never written into the lane stats
+   the report reads**, so a completed cluster run reported having moved nothing.
+
+Counters sum and **histograms merge**: three stubs recording three samples each give a merged
+histogram of nine, asserted — not three, which taking one node's would give, and not an average.
+Losing a node mid-run aborts and names it.
+
+**Not yet wired to the CLI (T073b).** `--node` still starts, verifies and refuses. Two things
+must move first: `attach` runs before the node check, so a remote run would still demand a local
+mailbox — contradicting FR-079's off-cluster goal — and the description is loaded after the
+point the remote branch needs it. `live_report` is extracted ready for it, so both paths render
+one report. Attempting the move with little room left produced a tangle that was reverted rather
+than committed half-done.
+
 **T073 done: the flags and the exit code, and a gap in this list named rather than
 papered over.** `--node` (repeatable), `--agent-port` and `--agent-binary` are in, and a
 refused peer is **exit 4**, distinct from a completed-but-invalid run (3) because the actions
@@ -2042,7 +2068,7 @@ same host, and the fixture had to model that or it would pass tests the producti
 launcher would fail.
 - [x] T073 [US3] Add `--node` and `--agent-port` to
   `crates/workload-gen/src/cli.rs`, with exit code 4 for a refused peer
-- [ ] T073a [US3] **The remote driver itself**, which no task covered — an omission in this
+- [x] T073a [US3] **The remote driver itself**, which no task covered — an omission in this
   list rather than work anybody chose to defer. It routes each turn to `session.node()`'s
   agent, collects `TurnOutcome`s, and merges each node's `Counters` and **histograms** at the
   end (counters sum; quantiles do not, so the merge is of distributions and the percentiles are
@@ -2050,6 +2076,11 @@ launcher would fail.
   shape the local path will adopt, rather than as a second driver beside it. It also needs the
   producer currently private to `live.rs` — that should be shared rather than copied, for
   T068a's reason
+- [ ] T073b [US3] Wire `remote::run` into `live_run`. Two things must move for it: `attach`
+  currently runs **before** the node check, so a remote run would still demand a local mailbox —
+  which contradicts FR-079's off-cluster goal — and the description is loaded after the point the
+  remote branch needs it. The report builder is already extracted for this (`live_report`), so
+  both paths render one report
 - [ ] T074 [P] [US3] Test in `crates/workload-wire/tests/loopback.rs`:
   submitting a plan through a loopback agent stub yields the same operation
   sequence as the local path — the transport-level form of FR-072
