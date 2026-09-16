@@ -183,6 +183,13 @@ pub enum Command {
         /// Path to the agent binary **on each node**.
         #[arg(long, default_value = "workload-node-agent")]
         agent_binary: String,
+        /// Use agents that are already running instead of launching them over ssh.
+        ///
+        /// For an operator managing the daemons themselves, and for a local node where ssh is
+        /// unnecessary. It weakens FR-052 — a leftover of the current build is reused rather
+        /// than replaced — which is why it is opt-in.
+        #[arg(long)]
+        no_launch: bool,
         /// Structured report destination.
         #[arg(long)]
         report: Option<PathBuf>,
@@ -328,6 +335,7 @@ pub fn run(cli: Cli) -> i32 {
             nodes,
             agent_port,
             agent_binary,
+            no_launch,
             report,
         } => match live_run(
             &description,
@@ -343,6 +351,7 @@ pub fn run(cli: Cli) -> i32 {
             &nodes,
             agent_port,
             &agent_binary,
+            no_launch,
             report,
         ) {
             Ok((text, code)) => {
@@ -1049,9 +1058,9 @@ fn live_run(
     nodes: &[String],
     agent_port: u16,
     agent_binary: &str,
+    no_launch: bool,
     report_path: Option<PathBuf>,
 ) -> Result<(String, i32), Failure> {
-    use crate::report::{LatencyPercentiles, LiveReport, QueueStats, Tuning};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
@@ -1059,38 +1068,11 @@ fn live_run(
     // (FR-050) — and the turn-routing driver that follows is T073a. Refusing plainly is the
     // honest state: a `--node` that connected and then drove nothing would report a run that
     // never happened.
-    if !nodes.is_empty() {
-        let specs: Vec<crate::agents::AgentSpec> = nodes
-            .iter()
-            .map(|node| crate::agents::AgentSpec {
-                node: node.clone(),
-                port: agent_port,
-                shm_path: shm_path.to_string(),
-                binary: agent_binary.to_string(),
-                lanes,
-                block_bytes: 0,
-                batch_keys,
-                extra_args: Vec::new(),
-            })
-            .collect();
-        let launcher = crate::agents::SshLauncher::default();
-        // A peer refused for provenance or capacity is exit 4, distinct from a run that
-        // completed and was invalid (3): the deployment is wrong, and rerunning will not help.
-        let agents = crate::agents::Agents::start_default(&launcher, &specs)
-            .map_err(|e| Failure::peer(e))?;
-        let count = agents.len();
-        // Torn down on the way out, so a refusal here leaves nothing holding channels.
-        drop(agents);
-        return Err(Failure::other(format!(
-            "started and verified {count} node agent(s), but the turn-routing driver is not \
-             built yet (T073a). Nothing was measured, and reporting a run here would report \
-             one that never happened. Use a local run until T073a lands."
-        )));
-    }
-
+    // Loaded and the handler installed before anything is claimed. A remote run needs the
+    // description and must NOT need a local mailbox: FR-079's point is that the generator can
+    // drive a cluster from a host running no Certus, and calling `attach` first quietly required
+    // one.
     let (description, text, effective) = load(description_path)?;
-    let (client, channels) = crate::live::attach(shm_path, lanes).map_err(Failure::config)?;
-    let node_channels = client.channel_count();
 
     // SIGINT/SIGTERM end the run cleanly; an interrupted run is not a failed one (FR-074),
     // so the handler asks rather than aborts.
@@ -1108,6 +1090,106 @@ fn live_run(
             }
         })
     };
+
+    // Remote mode. Agents are started and verified before the clock starts (FR-050), driven
+    // over TCP by the one driver `remote::run`, then stopped with their teardown checked.
+    if !nodes.is_empty() {
+        let block_bytes = u32::try_from(description.blocks.bytes)
+            .map_err(|_| Failure::config("blocks.bytes exceeds a 32-bit reservation"))?;
+        let specs: Vec<crate::agents::AgentSpec> = nodes
+            .iter()
+            .map(|node| crate::agents::AgentSpec {
+                node: node.clone(),
+                port: agent_port,
+                shm_path: shm_path.to_string(),
+                binary: agent_binary.to_string(),
+                lanes,
+                block_bytes,
+                batch_keys,
+                extra_args: Vec::new(),
+            })
+            .collect();
+        // A peer refused for provenance or capacity is exit 4: the deployment is wrong, and
+        // rerunning it will fail identically.
+        let depth = workload_wire::client::DEFAULT_DEPTH;
+        let mut agents = if no_launch {
+            crate::agents::Agents::start_with(&crate::agents::NoLaunch, &specs, depth, false)
+        } else {
+            crate::agents::Agents::start_with(
+                &crate::agents::SshLauncher::default(),
+                &specs,
+                depth,
+                true,
+            )
+        }
+        .map_err(Failure::peer)?;
+        let options = crate::live::RunOptions {
+            seed,
+            until,
+            batch_keys,
+            gpu_device,
+            stamp_keys,
+            verify_payload,
+            clear_cache,
+        };
+        // Captured before the agents are stopped: the report names the capacity the nodes
+        // actually reported, and printing 0 there would be a wrong number rather than a missing
+        // one.
+        let node_channels: usize = agents
+            .agents()
+            .iter()
+            .map(|a| a.ack.channels as usize)
+            .sum();
+        let driven = crate::remote::run(&mut agents, &description, &options, Arc::clone(&stop));
+        stop.store(true, Ordering::Relaxed);
+        let _ = watcher.join();
+        // Stopped whatever happened, and its teardown checked: a run that failed must still
+        // leave nothing holding mailbox channels (FR-053).
+        if let Err(e) = agents.stop() {
+            eprintln!("warning: agent teardown: {e}");
+        }
+        let out = match driven {
+            Ok(o) => o,
+            // A lost node is exit 3, not 4: the run began and was abandoned, rather than the
+            // deployment being refused before it started.
+            Err(lost) => {
+                return Err(Failure {
+                    message: format!("RUN INVALID \u{2014} {lost}"),
+                    code: exit::INVALID,
+                })
+            }
+        };
+        let mut rendered = effective;
+        rendered.push_str(&live_report(
+            &out.stats,
+            None,
+            node_channels,
+            lanes,
+            batch_keys,
+            seed,
+            description_path,
+            report_path,
+        )?);
+        rendered.push_str(&format!("  nodes             {}\n", nodes.len()));
+        for (node, c) in &out.per_node {
+            rendered.push_str(&format!(
+                "    {node:<20} {:>8} requests, {:>7} blocks read, {:>7} written\n",
+                c.requests,
+                c.blocks_read(),
+                c.blocks_written()
+            ));
+        }
+        let _ = text;
+        let code = if out.stats.is_valid() {
+            exit::OK
+        } else {
+            exit::INVALID
+        };
+        return Ok((rendered, code));
+    }
+
+    let (client, channels) = crate::live::attach(shm_path, lanes).map_err(Failure::config)?;
+    let node_channels = client.channel_count();
 
     let stats = crate::live::run(
         client,
@@ -1127,6 +1209,51 @@ fn live_run(
     .map_err(Failure::other)?;
     stop.store(true, Ordering::Relaxed);
     let _ = watcher.join();
+
+    let text_out = live_report(
+        &stats,
+        None,
+        node_channels,
+        lanes,
+        batch_keys,
+        seed,
+        description_path,
+        report_path,
+    )?;
+    let mut out = effective;
+    out.push_str(&text_out);
+    Ok((
+        out,
+        if stats.is_valid() {
+            exit::OK
+        } else {
+            exit::INVALID
+        },
+    ))
+}
+
+/// Build a live run's report.
+///
+/// Shared by the local and the remote paths, so one cannot report something the other would
+/// not. Under FR-079 the two collapse into a single caller; until then this is where they are
+/// held together.
+///
+/// # Errors
+///
+/// If the structured report cannot be written.
+#[cfg(feature = "live")]
+#[allow(clippy::too_many_arguments)]
+fn live_report(
+    stats: &crate::live::LiveStats,
+    lost_node: Option<String>,
+    node_channels: usize,
+    lanes: usize,
+    batch_keys: usize,
+    seed: u64,
+    description_path: &Path,
+    report_path: Option<PathBuf>,
+) -> Result<String, Failure> {
+    use crate::report::{LatencyPercentiles, LiveReport, QueueStats, Tuning};
 
     let valid = stats.is_valid();
     let report = LiveReport {
@@ -1195,8 +1322,8 @@ fn live_run(
             commits_declined: stats.commits_declined(),
         },
         cleared_entries: stats.cleared_entries,
-        // A local run has no nodes to lose; the remote driver sets this (T073).
-        lost_node: None,
+        // `None` locally; the remote driver passes the node it lost (FR-064).
+        lost_node,
         producer_completed: stats.producer_completed,
         lanes: stats.lanes.len(),
         node_channels,
@@ -1208,8 +1335,11 @@ fn live_run(
         },
         reproduction: Reproduction {
             seed,
-            until: until.unwrap_or(stats.virtual_span),
-            description_digest: digest_of(&text),
+            // The span actually covered, which for an unbounded run is the only answer there is.
+            until: stats.virtual_span,
+            description_digest: digest_of(
+                &std::fs::read_to_string(description_path).unwrap_or_default(),
+            ),
             description_path: description_path.display().to_string(),
         },
         tuning: Tuning { batch_keys, lanes },
@@ -1227,9 +1357,8 @@ fn live_run(
         .map_err(|e| Failure::other(format!("writing {}: {e}", path.display())))?;
     }
 
-    let mut out = effective;
-    out.push_str(&report.render());
-    Ok((out, if valid { exit::OK } else { exit::INVALID }))
+    let out = report.render();
+    Ok(out)
 }
 
 /// Set by the signal handler, polled by the drive loop.

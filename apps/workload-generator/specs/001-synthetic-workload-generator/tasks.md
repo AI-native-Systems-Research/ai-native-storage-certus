@@ -1994,6 +1994,38 @@ Verified live: an agent whose peer vanished without a `Shutdown` logged *"every 
 closed and none reopened within 3s; the control process is gone, so releasing this node's
 resources"* and exited. FR-053 amended to require it, and to forbid an idle timeout.
 
+**T073b done: a cluster run works end to end.** Driven over TCP through the agent into a real
+Certus, exit 0:
+
+```
+check   152 resident, 0 pending, 76 miss of 228 (66.7% resident)
+lookup  152 returned data (100.0% hit)
+CHECK 12us  TOUCH 15  RESERVE 23  COPY_TO_STORE 186  COMMIT_STORE 26  LOOKUP 208
+nodes 1 →  127.0.0.1   166 requests, 152 blocks read, 76 written
+```
+
+The two moves came first, as recorded: the description is now loaded and the stop handler
+installed **before** the node check, and `attach` happens only on the local branch — so a
+remote run no longer requires a local mailbox, which is what FR-079's off-cluster goal needs.
+`live_report` is extracted, so both paths render one report and neither can say something the
+other would not.
+
+**Two gaps the first live attempt exposed.** The generator tried to **ssh to localhost** and was
+refused on host-key verification — correct behaviour, exit 4, but it showed there was no way to
+use an agent somebody else is managing. `--no-launch` now covers that, with `NoLaunch` skipping
+both the launch and the leftover replacement: shutting an agent down and then being unable to
+start one would leave the run with nothing to talk to. It weakens FR-052 deliberately, for the
+case where the caller owns the daemon's lifecycle, which is why it is opt-in.
+
+And **`kill -9` on an agent leaks its mailbox channel claims.** The server cannot know the
+holder is gone, so they stay claimed until it restarts — the next agent reported "could only
+claim 0 of 2 channels". That is the operational reason FR-052's replacement path asks a leftover
+to stop rather than killing it, and a reason not to `-9` an agent.
+
+Also fixed a wrong number rather than a missing one: the remote report printed `1 of 0 channels`
+because the node capacity was passed as zero. It is now the sum the nodes reported, captured
+before they are stopped.
+
 **T073a done: the remote driver, 3 tests.** Written in the shape FR-079's single driver will
 take, not as a counterpart to `live::run`. The producer is now **shared**, with routing as a
 closure — locally session-id-modulo-lanes, remotely `session.node()` — because the only thing
@@ -2076,7 +2108,7 @@ launcher would fail.
   shape the local path will adopt, rather than as a second driver beside it. It also needs the
   producer currently private to `live.rs` — that should be shared rather than copied, for
   T068a's reason
-- [ ] T073b [US3] Wire `remote::run` into `live_run`. Two things must move for it: `attach`
+- [x] T073b [US3] Wire `remote::run` into `live_run`. Two things must move for it: `attach`
   currently runs **before** the node check, so a remote run would still demand a local mailbox —
   which contradicts FR-079's off-cluster goal — and the description is loaded after the point the
   remote branch needs it. The report builder is already extracted for this (`live_report`), so

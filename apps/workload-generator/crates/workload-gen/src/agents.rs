@@ -187,6 +187,31 @@ pub trait Launcher: Send + Sync {
     fn kill(&self, spec: &AgentSpec) -> Result<(), String>;
 }
 
+/// Uses agents that are already running, launching and killing nothing.
+///
+/// For an operator managing the daemons themselves, and for the local node under FR-079 — where
+/// ssh to `localhost` is both unnecessary and, on a host without its own key trusted, refused.
+/// A leftover is still *replaced* in the sense that matters: the handshake refuses a stale one,
+/// and this launcher simply cannot start a fresh one, so a run against a leftover of the current
+/// build reuses it. That is a deliberate weakening of FR-052 for the case where the caller has
+/// taken responsibility for the daemon's lifecycle, and it is why it is not the default.
+#[derive(Debug, Clone, Default)]
+pub struct NoLaunch;
+
+impl Launcher for NoLaunch {
+    fn launch(&self, spec: &AgentSpec) -> Result<(), String> {
+        // Nothing to start; `Agents::start` waits for the port and will report plainly if
+        // nothing is listening there.
+        let _ = spec;
+        Ok(())
+    }
+
+    fn kill(&self, spec: &AgentSpec) -> Result<(), String> {
+        let _ = spec;
+        Ok(())
+    }
+}
+
 /// Launches over ssh, which is the only thing ssh is used for (FR-054).
 #[derive(Debug, Clone, Default)]
 pub struct SshLauncher {
@@ -359,16 +384,35 @@ impl Agents {
         specs: &[AgentSpec],
         depth: usize,
     ) -> Result<Self, String> {
+        Self::start_with(launcher, specs, depth, true)
+    }
+
+    /// Start, optionally reusing whatever is already listening.
+    ///
+    /// `replace` false is for [`NoLaunch`]: shutting an agent down and then being unable to
+    /// start one would leave the run with nothing to talk to.
+    ///
+    /// # Errors
+    ///
+    /// As [`Agents::start`].
+    pub fn start_with<L: Launcher>(
+        launcher: &L,
+        specs: &[AgentSpec],
+        depth: usize,
+        replace: bool,
+    ) -> Result<Self, String> {
         assert!(depth > 0, "a pipelining depth of 0 could never send");
         let mut agents = Vec::with_capacity(specs.len());
         for spec in specs {
             // Always replace, even a current build: a leftover holds the previous run's
             // channels, device memory and counters, and reusing it would report another run's
             // numbers as this one's (FR-052).
-            match replace_leftover(launcher, spec) {
-                Ok(Some(())) => eprintln!("{}: replaced a leftover agent", spec.node),
-                Ok(None) => {}
-                Err(e) => return Err(e),
+            if replace {
+                match replace_leftover(launcher, spec) {
+                    Ok(Some(())) => eprintln!("{}: replaced a leftover agent", spec.node),
+                    Ok(None) => {}
+                    Err(e) => return Err(e),
+                }
             }
             launcher.launch(spec)?;
             let mut client = wait_for_port(spec, depth)?;
