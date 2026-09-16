@@ -12,3 +12,4 @@ pub mod manifest;
 #[cfg(feature = "parquet")]
 pub mod parquet;
 pub mod record;
+pub mod simulator;

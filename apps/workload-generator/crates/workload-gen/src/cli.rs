@@ -36,6 +36,8 @@ use workload_model::project::{project, span_for_invocations, Projection};
 use workload_model::sim::Simulation;
 use workload_trace::jsonl::JsonlWriter;
 use workload_trace::manifest::{BlockStats, Manifest};
+use workload_trace::record::InvocationRecord;
+use workload_trace::simulator::SimulatorWriter;
 
 use crate::report::{ContainerRecords, EmitReport, ProjectionSummary, Reproduction};
 
@@ -68,6 +70,13 @@ pub mod exit {
     pub const INVALID: i32 = 3;
     /// A peer refused: protocol or `build_id` mismatch.
     pub const PEER: i32 = 4;
+}
+
+/// What `convert` projects a stored trace into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ConvertTo {
+    /// The shape `apps/eviction-replay-benchmark` reads.
+    Simulator,
 }
 
 /// Which containers to write.
@@ -116,10 +125,31 @@ pub enum Command {
         /// Structured report destination. Defaults to `report.json` in `--output`.
         #[arg(long)]
         report: Option<PathBuf>,
+        /// Also write the cache-simulator projection here, in the same pass.
+        ///
+        /// A projection is not a trace (FR-075b): no manifest, and never accepted in
+        /// place of the native trace for a reproducibility check.
+        #[arg(long)]
+        simulator: Option<PathBuf>,
         /// Override the documented size ceiling. Never overrides the free-space
         /// check.
         #[arg(long)]
         force: bool,
+    },
+    /// Project a stored trace into another tool's format.
+    ///
+    /// Its input is the *schema*, so it works on any trace in it — including the real
+    /// ones in the corpus, which is what makes a real workload and a generated one
+    /// comparable through the identical projection (FR-075a).
+    Convert {
+        /// A trace directory, or a single JSONL part file.
+        trace: PathBuf,
+        /// Target format.
+        #[arg(long, value_enum)]
+        to: ConvertTo,
+        /// Output file.
+        #[arg(long)]
+        output: PathBuf,
     },
     /// Run the load-time checks and report the effective distributions and the
     /// projection, without writing anything.
@@ -201,8 +231,18 @@ pub fn run(cli: Cli) -> i32 {
             format,
             seed,
             report,
+            simulator,
             force,
-        } => match emit(&description, until, &output, format, seed, report, force) {
+        } => match emit(
+            &description,
+            until,
+            &output,
+            format,
+            seed,
+            report,
+            simulator,
+            force,
+        ) {
             Ok(text) => {
                 print!("{text}");
                 exit::OK
@@ -242,7 +282,68 @@ pub fn run(cli: Cli) -> i32 {
                 e.code()
             }
         },
+        Command::Convert { trace, to, output } => match convert(&trace, to, &output) {
+            Ok(text) => {
+                print!("{text}");
+                exit::OK
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                e.code()
+            }
+        },
     }
+}
+
+/// The `convert` subcommand.
+fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure> {
+    let ConvertTo::Simulator = to;
+    let input_path = if trace.is_dir() {
+        find_jsonl_part(trace).ok_or_else(|| {
+            Failure::config(format!(
+                "{} holds no invocations/*/part-*.jsonl to convert",
+                trace.display()
+            ))
+        })?
+    } else {
+        trace.to_path_buf()
+    };
+    let input = fs::File::open(&input_path)
+        .map_err(|e| Failure::config(format!("cannot read {}: {e}", input_path.display())))?;
+    let out = fs::File::create(output)
+        .map_err(|e| Failure::other(format!("cannot create {}: {e}", output.display())))?;
+    let stats = workload_trace::simulator::convert_jsonl(
+        std::io::BufReader::new(input),
+        BufWriter::new(out),
+    )
+    .map_err(|e| Failure::other(format!("converting {}: {e}", input_path.display())))?;
+
+    Ok(format!(
+        "converted {} to {} for the cache simulator\n           records {}  sessions {}  distinct keys {}  key references {}\n           dropped {} rows with no blocks (the simulator skips them)\n           DROPPED by this projection: virtual time, session identity as such, the \
+         input/output distinction. A projection is not a trace and is not accepted \
+         in place of one for a reproducibility check (FR-077, FR-075b).\n",
+        input_path.display(),
+        output.display(),
+        stats.records,
+        stats.sessions,
+        stats.distinct_keys,
+        stats.key_references,
+        stats.dropped_empty,
+    ))
+}
+
+/// The first `invocations/*/part-*.jsonl` under a trace directory.
+fn find_jsonl_part(dir: &Path) -> Option<PathBuf> {
+    for entry in fs::read_dir(dir.join("invocations")).ok()? {
+        let sub = entry.ok()?.path();
+        for f in fs::read_dir(sub).ok()? {
+            let f = f.ok()?.path();
+            if f.extension().is_some_and(|e| e == "jsonl") {
+                return Some(f);
+            }
+        }
+    }
+    None
 }
 
 /// A failure with the exit code it should produce.
@@ -374,6 +475,7 @@ fn emit(
     format: Format,
     seed: u64,
     report_path: Option<PathBuf>,
+    simulator: Option<PathBuf>,
     force: bool,
 ) -> Result<String, Failure> {
     // NaN takes the is_finite branch, so it is refused rather than slipping past a
@@ -415,11 +517,31 @@ fn emit(
     let file = fs::File::create(&jsonl_path)
         .map_err(|e| Failure::other(format!("cannot create {}: {e}", jsonl_path.display())))?;
     let mut writer = JsonlWriter::new(BufWriter::new(file), &trace_id, block_size);
+
+    // The simulator projection, written in the same pass rather than by converting the
+    // trace afterwards (FR-075): a projection of a workload nobody wants stored should
+    // not require storing it first.
+    let mut simulator_writer = match &simulator {
+        Some(path) => {
+            let f = fs::File::create(path)
+                .map_err(|e| Failure::other(format!("cannot create {}: {e}", path.display())))?;
+            Some(SimulatorWriter::new(BufWriter::new(f)))
+        }
+        None => None,
+    };
+
     let mut write_error = None;
     sim.run_until(until, &mut |s, t| {
         if write_error.is_none() {
             if let Err(e) = writer.write(s, t) {
                 write_error = Some(e);
+                return;
+            }
+            if let Some(w) = simulator_writer.as_mut() {
+                let record = InvocationRecord::from_turn(&trace_id, s, t, block_size);
+                if let Err(e) = w.write_record(&record) {
+                    write_error = Some(e);
+                }
             }
         }
     });
@@ -429,6 +551,13 @@ fn emit(
             jsonl_path.display()
         )));
     }
+    let simulator_stats = match simulator_writer {
+        Some(w) => Some(
+            w.finish()
+                .map_err(|e| Failure::other(format!("closing the simulator file: {e}")))?,
+        ),
+        None => None,
+    };
     let stats: BlockStats = writer
         .finish()
         .map_err(|e| Failure::other(format!("closing {}: {e}", jsonl_path.display())))?;
@@ -488,6 +617,15 @@ fn emit(
 
     let mut out = effective;
     out.push_str(&report.render());
+    if let (Some(path), Some(s)) = (&simulator, &simulator_stats) {
+        out.push_str(&format!(
+            "  simulator         {} records to {} ({} sessions, {} distinct keys)\n",
+            s.records,
+            path.display(),
+            s.sessions,
+            s.distinct_keys
+        ));
+    }
     Ok(out)
 }
 

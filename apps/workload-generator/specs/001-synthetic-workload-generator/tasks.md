@@ -835,11 +835,11 @@ feature-gated test nobody enables is indistinguishable from no test.
   `crates/workload-gen/src/cli.rs`: `validate` runs the load-time checks and
   reports effective distributions and the projection without writing; `plan`
   writes the canonical plan serialisation
-- [ ] T060 [P] [US2] Implement the simulator converter in
+- [x] T060 [P] [US2] Implement the simulator converter in
   `crates/workload-trace/src/simulator.rs`, projecting a trace into the
   `{chat_id, parent_chat_id, hash_ids, type}` shape
   `apps/eviction-replay-benchmark` reads, and wire it as `convert`
-- [ ] T061 [P] [US2] Test in `crates/workload-trace/tests/simulator.rs`: a
+- [x] T061 [P] [US2] Test in `crates/workload-trace/tests/simulator.rs`: a
   converted trace loads in the simulator with distinct-key and session counts
   matching the emit report — the loader derives sessions by walking
   `parent_chat_id`, so a wrong chain still loads while collapsing every session
@@ -847,6 +847,37 @@ feature-gated test nobody enables is indistinguishable from no test.
 - [x] T062 [P] [US2] Test in `crates/workload-gen/tests/emit_determinism.rs`:
   an emit run's output is byte-identical across repeats and across differing
   `--batch-keys` and `--lanes` values — the executable form of FR-072
+
+**T060/T061 notes. `chat_id` must be unique across the whole FILE, not per
+session** — the loader keeps a single `chat_id -> root` map, so two sessions
+each numbering turns from zero would be merged into one conversation. It is a
+running counter over emitted rows, with each session remembering its previous
+turn's counter. **Verified by injecting the per-session version: 98 sessions
+collapsed into 1, and nothing errored.**
+
+**`hash_ids` is the turn's prompt, not its whole chain.** The simulator counts
+every listed key as one access, and a turn reads its prompt while it stores its
+output. No key is lost — a turn's output is part of the next turn's prompt —
+except the final turn's, which is stored and never read again, correctly absent
+from a trace of accesses.
+
+**T061 drives `eviction_replay_benchmark::replay::load` itself** (a test-only
+path dependency) rather than a reimplementation. `research.md` D1 is a claim
+about *another app's* record shape, and my reading of it is exactly what could
+be wrong, so the only way to check it is to run that code. **The assertion that
+matters is not "it loaded" but that the loader's derived session count equals
+the run's** — a wrong chain loads silently and reshapes the conversation graph,
+and a lineage-aware policy would then score against a workload nobody
+described.
+
+**The converter refuses a broken parent chain** rather than emitting it, for
+the same reason.
+
+**Both entry points are wired and produce byte-identical output**, checked end
+to end: `emit --simulator <file>` writes the projection in the same pass
+(FR-075), and `convert <trace> --to simulator` projects a stored trace
+(FR-075a). `cmp` on the two outputs of the same seed: identical. `convert`'s
+output names what the projection drops (FR-077).
 
 **T056-T059 and T062 notes. The emit path runs end to end on the shipped
 example**, and running it found two real defects that no test had:
