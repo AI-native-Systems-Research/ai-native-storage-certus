@@ -656,6 +656,23 @@ impl WorkloadDescription {
                     if eff.lo < 0.0 {
                         report.refuse(format!("{}: cannot be negative", at("think_time")));
                     }
+                    // FR-024 makes a session's duration emergent —
+                    // `E[turns] * E[think_time]` — and the arrival rate
+                    // `size / E[duration]`. A mean think time of zero therefore
+                    // gives instantaneous sessions, and no finite arrival rate can
+                    // sustain any concurrency at all. Refused here rather than left
+                    // to divide by zero mid-run.
+                    if eff.mean <= 0.0 {
+                        report.refuse(format!(
+                            "{}: a mean of {} makes sessions instantaneous, so the \
+                             arrival rate needed to hold {} concurrent sessions is \
+                             unbounded. Session duration is an output of turns and \
+                             think time (FR-024), so give think_time a positive mean",
+                            at("think_time"),
+                            eff.mean,
+                            class.pool.size.nominal()
+                        ));
+                    }
                 }
                 Err(e) => report.refuse(e.within(at("think_time")).to_string()),
             }

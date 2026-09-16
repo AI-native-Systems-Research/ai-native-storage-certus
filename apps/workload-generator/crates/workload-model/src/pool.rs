@@ -326,7 +326,7 @@ impl ResidualLife {
 /// about 745 and a Poisson is the sum of independent Poissons whose means sum to
 /// the same total. Exact rather than a normal approximation, since it is drawn
 /// once per pool at seeding and the cost is irrelevant.
-fn poisson<R: Rng + ?Sized>(rng: &mut R, mean: f64) -> u64 {
+pub(crate) fn poisson<R: Rng + ?Sized>(rng: &mut R, mean: f64) -> u64 {
     if !mean.is_finite() || mean <= 0.0 {
         return 0;
     }
@@ -851,7 +851,7 @@ impl SharedPool {
 }
 
 /// Exponential draw with the given mean, by inverse transform.
-fn exponential<R: Rng + ?Sized>(rng: &mut R, mean: f64) -> f64 {
+pub(crate) fn exponential<R: Rng + ?Sized>(rng: &mut R, mean: f64) -> f64 {
     -mean * (-rng.gen::<f64>()).ln_1p()
 }
 

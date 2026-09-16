@@ -23,6 +23,7 @@ pub mod keys;
 pub mod pool;
 pub mod rng;
 pub mod selection;
+pub mod session;
 mod special;
 
 pub use error::{Error, Result};
