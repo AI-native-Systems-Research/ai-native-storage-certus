@@ -1914,11 +1914,52 @@ rather than of skipping placement.
 `Simulation::migrations()` is reported because an interval long relative to session
 lifetime performs none, and a multi-node measurement that meant to exercise migration
 would otherwise look like one that did.
-- [ ] T071 [US3] Implement agent lifecycle in
+- [x] T071 [US3] Implement agent lifecycle in
   `crates/workload-gen/src/agents.rs`: start before the run and stop after,
   both outside the timed window; idempotent startup that replaces a leftover
   from a crashed run; verified teardown that releases resources even when the
   generator exits abnormally
+
+**T071 done, 9 lifecycle tests + 3 unit; 139 in gen+wire.**
+
+**FR-052 and FR-053 turn out to be two halves of one mechanism**, and reading them
+separately makes the second look impossible: a generator killed with `SIGKILL` runs no
+code, so no teardown it contains can run. Together they work — teardown covers the
+ordinary exit and the panic (a `Drop` guard on `Agents`), and **leftover replacement is
+the backstop for everything else**. A generator that dies without stopping its agents
+leaves them running, and the next run finds them, stops them and starts fresh ones.
+Treating them as separate features is how a teardown bug survives, and this repository
+has already lost an A/B series to one that failed nondeterministically rather than
+visibly.
+
+**A leftover is replaced even when it is the current build.** The provenance check makes
+reusing a *stale* agent impossible but says nothing about a current one — same sources,
+still listening, left from a crashed run. That agent holds mailbox channels claimed for
+the previous run, a device allocation filled for its geometry, and counters that would be
+reported as this run's. FR-052 says "replaced, never silently reused", and the operative
+word is *silently*: reuse would produce a run whose numbers included another run's. One
+that answers is asked to stop, which lets it release its channels in order; one that will
+not answer is killed.
+
+**`Launcher` is a trait, which is what makes the policy testable.** Ssh appears in exactly
+one impl and nowhere else (FR-054), so detect-replace-verify runs here against a real
+agent on a real loopback port — including a leftover of the current build, a stale
+leftover, a silent squatter, a node that never comes up, and a `Drop` with no explicit
+stop. A policy exercisable only on a cluster would be exercised rarely.
+
+**Teardown is verified rather than assumed** (FR-053): `Teardown::port_released` records
+whether the port actually went quiet. An agent that acknowledged a shutdown and kept its
+channels would leave the next run unable to claim them, and that failure would present as
+a mailbox problem rather than a teardown one. A busy port is reported, not raised — the
+run's measurements are already taken, so the caller should see the whole picture.
+
+**A defect the test found: the client could hang forever.** `Client` had no read timeout,
+so a peer that accepted a connection and never answered blocked the generator
+indefinitely — the run neither finished nor failed. That contradicts FR-064 in substance:
+a node becoming unreachable must abort the run, and **a hang is not an abort**. Added
+`DEFAULT_READ_TIMEOUT` (30 s, generous because a turn does real work on the far side) plus
+`with_read_timeout` for probes, which the leftover check uses at 2 s — a squatter must be
+discovered in a moment, not after the default.
 - [ ] T072 [US3] Implement node-loss handling in
   `crates/workload-gen/src/agents.rs`: abort the whole run, report it invalid,
   name the lost node, exit 3. Never continue on the survivors — a lost node
