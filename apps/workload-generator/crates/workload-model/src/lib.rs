@@ -22,6 +22,7 @@ mod error;
 pub mod keys;
 pub mod pool;
 pub mod rng;
+pub mod selection;
 mod special;
 
 pub use error::{Error, Result};

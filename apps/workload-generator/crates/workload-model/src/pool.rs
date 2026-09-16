@@ -544,6 +544,17 @@ impl SharedPool {
         self.birth_rate
     }
 
+    /// The nominal population, whichever form this pool takes.
+    ///
+    /// For [`Population::Exact`] this is also the live count at every instant;
+    /// for [`Population::Poisson`] the live count fluctuates around it with
+    /// variance equal to it, so it is a target rather than a guarantee. Selection
+    /// bounds a draw by `min(nominal, live)` (FR-022), and the two bounds mean
+    /// different things — see `selection.rs`.
+    pub fn nominal(&self) -> u64 {
+        self.form.nominal()
+    }
+
     /// Take a hold on the instance occupying `slot`, keeping its bookkeeping
     /// alive across retirement for as long as the holder needs it (FR-018).
     ///
