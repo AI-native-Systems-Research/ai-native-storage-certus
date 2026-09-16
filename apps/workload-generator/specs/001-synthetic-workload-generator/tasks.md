@@ -1594,6 +1594,54 @@ local hit rate on the origin node is unchanged.
   server, in `crates/workload-wire/tests/conformance.rs`, covering all six
   cases listed in `contracts/node-agent-wire.md`
 
+**T068/a/b/c done. The agent drives a real Certus, end to end.**
+
+**T068a came first, because it is the load-bearing part.** The reactive rule was inside
+`live::consume`, so an agent written beside it would have been a *second*
+implementation — free to drift, with a fix applied on one side and forgotten on the
+other surfacing as a local/remote difference that looked like a property of the
+network. It is now `workload-gen`'s `exec::TurnExecutor`, and both paths call it. The
+local path was re-measured after the extraction and is **byte-identical** to before
+(140 resident / 88 miss of 228, 76 written, 12 reserve declines), so the refactor is
+behaviour-preserving rather than merely compiling.
+
+`LaneStats` now *holds* `workload_wire::frame::Counters` instead of duplicating those
+fields, so a local figure and a remote figure are the same measurement rather than two
+that happen to be named alike (T068c).
+
+**Measured against a live agent and a live server** (`tests/live_agent.rs`, `--ignored`):
+
+```
+cold  missing: 8, granted: 8, blocks_written: 8
+warm  resident: 8, blocks_read: 8
+counters: 7 requests, 56 refs, read 8 blocks, wrote 8 blocks
+  CHECK 30us  TOUCH 14us  RESERVE 33us  COPY_TO_STORE 663us  COMMIT_STORE 34us  LOOKUP 237us
+```
+
+Eight fresh keys all miss and are stored; the same path again comes back **fully
+resident and read back**, which is the assertion that distinguishes "the agent sent
+frames" from "the agent reached a cache". The per-operation shape matches the local
+path's — control operations in the tens of microseconds, the two data movers far higher.
+
+**Three defects that only running it could have found:**
+
+1. **`Counters.blocks_read`/`blocks_written` were fields nothing populated.** The
+   counters said 0 while the per-turn outcomes said 8. They duplicated what
+   `lookup_hits` and `transfers_attempted − declined` already say, so they are now
+   **derived methods**: two representations of one quantity can disagree, one cannot.
+2. **A closed connection never returned its mailbox channel.** An agent could serve
+   `--lanes` connections *in its whole lifetime* and then refuse every client with a
+   connection reset — found by running the test twice. Channels and payload slots now
+   go back to the pool on drop, including when `accept` fails part-way.
+3. **The provenance check fired on a genuinely stale binary** — mine, two minutes old
+   (`70e22ba5…` against `448629b9…`), refused by name. Good demonstration, and also the
+   friction predicted: the agent must be rebuilt after any source edit.
+
+`Stats` returns serialized V2 histograms plus the counters (T068b), and the test
+deserialises them, checks each histogram's length against its reported request count,
+and confirms a serialize/deserialize round trip preserves quantiles — because a
+multi-node merge that silently changed the numbers would be worse than no merge.
+
 **T067 done, 12 handshake tests; 51 in the crate.**
 
 **`build_id` had to become a *source* identity, not a binary digest.** The contract
@@ -1755,22 +1803,22 @@ operation's key list and issue something plausible.
   `proto_version` and `build_id`, and carrying `channels` and `block_bytes`
   back so the generator can check its lane count against the node's real
   capacity
-- [ ] T068 [US3] Implement the node agent binary in
+- [x] T068 [US3] Implement the node agent binary in
   `crates/workload-node-agent/src/main.rs` and `agent.rs`: attach to the local
   mailbox and serve `SubmitTurn` by applying FR-072a's rule against it — check the
   path, load what is resident, store what is absent. It decides no *workload*:
   which keys, which session and which virtual time all come from the generator.
   Exit non-zero if the mailbox is absent
-- [ ] T068a [US3] Depend on `workload-gen`'s library for the split and encoders so
+- [x] T068a [US3] Depend on `workload-gen`'s library for the split and encoders so
   the reactive rule has **one** implementation. Two would let the local and remote
   paths diverge and make FR-072's guarantee unverifiable. It cannot live in
   `workload-wire`, a CUDA-free default member, since depending on `shmq-dispatcher`
   there would unify `interfaces/spdk` into the default build
-- [ ] T068b [US3] Serve `Stats` returning **serialized histograms** per `op_kind`,
+- [x] T068b [US3] Serve `Stats` returning **serialized histograms** per `op_kind`,
   never percentiles: the median of two nodes' medians is not a median, so merging
   percentiles yields a number belonging to no distribution. Needs
   `hdrhistogram`'s `serialization` feature
-- [ ] T068c [US3] Have the **mailbox-facing code be the only collector** of latency
+- [x] T068c [US3] Have the **mailbox-facing code be the only collector** of latency
   and bandwidth, on both paths, and ship its `Counters` back with `Stats`. Only the
   agent is near a remote mailbox, so only it can time a `LOOKUP` or count a block
   that moved; a figure derived from wire timings would describe the transport. The

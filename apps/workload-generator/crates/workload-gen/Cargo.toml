@@ -36,7 +36,9 @@ clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Latency percentiles live in the binary only, never in the simulation core.
-hdrhistogram = "7"
+#  so the node agent can ship a histogram back: quantiles do not merge
+# across nodes, but histograms do (contracts/node-agent-wire.md).
+hdrhistogram = { version = "7", features = ["serialization"] }
 # `statvfs` for the emit path's free-space refusal (FR-073). Needed in the
 # emit-only build too, which is why it is not behind the `live` feature.
 libc = "0.2"

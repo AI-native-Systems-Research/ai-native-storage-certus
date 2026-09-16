@@ -598,13 +598,28 @@ pub struct Counters {
     pub commits_attempted: u64,
     /// Keys it declined.
     pub commits_declined: u64,
-    /// Blocks whose payload came out of the cache — `LOOKUP` hits, and only those.
-    pub blocks_read: u64,
-    /// Blocks whose payload went into it — accepted transfers, and only those.
-    pub blocks_written: u64,
 }
 
 impl Counters {
+    /// Blocks whose payload came out of the cache.
+    ///
+    /// **Derived, not stored.** A `LOOKUP` hit is the only thing that brings a payload back,
+    /// so this is `lookup_hits` — and it was briefly a field of its own, which a live run
+    /// immediately caught reporting zero while the per-turn outcomes said eight. Two
+    /// representations of one quantity can disagree; one cannot.
+    pub fn blocks_read(&self) -> u64 {
+        self.lookup_hits
+    }
+
+    /// Blocks whose payload went into the cache.
+    ///
+    /// An accepted `COPY_TO_STORE` is the only thing that sends one, so a declined transfer
+    /// moved nothing. Derived for the same reason as [`Counters::blocks_read`].
+    pub fn blocks_written(&self) -> u64 {
+        self.transfers_attempted
+            .saturating_sub(self.transfers_declined)
+    }
+
     /// Add another node's counters.
     ///
     /// Counters sum exactly, which is why bandwidth can be aggregated across nodes while a
@@ -623,8 +638,6 @@ impl Counters {
         self.transfers_declined += other.transfers_declined;
         self.commits_attempted += other.commits_attempted;
         self.commits_declined += other.commits_declined;
-        self.blocks_read += other.blocks_read;
-        self.blocks_written += other.blocks_written;
     }
 
     /// Encode, in declaration order.
@@ -654,12 +667,10 @@ impl Counters {
             transfers_declined: r.u64()?,
             commits_attempted: r.u64()?,
             commits_declined: r.u64()?,
-            blocks_read: r.u64()?,
-            blocks_written: r.u64()?,
         })
     }
 
-    fn fields(&self) -> [u64; 15] {
+    fn fields(&self) -> [u64; 13] {
         [
             self.requests,
             self.key_references,
@@ -674,8 +685,6 @@ impl Counters {
             self.transfers_declined,
             self.commits_attempted,
             self.commits_declined,
-            self.blocks_read,
-            self.blocks_written,
         ]
     }
 }
