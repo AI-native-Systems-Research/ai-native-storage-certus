@@ -382,9 +382,52 @@ seeding must change *when* keys churn, not how many.
 
 ### Sessions, turns, and the plan
 
-- [ ] T025 Implement `SessionPool` and `Session` in
+- [x] T025 Implement `SessionPool` and `Session` in
   `crates/workload-model/src/session.rs`, with `pool.size` meaning concurrent
   sessions so arrival rate is an output
+**T025 notes.** Four design decisions, and one hole found in T017.
+
+**A session has no death event.** A shared object's death is an event in its
+own right; a session's *is* its final turn. A death heap was written first and
+removed: it works, but it makes the pool and the loop each decide independently
+when a session ends, and if they ever disagree — a skipped turn, a re-drawn
+think time — the population silently stops matching the operation stream. The
+loop now calls `finish`, which **panics if turns remain**, because retiring
+early would drop operations from the plan and no downstream statistic would
+reveal it.
+
+**The whole turn schedule is drawn at birth**, as absolute virtual times.
+Beyond making `dies_at` a value immediately, this makes each session's schedule
+a function of *its own* birth: with lazy per-turn draws, adding one session
+would shift every later think time in the run. Costs one `f64` per turn per
+live session — under 2 MB at the 10 000-session, 20-turn design scale.
+
+**Sessions live in a slab, not a packed `Vec`.** The first version used
+`swap_remove`, which **silently invalidated the birth handles** the caller
+holds across a step — so binding would have been applied to the wrong session.
+Caught by the birth-reporting test; a test now pins that a handle survives
+another session's death.
+
+**Seeding gives a residual number of remaining TURNS, not a mid-chain prefix.**
+The equilibrium argument in discrete form (length-biased turn count, then a
+uniform point in it, so `E[R] ~ (T+1)/2`). Giving a seeded session the prefix
+it "would have" accumulated was rejected: those blocks would be *read* by an
+operation in the plan while never having been *written* by one, so hit rates
+would be computed against a key space partly conjured out of nothing. The price
+is a recorded bias — for the first mean-duration, seeded sessions have shorter
+chains than steady state.
+
+**`SessionIds` is a distinct type because session ids must be unique across
+CLASSES.** `keys::input_salt` takes a session id and a block ordinal and has
+**no class field**, so two classes each numbering from zero would derive
+*identical keys* for unrelated sessions — showing up as inexplicable
+cross-class hits.
+
+**Found and fixed in T017's validation**: a class whose `think_time` has mean zero
+makes sessions instantaneous, so no finite arrival rate can sustain any
+concurrency and `size / E[duration]` diverges. Now refused at load with the
+arithmetic named, rather than dividing by zero mid-run.
+
 - [ ] T026 Implement canonical ordering in
   `crates/workload-model/src/session.rs`: shared classes in declaration order,
   instances sorted by index within a class
