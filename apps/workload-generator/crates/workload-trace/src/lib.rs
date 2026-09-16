@@ -9,6 +9,7 @@
 
 pub mod jsonl;
 pub mod manifest;
+pub mod mooncake;
 #[cfg(feature = "parquet")]
 pub mod parquet;
 pub mod record;

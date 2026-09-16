@@ -36,6 +36,7 @@ use workload_model::project::{project, span_for_invocations, Projection};
 use workload_model::sim::Simulation;
 use workload_trace::jsonl::JsonlWriter;
 use workload_trace::manifest::{BlockStats, Manifest};
+use workload_trace::mooncake::MooncakeWriter;
 use workload_trace::record::InvocationRecord;
 use workload_trace::simulator::SimulatorWriter;
 
@@ -77,6 +78,8 @@ pub mod exit {
 pub enum ConvertTo {
     /// The shape `apps/eviction-replay-benchmark` reads.
     Simulator,
+    /// The Mooncake FAST'25 trace format — the standard-format export.
+    Mooncake,
 }
 
 /// Which containers to write.
@@ -125,6 +128,9 @@ pub enum Command {
         /// Structured report destination. Defaults to `report.json` in `--output`.
         #[arg(long)]
         report: Option<PathBuf>,
+        /// Also write the Mooncake projection here, in the same pass.
+        #[arg(long)]
+        mooncake: Option<PathBuf>,
         /// Also write the cache-simulator projection here, in the same pass.
         ///
         /// A projection is not a trace (FR-075b): no manifest, and never accepted in
@@ -231,6 +237,7 @@ pub fn run(cli: Cli) -> i32 {
             format,
             seed,
             report,
+            mooncake,
             simulator,
             force,
         } => match emit(
@@ -240,7 +247,10 @@ pub fn run(cli: Cli) -> i32 {
             format,
             seed,
             report,
-            simulator,
+            Projections {
+                mooncake,
+                simulator,
+            },
             force,
         ) {
             Ok(text) => {
@@ -295,9 +305,17 @@ pub fn run(cli: Cli) -> i32 {
     }
 }
 
+/// Projections an emit run may write alongside the native trace (FR-075).
+#[derive(Debug, Default)]
+pub struct Projections {
+    /// Mooncake output path.
+    pub mooncake: Option<PathBuf>,
+    /// Cache-simulator output path.
+    pub simulator: Option<PathBuf>,
+}
+
 /// The `convert` subcommand.
 fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure> {
-    let ConvertTo::Simulator = to;
     let input_path = if trace.is_dir() {
         find_jsonl_part(trace).ok_or_else(|| {
             Failure::config(format!(
@@ -312,6 +330,34 @@ fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure
         .map_err(|e| Failure::config(format!("cannot read {}: {e}", input_path.display())))?;
     let out = fs::File::create(output)
         .map_err(|e| Failure::other(format!("cannot create {}: {e}", output.display())))?;
+
+    if let ConvertTo::Mooncake = to {
+        // Block size comes from the trace's own manifest, since the Mooncake format
+        // carries no block-geometry field and a guess would be silently wrong.
+        let block_size = block_size_of(trace)?;
+        let stats = workload_trace::mooncake::convert_jsonl(
+            std::io::BufReader::new(input),
+            BufWriter::new(out),
+            block_size,
+        )
+        .map_err(|e| Failure::other(format!("converting {}: {e}", input_path.display())))?;
+        let mut text = format!(
+            "converted {} to {} in the Mooncake format\n  \
+             records {}  distinct identifiers {}  references {}\n",
+            input_path.display(),
+            output.display(),
+            stats.records,
+            stats.distinct_ids,
+            stats.references,
+        );
+        for loss in stats.declared_losses() {
+            text.push_str("  DROPPED: ");
+            text.push_str(&loss);
+            text.push('\n');
+        }
+        return Ok(text);
+    }
+
     let stats = workload_trace::simulator::convert_jsonl(
         std::io::BufReader::new(input),
         BufWriter::new(out),
@@ -330,6 +376,36 @@ fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure
         stats.key_references,
         stats.dropped_empty,
     ))
+}
+
+/// Read `block_size` out of a trace's manifest.
+///
+/// Not guessed and not defaulted: the Mooncake format carries no block geometry, so a
+/// wrong value here produces a file whose lengths are silently wrong by a constant
+/// factor — which nothing downstream would flag.
+fn block_size_of(trace: &Path) -> Result<u64, Failure> {
+    let path = if trace.is_dir() {
+        trace.join("manifest.json")
+    } else {
+        trace
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .map(|p| p.join("manifest.json"))
+            .unwrap_or_else(|| Path::new("manifest.json").to_path_buf())
+    };
+    let text = fs::read_to_string(&path).map_err(|e| {
+        Failure::config(format!(
+            "cannot read {} for the block size: {e}. The Mooncake format carries no \
+             block geometry, so it has to come from the trace's manifest",
+            path.display()
+        ))
+    })?;
+    let v: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| Failure::config(format!("{}: {e}", path.display())))?;
+    v.get("block_size")
+        .and_then(|b| b.as_u64())
+        .ok_or_else(|| Failure::config(format!("{} has no block_size", path.display())))
 }
 
 /// The first `invocations/*/part-*.jsonl` under a trace directory.
@@ -475,7 +551,7 @@ fn emit(
     format: Format,
     seed: u64,
     report_path: Option<PathBuf>,
-    simulator: Option<PathBuf>,
+    projections: Projections,
     force: bool,
 ) -> Result<String, Failure> {
     // NaN takes the is_finite branch, so it is refused rather than slipping past a
@@ -521,7 +597,15 @@ fn emit(
     // The simulator projection, written in the same pass rather than by converting the
     // trace afterwards (FR-075): a projection of a workload nobody wants stored should
     // not require storing it first.
-    let mut simulator_writer = match &simulator {
+    let mut mooncake_writer = match &projections.mooncake {
+        Some(path) => {
+            let f = fs::File::create(path)
+                .map_err(|e| Failure::other(format!("cannot create {}: {e}", path.display())))?;
+            Some(MooncakeWriter::new(BufWriter::new(f), block_size))
+        }
+        None => None,
+    };
+    let mut simulator_writer = match &projections.simulator {
         Some(path) => {
             let f = fs::File::create(path)
                 .map_err(|e| Failure::other(format!("cannot create {}: {e}", path.display())))?;
@@ -537,10 +621,18 @@ fn emit(
                 write_error = Some(e);
                 return;
             }
-            if let Some(w) = simulator_writer.as_mut() {
+            if mooncake_writer.is_some() || simulator_writer.is_some() {
                 let record = InvocationRecord::from_turn(&trace_id, s, t, block_size);
-                if let Err(e) = w.write_record(&record) {
-                    write_error = Some(e);
+                if let Some(w) = mooncake_writer.as_mut() {
+                    if let Err(e) = w.write_record(&record) {
+                        write_error = Some(e);
+                        return;
+                    }
+                }
+                if let Some(w) = simulator_writer.as_mut() {
+                    if let Err(e) = w.write_record(&record) {
+                        write_error = Some(e);
+                    }
                 }
             }
         }
@@ -551,6 +643,13 @@ fn emit(
             jsonl_path.display()
         )));
     }
+    let mooncake_stats = match mooncake_writer {
+        Some(w) => Some(
+            w.finish()
+                .map_err(|e| Failure::other(format!("closing the mooncake file: {e}")))?,
+        ),
+        None => None,
+    };
     let simulator_stats = match simulator_writer {
         Some(w) => Some(
             w.finish()
@@ -617,7 +716,15 @@ fn emit(
 
     let mut out = effective;
     out.push_str(&report.render());
-    if let (Some(path), Some(s)) = (&simulator, &simulator_stats) {
+    if let (Some(path), Some(s)) = (&projections.mooncake, &mooncake_stats) {
+        out.push_str(&format!(
+            "  mooncake          {} records to {} ({} distinct identifiers)\n",
+            s.records,
+            path.display(),
+            s.distinct_ids
+        ));
+    }
+    if let (Some(path), Some(s)) = (&projections.simulator, &simulator_stats) {
         out.push_str(&format!(
             "  simulator         {} records to {} ({} sessions, {} distinct keys)\n",
             s.records,
