@@ -1,14 +1,12 @@
-//! Trace output containers for generated workloads.
+//! Trace output containers and the projections onto other tools' formats.
 //!
-//! Writes a [`workload_model`] operation plan to a trace directory in the
-//! schema real decoded
-//! LLM traces use, so a generated workload and a real trace are interchangeable
-//! inputs to the same analysis. Two containers are supported — JSONL always,
-//! parquet behind the non-default `parquet` feature — and they carry identical
-//! records.
-//!
-//! A trace directory is self-describing: its `manifest.json` records the source
-//! class, the encoding, the block geometry, and the block identifier space. The
-//! manifest is written **last**, so a directory without one is incomplete by
-//! construction and needs no separate "incomplete" flag.
+//! `contracts/trace-io.md` is normative for what an emit run writes;
+//! `contracts/trace-interop.md` is normative for what `convert` projects it into.
+//! This crate is CUDA-free and a workspace default member, so container
+//! equivalence and every schema invariant are testable with no accelerator, no
+//! server and no network.
 #![warn(missing_docs)]
+
+pub mod jsonl;
+pub mod manifest;
+pub mod record;
