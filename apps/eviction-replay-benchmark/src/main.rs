@@ -8,6 +8,7 @@
 //!     --dataset chat --cache-size-nelements 256K,1M,4M --policy both
 //! ```
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -139,6 +140,10 @@ struct Cli {
     /// Which policy to run.
     #[arg(long, value_enum, default_value_t = PolicyArg::All)]
     policy: PolicyArg,
+
+    /// Write a hit-rate-vs-cache-size plot to this PDF path.
+    #[arg(long)]
+    output_pdf: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -224,6 +229,8 @@ fn main() -> ExitCode {
     );
     println!("{}", "-".repeat(100));
 
+    let mut all_results: Vec<(usize, PolicyKind, SimStats)> = Vec::new();
+
     for &size in &cli.cache_sizes {
         let mut results: Vec<(PolicyKind, SimStats)> = kinds
             .iter()
@@ -248,9 +255,16 @@ fn main() -> ExitCode {
                 s.mean_track_ns(),
                 format_thousands(s.ops_per_sec() as u64),
             );
+            all_results.push((size, *kind, s.clone()));
         }
         if cli.cache_sizes.len() > 1 {
             println!();
+        }
+    }
+
+    if let Some(ref pdf_path) = cli.output_pdf {
+        if let Err(e) = generate_pdf(&all_results, pdf_path, &source) {
+            eprintln!("warning: failed to generate PDF: {e}");
         }
     }
 
@@ -290,6 +304,113 @@ fn format_size(n: usize) -> String {
         n.to_string()
     }
 }
+
+fn generate_pdf(
+    results: &[(usize, PolicyKind, SimStats)],
+    pdf_path: &std::path::Path,
+    title: &str,
+) -> Result<(), String> {
+    let mut policies: std::collections::BTreeMap<&str, Vec<(usize, f64)>> =
+        std::collections::BTreeMap::new();
+    for (size, kind, stats) in results {
+        policies
+            .entry(kind.label())
+            .or_default()
+            .push((*size, stats.hit_rate() * 100.0));
+    }
+
+    let mut json_series = String::from("[");
+    for (i, (label, points)) in policies.iter().enumerate() {
+        if i > 0 {
+            json_series.push(',');
+        }
+        let xs: Vec<String> = points.iter().map(|(s, _)| s.to_string()).collect();
+        let ys: Vec<String> = points.iter().map(|(_, h)| format!("{h:.2}")).collect();
+        json_series.push_str(&format!(
+            "{{\"label\":\"{label}\",\"x\":[{}],\"y\":[{}]}}",
+            xs.join(","),
+            ys.join(",")
+        ));
+    }
+    json_series.push(']');
+
+    let title_line = title.lines().next().unwrap_or(title);
+    let pdf_str = pdf_path.display().to_string();
+
+    let mut script_file = tempfile::NamedTempFile::new()
+        .map_err(|e| format!("failed to create temp script: {e}"))?;
+    script_file
+        .write_all(PLOT_SCRIPT.as_bytes())
+        .map_err(|e| format!("failed to write temp script: {e}"))?;
+
+    let output = std::process::Command::new("python3")
+        .args([
+            script_file.path().as_os_str(),
+            std::ffi::OsStr::new(&json_series),
+            std::ffi::OsStr::new(&pdf_str),
+            std::ffi::OsStr::new(title_line),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| format!("failed to run python3: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "python3 exited {}: {}",
+            output.status,
+            stderr.trim_end()
+        ));
+    }
+
+    eprintln!("wrote {pdf_str}");
+    Ok(())
+}
+
+const PLOT_SCRIPT: &str = r##"
+import json, sys
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+series = json.loads(sys.argv[1])
+pdf_path = sys.argv[2]
+title = sys.argv[3]
+
+colors = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c"]
+markers = ["o", "s", "^", "D", "v"]
+fig, ax = plt.subplots(figsize=(8, 5))
+for i, s in enumerate(series):
+    c = colors[i % len(colors)]
+    m = markers[i % len(markers)]
+    ax.plot(s["x"], s["y"], f"{m}-", color=c, linewidth=2, markersize=7, label=s["label"])
+    for x, y in zip(s["x"], s["y"]):
+        ax.annotate(f"{y:.1f}%", (x, y), textcoords="offset points",
+                    xytext=(0, 10 if i == 0 else -15), ha="center", fontsize=8, color=c)
+ax.set_xlabel("Cache Size (elements)", fontsize=12)
+ax.set_ylabel("Hit Rate (%)", fontsize=12)
+ax.set_title(title, fontsize=13)
+ax.legend(fontsize=11)
+ax.grid(True, alpha=0.3)
+if series:
+    all_x = sorted(set(x for s in series for x in s["x"]))
+    ax.set_xticks(all_x)
+    labels = []
+    for v in all_x:
+        if v >= 1024*1024*1024 and v % (1024*1024*1024) == 0:
+            labels.append(f"{v//(1024*1024*1024)}G")
+        elif v >= 1024*1024 and v % (1024*1024) == 0:
+            labels.append(f"{v//(1024*1024)}M")
+        elif v >= 1024 and v % 1024 == 0:
+            labels.append(f"{v//1024}K")
+        else:
+            labels.append(str(v))
+    ax.set_xticklabels(labels)
+fig.tight_layout()
+fig.savefig(pdf_path, dpi=150)
+"##;
 
 /// Format an integer with `_` thousands separators for readability.
 fn format_thousands(n: u64) -> String {
