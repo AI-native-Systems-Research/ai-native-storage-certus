@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run -p eviction-replay-benchmark -- \
-//!     --dataset chat --cache-size 64,256,1024 --policy both
+//!     --dataset chat --cache-size 256KB,1MB,4MB --policy both
 //! ```
 
 use std::path::PathBuf;
@@ -113,11 +113,14 @@ struct Cli {
     #[arg(long, default_value_t = 64)]
     block_chars: usize,
 
-    /// Cache size(s) in blocks to evaluate (comma-separated or repeated).
+    /// Cache size(s) to evaluate (comma-separated). Accepts human-readable
+    /// suffixes: K/KB = ×1024, M/MB = ×1024², G/GB = ×1024³ blocks.
+    /// Examples: 256KB, 1MB, 4096.
     #[arg(
         long = "cache-size",
         value_delimiter = ',',
-        default_value = "256,1024,4096"
+        default_value = "1MB",
+        value_parser = parse_cache_size,
     )]
     cache_sizes: Vec<usize>,
 
@@ -205,7 +208,7 @@ fn main() -> ExitCode {
             println!(
                 "{:<14} {:>7} {:>9} {:>6.1}% {:>9} {:>12.1} {:>12.1} {:>12.1} {:>12}",
                 kind.label(),
-                size,
+                format_size(size),
                 s.hits,
                 s.hit_rate() * 100.0,
                 s.evictions,
@@ -221,6 +224,46 @@ fn main() -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+fn parse_cache_size(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    let (num_part, multiplier) = if let Some(n) = s.strip_suffix("GB") {
+        (n, 1024 * 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix("MB") {
+        (n, 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix("KB") {
+        (n, 1024)
+    } else if let Some(n) = s.strip_suffix('G') {
+        (n, 1024 * 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('M') {
+        (n, 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('K') {
+        (n, 1024)
+    } else {
+        (s, 1)
+    };
+    let num: f64 = num_part
+        .trim()
+        .parse()
+        .map_err(|e| format!("invalid cache size '{s}': {e}"))?;
+    let result = (num * multiplier as f64) as usize;
+    if result == 0 {
+        return Err(format!("cache size must be > 0, got '{s}'"));
+    }
+    Ok(result)
+}
+
+fn format_size(blocks: usize) -> String {
+    if blocks >= 1024 * 1024 * 1024 && blocks % (1024 * 1024 * 1024) == 0 {
+        format!("{}GB", blocks / (1024 * 1024 * 1024))
+    } else if blocks >= 1024 * 1024 && blocks % (1024 * 1024) == 0 {
+        format!("{}MB", blocks / (1024 * 1024))
+    } else if blocks >= 1024 && blocks % 1024 == 0 {
+        format!("{}KB", blocks / 1024)
+    } else {
+        blocks.to_string()
+    }
 }
 
 /// Format an integer with `_` thousands separators for readability.
