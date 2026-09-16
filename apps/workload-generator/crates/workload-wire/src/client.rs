@@ -36,6 +36,19 @@
 //! not trusted to be ordered: the contract permits a multiplexed connection, and an
 //! in-order reply stream must not become an unstated assumption of the client.
 //!
+//! # A read timeout, because a hang is not an abort
+//!
+//! FR-064 requires a run to abort and name a node that becomes unreachable. A peer that
+//! accepts a connection and then never answers is exactly that case, and without a read
+//! timeout the generator blocks in `read` forever — the run neither finishes nor fails, which
+//! is worse than either. Found by a leftover-detection test against a socket that accepted and
+//! stayed silent.
+//!
+//! [`DEFAULT_READ_TIMEOUT`] is generous, because a legitimate turn does real work on the far
+//! side: the agent checks a path, loads and stores against a live mailbox, and that may take a
+//! while under load. A probe that only wants to know whether *anything* is there should set a
+//! short one with [`Client::with_read_timeout`] rather than wait for the default.
+//!
 //! # `TCP_NODELAY`, always
 //!
 //! Nagle's algorithm withholds a small write until the previous one is acknowledged, which
@@ -84,6 +97,12 @@ impl std::error::Error for HandshakeError {}
 /// on this hardware — a 50 µs round trip needs 0.78 batches in flight, so 8 is an order of
 /// magnitude of headroom. Bigger would only add queueing delay to a latency measurement.
 pub const DEFAULT_DEPTH: usize = 8;
+
+/// Default read timeout.
+///
+/// Generous on purpose: the far side is doing real work per turn. It exists to turn an
+/// unreachable peer into an error rather than a hang, not to bound normal latency.
+pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Default largest body accepted, in bytes.
 ///
@@ -186,7 +205,25 @@ impl Client<TcpStream> {
             None => TcpStream::connect(&addrs[..])?,
         };
         stream.set_nodelay(true)?;
+        // Without this, a peer that accepts and never answers hangs the run instead of failing
+        // it, which FR-064 forbids in substance if not in words.
+        stream.set_read_timeout(Some(DEFAULT_READ_TIMEOUT))?;
         Ok(Self::with_transport(stream, depth))
+    }
+}
+
+impl Client<TcpStream> {
+    /// Set the read timeout, replacing [`DEFAULT_READ_TIMEOUT`].
+    ///
+    /// A short one suits a probe that only wants to know whether anything is listening; the
+    /// default suits driving turns, where the far side is doing real work.
+    ///
+    /// # Errors
+    ///
+    /// If the socket refuses it.
+    pub fn with_read_timeout(self, timeout: Duration) -> Result<Self, ClientError> {
+        self.stream.set_read_timeout(Some(timeout))?;
+        Ok(self)
     }
 }
 

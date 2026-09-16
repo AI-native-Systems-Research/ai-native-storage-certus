@@ -5,6 +5,8 @@
 //! of `contracts/cli.md`, so they need asserting rather than eyeballing.
 #![warn(missing_docs)]
 
+#[cfg(feature = "live")]
+pub mod agents;
 pub mod cli;
 #[cfg(feature = "live")]
 pub mod cuda;
