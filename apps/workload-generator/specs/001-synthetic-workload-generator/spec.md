@@ -742,7 +742,7 @@ modes reorder the policies.
   agent's leftover replacement covers that case.
 
   **Sequencing is part of the decision.** This MUST come after the loopback-equivalence test
-  (T074), not before. That test is what compares the two paths, so it is the instrument that
+  (T074), not before. Tracked as **T092/T092a** — the numbers T075-T080 were already US4's. That test is what compares the two paths, so it is the instrument that
   demonstrates the unification changed nothing — unifying first would collapse onto a path
   never shown equivalent, and would destroy the means of showing it.
 
