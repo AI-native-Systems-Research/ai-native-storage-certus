@@ -9,4 +9,6 @@
 
 pub mod jsonl;
 pub mod manifest;
+#[cfg(feature = "parquet")]
+pub mod parquet;
 pub mod record;
