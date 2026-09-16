@@ -2113,7 +2113,7 @@ launcher would fail.
   which contradicts FR-079's off-cluster goal — and the description is loaded after the point the
   remote branch needs it. The report builder is already extracted for this (`live_report`), so
   both paths render one report
-- [ ] T074 [P] [US3] Test in `crates/workload-wire/tests/loopback.rs`:
+- [x] T074 [P] [US3] Test in `crates/workload-wire/tests/loopback.rs`:
   submitting a plan through a loopback agent stub yields the same operation
   sequence as the local path — the transport-level form of FR-072
 
@@ -2251,10 +2251,41 @@ Not a finding, but worth recording since it cost time: clippy 1.96 added
 compiles that module — which under `--features live` includes `workload-gen`.
 That masked several new lints in this app until `--no-deps` was used. Both are
 pre-existing repo code, unrelated to this branch.
-- [ ] T080 [US4] Document the policy-comparison procedure in `README.md`,
+- [x] T080 [US4] Document the policy-comparison procedure in `README.md`,
   including that hit-dependent comparisons need repetition with a stated
   significance test because mint races are preserved deliberately, and that n ≥
   8 is the recorded floor on this hardware
+
+**T080 done. US4 is complete.** `README.md` did not exist — T081 writes its
+orientation half — so this created it with the comparison procedure and a note
+saying what is still missing, rather than waiting for T081 and leaving the
+measurement undocumented in the meantime.
+
+Four sections, because the task's two requirements are only half of what makes a
+policy comparison trustworthy here:
+
+- **Why hit-dependent comparisons are not reproducible**, stated as a
+  consequence of a deliberate decision rather than a caveat: the plan is
+  deterministic but mint races are preserved (FR-035, FR-036), so a run's hit
+  rate is a sample. Hence repetition, a significance test stated *before* looking
+  at the numbers, and **n >= 8** — justified by the two recorded incidents rather
+  than asserted, since a floor with a reason attached survives contact with a
+  deadline better than one without.
+- **The four checks before quoting a figure**, each of which corresponds to a
+  measurement this project has already got wrong: two servers on one mailbox, a
+  percentile without its n, a warm tier from the previous arm, and a stale agent
+  build.
+- **Sweeping capacity**, pointing at T079's check and carrying its three
+  corrections forward, so someone writing a description to sweep does not
+  rediscover them.
+- **Figures that do not combine across nodes** — counters sum, percentiles must
+  be merged as histograms, distinct keys must not be added at all. Worth a table
+  because the last two are the same arithmetic error one type apart, and the
+  report's shape (merged histograms, `distinct_keys` as the generator's own
+  count) is otherwise unexplained.
+
+Also ticked T074, whose checkbox was missed when it was committed as `2e5e7626`;
+its progress note was already in place.
 
 **T078 done.** The hit/miss/pending split was already there from FR-072a's work, so what this
 added were the two fields a sweep cannot do without.
