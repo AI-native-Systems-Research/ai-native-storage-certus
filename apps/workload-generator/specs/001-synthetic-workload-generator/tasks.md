@@ -780,11 +780,21 @@ at zero, so the run is **valid** and exits 0. The `--lanes 32` refusal was
 verified live: it names the node's 8 channels and exits 2.
 
 **Two profile facts worth keeping.** `full-fs-block` is the right profile for
-the local path — the only profile needing zyre and RDMA is `full-remote`, and
-**`libzyre.so.2` is not installed on node2**, which is why a previously-built
-binary would not start. That is a blocker for US3, which needs `full-remote`.
-`full-fs-block` needs `--features filesys --no-default-features`; the build
-script says so if you omit them.
+the local path, and needs `--features filesys --no-default-features` — the
+build script says so if you omit them. The only profile needing zyre and RDMA
+is `full-remote`, which US3 uses.
+
+**zyre was UNBUILT rather than missing, so US3 is not blocked** — I recorded it
+as a blocker and that was wrong. `deps/build-zyre.sh` builds it to
+`deps/zyre-build/`, after which the library resolves. **Both paths are needed
+together**, `/usr/local/lib` for `libgdrapi` and `deps/zyre-build/lib` for
+`libzyre`:
+
+```text
+LD_LIBRARY_PATH=/usr/local/lib:deps/zyre-build/lib
+```
+
+That is why a previously-built server binary would not start.
 
 **T041 found the defect, and running found a second one.** Reading the opcode
 table suggested `LOOKUP` takes a key list. The live server answered
