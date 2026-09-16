@@ -39,13 +39,30 @@
 //! keep — measuring the generator's opinion rather than Certus's. `CLEAR_MEMORY_TIER` is
 //! permitted exactly once, at startup, before the timed window opens.
 //!
-//! [`forbidden_opcode`] names them and [`OpStream::encode`] cannot produce them, since
-//! nothing in [`OpKind`] maps to one. The test that matters is the one asserting a whole
+//! # Requests are split to `--batch-keys`, and nothing allocates per operation
+//!
+//! FR-069 makes the number of keys per request a per-run option, because it is the largest
+//! measured performance lever on this path and it belongs to the client's request
+//! scheduling rather than to the workload. So an operation with more keys than
+//! `--batch-keys` becomes **several requests**, which is what the production client does
+//! with a long prefix. [`OpStream::encode_chunk`] takes one chunk; the caller does the
+//! chunking, because only the caller knows how to count what it issued.
+//!
+//! Every encoding borrows: key lists are written into a reused scratch buffer and handle
+//! batches into a pre-built template (see [`crate::payload`]), so issuing an operation
+//! allocates nothing. That is FR-038 applied to the request as well as to the payload.
+//!
+//! [`forbidden_opcode`] names them and [`OpStream::encode_chunk`] cannot produce them,
+//! since nothing in [`OpKind`] maps to one. The test that matters is the one asserting a whole
 //! run's issued opcodes contain none of them, because that is a property of the stream
 //! rather than of any single call.
 
-use shmq_dispatcher::wire::{self, op};
-use workload_model::plan::{OpKind, Operation, OperationPlan};
+use std::sync::Arc;
+
+use shmq_dispatcher::wire::op;
+
+use crate::payload::{HandleBatchTemplate, PayloadBuffer};
+use workload_model::plan::OpKind;
 
 /// `promote` value for `TOUCH` and `LOOKUP`.
 ///
@@ -59,20 +76,19 @@ pub const NO_PROMOTE: u8 = 0;
 /// a cap would leave events to accumulate and turn a steady cost into a sawtooth.
 pub const DRAIN_ALL_EVENTS: u32 = 0;
 
-/// One encoded request, ready for the mailbox.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Encoded {
-    /// The mailbox opcode.
-    pub opcode: u32,
-    /// The payload, in the layout `translate.rs` expects.
-    pub payload: Vec<u8>,
-}
-
 /// What encoding an operation produced.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Encoding {
+///
+/// The payload is **borrowed** from the encoder's own reused buffers, so nothing is
+/// allocated per operation. It is valid until the next call.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Encoding<'a> {
     /// Ready to issue.
-    Ready(Encoded),
+    Ready {
+        /// The mailbox opcode.
+        opcode: u32,
+        /// The payload, in the layout `translate.rs` expects.
+        payload: &'a [u8],
+    },
     /// Nothing to issue: only [`OpKind::Abort`], which the planner never emits.
     NotPlanned,
     /// **Needs a GPU IPC handle**, which this build has no payload buffer for.
@@ -85,8 +101,9 @@ pub enum Encoding {
     ///
     /// A run that skipped these silently would report a throughput for an operation
     /// stream missing its two data-moving operations, so the driver counts them and the
-    /// report says the run was partial. They become `Ready` when the pre-filled
-    /// reusable payload buffer lands (T038, T039).
+    /// report says the run was partial. Attaching a [`crate::payload::PayloadBuffer`] with
+    /// [`OpStream::with_payload`] makes them `Ready`; without one — no GPU on the node —
+    /// they are still counted and declared.
     NeedsGpuPayload {
         /// Which opcode it would have been.
         opcode: u32,
@@ -119,111 +136,228 @@ pub fn forbidden_opcode(opcode: u32) -> Option<&'static str> {
 }
 
 /// Encodes plan operations as mailbox requests.
-#[derive(Debug, Clone)]
+///
+/// Holds the reused buffers, so an encoder is per-lane and never shared.
+#[derive(Debug)]
 pub struct OpStream {
     block_bytes: u32,
+    batch_keys: usize,
+    scratch: Vec<u8>,
+    payload: Option<PayloadTarget>,
+}
+
+/// The GPU buffer and this lane's pre-built request template.
+#[derive(Debug)]
+struct PayloadTarget {
+    buffer: Arc<PayloadBuffer>,
+    slot: usize,
+    template: HandleBatchTemplate,
 }
 
 impl OpStream {
-    /// An encoder for a description's block geometry.
+    /// An encoder for a description's block geometry and a run's request size.
     ///
     /// `block_bytes` is what `RESERVE` asks for per key — the cache holds bytes, and a
-    /// reservation in the wrong unit would silently size the cache wrongly.
-    pub fn new(block_bytes: u32) -> Self {
-        Self { block_bytes }
+    /// reservation in the wrong unit would silently size the cache wrongly. `batch_keys`
+    /// is FR-069's per-run option, and bounds one request's key count.
+    ///
+    /// Without a payload buffer, `LOOKUP` and `COPY_TO_STORE` report
+    /// [`Encoding::NeedsGpuPayload`] rather than being issued; see
+    /// [`OpStream::with_payload`].
+    pub fn new(block_bytes: u32, batch_keys: usize) -> Self {
+        assert!(batch_keys > 0, "a request must carry at least one key");
+        Self {
+            block_bytes,
+            batch_keys,
+            // Sized for the largest key list this encoder can produce, so the scratch
+            // buffer never reallocates mid-run.
+            scratch: Vec::with_capacity(4 + batch_keys * 20),
+            payload: None,
+        }
     }
 
-    /// Encode one plan operation.
+    /// Attach the GPU payload buffer, making the two data-moving operations issuable.
     ///
-    /// Returns `None` for [`OpKind::Abort`], which the planner never emits: whether a
-    /// commit fails is a run-time outcome, so the executor chooses it and this
-    /// translates it only when asked to.
-    pub fn encode(&self, plan: &OperationPlan, op: &Operation) -> Encoding {
-        let keys = plan.keys_of(op);
-        // The two data-moving operations need a GPU IPC handle per key; see
-        // `Encoding::NeedsGpuPayload`.
-        if matches!(op.kind(), OpKind::Load) {
-            return Encoding::NeedsGpuPayload {
-                opcode: op::LOOKUP,
-                keys: keys.len(),
+    /// `slot` is this lane's disjoint region; see [`crate::payload`] on why that is a
+    /// correctness requirement rather than tidiness.
+    pub fn with_payload(mut self, buffer: Arc<PayloadBuffer>, slot: usize) -> Self {
+        let template = buffer.template(slot);
+        assert!(
+            template.max_keys() >= self.batch_keys,
+            "the payload template holds {} keys but requests carry up to {}",
+            template.max_keys(),
+            self.batch_keys
+        );
+        self.payload = Some(PayloadTarget {
+            buffer,
+            slot,
+            template,
+        });
+        self
+    }
+
+    /// Keys per request, FR-069's option.
+    pub fn batch_keys(&self) -> usize {
+        self.batch_keys
+    }
+
+    /// Whether the data-moving operations can be issued.
+    pub fn can_move_data(&self) -> bool {
+        self.payload.is_some()
+    }
+
+    /// Encode one chunk of one operation's keys.
+    ///
+    /// The caller splits an operation's keys into chunks of at most
+    /// [`OpStream::batch_keys`] — see the module docs on FR-069 — and passes each in turn.
+    /// An operation with no keys ([`OpKind::PollEvents`]) is passed an empty slice and
+    /// still produces one request.
+    ///
+    /// # Errors
+    ///
+    /// If a key stamp fails, which only happens when stamping is enabled.
+    ///
+    /// # Panics
+    ///
+    /// If `keys` is longer than [`OpStream::batch_keys`]: the caller is responsible for
+    /// splitting, and truncating here would drop key references the caller has already
+    /// counted as issued.
+    pub fn encode_chunk(
+        &mut self,
+        kind: OpKind,
+        keys: &[u64],
+        session: u64,
+    ) -> Result<Encoding<'_>, String> {
+        assert!(
+            keys.len() <= self.batch_keys,
+            "chunk of {} keys exceeds --batch-keys {}; the caller must split",
+            keys.len(),
+            self.batch_keys
+        );
+        // The two data-moving operations take a handle batch, not a key list.
+        if matches!(kind, OpKind::Load | OpKind::Transfer) {
+            let opcode = if kind == OpKind::Load {
+                op::LOOKUP
+            } else {
+                op::COPY_TO_STORE
             };
-        }
-        if matches!(op.kind(), OpKind::Transfer) {
-            return Encoding::NeedsGpuPayload {
-                opcode: op::COPY_TO_STORE,
-                keys: keys.len(),
+            let Some(target) = self.payload.as_mut() else {
+                return Ok(Encoding::NeedsGpuPayload {
+                    opcode,
+                    keys: keys.len(),
+                });
             };
+            // A store reads out of our buffer, so its blocks are what a stamp identifies.
+            // A load overwrites them, so stamping before one would be wasted work.
+            if kind == OpKind::Transfer && target.buffer.stamping() {
+                for (i, key) in keys.iter().enumerate() {
+                    target.buffer.stamp_key(target.slot, i, *key)?;
+                }
+            }
+            return Ok(Encoding::Ready {
+                opcode,
+                payload: target.template.stamp_keys(keys),
+            });
         }
-        Encoding::Ready(match op.kind() {
-            OpKind::Check => Encoded {
-                opcode: op::CHECK,
-                payload: encode_keys(keys),
-            },
-            OpKind::Touch => Encoded {
-                opcode: op::TOUCH,
-                payload: encode_promote_and_keys(NO_PROMOTE, keys),
-            },
-            OpKind::Reserve => Encoded {
-                opcode: op::RESERVE,
-                payload: encode_reserve(keys, self.block_bytes, op.session()),
-            },
-            OpKind::Commit => Encoded {
-                opcode: op::COMMIT_STORE,
-                payload: encode_keys(keys),
-            },
+
+        let opcode = match kind {
+            OpKind::Check => op::CHECK,
+            OpKind::Touch => op::TOUCH,
+            OpKind::Reserve => op::RESERVE,
+            OpKind::Commit => op::COMMIT_STORE,
+            OpKind::Abort => return Ok(Encoding::NotPlanned),
+            OpKind::PollEvents => op::TAKE_EVENTS,
             OpKind::Load | OpKind::Transfer => unreachable!("handled above"),
-            OpKind::Abort => return Encoding::NotPlanned,
-            OpKind::PollEvents => Encoded {
-                opcode: op::TAKE_EVENTS,
-                payload: DRAIN_ALL_EVENTS.to_le_bytes().to_vec(),
-            },
+        };
+        self.scratch.clear();
+        match kind {
+            OpKind::Check | OpKind::Commit => write_keys(&mut self.scratch, keys),
+            OpKind::Touch => {
+                self.scratch.push(NO_PROMOTE);
+                write_keys(&mut self.scratch, keys);
+            }
+            OpKind::Reserve => write_reserve(&mut self.scratch, keys, self.block_bytes, session),
+            OpKind::PollEvents => self
+                .scratch
+                .extend_from_slice(&DRAIN_ALL_EVENTS.to_le_bytes()),
+            OpKind::Load | OpKind::Transfer | OpKind::Abort => unreachable!("handled above"),
+        }
+        Ok(Encoding::Ready {
+            opcode,
+            payload: &self.scratch,
         })
     }
 
     /// Encode the abort branch of a store, which only the executor can choose.
-    pub fn encode_abort(&self, keys: &[u64]) -> Encoded {
-        Encoded {
+    pub fn encode_abort(&mut self, keys: &[u64]) -> Encoding<'_> {
+        self.scratch.clear();
+        write_keys(&mut self.scratch, keys);
+        Encoding::Ready {
             opcode: op::ABORT_STORE,
-            payload: encode_keys(keys),
+            payload: &self.scratch,
         }
     }
 }
 
-fn encode_keys(keys: &[u64]) -> Vec<u8> {
-    let mut w = wire::Writer::with_capacity(4 + keys.len() * 8);
-    w.u32(keys.len() as u32);
+fn write_keys(out: &mut Vec<u8>, keys: &[u64]) {
+    out.extend_from_slice(&(keys.len() as u32).to_le_bytes());
     for k in keys {
-        w.u64(*k);
+        out.extend_from_slice(&k.to_le_bytes());
     }
-    w.into_bytes()
 }
 
-fn encode_promote_and_keys(promote: u8, keys: &[u64]) -> Vec<u8> {
-    let mut w = wire::Writer::with_capacity(1 + 4 + keys.len() * 8);
-    w.u8(promote);
-    w.u32(keys.len() as u32);
+fn write_reserve(out: &mut Vec<u8>, keys: &[u64], size: u32, session: u64) {
+    out.extend_from_slice(&(keys.len() as u32).to_le_bytes());
     for k in keys {
-        w.u64(*k);
+        out.extend_from_slice(&k.to_le_bytes());
+        out.extend_from_slice(&size.to_le_bytes());
+        out.extend_from_slice(&session.to_le_bytes());
     }
-    w.into_bytes()
-}
-
-fn encode_reserve(keys: &[u64], size: u32, session: u64) -> Vec<u8> {
-    let mut w = wire::Writer::with_capacity(4 + keys.len() * 20);
-    w.u32(keys.len() as u32);
-    for k in keys {
-        w.u64(*k);
-        w.u32(size);
-        w.u64(session);
-    }
-    w.into_bytes()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shmq_dispatcher::wire;
     use workload_model::description::WorkloadDescription;
+    use workload_model::plan::{Operation, OperationPlan};
     use workload_model::sim::Simulation;
+
+    /// Encode every operation of a plan, one chunk each, collecting `(kind, opcode)`.
+    fn encode_all(plan: &OperationPlan, s: &mut OpStream) -> Vec<(OpKind, u32)> {
+        let mut seen = Vec::new();
+        for op in plan.operations() {
+            let keys = plan.keys_of(op);
+            for chunk in chunks_of(keys, s.batch_keys()) {
+                match s.encode_chunk(op.kind(), chunk, op.session()).unwrap() {
+                    Encoding::Ready { opcode, .. } => seen.push((op.kind(), opcode)),
+                    Encoding::NeedsGpuPayload { opcode, .. } => seen.push((op.kind(), opcode)),
+                    Encoding::NotPlanned => {}
+                }
+            }
+        }
+        seen
+    }
+
+    /// Chunk a key list the way the driver does, yielding one empty chunk for a keyless
+    /// operation so that a poll still produces a request.
+    fn chunks_of(keys: &[u64], n: usize) -> Vec<&[u64]> {
+        if keys.is_empty() {
+            return vec![&[]];
+        }
+        keys.chunks(n).collect()
+    }
+
+    /// The payload bytes for one operation of a given kind, or `None` if there is none.
+    fn payload_of(plan: &OperationPlan, s: &mut OpStream, kind: OpKind) -> Option<Vec<u8>> {
+        let op: &Operation = plan.operations().iter().find(|o| o.kind() == kind)?;
+        let keys = plan.keys_of(op);
+        let chunk = chunks_of(keys, s.batch_keys())[0];
+        match s.encode_chunk(kind, chunk, op.session()).unwrap() {
+            Encoding::Ready { payload, .. } => Some(payload.to_vec()),
+            _ => None,
+        }
+    }
 
     fn plan_of(seed: u64, span: f64) -> OperationPlan {
         let yaml = r#"
@@ -254,19 +388,9 @@ session_classes:
         // The mapping is the whole point of this module, and a wrong entry would issue
         // a valid request that does the wrong thing — the dispatcher would accept it.
         let plan = plan_of(1, 40.0);
-        let s = OpStream::new(32768);
-        let mut seen = std::collections::BTreeMap::new();
-        for op in plan.operations() {
-            match s.encode(&plan, op) {
-                Encoding::Ready(e) => {
-                    seen.insert(op.kind(), e.opcode);
-                }
-                Encoding::NeedsGpuPayload { opcode, .. } => {
-                    seen.insert(op.kind(), opcode);
-                }
-                Encoding::NotPlanned => {}
-            }
-        }
+        let mut s = OpStream::new(32768, 64);
+        let seen: std::collections::BTreeMap<OpKind, u32> =
+            encode_all(&plan, &mut s).into_iter().collect();
         assert_eq!(seen[&OpKind::Check], op::CHECK);
         assert_eq!(seen[&OpKind::Touch], op::TOUCH);
         assert_eq!(seen[&OpKind::Load], op::LOOKUP);
@@ -282,18 +406,9 @@ session_classes:
         // FR-043 and FR-044. `promote` is the first byte of a TOUCH payload, so this
         // reads the wire rather than trusting the constant.
         let plan = plan_of(2, 40.0);
-        let s = OpStream::new(32768);
-        let mut touches = 0;
-        for op in plan.operations() {
-            if op.kind() == OpKind::Touch {
-                let Encoding::Ready(e) = s.encode(&plan, op) else {
-                    panic!("a touch must be issuable without a GPU");
-                };
-                assert_eq!(e.payload[0], 0, "TOUCH asked for promotion");
-                touches += 1;
-            }
-        }
-        assert!(touches > 0, "no TOUCH was issued, so nothing was tested");
+        let mut s = OpStream::new(32768, 64);
+        let payload = payload_of(&plan, &mut s, OpKind::Touch).expect("a touch");
+        assert_eq!(payload[0], 0, "TOUCH asked for promotion");
     }
 
     #[test]
@@ -302,20 +417,14 @@ session_classes:
         // against the dispatcher's own opcode constants, so adding a forbidden
         // operation upstream cannot slip past by renaming.
         let plan = plan_of(3, 200.0);
-        let s = OpStream::new(32768);
-        let mut issued = 0;
-        for op in plan.operations() {
-            let opcode = match s.encode(&plan, op) {
-                Encoding::Ready(e) => e.opcode,
-                Encoding::NeedsGpuPayload { opcode, .. } => opcode,
-                Encoding::NotPlanned => continue,
-            };
-            if let Some(why) = forbidden_opcode(opcode) {
-                panic!("issued a forbidden opcode {opcode}: {why}");
+        let mut s = OpStream::new(32768, 64);
+        let issued = encode_all(&plan, &mut s);
+        for (kind, opcode) in &issued {
+            if let Some(why) = forbidden_opcode(*opcode) {
+                panic!("issued a forbidden opcode {opcode} for {kind:?}: {why}");
             }
-            issued += 1;
         }
-        assert!(issued > 50, "only {issued} operations, too few to test");
+        assert!(issued.len() > 50, "only {} operations", issued.len());
     }
 
     #[test]
@@ -357,12 +466,19 @@ session_classes:
     fn a_key_payload_round_trips_through_the_dispatchers_own_reader() {
         // The encodings are only right if the dispatcher's reader agrees, so this
         // decodes with `wire::Reader` rather than with a hand-written parser.
-        let keys = [7u64, 8, 0xDEAD_BEEF_CAFE_1234];
-        let payload = encode_keys(&keys);
+        let plan = plan_of(1, 40.0);
+        let mut s = OpStream::new(32768, 64);
+        let op_ref = plan
+            .operations()
+            .iter()
+            .find(|o| o.kind() == OpKind::Check)
+            .expect("a check");
+        let expected = plan.keys_of(op_ref).to_vec();
+        let payload = payload_of(&plan, &mut s, OpKind::Check).expect("a check");
         let mut r = wire::Reader::new(&payload);
-        assert_eq!(r.u32().unwrap() as usize, keys.len());
-        for want in keys {
-            assert_eq!(r.u64().unwrap(), want);
+        assert_eq!(r.u32().unwrap() as usize, expected.len().min(64));
+        for want in expected.iter().take(64) {
+            assert_eq!(r.u64().unwrap(), *want);
         }
     }
 
@@ -372,66 +488,118 @@ session_classes:
         // reservation in the wrong unit would size the cache wrongly and nothing would
         // report it.
         let plan = plan_of(4, 40.0);
-        let s = OpStream::new(32768);
-        let op = plan
+        let mut s = OpStream::new(32768, 64);
+        let op_ref = plan
             .operations()
             .iter()
             .find(|o| o.kind() == OpKind::Reserve)
             .expect("a reserve");
-        let Encoding::Ready(e) = s.encode(&plan, op) else {
-            panic!("a reserve must be issuable without a GPU");
-        };
-        let expected_keys = plan.keys_of(op);
-        let mut r = wire::Reader::new(&e.payload);
-        assert_eq!(r.u32().unwrap() as usize, expected_keys.len());
-        for want in expected_keys {
-            assert_eq!(r.u64().unwrap(), *want);
+        let session = op_ref.session();
+        let expected: Vec<u64> = plan.keys_of(op_ref).iter().copied().take(64).collect();
+        let payload = payload_of(&plan, &mut s, OpKind::Reserve).expect("a reserve");
+        let mut r = wire::Reader::new(&payload);
+        assert_eq!(r.u32().unwrap() as usize, expected.len());
+        for want in expected {
+            assert_eq!(r.u64().unwrap(), want);
             assert_eq!(r.u32().unwrap(), 32768, "size must be bytes per block");
-            assert_eq!(r.u64().unwrap(), op.session(), "session must be the turn's");
+            assert_eq!(r.u64().unwrap(), session, "session must be the turn's");
         }
     }
 
     #[test]
-    fn a_poll_drains_every_queued_event() {
+    fn a_poll_drains_every_queued_event_and_still_issues_with_no_keys() {
         // A cap would let events accumulate and turn a steady per-turn cost into a
-        // sawtooth, which would show up in latency percentiles as the generator's own
-        // artifact.
+        // sawtooth. And a poll carries no keys, so the chunking must still produce one
+        // request for it — `[].chunks(n)` yields nothing, which would silently drop
+        // every poll from the stream.
         let plan = plan_of(5, 40.0);
-        let s = OpStream::new(32768);
-        let op = plan
-            .operations()
-            .iter()
-            .find(|o| o.kind() == OpKind::PollEvents)
-            .expect("a poll");
-        let Encoding::Ready(e) = s.encode(&plan, op) else {
-            panic!("a poll must be issuable without a GPU");
-        };
-        assert_eq!(e.opcode, op::TAKE_EVENTS);
-        let mut r = wire::Reader::new(&e.payload);
+        let mut s = OpStream::new(32768, 64);
+        let payload = payload_of(&plan, &mut s, OpKind::PollEvents).expect("a poll");
+        let mut r = wire::Reader::new(&payload);
         assert_eq!(r.u32().unwrap(), DRAIN_ALL_EVENTS);
+        let polls = encode_all(&plan, &mut s)
+            .iter()
+            .filter(|(k, _)| *k == OpKind::PollEvents)
+            .count();
+        assert!(polls > 0, "chunking dropped every poll");
     }
 
     #[test]
-    fn the_two_data_moving_operations_report_that_they_need_a_gpu() {
+    fn the_two_data_moving_operations_need_a_gpu_and_say_so_without_one() {
         // Found by running against a live server, which answered LOOKUP with
         // "truncated: need 64 bytes at offset 4, have 32": `op_lookup` reads a handle
-        // batch, not a key list, because a load DMAs into a GPU buffer. Counted rather
-        // than skipped, so a run cannot report a throughput for a stream missing its two
-        // data-moving operations.
+        // batch, not a key list. Counted rather than skipped, so a run cannot report a
+        // throughput for a stream missing its two data-moving operations.
         let plan = plan_of(7, 40.0);
-        let s = OpStream::new(32768);
+        let mut s = OpStream::new(32768, 64);
+        assert!(!s.can_move_data(), "no buffer was attached");
         let mut needs = 0;
         for op in plan.operations() {
-            match s.encode(&plan, op) {
-                Encoding::NeedsGpuPayload { opcode, keys } => {
+            let keys = plan.keys_of(op);
+            for chunk in chunks_of(keys, 64) {
+                if let Encoding::NeedsGpuPayload { opcode, keys } =
+                    s.encode_chunk(op.kind(), chunk, op.session()).unwrap()
+                {
                     assert!(opcode == op::LOOKUP || opcode == op::COPY_TO_STORE);
                     assert!(keys > 0);
                     needs += 1;
                 }
-                _ => {}
             }
         }
         assert!(needs > 0, "no operation reported needing a GPU");
+    }
+
+    #[test]
+    fn an_operation_longer_than_batch_keys_becomes_several_requests() {
+        // FR-069: keys per request is a per-run option, and a long prefix is what makes
+        // it bite. Before this was wired the option was accepted, reported in the run's
+        // own parameters, and had no effect at all.
+        let plan = plan_of(9, 400.0);
+        let longest = plan
+            .operations()
+            .iter()
+            .map(|o| plan.keys_of(o).len())
+            .max()
+            .unwrap_or(0);
+        assert!(
+            longest > 4,
+            "the plan has no operation long enough to split"
+        );
+        let mut wide = OpStream::new(32768, 4096);
+        let mut narrow = OpStream::new(32768, 4);
+        let wide_n = encode_all(&plan, &mut wide).len();
+        let narrow_n = encode_all(&plan, &mut narrow).len();
+        assert!(
+            narrow_n > wide_n,
+            "a smaller --batch-keys must produce more requests ({narrow_n} vs {wide_n})"
+        );
+        // And every chunk must be within the limit, since the template is sized by it.
+        for op in plan.operations() {
+            for chunk in chunks_of(plan.keys_of(op), 4) {
+                assert!(chunk.len() <= 4);
+            }
+        }
+    }
+
+    #[test]
+    fn the_same_keys_encode_identically_whatever_the_batch_size_of_the_previous_call() {
+        // The scratch buffer is reused, so a long request followed by a short one must
+        // not leave the long one's tail visible. `n` bounds the read, but the returned
+        // slice must agree with it.
+        let mut s = OpStream::new(4096, 64);
+        let long = s.encode_chunk(OpKind::Check, &[1, 2, 3, 4, 5], 0).unwrap();
+        let Encoding::Ready { payload, .. } = long else {
+            panic!("a check must be ready")
+        };
+        let long_len = payload.len();
+        let short = s.encode_chunk(OpKind::Check, &[9], 0).unwrap();
+        let Encoding::Ready { payload, .. } = short else {
+            panic!("a check must be ready")
+        };
+        assert!(payload.len() < long_len, "stale bytes remained");
+        let mut r = wire::Reader::new(payload);
+        assert_eq!(r.u32().unwrap(), 1);
+        assert_eq!(r.u64().unwrap(), 9);
     }
 
     #[test]
@@ -439,11 +607,13 @@ session_classes:
         // The executor needs it for a failed commit; the planner must not emit it,
         // because which branch is taken is a run-time outcome.
         let plan = plan_of(6, 100.0);
-        let s = OpStream::new(32768);
+        let mut s = OpStream::new(32768, 64);
         assert!(plan.operations().iter().all(|o| o.kind() != OpKind::Abort));
-        let e = s.encode_abort(&[1, 2]);
-        assert_eq!(e.opcode, op::ABORT_STORE);
-        let mut r = wire::Reader::new(&e.payload);
+        let Encoding::Ready { opcode, payload } = s.encode_abort(&[1, 2]) else {
+            panic!("an abort must be ready")
+        };
+        assert_eq!(opcode, op::ABORT_STORE);
+        let mut r = wire::Reader::new(payload);
         assert_eq!(r.u32().unwrap(), 2);
     }
 }

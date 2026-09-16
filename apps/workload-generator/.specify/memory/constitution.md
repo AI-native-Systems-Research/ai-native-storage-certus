@@ -212,7 +212,7 @@ used.
 
 **Rationale**: These three are the difference between an instrument and a load
 script. Each has a specific failure mode that produces plausible numbers rather
-than an error: a starved queue reports the generator's speed as the system's, a
+than an error: a queue that underran reports the generator's speed as the system's, a
 wallclock-coupled clock lets a slow server quietly reshape the workload it is
 being judged on, and single-run A/B comparisons of a racing system report noise
 as signal.

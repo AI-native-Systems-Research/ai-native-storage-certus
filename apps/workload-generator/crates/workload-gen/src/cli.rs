@@ -138,6 +138,26 @@ pub enum Command {
         /// Seed.
         #[arg(long)]
         seed: u64,
+        /// GPU device for the payload buffer.
+        ///
+        /// `LOOKUP` and `COPY_TO_STORE` name GPU memory — a load DMAs into a device
+        /// buffer and a store copies out of one — so without a device those two
+        /// operations cannot be issued.
+        #[arg(long, default_value_t = 0)]
+        gpu_device: i32,
+        /// Run the control path only, issuing no data-moving operations.
+        ///
+        /// For a node with no accelerator. The run is **partial** and its report says so,
+        /// because a throughput from a stream missing its loads and stores is not
+        /// comparable with a complete run's.
+        #[arg(long)]
+        no_payload: bool,
+        /// Stamp each stored block with its key, for identity checking.
+        ///
+        /// Costs one host-to-device copy per key, which puts generator work on the
+        /// per-key path (FR-070), so it is opt-in.
+        #[arg(long)]
+        stamp_keys: bool,
         /// Structured report destination.
         #[arg(long)]
         report: Option<PathBuf>,
@@ -275,6 +295,9 @@ pub fn run(cli: Cli) -> i32 {
             lanes,
             batch_keys,
             seed,
+            gpu_device,
+            no_payload,
+            stamp_keys,
             report,
         } => match live_run(
             &description,
@@ -283,6 +306,8 @@ pub fn run(cli: Cli) -> i32 {
             lanes,
             batch_keys,
             seed,
+            (!no_payload).then_some(gpu_device),
+            stamp_keys,
             report,
         ) {
             Ok((text, code)) => {
@@ -969,6 +994,8 @@ fn live_run(
     lanes: usize,
     batch_keys: usize,
     seed: u64,
+    gpu_device: Option<i32>,
+    stamp_keys: bool,
     report_path: Option<PathBuf>,
 ) -> Result<(String, i32), Failure> {
     use crate::report::{LatencyPercentiles, LiveReport, QueueStats, Tuning};
@@ -1000,8 +1027,13 @@ fn live_run(
         client,
         channels,
         &description,
-        seed,
-        until,
+        &crate::live::RunOptions {
+            seed,
+            until,
+            batch_keys,
+            gpu_device,
+            stamp_keys,
+        },
         Arc::clone(&stop),
     )
     .map_err(Failure::other)?;
@@ -1014,12 +1046,12 @@ fn live_run(
         valid,
         invalid_reason: (!valid).then(|| {
             format!(
-                "lanes found their queue empty {} times out of {} pops ({:.3}%), so the \
+                "the plan queue underran {} times out of {} pops ({:.3}%), so the \
                  generator and not Certus set the pace at those instants and the \
                  throughput describes the instrument (FR-062)",
-                stats.empty_pops(),
+                stats.underruns(),
                 stats.pops(),
-                stats.fraction_starved() * 100.0
+                stats.fraction_underrun() * 100.0
             )
         }),
         requests: stats.requests(),
@@ -1032,11 +1064,12 @@ fn live_run(
         queue: QueueStats {
             batches_produced: stats.batches_produced,
             pops: stats.pops(),
-            empty_pops: stats.empty_pops(),
-            fraction_starved: stats.fraction_starved(),
+            underruns: stats.underruns(),
+            fraction_underrun: stats.fraction_underrun(),
             min_depth: stats.min_depth(),
             capacity_per_lane: crate::live::QUEUE_CAPACITY,
-            per_lane_empty_pops: stats.lanes.iter().map(|l| l.empty_pops).collect(),
+            per_lane_underruns: stats.lanes.iter().map(|l| l.underruns).collect(),
+            producer_blocked: stats.producer_blocked,
             per_lane_min_depth: stats.lanes.iter().map(|l| l.min_depth).collect(),
         },
         producer_completed: stats.producer_completed,
