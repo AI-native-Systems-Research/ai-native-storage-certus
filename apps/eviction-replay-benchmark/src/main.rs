@@ -282,7 +282,8 @@ fn main() -> ExitCode {
         };
         let plot_title = format!("{trace_name} ({n_convs} conversations)");
         if let Err(e) = generate_pdf(&all_results, pdf_path, &plot_title) {
-            eprintln!("warning: failed to generate PDF: {e}");
+            eprintln!("error: failed to generate PDF: {e}");
+            return ExitCode::FAILURE;
         }
     }
 
