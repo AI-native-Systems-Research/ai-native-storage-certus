@@ -1,0 +1,125 @@
+#!/bin/bash
+# run-guidellm.sh — EXAMPLE guidellm client for a vLLM server started by
+# run-serve-shmq.sh or run-serve-cputier.sh.
+#
+# guidellm (https://github.com/vllm-project/guidellm) is an HTTP load generator
+# for OpenAI-compatible endpoints. This script points it at the /v1 surface the
+# serve scripts publish and drives the "Shared-Prefix Synthetic" smoke workload
+# from benchmarks/BENCHMARKING.md (a shared system prompt reused across a group
+# of unique questions — the access pattern that exercises the KV-offload read
+# path). Everything is env-overridable; this is a starting point, not a fixed
+# benchmark.
+#
+# Prerequisites:
+#   1. A server is already running and serving on ${TARGET} — start one first:
+#        ./run-serve-certus-shmq.sh   # Certus-SHMQ backend (needs a host certus-server)
+#        ./run-serve-cputier.sh       # native CPU+disk tiering backend
+#   2. guidellm is installed on the HOST (not in the server container):
+#        pip install guidellm            # or: pipx install guidellm
+#
+# Examples:
+#   ./run-guidellm.sh                                  # sweep the full load range, 120s/stage
+#   RATE_TYPE=throughput MAX_SECONDS=60 ./run-guidellm.sh
+#   RATE_TYPE=constant RATE=8 ./run-guidellm.sh        # fixed 8 req/s
+#   PORT=9000 MODEL=qwen2.5-7b ./run-guidellm.sh       # match a non-default serve port
+#   DATA="prompt_tokens=512,output_tokens=512,prefix_tokens=4096,prefix_count=16" ./run-guidellm.sh
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Target endpoint (must match the running serve script) ───────────────────────
+# guidellm's openai_http backend takes the server ROOT and appends /v1/...; the
+# serve scripts publish IPv4 on 127.0.0.1 (podman does not publish IPv6).
+HOST="${HOST:-127.0.0.1}"
+PORT="${PORT:-8000}"
+TARGET="${TARGET:-http://${HOST}:${PORT}}"
+MODEL="${MODEL:-qwen2.5-7b}"          # the --served-model-name the server advertises
+PROCESSOR="${PROCESSOR:-Qwen/Qwen2.5-7B-Instruct}"  # tokenizer for token accounting
+
+# ── Load profile ─────────────────────────────────────────────────────────────────
+# rate-type: sweep (auto low->saturation), throughput (max), synchronous (1 at a
+# time), constant/poisson (need RATE). Bound each stage by time or request count.
+RATE_TYPE="${RATE_TYPE:-sweep}"
+RATE="${RATE:-}"                       # req/s — only used by constant/poisson
+MAX_SECONDS="${MAX_SECONDS:-120}"      # per-stage wall-clock budget
+MAX_REQUESTS="${MAX_REQUESTS:-}"       # alternative bound; if set, overrides MAX_SECONDS
+
+# ── Workload (guidellm synthetic spec) — the BENCHMARKING.md smoke test ─────────
+#   prefix_tokens : shared system prompt per group
+#   prefix_count  : distinct prefix groups
+#   prompt_tokens : unique user question
+#   output_tokens : generated length
+DATA="${DATA:-prompt_tokens=256,output_tokens=256,prefix_tokens=2048,prefix_count=32}"
+
+STAMP="$(date +%Y%m%d_%H%M%S)"
+OUTPUT="${OUTPUT:-${SCRIPT_DIR}/guidellm_${RATE_TYPE}_${STAMP}.json}"
+
+# ── Preflight ──────────────────────────────────────────────────────────────────
+if ! command -v guidellm >/dev/null 2>&1; then
+  echo "error: guidellm not found on PATH — install it on the host: pip install guidellm" >&2
+  exit 1
+fi
+# Fail fast with a clear message if no server is answering (rather than deep in guidellm).
+if command -v curl >/dev/null 2>&1; then
+  if ! curl -fsS --max-time 5 "${TARGET}/v1/models" >/dev/null 2>&1; then
+    echo "error: no OpenAI server answering at ${TARGET}/v1/models" >&2
+    echo "       start one first: ./run-serve-certus-shmq.sh  (or)  ./run-serve-cputier.sh" >&2
+    exit 1
+  fi
+fi
+
+# ── Translate the DATA spec to a JSON synthetic_text config ─────────────────────
+# guidellm >= 0.7 validates --data strictly and no longer accepts the flat
+# prefix_tokens/prefix_count keys — they must be expressed as a prefix_buckets
+# entry. Keep the familiar comma-separated DATA env interface and fold any
+# prefix_tokens/prefix_count into a single bucket here.
+build_data_json() {
+  local spec="$1" pt="" pc="" kv k v f
+  local -a parts fields=()
+  IFS=',' read -ra parts <<< "$spec"
+  for kv in "${parts[@]}"; do
+    [[ -z "$kv" ]] && continue
+    k="${kv%%=*}"; v="${kv#*=}"
+    case "$k" in
+      prefix_tokens) pt="$v" ;;
+      prefix_count)  pc="$v" ;;
+      *) fields+=("\"$k\":$v") ;;
+    esac
+  done
+  local json="{\"kind\":\"synthetic_text\""
+  for f in "${fields[@]}"; do json+=",$f"; done
+  if [[ -n "$pt" || -n "$pc" ]]; then
+    json+=",\"prefix_buckets\":[{\"bucket_weight\":100,\"prefix_count\":${pc:-1},\"prefix_tokens\":${pt:-0}}]"
+  fi
+  printf '%s}' "$json"
+}
+DATA_JSON="$(build_data_json "$DATA")"
+
+# ── Assemble guidellm args ──────────────────────────────────────────────────────
+# guidellm >= 0.7 replaced the flat flags (--target/--model/--rate-type/--output-path)
+# with structured "kind=...,key=val" options under the `run` subcommand.
+ARGS=(
+  run
+  --backend "kind=openai_http,target=${TARGET},model=${MODEL}"
+  --tokenizer "kind=huggingface_auto,model=${PROCESSOR}"
+  --data "$DATA_JSON"
+  --output "kind=json,path=${OUTPUT}"
+)
+# constant/poisson require a numeric rate; sweep/throughput/synchronous ignore it.
+if [[ "$RATE_TYPE" == "constant" || "$RATE_TYPE" == "poisson" ]]; then
+  [[ -n "$RATE" ]] || { echo "error: RATE_TYPE=${RATE_TYPE} needs RATE=<req/s>" >&2; exit 1; }
+  ARGS+=(--profile "kind=${RATE_TYPE},rate=${RATE}")
+else
+  ARGS+=(--profile "kind=${RATE_TYPE}")
+fi
+# Bound each stage: request count takes precedence over wall-clock when both set.
+if [[ -n "$MAX_REQUESTS" ]]; then
+  ARGS+=(--constraint "kind=max_requests,count=${MAX_REQUESTS}")
+else
+  ARGS+=(--constraint "kind=max_duration,seconds=${MAX_SECONDS}")
+fi
+
+echo "[guidellm] target=${TARGET}  model=${MODEL}  rate-type=${RATE_TYPE}${RATE:+ rate=${RATE}}"
+echo "[guidellm] data: ${DATA}"
+echo "[guidellm] results -> ${OUTPUT}"
+exec guidellm "${ARGS[@]}"

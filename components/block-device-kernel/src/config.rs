@@ -85,9 +85,10 @@ impl DeviceConfig {
 /// Verify that a path is a block device using stat(2).
 fn assert_block_device(path: &Path) -> Result<(), String> {
     let mut stat_buf: libc::stat = unsafe { std::mem::zeroed() };
-    let c_path = std::ffi::CString::new(path.to_str().ok_or_else(|| {
-        format!("path contains non-UTF8 characters: {}", path.display())
-    })?)
+    let c_path = std::ffi::CString::new(
+        path.to_str()
+            .ok_or_else(|| format!("path contains non-UTF8 characters: {}", path.display()))?,
+    )
     .map_err(|e| format!("path contains null byte: {e}"))?;
 
     // SAFETY: c_path is a valid C string, stat_buf is zeroed and valid.

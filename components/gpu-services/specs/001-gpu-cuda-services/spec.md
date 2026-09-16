@@ -311,7 +311,18 @@ by a verification read-back.
   and registers it with SPDK via `spdk_mem_register` (enabling NVMe
   DMA). If `cudaHostRegister` succeeds but `spdk_mem_register` fails,
   the method MUST roll back by calling `cudaHostUnregister` before
-  returning the error.
+  returning the error. *(Backfilled 2026-09-09 from `src/lib.rs:960-1010`.)*
+  Registration MUST use the **portable** flag
+  (`CUDA_HOST_REGISTER_PORTABLE`) so memory pinned under one device's CUDA
+  context remains page-locked for transfers to/from every GPU — required for
+  multi-GPU / data-parallel serving where one shared host pool feeds several
+  devices (introduced as "Gate #1" in `ecf2dbe3`). The method is idempotent: a
+  `cudaHostRegister` result of `CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED`, and
+  an `spdk_mem_register` result of `EBUSY` (memory already registered, e.g. via
+  `spdk_zmalloc`), are both treated as success. The `cudaHostUnregister`
+  rollback on SPDK failure is performed ONLY when this call actually performed
+  the CUDA registration (tracked via `we_registered_cuda`) — not when the
+  memory was already registered by a prior call or another owner.
 - **FR-016**: Component MUST provide an `unregister_host_memory(ptr,
   size)` method (gated behind `spdk` feature) that unregisters memory
   from SPDK via `spdk_mem_unregister` then removes page-locking via
@@ -341,7 +352,12 @@ by a verification read-back.
   `spdk_mem_register`, returning an SPDK `DmaBuffer`. The returned
   buffer is suitable as both an NVMe DMA target and a source for async
   GPU H2D copies. On drop, the buffer unregisters from SPDK and frees
-  via `cudaFreeHost`.
+  via `cudaFreeHost`. *(Backfilled 2026-09-09 from `src/lib.rs:937-939`.)*
+  The allocation MUST use the **portable** flag (`CUDA_HOST_ALLOC_PORTABLE`)
+  so the returned buffer stays page-locked across all GPU contexts and is
+  usable as an async H2D source for any device, not only the device current at
+  allocation time (required for multi-GPU / data-parallel operation; Gate #1,
+  `ecf2dbe3`).
 - **FR-021**: Component MUST provide a `set_device(device)` method that
   binds the calling thread's current CUDA device context to the
   specified GPU ordinal via `cudaSetDevice`, so that subsequently-created

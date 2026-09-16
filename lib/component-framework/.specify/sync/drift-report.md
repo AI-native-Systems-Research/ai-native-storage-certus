@@ -1,11 +1,27 @@
 ---
 spec_sync_component: component-framework
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T17:33:06Z
-spec_sync_git_commit: cab68bf2
-spec_sync_inputs_sha256: ffeeb57f098e00d29807473fb4317861ae4fe512b35be0820a2feabf403eb4e6
+spec_sync_synced_at: 2026-09-09T22:30:36Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: 2b13367a6c1538bf68236f4694cacab9614f7693b1131683ad2b753715e3c8f0
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (latent-stale on unstable; re-verified clean).** This
+> stamp was already stale on `origin/unstable`: commit `d8f9bdea` edited
+> `specs/002-registry-refcount-binding/spec.md` (added the FR-018 / SC-002
+> "known limitation" text) after the last stamp `cab68bf2` without re-stamping,
+> and later `components/interfaces/` changes fold into this hash too. Re-verified
+> this sweep against current code (`src/` unchanged since the stamp): the FR-018
+> limitation is CONFIRMED — `define_component!` stores one strong `Arc` self-clone
+> per provided interface plus one for `IUnknown` in `__interface_map`
+> (`crates/component-macros/src/define_component.rs:180-213,356-359`), stored as
+> strong `Arc` not `Weak` (no `Weak` in the crates; no `impl Drop` clears the
+> map), so a generated component is retained until process exit after external
+> refs drop. The `ComponentRef`/`Arc` refcount primitive itself is correct
+> (`crates/component-core/src/component_ref.rs:41-89`). Spec matches code; the
+> `Weak`-based fix stays a maintainer-deferred code change tracked below. Digest
+> recomputed at merged HEAD; drift status remains `clean`.
+
 # Drift Report: component-framework
 
 **Generated**: 2026-09-03

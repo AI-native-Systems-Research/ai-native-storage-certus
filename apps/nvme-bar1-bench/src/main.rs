@@ -69,10 +69,7 @@ struct Cli {
 
 static COMPLETIONS: AtomicU32 = AtomicU32::new(0);
 
-unsafe extern "C" fn read_completion_cb(
-    _ctx: *mut c_void,
-    _cpl: *const spdk_sys::spdk_nvme_cpl,
-) {
+unsafe extern "C" fn read_completion_cb(_ctx: *mut c_void, _cpl: *const spdk_sys::spdk_nvme_cpl) {
     COMPLETIONS.fetch_add(1, Ordering::Relaxed);
 }
 
@@ -125,16 +122,21 @@ fn initialize_spdk(
         return Err("no CUDA GPU available".into());
     }
     if gpu_index >= device_count {
-        return Err(format!("GPU {} out of range ({} available)", gpu_index, device_count));
+        return Err(format!(
+            "GPU {} out of range ({} available)",
+            gpu_index, device_count
+        ));
     }
     unsafe { cuda_ffi::cudaSetDevice(gpu_index) };
-    eprintln!("GPU: device {} selected ({} available)", gpu_index, device_count);
+    eprintln!(
+        "GPU: device {} selected ({} available)",
+        gpu_index, device_count
+    );
 
     let spdk_env_comp = spdk_env::SPDKEnvComponent::new_default();
-    let ienv = component_core::iunknown::query::<dyn spdk_env::ISPDKEnv + Send + Sync>(
-        &*spdk_env_comp,
-    )
-    .ok_or("ISPDKEnv query failed")?;
+    let ienv =
+        component_core::iunknown::query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env_comp)
+            .ok_or("ISPDKEnv query failed")?;
     ienv.init().map_err(|e| format!("SPDK init: {e}"))?;
 
     // Probe all devices
@@ -187,9 +189,7 @@ fn initialize_spdk(
 
         let sector_size = unsafe { spdk_sys::spdk_nvme_ns_get_sector_size(ns) } as usize;
 
-        let qpair = unsafe {
-            spdk_sys::spdk_nvme_ctrlr_alloc_io_qpair(ctrlr, std::ptr::null(), 0)
-        };
+        let qpair = unsafe { spdk_sys::spdk_nvme_ctrlr_alloc_io_qpair(ctrlr, std::ptr::null(), 0) };
         if qpair.is_null() {
             return Err("failed to allocate IO qpair".into());
         }
@@ -197,14 +197,23 @@ fn initialize_spdk(
         let pci_addr = format!("drive-{}", drives.len());
 
         eprintln!("  Drive: {} (sector_size={})", pci_addr, sector_size);
-        drives.push(DriveCtx { ctrlr, ns, qpair, sector_size, pci_addr });
+        drives.push(DriveCtx {
+            ctrlr,
+            ns,
+            qpair,
+            sector_size,
+            pci_addr,
+        });
     }
 
     if drives.is_empty() {
         return Err("no usable drives".into());
     }
 
-    Ok(SpdkState { drives, ctrlrs: all_ctrlrs })
+    Ok(SpdkState {
+        drives,
+        ctrlrs: all_ctrlrs,
+    })
 }
 
 /// Per-drive poller thread context.
@@ -227,9 +236,8 @@ unsafe impl Sync for DriveWork {}
 /// Single-drive poller: allocates its own qpair, runs submit/poll loop.
 fn drive_poller(work: DriveWork) -> Result<(), String> {
     // Allocate qpair on THIS thread (SPDK requirement)
-    let qpair = unsafe {
-        spdk_sys::spdk_nvme_ctrlr_alloc_io_qpair(work.ctrlr, std::ptr::null(), 0)
-    };
+    let qpair =
+        unsafe { spdk_sys::spdk_nvme_ctrlr_alloc_io_qpair(work.ctrlr, std::ptr::null(), 0) };
     if qpair.is_null() {
         return Err("failed to allocate qpair on poller thread".into());
     }
@@ -267,9 +275,7 @@ fn drive_poller(work: DriveWork) -> Result<(), String> {
 
     // Poll + resubmit
     while completed < work.num_chunks {
-        let n = unsafe {
-            spdk_sys::spdk_nvme_qpair_process_completions(qpair, 0)
-        };
+        let n = unsafe { spdk_sys::spdk_nvme_qpair_process_completions(qpair, 0) };
         if n < 0 {
             unsafe { spdk_sys::spdk_nvme_ctrlr_free_io_qpair(qpair) };
             return Err(format!("process_completions error (rc={n})"));
@@ -346,11 +352,11 @@ fn multi_drive_bench(
 
                 let ctrlr = ctrlr as *mut spdk_sys::spdk_nvme_ctrlr;
                 let ns = ns as *mut spdk_sys::spdk_nvme_ns;
-                let bufs = unsafe { std::slice::from_raw_parts(buf_ptr as *const *mut c_void, num_bufs) };
+                let bufs =
+                    unsafe { std::slice::from_raw_parts(buf_ptr as *const *mut c_void, num_bufs) };
 
-                let qpair = unsafe {
-                    spdk_sys::spdk_nvme_ctrlr_alloc_io_qpair(ctrlr, std::ptr::null(), 0)
-                };
+                let qpair =
+                    unsafe { spdk_sys::spdk_nvme_ctrlr_alloc_io_qpair(ctrlr, std::ptr::null(), 0) };
                 if qpair.is_null() {
                     return Err("failed to allocate qpair".into());
                 }
@@ -368,9 +374,14 @@ fn multi_drive_bench(
                     let slot = submitted % num_bufs;
                     let rc = unsafe {
                         spdk_sys::spdk_nvme_ns_cmd_read(
-                            ns, qpair, bufs[slot], lba,
-                            sectors_per_chunk, Some(read_completion_cb),
-                            std::ptr::null_mut(), 0,
+                            ns,
+                            qpair,
+                            bufs[slot],
+                            lba,
+                            sectors_per_chunk,
+                            Some(read_completion_cb),
+                            std::ptr::null_mut(),
+                            0,
                         )
                     };
                     if rc != 0 {
@@ -382,9 +393,7 @@ fn multi_drive_bench(
                 }
 
                 while completed < chunks_total {
-                    let n = unsafe {
-                        spdk_sys::spdk_nvme_qpair_process_completions(qpair, 0)
-                    };
+                    let n = unsafe { spdk_sys::spdk_nvme_qpair_process_completions(qpair, 0) };
                     if n > 0 {
                         for _ in 0..n {
                             completed += 1;
@@ -392,9 +401,14 @@ fn multi_drive_bench(
                                 let slot = submitted % num_bufs;
                                 let rc = unsafe {
                                     spdk_sys::spdk_nvme_ns_cmd_read(
-                                        ns, qpair, bufs[slot], lba,
-                                        sectors_per_chunk, Some(read_completion_cb),
-                                        std::ptr::null_mut(), 0,
+                                        ns,
+                                        qpair,
+                                        bufs[slot],
+                                        lba,
+                                        sectors_per_chunk,
+                                        Some(read_completion_cb),
+                                        std::ptr::null_mut(),
+                                        0,
                                     )
                                 };
                                 if rc != 0 {
@@ -493,8 +507,16 @@ fn main() {
     println!("=== NVMe -> BAR1 DMA Isolation Benchmark (direct SPDK) ===");
     println!("  drives:       {}", num_drives);
     println!("  chunk_size:   {} KiB", cli.chunk_size / 1024);
-    println!("  total_bytes:  {} MiB per drive ({} chunks)", total_per_drive / (1024 * 1024), num_chunks_per_drive);
-    println!("  total_data:   {} MiB ({} drives)", total_bytes / (1024 * 1024), num_drives);
+    println!(
+        "  total_bytes:  {} MiB per drive ({} chunks)",
+        total_per_drive / (1024 * 1024),
+        num_chunks_per_drive
+    );
+    println!(
+        "  total_data:   {} MiB ({} drives)",
+        total_bytes / (1024 * 1024),
+        num_drives
+    );
     println!("  queue_depth:  {} per drive", cli.queue_depth);
     println!("  warmup:       {}", cli.warmup);
     println!("  iterations:   {}", cli.iterations);
@@ -516,7 +538,10 @@ fn main() {
                 cuda_ffi::cudaHostAlloc(&mut ptr, cli.chunk_size, cuda_ffi::CUDA_HOST_ALLOC_DEFAULT)
             };
             if err != cuda_ffi::CUDA_SUCCESS {
-                eprintln!("FATAL: cudaHostAlloc #{i}: {}", cuda_ffi::cuda_error_string(err));
+                eprintln!(
+                    "FATAL: cudaHostAlloc #{i}: {}",
+                    cuda_ffi::cuda_error_string(err)
+                );
                 std::process::exit(1);
             }
             match create_spdk_dma_buffer_from_cuda_host_alloc(ptr, cli.chunk_size) {
@@ -535,10 +560,23 @@ fn main() {
     }
 
     let host_times = multi_drive_bench(
-        &state.drives, &host_ptrs, num_chunks_per_drive,
-        cli.chunk_size, cli.queue_depth, cli.warmup, cli.iterations,
-    ).unwrap_or_else(|e| { eprintln!("FATAL: {e}"); std::process::exit(1); });
-    let host_result = BenchResult { label: "host-ram".into(), total_bytes, times_us: host_times };
+        &state.drives,
+        &host_ptrs,
+        num_chunks_per_drive,
+        cli.chunk_size,
+        cli.queue_depth,
+        cli.warmup,
+        cli.iterations,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("FATAL: {e}");
+        std::process::exit(1);
+    });
+    let host_result = BenchResult {
+        label: "host-ram".into(),
+        total_bytes,
+        times_us: host_times,
+    };
 
     // --- BAR1 mode ---
     if !kernel_module_loaded("gdrdrv") {
@@ -549,7 +587,10 @@ fn main() {
         std::process::exit(0);
     }
 
-    eprintln!("Setting up bar1 buffers ({} per drive, GDRCopy-mapped)...", ring_size);
+    eprintln!(
+        "Setting up bar1 buffers ({} per drive, GDRCopy-mapped)...",
+        ring_size
+    );
     let alloc_chunk = std::cmp::max(cli.chunk_size, gpu_services::gdrcopy_ffi::GPU_PAGE_SIZE);
     let mut bar1_ptrs: Vec<Vec<*mut c_void>> = Vec::new();
     let mut _bar1_bufs: Vec<Vec<DmaBuffer>> = Vec::new();
@@ -563,7 +604,10 @@ fn main() {
             let mut dev_ptr: *mut c_void = std::ptr::null_mut();
             let err = unsafe { cuda_ffi::cudaMalloc(&mut dev_ptr, alloc_chunk) };
             if err != cuda_ffi::CUDA_SUCCESS {
-                eprintln!("FATAL: cudaMalloc #{i}: {}", cuda_ffi::cuda_error_string(err));
+                eprintln!(
+                    "FATAL: cudaMalloc #{i}: {}",
+                    cuda_ffi::cuda_error_string(err)
+                );
                 std::process::exit(1);
             }
             match create_spdk_dma_buffer_from_gpu_bar(dev_ptr, cli.chunk_size) {
@@ -585,13 +629,30 @@ fn main() {
     }
 
     let bar1_times = multi_drive_bench(
-        &state.drives, &bar1_ptrs, num_chunks_per_drive,
-        cli.chunk_size, cli.queue_depth, cli.warmup, cli.iterations,
-    ).unwrap_or_else(|e| { eprintln!("FATAL: {e}"); std::process::exit(1); });
-    let bar1_result = BenchResult { label: "bar1".into(), total_bytes, times_us: bar1_times };
+        &state.drives,
+        &bar1_ptrs,
+        num_chunks_per_drive,
+        cli.chunk_size,
+        cli.queue_depth,
+        cli.warmup,
+        cli.iterations,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("FATAL: {e}");
+        std::process::exit(1);
+    });
+    let bar1_result = BenchResult {
+        label: "bar1".into(),
+        total_bytes,
+        times_us: bar1_times,
+    };
 
     // --- Results ---
-    println!("Results ({} drive(s), {} MiB total per iteration):", num_drives, total_bytes / (1024*1024));
+    println!(
+        "Results ({} drive(s), {} MiB total per iteration):",
+        num_drives,
+        total_bytes / (1024 * 1024)
+    );
     host_result.report();
     bar1_result.report();
     println!();
@@ -605,7 +666,11 @@ fn main() {
     } else {
         println!("  BAR1 is {:.1}% faster than host-ram", overhead_pct.abs());
     }
-    println!("  Per-drive: host-ram {:.2} GB/s, bar1 {:.2} GB/s", host_gbps / num_drives as f64, bar1_gbps / num_drives as f64);
+    println!(
+        "  Per-drive: host-ram {:.2} GB/s, bar1 {:.2} GB/s",
+        host_gbps / num_drives as f64,
+        bar1_gbps / num_drives as f64
+    );
 
     // Cleanup
     drop(_bar1_bufs);
@@ -620,6 +685,8 @@ fn main() {
         unsafe { spdk_sys::spdk_nvme_ctrlr_free_io_qpair(drive.qpair) };
     }
     for &ctrlr in &state.ctrlrs {
-        unsafe { let _ = spdk_sys::spdk_nvme_detach(ctrlr); };
+        unsafe {
+            let _ = spdk_sys::spdk_nvme_detach(ctrlr);
+        };
     }
 }

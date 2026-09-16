@@ -41,11 +41,7 @@ pub struct ClientSession {
 
 impl ClientSession {
     /// Create a session with an empty backlog.
-    pub fn new(
-        id: u64,
-        ingress_rx: Receiver<Command>,
-        callback_tx: Sender<Completion>,
-    ) -> Self {
+    pub fn new(id: u64, ingress_rx: Receiver<Command>, callback_tx: Sender<Completion>) -> Self {
         Self {
             id,
             ingress_rx,
@@ -353,7 +349,14 @@ impl FilesysHandler {
                 .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
         }
 
-        self.send_completion(client_id, Completion::ReadDone { handle, tag: 0, result });
+        self.send_completion(
+            client_id,
+            Completion::ReadDone {
+                handle,
+                tag: 0,
+                result,
+            },
+        );
     }
 
     fn handle_write_sync(&mut self, client_id: u64, ns_id: u32, lba: u64, buf: Arc<DmaBuffer>) {
@@ -418,7 +421,14 @@ impl FilesysHandler {
                 .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
         }
 
-        self.send_completion(client_id, Completion::WriteDone { handle, tag: 0, result });
+        self.send_completion(
+            client_id,
+            Completion::WriteDone {
+                handle,
+                tag: 0,
+                result,
+            },
+        );
     }
 
     fn handle_read_async(
@@ -536,7 +546,14 @@ impl FilesysHandler {
                     .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
             }
 
-            self.send_completion(client_id, Completion::ReadDone { handle, tag, result });
+            self.send_completion(
+                client_id,
+                Completion::ReadDone {
+                    handle,
+                    tag,
+                    result,
+                },
+            );
         }
     }
 
@@ -673,7 +690,14 @@ impl FilesysHandler {
                     .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
             }
 
-            self.send_completion(client_id, Completion::WriteDone { handle, tag, result });
+            self.send_completion(
+                client_id,
+                Completion::WriteDone {
+                    handle,
+                    tag,
+                    result,
+                },
+            );
         }
     }
 

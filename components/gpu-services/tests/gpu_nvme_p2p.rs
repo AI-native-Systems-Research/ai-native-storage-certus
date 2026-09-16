@@ -460,10 +460,7 @@ fn test_nvme_to_gpu_p2p_python_client() {
         interfaces::Completion::WriteDone { result, .. } => result.expect("NVMe write failed"),
         other => panic!("expected WriteDone, got {other:?}"),
     }
-    log.info(&format!(
-        "Step 2: wrote {} bytes to NVMe LBA 0",
-        alloc_size
-    ));
+    log.info(&format!("Step 2: wrote {} bytes to NVMe LBA 0", alloc_size));
 
     // Step 3: NVMe ReadSync into GDRCopy BAR1 mapping → P2P DMA to GPU VRAM.
     let dma_buf = Arc::new(Mutex::new(dma_buf));

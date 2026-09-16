@@ -1,50 +1,51 @@
-# Spec Sync Apply Report — gpu-services
+# Sync Apply Report
 
-**Applied**: 2026-08-20
-**Component**: gpu-services
-**Based on**: proposals from 2026-08-20 (drift-report 2026-08-20)
+Applied: 2026-09-09
 
-## Summary
+## Changes Made
 
-| Metric | Count |
-|---|---|
-| BACKFILL applied | 1 |
-| ALIGN tasks generated | 0 |
-| UNSPECCED backfilled | 0 |
-| RESOLVED | 0 |
-| HUMAN_DECISION | 0 |
+### Specs Updated
 
-Prior-round canonical deliverables were archived before regeneration:
-`proposals-20260721.{md,json}`, `apply-report-20260721.{md,json}` (the
-2026-08-07 sweep proposals were already archived as `proposals-20260807.json`).
+| Spec | Requirement | Change Type | Direction |
+|------|-------------|-------------|-----------|
+| 001-gpu-cuda-services | FR-015 | Modified (appended) | Backfill |
+| 001-gpu-cuda-services | FR-020 | Modified (appended) | Backfill |
+| 002-gpu-ssd-dma-prepare | FR-019 | Modified (appended) | Backfill |
 
-## Specs Updated
+All three backfills document the `ecf2dbe3` (2026-09-02) Gate #1 change —
+host memory is now registered/allocated with the CUDA **portable** flag
+(`CUDA_HOST_REGISTER_PORTABLE` / `CUDA_HOST_ALLOC_PORTABLE`) so a shared pool
+stays pinned/zero-copy across all GPU contexts for multi-GPU data-parallel
+serving — plus the pre-existing idempotent registration handling
+(`ALREADY_REGISTERED` / SPDK `EBUSY` treated as success; conditional
+`cudaHostUnregister` rollback).
 
-| Spec | Requirement | Change Type |
-|---|---|---|
-| 003-gpu-p2p-server | FR-012 | BACKFILL — reworded: chunked reads confirmed; MDTS ceiling is an operator responsibility documented via CLI help + 128KB default, not runtime-validated |
-| 003-gpu-p2p-server | US1 Acceptance Scenario 4 | ADD — chunked-read scenario (`ceil(size/chunk-size)` chunks, `<n>` reported in `OK` response) |
-| 003-gpu-p2p-server | Assumptions | ADD — bullet: operator responsible for `--chunk-size` ≤ MDTS (refs FR-012) |
-| 003-gpu-p2p-server | Metadata | ADD — `Last-Synced: 2026-08-20` line |
+### New Specs Created
 
-## Align Tasks Generated
+None.
 
-None. No drift item this run was a real behavioral bug (0 ALIGN).
+### Implementation Tasks Generated
 
-## Unspecced Backfilled
+None (no ALIGN proposals — all resolutions were spec backfills; the code is
+authoritative and unchanged).
 
-None. Drift report reported 0 unspecced features (auxiliary `dma.rs` /
-`gdrcopy_ffi.rs` items were backfilled into spec 002 in prior rounds).
+### Not Applied
 
-## Resolved
-
-None. No per-component "already fixed on main thread" items for gpu-services.
+None — all three proposals were approved and applied.
 
 ## Backups
 
-| Spec file edited | Backup |
-|---|---|
-| `specs/003-gpu-p2p-server/spec.md` | `.specify/sync/backups/003-spec.md.20260820T171427Z.bak` |
+- `.specify/sync/backups/spec-001-<ts>.md.bak`
+- `.specify/sync/backups/spec-002-<ts>.md.bak`
 
-`specs/001-gpu-cuda-services/spec.md` and `specs/002-gpu-ssd-dma-prepare/spec.md`
-were not edited this run (0 drift each), so no backups were required for them.
+## Result
+
+No actionable spec/implementation drift remains. Drift report stamped
+`spec_sync_drift_status: clean`.
+
+## Next Steps
+
+1. (Optional) A human maintainer pass on spec 003 to graduate it from
+   backfilled-draft ("needs human review") status.
+2. Commit specs + reports together so the freshness stamp travels with the
+   inputs it certifies.

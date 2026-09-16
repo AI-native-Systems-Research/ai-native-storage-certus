@@ -1,11 +1,24 @@
 ---
 spec_sync_component: spdk-sys
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-03T17:59:17Z
-spec_sync_git_commit: 3a988d9a
-spec_sync_inputs_sha256: 740544ac22940f3af59d6d8f4ce0a133d4f86b8bc49a73a6be2b035e70ed8c4d
+spec_sync_synced_at: 2026-09-09T22:30:36Z
+spec_sync_git_commit: 3411518a
+spec_sync_inputs_sha256: 4608e457759821021fc3f33df5d8b1cb4837ffe0a3af61b5d31f598b478bd7cd
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-09 (latent-stale on unstable; re-verified clean).** This
+> stamp was already stale on `origin/unstable`: commit `2c7864a2` backfilled
+> FR-4's binding-cluster names into `specs/001-spdk-sys/spec.md` after the stamp
+> commit `3a988d9a`, and later `components/interfaces/` changes fold into this
+> hash too. Re-verified this sweep against current `build.rs` (`src/`/`build.rs`
+> unchanged since the stamp): every FR-4 cluster is present at the cited lines —
+> `spdk_nvme_ctrlr_get_max_xfer_size` (build.rs:197), `..._cmd_abort_ext`
+> (build.rs:220), the five `spdk_nvme_ns_*` accessors (build.rs:207-211), ns
+> mgmt/qpair/admin/reset clusters (build.rs:189-205) — and FR-1..FR-9 + NFRs +
+> notes (wrapper.h includes, 30 `rte_*` libs, `+whole-archive`, opaque
+> `spdk_nvme_ctrlr_data`) all re-confirmed. Spec matches code. Digest recomputed
+> at merged HEAD; drift status remains `clean`.
+
 # Drift Report: spdk-sys
 
 **Generated**: 2026-09-03

@@ -505,6 +505,34 @@ def hist_pct(buckets, count, p):
 # use them — run_batched in run_multiturn_sync_batched and the async model in
 # run_multiturn_async (build_engine(..., async_mode=True) + run_async) — so
 # setup is not forked.
+def yarn_hf_overrides(model, max_model_len, native=32768):
+    """Return ``hf_overrides`` enabling YaRN rope-scaling when ``max_model_len``
+    exceeds the model's native context, else ``{}``.
+
+    Qwen2.x ships a 32768-token window (``max_position_embeddings=32768``, no
+    ``rope_scaling``), so vLLM rejects a larger ``max_model_len`` with a
+    ``ModelConfig`` validation error rather than infer long-context support. The
+    OTel corpus needs the full 131072-token window, and Qwen's official recipe is
+    static YaRN with ``factor = target / native`` (4.0 for 131072). This applies
+    it only when the requested window is larger AND the model is a Qwen2.x — other
+    models fall through untouched. ``VLLM_ALLOW_LONG_MAX_MODEL_LEN`` is the wrong
+    tool here (it merely bypasses the check; RoPE positions past the trained range
+    produce NaNs). Set ``ROPE_YARN=0`` to opt out (e.g. to cap at ``native``).
+
+    Note: static YaRN slightly degrades quality on short sequences, which is the
+    accepted trade for a long-context KV-offload benchmark."""
+    import os
+    if os.environ.get("ROPE_YARN", "1") == "0":
+        return {}
+    if max_model_len <= native or "qwen2" not in model.lower():
+        return {}
+    factor = float(max_model_len) / float(native)
+    print(f"[engine] enabling YaRN rope-scaling factor={factor:g} "
+          f"(native {native} -> max_model_len {max_model_len})", file=sys.stderr)
+    return {"rope_scaling": {"rope_type": "yarn", "factor": factor,
+                             "original_max_position_embeddings": native}}
+
+
 def build_engine(engine_kwargs, *, async_mode=False):
     """Construct the vLLM engine from a fully-assembled kwargs dict.
 

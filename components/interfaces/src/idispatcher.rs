@@ -54,6 +54,15 @@ pub struct DispatcherConfig {
     /// Maximum eviction attempts before returning AllocationFailed.
     /// Default: 2048.
     pub max_eviction_attempts: usize,
+    /// Maximum time, in milliseconds, that a store allocation
+    /// (`reserve_memory`) will backpressure — retrying eviction while the
+    /// background evictor demotes and in-flight write-throughs land — before
+    /// surfacing `AllocationFailed`. Absorbs momentary memory-tier saturation
+    /// under sustained store bursts (e.g. async closed-loop offload) instead of
+    /// failing the store, which is fatal to the vLLM offloading connector.
+    /// Default: 5000 (5 s). Set to 0 to disable (fail fast, original behavior).
+    /// Only the store path waits; load paths keep their staging fallback.
+    pub store_backpressure_ms: u64,
     /// Delay in milliseconds between DRAM backfill jobs after P2P cold reads.
     /// Throttles background NVMe→DRAM reads to avoid contending with active
     /// P2P cold reads for drive bandwidth.
@@ -99,6 +108,7 @@ impl Default for DispatcherConfig {
             ssd_eviction_interval_secs: 5,
             poller_base_cpu: None,
             max_eviction_attempts: 2048,
+            store_backpressure_ms: 5000,
             backfill_delay_ms: 10,
             metadata_partition_size: 128 * 1024 * 1024,
             extended_metadata_partition_size: 128 * 1024 * 1024,
@@ -199,6 +209,18 @@ pub struct TierEventStats {
     pub evictions_from_memory: u64,
     /// Extents freed on SSD by the background extent evictor.
     pub evictions_from_ssd: u64,
+    /// Store-allocation retries taken while backpressuring on a momentarily
+    /// full memory tier (see `DispatcherConfig::store_backpressure_ms`). A
+    /// nonzero value means the tier saturated and the store path waited for the
+    /// evictor to catch up rather than failing the store.
+    pub store_backpressure_events: u64,
+    /// Stores dropped best-effort because the memory tier was still full after
+    /// the backpressure budget elapsed. The KV block is not cached (a later
+    /// load misses and recomputes), but the store reports success so a full
+    /// cache is never fatal to the vLLM offloading connector. A nonzero value
+    /// means the tier could not absorb the store inflow even after
+    /// backpressuring — consider a larger tier or more SSD write bandwidth.
+    pub store_drops_on_full: u64,
 }
 
 #[cfg(feature = "spdk")]
@@ -440,7 +462,18 @@ component_macros::define_interface! {
         /// `session_id` is an opaque per-request identifier (0 = unset) supplied
         /// by the client (e.g. a hash of vLLM's `session_id`). It carries no
         /// allocation semantics today and is used only for observability.
-        fn reserve_memory(&self, key: CacheKey, size: u32, session_id: u64) -> Result<*mut u8, DispatcherError>;
+        ///
+        /// `deadline` bounds how long a full-tier allocation may backpressure
+        /// (retry LRU eviction) before surfacing [`DispatcherError::AllocationFailed`]:
+        /// - `None` — use the dispatcher's own `store_backpressure_ms` budget,
+        ///   measured from the start of *this* call (legacy per-call behavior).
+        /// - `Some(instant)` — retry only until `instant`, a deadline the caller
+        ///   shares across a batch of reserves. Once the instant has passed, make
+        ///   a single best-effort attempt and fail fast. This lets a multi-key
+        ///   reserve batch bound its *total* backpressure (rather than paying the
+        ///   full budget per key) so the client's request deadline is not exceeded;
+        ///   keys that fail fast are refused caching and recomputed by the client.
+        fn reserve_memory(&self, key: CacheKey, size: u32, session_id: u64, deadline: Option<std::time::Instant>) -> Result<*mut u8, DispatcherError>;
 
         /// DMA-copy from GPU into a previously reserved memory-tier slot.
         ///

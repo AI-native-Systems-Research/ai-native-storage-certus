@@ -20,7 +20,9 @@ use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
 use component_core::iunknown::query;
 use gpu_services::cuda_ffi;
-use gpu_services::dma::{create_spdk_dma_buffer_from_cuda_host_alloc, create_spdk_dma_buffer_from_gpu_bar};
+use gpu_services::dma::{
+    create_spdk_dma_buffer_from_cuda_host_alloc, create_spdk_dma_buffer_from_gpu_bar,
+};
 use interfaces::{Command, Completion, DmaBuffer, IBlockDevice};
 use spdk_env::SPDKEnvComponent;
 
@@ -122,8 +124,7 @@ fn initialize_stack(pci: Option<&str>) -> Result<BenchContext, String> {
 
     bind(&*spdk_env_comp, "ISPDKEnv", &*block_dev, "spdk_env")
         .map_err(|e| format!("bind spdk_env: {e}"))?;
-    bind(&*logger, "ILogger", &*block_dev, "logger")
-        .map_err(|e| format!("bind logger: {e}"))?;
+    bind(&*logger, "ILogger", &*block_dev, "logger").map_err(|e| format!("bind logger: {e}"))?;
 
     let ienv = query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env_comp)
         .ok_or("ISPDKEnv query failed")?;
@@ -181,7 +182,10 @@ fn initialize_stack(pci: Option<&str>) -> Result<BenchContext, String> {
     }
 
     let ns = &namespaces[0];
-    eprintln!("NVMe: ns_id={}, sector_size={}, PCI={}", ns.ns_id, ns.sector_size, spdk_addr);
+    eprintln!(
+        "NVMe: ns_id={}, sector_size={}, PCI={}",
+        ns.ns_id, ns.sector_size, spdk_addr
+    );
     eprintln!("GPU: {} device(s) available", device_count);
 
     Ok(BenchContext {
@@ -355,7 +359,11 @@ impl BounceBufferState {
             // Allocate CUDA-pinned host memory.
             let mut host_ptr: *mut c_void = std::ptr::null_mut();
             let err = unsafe {
-                cuda_ffi::cudaHostAlloc(&mut host_ptr, chunk_size, cuda_ffi::CUDA_HOST_ALLOC_DEFAULT)
+                cuda_ffi::cudaHostAlloc(
+                    &mut host_ptr,
+                    chunk_size,
+                    cuda_ffi::CUDA_HOST_ALLOC_DEFAULT,
+                )
             };
             if err != cuda_ffi::CUDA_SUCCESS {
                 return Err(format!(
@@ -394,7 +402,10 @@ impl BounceBufferState {
                     }
                 }
                 unsafe { cuda_ffi::cudaFree(gpu_dst) };
-                return Err(format!("cudaStreamCreate: {}", cuda_ffi::cuda_error_string(err)));
+                return Err(format!(
+                    "cudaStreamCreate: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
             }
         }
 
@@ -526,7 +537,10 @@ impl P2pState {
                     unsafe { cuda_ffi::cudaFree(*p) };
                 }
                 unsafe { cuda_ffi::cudaFree(gpu_dst) };
-                return Err(format!("cudaStreamCreate: {}", cuda_ffi::cuda_error_string(err)));
+                return Err(format!(
+                    "cudaStreamCreate: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
             }
         }
 
@@ -679,14 +693,21 @@ fn main() {
     println!();
     println!("=== Bounce-Buffer vs GPUDirect P2P Benchmark ===");
     println!("  chunk_size:   {} KiB", cli.chunk_size / 1024);
-    println!("  stream_size:  {} KiB ({} chunks)", total_size / 1024, num_chunks);
+    println!(
+        "  stream_size:  {} KiB ({} chunks)",
+        total_size / 1024,
+        num_chunks
+    );
     println!("  ring_size:    {} buffers", ring_size);
     println!("  warmup:       {} iterations", cli.warmup);
     println!("  measured:     {} iterations", cli.iterations);
     println!();
 
     // --- Bounce-buffer benchmark ---
-    eprintln!("Setting up bounce-buffer path ({} CUDA-pinned ring buffers, 2 streams)...", ring_size);
+    eprintln!(
+        "Setting up bounce-buffer path ({} CUDA-pinned ring buffers, 2 streams)...",
+        ring_size
+    );
     let bb = match BounceBufferState::new(ring_size, cli.chunk_size, total_size) {
         Ok(s) => s,
         Err(e) => {
@@ -700,7 +721,10 @@ fn main() {
     });
 
     // --- P2P benchmark ---
-    eprintln!("Setting up P2P path ({} GDRCopy ring buffers, 2 streams)...", ring_size);
+    eprintln!(
+        "Setting up P2P path ({} GDRCopy ring buffers, 2 streams)...",
+        ring_size
+    );
     let p2p = match P2pState::new(ring_size, cli.chunk_size, total_size) {
         Ok(s) => s,
         Err(e) => {
@@ -728,7 +752,10 @@ fn main() {
     let p2p_mean = p2p_result.times_us.iter().sum::<f64>() / p2p_result.times_us.len() as f64;
     println!();
     if p2p_mean < bb_mean {
-        println!("  P2P is {:.2}x faster than bounce-buffer", bb_mean / p2p_mean);
+        println!(
+            "  P2P is {:.2}x faster than bounce-buffer",
+            bb_mean / p2p_mean
+        );
     } else {
         println!(
             "  Bounce-buffer is {:.2}x faster than P2P",

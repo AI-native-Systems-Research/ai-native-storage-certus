@@ -175,9 +175,7 @@ impl FlushManager {
             let (lock, cvar) = &*ctx.notify;
             let mut signaled = lock.lock().unwrap();
             if !*signaled {
-                let result = cvar
-                    .wait_timeout(signaled, ctx.config.interval)
-                    .unwrap();
+                let result = cvar.wait_timeout(signaled, ctx.config.interval).unwrap();
                 signaled = result.0;
             }
             let was_signaled = *signaled;

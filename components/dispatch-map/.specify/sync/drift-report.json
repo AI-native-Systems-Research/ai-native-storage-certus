@@ -1,11 +1,13 @@
 {
   "generated": "2026-09-02T20:45:00Z",
+  "restamped": "2026-09-09T21:33:18Z",
+  "restamp_note": "Restamp only, no drift and no spec change. Prior stamp (2dbb7666...) went stale because (1) spec.md was already backfilled to the global-lock design in commit 6a3d801c and (2) scripts/spec-sync-hash.sh folds all of components/interfaces/ into every component hash, so the dispatcher-only idispatcher.rs store-backpressure change (39ffee9b/c400ced8) re-hashed dispatch-map. Re-verified src/state.rs still uses a single global Mutex<Inner>+Condvar (FR-002/FR-013); drift_status remains clean.",
   "project": "dispatch-map",
   "spec": "specs/001-dispatch-map/spec.md",
-  "branch": "evolve-dispatcher-dw",
-  "git_commit": "787b8263",
+  "branch": "fix-dispatcher-store-backpressure",
+  "git_commit": "5bb71702",
   "drift_status": "clean",
-  "inputs_sha256": "2dbb7666aa9c2fce3bdfda40d947ddbb498f6dbd7c925015bffb300f66944b74",
+  "inputs_sha256": "7f74b8e980be9afe665117e3ba9100092073f8f7960e78ad9620f0656cb810a7",
   "summary": {
     "specs_analyzed": 1,
     "requirements_checked": 33,

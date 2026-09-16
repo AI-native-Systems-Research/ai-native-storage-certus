@@ -1,0 +1,137 @@
+# vLLM workload-driver image for kv-offload-otel-replay (OffloadingConnector family).
+#
+# The OTel-corpus counterpart of benchmarks/kv-offload-replay/Dockerfile.offload:
+# ONE image + ONE driver (run_otel_replay.py) drives three self-contained
+# backends, selected at run time by environment, replaying the otel_trace_replay
+# corpus with the recorded per-turn timing instead of the ShareGPT 450x12 stream:
+#
+#   NoOffload    -e OFFLOAD_MODE=none
+#                GPU-only baseline: no kv_transfer_config, evicted KV recomputed.
+#   CPUOffload   (default; OFFLOAD_MODE unset, SECONDARY_TIER empty)
+#                vLLM OffloadingConnector + CPUOffloadingSpec -> pinned host RAM.
+#   Tiered-CPU-FS -e SECONDARY_TIER=fs  (or -e DISK_DIR=/path)
+#                OffloadingConnector + TieringOffloadingSpec: CPU primary (host RAM
+#                via /dev/shm) + "fs" disk secondary (FileSystemTierManager).
+#
+# All three are self-contained: a single vLLM process, NO separate server, NO
+# gRPC, NO CUDA IPC (so no --ipc=host, no CERTUS_SERVER). The two Tracing*
+# connector modules are baked in too, so TRACE_OFFLOAD=1 works.
+#
+# CORPUS IS NOT BAKED IN. Unlike the ShareGPT image (small json COPY'd in), the
+# OTel corpus is ~22 GB (1000 files). It is bind-mounted read-only at run time
+# onto OTEL_DIR (/workspace/otel-corpus); the entrypoint fails fast if it is
+# absent. Use the run-docker-otel-*.sh wrappers, which mount it for you.
+#
+# Build (context = repo root — needs benchmarks/ sources; NO dataset needed):
+#   podman build -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-offload \
+#       -t certus-otel-offload-bench .
+#
+# Run examples (GPU required; --dir/OTEL_DIR points at the mounted corpus):
+#   # CPUOffload, first 8 conversations, saturating (no recorded waits)
+#   podman run --rm --device nvidia.com/gpu=all \
+#       -e NUM_CONVS=8 -e TIME_SCALE=0 \
+#       -v /mnt/certus1/inference-perf-syn-data/otel_1k:/workspace/otel-corpus:ro \
+#       -v /mnt/certus1/hf-cache:/root/.cache/huggingface:z certus-otel-offload-bench
+#   # Tiered CPU+FS (CPU tier is a /dev/shm mmap -> --shm-size >= CPU_BYTES; bind
+#   # a host dir for the fs tier so it hits real disk)
+#   podman run --rm --device nvidia.com/gpu=all --shm-size 36g \
+#       -e SECONDARY_TIER=fs -e CPU_BYTES=34359738368 -e FS_ROOT_DIR=/mnt/fs-tier/kv-tier \
+#       -v /mnt/certus1/inference-perf-syn-data/otel_1k:/workspace/otel-corpus:ro \
+#       -v /mnt/certus1/hf-cache:/root/.cache/huggingface:z \
+#       -v /mnt/certus1/kv-fs-tier:/mnt/fs-tier:z certus-otel-offload-bench
+#   # docker equivalent of --device nvidia.com/gpu=all: --gpus all
+
+# Tiering (SECONDARY_TIER=fs) requires vLLM 0.26+; NoOffload / CPUOffload work on
+# older bases too. Default to 0.26.0 so all three modes are available from one
+# image. Override with:  podman build --build-arg VLLM_VERSION=<x.y.z> ...
+ARG VLLM_VERSION=0.26.0
+FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
+ENTRYPOINT []
+
+# ── Bake in the forked tiering fix (default ON) ──────────────────────────────
+# Same rationale as Dockerfile.offload: stock vLLM 0.26.0's tiering plugin
+# (OffloadingConnector -> TieringOffloadingSpec) crashes at scale with a
+# _req_state KeyError -> EngineDeadError. Our fork fix
+# fix/tiering-deferred-finalize-v0.26.0 (@5e20aeb5) is a pure-Python 3-file patch
+# we COPY over the prebuilt base (the base already has vLLM's compiled
+# extensions, so a source rebuild would be slow and needless).
+#   default (patched):  VLLM_FIX_TIERING=1  — applied on 0.26.x, skipped elsewhere
+#   stock/crashing arm: podman build --build-arg VLLM_FIX_TIERING=0 ...
+# See benchmarks/kv-offload-replay/vllm-fix2/PROVENANCE.md for source + sync.
+ARG VLLM_FIX_TIERING=1
+# Re-declare VLLM_VERSION inside the build stage so the RUN below can read it (an
+# ARG declared before FROM is not visible after FROM).
+ARG VLLM_VERSION
+# The vendored patch lives with the ShareGPT image; reuse it verbatim (context is
+# the repo root, so the path resolves).
+COPY benchmarks/kv-offload-replay/vllm-fix2/ /tmp/vllm-fix2/
+RUN set -eux; \
+    if [ "${VLLM_FIX_TIERING}" = "1" ] && case "${VLLM_VERSION}" in 0.26*) true ;; *) false ;; esac; then \
+      D=/usr/local/lib/python3.12/dist-packages/vllm; \
+      cp /tmp/vllm-fix2/manager.py   "$D/v1/kv_offload/tiering/manager.py"; \
+      cp /tmp/vllm-fix2/scheduler.py "$D/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py"; \
+      cp /tmp/vllm-fix2/base.py      "$D/v1/kv_offload/base.py"; \
+      python3 -c "import py_compile,sys; [py_compile.compile(f, doraise=True) for f in sys.argv[1:]]" \
+        "$D/v1/kv_offload/tiering/manager.py" \
+        "$D/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py" \
+        "$D/v1/kv_offload/base.py"; \
+      echo "[Dockerfile.otel-offload] baked tiering fix (fork fix/tiering-deferred-finalize-v0.26.0 @5e20aeb5)"; \
+    elif [ "${VLLM_FIX_TIERING}" = "1" ]; then \
+      echo "[Dockerfile.otel-offload] WARNING: tiering fix requested but base is vLLM ${VLLM_VERSION} (fix is 0.26.x-only) — proceeding on STOCK vLLM"; \
+    else \
+      echo "[Dockerfile.otel-offload] stock vLLM ${VLLM_VERSION} (tiering fix opted out, VLLM_FIX_TIERING=0)"; \
+    fi; \
+    rm -rf /tmp/vllm-fix2
+LABEL org.certus.vllm-fix-tiering="${VLLM_FIX_TIERING}"
+
+# GPU is REQUIRED at run time (vLLM loads the model on the GPU). WHICH GPU is a
+# run-time choice — select it on the run command, not here:
+#   docker:  --gpus all   |  --gpus '"device=0"'
+#   podman:  --device nvidia.com/gpu=all  |  --device nvidia.com/gpu=0
+LABEL org.certus.gpu-required="true" \
+      org.certus.host-prereq="nvidia-container-toolkit (docker --gpus / podman CDI); Tiered mode needs --shm-size >= CPU_BYTES; corpus bind-mounted on OTEL_DIR"
+
+WORKDIR /workspace
+
+# The OTel driver + its dependency closure (verified): run_otel_replay.py imports
+# run_otel_async + otel_corpus + run_multiturn_common; run_otel_async imports
+# run_multiturn_common + run_multiturn_async. The two Tracing* modules are only
+# imported when TRACE_OFFLOAD=1. torch/numpy/vllm come from the base image; no
+# extra pip deps. NO run_multiturn_sync_batched (OTel is async-only) and NO
+# baked dataset (corpus is bind-mounted at run time — see header).
+COPY benchmarks/kv-offload-replay/run_otel_replay.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_otel_async.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/otel_corpus.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_multiturn_common.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/tracing_connector.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/tracing_offloading_manager.py /workspace/bench/
+
+COPY benchmarks/kv-offload-otel-replay/docker-entrypoint-otel-offload.sh /usr/local/bin/otel-offload-entrypoint
+RUN chmod +x /usr/local/bin/otel-offload-entrypoint
+
+# Defaults target the OTel corpus (Qwen tokenizer, 131072 window, 120k sliding
+# context). NUM_CONVS and DATASET_PATH are deliberately UNSET so the default run
+# replays ALL corpus files; set NUM_CONVS=N for a subset. TIME_SCALE=1.0 honors
+# the recorded inter-turn timing (0 = saturating). The mode defaults to
+# CPUOffload; set OFFLOAD_MODE=none for the baseline or SECONDARY_TIER=fs for
+# tiering at run time. OTEL_DIR is the bind-mount target for the corpus.
+# PYTHONPATH lets vLLM import the tracer modules by name when TRACE_OFFLOAD=1.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/workspace/bench \
+    MODEL=Qwen/Qwen2.5-7B-Instruct \
+    MAX_MODEL_LEN=131072 \
+    CONTEXT_CAP=120000 \
+    TIME_SCALE=1.0 \
+    OTEL_DIR=/workspace/otel-corpus \
+    MAX_NUM_SEQS=64 \
+    GPU_MEM_UTIL=0.90 \
+    CPU_BYTES=17179869184 \
+    OFFLOAD_MODE= \
+    SECONDARY_TIER= \
+    FS_ROOT_DIR=/mnt/fs-tier/kv-tier \
+    TRACE_OFFLOAD=0 \
+    HF_HUB_OFFLINE=1 \
+    WORKLOAD=/workspace/bench/run_otel_replay.py
+
+ENTRYPOINT ["/usr/local/bin/otel-offload-entrypoint"]

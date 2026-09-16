@@ -1,12 +1,9 @@
 {
-  "generated": "2026-08-20",
-  "based_on": "drift-report from 2026-08-20 (specs_analyzed=3, requirements_checked=78, aligned=77, drifted=1)",
-  "component": "gpu-services",
+  "generated": "2026-09-09",
+  "based_on": "drift-report 2026-09-09",
   "summary": {
-    "backfill": 1,
+    "backfill": 3,
     "align": 0,
-    "resolved": 0,
-    "backfill_unspecced": 0,
     "human_decision": 0,
     "new_specs": 0,
     "remove_from_spec": 0
@@ -14,23 +11,39 @@
   "proposals": [
     {
       "id": 1,
-      "spec_id": "003-gpu-p2p-server",
-      "requirement": "FR-012",
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-015",
       "direction": "BACKFILL",
-      "severity": "minor",
-      "rationale": "Spec-lag / overclaim. The code correctly performs chunked NVMe reads in --chunk-size increments (do_chunked_read: one ReadAsync per chunk, sectors_per_chunk = chunk_size/sector_size, submitted via BatchSubmit). The parenthetical '(not exceeding the NVMe controller's MDTS)' asserts a runtime guarantee that was never designed: MDTS is only conveyed via the --chunk-size CLI help text ('must not exceed MDTS, typically 128KB') and the 131072-byte default, with no runtime query/validation/clamp against the device. This is intentional operator-configured behavior, not a behavioral bug (an oversized chunk surfaces as an NVMe read error through the block-device layer, not silent corruption). Per policy: stale/overclaiming spec + correct, intentional code -> BACKFILL, not ALIGN.",
-      "location": "components/gpu-services/src/bin/p2p_server.rs:54 (CLI help), :273-323 (do_chunked_read)",
-      "before": "**FR-012**: All transfer handlers MUST perform NVMe reads in `--chunk-size` increments (not exceeding the NVMe controller's MDTS).",
-      "after": "**FR-012**: All transfer handlers MUST perform NVMe reads in `--chunk-size` increments — `do_chunked_read` issues one async `ReadAsync` per chunk (`sectors_per_chunk = chunk_size / sector_size`, successive LBAs) and submits them together via `BatchSubmit`, awaiting all completions. Keeping `--chunk-size` at or below the NVMe controller's Maximum Data Transfer Size (MDTS) is an **operator responsibility**, communicated via the `--chunk-size` CLI help text (\"must not exceed MDTS, typically 128KB\") and the 131072-byte default; the server does NOT query the controller's MDTS or validate/clamp `--chunk-size` against it at runtime. A `--chunk-size` larger than the device MDTS surfaces as an NVMe read error through the block-device layer (returned to the client as `ERROR: <message>`), not as silent corruption.",
-      "additional_edits": [
-        "Added US1 Acceptance Scenario 4 (chunked reads: ceil(size/chunk-size) chunks, <n> reported in OK response).",
-        "Added an Assumptions bullet stating MDTS chunk sizing is the operator's responsibility (references FR-012).",
-        "Added a Last-Synced: 2026-08-20 metadata line."
-      ],
       "confidence": "HIGH",
-      "approved": true
+      "location": "components/gpu-services/src/lib.rs:960-1010",
+      "spec_text": "register_host_memory page-locks host memory via cudaHostRegister and registers with SPDK; on CUDA-success/SPDK-fail MUST roll back via cudaHostUnregister.",
+      "actual": "Uses CUDA_HOST_REGISTER_PORTABLE; treats cudaHostRegister ALREADY_REGISTERED (712) and spdk_mem_register EBUSY (-16) as success; rolls back cudaHostUnregister only when we_registered_cuda.",
+      "resolution": "Append: registration uses the portable flag so pinning holds across all GPU contexts (multi-GPU/DP); idempotent on ALREADY_REGISTERED and SPDK EBUSY; cudaHostUnregister rollback only when this call performed the CUDA registration.",
+      "status": "approve"
+    },
+    {
+      "id": 2,
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-020",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "location": "components/gpu-services/src/lib.rs:937-939",
+      "spec_text": "allocate_pinned_dma_buffer allocates page-locked host memory via cudaHostAlloc.",
+      "actual": "Allocates with CUDA_HOST_ALLOC_PORTABLE (was CUDA_HOST_ALLOC_DEFAULT).",
+      "resolution": "Append: allocation uses the portable flag so the buffer is usable as an async H2D source for any device, not only the device current at allocation.",
+      "status": "approve"
+    },
+    {
+      "id": 3,
+      "spec": "002-gpu-ssd-dma-prepare",
+      "requirement": "FR-019",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "location": "components/gpu-services/src/lib.rs:960-1010",
+      "spec_text": "register_host_memory page-locks an existing host allocation via cudaHostRegister and registers with SPDK; roll back cudaHostRegister on partial failure.",
+      "actual": "Identical method to spec-001 FR-015: portable flag + idempotent ALREADY_REGISTERED/EBUSY handling + conditional rollback.",
+      "resolution": "Append (consistent with spec-001 FR-015): portable flag; idempotent on ALREADY_REGISTERED and SPDK EBUSY; conditional cudaHostUnregister rollback.",
+      "status": "approve"
     }
-  ],
-  "align_tasks": [],
-  "unspecced_awaiting_decision": []
+  ]
 }

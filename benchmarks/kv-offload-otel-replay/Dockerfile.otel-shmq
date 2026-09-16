@@ -1,0 +1,88 @@
+# vLLM workload-driver image for kv-offload-otel-replay on the Certus shmq backend.
+#
+# The OTel-corpus counterpart of certus-shmq-connector/Dockerfile: the CLIENT
+# side only (vLLM + the pure-Python shmq connector + the OTel replay driver
+# run_otel_shmq_certus.py). It offloads KV blocks over a /dev/shm mailbox to a
+# SEPARATELY-RUN certus-server (which owns SPDK/NVMe/hugepages on the host). The
+# server is intentionally NOT built into this image — run it on the host and
+# point this image at its mailbox via SHM_PATH (exactly as for the ShareGPT shmq
+# image; see run-docker-otel-shmq.sh / run-docker-certus-shmq.sh).
+#
+# The mailbox lives on the host's /dev/shm; --ipc=host makes it (and the CUDA IPC
+# handles) visible inside the container. NO network transport: just ctypes + mmap.
+#
+# CORPUS IS NOT BAKED IN (~22 GB) — bind-mount it read-only onto OTEL_DIR at run
+# time; the entrypoint fails fast if it is absent.
+#
+# Build (context = repo root — needs certus-shmq-connector/ + benchmarks/ sources):
+#   podman build -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-shmq \
+#       -t certus-otel-shmq-bench .
+#
+# Run (server's mailbox reachable via --ipc=host; GPU exposed so the server can
+# open the CUDA IPC handles this container's vLLM process exports):
+#   podman run --rm --device nvidia.com/gpu=all --ipc=host \
+#       -e SHM_PATH=/dev/shm/certus-shmq -e NUM_CONVS=8 -e TIME_SCALE=0 \
+#       -v /mnt/certus1/inference-perf-syn-data/otel_1k:/workspace/otel-corpus:ro \
+#       -v /root/.cache/huggingface:/root/.cache/huggingface certus-otel-shmq-bench
+
+# vLLM base-image version. The connector self-adapts at RUN time via
+# certus_shmq_connector.compat (version detection + capability matrix) — this arg
+# only selects the base image. Build another version:
+#   podman build --build-arg VLLM_VERSION=0.26.0 \
+#       -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-shmq -t certus-otel-shmq-bench:vllm0.26 .
+ARG VLLM_VERSION=0.23.0
+FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
+ENTRYPOINT []
+
+# GPU is REQUIRED at run time: vLLM loads the model on the GPU and the connector
+# exports CUDA IPC handles from the KV cache. WHICH GPU is a run-time choice
+# (--gpus / --device nvidia.com/gpu=...). --ipc=host is ALSO required so (a) the
+# server can open this container's CUDA IPC handles and (b) this container sees
+# the server's /dev/shm mailbox file.
+LABEL org.certus.gpu-required="true" \
+      org.certus.host-prereq="nvidia-container-toolkit (docker --gpus / podman CDI); --ipc=host; corpus bind-mounted on OTEL_DIR"
+
+WORKDIR /workspace
+
+# Connector sources (already include run_otel_shmq_certus.py). torch/numpy/vllm
+# come from the base image; the shmq transport is pure ctypes + mmap (no grpcio).
+COPY certus-shmq-connector/ /workspace/certus-shmq-connector/
+# The shmq OTel driver imports the shared modules from the sibling bench dir via a
+# sys.path insert of ../benchmarks/kv-offload-replay -> /workspace/benchmarks/...:
+# run_otel_shmq_certus -> run_otel_async + otel_corpus + run_multiturn_common;
+# run_otel_async -> run_multiturn_common + run_multiturn_async. NO
+# run_multiturn_sync_batched (OTel is async-only) and NO baked dataset (corpus is
+# bind-mounted at run time — see header).
+COPY benchmarks/kv-offload-replay/run_multiturn_common.py /workspace/benchmarks/kv-offload-replay/
+COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/benchmarks/kv-offload-replay/
+COPY benchmarks/kv-offload-replay/run_otel_async.py /workspace/benchmarks/kv-offload-replay/
+COPY benchmarks/kv-offload-replay/otel_corpus.py /workspace/benchmarks/kv-offload-replay/
+# TRACE_OFFLOAD=1 wraps the connector in the generic tracer; vLLM resolves
+# kv_connector_module_path="tracing_connector" via importlib in the scheduler AND
+# each worker subprocess, which do NOT inherit the driver's runtime sys.path
+# insert — so the module dir is on PYTHONPATH below.
+COPY benchmarks/kv-offload-replay/tracing_connector.py /workspace/benchmarks/kv-offload-replay/
+
+RUN pip install --no-cache-dir -e /workspace/certus-shmq-connector
+
+COPY benchmarks/kv-offload-otel-replay/docker-entrypoint-otel-shmq.sh /usr/local/bin/certus-otel-entrypoint
+RUN chmod +x /usr/local/bin/certus-otel-entrypoint
+
+# OTel-corpus defaults (Qwen tokenizer, 131072 window, 120k sliding context).
+# NUM_CONVS is deliberately UNSET so the default run replays ALL corpus files.
+# TIME_SCALE=1.0 honors the recorded inter-turn timing (0 = saturating). OTEL_DIR
+# is the bind-mount target for the corpus.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/workspace/benchmarks/kv-offload-replay \
+    SHM_PATH=/dev/shm/certus-shmq \
+    MODEL=Qwen/Qwen2.5-7B-Instruct \
+    MAX_MODEL_LEN=131072 \
+    CONTEXT_CAP=120000 \
+    TIME_SCALE=1.0 \
+    OTEL_DIR=/workspace/otel-corpus \
+    DTYPE=float16 \
+    SLAB_SIZE_BYTES=131072 \
+    WORKLOAD=/workspace/certus-shmq-connector/run_otel_shmq_certus.py
+
+# Waits for the SHM_PATH mailbox to reach READY (and the corpus mount), then runs.
+ENTRYPOINT ["/usr/local/bin/certus-otel-entrypoint"]

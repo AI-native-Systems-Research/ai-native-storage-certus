@@ -252,22 +252,30 @@ def test_touch_after_lookup_starts_new_pass_and_clears_bitmap():
     assert mgr.lookup(K(5)) is False
 
 
-def test_lookup_pending_maps_to_none_on_legacy_contract():
-    # A store in flight -> Check PENDING. On the ≤0.24 bool|None contract (the
-    # conftest default), pending is None ("delay + retry"), never True: the block
-    # is coming but not yet loadable. (On 0.26 the shim yields HIT_PENDING.)
+def test_lookup_pending_reads_as_miss():
+    # A store in flight -> Check PENDING. A PENDING key is Reserve'd but NOT yet
+    # committed (no dispatch-map entry), so it is not loadable: the load-decision
+    # path (lookup) MUST treat it as a MISS. If lookup reported it present, vLLM
+    # would count a cache hit, issue a load, and fatally fail the transfer
+    # (Pin/lookup find NotExist -> EngineDeadError -- the observed 60-session
+    # saturation crash). Reading PENDING as a miss makes vLLM recompute the
+    # momentarily-in-flight block instead. Store dedup keeps PENDING-as-present
+    # separately (see test_prepare_store_*), so the in-flight store is not
+    # duplicated. Contract: MISS is False on the ≤0.24 bool shim / LookupResult
+    # .MISS on 0.26 -- never None/HIT_PENDING. See _check_all_present(resident_only).
     from certus_shmq_connector.ring import CHECK_PENDING
 
     ring = FakeRing()
     ring.states[U(7)] = CHECK_PENDING
     mgr = ShmqCertusOffloadingManager(ring, block_size_bytes=4096)
-    assert mgr.lookup(K(7)) is None
+    assert mgr.lookup(K(7)) is False
 
 
 def test_touch_caches_pending_state_for_following_lookups():
-    # The tri-state must survive the touch()-batched cache: a pending key looked
-    # up after touch answers from the cached state (no extra RPC) and still maps
-    # to the pending result, not resident.
+    # The PENDING state must survive the touch()-batched lookup cache: a PENDING
+    # key looked up after touch is answered from the cached state (no extra RPC)
+    # and still reads as a MISS, not resident -- the load-decision path never
+    # treats PENDING as loadable. See test_lookup_pending_reads_as_miss.
     from certus_shmq_connector.ring import CHECK_PENDING
 
     ring = FakeRing()
@@ -279,7 +287,7 @@ def test_touch_caches_pending_state_for_following_lookups():
     mgr.touch(keys)
     assert _calls_of(ring, "check_states") == [[U(1), U(2)]]
     assert mgr.lookup(keys[0]) is True  # resident
-    assert mgr.lookup(keys[1]) is None  # pending -> legacy None, from cache
+    assert mgr.lookup(keys[1]) is False  # pending -> reads as MISS, from cache
     assert _calls_of(ring, "check_states") == [[U(1), U(2)]]  # no further RPC
 
 

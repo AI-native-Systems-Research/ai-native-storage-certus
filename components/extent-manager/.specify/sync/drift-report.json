@@ -1,5 +1,7 @@
 {
   "generated": "2026-09-01T22:59:04Z",
+  "restamped": "2026-09-09T21:33:18Z",
+  "restamp_note": "Re-stamp only (no content change). extent-manager src/ and specs/ unchanged; the only moved hashed input since 2026-09-02 is components/interfaces/src/idispatcher.rs (dispatcher store-backpressure, 39ffee9b/c400ced8), which extent-manager does not reference. Folded interfaces hash moved 5e8ff021... -> 3817ba9e... at commit 5bb71702. drift_status remains clean. See drift-report.md frontmatter for the CI stamp.",
   "project": "extent-manager",
   "commit": "33bddaba",
   "summary": {

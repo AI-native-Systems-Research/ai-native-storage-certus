@@ -69,6 +69,12 @@ if __name__ == "__main__":
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 200))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))
+    # Data-parallel sharding: with DP_SIZE>1, N replicas (one per GPU, separate
+    # containers, each with its own isolated CPU+fs tier) each replay a disjoint
+    # strided 1/N slice of the conversations. Mirrors the shmq DP arm so the two
+    # backends are compared on the same per-replica shard. DP_SIZE=1 = original.
+    DP_SIZE = max(1, int(os.environ.get("DP_SIZE", 1)))
+    DP_RANK = max(0, int(os.environ.get("DP_RANK", 0)))
     # ACTIVE_SESSIONS — WORKLOAD_MODE=async only. >0 = closed loop: keep this many
     # conversations active, admitting the next as one finishes (steady-state
     # concurrency). 0 (default) = open loop (all launched at once, max_num_seqs
@@ -139,6 +145,11 @@ if __name__ == "__main__":
 
     # ── Load conversations and extract human-turn streams ─────────────────
     convs = common.load_convs(SUBSET_PATH, NUM_CONVS)
+    if DP_SIZE > 1:
+        _global_total = len(convs)
+        convs = convs[DP_RANK::DP_SIZE]
+        print(f"[run] DP shard rank={DP_RANK}/{DP_SIZE}: {len(convs)} of "
+              f"{_global_total} conversations", file=sys.stderr)
     print(f"[run] loaded {len(convs)} conversations  "
           f"(human-turn count: min={min(len(c) for c in convs)} "
           f"median={sorted(len(c) for c in convs)[len(convs)//2]} "

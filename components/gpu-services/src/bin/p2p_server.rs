@@ -33,7 +33,10 @@ enum TransferMode {
 }
 
 #[derive(Parser)]
-#[command(name = "gpu-p2p-server", about = "NVMe → GPU P2P DMA server via Unix socket")]
+#[command(
+    name = "gpu-p2p-server",
+    about = "NVMe → GPU P2P DMA server via Unix socket"
+)]
 struct Cli {
     /// Path to the Unix domain socket
     #[arg(long, default_value = "/tmp/gpu_p2p_server.sock")]
@@ -145,8 +148,7 @@ fn initialize_stack(pci: Option<&str>) -> Result<ServerContext, String> {
         .connect(Arc::clone(&logger))
         .map_err(|e| format!("connect logger: {e}"))?;
 
-    let gpu = query_interface!(gpu_component, IGpuServices)
-        .ok_or("IGpuServices query failed")?;
+    let gpu = query_interface!(gpu_component, IGpuServices).ok_or("IGpuServices query failed")?;
 
     let ienv = query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env_comp)
         .ok_or("ISPDKEnv query failed")?;
@@ -184,8 +186,8 @@ fn initialize_stack(pci: Option<&str>) -> Result<ServerContext, String> {
 
     gpu.initialize().map_err(|e| format!("CUDA init: {e}"))?;
 
-    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
-        .ok_or("IBlockDevice query failed")?;
+    let ibd =
+        query::<dyn IBlockDevice + Send + Sync>(&*block_dev).ok_or("IBlockDevice query failed")?;
     let channels = ibd
         .connect_client()
         .map_err(|e| format!("connect_client: {e}"))?;
@@ -278,7 +280,8 @@ fn do_chunked_read(
 ) -> Result<(), String> {
     let sectors_per_chunk = chunk_size / ctx.sector_size;
 
-    let channels = ctx.block_dev
+    let channels = ctx
+        .block_dev
         .connect_client()
         .map_err(|e| format!("connect_client: {e}"))?;
 
@@ -517,8 +520,10 @@ fn handle_p2p_cold(
     }
 
     // Collect DMA buffer refs.
-    let dma_bufs: Vec<Arc<Mutex<interfaces::DmaBuffer>>> =
-        staging_bufs.iter().map(|b| Arc::clone(&b.dma_buf)).collect();
+    let dma_bufs: Vec<Arc<Mutex<interfaces::DmaBuffer>>> = staging_bufs
+        .iter()
+        .map(|b| Arc::clone(&b.dma_buf))
+        .collect();
 
     // Concurrent NVMe reads into per-request staging chunks.
     if let Err(e) = do_chunked_read(ctx, &dma_bufs, 0, chunk_size) {
@@ -640,15 +645,11 @@ fn main() {
         match listener.accept() {
             Ok((mut stream, _)) => {
                 let result = match cli.mode {
-                    TransferMode::Bounce => {
-                        handle_bounce(&mut stream, &ctx, cli.chunk_size)
-                    }
+                    TransferMode::Bounce => handle_bounce(&mut stream, &ctx, cli.chunk_size),
                     TransferMode::P2p => {
                         handle_p2p(&mut stream, &ctx, chunk_pool.as_ref().unwrap())
                     }
-                    TransferMode::P2pCold => {
-                        handle_p2p_cold(&mut stream, &ctx, cli.chunk_size)
-                    }
+                    TransferMode::P2pCold => handle_p2p_cold(&mut stream, &ctx, cli.chunk_size),
                 };
                 match result {
                     Ok(msg) => {

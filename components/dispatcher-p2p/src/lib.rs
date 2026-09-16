@@ -2236,8 +2236,8 @@ impl IDispatcher for DispatcherP2pComponent {
         let size: u32 = ipc_handle.size;
 
         // Phase 1: Evict if needed and allocate memory-tier slot.
-        // Internal populate path has no client session context.
-        let _mem_ptr = self.reserve_memory(key, size, 0)?;
+        // Internal populate path has no client session context or batch deadline.
+        let _mem_ptr = self.reserve_memory(key, size, 0, None)?;
 
         // Phase 2: Async DMA into the reserved slot, then synchronize.
         let gpu = self
@@ -2255,8 +2255,14 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
-    fn batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
-        entries.iter().map(|(k, h)| self.populate(*k, h.clone())).collect()
+    fn batch_populate(
+        &self,
+        entries: &[(CacheKey, IpcHandle)],
+    ) -> Vec<Result<(), DispatcherError>> {
+        entries
+            .iter()
+            .map(|(k, h)| self.populate(*k, h.clone()))
+            .collect()
     }
 
     fn reserve_memory(
@@ -2264,6 +2270,10 @@ impl IDispatcher for DispatcherP2pComponent {
         key: CacheKey,
         size: u32,
         session_id: u64,
+        // dispatcher-p2p allocates straight-through (no store-backpressure retry
+        // loop), so it neither backpressures nor consults a batch deadline; the
+        // parameter exists only to satisfy the IDispatcher signature.
+        _deadline: Option<std::time::Instant>,
     ) -> Result<*mut u8, DispatcherError> {
         self.ensure_initialized()?;
 
@@ -2827,7 +2837,6 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             inner.slots.keys().take(n).copied().collect()
         }
-
 
         fn evict_next(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();

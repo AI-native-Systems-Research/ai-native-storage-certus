@@ -100,6 +100,30 @@ def _resolve_tp_rank() -> int:
     return 0
 
 
+def _resolve_dp_size() -> int:
+    """Data-parallel replica count sharing one certus-server mailbox.
+
+    Each DP replica is an independent vLLM engine on its own GPU, all driving a
+    single shared server. The benchmark exports ``DP_SIZE`` to every replica's
+    processes. Default 1 = single-replica baseline (no DP partitioning)."""
+    try:
+        return max(1, int(os.environ.get("DP_SIZE", "1")))
+    except ValueError:
+        return 1
+
+
+def _resolve_dp_rank() -> int:
+    """This replica's data-parallel index in ``[0, DP_SIZE)``.
+
+    Set per-container by the harness (``DP_RANK``). Used only to offset this
+    replica's channel-claim partition so two replicas sharing one mailbox scan
+    disjoint channel slices. Default 0."""
+    try:
+        return max(0, int(os.environ.get("DP_RANK", "0")))
+    except ValueError:
+        return 0
+
+
 class CertusShmqOffloadingSpec(OffloadingSpec):
     """OffloadingSpec backed by a remote certus-server over shared memory."""
 
@@ -153,7 +177,18 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
         # W+1 (scheduler slot 0 + one slot per worker rank), because TP>1 uses
         # MultiprocExecutor and the engine-core + W workers share the mailbox.
         self._world_size = _resolve_world_size()
-        self._claim_slots = 1 if self._world_size <= 1 else self._world_size + 1
+        # Per-replica channel slots: TP=1 → 1 (UniProcExecutor); TP>1 → W+1
+        # (scheduler slot 0 + one per worker rank, MultiprocExecutor).
+        self._per_replica_slots = 1 if self._world_size <= 1 else self._world_size + 1
+        # Data-parallel replicas share the one mailbox, so the global slot space
+        # is per_replica_slots * DP_SIZE and this replica's slots are offset by
+        # dp_rank * per_replica_slots — each DP replica claims a disjoint channel
+        # slice, on top of the TP slot split within a replica. DP_SIZE=1 → offset
+        # 0, exact single-replica baseline.
+        self._dp_size = _resolve_dp_size()
+        self._dp_rank = _resolve_dp_rank()
+        self._dp_slot_base = self._dp_rank * self._per_replica_slots
+        self._claim_slots = self._per_replica_slots * self._dp_size
 
         self._ring = None
         self._manager: ShmqCertusOffloadingManager | None = None
@@ -174,10 +209,11 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             # >= the copy size). get_handlers() corrects the manager once the
             # stride is known.
             size = self._block_bytes if self._block_bytes is not None else self._slab_size_bytes
-            # Scheduler role → channel slot 0. The manager mirrors what all W
-            # workers physically store, so it operates over every per-rank key.
+            # Scheduler role → this replica's base channel slot. The manager
+            # mirrors what all W workers physically store, so it operates over
+            # every per-rank key.
             self._manager = ShmqCertusOffloadingManager(
-                self._get_ring(claim_slot=0),
+                self._get_ring(claim_slot=self._dp_slot_base),
                 block_size_bytes=size,
                 world_size=self._world_size,
             )
@@ -196,7 +232,8 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
         # slot rank+1 (slot 0 belongs to the scheduler/manager process). At W==1
         # slots==1 so the slot is ignored (full-range baseline).
         rank = _resolve_tp_rank() if self._world_size > 1 else 0
-        claim_slot = (rank + 1) if self._world_size > 1 else 0
+        local_slot = (rank + 1) if self._world_size > 1 else 0
+        claim_slot = self._dp_slot_base + local_slot
         ring = self._get_ring(claim_slot=claim_slot)
         # 0.23+ splits a block into N per-layer tensors, each a separate GPU
         # allocation; 0.20/0.22 present one coalesced tensor (N==1). We open one

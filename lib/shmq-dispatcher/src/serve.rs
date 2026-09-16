@@ -22,6 +22,9 @@ pub struct ServeConfig {
     pub reserve_timeout: Duration,
     /// Optional CPU core to pin the busy-poll thread to.
     pub poller_cpu: Option<usize>,
+    /// Emit periodic poller fairness/backlog stats (per-channel serviced counts
+    /// and worker-queue depth). Off by default; zero overhead when disabled.
+    pub poller_stats: bool,
 }
 
 /// Pin the current thread to `cpu`. Best-effort; errors surface to the caller.
@@ -37,6 +40,27 @@ fn pin_current_thread(cpu: usize) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Format a compact poller fairness/backlog summary line. Reports total
+/// requests forwarded, the lower-half vs upper-half channel split (the
+/// data-parallel fairness signal — replica 0 owns the low channels, replica 1
+/// the high channels), per-channel min/max, current worker-queue depth, and the
+/// running high-water mark. A balanced low/high split with a near-zero queue
+/// means the poller is fair and workers keep up; a large queue means workers
+/// (shared server-side state) are the bottleneck.
+fn log_poller_stats(prefix: &str, serviced: &[u64], qdepth: usize, max_qdepth: usize) -> String {
+    let n = serviced.len();
+    let total: u64 = serviced.iter().sum();
+    let half = n / 2;
+    let low: u64 = serviced[..half].iter().sum();
+    let high: u64 = serviced[half..].iter().sum();
+    let min = serviced.iter().copied().min().unwrap_or(0);
+    let max = serviced.iter().copied().max().unwrap_or(0);
+    format!(
+        "{prefix}: serviced total={total} low[0,{half})={low} high[{half},{n})={high} \
+         per-ch min={min} max={max} qdepth={qdepth} qdepth_max={max_qdepth}"
+    )
 }
 
 /// Serve the shmq control plane until `shutdown` is set, then tear down in
@@ -117,6 +141,8 @@ pub fn serve(
         let server = Arc::clone(&server);
         let logger = Arc::clone(&logger);
         let poller_cpu = config.poller_cpu;
+        let poller_stats = config.poller_stats;
+        let stats_tx = tx.clone(); // for backlog sampling (tx.len()); does not extend worker life
         thread::Builder::new()
             .name("shmq-poller".into())
             .spawn(move || {
@@ -129,24 +155,76 @@ pub fn serve(
                     }
                 }
                 let mut last_seen = server.seq_baseline();
+                let n = last_seen.len();
+                // Rotating first-pick offset: the channel serviced first advances
+                // every sweep so no channel slice is permanently ahead in the FIFO
+                // worker queue. Fixes systematic starvation of higher-numbered
+                // channels (e.g. the second data-parallel replica's slice) under
+                // worker backlog.
+                let mut start = 0usize;
                 let mut sweeps: u64 = 0;
+                // Optional per-channel servicing counters + worker-queue high-water
+                // mark. Single-threaded poller, so plain counters (no atomics).
+                let mut serviced: Vec<u64> = if poller_stats { vec![0; n] } else { Vec::new() };
+                let mut max_qdepth: usize = 0;
+                // Throttle the stats line to wall-clock cadence: 4096 idle sweeps
+                // elapse in microseconds, so gate on time, not sweep count.
+                let mut last_stat_log = std::time::Instant::now();
                 while !shutdown.load(Ordering::Relaxed) {
                     let mut idle = true;
-                    for (ch, seen) in last_seen.iter_mut().enumerate() {
-                        if let Some(req) = server.take_request(ch, seen) {
+                    for i in 0..n {
+                        let ch = {
+                            let c = start + i;
+                            if c >= n {
+                                c - n
+                            } else {
+                                c
+                            }
+                        };
+                        if let Some(req) = server.take_request(ch, &mut last_seen[ch]) {
                             idle = false;
+                            if poller_stats {
+                                serviced[ch] += 1;
+                            }
                             if tx.send(req).is_err() {
                                 return; // workers gone
                             }
                         }
                     }
+                    start += 1;
+                    if start >= n {
+                        start = 0;
+                    }
                     sweeps = sweeps.wrapping_add(1);
                     if sweeps % 4096 == 0 {
                         server.heartbeat();
+                        if poller_stats {
+                            let q = stats_tx.len();
+                            if q > max_qdepth {
+                                max_qdepth = q;
+                            }
+                            if last_stat_log.elapsed() >= Duration::from_secs(5) {
+                                logger.info(&log_poller_stats(
+                                    "shmq poller",
+                                    &serviced,
+                                    q,
+                                    max_qdepth,
+                                ));
+                                last_stat_log = std::time::Instant::now();
+                            }
+                        }
                     }
                     if idle {
                         std::hint::spin_loop();
                     }
+                }
+                if poller_stats {
+                    logger.info(&log_poller_stats(
+                        "shmq poller (final)",
+                        &serviced,
+                        stats_tx.len(),
+                        max_qdepth,
+                    ));
                 }
             })
             .expect("spawn poller")

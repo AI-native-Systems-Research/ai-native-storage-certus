@@ -13,6 +13,9 @@ pub struct StackConfig {
     pub format: bool,
     pub poller_base_cpu: Option<usize>,
     pub max_eviction_attempts: usize,
+    /// Milliseconds a store allocation backpressures on a momentarily full
+    /// memory tier before surfacing AllocationFailed. 0 disables (fail fast).
+    pub store_backpressure_ms: u64,
     pub memory_tier_eviction_threshold: f64,
     /// Explicit zyre group (cluster name) for remote-lookup, from CLI
     /// `--rl-group` or the `CERTUS_RL_GROUP` env var. `None` => the remote-lookup

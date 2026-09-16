@@ -1,123 +1,118 @@
-# Certus Codebase Summary
+# Codebase SLOC & Complexity Summary
 
-Generated: 2026-06-18
+**Scope:** repository root (`/home/dwaddington/ai-native-storage-certus`)
+**Generated:** 2026-09-10 · tokei + `.claude/skills/tools-count-sloc/complexity.sh`
+**Excluded from source counts:** `target/` (build artifacts), `deps/spdk-build/`
+(vendored SPDK), `tools/creusot/` (vendored formal-verification submodule).
 
-## Overall SLOC by Language
+---
 
-| Language | Files | Code | Comments | Blanks | Total Lines |
-|----------|-------|------|----------|--------|-------------|
-| **Rust** | 228 | 52,832 | 2,508 | 8,276 | 63,616 |
-| Python | 41 | 9,799 | 538 | 1,659 | 11,996 |
-| JSON | 10 | 7,398 | 0 | 0 | 7,398 |
-| C | 10 | 2,980 | 522 | 553 | 4,055 |
-| C++ | 6 | 2,886 | 493 | 729 | 4,108 |
-| Shell | 49 | 2,680 | 585 | 494 | 3,759 |
-| YAML | 24 | 1,179 | 52 | 147 | 1,378 |
-| CUDA | 3 | 817 | 46 | 123 | 986 |
-| TOML | 40 | 834 | 12 | 131 | 977 |
-| Markdown (docs) | 269 | — | 80,176 | 59,752 | 139,928 |
-| **Total** | **727** | **87,678** | **105,304** | **75,823** | **268,805** |
+## Headline: Certus-authored source
 
-## Rust Breakdown (Primary Language)
+| Language | Files | Code | Comments | Blanks |
+|---|---:|---:|---:|---:|
+| **Rust** (core + components + apps) | 300 | **76,787** | 4,437 | 11,396 |
+| **Python** (benchmark drivers, tooling) | 194 | **48,684** | 3,450 | 7,487 |
+| Shell | 121 | 8,631 | 3,297 | 1,281 |
+| YAML | 78 | 6,505 | 255 | 285 |
+| TOML | 53 | 1,101 | 118 | 172 |
 
-| Metric | Value |
-|--------|-------|
-| Total Rust code lines | 52,832 |
-| Doc comments (in Rust) | 5,822 |
-| Inline comments | 2,508 |
-| Test code (est.) | ~16,300 |
-| Production code (est.) | ~36,500 |
-| Test-to-code ratio | ~0.45 |
-| Comment-to-code ratio | ~0.16 |
+Rust is the primary implementation language; Python is almost entirely the
+`benchmarks/` replay drivers and analysis tooling.
 
-## Component Breakdown (Rust, by code lines)
+> `tokei` respects `.gitignore` and does not descend into submodules, so the
+> Rust figure already **excludes** the vendored Creusot tool (~66k lines under
+> `tools/creusot/`). The complexity script below uses raw `find` and therefore
+> *does* include Creusot — its rankings are annotated accordingly.
 
-| Component | Code | Tests | Total | Test % |
-|-----------|------|-------|-------|--------|
-| component-framework | 5,034 | 3,875 | 8,909 | 43% |
-| dispatcher-p2p | 2,781 | 1,917 | 4,698 | 41% |
-| dispatcher | 2,471 | 1,936 | 4,407 | 44% |
-| gpu-services | 1,989 | 192 | 2,181 | 9% |
-| block-device-spdk-nvme | 1,972 | 475 | 2,447 | 19% |
-| extent-manager | 1,828 | 359 | 2,187 | 16% |
-| block-device-filesys | 1,181 | 96 | 1,277 | 8% |
-| block-device-kernel | 1,162 | 91 | 1,253 | 7% |
-| interfaces | 1,062 | 145 | 1,207 | 12% |
-| eviction-policy-lru | 520 | 310 | 830 | 37% |
-| dispatch-map | 503 | 324 | 827 | 39% |
-| memory-tier | 496 | 286 | 782 | 37% |
-| spdk-env | 356 | 607 | 963 | 63% |
-| remote-lookup | 180 | 120 | 300 | 40% |
-| logger | 135 | 170 | 305 | 56% |
+## What the raw repo-root totals contain (context)
 
-## Applications (Rust)
+The unfiltered `tokei .` total is ~4.0M lines, dominated by **non-source**
+material that should not be read as codebase size:
 
-| App | Code | Tests | Total |
-|-----|------|-------|-------|
-| iops-benchmark-md | 1,221 | 314 | 1,535 |
-| certus-server | 953 | 0 | 953 |
-| iops-benchmark | 931 | 298 | 1,229 |
-| certus-server-yaml | 724 | 0 | 724 |
-| extent-benchmark | 630 | 0 | 630 |
-| gpu-bb-vs-p2p | 581 | 0 | 581 |
-| nvme-bar1-bench | 502 | 0 | 502 |
-| baseline-generalized-fs | 420 | 0 | 420 |
-| nvme-ns-manager | 315 | 0 | 315 |
+- **JSON — 3,267,127 lines** (72 files): benchmark corpora / results / traces.
+- **C / C Header / Cython — ~450k lines**: vendored SPDK + generated FFI.
+- **Markdown — 147k comment-lines**: docs, transcripts, knowledge wiki.
 
-## Benchmarks (Rust, dedicated bench files)
+These are data/vendored/generated, not Certus implementation.
 
-| Component | Bench Lines |
-|-----------|-------------|
-| dispatcher-p2p | 1,730 |
-| dispatcher | 1,710 |
-| gpu-services | 418 |
-| block-device-spdk-nvme | 350 |
-| block-device-filesys | 193 |
-| block-device-kernel | 176 |
-| extent-manager | 110 |
-| dispatch-map | 108 |
-| logger | 69 |
+---
 
-## Complexity Indicators
+## Rust by component (top, non-test code lines; Creusot excluded)
 
-### Largest Source Files
+| Component | Code | Tests | Total |
+|---|---:|---:|---:|
+| `lib/component-framework/crates` | 5,044 | 3,928 | 8,972 |
+| `components/dispatcher/src` | 3,805 | 2,879 | 6,684 |
+| `components/dispatcher-p2p/src` | 3,625 | 2,611 | 6,236 |
+| `components/remote-lookup/src` | 2,436 | 354 | 2,790 |
+| `components/block-device-spdk-nvme/src` | 2,177 | 477 | 2,654 |
+| `components/gpu-services/src` | 2,169 | 195 | 2,364 |
+| `components/remote-lookup-rdma-initiator/src` | 2,102 | 955 | 3,057 |
+| `components/extent-manager/src` | 1,927 | 387 | 2,314 |
+| `components/interfaces/src` | 1,815 | 361 | 2,176 |
+| `components/remote-lookup-rdma-responder/src` | 1,415 | 549 | 1,964 |
 
-| File | Lines |
-|------|-------|
-| `components/dispatcher/src/lib.rs` | 3,992 |
-| `components/dispatcher-p2p/src/lib.rs` | 3,747 |
-| `components/block-device-spdk-nvme/src/actor.rs` | 1,286 |
-| `lib/component-framework/.../actor.rs` | 1,273 |
-| `components/dispatcher-p2p/src/pipeline.rs` | 1,155 |
-| `components/gpu-services/src/lib.rs` | 1,084 |
+*(Vendored `tools/creusot/creusot` reports 66,177 code lines — a formal-verification
+tool, not Certus source; omitted from the table.)*
 
-### Highest Function Count
+## Largest source files (non-test, Creusot & backups excluded)
 
-| File | Functions |
-|------|-----------|
-| `components/dispatcher/src/lib.rs` | 142 |
-| `components/dispatcher-p2p/src/lib.rs` | 137 |
-| `lib/component-framework/.../actor.rs` | 62 |
+| File | Code lines |
+|---|---:|
+| `components/dispatcher/src/lib.rs` | 6,381 |
+| `components/dispatcher-p2p/src/lib.rs` | 4,927 |
+| `components/remote-lookup-rdma-initiator/src/connection.rs` | 2,128 |
+| `components/block-device-spdk-nvme/src/actor.rs` | 1,500 |
+| `components/dispatcher-p2p/src/pipeline.rs` | 1,402 |
+| `components/gpu-services/src/lib.rs` | 1,318 |
+| `lib/component-framework/crates/component-core/src/actor.rs` | 1,273 |
+| `apps/remote-lookup-bench/src/main.rs` | 1,265 |
 
-### Deepest Nesting
+## Highest function/method count (Creusot excluded)
 
-| File | Max Depth |
-|------|-----------|
-| `apps/certus-server-yaml/build.rs` | 16 |
-| `components/dispatcher/src/lib.rs` | 14 |
+| File | Fns |
+|---|---:|
+| `components/dispatcher/src/lib.rs` | 211 |
+| `components/dispatcher-p2p/src/lib.rs` | 181 |
+| `components/remote-lookup/src/seams.rs` | 105 |
+| `components/remote-lookup-rdma-initiator/src/connection.rs` | 84 |
+| `lib/component-framework/crates/component-core/src/actor.rs` | 62 |
+
+## Deepest brace nesting (Creusot excluded)
+
+| File | Depth |
+|---|---:|
+| `apps/certus-server-yaml/build.rs` | 16 *(generated bindgen build script)* |
 | `components/dispatcher-p2p/src/lib.rs` | 12 |
+| `components/dispatcher/src/pipeline.rs` | 10 |
+| `components/dispatcher/src/lib.rs` | 10 |
 
-### Unsafe Usage
+## Unsafe usage (whole tree, `find`-based — includes vendored)
 
-- **125 files** contain `unsafe` blocks
-- **989 total** `unsafe` occurrences
-- Concentrated in: SPDK FFI bindings, io_uring operations, CUDA interop, DMA buffer management
+- Files containing `unsafe`: **144**
+- Total `unsafe` occurrences: **1,212**
 
-## Key Ratios
+Concentrated as expected in SPDK/FFI (`block-device-spdk-nvme`, `spdk-sys`),
+RDMA (`remote-lookup-rdma-*`), and GPU handle plumbing (`gpu-services`).
 
-| Ratio | Value | Assessment |
-|-------|-------|------------|
-| Test / Production code | 0.45 | Good coverage |
-| Comments / Code | 0.16 | Concise, relies on naming |
-| Docs (markdown) / Code | 1.6x | Heavily documented |
-| Unsafe density | 989 / 52,832 = 1.9% | Reasonable for systems code |
+---
+
+## Code vs tests vs comments
+
+- **Rust comment ratio:** 4,437 / 76,787 ≈ **5.8%** of code lines are comments.
+- **Test weight:** the `dispatcher` and `component-framework` crates carry the
+  most tests (≈2.9k and ≈3.9k test lines respectively) — roughly test-to-code
+  parity, the highest in the tree. Many `apps/*` and `benches/*` carry none.
+- **Python comment ratio:** 3,450 / 48,684 ≈ **7.1%**.
+
+## Observations
+
+- **`dispatcher/src/lib.rs` is the complexity hotspot** on every axis: largest
+  file (6,381 lines), most functions (211), and deep nesting (10). Its
+  data-parallel sibling `dispatcher-p2p/src/lib.rs` is a close second. These two
+  files alone are ~11k lines — a natural refactor / split candidate.
+- The `component-framework` core is well-tested (near 1:1 test:code); the
+  dispatchers are moderately tested; RDMA and SPDK components lean lighter.
+- Reported "size" of the repo is misleading at face value — 80%+ of raw lines
+  are JSON benchmark data and vendored C/Creusot, not authored Certus code.

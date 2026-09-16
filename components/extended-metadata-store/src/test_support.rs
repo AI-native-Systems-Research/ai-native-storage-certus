@@ -9,7 +9,7 @@ use interfaces::{DmaAllocFn, DmaBuffer};
 use component_core::channel::SpscChannel;
 use component_core::channel::{Receiver, Sender};
 
-use std::alloc::{Layout, alloc_zeroed, dealloc};
+use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -136,9 +136,7 @@ impl MockBlockDevice {
                             let _ = comp_tx.send(Completion::WriteDone {
                                 handle: OpHandle(0),
                                 tag: 0,
-                                result: Err(NvmeBlockError::LbaOutOfRange(
-                                    "fault injected".into(),
-                                )),
+                                result: Err(NvmeBlockError::LbaOutOfRange("fault injected".into())),
                             });
                             continue;
                         }
@@ -174,7 +172,9 @@ impl IBlockDevice for MockBlockDevice {
             .lock()
             .unwrap()
             .take()
-            .ok_or(NvmeBlockError::ClientDisconnected("already connected".into()))
+            .ok_or(NvmeBlockError::ClientDisconnected(
+                "already connected".into(),
+            ))
     }
 
     fn sector_size(&self, _ns_id: u32) -> Result<u32, NvmeBlockError> {
@@ -243,8 +243,8 @@ unsafe extern "C" fn heap_free(ptr: *mut std::ffi::c_void) {
 /// DMA allocator backed by the standard heap (aligned allocation).
 pub fn heap_dma_alloc() -> DmaAllocFn {
     Arc::new(|size: usize, align: usize, _numa: Option<i32>| {
-        let layout = Layout::from_size_align(size, align)
-            .map_err(|e| format!("invalid layout: {e}"))?;
+        let layout =
+            Layout::from_size_align(size, align).map_err(|e| format!("invalid layout: {e}"))?;
         let ptr = unsafe { alloc_zeroed(layout) };
         if ptr.is_null() {
             return Err("allocation failed".into());
@@ -262,7 +262,10 @@ pub fn heap_dma_alloc() -> DmaAllocFn {
 /// Create a test component wired with a MockBlockDevice (128MiB virtual disk).
 pub fn create_test_component(
     disk_size: u64,
-) -> (Arc<crate::ExtendedMetadataStoreComponent>, Arc<MockBlockDevice>) {
+) -> (
+    Arc<crate::ExtendedMetadataStoreComponent>,
+    Arc<MockBlockDevice>,
+) {
     let mock = MockBlockDevice::new(disk_size);
     let comp = crate::ExtendedMetadataStoreComponent::new_default();
     (comp, mock)
@@ -271,7 +274,10 @@ pub fn create_test_component(
 /// Create a test component from existing shared state (simulates reboot).
 pub fn create_test_component_from_state(
     shared_state: Arc<Mutex<MockState>>,
-) -> (Arc<crate::ExtendedMetadataStoreComponent>, Arc<MockBlockDevice>) {
+) -> (
+    Arc<crate::ExtendedMetadataStoreComponent>,
+    Arc<MockBlockDevice>,
+) {
     let mock = MockBlockDevice::reboot_from(shared_state);
     let comp = crate::ExtendedMetadataStoreComponent::new_default();
     (comp, mock)

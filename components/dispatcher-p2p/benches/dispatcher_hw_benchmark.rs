@@ -246,7 +246,9 @@ impl IDispatchMap for HwDispatchMap {
     }
 
     fn try_evict_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
-        Err(DispatchMapError::InvalidState("not supported in mock".into()))
+        Err(DispatchMapError::InvalidState(
+            "not supported in mock".into(),
+        ))
     }
 
     fn recover_extent(

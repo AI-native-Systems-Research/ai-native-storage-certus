@@ -45,7 +45,10 @@ fn key_max_is_silent_discard() {
     let c = setup();
     let h = c.reserve_extent(u64::MAX, 4096).expect("reserve key MAX");
     h.publish().expect("publish key MAX returns Ok");
-    assert!(c.get_extents().is_empty(), "FREE_KEY extent must not be stored");
+    assert!(
+        c.get_extents().is_empty(),
+        "FREE_KEY extent must not be stored"
+    );
 }
 
 #[test]
@@ -81,9 +84,21 @@ fn out_of_space_returns_error() {
 fn dynamic_size_class_creation() {
     let c = setup();
 
-    let e1 = c.reserve_extent(1, 4096).expect("reserve 4K").publish().expect("publish 4K");
-    let e2 = c.reserve_extent(2, 8192).expect("reserve 8K").publish().expect("publish 8K");
-    let e3 = c.reserve_extent(3, 16384).expect("reserve 16K").publish().expect("publish 16K");
+    let e1 = c
+        .reserve_extent(1, 4096)
+        .expect("reserve 4K")
+        .publish()
+        .expect("publish 4K");
+    let e2 = c
+        .reserve_extent(2, 8192)
+        .expect("reserve 8K")
+        .publish()
+        .expect("publish 8K");
+    let e3 = c
+        .reserve_extent(3, 16384)
+        .expect("reserve 16K")
+        .publish()
+        .expect("publish 16K");
 
     assert!(e1.size >= 4096);
     assert!(e2.size >= 8192);

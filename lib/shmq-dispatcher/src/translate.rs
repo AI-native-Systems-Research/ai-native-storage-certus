@@ -232,6 +232,9 @@ pub struct Translator {
     eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
     eviction_dropped: Arc<AtomicU64>,
     observer: Option<Arc<dyn TranslatorObserver>>,
+    /// Total store-backpressure budget shared across ALL keys in one OP_RESERVE
+    /// batch (not per key). See `op_reserve`.
+    store_backpressure: Duration,
 }
 
 impl Translator {
@@ -239,6 +242,7 @@ impl Translator {
         dispatcher: Arc<dyn IDispatcher + Send + Sync>,
         eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
         eviction_dropped: Arc<AtomicU64>,
+        store_backpressure: Duration,
     ) -> Self {
         Self {
             dispatcher,
@@ -247,6 +251,7 @@ impl Translator {
             eviction_rx,
             eviction_dropped,
             observer: None,
+            store_backpressure,
         }
     }
 
@@ -388,9 +393,26 @@ impl Translator {
         let keys: Vec<u64> = entries.iter().map(|(k, _, _)| *k).collect();
         check_duplicate_keys(&keys)?;
 
+        // Shared batch backpressure deadline. A full memory tier makes
+        // `reserve_memory` retry LRU eviction; historically each key paid the
+        // full `store_backpressure_ms` budget, so a batch of K keys could
+        // backpressure for K × budget — on a persistently saturated tier this
+        // overran the client's ring request deadline and surfaced as a spurious
+        // "server dead?" RingError even though the server was alive and merely
+        // stalled inside reserve. Instead, spend ONE budget across the whole
+        // batch: compute a single deadline up front and hand it to every key.
+        // Once it elapses, the remaining keys fail fast (single best-effort
+        // attempt) and we reply flag 0 for them — the client refuses to cache
+        // those blocks and recomputes on the next load. This bounds total batch
+        // latency to ~`store_backpressure` regardless of key count.
+        let batch_deadline = Instant::now() + self.store_backpressure;
+
         let mut w = Writer::with_capacity(n);
         for (key, size, session) in entries {
-            match self.dispatcher.reserve_memory(key, size, session) {
+            match self
+                .dispatcher
+                .reserve_memory(key, size, session, Some(batch_deadline))
+            {
                 Ok(_ptr) => {
                     self.pending_stores
                         .lock()
@@ -753,6 +775,8 @@ mod tests {
     struct MockDispatcher {
         resident: Mutex<HashSet<u64>>,
         reserve_fail: Mutex<HashSet<u64>>,
+        reserve_deadlines: Mutex<Vec<Option<std::time::Instant>>>,
+        block_until_deadline: Mutex<bool>,
     }
 
     impl IDispatcher for MockDispatcher {
@@ -797,7 +821,17 @@ mod tests {
             key: CacheKey,
             _size: u32,
             _session_id: u64,
+            deadline: Option<std::time::Instant>,
         ) -> Result<*mut u8, DispatcherError> {
+            self.reserve_deadlines.lock().unwrap().push(deadline);
+            if *self.block_until_deadline.lock().unwrap() {
+                if let Some(wait) =
+                    deadline.and_then(|d| d.checked_duration_since(std::time::Instant::now()))
+                {
+                    std::thread::sleep(wait);
+                }
+                return Err(DispatcherError::AllocationFailed("test".into()));
+            }
             if self.reserve_fail.lock().unwrap().contains(&key) {
                 Err(DispatcherError::AllocationFailed("test".into()))
             } else {
@@ -853,7 +887,7 @@ mod tests {
         // receiver does not report "disconnected".
         let (_tx, rx) = crossbeam_channel::unbounded::<dispatcher::EvictionEvent>();
         std::mem::forget(_tx);
-        Translator::new(disp, rx, Arc::new(AtomicU64::new(0)))
+        Translator::new(disp, rx, Arc::new(AtomicU64::new(0)), Duration::ZERO)
     }
 
     fn enc_keys(keys: &[u64]) -> Vec<u8> {
@@ -960,5 +994,38 @@ mod tests {
         // never a permanent PENDING.
         assert_eq!(tr.reap_stale_reservations(Duration::from_secs(0)), 1);
         assert_eq!(tr.dispatch(op::CHECK, &enc_keys(&[5])).unwrap(), vec![MISS]);
+    }
+
+    #[test]
+    fn op_reserve_shares_one_deadline_across_batch() {
+        let disp = Arc::new(MockDispatcher::default());
+        *disp.block_until_deadline.lock().unwrap() = true;
+        let (_tx, rx) = crossbeam_channel::unbounded::<dispatcher::EvictionEvent>();
+        std::mem::forget(_tx);
+        let budget = Duration::from_millis(300);
+        let tr = Translator::new(disp.clone(), rx, Arc::new(AtomicU64::new(0)), budget);
+
+        let start = std::time::Instant::now();
+        assert_eq!(
+            tr.dispatch(op::RESERVE, &enc_reserve(&[(11, 4096, 0), (12, 4096, 0)]))
+                .unwrap(),
+            vec![0, 0]
+        );
+        let elapsed = start.elapsed();
+
+        let deadlines = disp.reserve_deadlines.lock().unwrap().clone();
+        assert_eq!(deadlines.len(), 2, "expected one reserve call per key");
+        assert_eq!(
+            deadlines[0], deadlines[1],
+            "all keys in one RESERVE batch must share the same deadline"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(250),
+            "first key should consume approximately one shared budget (elapsed {elapsed:?})"
+        );
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "batch must be bounded by one budget, not per-key budgets (elapsed {elapsed:?})"
+        );
     }
 }

@@ -1,14 +1,35 @@
 {
-  "generated": "pending",
+  "generated": "2026-09-09",
   "project": "gpu-services",
   "summary": {
     "specs_analyzed": 3,
     "requirements_checked": 78,
-    "aligned": 77,
-    "drifted": 1,
+    "aligned": 78,
+    "drifted": 0,
+    "drifted_resolved_this_sync": 3,
     "not_implemented": 0,
     "unspecced_features": 0
   },
+  "resolved_this_sync": [
+    {
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-015",
+      "resolution": "backfill",
+      "note": "Documented CUDA_HOST_REGISTER_PORTABLE + idempotent ALREADY_REGISTERED/EBUSY handling + conditional cudaHostUnregister rollback (ecf2dbe3, Gate #1)."
+    },
+    {
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-020",
+      "resolution": "backfill",
+      "note": "Documented CUDA_HOST_ALLOC_PORTABLE for the pinned DMA buffer (ecf2dbe3, Gate #1)."
+    },
+    {
+      "spec": "002-gpu-ssd-dma-prepare",
+      "requirement": "FR-019",
+      "resolution": "backfill",
+      "note": "Documented portable flag + idempotent registration, consistent with spec-001 FR-015."
+    }
+  ],
   "specs": [
     {
       "id": "001-gpu-cuda-services",
@@ -27,16 +48,8 @@
     {
       "id": "003-gpu-p2p-server",
       "title": "GPU P2P Server",
-      "aligned": 15,
-      "drifted": [
-        {
-          "requirement": "FR-012",
-          "spec_text": "All transfer handlers MUST perform NVMe reads in --chunk-size increments (not exceeding the NVMe controller's MDTS).",
-          "actual": "Chunked reads implemented (do_chunked_read); MDTS ceiling only stated in CLI doc comment, not validated at runtime against the device.",
-          "location": "components/gpu-services/src/bin/p2p_server.rs:54,273",
-          "severity": "minor"
-        }
-      ],
+      "aligned": 16,
+      "drifted": [],
       "not_implemented": []
     }
   ],
