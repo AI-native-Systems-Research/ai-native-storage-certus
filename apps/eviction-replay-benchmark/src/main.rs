@@ -22,8 +22,10 @@ use eviction_replay_benchmark::sim::{simulate, SimStats};
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum PolicyArg {
     /// Recency-only LRU (`eviction-policy-lru`).
+    #[value(name = "eviction-policy-lru", alias = "lru")]
     Lru,
     /// Session-lineage policy (`eviction-policy-session-lists`).
+    #[value(name = "eviction-policy-session-lists", alias = "session-lists")]
     SessionLists,
     /// Run both and print them side by side (default).
     Both,
