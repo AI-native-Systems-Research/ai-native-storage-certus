@@ -1,6 +1,6 @@
 # Contract: Generator ↔ Node Agent Wire Protocol
 
-**Version**: 1
+**Version**: 2
 **Status**: Draft
 **Spoken by**: `workload-gen` (client) and `workload-node-agent` (server), both
 via `workload-wire`.
@@ -59,8 +59,14 @@ Hello       (1): req  { proto_version:u32, build_id:[u8;32], mailbox_len:u16,
                  resp { proto_version:u32, build_id:[u8;32], channels:u32,
                         block_bytes:u32, status:u16 }
 
-Submit      (2): req  { op_kind:u8, session:u64, n:u32, [key:u64]*n }
-                 resp { n:u32, [state:u8]*n, elapsed_ns:u64 }
+SubmitTurn  (2): req  { session:u64, flags:u16, n:u32, [key:u64]*n }
+                 resp { resident:u32, pending:u32, missing:u32, granted:u32,
+                        blocks_read:u32, blocks_written:u32, elapsed_ns:u64 }
+
+Stats       (5): req  { }
+                 resp { n_ops:u16,
+                        [ op_kind:u8, requests:u64, hist_len:u32,
+                          hist:[u8] ]*n_ops }
 
 Drain       (3): req  { }
                  resp { pending:u32 }
@@ -69,10 +75,59 @@ Shutdown    (4): req  { }
                  resp { ops_submitted:u64, ops_failed:u64 }
 ```
 
-`op_kind` mirrors the plan's operation kinds — check, **touch**, load, reserve,
-transfer, commit, abort, poll-events — so the agent is a submission relay and
-never decides *what* to issue. Deciding that on the agent would put workload
-semantics on two sides of a network boundary.
+### `SubmitTurn` carries a key path, not an operation (v2)
+
+Version 1 sent **one operation per frame** — `{ op_kind, session, keys }` — with
+the generator deciding each operation and the agent relaying it. FR-072a makes
+that impossible: a turn's operations are not known until the cache has answered,
+because a client offers its whole path and stores what came back absent. Relaying
+would also mean six or more network round trips per turn, which FR-072b rejects:
+the reactive rule is cheap at `/dev/shm` latency and ruinous over a fabric.
+
+So a frame now carries **one turn's key path**, root of the prefix through the end
+of the new growth, and the agent performs the check, the loads and the stores
+against its own local mailbox. `flags` bit 0 requests an event poll after the
+turn, which is the plan's decision and so stays with the generator.
+
+**What this does and does not move across the boundary.** The workload stays
+entirely on the generator: which keys, in which order, for which session, at which
+virtual time. What the agent applies is the *client rule* — load what is resident,
+store what is absent — which is a mechanical consequence of the cache's answer and
+not a workload decision. Version 1's concern, that deciding "what to issue" on the
+agent would put workload semantics on two sides of a network boundary, still
+holds and is still respected.
+
+**The rule MUST have exactly one implementation.** If the local path and the agent
+each had their own, the two execution paths could diverge and FR-072's guarantee —
+that the same description and seed produce the same workload whichever path runs
+it — would become unverifiable. `workload-node-agent` therefore depends on
+`workload-gen`'s library for the split and the encoders rather than reimplementing
+them. That is the wrong direction for a dependency arrow and is accepted for the
+stronger property; if `workload-gen`'s library grows, extracting the executor into
+its own crate is the tidier form. It cannot live in `workload-wire`, which is a
+CUDA-free workspace default member: depending on `shmq-dispatcher` from there would
+unify `interfaces/spdk` into the default build.
+
+`op_kind` still enumerates the plan's operation kinds — check, **touch**, load,
+reserve, transfer, commit, abort, poll-events. It is no longer what a submission
+names; it is the key space of the `Stats` reply, and the agent's own translation
+table to the mailbox's opcodes.
+
+### `Stats` returns histograms, because percentiles do not merge
+
+The agent times each local request, so per-operation latency (FR-066a) can only be
+measured there. It MUST be returned as **serialized histograms**, never as
+percentiles.
+
+Merging percentiles is arithmetically wrong: the median of two nodes' medians is
+not the median of their requests, and the same holds for every quantile. Averaging
+per-node p99s would produce a number that looks authoritative and belongs to no
+distribution — the failure mode this project has repeatedly caught elsewhere. HDR
+histograms merge exactly, so the wire carries the histogram and the generator
+merges before taking any quantile.
+
+Each entry also carries `requests` so the generator can mark a count too small to
+quote (FR-066a).
 
 **`touch` was missing from this list and from the plan, and that was a defect
 rather than an omission.** It is the reference report (FR-041), and in the
@@ -149,11 +204,16 @@ experiment than the one requested.
 
 The wire format MUST be tested without a live agent and without an accelerator:
 
-1. Round-trip encode/decode for every opcode, including a zero-key `Submit`.
+1. Round-trip encode/decode for every opcode, including a zero-key `SubmitTurn`.
 2. An oversized `len` is rejected without allocating.
 3. `Hello` with a mismatched `build_id` is refused, and the refusal names the
    node.
 4. `Hello` with a mismatched `proto_version` is refused.
 5. A truncated frame mid-body is an error, not a partial parse.
 6. Submitting against a loopback agent stub yields the same operation sequence
-   as the local path for the same plan — the executable form of FR-072.
+   as the local path for the same plan — the executable form of FR-072. Because
+   the rule is now applied on the agent, this test is also what proves the two
+   paths share one implementation rather than two that happen to agree today.
+7. Two histograms merged from a `Stats` reply give the same quantiles as one
+   histogram of the same samples, and a merge of per-node **percentiles** does
+   not — asserted so the wrong method cannot be reintroduced as an optimisation.
