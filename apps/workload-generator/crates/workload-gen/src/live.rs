@@ -267,6 +267,27 @@ impl LiveStats {
             .sum()
     }
 
+    /// Loaded blocks whose stamp did not match the key asked for.
+    ///
+    /// **Non-zero means Certus returned the wrong block.** Unlike every other figure here that
+    /// is a correctness failure rather than a cache outcome, so [`LiveStats::is_valid`] treats
+    /// it as invalidating: a throughput measured while the wrong data came back is not a
+    /// result.
+    pub fn payload_mismatches(&self) -> u64 {
+        self.lanes
+            .iter()
+            .map(|l| l.counters.payload_mismatches)
+            .sum()
+    }
+
+    /// Loaded blocks checked, so a mismatch count has a denominator.
+    pub fn payloads_verified(&self) -> u64 {
+        self.lanes
+            .iter()
+            .map(|l| l.counters.payloads_verified)
+            .sum()
+    }
+
     /// Keys a `COPY_TO_STORE` declined.
     pub fn transfers_declined(&self) -> u64 {
         self.lanes
@@ -337,7 +358,11 @@ impl LiveStats {
     /// An underrun means the generator, not Certus, set the pace at that instant, so the
     /// throughput would describe the instrument rather than the system under test.
     pub fn is_valid(&self) -> bool {
-        self.underruns() == 0
+        // A wrong block invalidates as surely as an underrun, and for the same reason: the
+        // throughput would describe something other than the system serving this workload
+        // correctly. It is the one cache-facing figure that is a failure rather than an
+        // outcome.
+        self.underruns() == 0 && self.payload_mismatches() == 0
     }
 
     /// Keys per second over the timed window.
@@ -459,6 +484,12 @@ pub struct RunOptions {
     /// Stamp each stored block with its key. Costs a CUDA call per key; see
     /// [`crate::payload`] on why it is off by default.
     pub stamp_keys: bool,
+    /// Check each loaded block against its key.
+    ///
+    /// Implies `stamp_keys`, and costs a device-to-host copy per key on top of the stamp's
+    /// host-to-device one. Wants a cold cache: a block stored by a run that did not stamp
+    /// holds the fill byte, so checking it reports a mismatch that is the instrument's fault.
+    pub verify_payload: bool,
     /// Clear the memory tier once before the timed window opens (FR-046).
     ///
     /// `CLEAR_MEMORY_TIER` is otherwise forbidden — see [`crate::opstream`] — because
@@ -492,6 +523,7 @@ pub fn run(
         batch_keys,
         gpu_device,
         stamp_keys,
+        verify_payload,
         clear_cache,
     } = *options;
     let block_bytes = u32::try_from(description.blocks.bytes)
@@ -508,7 +540,8 @@ pub fn run(
             batch_keys,
             block_bytes,
             device,
-            stamp_keys,
+            stamp_keys || verify_payload,
+            verify_payload,
         )?)),
         None => None,
     };

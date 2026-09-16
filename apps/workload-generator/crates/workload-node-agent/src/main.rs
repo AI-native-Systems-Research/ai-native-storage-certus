@@ -82,6 +82,16 @@ struct Cli {
     /// Stamp each stored block with its key. Costs a host-to-device copy per key.
     #[arg(long)]
     stamp_keys: bool,
+
+    /// Check each loaded block against its key, and count mismatches.
+    ///
+    /// Implies `--stamp-keys`. This is what separates "bytes arrived" from "the right bytes
+    /// arrived": the pre-filled buffer is one repeated byte, so without it a cache returning
+    /// the wrong block would produce a run that looked correct. Costs a device-to-host copy per
+    /// key, and wants a **cold** cache — a block stored by a run that did not stamp holds the
+    /// fill byte, so checking it would report a mismatch that is the agent's own fault.
+    #[arg(long)]
+    verify_payload: bool,
 }
 
 fn main() {
@@ -130,7 +140,8 @@ fn run(cli: &Cli) -> Result<(), String> {
             cli.batch_keys,
             cli.block_bytes,
             cli.gpu_device,
-            cli.stamp_keys,
+            cli.stamp_keys || cli.verify_payload,
+            cli.verify_payload,
         )?))
     };
 

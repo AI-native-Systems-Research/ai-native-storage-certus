@@ -598,6 +598,14 @@ pub struct Counters {
     pub commits_attempted: u64,
     /// Keys it declined.
     pub commits_declined: u64,
+    /// Loaded blocks whose key stamp did not match the key asked for.
+    ///
+    /// **Non-zero means Certus returned the wrong block**, which is a correctness failure
+    /// rather than a cache outcome — unlike every other counter here. Only meaningful when a
+    /// run asked for verification; zero otherwise because nothing was checked.
+    pub payload_mismatches: u64,
+    /// Loaded blocks whose stamp was checked, so a mismatch count has a denominator.
+    pub payloads_verified: u64,
 }
 
 impl Counters {
@@ -638,6 +646,8 @@ impl Counters {
         self.transfers_declined += other.transfers_declined;
         self.commits_attempted += other.commits_attempted;
         self.commits_declined += other.commits_declined;
+        self.payload_mismatches += other.payload_mismatches;
+        self.payloads_verified += other.payloads_verified;
     }
 
     /// Encode, in declaration order.
@@ -667,10 +677,12 @@ impl Counters {
             transfers_declined: r.u64()?,
             commits_attempted: r.u64()?,
             commits_declined: r.u64()?,
+            payload_mismatches: r.u64()?,
+            payloads_verified: r.u64()?,
         })
     }
 
-    fn fields(&self) -> [u64; 13] {
+    fn fields(&self) -> [u64; 15] {
         [
             self.requests,
             self.key_references,
@@ -685,6 +697,8 @@ impl Counters {
             self.transfers_declined,
             self.commits_attempted,
             self.commits_declined,
+            self.payload_mismatches,
+            self.payloads_verified,
         ]
     }
 }

@@ -158,6 +158,15 @@ pub enum Command {
         /// tier only — disk-backed entries survive — so it does not guarantee a cold cache.
         #[arg(long)]
         clear_cache: bool,
+        /// Check each loaded block against its key, and report mismatches.
+        ///
+        /// Implies `--stamp-keys`. This is what distinguishes "bytes arrived" from "the right
+        /// bytes arrived": without it every block in the buffer is interchangeable, so a cache
+        /// returning the wrong block would produce a run that looked correct. Costs a
+        /// device-to-host copy per key, and wants a **cold** cache — a block stored by a run
+        /// that did not stamp holds the fill byte.
+        #[arg(long)]
+        verify_payload: bool,
         /// Stamp each stored block with its key, for identity checking.
         ///
         /// Costs one host-to-device copy per key, which puts generator work on the
@@ -305,6 +314,7 @@ pub fn run(cli: Cli) -> i32 {
             no_payload,
             clear_cache,
             stamp_keys,
+            verify_payload,
             report,
         } => match live_run(
             &description,
@@ -315,6 +325,7 @@ pub fn run(cli: Cli) -> i32 {
             seed,
             (!no_payload).then_some(gpu_device),
             stamp_keys,
+            verify_payload,
             clear_cache,
             report,
         ) {
@@ -1004,6 +1015,7 @@ fn live_run(
     seed: u64,
     gpu_device: Option<i32>,
     stamp_keys: bool,
+    verify_payload: bool,
     clear_cache: bool,
     report_path: Option<PathBuf>,
 ) -> Result<(String, i32), Failure> {
@@ -1042,6 +1054,7 @@ fn live_run(
             batch_keys,
             gpu_device,
             stamp_keys,
+            verify_payload,
             clear_cache,
         },
         Arc::clone(&stop),
@@ -1110,6 +1123,8 @@ fn live_run(
             lookup_misses: stats.lookup_misses(),
             reserves_attempted: stats.reserves_attempted(),
             commits_attempted: stats.commits_attempted(),
+            payload_mismatches: stats.payload_mismatches(),
+            payloads_verified: stats.payloads_verified(),
             reserves_declined: stats.reserves_declined(),
             transfers_declined: stats.transfers_declined(),
             commits_declined: stats.commits_declined(),

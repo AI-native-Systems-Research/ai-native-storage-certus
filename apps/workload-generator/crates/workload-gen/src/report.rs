@@ -467,6 +467,13 @@ pub struct CacheOutcomes {
     pub transfers_declined: u64,
     /// Keys a `COMMIT_STORE` declined, which follows a declined reserve.
     pub commits_declined: u64,
+    /// Loaded blocks whose stamp did not match the key asked for.
+    ///
+    /// The one figure here that is **not** a cache outcome: it means Certus returned the wrong
+    /// block. Zero unless the run asked for verification.
+    pub payload_mismatches: u64,
+    /// Loaded blocks checked, so the mismatch count has a denominator.
+    pub payloads_verified: u64,
 }
 
 impl CacheOutcomes {
@@ -670,6 +677,21 @@ impl LiveReport {
             out.push_str(&format!(
                 "  cache cleared     {cleared} memory-tier entries dropped before the \
                  timed window (FR-046); disk-backed entries survive a clear\n"
+            ));
+        }
+        // Led with, and before any throughput: a wrong block is a correctness failure, not a
+        // performance figure, and it must not be read past.
+        if self.outcomes.payload_mismatches > 0 {
+            out.push_str(&format!(
+                "  WRONG DATA        {} of {} loaded blocks carried a different key than the \
+                 one asked for. Certus returned the wrong block; this is not a cache \
+                 outcome and no throughput below is meaningful\n",
+                self.outcomes.payload_mismatches, self.outcomes.payloads_verified
+            ));
+        } else if self.outcomes.payloads_verified > 0 {
+            out.push_str(&format!(
+                "  payload verified  {} loaded blocks carried the key they were asked for\n",
+                self.outcomes.payloads_verified
             ));
         }
         if let Some(rate) = self.outcomes.check_hit_rate() {

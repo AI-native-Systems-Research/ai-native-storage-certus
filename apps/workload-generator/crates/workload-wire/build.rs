@@ -26,11 +26,16 @@
 //!
 //! # What is covered
 //!
-//! Every `.rs` and `Cargo.toml` under `apps/workload-generator/crates/`, which is the
-//! generator, the agent, the wire and the model — the code whose divergence between two
-//! nodes would change a measurement. Paths are sorted so the digest does not depend on
-//! directory order, and each file contributes its path as well as its bytes, so moving code
-//! between files changes the identity.
+//! Every `.rs` and `Cargo.toml` under `apps/workload-generator/crates/`, excluding `tests/`
+//! and `benches/` — those compile into separate binaries that are never linked into the agent
+//! or the generator, so an edit there cannot change either one's behaviour and including them
+//! only forced a redeploy whenever a test was touched. Paths are sorted so the digest does not
+//! depend on directory order, and each file contributes its path as well as its bytes, so
+//! moving code between files changes the identity.
+//!
+//! Inline `#[cfg(test)]` modules inside `src/` are still covered, since a path cannot tell
+//! them from the code around them. Editing one still invalidates a deployed agent — the
+//! remaining friction, and a small one.
 //!
 //! Workspace dependencies outside this directory are **not** covered. A node running a
 //! different `shmq-dispatcher` would not be caught here; that is a deliberate boundary
@@ -67,9 +72,11 @@ fn sources(root: &Path, out: &mut Vec<PathBuf>) {
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if path.is_dir() {
-            // `target` holds build output, not sources, and including it would make the
-            // identity depend on whether the tree had been built.
-            if name != "target" && !name.starts_with('.') {
+            // `target` holds build output, not sources. `tests` and `benches` compile into
+            // separate binaries and are never linked into the agent or the generator, so an
+            // edit there cannot change either one's behaviour — including them only forced a
+            // redeploy every time a test was touched, which is friction with no safety in it.
+            if !matches!(name.as_ref(), "target" | "tests" | "benches") && !name.starts_with('.') {
                 sources(&path, out);
             }
         } else if name.ends_with(".rs") || name == "Cargo.toml" {
