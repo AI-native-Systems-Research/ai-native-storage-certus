@@ -49,6 +49,15 @@
 //!   residual turn counts, so a very short span references fewer keys than
 //!   projected. The error decays over one mean session duration, and
 //!   [`Projection::warnings`] says so when the span is short.
+//! - **Key references are an UPPER BOUND when the session-length tail outlives the
+//!   span.** Every session is counted for its full quadratic contribution, but a
+//!   session cut off by the span never reaches its late, expensive turns. This bites
+//!   whenever `turns` is heavy-tailed: on the shipped example, whose `turns` is
+//!   exponential with mean 10, a 300-second span gave a projection **2.9x** the
+//!   actual — while the mean duration of 105 seconds raised no warning at all. The
+//!   warning is therefore keyed on the **p99** session duration, not the mean. The
+//!   direction is the safe one for a refusal, and the warning says not to compare
+//!   the figure with a run's actual count.
 //! - **Emptiness is assumed from means.** A turn is counted as issuing a check and
 //!   a load whenever the class has any shared instances or any growth, and as
 //!   issuing a store sequence whenever the corresponding growth mean is positive. A
@@ -283,6 +292,26 @@ pub fn project_with(
                  {duration:.0} virtual seconds, longer than the {span:.0}-second \
                  span, so most sessions will not complete and the seeded \
                  generation's shorter chains dominate"
+            ));
+        }
+        // The reference figure is driven by the *tail*, not the mean. A class whose
+        // p99 session outlives the span has long sessions that never reach their
+        // expensive late turns, while this projection counts every session's full
+        // quadratic contribution — so the estimate becomes an upper bound.
+        //
+        // Measured on the shipped example: mean duration 105 s against a 300 s span
+        // raises no mean-based warning at all, yet references came out 2.9x over.
+        // Warning on the mean alone would have missed that entirely.
+        let tail_duration = turns.effective().p99 * mean_think;
+        if span < tail_duration && span >= duration {
+            warnings.push(format!(
+                "session class {name:?} has a mean session duration of \
+                 {duration:.0} virtual seconds but a p99 of {tail_duration:.0}, \
+                 longer than the {span:.0}-second span. Its longest sessions will be \
+                 cut off before their most expensive turns, so the key-reference \
+                 figure below is an UPPER BOUND and may exceed the actual by a \
+                 factor of a few. Sizing on it is safe; comparing it to a run's \
+                 actual count is not"
             ));
         }
 
@@ -552,6 +581,48 @@ session_classes:
             p.warnings
         );
         assert!(p.render().contains("warning:"));
+    }
+
+    #[test]
+    fn a_heavy_tailed_turn_count_warns_that_references_are_an_upper_bound() {
+        // The case a mean-based warning misses entirely, and the reason the warning
+        // is keyed on p99. Exponential turns with mean 10 give a mean duration of
+        // ~105 s, so a 300 s span raises no mean warning — but the p99 session runs
+        // ~460 s and is cut off before its expensive turns.
+        let yaml = r#"
+version: 1
+blocks: {tokens: 16, bytes: 32768}
+shared_classes:
+  m: {length: {constant: 4}, lifetime: {constant: .inf}}
+session_classes:
+  chat:
+    pool: {size: {exact: 50}}
+    uses: [{class: m, count: {constant: 1}}]
+    turns: {exponential: {mean: 10, min: 1}}
+    input_growth: {constant: 5}
+    output_growth: {constant: 2}
+    think_time: {exponential: {mean: 10}}
+"#;
+        let d: WorkloadDescription = yaml.parse().unwrap();
+        let p = project(&d, 300.0, 1).unwrap();
+        assert!(
+            p.warnings.iter().any(|w| w.contains("UPPER BOUND")),
+            "no upper-bound warning for a heavy-tailed turn count: {:?}",
+            p.warnings
+        );
+        assert!(
+            !p.warnings
+                .iter()
+                .any(|w| w.contains("most sessions will not")),
+            "the mean-based warning should NOT fire here — that is the point"
+        );
+        // And it stops firing once the span covers the tail.
+        let long = project(&d, 20_000.0, 1).unwrap();
+        assert!(
+            !long.warnings.iter().any(|w| w.contains("UPPER BOUND")),
+            "a warning that always fires is noise: {:?}",
+            long.warnings
+        );
     }
 
     #[test]

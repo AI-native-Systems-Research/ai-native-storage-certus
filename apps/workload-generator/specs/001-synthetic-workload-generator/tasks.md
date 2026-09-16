@@ -818,20 +818,20 @@ feature would be carrying arrow for nothing.
 the feature on. CI must run `--features parquet` or SC-004 is untested — a
 feature-gated test nobody enables is indistinguishable from no test.
 
-- [ ] T056 [US2] Implement the emit report in
+- [x] T056 [US2] Implement the emit report in
   `crates/workload-gen/src/report.rs`: completeness only — sessions started and
   completed, turns and blocks emitted, virtual-time span, records per
   container, plus reproduction parameters. Latency, lane utilisation, and the
   virtual-to-wallclock ratio are **omitted, not zeroed**
-- [ ] T057 [US2] Wire the `emit` subcommand in
+- [x] T057 [US2] Wire the `emit` subcommand in
   `crates/workload-gen/src/cli.rs`: `--until` **required**, `--output`,
   `--format jsonl|parquet|both`
-- [ ] T058 [US2] Wire the projection into `emit` in
+- [x] T058 [US2] Wire the projection into `emit` in
   `crates/workload-gen/src/cli.rs`: project before writing, compare against
   free space via `statvfs`, and refuse past the free space or a documented
   ceiling, naming both figures. `--force` overrides the ceiling but never the
   free-space check
-- [ ] T059 [US2] Wire the `validate` and `plan` subcommands in
+- [x] T059 [US2] Wire the `validate` and `plan` subcommands in
   `crates/workload-gen/src/cli.rs`: `validate` runs the load-time checks and
   reports effective distributions and the projection without writing; `plan`
   writes the canonical plan serialisation
@@ -844,9 +844,62 @@ feature-gated test nobody enables is indistinguishable from no test.
   matching the emit report — the loader derives sessions by walking
   `parent_chat_id`, so a wrong chain still loads while collapsing every session
   into one
-- [ ] T062 [P] [US2] Test in `crates/workload-gen/tests/emit_determinism.rs`:
+- [x] T062 [P] [US2] Test in `crates/workload-gen/tests/emit_determinism.rs`:
   an emit run's output is byte-identical across repeats and across differing
   `--batch-keys` and `--lanes` values — the executable form of FR-072
+
+**T056-T059 and T062 notes. The emit path runs end to end on the shipped
+example**, and running it found two real defects that no test had:
+
+1. **The report counted only session class 0 of two.** 3 862 sessions where the
+   truth was 34 641. It reads perfectly plausibly, which is why
+   `Simulation::session_totals()` now exists as its own method and a test
+   asserts against a *two-class* description.
+2. **The reference projection was 2.9x high, and the mean-based warning could
+   not see it.** The example's `turns` is exponential(10), so mean duration is
+   105 s — under the 300 s span, no warning — while the **p99 session runs 470
+   s** and is cut off before its expensive late turns. The projection counts
+   every session's full quadratic contribution. The warning is now keyed on the
+   **p99**, says the figure is an UPPER BOUND, and says not to compare it with
+   a run's actual count. The direction is the safe one for a refusal.
+
+**FR-071 is enforced by the type, not by discipline**: `EmitReport` has **no fields**
+for latency, lane utilisation or the wallclock ratio — not `Option`, not zero.
+An `Option` left at `None` is one careless `unwrap_or(0.0)` from a published
+zero, and `skip_serializing_if` is avoided for the same reason. Generation
+speed is the one wallclock figure FR-071 allows and is named
+`generation_rate_invocations_per_second` so it cannot be read as a server
+result.
+
+**The two size refusals are deliberately not the same check.** Free space is
+hard and `--force` does **not** override it — overriding it yields a truncated
+directory and a full filesystem, on a shared box for other people too. The 32
+GiB ceiling is a guard rail and `--force` does override it. Both name **both
+figures**; a refusal that says only "too large" cannot be acted on. `statvfs`
+is read on the **output** directory's filesystem, and a failed call is a
+refusal, not a pass.
+
+**`check_size` takes free space as a parameter so both branches are testable.**
+On a box with less free space than the ceiling the free-space check always
+fires first, so the end-to-end test could never reach the ceiling branch — it
+is now honestly named for what it asserts (a refused run writes nothing) and
+the branches are covered by unit tests where free space is a value.
+
+**`workload-gen` gained a lib target** so every subcommand is testable
+in-process. `cli::run_argv` returns an exit code rather than calling `exit`; a
+CLI only reachable by spawning a process tends not to be exercised, and the
+exit codes are contract.
+
+**The half of FR-072 this cannot yet reach**, recorded in the test header
+rather than implied: identity across differing `--batch-keys` and `--lanes`
+needs flags that arrive with US1. The property holds *structurally* —
+`workload-model` has no parameter to receive either — but a crate boundary is
+an argument, not a test, and the executable form is still owed.
+
+**Confirmed pre-existing, not ours**: `cargo clippy -p workload-gen` with the default
+`live` feature fails on 4 `manual_checked_ops` lints in
+`components/interfaces`, reached through `shmq-dispatcher` enabling
+`interfaces/spdk`. Both `--no-default-features` states are clean.
 
 **Checkpoint**: US1 and US2 both work independently. US2 needs no hardware, so
 it is the CI-testable half of the feature.

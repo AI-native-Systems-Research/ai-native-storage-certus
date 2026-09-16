@@ -278,6 +278,17 @@ impl Simulation {
             .map(|c| (c.pool.started(), c.pool.completed()))
     }
 
+    /// Sessions started and completed across **every** session class.
+    ///
+    /// What a run report wants. Kept as its own method because reporting class 0's
+    /// numbers as the run's is a mistake that reads perfectly plausibly — a
+    /// two-class description would simply under-report, with no sign that it had.
+    pub fn session_totals(&self) -> (u64, u64) {
+        self.sessions.iter().fold((0, 0), |(s, c), class| {
+            (s + class.pool.started(), c + class.pool.completed())
+        })
+    }
+
     /// The next virtual time anything happens, if anything does.
     pub fn next_event_at(&self) -> Option<f64> {
         let mut next = f64::INFINITY;

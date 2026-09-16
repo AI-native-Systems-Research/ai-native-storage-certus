@@ -37,7 +37,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Latency percentiles live in the binary only, never in the simulation core.
 hdrhistogram = "7"
+# `statvfs` for the emit path's free-space refusal (FR-073). Needed in the
+# emit-only build too, which is why it is not behind the `live` feature.
+libc = "0.2"
 # Live path only: the /dev/shm mailbox and its wire framing, so the generator
 # speaks exactly what the server serves.
 shm-queue = { workspace = true, optional = true }
 shmq-dispatcher = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3"
