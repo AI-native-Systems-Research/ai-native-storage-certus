@@ -33,10 +33,13 @@ to fitting, which is out of scope (spec, Out of scope).
   invocations/block_size_<N>/part-*.jsonl     # or .parquet, or both
 ```
 
-`block_size` counts **blocks of keys** as this feature mints them, and appears
-in the path so the directory is self-locating even if the manifest is lost.
-There is no `blocks/` directory: block role is a property real traces recover
-from text, and we do not model it.
+`block_size` counts **tokens per block**, exactly as the corpus's own traces
+do, and appears in the path so the directory is self-locating even if the
+manifest is lost. (An earlier revision of this contract made it a count of
+blocks and put `input_length` in blocks too. That was a mistake: deviating on
+those fields would break the field-level comparability with real traces that
+this whole format exists for.) There is no `blocks/` directory: block role is a
+property real traces recover from text, and we do not model it.
 
 ## The invocation record
 
@@ -50,17 +53,24 @@ session of 135 turns is 135 records, tied together by `session_id` and
 | `session_id` | string | the session this turn belongs to |
 | `invocation_index` | int64 | 0-based position within the session |
 | `parent_invocation` | int64 | previous turn, or −1 at a session root |
-| `request_start`, `request_end` | double | virtual seconds, run-global clock |
+| `request_start` | double | virtual seconds, run-global clock |
+| `request_end` | double | always **null** — see below |
 | `timestamp_kind` | string | always `start` |
 | `timestamp_is_synthetic` | bool | always `true` — the clock is virtual |
 | `model` | string | null; this feature does not model models |
-| `input_length`, `output_length` | int64 | **blocks**, not tokens and not bytes |
+| `input_length`, `output_length` | int64 | **tokens**, as the corpus does — `blocks * block_size` |
 | `reuse_from` | list\<int64\> | invocation indices whose blocks this re-reads |
 | `new_input_blocks` | list\<u64\> | input keys first minted at this turn |
 | `new_output_blocks` | list\<u64\> | output keys first minted at this turn |
 | `full_input_blocks` | list\<u64\> | the complete ordered input key list |
 | `full_output_blocks` | list\<u64\> | the complete ordered output key list |
-| `partial_final_valid` | int64 | valid units in a trailing partial block |
+| `partial_final_valid` | int64 | always **null**: this generator mints whole blocks |
+
+**`request_end` is null, not equal to `request_start`.** A turn occupies a
+single virtual instant because nothing here models service time, so a duration
+of zero would be a measurement this generator did not make. The same rule as
+the emit report's omitted fields (FR-071): a zero is indistinguishable from a
+real result.
 
 `parent_invocations` (the fan-in form) is **absent**, because a session's chain
 is a path and not a graph (spec, Out of scope). A reader must treat an absent
@@ -115,7 +125,8 @@ Written **last**. Every field a reader needs to interpret the records:
 
 FR-058 requires these to hold on every emitted row, not on a sample:
 
-1. `len(full_input_blocks) == input_length`, and likewise for output.
+1. `len(full_input_blocks) * block_size == input_length`, and likewise for
+   output — exact, with no rounding, because every block is whole.
 2. `full_input_blocks` of turn *n* begins with the whole of turn *n−1*'s input
    followed by its output — the chain is append-only.
 3. `new_input_blocks` is the suffix of `full_input_blocks` not present in any

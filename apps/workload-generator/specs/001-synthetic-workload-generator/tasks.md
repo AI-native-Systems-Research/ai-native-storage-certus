@@ -744,19 +744,44 @@ seed and no server present; the two contain identical records, every row
 satisfies the schema's invariants, and repeating reproduces the output byte for
 byte.
 
-- [ ] T052 [P] [US2] Implement the self-describing manifest in
+- [x] T052 [P] [US2] Implement the self-describing manifest in
   `crates/workload-trace/src/manifest.rs` per `contracts/trace-io.md`:
   `source_class: pre_hashed`, full encoding, block geometry, and
   `block_id_space` recording that identifiers are chained u64 keys rather than
   dense mint-order integers. **Written last** during emit, so a directory
   without one is incomplete by construction
-- [ ] T053 [P] [US2] Implement the JSONL writer in
+- [x] T053 [P] [US2] Implement the JSONL writer in
   `crates/workload-trace/src/jsonl.rs` per `contracts/trace-io.md`, emitting
   **one record per invocation** (not per session, so the file streams in
   virtual-time order and nothing is buffered) with the full encoding,
   `full_input_blocks` populated and the trailing-partial-block convention
   honoured, recording `partial_final_valid`. The six per-row invariants the
   contract lists are what T055 asserts
+**T052/T053 notes, and a correction to `contracts/trace-io.md`.** I had written
+`input_length` in **blocks** and `block_size` as a count of blocks. That was wrong
+and is fixed: both now follow the corpus — `block_size` is **tokens per block** and
+`input_length` is `blocks * block_size` tokens. Deviating on those two fields would
+have broken exactly the field-level comparability with real traces that the format
+exists for.
+
+**A turn's prompt is not a turn's reads.** `Turn` separates them because FR-025
+defines the read set as the prefix *before* the turn, but a trace's
+`full_input_blocks` is the request's prompt — that prefix **plus** the turn's own
+new input, since the new user text is part of what gets sent. Conflating them would
+understate every prompt by one turn's growth and would break the schema's own
+`len(full_input_blocks) * block_size == input_length` invariant.
+
+**`request_end` and `partial_final_valid` are null, not zero.** A turn occupies a
+single instant because no service time is modelled, so a zero duration would be a
+measurement never made; and this generator mints whole blocks, so there is no
+trailing partial. Both are **present and null** so a reader need not recognise
+which trace it is (FR-056) — the same rule as FR-071's omitted report fields.
+
+**Row verification is on by default** in the writer (FR-058), including the
+append-only check against the previous row of the same session, which is the one
+invariant a single row cannot express. Two tests build a broken row by hand,
+because the simulation cannot produce one.
+
 - [ ] T054 [US2] Implement the parquet writer in
   `crates/workload-trace/src/parquet.rs` behind the `parquet` feature, emitting
   records identical to the JSONL writer's

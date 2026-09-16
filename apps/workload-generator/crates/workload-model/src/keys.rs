@@ -63,6 +63,13 @@ pub type CacheKey = u64;
 /// The parent of a chain root.
 pub const ROOT_PARENT: CacheKey = 0;
 
+/// Version of the key derivation, recorded in a trace manifest.
+///
+/// Bumped only when the derivation changes, which per this module's Versioning
+/// rules is a new version and never an edit — a consumer that cannot compute this
+/// version must refuse the trace rather than derive different keys from it.
+pub const KEY_DERIVATION_VERSION: u32 = 1;
+
 // Salt field layout, per `contracts/key-derivation.md`. Both arrangements use
 // all 64 bits exactly: 2 + 12 + 26 + 24 for a shared block, 2 + 38 + 24 for a
 // session block. Each field's *width is the gap to the next*, which is why the

@@ -718,6 +718,16 @@ modes reorder the policies.
   test rather than single runs.
 - **Fitting a description from real traces is out of scope**, but the trace
   format is chosen so that flow can read the same shape when it returns.
+- **Bit-identical plans across different machines are out of scope**, and this
+  is a decision rather than a gap. FR-034 asks only that a plan not depend on
+  server speed, which it does not. Across *machines*, `f64::exp` and `f64::ln`
+  are not guaranteed bit-identical between libm versions, so a draw landing
+  within an ULP of a rounding boundary could round the other way and change a
+  plan structurally. The values are otherwise identical to within an ULP, keys
+  are integer-only and so identical everywhere, and no live run's validity
+  depends on it — so the consequence is confined to a plan *digest* failing to
+  match across boxes. Compare statistics rather than digests when doing that;
+  the reasoning is in `crates/workload-model/src/special.rs`.
 - **Reading third-party trace corpora is out of scope**, and so is the
   `metadata_only` (arrival-plus-counts) export. The first is deferred rather
   than rejected — the reasoning for the one corpus worth importing is preserved

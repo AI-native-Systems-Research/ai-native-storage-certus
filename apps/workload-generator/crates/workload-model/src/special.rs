@@ -15,17 +15,28 @@
 //! at the bottom of this file re-check them against pinned reference values,
 //! rather than trusting them from their source.
 //!
-//! # Reproducibility caveat, recorded deliberately
+//! # Cross-machine reproducibility: accepted, and not worth chasing
 //!
 //! These functions call `f64::exp` and `f64::ln`, which are **not** guaranteed
-//! bit-identical across libm implementations. FR-034 wants a plan to be
-//! byte-identical on any machine, and a 1-ULP difference here could in principle
-//! flip a rounded integral draw and change a plan. It cannot affect a *live*
-//! run's correctness — cache keys are integer-only splitmix64, and remote agents
-//! replay keys rather than re-simulating — so the exposure is limited to
-//! reproducing an experiment on a different box. The plan serialisation is the
-//! place to detect it: comparing plan digests turns a silent divergence into a
-//! visible one.
+//! bit-identical across libm implementations. **This is accepted and no work is
+//! planned on it** — a decision taken deliberately rather than an oversight left
+//! standing.
+//!
+//! The reasoning, so it does not have to be re-derived. The values agree to
+//! within an ULP, which is far inside every tolerance anything here reads. The one
+//! place a tiny difference is not a tiny difference is a **rounded integral draw**:
+//! a turn count landing within an ULP of `4.5` could round to 4 on one machine and
+//! 5 on another, and the resulting plan then differs structurally rather than
+//! slightly. That is a real discontinuity, but it needs a draw to land on a
+//! rounding boundary to within one part in 10^16, so it is rare to the point of
+//! irrelevance — and the consequence when it does happen is only that a plan
+//! *digest* fails to match across machines. Nothing about a run's validity depends
+//! on it: cache keys are integer-only splitmix64, and remote agents replay keys
+//! rather than re-simulating, so a live run cannot be affected at all.
+//!
+//! The practical upshot for anyone comparing runs on two boxes: compare the
+//! statistics, not the digest. A digest mismatch across machines means "possibly
+//! one draw rounded differently", not "the workloads differ".
 //!
 //! Every numeric table below is transcribed from a published source, and the
 //! digits are kept exactly as published even where the last one or two make no
