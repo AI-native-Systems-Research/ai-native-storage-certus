@@ -689,10 +689,42 @@ percentiles.
 - [ ] T040 [US1] Implement the local mailbox client in
   `crates/workload-gen/src/live.rs` over `shm-queue`, framing with
   `shmq-dispatcher::wire`
-- [ ] T041 [US1] Map plan operations to the production client's stream in
-  `crates/workload-gen/src/live.rs`: reserve → transfer → commit-or-abort for
-  stores, **never** the single-shot store; reference reports with `promote: 0`;
-  poll for events. Never removal, pinning, unpinning, or promotion
+- [x] T041 [US1] Map plan operations to the production client's stream, in
+  `crates/workload-gen/src/opstream.rs` (not `live.rs`: the mapping is a pure
+  function and is the only part of the live path testable without a server, so
+  it is its own module)
+
+**T041 done, and it is where the `Touch` defect was found.** Every opcode and
+payload layout was read from `lib/shmq-dispatcher/src/{wire,translate}.rs`. The
+mapping: `Check`→`CHECK` 1, `Touch`→`TOUCH` 2, `Load`→`LOOKUP` 9,
+`Reserve`→`RESERVE` 3, `Transfer`→`COPY_TO_STORE` 4, `Commit`→`COMMIT_STORE` 5,
+`Abort`→`ABORT_STORE` 6, `PollEvents`→`TAKE_EVENTS` 10. Three numbering schemes
+now exist — the plan's kinds, the node-agent wire's `op_kind`, and the
+mailbox's opcodes — and they are deliberately distinct so a change to one
+cannot silently redefine another.
+
+**`promote` is a named constant at zero, never a parameter** (FR-043, FR-044).
+Promotion is a *decision*, and taking it on the client's behalf would make this
+instrument measure a tiering policy it had partly authored. A test reads the
+first payload byte off the wire rather than trusting the constant.
+
+**Six opcodes are on a forbidden list**: `PIN`, `UNPIN`, `REMOVE`,
+`CLEAR_MEMORY_TIER`, `POPULATE`, `FLUSH_TO_SSD`. A test asserts a whole run's
+issued opcodes contain none of them, and a second asserts the list still names
+each by its dispatcher constant — a guard list that quietly lost an entry would
+be worse than none.
+
+**Payloads are decoded back with the dispatcher's own `wire::Reader`**, not a
+hand-written parser, so "my encoder agrees with their decoder" is checked
+rather than assumed.
+
+**T038-T040 and T042-T050 are NOT done, and cannot be verified on this
+machine.** There is no Certus server running here and `/dev/shm` is empty, so a
+lane loop, a plan queue, latency percentiles, throughput, or a validity
+classification could be *written* but not *run*. Writing them and reporting
+them as done would be the one thing this feature's own Principle VIII forbids.
+What is needed to proceed: a Certus server on a local mailbox (SPDK, hugepages
+and VFIO per README.md), or a decision to accept unverified code.
 - [ ] T042 [US1] Implement lanes in `crates/workload-gen/src/lanes.rs`: one
   session's turn at a time, per-session order strict, cross-session overlap
   allowed
