@@ -342,6 +342,12 @@ pub struct LiveReport {
     pub cleared_entries: Option<u64>,
     /// Whether the producer reached the end of its span rather than being interrupted.
     pub producer_completed: bool,
+    /// The node that was lost, if one was (FR-064).
+    ///
+    /// Separate from `invalid_reason` so a sweep driver can act on it without parsing prose: a
+    /// lost node is worth retrying the run for, whereas an underrun means the generator needs
+    /// looking at.
+    pub lost_node: Option<String>,
     /// Lanes used, which equals channels claimed.
     pub lanes: usize,
     /// The node's channel count, for comparison with `lanes`.
@@ -614,6 +620,9 @@ impl LiveReport {
         let mut out = String::new();
         if !self.valid {
             out.push_str("RUN INVALID — its throughput is not a result\n");
+            if let Some(node) = &self.lost_node {
+                out.push_str(&format!("  lost node         {node}\n"));
+            }
             if let Some(why) = &self.invalid_reason {
                 out.push_str(&format!("  reason            {why}\n"));
             }

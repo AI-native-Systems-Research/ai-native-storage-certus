@@ -1960,11 +1960,39 @@ a node becoming unreachable must abort the run, and **a hang is not an abort**. 
 `DEFAULT_READ_TIMEOUT` (30 s, generous because a turn does real work on the far side) plus
 `with_read_timeout` for probes, which the leftover check uses at 2 s — a squatter must be
 discovered in a moment, not after the default.
-- [ ] T072 [US3] Implement node-loss handling in
+- [x] T072 [US3] Implement node-loss handling in
   `crates/workload-gen/src/agents.rs`: abort the whole run, report it invalid,
   name the lost node, exit 3. Never continue on the survivors — a lost node
   makes its sessions' prefixes unreachable, shrinks the migration target set,
   and redistributes load, so any later number describes a different experiment
+
+**T072 done, 3 more tests; 142 in gen+wire.** `NodeLost` carries the node, what the run
+was doing, and the transport's own words, and its message spells out all three reasons
+continuing is wrong — because "carry on with the survivors" is the tempting thing to do
+and it produces a *plausible* number for a different experiment.
+
+**Every transport failure counts as losing the node, with no retry.** A clean close, a
+timeout, a protocol error: to a run they all mean the node is not usable, and a retry only
+extends the window in which the run is measuring a cluster it no longer has.
+
+`lost_node` is a **separate report field** rather than only prose in `invalid_reason`, so a
+sweep driver can act on it without parsing English: a lost node is worth retrying the run
+for, whereas an underrun means the generator itself needs looking at.
+
+**This is where T071's read timeout pays off.** A node that accepts and stops answering is
+now detected in bounded time and asserted as such — before the timeout it would have hung,
+and a run that neither finishes nor fails cannot even be *reported* as invalid. A failed
+run still tears its remaining agents down, because a run that failed must still leave
+nothing holding mailbox channels.
+
+**Two fixture bugs worth recording, both mine.** The first test claimed a dead node went
+unnoticed; it had killed the agent but not waited for it to actually go down, and a
+connection already accepted served one more frame. The second surfaced only after that
+fix: `LocalLauncher::kill` stopped *every* agent, so starting a second one killed the
+first — because replacing a non-existent leftover calls `kill`. The real
+`SshLauncher::kill` is port-scoped precisely so it cannot kill another run's agent on the
+same host, and the fixture had to model that or it would pass tests the production
+launcher would fail.
 - [ ] T073 [US3] Add `--node` and `--agent-port` to
   `crates/workload-gen/src/cli.rs`, with exit code 4 for a refused peer
 - [ ] T074 [P] [US3] Test in `crates/workload-wire/tests/loopback.rs`:
