@@ -102,7 +102,16 @@ struct Cli {
 
     /// Use a local Qwen-format JSONL file instead of downloading a dataset.
     #[arg(long)]
-    file: Option<PathBuf>,
+    qwen_file: Option<PathBuf>,
+
+    /// Use a local ShareGPT-format JSON file (array of {id, conversations}).
+    #[arg(long)]
+    sharegpt: Option<PathBuf>,
+
+    /// Characters per cache block when converting ShareGPT text to block keys
+    /// (approximately 16 tokens at ~4 chars/token).
+    #[arg(long, default_value_t = 64)]
+    block_chars: usize,
 
     /// Cache size(s) in blocks to evaluate (comma-separated or repeated).
     #[arg(
@@ -120,37 +129,48 @@ struct Cli {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // Resolve the trace file: an explicit --file, else download-on-demand.
-    let (path, source) = match &cli.file {
-        Some(p) => (p.clone(), format!("file {}", p.display())),
-        None => match dataset::ensure(cli.dataset.id()) {
-            Ok(p) => (
-                p,
-                format!(
-                    "dataset {} ({})",
-                    cli.dataset.id(),
-                    dataset::describe(cli.dataset.id()).unwrap_or("")
-                ),
+    // Resolve the trace: --sharegpt, --qwen-file, or --dataset (download-on-demand).
+    let (trace, source) = if let Some(ref p) = cli.sharegpt {
+        match eviction_replay_benchmark::sharegpt::load(p, Some(cli.block_chars)) {
+            Ok(t) => (
+                t,
+                format!("sharegpt {} (block_chars={})", p.display(), cli.block_chars),
             ),
             Err(e) => {
-                eprintln!("error: could not obtain dataset: {e}");
+                eprintln!("error: failed to load ShareGPT file {}: {e}", p.display());
                 return ExitCode::FAILURE;
             }
-        },
-    };
-
-    let trace = match replay::load(&path) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("error: failed to load trace {}: {e}", path.display());
-            return ExitCode::FAILURE;
+        }
+    } else {
+        let (path, src) = match &cli.qwen_file {
+            Some(p) => (p.clone(), format!("qwen-file {}", p.display())),
+            None => match dataset::ensure(cli.dataset.id()) {
+                Ok(p) => (
+                    p,
+                    format!(
+                        "dataset {} ({})",
+                        cli.dataset.id(),
+                        dataset::describe(cli.dataset.id()).unwrap_or("")
+                    ),
+                ),
+                Err(e) => {
+                    eprintln!("error: could not obtain dataset: {e}");
+                    return ExitCode::FAILURE;
+                }
+            },
+        };
+        let src = format!("{src}\n  file: {}", path.display());
+        match replay::load(&path) {
+            Ok(t) => (t, src),
+            Err(e) => {
+                eprintln!("error: failed to load trace {}: {e}", path.display());
+                return ExitCode::FAILURE;
+            }
         }
     };
+
     if trace.ops.is_empty() {
-        eprintln!(
-            "error: trace {} has no key-bearing operations",
-            path.display()
-        );
+        eprintln!("error: trace has no key-bearing operations");
         return ExitCode::FAILURE;
     }
 
@@ -161,7 +181,6 @@ fn main() -> ExitCode {
     };
 
     println!("{source}");
-    println!("  file: {}", path.display());
     println!(
         "  requests={}  accesses(block-refs)={}  working-set(distinct blocks)={}",
         trace.ops.len(),
