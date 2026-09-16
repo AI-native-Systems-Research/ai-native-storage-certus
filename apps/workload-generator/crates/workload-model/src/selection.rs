@@ -101,6 +101,7 @@
 use rand::Rng;
 
 use crate::description::RankBy;
+use crate::distribution::Resolved;
 use crate::pool::SharedPool;
 
 /// How often a draw could not deliver what was asked, and why (FR-023).
@@ -114,9 +115,20 @@ pub struct SelectionStats {
     empty_pool: u64,
     requested: u64,
     delivered: u64,
+    exhausted_retries: u64,
 }
 
 impl SelectionStats {
+    /// Draws whose rejection budget ran out and were completed in rank order.
+    ///
+    /// Non-zero means a session asked for more instances than its `selection` spread
+    /// realistically covers, so the draw was completed by taking the next-highest-ranked
+    /// unchosen instances. Counted rather than left to be inferred from a hit-rate curve that
+    /// looks slightly flatter than it should.
+    pub fn exhausted_retries(&self) -> u64 {
+        self.exhausted_retries
+    }
+
     /// Draws made.
     pub fn draws(&self) -> u64 {
         self.draws
@@ -185,6 +197,14 @@ pub struct Selector {
     rank_by: RankBy,
     /// Candidate slots, in rank order. Refilled per draw; never freed.
     candidates: Vec<u32>,
+    /// How ranks are drawn, or `None` for uniform.
+    ///
+    /// This is what makes [`RankBy`] mean anything: a uniform draw is the same distribution
+    /// whichever way the ranks are numbered, so without a selection distribution `rank_by` is
+    /// inert by construction rather than by omission.
+    selection: Option<Resolved>,
+    /// Chosen ranks for one draw, so a draw allocates nothing.
+    picked: Vec<usize>,
     stats: SelectionStats,
 }
 
@@ -194,8 +214,35 @@ impl Selector {
         Self {
             rank_by,
             candidates: Vec::new(),
+            selection: None,
+            picked: Vec::new(),
             stats: SelectionStats::default(),
         }
+    }
+
+    /// Draw ranks from `selection` instead of uniformly (FR-021).
+    ///
+    /// # What this buys, and why uniform selection is the wrong default to leave in place
+    ///
+    /// Under uniform selection every instance is equally likely, so the working set *is* the
+    /// whole key space and a cache either holds all of it or thrashes. A hit-rate curve swept
+    /// against capacity then has a step in it rather than a slope, and every eviction policy
+    /// scores the same — the measurement cannot discriminate, which is what US4 exists to do.
+    ///
+    /// A concentrated distribution separates the two: the key space stays as large as the pool,
+    /// while the *working set* is set by the spread. That is the knob that makes a capacity
+    /// sweep informative.
+    ///
+    /// The distribution is over **rank**, not over slot or key, which is what gives
+    /// [`RankBy`] its meaning — see the module docs.
+    pub fn with_selection(mut self, selection: Option<Resolved>) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    /// Whether draws are concentrated rather than uniform.
+    pub fn is_concentrated(&self) -> bool {
+        self.selection.is_some()
     }
 
     /// The index space this selector draws over.
@@ -216,11 +263,31 @@ impl Selector {
     /// never waits. Pass each returned slot to [`SharedPool::acquire`] to take a
     /// hold on it.
     ///
-    /// The result is ordered by **slot**, not by rank, and that is deliberate: a
-    /// session's `uses` order fixes where each instance's blocks land in its
-    /// prefix chain, so the order has to be stable for the session's whole life.
-    /// A recency rank is not — it changes every time another instance is born —
-    /// so ordering by rank would silently rearrange a live session's prefix.
+    /// The result is ordered by **slot**, not by rank, and that is deliberate for two reasons.
+    /// The second is the load-bearing one and was not written down until someone asked.
+    ///
+    /// The first is stability: a session's `uses` order fixes where each instance's blocks land
+    /// in its prefix chain, so the order has to hold for the session's whole life. A recency rank
+    /// does not — it changes every time another instance is born — so ordering by rank would
+    /// silently rearrange a live session's prefix.
+    ///
+    /// The second is that **sorting is what makes cross-session sharing possible at all**. Keys
+    /// are a rolling prefix: block *n*'s key is derived from every block before it. Two sessions
+    /// therefore share a prefix only if they lay the same instances down in the same *order*. Had
+    /// the draw returned them in the order they were sampled, two sessions holding the same set
+    /// of *k* instances would agree only when their orderings happened to coincide — probability
+    /// `1/k!` — and the shared pools would produce almost no reuse while appearing to be shared.
+    /// A canonical order takes that from `1/k!` to certain.
+    ///
+    /// It also makes *partial* sharing systematic rather than accidental: sessions holding
+    /// `{3, 7}` and `{3, 9}` share slot 3's blocks and diverge after, because the common part of
+    /// their sets is a common *prefix* once both are sorted.
+    ///
+    /// And slot order in particular interacts with `rank_by: slot`, where a concentrated
+    /// selection favours low ranks: the hottest instances are then also the ones most likely to
+    /// sit at the *front* of a chain. That puts the heaviest sharing at the prefix root, which is
+    /// the shape a real workload has — a system prompt every session begins with. That was not
+    /// designed; it falls out of the two choices and is worth knowing before either is changed.
     ///
     /// Cost is `O(live)` per draw, from refilling the candidate buffer, against
     /// `O(requested)` for the draw itself. Draws happen once per session per
@@ -267,16 +334,81 @@ impl Selector {
             self.stats.empty_pool += 1;
         }
 
-        // Partial Fisher-Yates: after k steps the first k entries are a uniform
-        // sample without replacement, and no allocation happened.
         let k = bound as usize;
-        for i in 0..k {
-            let j = i + rng.gen_range(0..(self.candidates.len() - i));
-            self.candidates.swap(i, j);
+        match self.selection.clone() {
+            // Partial Fisher-Yates: after k steps the first k entries are a uniform
+            // sample without replacement, and no allocation happened.
+            None => {
+                for i in 0..k {
+                    let j = i + rng.gen_range(0..(self.candidates.len() - i));
+                    self.candidates.swap(i, j);
+                }
+                self.candidates.truncate(k);
+            }
+            // Concentrated: ranks come from the distribution, so a spread narrower than the pool
+            // makes the working set smaller than the key space.
+            Some(dist) => self.draw_ranked(&dist, k, live as usize, rng),
         }
-        self.candidates.truncate(k);
         self.candidates.sort_unstable();
         &self.candidates
+    }
+}
+
+impl Selector {
+    /// Choose `k` distinct ranks from `dist`, then keep those candidates.
+    ///
+    /// # Rejection, with a budget, and what happens when it runs out
+    ///
+    /// Sampling *without replacement* from a concentrated distribution has no closed form: the
+    /// obvious alternative — drawing into the shrinking list of remaining candidates — silently
+    /// reshapes the distribution as the list shrinks, so a "concentrated" draw would flatten
+    /// exactly when it was asked for the most instances.
+    ///
+    /// So a duplicate rank is rejected and redrawn, with a budget proportional to `k`. When the
+    /// budget runs out the remainder is filled **in rank order** from what has not been chosen,
+    /// which is the least distorting completion available: it favours the ranks the distribution
+    /// already favours. That case means the description asked one session for more instances
+    /// than its spread realistically covers, and [`SelectionStats::exhausted_retries`] counts it
+    /// rather than leaving it to be inferred from a curve that looks slightly wrong.
+    fn draw_ranked<R: Rng + ?Sized>(
+        &mut self,
+        dist: &Resolved,
+        k: usize,
+        live: usize,
+        rng: &mut R,
+    ) {
+        self.picked.clear();
+        let budget = 8 * k.max(1) + 16;
+        let mut attempts = 0usize;
+        while self.picked.len() < k && attempts < budget {
+            attempts += 1;
+            // Truncated to the live ranks: a distribution wider than the pool would otherwise
+            // spend most of its mass outside it, which would look like a much smaller working
+            // set than was asked for.
+            let raw = dist.sample(rng);
+            if !raw.is_finite() {
+                continue;
+            }
+            let rank = (raw.round().max(0.0) as usize).min(live.saturating_sub(1));
+            if !self.picked.contains(&rank) {
+                self.picked.push(rank);
+            }
+        }
+        if self.picked.len() < k {
+            self.stats.exhausted_retries += 1;
+            for rank in 0..live {
+                if self.picked.len() >= k {
+                    break;
+                }
+                if !self.picked.contains(&rank) {
+                    self.picked.push(rank);
+                }
+            }
+        }
+        // Map ranks to slots, then keep only those.
+        let chosen: Vec<u32> = self.picked.iter().map(|r| self.candidates[*r]).collect();
+        self.candidates.clear();
+        self.candidates.extend(chosen);
     }
 }
 

@@ -175,7 +175,13 @@ impl Simulation {
             );
             pool.seed(0.0, &mut pool_rng);
             shared_pools.push(pool);
-            selectors.push(Selector::new(rank_by));
+            // The selection distribution is what makes `rank_by` mean anything: a uniform draw
+            // is the same distribution however the ranks are numbered (FR-021).
+            let selection = match &class.pool.selection {
+                Some(d) => Some(d.resolve(None)?),
+                None => None,
+            };
+            selectors.push(Selector::new(rank_by).with_selection(selection));
         }
 
         let mut session_rng = rng::substream(seed, "sessions");

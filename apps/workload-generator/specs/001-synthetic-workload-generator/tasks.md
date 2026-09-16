@@ -2117,7 +2117,7 @@ launcher would fail.
   submitting a plan through a loopback agent stub yields the same operation
   sequence as the local path — the transport-level form of FR-072
 
-- [ ] T075 [US3] *(AGREED, after T074; **recommended trigger: do it with FR-078's paced mode**,
+- [ ] T092 [US3] *(AGREED, after T074; **recommended trigger: do it with FR-078's paced mode**,
   because pacing changes when a request is submitted and would otherwise be built in two drivers.
   Not urgent on its own: T074 plus the single executor already prevent the divergence it guards
   against. Rule while both paths exist: **add features to neither twice**.)* Proxy the **local** node through an agent
@@ -2127,7 +2127,7 @@ launcher would fail.
   the direct mailbox path and let `workload-gen` drop its CUDA and `shm-queue` dependencies —
   which also stops it enabling `interfaces/spdk` transitively, and lets it become a workspace
   default member
-- [ ] T075a [US3] After T075, re-point the loopback-equivalence test (T074) at the *previous*
+- [ ] T092a [US3] After T092, re-point the loopback-equivalence test (T074) at the *previous*
   behaviour as a regression guard, and re-measure the live numbers to confirm the reported
   per-op latency and bandwidth are unchanged — they should be, since the agent already times
   its own mailbox requests, and if they move something else is wrong
@@ -2173,15 +2173,15 @@ curves that actually discriminate between eviction policies.
 under both ranking modes; the curves are smooth and concave rather than
 step-shaped, and the two ranking modes reorder the policies.
 
-- [ ] T075 [US4] Implement the `selection` distribution over instance index in
+- [x] T075 [US4] Implement the `selection` distribution over instance index in
   `crates/workload-model/src/selection.rs`, so its spread sets working-set size
   independently of the pool's key-space size
-- [ ] T076 [US4] Implement `rank_by: slot` and `rank_by: recency` in
+- [x] T076 [US4] Implement `rank_by: slot` and `rank_by: recency` in
   `crates/workload-model/src/selection.rs`: a slot's popularity is inherited by
   each new occupant, while recency ranking makes heat decay as newer instances
   arrive. Index space stays bounded — numbering by a monotonic mint counter is
   wrong and would mint objects nothing selects
-- [ ] T077 [P] [US4] Test in `crates/workload-model/tests/selection.rs`: under
+- [x] T077 [P] [US4] Test in `crates/workload-model/tests/selection.rs`: under
   a concentrated `selection`, the realised reference distribution is skewed as
   configured; under `rank_by: recency` an instance's reference rate decays with
   age, and under `slot` it does not
@@ -2199,6 +2199,42 @@ step-shaped, and the two ranking modes reorder the policies.
   including that hit-dependent comparisons need repetition with a stated
   significance test because mint races are preserved deliberately, and that n ≥
   8 is the recorded floor on this hardware
+
+**T075-T077 done, 5 tests; 228 in `workload-model`.** The `selection` distribution is over
+**rank**, so a spread narrower than the pool makes the working set smaller than the key space
+while the key space stays as large as the pool. That is the knob a capacity sweep needs: under
+uniform selection the working set *is* the whole key space, so a cache either holds all of it or
+thrashes, the curve has a step rather than a slope, and no two eviction policies can be
+distinguished — which is the measurement US4 exists to make possible.
+
+**T075 and T076 were one change, not two.** `rank_by` was inert *by construction* rather than by
+omission: a uniform draw is the same distribution however the ranks are numbered. Only a
+concentrated distribution over rank makes `slot` and `recency` differ — under `slot` a position
+is hot and each new occupant inherits that heat, under `recency` rank 0 is the newest instance so
+heat decays as newer ones arrive. Measured both ways.
+
+**Rejection has a budget, and running out is counted.** Sampling without replacement from a
+concentrated distribution has no closed form, and the obvious alternative — drawing into the
+shrinking list of remaining candidates — reshapes the distribution as the list shrinks, so a
+concentrated draw would flatten exactly when asked for the most instances. A duplicate rank is
+therefore redrawn, and when the budget runs out the remainder is filled **in rank order**, the
+least distorting completion available. `SelectionStats::exhausted_retries` counts it, because
+that case means the description asked one session for more instances than its spread covers and
+the symptom would otherwise be a hit-rate curve that merely looked a little flat.
+
+**Why the draw is sorted into slot order — the reason that was not written down.** Asked
+directly, and the recorded reason (a session's prefix must not be rearranged as recency ranks
+change) is the lesser one. Keys are a rolling prefix, so two sessions share a prefix only if they
+lay the same instances down in the same *order*. Returning them in sampled order would have two
+sessions holding the same set of *k* instances agree only when their orderings coincided —
+`1/k!` — so the shared pools would produce almost no reuse while appearing to be shared. **A
+canonical order takes that from `1/k!` to certain**, and it makes partial sharing systematic:
+`{3,7}` and `{3,9}` share slot 3 and diverge after, because the common part of their sets is a
+common prefix once sorted. Slot order in particular interacts with `rank_by: slot`, where a
+concentrated selection favours low ranks — so the hottest instances also sit at the *front* of a
+chain, putting the heaviest sharing at the prefix root, which is the shape a real workload has.
+That was not designed; it falls out of the two choices, and it is now recorded before either is
+changed.
 
 **Checkpoint**: all four stories are independently functional.
 
