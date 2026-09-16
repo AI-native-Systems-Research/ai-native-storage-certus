@@ -22,6 +22,7 @@ mod error;
 pub mod keys;
 pub mod plan;
 pub mod pool;
+pub mod project;
 pub mod rng;
 pub mod selection;
 pub mod session;

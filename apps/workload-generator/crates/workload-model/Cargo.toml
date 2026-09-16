@@ -23,7 +23,12 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 
 [dev-dependencies]
-# The per-key plan-generation benchmark (T036) registers its own `[[bench]]`
-# target with `harness = false` when it lands.
 criterion = "0.5"
 serde_json = "1"
+
+[[bench]]
+# Per-key plan-generation cost: the measurement Principle I's
+# never-the-bottleneck claim rests on, and the only claim in this crate a test
+# cannot make. `harness = false` because Criterion supplies its own.
+name = "plan"
+harness = false
