@@ -2189,12 +2189,68 @@ step-shaped, and the two ranking modes reorder the policies.
   `crates/workload-gen/src/report.rs`: hit/miss/pending split, distinct keys
   touched, and the effective working-set size, so a sweep can be aggregated
   without scraping terminal text
-- [ ] T079 [P] [US4] Implement the sweep check in
+- [x] T079 [P] [US4] Implement the sweep check in
   `crates/workload-gen/tests/sweep.rs` (or a script under `scripts/`): across
   at least five capacity points spanning a hundredfold range, hit rate rises
   monotonically with **no single step contributing more than half the total
   rise** — and the same check **fails** when `selection` is removed from every
   class, which is what proves the check has teeth
+
+**T079 done, 5 tests (1 `#[ignore]`d); 386 across the three crates.** The check
+replays the plan's own reference stream through an LRU simulator at five
+capacities, so it needs no server, no accelerator and no cluster and runs in the
+ordinary gate. That is deliberately not a test of Certus's policy: it is a test
+of whether the *workload* produces a reference pattern two policies could differ
+over at all — a necessary condition for the real measurement.
+
+**Getting it to have teeth took three corrections, all found by measuring, and
+SC-005 and Scenario 6 are amended accordingly.** Each one had the check passing a
+uniform workload, which is the failure this task exists to prevent:
+
+1. **The overall hit rate is the wrong curve.** The reactive rule (FR-072a)
+   re-offers a session's whole prefix every turn, so most references are a
+   session re-reading what it stored moments ago; they miss below the concurrent
+   footprint and hit above it. That is a cliff — measured, ~85% of the rise in
+   one step — and it is a cliff whether popularity is concentrated or flat, so
+   the overall curve fails for *both* descriptions and separates neither. The
+   swept curve is now the **cross-session** hit rate: references to a block some
+   other session brought in, which are exactly the references a replacement
+   decision decides. 40% in its largest step concentrated, 94% uniform.
+2. **The ladder must stop below the key space.** The first version ran 1%-100%
+   of the key space. At 100% nothing is ever evicted, so the hit rate is 1.0 for
+   any workload at all, and both curves were pinned there — which flattered
+   every shape that reached it and is how a uniform workload first passed. It is
+   also the one capacity at which no policy can differ from another, so it is the
+   least informative point available. Now 0.1%-10%, still a hundredfold, wholly
+   inside the region where eviction bites.
+3. **A rise must also be substantial, not merely smooth.** "No step over half"
+   is scale-free and so passes a curve that barely moves; a 6-point rise across a
+   hundredfold capacity range gives two policies almost nothing to differ over.
+   `MINIMUM_RISE` is 10 points.
+
+**Two findings about descriptions came out of it, both now in the quickstart.**
+Concentration is not enough — it has to be *scale-free*: an `exponential`
+selection produces one hot band and therefore one cliff, while an `empirical`
+ladder `[1, 4, 16, ...]` with `interpolate: true` puts equal mass in each octave
+of rank, which is a power law over instance index. And popularity being
+scale-free is not sufficient either: with `turns` and `uses.count` held
+constant every session has the same footprint, so the aggregate working set has
+one characteristic size and the curve cliffs there however the pool is selected.
+The working set has to be scale-free too.
+
+**"A uniform workload fails by construction" is withdrawn as too strong.** It
+fails by *measurement* — at five seeds of five, with the largest step steady
+near 90-94% of the rise against 40% concentrated. Checked across seeds rather
+than assumed, because recorded history on this hardware includes n=3 sampling
+producing conclusions that later measurement reversed; the seed sweep is
+`#[ignore]`d for runtime and named in the module docs.
+
+Not a finding, but worth recording since it cost time: clippy 1.96 added
+`manual_checked_ops`, which fires on `components/interfaces/src/iblock_device.rs`
+(lines 243 and 252) and so aborts `cargo clippy -D warnings` for any crate that
+compiles that module — which under `--features live` includes `workload-gen`.
+That masked several new lints in this app until `--no-deps` was used. Both are
+pre-existing repo code, unrelated to this branch.
 - [ ] T080 [US4] Document the policy-comparison procedure in `README.md`,
   including that hit-dependent comparisons need repetition with a stated
   significance test because mint races are preserved deliberately, and that n ≥
