@@ -955,25 +955,61 @@ and is normative for all of them. All are [US2]-scoped: no hardware, no server.
   corner — it is what avoids materialising ~27 GB of native trace to obtain a
   much smaller file. The pre-flight projection must size only the outputs
   requested (FR-073)
-- [ ] T062a [P] [US2] Implement the Mooncake writer in
+- [x] T062a [P] [US2] Implement the Mooncake writer in
   `crates/workload-trace/src/mooncake.rs`, emitting `{timestamp, input_length,
   output_length, hash_ids}` one document per line per **request**, `timestamp`
   in true milliseconds off the virtual clock (not quantised — upstream's 3 s
   tick is its corpus's property, not the format's), and `len(hash_ids) ==
   ceil(input_length / block_size)` per upstream's ceil convention. Wire as
   both `emit --mooncake` and `convert --to mooncake`
-- [ ] T062b [US2] Implement dense renumbering for the Mooncake writer in
+- [x] T062b [US2] Implement dense renumbering for the Mooncake writer in
   `crates/workload-trace/src/mooncake.rs`: one dense identifier per distinct
   key across the **whole output** (FR-078). **This is the one mistake that
   would look like success** — renumbering per session yields a file that loads
   and replays while cross-session reuse has silently vanished
-- [ ] T062c [P] [US2] Test in `crates/workload-trace/tests/mooncake.rs`: a
+- [x] T062c [P] [US2] Test in `crates/workload-trace/tests/mooncake.rs`: a
   converted trace reproduces the upstream invariants measured on
   `conversation_trace.jsonl` — `len(hash_ids) == ceil(input_length /
   block_size)` on **every** row, `timestamp` non-decreasing, identifiers
   globally dense (`distinct == max + 1`) — and, the load-bearing assertion,
   **two sessions that shared a shared-object instance still share identifiers
-  after renumbering**
+  after renumbering** **T062a-T062c notes. The renumbering bug was injected and
+  the tests sorted themselves into exactly two groups**, which is the useful
+  result: `two_sessions_that_shared_an_instance_still_share_identifiers`
+  **failed** ("shared 5 keys in the trace but 7 identifiers after conversion")
+  while **all four structural conformance tests passed**. That is the FR-078
+  failure in its pure form — a file that satisfies every invariant upstream
+  states and has lost all cross-session reuse.
+
+**First injection attempt did not fire, and that was informative too.** I tried
+resetting the map whenever a row's first key was unseen; with a single shared
+instance every session's prompt starts with the *same* key, so the condition
+was false from row two onward. Renumbering every row was the injection that
+worked.
+
+**One of my own tests is recorded as weak rather than left implied.**
+`the_prompt_prefix_structure_survives_the_conversion` passes under per-row
+renumbering, because restarting at zero each row *also* yields `0,1,2,...`
+prefixes. It shows identifiers are assigned in prompt order; it does not show
+reuse survives. Noted in the test.
+
+**Block size is read from the trace's manifest, never guessed.** The Mooncake
+format carries **no block-geometry field** — upstream's 512 is implicit — so a
+wrong value produces a file whose lengths are silently off by a constant
+factor. `convert` reads `manifest.json`, refuses if it cannot, and the
+conversion **reports** the block size it used as one of its declared losses
+(FR-077).
+
+**A backwards timestamp is refused.** Upstream's `timestamp` is non-decreasing,
+and a reader that sorts on it would silently reorder the workload rather than
+fail.
+
+**Both entry points wired and verified byte-identical**: `emit --mooncake` writes in
+the same pass, `convert --to mooncake` reads a stored trace, `cmp` reports
+identical. A real emitted line:
+`{"timestamp":6,"input_length":7872,"output_length":64,"hash_ids":[0,1,...]}`
+with 492 identifiers and 492*16 = 7872 tokens.
+
 - [ ] T062d [P] [US2] Implement the libCacheSim CSV writer in
   `crates/workload-trace/src/cachesim.rs` as `(time, obj_id, size)` rows, and
   have `convert --to cachesim` **print the `--trace-type-params` string** for
