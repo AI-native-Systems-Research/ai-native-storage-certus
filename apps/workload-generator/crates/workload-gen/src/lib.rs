@@ -7,5 +7,7 @@
 
 pub mod cli;
 #[cfg(feature = "live")]
+pub mod live;
+#[cfg(feature = "live")]
 pub mod opstream;
 pub mod report;

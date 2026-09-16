@@ -114,6 +114,34 @@ pub struct Cli {
 /// Subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Drive a live Certus node over its `/dev/shm` mailbox.
+    ///
+    /// Unbounded by default (FR-059); stops cleanly on SIGINT/SIGTERM, and an
+    /// interrupted run whose plan queue never reached zero is **valid** (FR-074).
+    #[cfg(feature = "live")]
+    Run {
+        /// The workload description.
+        description: PathBuf,
+        /// Optional virtual-second cap. Absent means run until interrupted.
+        #[arg(long)]
+        until: Option<f64>,
+        /// The node's mailbox.
+        #[arg(long, default_value = "/dev/shm/certus-shmq")]
+        shm_path: String,
+        /// Execution concurrency. Refused above the node's channel count, because the
+        /// mailbox is depth-1 per channel and the extra lanes would serialise silently.
+        #[arg(long, default_value_t = 4)]
+        lanes: usize,
+        /// Keys per request. MUST NOT change the plan (FR-072).
+        #[arg(long, default_value_t = 64)]
+        batch_keys: usize,
+        /// Seed.
+        #[arg(long)]
+        seed: u64,
+        /// Structured report destination.
+        #[arg(long)]
+        report: Option<PathBuf>,
+    },
     /// Write a trace file. Contacts no server and needs no accelerator.
     Emit {
         /// The workload description.
@@ -239,6 +267,33 @@ pub fn run_argv(argv: &[String]) -> i32 {
 /// to be checked at all.
 pub fn run(cli: Cli) -> i32 {
     match cli.command {
+        #[cfg(feature = "live")]
+        Command::Run {
+            description,
+            until,
+            shm_path,
+            lanes,
+            batch_keys,
+            seed,
+            report,
+        } => match live_run(
+            &description,
+            until,
+            &shm_path,
+            lanes,
+            batch_keys,
+            seed,
+            report,
+        ) {
+            Ok((text, code)) => {
+                print!("{text}");
+                code
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                e.code()
+            }
+        },
         Command::Emit {
             description,
             until,
@@ -893,6 +948,170 @@ fn plan(description_path: &Path, until: f64, output: &Path, seed: u64) -> Result
         plan.fingerprint()
     ));
     Ok(out)
+}
+
+/// The `run` subcommand: drive a live node.
+///
+/// Returns the report text and the exit code, so validity travels in the process status
+/// and not only in the report (FR-062). A sweep driver that treats "the process exited"
+/// as "I have a data point" is exactly how an invalid run gets published.
+#[cfg(feature = "live")]
+#[allow(clippy::too_many_arguments)]
+fn live_run(
+    description_path: &Path,
+    until: Option<f64>,
+    shm_path: &str,
+    lanes: usize,
+    batch_keys: usize,
+    seed: u64,
+    report_path: Option<PathBuf>,
+) -> Result<(String, i32), Failure> {
+    use crate::live::{drive, LiveNode};
+    use crate::report::{LatencyPercentiles, LiveReport, Tuning};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let (description, text, effective) = load(description_path)?;
+    let block_bytes = u32::try_from(description.blocks.bytes)
+        .map_err(|_| Failure::config("blocks.bytes exceeds a 32-bit reservation".to_string()))?;
+
+    let node = LiveNode::attach(shm_path, lanes, block_bytes).map_err(Failure::config)?;
+    let batch_keys = batch_keys.min(node.max_batch_keys()).max(1);
+
+    // An unbounded run needs a span to build a plan from, so it builds in windows. This
+    // first cut plans the whole span up front, which bounds a `run` by memory rather
+    // than by the span — see the note in the returned text.
+    let span = until.unwrap_or(60.0);
+    let mut sim = Simulation::new(&description, seed)
+        .map_err(|e| Failure::config(format!("cannot start the simulation: {e}")))?;
+    let mut plan = OperationPlan::default();
+    sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
+    plan.check_ordered()
+        .map_err(|e| Failure::other(format!("the plan is not ordered: {e}")))?;
+
+    // SIGINT/SIGTERM end the run cleanly; an interrupted run is not a failed one
+    // (FR-074), so the handler asks rather than aborts.
+    install_stop_handler().map_err(Failure::other)?;
+    let stop = Arc::new(AtomicBool::new(false));
+    // Bridge the static the handler can touch to the flag the loop polls.
+    let watcher = {
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                if STOP.load(Ordering::Relaxed) {
+                    stop.store(true, Ordering::Relaxed);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        })
+    };
+
+    let stats = drive(&node, &plan, &stop, description.blocks.bytes).map_err(Failure::other)?;
+    stop.store(true, Ordering::Relaxed);
+    let _ = watcher.join();
+
+    let valid = stats.is_valid();
+    let report = LiveReport {
+        run_kind: "live",
+        valid,
+        invalid_reason: (!valid).then(|| {
+            format!(
+                "the plan queue reached zero ({:.3}% of samples), so the generator did \
+                 not stay ahead of the lanes and the throughput describes the generator \
+                 rather than the server (FR-062)",
+                stats.fraction_at_zero * 100.0
+            )
+        }),
+        requests: stats.requests,
+        key_references: stats.key_references,
+        keys_per_second: stats.keys_per_second(),
+        bytes_per_second: stats.bytes_per_second(),
+        virtual_to_wallclock: stats.virtual_to_wallclock(),
+        elapsed_seconds: stats.elapsed,
+        virtual_span: stats.virtual_span,
+        plan_queue_min_depth: stats.min_queue_depth,
+        plan_queue_fraction_at_zero: stats.fraction_at_zero,
+        lanes: stats.lanes,
+        node_channels: node.channel_count(),
+        latency_us: LatencyPercentiles {
+            p50: stats.latency.value_at_quantile(0.50),
+            p90: stats.latency.value_at_quantile(0.90),
+            p99: stats.latency.value_at_quantile(0.99),
+            max: stats.latency.max(),
+        },
+        reproduction: Reproduction {
+            seed,
+            until: span,
+            description_digest: digest_of(&text),
+            description_path: description_path.display().to_string(),
+        },
+        tuning: Tuning { batch_keys, lanes },
+        skipped_needing_gpu: stats.skipped_needing_gpu,
+        skipped_keys: stats.skipped_keys,
+    };
+
+    if let Some(path) = report_path {
+        fs::write(
+            &path,
+            report
+                .to_json()
+                .map_err(|e| Failure::other(format!("serialising the report: {e}")))?,
+        )
+        .map_err(|e| Failure::other(format!("writing {}: {e}", path.display())))?;
+    }
+
+    let mut out = effective;
+    out.push_str(&report.render());
+    Ok((out, if valid { exit::OK } else { exit::INVALID }))
+}
+
+/// Set by the signal handler, polled by the drive loop.
+///
+/// A plain `static` rather than a closure or a `OnceLock`: a signal handler must be
+/// async-signal-safe, and an atomic store to a static is the whole of what that allows.
+/// An earlier attempt threaded a generic closure through and needed `unsafe impl Sync`
+/// to compile, which is a sign the design was wrong rather than a thing to justify.
+#[cfg(feature = "live")]
+static STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Handle SIGINT and SIGTERM by asking the run to stop.
+#[cfg(feature = "live")]
+extern "C" fn on_stop_signal(_sig: libc::c_int) {
+    STOP.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Install the stop handler for SIGINT and SIGTERM.
+///
+/// # Errors
+///
+/// If `signal` refuses, which would leave an interrupt killing the run outright and
+/// losing its report — worth reporting rather than ignoring.
+#[cfg(feature = "live")]
+fn install_stop_handler() -> Result<(), String> {
+    for sig in [libc::SIGINT, libc::SIGTERM] {
+        // SAFETY: `on_stop_signal` is an `extern "C"` fn of the right signature whose
+        // body is a single relaxed atomic store — async-signal-safe, no allocation, no
+        // locking, no I/O.
+        let previous =
+            unsafe { libc::signal(sig, on_stop_signal as *const () as libc::sighandler_t) };
+        if previous == libc::SIG_ERR {
+            return Err(format!("cannot install a handler for signal {sig}"));
+        }
+    }
+    Ok(())
+}
+
+/// Non-cryptographic digest of a description, matching the trace manifest's.
+///
+/// Live-only: the emit path takes its digest from the manifest it is already building.
+#[cfg(feature = "live")]
+fn digest_of(text: &str) -> String {
+    let mut acc = 0x9e37_79b9_7f4a_7c15u64;
+    for b in text.as_bytes() {
+        acc = workload_model::keys::splitmix64(acc ^ *b as u64);
+    }
+    format!("{acc:016x}")
 }
 
 #[cfg(test)]

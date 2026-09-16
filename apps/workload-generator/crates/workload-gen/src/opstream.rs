@@ -68,6 +68,33 @@ pub struct Encoded {
     pub payload: Vec<u8>,
 }
 
+/// What encoding an operation produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Encoding {
+    /// Ready to issue.
+    Ready(Encoded),
+    /// Nothing to issue: only [`OpKind::Abort`], which the planner never emits.
+    NotPlanned,
+    /// **Needs a GPU IPC handle**, which this build has no payload buffer for.
+    ///
+    /// `LOOKUP` and `COPY_TO_STORE` do not take key lists. `op_lookup` reads a *handle
+    /// batch* — `(key, IpcHandle regions)` pairs — because a load DMAs into a GPU
+    /// buffer, and a store copies out of one. Discovered by running against a live
+    /// server: reading the opcode table suggested a key list and the server answered
+    /// "truncated: need 64 bytes at offset 4, have 32".
+    ///
+    /// A run that skipped these silently would report a throughput for an operation
+    /// stream missing its two data-moving operations, so the driver counts them and the
+    /// report says the run was partial. They become `Ready` when the pre-filled
+    /// reusable payload buffer lands (T038, T039).
+    NeedsGpuPayload {
+        /// Which opcode it would have been.
+        opcode: u32,
+        /// How many keys it would have carried.
+        keys: usize,
+    },
+}
+
 /// Whether an opcode is one this generator must never issue (FR-043).
 ///
 /// `CLEAR_MEMORY_TIER` is included: it is permitted exactly once at startup, which is
@@ -111,9 +138,23 @@ impl OpStream {
     /// Returns `None` for [`OpKind::Abort`], which the planner never emits: whether a
     /// commit fails is a run-time outcome, so the executor chooses it and this
     /// translates it only when asked to.
-    pub fn encode(&self, plan: &OperationPlan, op: &Operation) -> Option<Encoded> {
+    pub fn encode(&self, plan: &OperationPlan, op: &Operation) -> Encoding {
         let keys = plan.keys_of(op);
-        Some(match op.kind() {
+        // The two data-moving operations need a GPU IPC handle per key; see
+        // `Encoding::NeedsGpuPayload`.
+        if matches!(op.kind(), OpKind::Load) {
+            return Encoding::NeedsGpuPayload {
+                opcode: op::LOOKUP,
+                keys: keys.len(),
+            };
+        }
+        if matches!(op.kind(), OpKind::Transfer) {
+            return Encoding::NeedsGpuPayload {
+                opcode: op::COPY_TO_STORE,
+                keys: keys.len(),
+            };
+        }
+        Encoding::Ready(match op.kind() {
             OpKind::Check => Encoded {
                 opcode: op::CHECK,
                 payload: encode_keys(keys),
@@ -122,23 +163,16 @@ impl OpStream {
                 opcode: op::TOUCH,
                 payload: encode_promote_and_keys(NO_PROMOTE, keys),
             },
-            OpKind::Load => Encoded {
-                opcode: op::LOOKUP,
-                payload: encode_keys(keys),
-            },
             OpKind::Reserve => Encoded {
                 opcode: op::RESERVE,
                 payload: encode_reserve(keys, self.block_bytes, op.session()),
-            },
-            OpKind::Transfer => Encoded {
-                opcode: op::COPY_TO_STORE,
-                payload: encode_keys(keys),
             },
             OpKind::Commit => Encoded {
                 opcode: op::COMMIT_STORE,
                 payload: encode_keys(keys),
             },
-            OpKind::Abort => return None,
+            OpKind::Load | OpKind::Transfer => unreachable!("handled above"),
+            OpKind::Abort => return Encoding::NotPlanned,
             OpKind::PollEvents => Encoded {
                 opcode: op::TAKE_EVENTS,
                 payload: DRAIN_ALL_EVENTS.to_le_bytes().to_vec(),
@@ -223,8 +257,14 @@ session_classes:
         let s = OpStream::new(32768);
         let mut seen = std::collections::BTreeMap::new();
         for op in plan.operations() {
-            if let Some(e) = s.encode(&plan, op) {
-                seen.insert(op.kind(), e.opcode);
+            match s.encode(&plan, op) {
+                Encoding::Ready(e) => {
+                    seen.insert(op.kind(), e.opcode);
+                }
+                Encoding::NeedsGpuPayload { opcode, .. } => {
+                    seen.insert(op.kind(), opcode);
+                }
+                Encoding::NotPlanned => {}
             }
         }
         assert_eq!(seen[&OpKind::Check], op::CHECK);
@@ -246,7 +286,9 @@ session_classes:
         let mut touches = 0;
         for op in plan.operations() {
             if op.kind() == OpKind::Touch {
-                let e = s.encode(&plan, op).unwrap();
+                let Encoding::Ready(e) = s.encode(&plan, op) else {
+                    panic!("a touch must be issuable without a GPU");
+                };
                 assert_eq!(e.payload[0], 0, "TOUCH asked for promotion");
                 touches += 1;
             }
@@ -263,12 +305,15 @@ session_classes:
         let s = OpStream::new(32768);
         let mut issued = 0;
         for op in plan.operations() {
-            if let Some(e) = s.encode(&plan, op) {
-                if let Some(why) = forbidden_opcode(e.opcode) {
-                    panic!("issued a forbidden opcode {}: {why}", e.opcode);
-                }
-                issued += 1;
+            let opcode = match s.encode(&plan, op) {
+                Encoding::Ready(e) => e.opcode,
+                Encoding::NeedsGpuPayload { opcode, .. } => opcode,
+                Encoding::NotPlanned => continue,
+            };
+            if let Some(why) = forbidden_opcode(opcode) {
+                panic!("issued a forbidden opcode {opcode}: {why}");
             }
+            issued += 1;
         }
         assert!(issued > 50, "only {issued} operations, too few to test");
     }
@@ -333,7 +378,9 @@ session_classes:
             .iter()
             .find(|o| o.kind() == OpKind::Reserve)
             .expect("a reserve");
-        let e = s.encode(&plan, op).unwrap();
+        let Encoding::Ready(e) = s.encode(&plan, op) else {
+            panic!("a reserve must be issuable without a GPU");
+        };
         let expected_keys = plan.keys_of(op);
         let mut r = wire::Reader::new(&e.payload);
         assert_eq!(r.u32().unwrap() as usize, expected_keys.len());
@@ -356,10 +403,35 @@ session_classes:
             .iter()
             .find(|o| o.kind() == OpKind::PollEvents)
             .expect("a poll");
-        let e = s.encode(&plan, op).unwrap();
+        let Encoding::Ready(e) = s.encode(&plan, op) else {
+            panic!("a poll must be issuable without a GPU");
+        };
         assert_eq!(e.opcode, op::TAKE_EVENTS);
         let mut r = wire::Reader::new(&e.payload);
         assert_eq!(r.u32().unwrap(), DRAIN_ALL_EVENTS);
+    }
+
+    #[test]
+    fn the_two_data_moving_operations_report_that_they_need_a_gpu() {
+        // Found by running against a live server, which answered LOOKUP with
+        // "truncated: need 64 bytes at offset 4, have 32": `op_lookup` reads a handle
+        // batch, not a key list, because a load DMAs into a GPU buffer. Counted rather
+        // than skipped, so a run cannot report a throughput for a stream missing its two
+        // data-moving operations.
+        let plan = plan_of(7, 40.0);
+        let s = OpStream::new(32768);
+        let mut needs = 0;
+        for op in plan.operations() {
+            match s.encode(&plan, op) {
+                Encoding::NeedsGpuPayload { opcode, keys } => {
+                    assert!(opcode == op::LOOKUP || opcode == op::COPY_TO_STORE);
+                    assert!(keys > 0);
+                    needs += 1;
+                }
+                _ => {}
+            }
+        }
+        assert!(needs > 0, "no operation reported needing a GPU");
     }
 
     #[test]

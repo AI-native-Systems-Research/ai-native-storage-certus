@@ -294,3 +294,157 @@ mod tests {
         assert!(r.render().contains("warning: the span is short"));
     }
 }
+
+/// The report a **live** run writes (FR-061, FR-062, FR-065).
+///
+/// A separate type from [`EmitReport`], deliberately. They answer different questions,
+/// and a shared type would need every live-only field to be optional — which is the
+/// shape that lets a zero escape into an emit report.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LiveReport {
+    /// Always `"live"`.
+    pub run_kind: &'static str,
+    /// **Whether this run's numbers may be used at all** (FR-062).
+    ///
+    /// First field on purpose: a reader scanning a directory of reports should meet the
+    /// validity before the throughput, not after it.
+    pub valid: bool,
+    /// Why, when it is not.
+    pub invalid_reason: Option<String>,
+    /// Requests issued.
+    pub requests: u64,
+    /// Key references issued.
+    pub key_references: u64,
+    /// Keys per second over the timed window.
+    pub keys_per_second: f64,
+    /// Bytes per second over the timed window.
+    pub bytes_per_second: f64,
+    /// Virtual seconds advanced per wallclock second.
+    pub virtual_to_wallclock: f64,
+    /// Wallclock seconds of the timed window, excluding any startup cache clear.
+    pub elapsed_seconds: f64,
+    /// Virtual seconds covered.
+    pub virtual_span: f64,
+    /// Smallest plan-queue depth observed. Zero invalidates the run.
+    pub plan_queue_min_depth: usize,
+    /// Fraction of samples at zero depth.
+    pub plan_queue_fraction_at_zero: f64,
+    /// Lanes used, which equals channels claimed.
+    pub lanes: usize,
+    /// The node's channel count, for comparison with `lanes`.
+    pub node_channels: usize,
+    /// Request latency in microseconds.
+    pub latency_us: LatencyPercentiles,
+    /// How to reproduce it.
+    pub reproduction: Reproduction,
+    /// Batch size and lane count, which MUST NOT have changed the plan (FR-072).
+    pub tuning: Tuning,
+    /// Operations skipped for want of a GPU payload buffer.
+    ///
+    /// Non-zero means the run exercised the **control path only** and moved no data, so
+    /// its throughput is not comparable with a complete run's. Reported rather than
+    /// hidden, because a keys-per-second figure from a run that never transferred a
+    /// block is the kind of number that gets quoted.
+    pub skipped_needing_gpu: u64,
+    /// Keys those skipped operations would have moved.
+    pub skipped_keys: u64,
+}
+
+/// Request latency, in microseconds.
+///
+/// Percentiles rather than a mean: a mean latency hides the tail that a cache's
+/// behaviour actually shows up in, and it is the tail an eviction policy moves.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct LatencyPercentiles {
+    /// Median.
+    pub p50: u64,
+    /// 90th percentile.
+    pub p90: u64,
+    /// 99th percentile.
+    pub p99: u64,
+    /// Largest observed.
+    pub max: u64,
+}
+
+/// Execution knobs, recorded so a sweep can be reconstructed.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Tuning {
+    /// Keys per request.
+    pub batch_keys: usize,
+    /// Execution concurrency.
+    pub lanes: usize,
+}
+
+impl LiveReport {
+    /// Render the human-readable form.
+    ///
+    /// An invalid run leads with the invalidity and **does not print a throughput at
+    /// all** (FR-062): a number printed beside "invalid" gets copied out of the
+    /// terminal without the word.
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        if !self.valid {
+            out.push_str("RUN INVALID — its throughput is not a result\n");
+            if let Some(why) = &self.invalid_reason {
+                out.push_str(&format!("  reason            {why}\n"));
+            }
+        } else {
+            out.push_str("live run complete and valid\n");
+        }
+        out.push_str(&format!(
+            "  requests          {}\n  key references    {}\n",
+            self.requests, self.key_references
+        ));
+        if self.valid {
+            out.push_str(&format!(
+                "  throughput        {:.0} keys/s, {:.1} MiB/s\n  \
+                 virtual/wallclock {:.2}\n",
+                self.keys_per_second,
+                self.bytes_per_second / (1024.0 * 1024.0),
+                self.virtual_to_wallclock
+            ));
+        }
+        out.push_str(&format!(
+            "  latency us        p50 {} p90 {} p99 {} max {}\n",
+            self.latency_us.p50, self.latency_us.p90, self.latency_us.p99, self.latency_us.max
+        ));
+        out.push_str(&format!(
+            "  plan queue        min depth {}, {:.3}% of samples at zero\n",
+            self.plan_queue_min_depth,
+            self.plan_queue_fraction_at_zero * 100.0
+        ));
+        out.push_str(&format!(
+            "  lanes             {} of {} channels\n",
+            self.lanes, self.node_channels
+        ));
+        if self.skipped_needing_gpu > 0 {
+            out.push_str(&format!(
+                "  PARTIAL RUN       {} operations ({} keys) were NOT issued: LOOKUP and \
+                 COPY_TO_STORE need a GPU IPC handle per key, which this build has no \
+                 payload buffer for. The control path was exercised; no data moved, so \
+                 this throughput is not comparable with a complete run's.\n",
+                self.skipped_needing_gpu, self.skipped_keys
+            ));
+        }
+        out.push_str(&format!(
+            "  reproduce with    --seed {} --lanes {} --batch-keys {}   description {} ({})\n",
+            self.reproduction.seed,
+            self.tuning.lanes,
+            self.tuning.batch_keys,
+            self.reproduction.description_path,
+            self.reproduction.description_digest
+        ));
+        out
+    }
+
+    /// The structured form.
+    ///
+    /// # Errors
+    ///
+    /// If serialisation fails, which for this type means a bug.
+    pub fn to_json(&self) -> serde_json::Result<String> {
+        let mut s = serde_json::to_string_pretty(self)?;
+        s.push('\n');
+        Ok(s)
+    }
+}

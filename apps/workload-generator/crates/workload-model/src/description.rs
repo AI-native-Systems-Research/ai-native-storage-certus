@@ -799,12 +799,12 @@ impl Report {
     /// ```
     /// use workload_model::description::Report;
     ///
-    /// assert_eq!(Report::default().render(), "the description is consistent");
+    /// assert_eq!(Report::default().render(), "the description is consistent\n");
     /// ```
     pub fn render(&self) -> String {
         let mut out = String::new();
         if self.effective.is_empty() && self.notes.is_empty() {
-            return "the description is consistent".to_string();
+            return "the description is consistent\n".to_string();
         }
         if !self.effective.is_empty() {
             out.push_str("effective values that differ from the file:\n");
