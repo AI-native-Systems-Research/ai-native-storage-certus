@@ -44,7 +44,9 @@ use crate::frame::{Hello, HelloAck, BUILD_ID_BYTES, PROTO_VERSION};
 
 /// The source identity captured at build time.
 ///
-/// `unknown` when git could not describe the tree; see [`is_known`].
+/// A digest of this application's own source files, so it is available whether or not the
+/// build happened inside a repository. `unknown` only when those files could not be read;
+/// see [`is_known`].
 pub const SOURCE_ID: &str = env!("WORKLOAD_SOURCE_ID");
 
 /// The identity used when provenance could not be established.
@@ -173,8 +175,9 @@ impl fmt::Display for Refused {
                 write!(
                     f,
                     "node {node}: {side} cannot describe the sources it was built from, so \
-                     the two cannot be shown to match. Build from a tree git can describe, \
-                     or set WORKLOAD_SOURCE_ID deliberately (FR-051)"
+                     the two cannot be shown to match — its source files could not be read \
+                     at build time. Set WORKLOAD_SOURCE_ID deliberately if a packager knows \
+                     better (FR-051)"
                 )
             }
             Self::ByPeer { node, status } => write!(

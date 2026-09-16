@@ -220,16 +220,27 @@ fn this_builds_identity_is_not_the_unknown_sentinel() {
 }
 
 #[test]
-fn the_captured_identity_describes_this_tree() {
-    // Printed so a reader can see the check is not passing on a placeholder, and asserted to
-    // contain a commit: an identity of the literal string "unknown" would make every
-    // provenance test above vacuous.
+fn the_captured_identity_is_a_digest_of_the_sources_and_needs_no_repository() {
+    // Printed so a reader can see the check is not passing on a placeholder. The identity is
+    // a digest of this application's source files rather than anything from git, which is what
+    // lets a build from a release tarball take part in a multi-node run at all — the git-based
+    // version this replaced would have refused one, and would also have missed an untracked
+    // file entirely.
     eprintln!("SOURCE_ID = {SOURCE_ID}");
     eprintln!("digest     = {}", abbreviate(&current()));
     assert!(
-        SOURCE_ID.len() > 40,
-        "no commit in the identity: {SOURCE_ID}"
+        SOURCE_ID.starts_with("src:"),
+        "not a source digest: {SOURCE_ID}"
     );
-    assert!(SOURCE_ID.contains("diff:"), "no diff in the identity");
-    assert!(SOURCE_ID.contains("status:"), "no status in the identity");
+    assert!(
+        !SOURCE_ID.contains("diff:") && !SOURCE_ID.contains("status:"),
+        "the identity still depends on git: {SOURCE_ID}"
+    );
+    // File count and total size travel with the fold, so a collision must match all three.
+    let parts: Vec<&str> = SOURCE_ID.split(':').collect();
+    assert_eq!(parts.len(), 4, "expected src:count:bytes:fold");
+    let count: usize = parts[1].parse().expect("a file count");
+    let bytes: usize = parts[2].parse().expect("a byte total");
+    assert!(count > 20, "only {count} source files hashed");
+    assert!(bytes > 100_000, "only {bytes} bytes hashed");
 }
