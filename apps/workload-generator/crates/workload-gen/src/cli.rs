@@ -1083,8 +1083,11 @@ fn live_run(
             per_lane_min_depth: stats.lanes.iter().map(|l| l.min_depth).collect(),
         },
         outcomes: crate::report::CacheOutcomes {
-            hits: stats.hits(),
-            misses: stats.misses(),
+            check_resident: stats.check_resident(),
+            check_pending: stats.check_pending(),
+            check_miss: stats.check_miss(),
+            lookup_hits: stats.lookup_hits(),
+            lookup_misses: stats.lookup_misses(),
             reserves_attempted: stats.reserves_attempted(),
             commits_attempted: stats.commits_attempted(),
             reserves_declined: stats.reserves_declined(),

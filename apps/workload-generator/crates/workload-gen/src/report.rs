@@ -435,13 +435,19 @@ pub struct QueueStats {
 ///
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct CacheOutcomes {
-    /// Keys a `CHECK` or `LOOKUP` found present.
-    pub hits: u64,
-    /// Keys a `CHECK` or `LOOKUP` found absent.
+    /// `CHECK` keys reported `RESIDENT` — committed and loadable now.
+    pub check_resident: u64,
+    /// `CHECK` keys reported `PENDING` — another lane's store is in flight. Not a miss.
+    pub check_pending: u64,
+    /// `CHECK` keys reported `MISS`.
+    pub check_miss: u64,
+    /// `LOOKUP` keys that returned data.
+    pub lookup_hits: u64,
+    /// `LOOKUP` keys that did not.
     ///
-    /// A lower bound: `op_lookup` reports a handle it could not open as a miss too, and
-    /// the wire does not distinguish the two.
-    pub misses: u64,
+    /// An upper bound on true cache misses: `op_lookup` reports a handle it could not open
+    /// as a 0 as well, and the wire does not distinguish the two.
+    pub lookup_misses: u64,
     /// Keys a `RESERVE` was asked for, so a decline count has a denominator.
     pub reserves_attempted: u64,
     /// Keys a `COMMIT_STORE` was asked for.
@@ -455,13 +461,29 @@ pub struct CacheOutcomes {
 }
 
 impl CacheOutcomes {
-    /// Fraction of read references that were present, or `None` if nothing was read.
+    /// `CHECK` references answered.
+    pub fn checks(&self) -> u64 {
+        self.check_resident + self.check_pending + self.check_miss
+    }
+
+    /// Fraction of `CHECK` references that were resident, or `None` if nothing was checked.
     ///
-    /// `None` rather than zero: a run that read nothing has no hit rate, and printing
-    /// 0.000 would read as "everything missed".
-    pub fn hit_rate(&self) -> Option<f64> {
-        let total = self.hits + self.misses;
-        (total > 0).then(|| self.hits as f64 / total as f64)
+    /// `PENDING` is excluded from the numerator and kept in the denominator: the key is
+    /// coming but is not loadable at that instant, so counting it as a hit would overstate
+    /// what the cache could serve, and counting it as a miss would understate what it
+    /// holds. It is reported separately instead of being folded either way.
+    ///
+    /// `None` rather than zero: a run that checked nothing has no hit rate, and printing
+    /// 0.0% would read as "everything missed".
+    pub fn check_hit_rate(&self) -> Option<f64> {
+        let total = self.checks();
+        (total > 0).then(|| self.check_resident as f64 / total as f64)
+    }
+
+    /// Fraction of `LOOKUP` references that returned data.
+    pub fn lookup_hit_rate(&self) -> Option<f64> {
+        let total = self.lookup_hits + self.lookup_misses;
+        (total > 0).then(|| self.lookup_hits as f64 / total as f64)
     }
 
     /// Whether the store path was declined anywhere.
@@ -569,11 +591,22 @@ impl LiveReport {
                  timed window (FR-046); disk-backed entries survive a clear\n"
             ));
         }
-        if let Some(rate) = self.outcomes.hit_rate() {
+        if let Some(rate) = self.outcomes.check_hit_rate() {
             out.push_str(&format!(
-                "  cache outcomes    {} hits, {} misses ({:.1}% hit rate)\n",
-                self.outcomes.hits,
-                self.outcomes.misses,
+                "  check             {} resident, {} pending, {} miss of {} ({:.1}% \
+                 resident)\n",
+                self.outcomes.check_resident,
+                self.outcomes.check_pending,
+                self.outcomes.check_miss,
+                self.outcomes.checks(),
+                rate * 100.0
+            ));
+        }
+        if let Some(rate) = self.outcomes.lookup_hit_rate() {
+            out.push_str(&format!(
+                "  lookup            {} returned data, {} did not ({:.1}% hit)\n",
+                self.outcomes.lookup_hits,
+                self.outcomes.lookup_misses,
                 rate * 100.0
             ));
         }
