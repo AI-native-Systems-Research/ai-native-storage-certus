@@ -24,6 +24,7 @@ pub mod pool;
 pub mod rng;
 pub mod selection;
 pub mod session;
+pub mod sim;
 mod special;
 
 pub use error::{Error, Result};
