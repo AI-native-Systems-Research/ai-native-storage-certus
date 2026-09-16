@@ -706,6 +706,45 @@ modes reorder the policies.
     descriptions expensive to run at 1.0.
   - FR-031 MUST be scoped to the work-conserving mode when this lands.
 
+  **Paced MUST be the default, and the argument is the constitution's own.** Its
+  rationale for the three measurement principles is that each guards "a specific
+  failure mode that produces plausible numbers rather than an error". Apply that
+  test to the choice of default and it is asymmetric:
+
+  * Paced by default, when the operator wanted a ceiling: throughput comes back
+    capped at the rate they asked for and lateness is ~0. The number equals the
+    request, which is conspicuous and hard to misquote.
+  * Work-conserving by default, when the operator wanted their workload's latency:
+    percentiles come back from a **saturated** queue. They look entirely plausible
+    and describe a queue the workload would never form.
+
+  The second is the failure mode the constitution names, so the default must be
+  paced. A supporting argument from the data model: `think_time`, arrival rates and
+  session lifetimes are most of what a description says, and a work-conserving
+  default makes those fields decorative for a live run.
+
+  **The selector MUST be positive rather than `--unpaced`.** A negative flag cannot
+  be read without already knowing the default, and it collides with the rate
+  multiplier — `--unpaced --rate 10` has no meaning and would have to be rejected.
+  `--pacing real|none`, defaulting to `real`, with `--rate` valid only under
+  `real`, keeps the flag one-to-one with the mode the report is required to name.
+
+  **Due times MUST be absolute, and this is a correctness requirement rather than
+  a style choice.** `due` is computed from `t0` and the request's virtual
+  timestamp, **never** from the previous submission. If a late request pushed later
+  due times back, a slow server would silently stretch think time and dilate the
+  workload — which is precisely the hazard the constitution names when it warns
+  that "a wallclock-coupled clock lets a slow server quietly reshape the workload
+  it is being judged on". With absolute due times the schedule is fixed in advance
+  and lateness accumulates as a *measured error*, so pacing measures the deviation
+  instead of absorbing it.
+
+  **A paced run MUST project its wallclock cost before starting**, symmetrically
+  with FR-073's size projection for an emit run: at rate 1.0 a paced run takes
+  wallclock equal to its virtual span, so `--until 3600` costs an hour and a tool
+  that simply went quiet would look hung. Naming the figure up front is the
+  difference between a long run and an apparently broken one.
+
   **Known cost**: two modes means two validity rules, two meanings for the
   virtual-to-wallclock ratio, and a report that must be unambiguous about which it
   is showing. That complexity is accepted deliberately and is the reason this is

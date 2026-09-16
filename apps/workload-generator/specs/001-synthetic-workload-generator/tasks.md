@@ -1068,7 +1068,17 @@ Deferred tasks, in order:
 
 - [ ] T088 [DEFERRED] Add the paced mode to `crates/workload-gen/src/live.rs`: hold
   each request until its virtual time is due, `due = t0 + (virtual timestamp −
-  virtual start) / rate`, with a `--rate` multiplier defaulting to 1.0
+  virtual start) / rate`, with a `--rate` multiplier defaulting to 1.0. **Due times
+  are absolute from `t0`, never relative to the previous submission** — otherwise a
+  slow server stretches think time and dilates the workload it is being judged on
+- [ ] T088a [DEFERRED] Make **paced the default** and the selector positive:
+  `--pacing real|none` defaulting to `real`, with `--rate` valid only under `real`.
+  `--unpaced` was considered and rejected — a negative flag cannot be read without
+  knowing the default, and `--unpaced --rate 10` is a combination that would have
+  to be refused
+- [ ] T088b [DEFERRED] Project a paced run's **wallclock cost** before starting,
+  symmetrically with FR-073's size projection: at rate 1.0 a run costs its virtual
+  span, so `--until 3600` is an hour and silence would look like a hang
 - [ ] T089 [DEFERRED] Replace the validity metric under pacing with **lateness**
   in `crates/workload-gen/src/report.rs`: `lateness = submitted − due`, positive
   only, reported as percentiles with its request count (FR-066a). A run whose
