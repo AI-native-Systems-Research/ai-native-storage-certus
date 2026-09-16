@@ -758,7 +758,7 @@ and VFIO per README.md), or a decision to accept unverified code.
   per `contracts/cli.md`: unbounded by default, optional `--until`,
   `--shm-path`, `--lanes`, `--batch-keys`, `--seed`, `--report`,
   `--clear-cache`, and the documented exit codes
-- [ ] T051 [P] [US1] Test in `crates/workload-gen/tests/op_stream.rs`: against
+- [x] T051 [P] [US1] Test in `crates/workload-gen/tests/op_stream.rs`: against
   a mock mailbox, the issued operation sequence matches the production client's
   for the same plan, and contains no forbidden operation
 
@@ -886,8 +886,70 @@ future task should have a live run record the server's tier-event counters at
 start and end, so a contaminated baseline declares itself instead of being
 quoted.
 
-**Still open in US1**: T051 (mock-mailbox op stream test), plus the pacing
-limitation above.
+**T051: the mock is a protocol checker, not a recorder.** Writing down
+`Check, Touch, Load, Reserve, Transfer, Commit, Poll` and asserting the encoder
+produces it would be vacuous — both sides from the code under test, passing
+equally well when the mapping is wrong, which this feature has already been
+bitten by three times. So every rule the mock enforces is sourced outside the
+crate: the `IDispatcher` contract's error conditions (`KeyNotFound` without a
+pending write, `InvalidParameter` on size 0), `check_duplicate_keys` in
+`shmq-dispatcher::translate`, and FR-040/043/044/069/072. It decodes with the
+server's own `wire::Reader`. 11 tests, one of which (`the_mock_can_actually_fail`)
+provokes four violations deliberately, because a checker that cannot object is
+decoration.
+
+**A second inert option found: `--clear-cache` did not exist.** T050 is ticked
+and lists it, but nothing wired it. Now implemented, issued once on its own path
+before the timed window opens (FR-046) — `OpStream` still refuses the opcode, as
+a clear inside the operation stream would be the generator evicting on the
+policy's behalf.
+
+**The per-key result bytes were being thrown away.** Every one of `CHECK`,
+`TOUCH`, `RESERVE`, `COPY_TO_STORE`, `COMMIT_STORE` and `LOOKUP` answers with one
+byte per key, and the client checked only the overall status — so a run in which
+*every* store was declined reported full throughput. They are now counted and
+reported with denominators. They are **outcomes, never generator errors**: we do
+not know when Certus will evict anything, and a block stored earlier and absent
+later is eviction working, which is the behaviour under measurement. Equally, it
+is not the generator's job to be gracious about a server that declines a store —
+the report gives the count and refuses to guess the cause, because the wire
+carries no reason code.
+
+Measured on node2 with **exactly one** server running:
+
+| run | reserves declined | commits declined | hit rate |
+| --- | --- | --- | --- |
+| cold cache | 0 of 72 | 0 of 72 | 38.5% |
+| same seed again | 72 of 72 | 72 of 72 | 38.5% |
+| different seed | 66 of 72 | 66 of 72 | 36.0% |
+| warm, `--clear-cache` | **0 of 72** | **72 of 72** | 19.2% |
+
+A cold cache declines nothing, so the store path is sound. A warm one declines
+because the key is already there (`create_memory_tier_entry` answers
+`AlreadyExists`). The last row matters most: `CLEAR_MEMORY_TIER` frees the memory
+tier so `RESERVE` succeeds, but the dispatch map keeps its disk-backed entries so
+the commit still cannot land — **`--clear-cache` is not a cold cache and is no
+substitute for restarting the server.** A different seed still declines 91.7%
+because shared-prefix keys largely survive a seed change. Transfers never decline
+because `copy_gpu_to_memory_async` needs no pending write, which is why the
+counts read 72 / 0 / 72.
+
+Certus's disk-tier eviction is not yet implemented, so a long streaming run may
+eventually see stores fail for that reason; that would be a genuine limitation
+rather than intended behaviour, and it is not distinguishable on the wire from
+the rows above. Nothing measured here reached it — these runs move about 2.25 MiB
+against a 3.7 GiB device.
+
+**A trap of my own making, recorded because the report cannot detect it.** Two
+`certus-server-yaml` processes were left polling the same mailbox and device
+file. Each keeps its own `pending_stores`, so a `RESERVE` answered by one and a
+`COMMIT_STORE` answered by the other finds no pending write, and every decline
+figure taken that way is meaningless. Verify with
+`ps -eo args | awk '$1 ~ /certus-server-yaml$/'` before trusting a number — and
+note that `pkill -f <pattern>` matches the invoking shell's own command line,
+which killed this session's shell twice.
+
+**Still open in US1**: the pacing limitation above.
 
 **Checkpoint**: US1 is functional against a live local server for the control path.
 

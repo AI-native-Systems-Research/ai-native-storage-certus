@@ -152,6 +152,12 @@ pub enum Command {
         /// comparable with a complete run's.
         #[arg(long)]
         no_payload: bool,
+        /// Clear the memory tier once before the timed window opens (FR-046).
+        ///
+        /// Setup, not part of the operation stream, and never timed. It clears the memory
+        /// tier only — disk-backed entries survive — so it does not guarantee a cold cache.
+        #[arg(long)]
+        clear_cache: bool,
         /// Stamp each stored block with its key, for identity checking.
         ///
         /// Costs one host-to-device copy per key, which puts generator work on the
@@ -297,6 +303,7 @@ pub fn run(cli: Cli) -> i32 {
             seed,
             gpu_device,
             no_payload,
+            clear_cache,
             stamp_keys,
             report,
         } => match live_run(
@@ -308,6 +315,7 @@ pub fn run(cli: Cli) -> i32 {
             seed,
             (!no_payload).then_some(gpu_device),
             stamp_keys,
+            clear_cache,
             report,
         ) {
             Ok((text, code)) => {
@@ -996,6 +1004,7 @@ fn live_run(
     seed: u64,
     gpu_device: Option<i32>,
     stamp_keys: bool,
+    clear_cache: bool,
     report_path: Option<PathBuf>,
 ) -> Result<(String, i32), Failure> {
     use crate::report::{LatencyPercentiles, LiveReport, QueueStats, Tuning};
@@ -1033,6 +1042,7 @@ fn live_run(
             batch_keys,
             gpu_device,
             stamp_keys,
+            clear_cache,
         },
         Arc::clone(&stop),
     )
@@ -1072,6 +1082,16 @@ fn live_run(
             producer_blocked: stats.producer_blocked,
             per_lane_min_depth: stats.lanes.iter().map(|l| l.min_depth).collect(),
         },
+        outcomes: crate::report::CacheOutcomes {
+            hits: stats.hits(),
+            misses: stats.misses(),
+            reserves_attempted: stats.reserves_attempted(),
+            commits_attempted: stats.commits_attempted(),
+            reserves_declined: stats.reserves_declined(),
+            transfers_declined: stats.transfers_declined(),
+            commits_declined: stats.commits_declined(),
+        },
+        cleared_entries: stats.cleared_entries,
         producer_completed: stats.producer_completed,
         lanes: stats.lanes.len(),
         node_channels,
