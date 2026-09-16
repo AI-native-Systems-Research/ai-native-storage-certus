@@ -150,11 +150,13 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
 
     // Resolve the trace: --sharegpt, --weka-file, --qwen-file, or --dataset (download-on-demand).
-    let (trace, source) = if let Some(ref p) = cli.sharegpt {
+    let (trace, source, trace_name) = if let Some(ref p) = cli.sharegpt {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
         match eviction_replay_benchmark::sharegpt::load(p, Some(cli.block_chars), cli.max_conversations) {
             Ok(t) => (
                 t,
                 format!("sharegpt {} (block_chars={})", p.display(), cli.block_chars),
+                name,
             ),
             Err(e) => {
                 eprintln!("error: failed to load ShareGPT file {}: {e}", p.display());
@@ -162,25 +164,33 @@ fn main() -> ExitCode {
             }
         }
     } else if let Some(ref p) = cli.weka_file {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
         match eviction_replay_benchmark::weka::load(p, cli.max_conversations) {
-            Ok(t) => (t, format!("weka {}", p.display())),
+            Ok(t) => (t, format!("weka {}", p.display()), name),
             Err(e) => {
                 eprintln!("error: failed to load Weka trace {}: {e}", p.display());
                 return ExitCode::FAILURE;
             }
         }
     } else {
-        let (path, src) = match &cli.qwen_file {
-            Some(p) => (p.clone(), format!("qwen-file {}", p.display())),
+        let (path, src, name) = match &cli.qwen_file {
+            Some(p) => {
+                let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
+                (p.clone(), format!("qwen-file {}", p.display()), name)
+            }
             None => match dataset::ensure(cli.dataset.id()) {
-                Ok(p) => (
-                    p,
-                    format!(
-                        "dataset {} ({})",
-                        cli.dataset.id(),
-                        dataset::describe(cli.dataset.id()).unwrap_or("")
-                    ),
-                ),
+                Ok(p) => {
+                    let name = cli.dataset.id().to_string();
+                    (
+                        p,
+                        format!(
+                            "dataset {} ({})",
+                            cli.dataset.id(),
+                            dataset::describe(cli.dataset.id()).unwrap_or("")
+                        ),
+                        name,
+                    )
+                }
                 Err(e) => {
                     eprintln!("error: could not obtain dataset: {e}");
                     return ExitCode::FAILURE;
@@ -189,7 +199,7 @@ fn main() -> ExitCode {
         };
         let src = format!("{src}\n  file: {}", path.display());
         match replay::load(&path, cli.max_conversations) {
-            Ok(t) => (t, src),
+            Ok(t) => (t, src, name),
             Err(e) => {
                 eprintln!("error: failed to load trace {}: {e}", path.display());
                 return ExitCode::FAILURE;
@@ -263,7 +273,15 @@ fn main() -> ExitCode {
     }
 
     if let Some(ref pdf_path) = cli.output_pdf {
-        if let Err(e) = generate_pdf(&all_results, pdf_path, &source) {
+        let n_convs: usize = {
+            let mut sessions = std::collections::HashSet::new();
+            for op in &trace.ops {
+                sessions.insert(op.session_id);
+            }
+            sessions.len()
+        };
+        let plot_title = format!("{trace_name} ({n_convs} conversations)");
+        if let Err(e) = generate_pdf(&all_results, pdf_path, &plot_title) {
             eprintln!("warning: failed to generate PDF: {e}");
         }
     }
