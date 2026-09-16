@@ -173,17 +173,52 @@ experiment.
 This is what the tool exists for, and the two criteria most likely to fail
 silently (SC-005, SC-006).
 
+The check itself needs no server, no accelerator and no cluster — it replays
+the plan's own reference stream through an LRU simulator — so it runs as an
+ordinary test:
+
 ```bash
-for cap in 1 4 16 64 256; do
-  cargo run -p workload-gen -- run $E --seed 42 --report /tmp/sweep-$cap.json
-done
+cargo test -p workload-gen --features live --test sweep
+cargo test -p workload-gen --features live --test sweep -- --ignored  # 5 seeds, ~2 min
 ```
 
-**Expect**: hit rate rises monotonically across at least five points spanning a
-hundredfold capacity range, with **no single step contributing more than half
-the total rise**. A uniform-popularity workload fails this by construction,
-which is what makes it a test rather than a description — if it passes with
-`selection` removed from every class, the popularity machinery is not wired in.
+**Expect**: the **cross-session** hit rate rises monotonically across five
+points spanning a hundredfold capacity range, with **no single step
+contributing more than half the total rise**. The same check applied to a
+description with `selection` removed must **fail** — if it passes, the
+popularity machinery is not wired in and the sweep is measuring nothing.
+
+Three things about that sentence were wrong when this scenario was first
+written, and each of them made the check pass a workload that discriminates
+nothing. They are worth knowing before writing a description to sweep:
+
+- **Sweep cross-session reuse, not the hit rate the report prints.** A turn
+  re-offers its whole prefix (FR-072a), so most references are a session
+  re-reading what it stored moments ago. Those miss below the concurrent
+  footprint and hit above it — a cliff, ~85% of the rise in one step, for
+  concentrated and uniform popularity alike.
+- **Keep the top of the ladder well below the key space** (0.1%-10% of it). A
+  cache the size of the key space evicts nothing, so its hit rate is 1.0 for any
+  workload whatsoever.
+- **Scale-free popularity is not sufficient.** With `turns` and `uses.count`
+  held constant every session has the same footprint, so the working set has one
+  characteristic size and the curve cliffs there however the pool is selected.
+  Both must be heavy-tailed, and `selection` needs a *scale-free* shape —
+  `exponential` gives one hot band and steps; an `empirical` ladder
+  `[1, 4, 16, 64, ...]` with `interpolate: true` puts equal mass in each octave
+  of rank, which is a power law.
+
+To sweep a real Certus instead of the simulator, restart the server at each
+capacity — the cache size is a server setting, not a generator flag — and read
+`cache.check_resident` against `cache.check_miss` from each report:
+
+```bash
+for cap in 1 4 16 64 256; do
+  # restart certus-server-yaml with a memory tier of ${cap}GiB, then:
+  cargo run -p workload-gen --features live -- run $E --seed 42 \
+    --clear-cache --report /tmp/sweep-$cap.json
+done
+```
 
 Then re-run with `rank_by: recency` instead of `slot` and compare two eviction
 policies: **the ranking of the two policies must reverse**, significantly

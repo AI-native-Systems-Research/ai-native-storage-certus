@@ -919,10 +919,35 @@ modes reorder the policies.
   and 100% of rows satisfy the trace schema's invariants for the encoding
   declared in the manifest.
 - **SC-005**: Sweeping cache size across at least five points spanning a
-  hundredfold range produces a monotonically rising hit rate in which no single
-  step contributes more than half of the total rise — the evidence that the
-  workload's popularity structure is concentrated rather than flat. A uniform
-  workload fails this by construction, which is what makes it a real test.
+  hundredfold range produces a monotonically rising **cross-session** hit rate
+  in which no single step contributes more than half of the total rise — the
+  evidence that the workload's popularity structure is concentrated rather than
+  flat. A uniform workload fails this, which is what makes it a real test.
+
+  **Amended after measurement (T079).** Three details were wrong as first
+  written, each of which made the criterion pass a workload that discriminates
+  nothing:
+
+  - It named the *overall* hit rate. The reactive rule (FR-072a) re-offers a
+    session's whole prefix every turn, so most references are a session
+    re-reading what it just stored; those miss below the concurrent footprint
+    and hit above it, which is a cliff, and the overall curve puts ~85% of its
+    rise in one step whether popularity is concentrated or flat. The criterion
+    is now the cross-session hit rate — references to a block some *other*
+    session brought in, which are the references a replacement decision decides.
+  - The hundredfold span must sit **below** the key space (0.1%-10% of it). At a
+    capacity equal to the key space nothing is evicted, so the hit rate is 1.0
+    for any workload at all, and a ladder ending there flatters every shape that
+    reaches it.
+  - The rise must also be **substantial** (>= 10 points), since a curve that
+    barely moves satisfies "no step over half" trivially.
+
+  "By construction" was too strong and is withdrawn: a uniform workload fails
+  the corrected criterion by *measurement*, at five seeds out of five, not by
+  arithmetic necessity. It is also not enough for popularity alone to be
+  scale-free — with constant `turns` and `uses.count` every session has the same
+  footprint, so the working set has one characteristic size and the curve cliffs
+  there however the pool is selected.
 - **SC-006**: Holding workload and cache size fixed, the two popularity ranking
   modes reverse the measured ranking of two eviction policies, with the
   difference significant across repeated runs — demonstrating the tool can
