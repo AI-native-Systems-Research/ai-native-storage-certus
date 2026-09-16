@@ -138,6 +138,27 @@ totalled where a percentile cannot.
 They travel back **for reporting only**. Nothing the generator does may depend on
 them: they do not gate validity, steer submission, or re-enter the workload.
 
+### Ordering: one causal rule for the generator, everything else is Certus's
+
+The generator owns exactly one ordering property, and it is **causal** rather than
+general: turn *n+1* of a session contains the blocks turn *n* stored, so two turns
+of the same session MUST NOT be in flight together. The agent therefore processes
+one connection's frames in arrival order, and a lane owns a fixed set of sessions
+on its own connection; overlap comes from having several lanes. An agent that
+handed a connection's frames to a thread pool would violate this, and the symptom
+would be quiet — turn *n+1* would check a prefix turn *n* had not yet stored, find
+it absent, and store it again, so the run would complete with inflated store counts
+and a depressed hit rate.
+
+**Reordering after submission is Certus-internal and explicitly not a generator
+concern.** The mailbox has parallel channels and the server runs multiple threads,
+so two submitted requests may be processed in either order; preventing that would
+mean one channel and no parallelism, which would remove the thing the measurement
+exists to exercise. Neither the generator nor the agent makes an end-to-end
+ordering claim, and neither should be changed to try to enforce one. `CHECK`'s
+`PENDING` state is the evidence that Certus already expects concurrent stores of
+one key and reports them rather than treating them as an error.
+
 ### `Stats` returns histograms, because percentiles do not merge
 
 The agent times each local request, so per-operation latency (FR-066a) can only be

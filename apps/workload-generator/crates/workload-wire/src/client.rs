@@ -9,22 +9,32 @@
 //! must be settable without touching lane count, and lane count must be settable without
 //! touching depth.
 //!
-//! # Why pipelining does not break per-session ordering
+//! # What ordering the generator owns, and what belongs to Certus
 //!
-//! A session's turns must be issued in order — a turn reads the prefix its predecessor
-//! stored — while different sessions may overlap freely. Pipelining puts several turns on
-//! the wire at once, which would break that if the agent were free to reorder them.
+//! Only one ordering property is the generator's, and it is a **causal** one: a session's
+//! turns depend on each other, because turn *n+1*'s path contains the blocks turn *n*
+//! stored. So two turns of the same session must not be in flight together. Pipelining
+//! preserves that because the agent takes one connection's frames in arrival order and a
+//! lane owns a fixed set of sessions on its own connection, so overlap comes from having
+//! several lanes rather than from reordering within one. An agent that handed a
+//! connection's frames to a thread pool would break it.
 //!
-//! It does not, because **the agent processes one connection's frames in the order they
-//! arrive**, and a lane owns a fixed set of sessions on its own connection. Overlap
-//! therefore comes from having several lanes, never from reordering within one. This is a
-//! requirement on the agent rather than a hope about it: an agent that handed a
-//! connection's frames to a thread pool would silently reorder a session's turns, and the
-//! result would look like a cache that had lost blocks it was given.
+//! The symptom if it were broken is worth knowing, because it is quiet: turn *n+1* would
+//! `CHECK` a prefix turn *n* had not yet stored, find it absent and store it **again**.
+//! The run would still complete, with inflated store counts and a depressed hit rate.
 //!
-//! Correlation ids are still matched rather than assumed, since the contract permits a
-//! multiplexed connection and an in-order reply stream must not become an unstated
-//! assumption of the client.
+//! **Everything past submission is Certus's own business.** The mailbox has parallel
+//! channels and the server runs multiple threads, so two requests already submitted may be
+//! processed in either order, and there is no way to prevent that without collapsing to one
+//! channel and giving up the parallelism the measurement exists to exercise. That
+//! reordering is Certus-internal and is *not* a generator concern: this client makes no
+//! end-to-end ordering claim, and nothing here should be changed to try to enforce one.
+//! `CHECK`'s `PENDING` state exists precisely because Certus expects concurrent stores of
+//! the same key and reports them, so the design already assumes this.
+//!
+//! Correlation ids are matched rather than assumed for the same reason the reply stream is
+//! not trusted to be ordered: the contract permits a multiplexed connection, and an
+//! in-order reply stream must not become an unstated assumption of the client.
 //!
 //! # `TCP_NODELAY`, always
 //!

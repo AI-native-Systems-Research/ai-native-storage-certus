@@ -1609,13 +1609,21 @@ would be decoded as whatever was asked for — a silent misread rather than an e
 A clean close is reported as `Closed` distinctly from an I/O error, since a lost
 node must abort the run and be named (FR-064).
 
-**Why pipelining does not break per-session ordering**, recorded because it is a
-requirement on the agent rather than a hope about it: a session's turns must be
-issued in order while different sessions may overlap, and that holds only because
-the agent processes one connection's frames **in arrival order** while a lane owns a
-fixed set of sessions on its own connection. An agent that handed a connection's
-frames to a thread pool would silently reorder a session's turns, and the result
-would look like a cache that had lost blocks it was given.
+**Ordering: the generator owns one causal rule, and nothing more.** Turn *n+1* of a
+session contains the blocks turn *n* stored, so two turns of one session must not be
+in flight together. Pipelining preserves that because the agent takes a connection's
+frames in arrival order and a lane owns a fixed set of sessions on its own
+connection. The symptom of breaking it is quiet rather than loud: turn *n+1* would
+check a prefix turn *n* had not stored yet, find it absent and store it again, so the
+run completes with inflated store counts and a depressed hit rate.
+
+**Reordering after submission is Certus-internal and not a generator concern.** The
+mailbox has parallel channels and the server runs multiple threads, so two submitted
+requests may be processed in either order, and preventing that would mean one channel
+and no parallelism — removing the thing the measurement exists to exercise. No
+end-to-end ordering claim is made on either path, and neither should be changed to
+enforce one. `CHECK`'s `PENDING` state is the evidence that Certus already expects
+concurrent stores of one key and reports them.
 
 **T063/T064 done, 15 conformance tests, no agent and no accelerator needed.**
 Two allocation hazards are guarded rather than one: `len` is refused against a
