@@ -52,8 +52,14 @@ struct LocalLauncher {
     launches: Arc<AtomicUsize>,
     kills: Arc<AtomicUsize>,
     stale: bool,
-    /// Stop flags for everything started, so a "kill" can be genuine.
-    running: Arc<Mutex<Vec<Arc<AtomicBool>>>>,
+    /// Stop flags by port, so a "kill" is genuine **and port-scoped**.
+    ///
+    /// Port-scoped because the real `SshLauncher::kill` matches on `--port N`: a pattern that
+    /// matched only the binary would kill another run's agent on the same host. A fixture that
+    /// killed everything would pass tests the production launcher would fail, and it did —
+    /// starting a second agent stopped the first, because replacing a non-existent leftover
+    /// calls `kill`.
+    running: Arc<Mutex<Vec<(u16, Arc<AtomicBool>)>>>,
     /// When set, `launch` starts nothing — for the "never comes up" case.
     refuse_to_launch: bool,
 }
@@ -85,7 +91,7 @@ impl LocalLauncher {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        self.running.lock().unwrap().push(Arc::clone(&stop));
+        self.running.lock().unwrap().push((port, Arc::clone(&stop)));
         stop
     }
 }
@@ -100,10 +106,12 @@ impl Launcher for LocalLauncher {
         Ok(())
     }
 
-    fn kill(&self, _spec: &AgentSpec) -> Result<(), String> {
+    fn kill(&self, spec: &AgentSpec) -> Result<(), String> {
         self.kills.fetch_add(1, Ordering::Relaxed);
-        for stop in self.running.lock().unwrap().iter() {
-            stop.store(true, Ordering::Relaxed);
+        for (port, stop) in self.running.lock().unwrap().iter() {
+            if *port == spec.port {
+                stop.store(true, Ordering::Relaxed);
+            }
         }
         Ok(())
     }
@@ -304,4 +312,101 @@ fn stopping_twice_is_not_attempted() {
     let first = agents.stop().expect("stop");
     assert_eq!(first.len(), 1);
     // Nothing to assert beyond not panicking or hanging: the guard is gone by construction.
+}
+
+// ---------------------------------------------------------------------------
+// T072: node loss aborts the run and names the node (FR-064).
+// ---------------------------------------------------------------------------
+
+use workload_gen::agents::NodeLost;
+use workload_wire::client::ClientError;
+
+#[test]
+fn a_lost_node_is_named_and_the_message_says_why_the_run_cannot_continue() {
+    // The message has to carry the reasoning, because "continue on the survivors" is the
+    // tempting thing to do and it produces a plausible number for a different experiment.
+    let lost = NodeLost::from_client("node5", "submitting a turn", ClientError::Closed);
+    let text = lost.to_string();
+    assert!(text.contains("node5"), "the node must be named: {text}");
+    assert!(
+        text.contains("submitting a turn"),
+        "and what was happening: {text}"
+    );
+    assert!(text.contains("FR-064"), "and the requirement: {text}");
+    // The three consequences, since each alone would invalidate the run.
+    assert!(text.contains("prefixes"), "unreachable prefixes: {text}");
+    assert!(text.contains("migration"), "shrunken target set: {text}");
+    assert!(text.contains("load"), "redistributed load: {text}");
+}
+
+#[test]
+fn every_transport_failure_counts_as_losing_the_node() {
+    // There is no variant worth retrying: a retry extends the window in which the run is
+    // measuring a cluster it no longer has. A clean close, a timeout and a protocol error all
+    // mean the same thing to a run.
+    for (label, err) in [
+        ("closed", ClientError::Closed),
+        (
+            "timeout",
+            ClientError::Io(std::io::Error::from(std::io::ErrorKind::TimedOut)),
+        ),
+        ("unexpected", ClientError::Unexpected { corr: 9 }),
+    ] {
+        let lost = NodeLost::from_client("node7", "draining", err);
+        assert_eq!(lost.node, "node7", "{label}");
+        assert!(!lost.reason.is_empty(), "{label} lost its reason");
+    }
+}
+
+#[test]
+fn losing_a_node_is_detected_rather_than_hung_on() {
+    // The property T071's read timeout bought. A node that accepts and stops answering must
+    // produce an error in bounded time — a hang is not an abort, and a run that neither
+    // finishes nor fails cannot even be reported as invalid.
+    let port = free_port();
+    let launcher = LocalLauncher::new();
+    let specs = vec![spec(port)];
+    let mut agents = Agents::start_default(&launcher, &specs).expect("start");
+
+    // Take the agent down and wait until it really is down: the fixture's kill only sets a
+    // stop flag, and a connection already accepted will happily serve one more frame first. The
+    // scenario being tested is a node that is *gone*, not one that is about to go.
+    launcher.kill(&specs[0]).expect("kill");
+    let mut down = false;
+    for _ in 0..200 {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+            down = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        down,
+        "the fixture agent never went down, so nothing is tested"
+    );
+
+    let started = std::time::Instant::now();
+    let turn = workload_wire::frame::SubmitTurn {
+        session: 1,
+        flags: 0,
+        path: vec![1, 2, 3],
+    };
+    // Submitting and draining must fail rather than block. The submit itself may succeed into a
+    // socket buffer, so the drain is what has to notice.
+    let outcome = agents.agents()[0]
+        .submit(&turn)
+        .and_then(|_| agents.agents()[0].finish().map(|_| ()));
+    let elapsed = started.elapsed();
+    assert!(
+        outcome.is_err(),
+        "a dead node was not noticed after {elapsed:?}"
+    );
+    let lost = outcome.unwrap_err();
+    assert_eq!(lost.node, "127.0.0.1");
+    assert!(
+        elapsed < std::time::Duration::from_secs(35),
+        "took {elapsed:?} to notice a dead node; a run must abort, not hang"
+    );
+    // The guard still tears down what remains: a failed run must leave nothing holding channels.
+    drop(agents);
 }

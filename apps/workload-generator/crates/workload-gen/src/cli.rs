@@ -1130,6 +1130,8 @@ fn live_run(
             commits_declined: stats.commits_declined(),
         },
         cleared_entries: stats.cleared_entries,
+        // A local run has no nodes to lose; the remote driver sets this (T073).
+        lost_node: None,
         producer_completed: stats.producer_completed,
         lanes: stats.lanes.len(),
         node_channels,

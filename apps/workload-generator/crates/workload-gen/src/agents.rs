@@ -57,6 +57,62 @@ const POLL: Duration = Duration::from_millis(100);
 /// grew a read timeout at all.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// A node stopped being reachable, so the run is over.
+///
+/// # Why this aborts everything rather than continuing on the survivors
+///
+/// FR-064 is emphatic, and the reason is that continuing produces a *plausible* number for a
+/// different experiment. Losing a node does three things at once: its sessions' prefixes become
+/// unreachable, so their turns miss forever; the set of migration targets shrinks, so migration
+/// stops meaning what the description said; and the survivors absorb its share of the load, so
+/// their latency reflects a concurrency nobody asked for. None of that produces an error on its
+/// own — the run would finish and report a throughput.
+///
+/// So a lost node ends the run, the report says which one, and the exit code is 3. The other
+/// agents are still torn down, because a run that failed still has to leave nothing holding
+/// mailbox channels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeLost {
+    /// The node. Named in the report, because on a cluster that is the actionable part.
+    pub node: String,
+    /// What the run was doing — "handshake", "submitting a turn", "collecting stats".
+    pub during: &'static str,
+    /// The underlying failure, in the transport's own words.
+    pub reason: String,
+}
+
+impl std::fmt::Display for NodeLost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "node {} became unreachable while {} ({}). The run is aborted and invalid: \
+             continuing on the surviving nodes would measure a different experiment, because \
+             this node's sessions' prefixes are now unreachable, the set of migration targets \
+             has shrunk, and the survivors have absorbed its load (FR-064)",
+            self.node, self.during, self.reason
+        )
+    }
+}
+
+impl std::error::Error for NodeLost {}
+
+impl NodeLost {
+    /// Describe a transport failure as the loss of `node`.
+    ///
+    /// Every [`ClientError`] means the node is gone as far as a run is concerned: a clean close,
+    /// a timeout and a refused read are all "this node is not answering", and a protocol error
+    /// means it is answering something this build cannot use. There is no variant worth
+    /// retrying — a retry would extend the window in which the run is measuring a cluster it no
+    /// longer has.
+    pub fn from_client(node: &str, during: &'static str, e: ClientError) -> Self {
+        Self {
+            node: node.to_string(),
+            during,
+            reason: e.to_string(),
+        }
+    }
+}
+
 /// Where one agent lives and how to start it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentSpec {
@@ -214,6 +270,45 @@ impl Agent {
         &mut self.client
     }
 
+    /// Submit a turn, treating any transport failure as the loss of this node (FR-064).
+    ///
+    /// # Errors
+    ///
+    /// [`NodeLost`], naming this node. The caller must abort the whole run rather than carry on
+    /// with the others.
+    pub fn submit(
+        &mut self,
+        turn: &workload_wire::frame::SubmitTurn,
+    ) -> Result<(u32, Option<workload_wire::frame::TurnOutcome>), NodeLost> {
+        self.client
+            .submit(turn)
+            .map_err(|e| NodeLost::from_client(&self.node, "submitting a turn", e))
+    }
+
+    /// Wait for every outstanding turn, treating a failure as the loss of this node.
+    ///
+    /// # Errors
+    ///
+    /// [`NodeLost`], naming this node.
+    pub fn finish(&mut self) -> Result<Vec<workload_wire::frame::TurnOutcome>, NodeLost> {
+        self.client
+            .finish()
+            .map_err(|e| NodeLost::from_client(&self.node, "draining its outstanding turns", e))
+    }
+
+    /// Collect this node's counters and histograms.
+    ///
+    /// # Errors
+    ///
+    /// [`NodeLost`], naming this node. Statistics are gathered after the timed window, so losing
+    /// a node here still invalidates the run: the figures would be missing one node's share and
+    /// the totals would silently describe a smaller cluster.
+    pub fn stats(&mut self) -> Result<workload_wire::frame::Stats, NodeLost> {
+        self.client
+            .stats()
+            .map_err(|e| NodeLost::from_client(&self.node, "collecting its statistics", e))
+    }
+
     /// What this agent was started from.
     pub fn spec(&self) -> &AgentSpec {
         &self.spec
@@ -264,6 +359,7 @@ impl Agents {
         specs: &[AgentSpec],
         depth: usize,
     ) -> Result<Self, String> {
+        assert!(depth > 0, "a pipelining depth of 0 could never send");
         let mut agents = Vec::with_capacity(specs.len());
         for spec in specs {
             // Always replace, even a current build: a leftover holds the previous run's
@@ -275,7 +371,7 @@ impl Agents {
                 Err(e) => return Err(e),
             }
             launcher.launch(spec)?;
-            let mut client = wait_for_port(spec)?;
+            let mut client = wait_for_port(spec, depth)?;
             let ack = client
                 .handshake(&spec.node, &spec.shm_path, spec.lanes, spec.block_bytes)
                 .map_err(|e| describe(spec, e))?;
@@ -406,11 +502,11 @@ fn replace_leftover<L: Launcher>(launcher: &L, spec: &AgentSpec) -> Result<Optio
 }
 
 /// Connect once the agent is listening, or give up.
-fn wait_for_port(spec: &AgentSpec) -> Result<Client<TcpStream>, String> {
+fn wait_for_port(spec: &AgentSpec, depth: usize) -> Result<Client<TcpStream>, String> {
     let deadline = Instant::now() + START_TIMEOUT;
     let mut last: Option<ClientError> = None;
     while Instant::now() < deadline {
-        match Client::<TcpStream>::connect(spec.address(), DEFAULT_DEPTH, Some(POLL * 5)) {
+        match Client::<TcpStream>::connect(spec.address(), depth, Some(POLL * 5)) {
             Ok(c) => return Ok(c),
             Err(e) => last = Some(e),
         }
