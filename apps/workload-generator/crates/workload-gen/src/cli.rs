@@ -34,6 +34,7 @@ use workload_model::description::WorkloadDescription;
 use workload_model::plan::OperationPlan;
 use workload_model::project::{project, span_for_invocations, Projection};
 use workload_model::sim::Simulation;
+use workload_trace::cachesim::CsvWriter;
 use workload_trace::jsonl::JsonlWriter;
 use workload_trace::manifest::{BlockStats, Manifest};
 use workload_trace::mooncake::MooncakeWriter;
@@ -80,6 +81,11 @@ pub enum ConvertTo {
     Simulator,
     /// The Mooncake FAST'25 trace format — the standard-format export.
     Mooncake,
+    /// libCacheSim CSV.
+    Cachesim,
+    /// libCacheSim's binary `oracleGeneral`, with next-access ordinals — which no real
+    /// trace can supply, so this is what makes Belady baselines available.
+    OracleGeneral,
 }
 
 /// Which containers to write.
@@ -131,6 +137,9 @@ pub enum Command {
         /// Also write the Mooncake projection here, in the same pass.
         #[arg(long)]
         mooncake: Option<PathBuf>,
+        /// Also write libCacheSim CSV here, in the same pass.
+        #[arg(long)]
+        cachesim: Option<PathBuf>,
         /// Also write the cache-simulator projection here, in the same pass.
         ///
         /// A projection is not a trace (FR-075b): no manifest, and never accepted in
@@ -238,6 +247,7 @@ pub fn run(cli: Cli) -> i32 {
             seed,
             report,
             mooncake,
+            cachesim,
             simulator,
             force,
         } => match emit(
@@ -249,6 +259,7 @@ pub fn run(cli: Cli) -> i32 {
             report,
             Projections {
                 mooncake,
+                cachesim,
                 simulator,
             },
             force,
@@ -310,6 +321,8 @@ pub fn run(cli: Cli) -> i32 {
 pub struct Projections {
     /// Mooncake output path.
     pub mooncake: Option<PathBuf>,
+    /// libCacheSim CSV output path.
+    pub cachesim: Option<PathBuf>,
     /// Cache-simulator output path.
     pub simulator: Option<PathBuf>,
 }
@@ -330,6 +343,55 @@ fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure
         .map_err(|e| Failure::config(format!("cannot read {}: {e}", input_path.display())))?;
     let out = fs::File::create(output)
         .map_err(|e| Failure::other(format!("cannot create {}: {e}", output.display())))?;
+
+    if matches!(to, ConvertTo::Cachesim | ConvertTo::OracleGeneral) {
+        // Bytes per block, not tokens: a cache holds bytes, and `obj_size` is what the
+        // simulator's capacity is measured against.
+        let object_bytes = u32::try_from(block_bytes_of(trace)?).map_err(|_| {
+            Failure::config(
+                "the description's blocks.bytes exceeds oracleGeneral's 32-bit obj_size"
+                    .to_string(),
+            )
+        })?;
+        let input = std::io::BufReader::new(input);
+        let sink = BufWriter::new(out);
+        let (stats, kind) = if matches!(to, ConvertTo::Cachesim) {
+            (
+                workload_trace::cachesim::convert_jsonl_csv(input, sink, object_bytes),
+                "csv",
+            )
+        } else {
+            (
+                workload_trace::cachesim::convert_jsonl_oracle(input, sink, object_bytes),
+                "oracleGeneral",
+            )
+        };
+        let stats = stats
+            .map_err(|e| Failure::other(format!("converting {}: {e}", input_path.display())))?;
+        let mut text = format!(
+            "converted {} to {} as libCacheSim {kind}\n  \
+             accesses {}  distinct objects {}  object size {} bytes\n",
+            input_path.display(),
+            output.display(),
+            stats.accesses,
+            stats.distinct_objects,
+            stats.object_bytes,
+        );
+        if kind == "csv" {
+            // The columns are configurable, so a CSV file cannot say what its own
+            // columns mean. Printing the command is the only way that does not get lost.
+            text.push_str(&format!(
+                "  read it with: {}\n",
+                stats.example_command(&output.display().to_string())
+            ));
+        }
+        text.push_str(
+            "  DROPPED: session identity, the input/output distinction, and virtual \
+             time as anything but an integer clock. A projection is not a trace \
+             (FR-075b, FR-077).\n",
+        );
+        return Ok(text);
+    }
 
     if let ConvertTo::Mooncake = to {
         // Block size comes from the trace's own manifest, since the Mooncake format
@@ -378,12 +440,22 @@ fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure
     ))
 }
 
+/// Read `block_bytes` out of a trace's manifest.
+fn block_bytes_of(trace: &Path) -> Result<u64, Failure> {
+    manifest_field(trace, "block_bytes")
+}
+
 /// Read `block_size` out of a trace's manifest.
 ///
 /// Not guessed and not defaulted: the Mooncake format carries no block geometry, so a
 /// wrong value here produces a file whose lengths are silently wrong by a constant
 /// factor — which nothing downstream would flag.
 fn block_size_of(trace: &Path) -> Result<u64, Failure> {
+    manifest_field(trace, "block_size")
+}
+
+/// Read one integer field from a trace's manifest.
+fn manifest_field(trace: &Path, field: &str) -> Result<u64, Failure> {
     let path = if trace.is_dir() {
         trace.join("manifest.json")
     } else {
@@ -396,16 +468,16 @@ fn block_size_of(trace: &Path) -> Result<u64, Failure> {
     };
     let text = fs::read_to_string(&path).map_err(|e| {
         Failure::config(format!(
-            "cannot read {} for the block size: {e}. The Mooncake format carries no \
-             block geometry, so it has to come from the trace's manifest",
+            "cannot read {} for {field}: {e}. Neither the Mooncake nor the libCacheSim \
+             format carries block geometry, so it has to come from the trace's manifest",
             path.display()
         ))
     })?;
     let v: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| Failure::config(format!("{}: {e}", path.display())))?;
-    v.get("block_size")
+    v.get(field)
         .and_then(|b| b.as_u64())
-        .ok_or_else(|| Failure::config(format!("{} has no block_size", path.display())))
+        .ok_or_else(|| Failure::config(format!("{} has no {field}", path.display())))
 }
 
 /// The first `invocations/*/part-*.jsonl` under a trace directory.
@@ -605,6 +677,17 @@ fn emit(
         }
         None => None,
     };
+    let mut cachesim_writer = match &projections.cachesim {
+        Some(path) => {
+            let bytes = u32::try_from(description.blocks.bytes).map_err(|_| {
+                Failure::config("blocks.bytes exceeds a 32-bit object size".to_string())
+            })?;
+            let f = fs::File::create(path)
+                .map_err(|e| Failure::other(format!("cannot create {}: {e}", path.display())))?;
+            Some(CsvWriter::new(BufWriter::new(f), bytes))
+        }
+        None => None,
+    };
     let mut simulator_writer = match &projections.simulator {
         Some(path) => {
             let f = fs::File::create(path)
@@ -621,9 +704,16 @@ fn emit(
                 write_error = Some(e);
                 return;
             }
-            if mooncake_writer.is_some() || simulator_writer.is_some() {
+            if mooncake_writer.is_some() || cachesim_writer.is_some() || simulator_writer.is_some()
+            {
                 let record = InvocationRecord::from_turn(&trace_id, s, t, block_size);
                 if let Some(w) = mooncake_writer.as_mut() {
+                    if let Err(e) = w.write_record(&record) {
+                        write_error = Some(e);
+                        return;
+                    }
+                }
+                if let Some(w) = cachesim_writer.as_mut() {
                     if let Err(e) = w.write_record(&record) {
                         write_error = Some(e);
                         return;
@@ -647,6 +737,13 @@ fn emit(
         Some(w) => Some(
             w.finish()
                 .map_err(|e| Failure::other(format!("closing the mooncake file: {e}")))?,
+        ),
+        None => None,
+    };
+    let cachesim_stats = match cachesim_writer {
+        Some(w) => Some(
+            w.finish()
+                .map_err(|e| Failure::other(format!("closing the cachesim file: {e}")))?,
         ),
         None => None,
     };
@@ -722,6 +819,16 @@ fn emit(
             s.records,
             path.display(),
             s.distinct_ids
+        ));
+    }
+    if let (Some(path), Some(s)) = (&projections.cachesim, &cachesim_stats) {
+        out.push_str(&format!(
+            "  cachesim          {} accesses to {} ({} distinct objects)\n    \
+             read it with: {}\n",
+            s.accesses,
+            path.display(),
+            s.distinct_objects,
+            s.example_command(&path.display().to_string())
         ));
     }
     if let (Some(path), Some(s)) = (&projections.simulator, &simulator_stats) {

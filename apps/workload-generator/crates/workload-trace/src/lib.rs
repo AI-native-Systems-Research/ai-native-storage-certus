@@ -7,6 +7,7 @@
 //! server and no network.
 #![warn(missing_docs)]
 
+pub mod cachesim;
 pub mod jsonl;
 pub mod manifest;
 pub mod mooncake;
