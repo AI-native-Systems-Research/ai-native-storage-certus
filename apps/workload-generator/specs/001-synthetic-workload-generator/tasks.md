@@ -512,13 +512,26 @@ each is a projection of the emitted schema, so none of them touches the
 simulation. `contracts/trace-interop.md` carries the verified upstream details
 and is normative for all of them. All are [US2]-scoped: no hardware, no server.
 
+- [ ] T062x [US2] Implement the projection module in
+  `crates/workload-trace/src/project.rs`: each target is a **function of the
+  plan's record stream**, with two entry points calling it — `emit`'s in-stream
+  flags and `convert`'s stored-trace pass (FR-075, FR-075a). Equivalence
+  between the two is then structural rather than tested. A projection carries
+  no manifest and is refused as an input to the determinism check (FR-075b)
+- [ ] T062y [US2] Wire the emit-time projection flags in
+  `crates/workload-gen/src/cli.rs`: `--mooncake`, `--cachesim`, `--simulator`,
+  each a file, with **at least one output required** across them and
+  `--output`. A projection **without** `--output` is the expected case, not a
+  corner — it is what avoids materialising ~27 GB of native trace to obtain a
+  much smaller file. The pre-flight projection must size only the outputs
+  requested (FR-073)
 - [ ] T062a [P] [US2] Implement the Mooncake writer in
   `crates/workload-trace/src/mooncake.rs`, emitting `{timestamp, input_length,
   output_length, hash_ids}` one document per line per **request**, `timestamp`
   in true milliseconds off the virtual clock (not quantised — upstream's 3 s
   tick is its corpus's property, not the format's), and `len(hash_ids) ==
   ceil(input_length / block_size)` per upstream's ceil convention. Wire as
-  `convert --to mooncake`
+  both `emit --mooncake` and `convert --to mooncake`
 - [ ] T062b [US2] Implement dense renumbering for the Mooncake writer in
   `crates/workload-trace/src/mooncake.rs`: one dense identifier per distinct
   key across the **whole output** (FR-078). **This is the one mistake that

@@ -256,8 +256,28 @@ field for session start, and `hash_id_scope: "local"`.
   precisely because they are projections of a superset. Adding one later costs
   a writer, not a redesign.
 
-**Consequence for the plan**: `convert` grows a `--to` selector rather than
-staying single-purpose; two writers become tasks; and the
+**Correction applied after this decision was first written.** It initially said
+every target must be a *conversion of the emitted trace*, which over-applied
+D1. D1's concern was keeping consumer-specific shapes out of the published
+trace contract — not forbidding a direct writer — and the stronger rule imposed
+a real cost: a legal span on the shipped example is roughly 27 GB as a native
+trace, so requiring it as an intermediate meant paying that, plus a possible
+free-space refusal, to obtain a Mooncake file of a few hundred megabytes. What
+actually needed protecting is narrower and is now what FR-075b says: a
+projection is a function of the **plan**, never a second simulation, and a
+projection is not a trace. Direct emission satisfies both, and avoids a JSONL
+parse step that could itself be wrong.
+
+So the projections live in `workload-trace` as functions, with **two entry
+points calling the same function**: `emit` applies them in-stream, and
+`convert` applies them to a stored trace. Keeping `convert` is not redundancy —
+its input is the *schema*, and the 24 real traces in `traces/` are in that
+schema, so it is the only way to push a real workload and a generated one
+through an identical transformation. That is the comparability goal, and it
+cannot be reached from the emit path at all.
+
+**Consequence for the plan**: `emit` grows one flag per projection, and
+`convert` grows a `--to` selector; two writers become tasks; and the
 `oracleGeneral` binary layout needs reading from upstream source before any
 bytes are written, because upstream documents those fields in prose only.
 
