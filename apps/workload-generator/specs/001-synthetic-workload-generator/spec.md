@@ -375,8 +375,12 @@ modes reorder the policies.
 
 **Virtual time and execution**
 
-- **FR-031**: Virtual time MUST exist only to decide the order of operations,
-  and MUST NOT be mapped to wallclock time.
+- **FR-031**: In the default **work-conserving** mode, virtual time MUST exist
+  only to decide the order of operations, and MUST NOT be mapped to wallclock
+  time. This is what makes the run a measurement of capability: it issues as fast
+  as the mailbox allows and FR-062's plan-queue check proves the generator was not
+  the constraint. FR-078 adds a second, **paced** mode in which the mapping is the
+  point; until that lands, this requirement is unqualified in practice.
 - **FR-032**: The virtual clock MUST be the minimum timestamp among operations
   still in flight. When the server applies backpressure, a lane blocks and the
   clock holds — it MUST NOT advance, skip, or dilate unevenly.
@@ -665,6 +669,47 @@ modes reorder the policies.
   what is deterministic — paths, session identity and virtual timing — and never
   cache outcomes, which keeps FR-072's guarantee intact across nodes while
   keeping the chatter host-local.
+
+### Deferred: paced mode
+
+- **FR-078** *(DEFERRED — agreed design, to be implemented once everything else
+  is settled)*: System MUST offer a **paced** mode alongside the default
+  work-conserving one, in which a request is **held back until its virtual time
+  is due**, so that the offered load matches the workload's own rate. The two
+  modes answer different questions and both are wanted: work-conserving measures
+  *how fast Certus can go*, paced measures *the latency Certus delivers under the
+  load this workload actually represents*. Latency is the reason for the feature —
+  a percentile gathered while the generator sprints describes a queue that the
+  real workload would never form.
+
+  **The validity metric changes with the mode, and this is the substance of the
+  work rather than a detail.** FR-062 invalidates a run whose plan queue reached
+  zero, which is meaningful only when the generator is trying to sprint. Under
+  pacing an empty queue is the normal, intended state — nothing is due yet — so
+  that test must be replaced by **lateness**: for each request, `due =
+  t0 + (virtual timestamp − virtual start) / rate`, and `lateness = submitted −
+  due`, positive meaning the generator missed its slot. Pacing never submits early
+  by construction, so lateness is one-sided. A run whose lateness exceeds its
+  tolerance is invalid for the same reason FR-062 exists: the generator, not
+  Certus, set the pace.
+
+  Requirements that follow:
+
+  - The report MUST name the mode, because a throughput from a paced run and one
+    from a work-conserving run are not comparable and would otherwise be quoted
+    side by side.
+  - Lateness MUST be reported as percentiles with its request count, per FR-066a.
+  - FR-072 and FR-072a MUST continue to hold: pacing changes *when* a request is
+    submitted, never which keys a turn names or how sessions interleave.
+  - A rate multiplier SHOULD exist (1.0 being real time), since a paced run costs
+    wallclock equal to its virtual span divided by the rate, which makes long
+    descriptions expensive to run at 1.0.
+  - FR-031 MUST be scoped to the work-conserving mode when this lands.
+
+  **Known cost**: two modes means two validity rules, two meanings for the
+  virtual-to-wallclock ratio, and a report that must be unambiguous about which it
+  is showing. That complexity is accepted deliberately and is the reason this is
+  deferred rather than folded into US1.
 
 ### Key Entities
 
