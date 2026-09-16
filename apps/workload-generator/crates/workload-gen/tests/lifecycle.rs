@@ -173,7 +173,7 @@ fn a_leftover_of_the_current_build_is_replaced_rather_than_reused() {
     );
 
     let specs = vec![spec(port)];
-    let mut agents = Agents::start_default(&launcher, &specs).expect("start over a leftover");
+    let agents = Agents::start_default(&launcher, &specs).expect("start over a leftover");
     // It was replaced: a fresh one was launched, and the old one was stopped or killed.
     assert_eq!(
         launcher.launches.load(Ordering::Relaxed),
@@ -226,7 +226,7 @@ fn a_stale_leftover_is_replaced_and_the_refusal_would_name_the_node() {
     launcher.stale = false; // the replacement is this build
 
     let specs = vec![spec(port)];
-    let mut agents = Agents::start_default(&launcher, &specs).expect("start over a stale leftover");
+    let agents = Agents::start_default(&launcher, &specs).expect("start over a stale leftover");
     assert_eq!(launcher.launches.load(Ordering::Relaxed), 1);
     agents.stop().expect("stop");
 }
@@ -292,7 +292,7 @@ fn dropping_the_agents_stops_them_so_a_panicking_run_leaves_nothing_holding_chan
 fn several_nodes_are_all_started_and_all_stopped() {
     let launcher = LocalLauncher::new();
     let specs: Vec<AgentSpec> = (0..3).map(|_| spec(free_port())).collect();
-    let mut agents = Agents::start_default(&launcher, &specs).expect("start three");
+    let agents = Agents::start_default(&launcher, &specs).expect("start three");
     assert_eq!(agents.len(), 3);
     assert_eq!(launcher.launches.load(Ordering::Relaxed), 3);
     let teardown = agents.stop().expect("stop three");
