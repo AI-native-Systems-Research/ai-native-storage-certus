@@ -50,7 +50,7 @@
 //!   should already have refused it or reported it (FR-004). Seeing it at run
 //!   time means the gate was evaded.
 //! - **Bound by live** — the population is simply fluctuating below its target,
-//!   which is what a [`Population::Poisson`] pool is *for*. Nothing is wrong; the
+//!   which is what a [`Population::Poisson`](crate::description::Population::Poisson) pool is *for*. Nothing is wrong; the
 //!   requested distribution is nonetheless narrowed, and by how often is
 //!   something a reader of the report needs to know.
 //!
