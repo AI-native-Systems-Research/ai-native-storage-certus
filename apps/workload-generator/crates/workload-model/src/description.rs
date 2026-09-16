@@ -597,6 +597,25 @@ impl WorkloadDescription {
                     at("uses")
                 ));
             }
+            // FR-028 makes a session's prefix a pure function of the *set* of
+            // instances it chose, and listing a class twice destroys that: the two
+            // draws are independent, so the same instance can land at two
+            // positions in the prefix, where prefix chaining gives it two
+            // different keys. `count` expresses the intent without the ambiguity.
+            let mut listed = std::collections::BTreeSet::new();
+            for u in &class.uses {
+                if !listed.insert(u.class.as_str()) {
+                    report.refuse(format!(
+                        "{}: shared class {:?} is listed more than once. A session's \
+                         prefix must be a function of the set it drew (FR-028), and two \
+                         independent draws from one class can place the same instance \
+                         twice; raise that entry's count instead",
+                        at("uses"),
+                        u.class
+                    ));
+                }
+            }
+
             for u in &class.uses {
                 let path = at(&format!("uses[{}].count", u.class));
                 let Some(target) = self.shared_classes.get(&u.class) else {

@@ -88,7 +88,7 @@
 //! use workload_model::description::Population;
 //! use workload_model::distribution::{Distribution, Kind};
 //! use workload_model::rng;
-//! use workload_model::session::{SessionIds, SessionPool};
+//! use workload_model::session::{bind, SessionIds, SessionPool};
 //!
 //! let turns = Distribution::new(Kind::Constant { value: 10.0 })
 //!     .resolve_integral(None)
@@ -112,6 +112,12 @@
 //! let seeded = pool.live();
 //! assert!((30..=70).contains(&seeded));
 //!
+//! // Every session must be bound before its first turn (FR-028). This class
+//! // has no `uses`, so it binds nothing — but it still has to be bound.
+//! for h in pool.handles().collect::<Vec<_>>() {
+//!     bind(pool.session_mut(h), &[], &mut [], &mut [], &mut rng);
+//! }
+//!
 //! // Turns belong to the loop; a session ends when its last one is taken.
 //! let first = pool.handles().next().unwrap();
 //! while pool.session_mut(first).take_turn().is_some() {}
@@ -128,7 +134,8 @@ use rand::Rng;
 use crate::description::Population;
 use crate::distribution::Resolved;
 use crate::keys::MAX_SESSIONS_PER_RUN;
-use crate::pool::{exponential, poisson, ResidualLife};
+use crate::pool::{exponential, poisson, Held, ResidualLife, SharedPool};
+use crate::selection::Selector;
 
 /// Run-global monotonic session identity.
 ///
@@ -186,12 +193,49 @@ impl SessionIds {
     }
 }
 
+/// One shared instance a session holds, at one position in its prefix.
+///
+/// Carries the hold, so that dropping a session without giving these back is a
+/// leak the type system makes visible ([`Held`] is not `Clone`).
+#[derive(Debug, PartialEq)]
+pub struct Bound {
+    held: Held,
+    length_blocks: u64,
+}
+
+impl Bound {
+    /// Declaration index of the shared class this instance belongs to.
+    pub fn class_id(&self) -> u64 {
+        self.held.class_id()
+    }
+
+    /// Key identity of the instance — the salt's `instance_index`.
+    pub fn mint(&self) -> u64 {
+        self.held.mint()
+    }
+
+    /// Blocks this instance contributes to the prefix.
+    pub fn length_blocks(&self) -> u64 {
+        self.length_blocks
+    }
+
+    /// The hold, for reading the instance out of its pool.
+    pub fn held(&self) -> &Held {
+        &self.held
+    }
+
+    /// The hold, to be released into the instance's own pool.
+    pub fn into_held(self) -> Held {
+        self.held
+    }
+}
+
 /// One live session.
 ///
 /// Its turn schedule is fixed at birth; see the module docs on why. Turn
 /// mechanics — the prefix chain and the blocks each turn mints — belong to the
 /// turn model, not here.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Session {
     id: u64,
     class_id: u64,
@@ -199,6 +243,10 @@ pub struct Session {
     /// Absolute virtual time of each turn, ascending. Length is the turn count.
     turn_at: Vec<f64>,
     cursor: usize,
+    /// Shared instances in canonical order (FR-028). Empty until bound, which is
+    /// why `bound` is a separate flag — a class with no `uses` binds nothing.
+    chosen: Vec<Bound>,
+    bound: bool,
 }
 
 impl Session {
@@ -256,14 +304,201 @@ impl Session {
     /// The turn model calls this; the population does not, because a session's
     /// death time is already known from its schedule.
     pub fn take_turn(&mut self) -> Option<f64> {
+        debug_assert!(
+            self.bound,
+            "session {} took a turn before its shared instances were bound; its \
+             prefix would be missing every shared block",
+            self.id
+        );
         let at = self.turn_at.get(self.cursor).copied()?;
         self.cursor += 1;
         Some(at)
     }
+
+    /// Whether this session's shared instances have been bound.
+    pub fn is_bound(&self) -> bool {
+        self.bound
+    }
+
+    /// The session's shared instances, in canonical order (FR-028).
+    pub fn chosen(&self) -> &[Bound] {
+        &self.chosen
+    }
+
+    /// Take the shared instances back, so their holds can be released into their
+    /// own pools. Called once, when the session has finished.
+    pub fn take_chosen(&mut self) -> Vec<Bound> {
+        std::mem::take(&mut self.chosen)
+    }
+}
+
+/// A session class's reference to one shared class: which class, and how many
+/// instances a session of this class draws from it.
+///
+/// The **order of a slice of these is semantic** — it is the order the session
+/// class listed them in, and it fixes where each class's blocks land in the prefix
+/// (FR-028).
+#[derive(Debug, Clone)]
+pub struct Uses {
+    /// Declaration index of the shared class.
+    pub class_index: usize,
+    /// How many instances to draw. Integral, and capped by the pool at load.
+    pub count: Resolved,
+}
+
+/// Draw and acquire a session's shared instances, in canonical order (FR-028).
+///
+/// `uses` is in the order the session class listed, `pools` and `selectors` are
+/// indexed by shared-class declaration index. Every drawn instance is acquired, so
+/// the session holds each one until it finishes — see
+/// [`Session::take_chosen`].
+///
+/// # The ordering, and why it is the whole reason sharing works
+///
+/// Two rules, and the second is the one that is easy to get wrong:
+///
+/// 1. **Classes in the order the session class lists them.** That order is part of
+///    the description, not an implementation detail.
+/// 2. **Instances sorted within a class**, which [`Selector::draw`] already
+///    guarantees by returning slots ascending.
+///
+/// Together they make a session's prefix a pure function of the *set* it drew. So
+/// a session that drew `{0, 1}` and one that drew `{0, 1, 4}` produce **nested**
+/// chains — the second extends the first — rather than divergent ones. Without the
+/// sort, the same two sets could be laid out as `[1, 0]` and `[0, 1, 4]` and share
+/// nothing at all, because keys are prefix-chained and the first block already
+/// differs.
+///
+/// This is also why ordering is done here rather than left to the caller:
+/// assembling the list in the wrong order produces a workload that runs, reports
+/// plausible numbers, and has almost no cross-session reuse.
+///
+/// # Examples
+///
+/// ```
+/// use workload_model::description::{Population, RankBy};
+/// use workload_model::distribution::{Distribution, Kind};
+/// use workload_model::pool::SharedPool;
+/// use workload_model::selection::Selector;
+/// use workload_model::session::{bind, SessionIds, SessionPool, Uses};
+/// use workload_model::rng;
+///
+/// let forever = Distribution::new(Kind::Constant { value: f64::INFINITY })
+///     .resolve(None)
+///     .unwrap();
+/// let four = Distribution::new(Kind::Constant { value: 4.0 })
+///     .resolve_integral(None)
+///     .unwrap();
+/// let mut rng = rng::substream(1, "bind");
+///
+/// let mut docs = SharedPool::new(0, Population::Exact(8), forever, four.clone(), &mut rng);
+/// docs.seed(0.0, &mut rng);
+/// let mut pools = vec![docs];
+/// let mut selectors = vec![Selector::new(RankBy::Slot)];
+///
+/// let turns = Distribution::new(Kind::Constant { value: 3.0 })
+///     .resolve_integral(None)
+///     .unwrap();
+/// let think = Distribution::new(Kind::Constant { value: 1.0 })
+///     .resolve(None)
+///     .unwrap();
+/// let mut ids = SessionIds::new();
+/// let mut sessions = SessionPool::new(0, Population::Exact(1), turns, think, &mut rng);
+/// sessions.seed(0.0, &mut ids, &mut rng);
+/// let h = sessions.handles().next().unwrap();
+///
+/// let uses = vec![Uses { class_index: 0, count: four }];
+/// bind(sessions.session_mut(h), &uses, &mut pools, &mut selectors, &mut rng);
+///
+/// let chosen = sessions.session(h).chosen();
+/// assert_eq!(chosen.len(), 4);
+/// // Sorted within the class, which is what makes overlapping sessions nest.
+/// let slots: Vec<u32> = chosen.iter().map(|b| pools[0].held(b.held()).slot()).collect();
+/// assert!(slots.windows(2).all(|w| w[0] < w[1]));
+///
+/// // Give the holds back when the session finishes.
+/// for b in sessions.session_mut(h).take_chosen() {
+///     pools[0].release(b.into_held());
+/// }
+/// ```
+///
+/// # Panics
+///
+/// If the session is already bound, or if a `Uses` names a class index outside
+/// `pools`.
+pub fn bind<R: Rng + ?Sized>(
+    session: &mut Session,
+    uses: &[Uses],
+    pools: &mut [SharedPool],
+    selectors: &mut [Selector],
+    rng: &mut R,
+) {
+    assert!(
+        !session.bound,
+        "session {} bound twice; its first holds would leak",
+        session.id
+    );
+    for u in uses {
+        let idx = u.class_index;
+        assert!(
+            idx < pools.len() && idx < selectors.len(),
+            "uses names shared class {idx}, but only {} are declared",
+            pools.len()
+        );
+        let count = u.count.sample_int(rng).max(0) as u64;
+        // Slots come back ascending, which is rule 2. Copied out because acquiring
+        // needs the pool mutably while the selector still owns its buffer.
+        let slots: Vec<u32> = selectors[idx].draw(&pools[idx], count, rng).to_vec();
+        for slot in slots {
+            let held = pools[idx]
+                .acquire(slot)
+                .expect("selection returned an unoccupied slot");
+            let length_blocks = pools[idx].held(&held).length_blocks();
+            session.chosen.push(Bound {
+                held,
+                length_blocks,
+            });
+        }
+    }
+    session.bound = true;
+    debug_assert!(
+        is_canonical(&session.chosen, uses),
+        "bound instances are not in canonical order"
+    );
+}
+
+/// Whether a bound list satisfies FR-028: classes in `uses` order, mints of
+/// ascending slot within a class.
+///
+/// Checks what it can from the outside — class grouping and order. The
+/// within-class sort is [`Selector::draw`]'s guarantee and is asserted there.
+fn is_canonical(chosen: &[Bound], uses: &[Uses]) -> bool {
+    let mut expected = uses.iter().map(|u| u.class_index as u64);
+    let mut current: Option<u64> = None;
+    for b in chosen {
+        if current != Some(b.class_id()) {
+            // A new class must be the next one `uses` lists, skipping any that
+            // drew nothing.
+            loop {
+                match expected.next() {
+                    Some(c) if c == b.class_id() => break,
+                    Some(_) => continue,
+                    None => return false,
+                }
+            }
+            current = Some(b.class_id());
+        }
+    }
+    true
 }
 
 /// The live sessions of one session class, and their population dynamics.
-#[derive(Debug, Clone)]
+///
+/// Deliberately **not** `Clone`: its sessions hold refcounted shared instances, so
+/// a clone would duplicate every [`Held`] without incrementing the refcount, and
+/// releasing both copies would free an instance still in use. [`Held`] not being
+/// `Clone` is what makes that a compile error rather than a leak to find later.
+#[derive(Debug)]
 pub struct SessionPool {
     class_id: u64,
     form: Population,
@@ -562,6 +797,8 @@ impl SessionPool {
             born_at,
             turn_at,
             cursor: 0,
+            chosen: Vec::new(),
+            bound: false,
         };
         let handle = match self.free_handles.pop() {
             Some(h) => {
@@ -583,6 +820,7 @@ impl SessionPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::description::RankBy;
     use crate::distribution::{Distribution, Kind};
     use crate::rng;
 
@@ -620,6 +858,20 @@ mod tests {
         born: usize,
     }
 
+    /// Bind every session that has not been bound yet.
+    ///
+    /// These population tests use classes with no `uses`, so binding is empty —
+    /// but it must still happen, because `take_turn` refuses an unbound session: a
+    /// session that took a turn before binding would have a prefix missing every
+    /// shared block, which is a workload, just not the one asked for.
+    fn bind_new<R: Rng + ?Sized>(p: &mut SessionPool, rng: &mut R) {
+        for h in p.handles().collect::<Vec<_>>() {
+            if !p.session(h).is_bound() {
+                bind(p.session_mut(h), &[], &mut [], &mut [], rng);
+            }
+        }
+    }
+
     fn drive<R: Rng + ?Sized>(
         p: &mut SessionPool,
         t: f64,
@@ -629,6 +881,7 @@ mod tests {
         let mut out = Driven::default();
         loop {
             p.advance_births_to(t, ids, rng);
+            bind_new(p, rng);
             let mut created = p.newly_born().len();
             let due: Vec<usize> = p
                 .handles()
@@ -839,6 +1092,7 @@ mod tests {
             Kind::Constant { value: 10.0 },
         );
         p.seed(0.0, &mut ids, &mut r);
+        bind_new(&mut p, &mut r);
         let h = p.handles().next().unwrap();
         let total = p.session(h).turns_total();
         let mut seen = Vec::new();
@@ -863,6 +1117,7 @@ mod tests {
             Kind::Constant { value: 1.0 },
         );
         p.seed(0.0, &mut ids, &mut r);
+        bind_new(&mut p, &mut r);
         let h = p.handles().next().unwrap();
         p.session_mut(h).take_turn();
         p.finish(h, &mut ids, &mut r);
@@ -880,6 +1135,7 @@ mod tests {
             Kind::Constant { value: 1.0 },
         );
         p.seed(0.0, &mut ids, &mut r);
+        bind_new(&mut p, &mut r);
         let handles: Vec<usize> = p.handles().collect();
         let watched = *handles.last().unwrap();
         let watched_id = p.session(watched).id();
@@ -969,6 +1225,235 @@ mod tests {
             total += drive(&mut p, step as f64 * 20.0, &mut ids, &mut r).born as u64;
         }
         assert_eq!(total, p.started(), "births were not all reported");
+    }
+
+    // ---- T026: canonical ordering (FR-028) ----------------------------------
+
+    /// A shared class with `n` immortal instances, so slots are stable while a
+    /// binding test runs and the ordering is the only thing under test.
+    fn shared(class_id: u64, n: u64, r: &mut rng::Rng) -> (SharedPool, Selector) {
+        let life = Distribution::new(Kind::Constant {
+            value: f64::INFINITY,
+        })
+        .resolve(None)
+        .unwrap();
+        let length = Distribution::new(Kind::Constant { value: 4.0 })
+            .resolve_integral(None)
+            .unwrap();
+        let mut p = SharedPool::new(class_id, Population::Exact(n), life, length, r);
+        p.seed(0.0, r);
+        (p, Selector::new(RankBy::Slot))
+    }
+
+    fn uses_of(class_index: usize, count: f64) -> Uses {
+        Uses {
+            class_index,
+            count: Distribution::new(Kind::Constant { value: count })
+                .resolve_integral(None)
+                .unwrap(),
+        }
+    }
+
+    /// One unbound session, for binding tests.
+    fn lone_session(ids: &mut SessionIds, r: &mut rng::Rng) -> (SessionPool, usize) {
+        let mut p = SessionPool::new(
+            0,
+            Population::Exact(1),
+            resolved(Kind::Constant { value: 3.0 }, true),
+            resolved(Kind::Constant { value: 1.0 }, false),
+            r,
+        );
+        p.seed(0.0, ids, r);
+        let h = p.handles().next().unwrap();
+        (p, h)
+    }
+
+    #[test]
+    fn classes_appear_in_the_order_the_session_class_lists_them() {
+        // Rule 1 of FR-028. The `uses` order is part of the description, so it
+        // fixes where each class's blocks land in the prefix — reversing the list
+        // must reverse the binding.
+        let mut r = rng::substream(31, "bind");
+        let mut ids = SessionIds::new();
+        let (p0, s0) = shared(0, 6, &mut r);
+        let (p1, s1) = shared(1, 6, &mut r);
+        let (p2, s2) = shared(2, 6, &mut r);
+        let mut pools = vec![p0, p1, p2];
+        let mut sels = vec![s0, s1, s2];
+
+        for order in [vec![0usize, 1, 2], vec![2, 0, 1]] {
+            let uses: Vec<Uses> = order.iter().map(|i| uses_of(*i, 2.0)).collect();
+            let (mut sp, h) = lone_session(&mut ids, &mut r);
+            bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
+            let classes: Vec<u64> = sp
+                .session(h)
+                .chosen()
+                .iter()
+                .map(|b| b.class_id())
+                .collect();
+            let want: Vec<u64> = order.iter().flat_map(|i| [*i as u64; 2]).collect();
+            assert_eq!(classes, want, "classes are not in `uses` order");
+            for b in sp.session_mut(h).take_chosen() {
+                let c = b.class_id() as usize;
+                pools[c].release(b.into_held());
+            }
+        }
+    }
+
+    #[test]
+    fn instances_are_sorted_within_a_class() {
+        // Rule 2. `Selector::draw` guarantees it; this checks the binding does not
+        // undo it, which is the only way it could be lost here.
+        let mut r = rng::substream(32, "bind");
+        let mut ids = SessionIds::new();
+        let (p0, s0) = shared(0, 12, &mut r);
+        let mut pools = vec![p0];
+        let mut sels = vec![s0];
+        let uses = vec![uses_of(0, 5.0)];
+        for _ in 0..200 {
+            let (mut sp, h) = lone_session(&mut ids, &mut r);
+            bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
+            let slots: Vec<u32> = sp
+                .session(h)
+                .chosen()
+                .iter()
+                .map(|b| pools[0].held(&b.held).slot())
+                .collect();
+            assert!(
+                slots.windows(2).all(|w| w[0] < w[1]),
+                "instances not ascending: {slots:?}"
+            );
+            for b in sp.session_mut(h).take_chosen() {
+                pools[0].release(b.into_held());
+            }
+        }
+    }
+
+    #[test]
+    fn overlapping_sets_produce_nested_chains_not_divergent_ones() {
+        // **The reason canonical ordering exists.** Because the order is a function
+        // of the set, two sessions agree on exactly the leading run their sorted
+        // sets agree on — so `{0,1}` and `{0,1,4}` share their first two objects.
+        // Keys are prefix-chained, so a shared leading run is the only thing that
+        // produces reuse at all; a shuffled order would share nothing.
+        let mut r = rng::substream(33, "bind");
+        let mut ids = SessionIds::new();
+        let (p0, s0) = shared(0, 10, &mut r);
+        let mut pools = vec![p0];
+        let mut sels = vec![s0];
+
+        // Vary the count so the pairs genuinely differ in size.
+        let mut checked = 0;
+        let mut bindings: Vec<(Vec<u32>, Vec<u64>)> = Vec::new();
+        for count in [2.0, 3.0, 4.0, 5.0] {
+            let uses = vec![uses_of(0, count)];
+            for _ in 0..40 {
+                let (mut sp, h) = lone_session(&mut ids, &mut r);
+                bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
+                let slots: Vec<u32> = sp
+                    .session(h)
+                    .chosen()
+                    .iter()
+                    .map(|b| pools[0].held(&b.held).slot())
+                    .collect();
+                let mints: Vec<u64> = sp.session(h).chosen().iter().map(|b| b.mint()).collect();
+                bindings.push((slots, mints));
+                for b in sp.session_mut(h).take_chosen() {
+                    pools[0].release(b.into_held());
+                }
+            }
+        }
+
+        for (a, b) in bindings.iter().zip(bindings.iter().skip(1)) {
+            // The expected leading run comes from sorting each *set*
+            // independently — not from the bound order — or the assertion would
+            // be comparing the bound order against itself and hold whatever that
+            // order was. (It did: an earlier version of this test passed with the
+            // sort removed.)
+            let mut sa = a.0.clone();
+            let mut sb = b.0.clone();
+            sa.sort_unstable();
+            sb.sort_unstable();
+            let expected = sa.iter().zip(&sb).take_while(|(x, y)| x == y).count();
+            let actual = a.0.iter().zip(&b.0).take_while(|(x, y)| x == y).count();
+            assert_eq!(
+                actual, expected,
+                "bound orders {:?} and {:?} share a leading run of {actual}, but \
+                 their sorted sets share {expected} — the prefix is not a function \
+                 of the set, so overlapping sessions would diverge instead of nest",
+                a.0, b.0
+            );
+            // And the mints must track the slots, which is what makes a shared
+            // leading run of slots a shared run of *blocks*.
+            let mint_common = a.1.iter().zip(&b.1).take_while(|(x, y)| x == y).count();
+            assert_eq!(mint_common, actual, "mints and slots disagree");
+            checked += 1;
+        }
+        assert!(checked > 100, "not enough pairs compared");
+    }
+
+    #[test]
+    fn a_class_that_draws_nothing_does_not_break_the_ordering() {
+        // A count of zero, or a class whose pool is momentarily empty, must leave
+        // the remaining classes in order rather than shifting them.
+        let mut r = rng::substream(34, "bind");
+        let mut ids = SessionIds::new();
+        let (p0, s0) = shared(0, 4, &mut r);
+        let (p1, s1) = shared(1, 4, &mut r);
+        let mut pools = vec![p0, p1];
+        let mut sels = vec![s0, s1];
+        let uses = vec![uses_of(0, 0.0), uses_of(1, 2.0)];
+        let (mut sp, h) = lone_session(&mut ids, &mut r);
+        bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
+        let classes: Vec<u64> = sp
+            .session(h)
+            .chosen()
+            .iter()
+            .map(|b| b.class_id())
+            .collect();
+        assert_eq!(classes, vec![1, 1]);
+        for b in sp.session_mut(h).take_chosen() {
+            pools[b.class_id() as usize].release(b.into_held());
+        }
+    }
+
+    #[test]
+    fn binding_holds_every_instance_it_drew() {
+        // Each drawn instance must be acquired, or it could retire out from under a
+        // session still reading it (FR-018).
+        let mut r = rng::substream(35, "bind");
+        let mut ids = SessionIds::new();
+        let (p0, s0) = shared(0, 8, &mut r);
+        let mut pools = vec![p0];
+        let mut sels = vec![s0];
+        let uses = vec![uses_of(0, 3.0)];
+        let (mut sp, h) = lone_session(&mut ids, &mut r);
+        bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
+        assert_eq!(sp.session(h).chosen().len(), 3);
+        for b in sp.session(h).chosen() {
+            assert_eq!(pools[0].held(&b.held).users(), 1);
+            assert_eq!(b.length_blocks(), 4);
+        }
+        for b in sp.session_mut(h).take_chosen() {
+            pools[0].release(b.into_held());
+        }
+        assert!(pools[0].selectable().all(|i| i.users() == 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "bound twice")]
+    fn binding_twice_is_refused() {
+        // The first binding's holds would leak, and the session's prefix would
+        // silently double in length.
+        let mut r = rng::substream(36, "bind");
+        let mut ids = SessionIds::new();
+        let (p0, s0) = shared(0, 4, &mut r);
+        let mut pools = vec![p0];
+        let mut sels = vec![s0];
+        let uses = vec![uses_of(0, 2.0)];
+        let (mut sp, h) = lone_session(&mut ids, &mut r);
+        bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
+        bind(sp.session_mut(h), &uses, &mut pools, &mut sels, &mut r);
     }
 
     #[test]
