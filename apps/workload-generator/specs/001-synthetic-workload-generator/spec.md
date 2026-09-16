@@ -576,11 +576,18 @@ modes reorder the policies.
   charges a full block to every control operation and overstated bandwidth by
   4.9x when measured.
 - **FR-066a**: Latency MUST be reported **per operation**, not only in aggregate.
-  A `CHECK` is control and costs tens of microseconds; a `COPY_TO_STORE` DMAs a
-  block per key and was measured at 5.5x that. An aggregate percentile therefore
-  describes the operation mix a description happens to produce rather than
-  anything about Certus, and changes when the hit rate changes even if the server
-  does not.
+  A control operation costs tens of microseconds uncontended; a `LOOKUP` DMAs a
+  block per key and was measured at eleven times that. An aggregate percentile
+  therefore describes the operation mix a description happens to produce rather
+  than anything about Certus, and changes when the hit rate changes even if the
+  server does not.
+
+  Each operation's **request count MUST be reported beside its percentiles**, and
+  a count too small to support them MUST be marked. A p50 over a few dozen
+  requests is noise and a p99 over a few dozen *is* the maximum. This is not
+  hypothetical: a 24-request run appeared to show `TOUCH` costing three times
+  `CHECK`, and a second 24-request run appeared to show it four times faster. At
+  8000 requests each they differ by one microsecond.
 - **FR-066b**: A store MUST transfer only into a reservation the server granted.
   `RESERVE` answers per key, and transferring for a declined key sends a payload
   to no slot and then fails its commit for want of a pending write. Measured

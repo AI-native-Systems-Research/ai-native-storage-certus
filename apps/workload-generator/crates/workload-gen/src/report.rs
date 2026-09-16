@@ -532,6 +532,16 @@ pub struct Bandwidth {
     pub write_bytes: u64,
 }
 
+/// Requests an opcode needs before its percentiles are worth quoting.
+///
+/// A p50 over 20 samples is noise and a p99 over 20 samples *is* the maximum. This is not
+/// hypothetical: a 24-request run appeared to show `TOUCH` costing three times `CHECK`,
+/// which prompted an investigation that found nothing — at 8000 requests each they differ
+/// by 1 microsecond, and `TOUCH` is marginally the faster in most runs. A hundred is the
+/// point where a p50 is stable enough to compare and a p90 means something; a p99 still
+/// wants thousands, so it is flagged rather than hidden.
+pub const QUOTABLE_REQUESTS: u64 = 100;
+
 /// Latency of one opcode, in microseconds.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OpLatency {
@@ -703,10 +713,24 @@ impl LiveReport {
         }
         if !self.latency_by_op.is_empty() {
             out.push_str("  latency by op     (us)  requests    p50    p90    p99    max\n");
+            let mut thin = false;
             for l in &self.latency_by_op {
+                let mark = if l.requests < QUOTABLE_REQUESTS {
+                    thin = true;
+                    " <- too few to quote"
+                } else {
+                    ""
+                };
                 out.push_str(&format!(
-                    "    {:<14} {:>10} {:>6} {:>6} {:>6} {:>6}\n",
-                    l.op, l.requests, l.us.p50, l.us.p90, l.us.p99, l.us.max
+                    "    {:<14} {:>10} {:>6} {:>6} {:>6} {:>6}{}\n",
+                    l.op, l.requests, l.us.p50, l.us.p90, l.us.p99, l.us.max, mark
+                ));
+            }
+            if thin {
+                out.push_str(&format!(
+                    "                    a p50 over a few dozen requests is noise and the \
+                     p99 is just the max;\n                    {QUOTABLE_REQUESTS}+ before \
+                     comparing operations\n"
                 ));
             }
         }

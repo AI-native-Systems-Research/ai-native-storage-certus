@@ -1105,10 +1105,39 @@ Aggregate latency was similarly a blend. Split per operation:
 
 The aggregate p50 of 243 us is between `CHECK` at 79 and `COPY_TO_STORE` at 435,
 describing the mix rather than the server — and it would move with the hit rate
-even if Certus did not. `TOUCH` at 250 us is worth a look: it is control only,
-yet three times `CHECK`. `TOUCH` and `LOOKUP` show 20 requests to the others' 24
+even if Certus did not. `TOUCH` and `LOOKUP` show 20 requests to the others' 24
 because they are issued only when something is resident, and the first turn of
 each session has nothing.
+
+**RETRACTED: `TOUCH` is not slower than `CHECK`.** The table above appeared to
+show it three times slower, which was a p50 over **20 requests** — noise. At 8000
+requests per operation the two are within a microsecond, and `TOUCH` is marginally
+the faster in most runs:
+
+| lanes | CHECK | TOUCH | TAKE_EVENTS | LOOKUP |
+| --- | --- | --- | --- | --- |
+| 1 | 25 | **22** | 18 | 274 |
+| 4 | 291 | **292** | 290 | 534 |
+| 6 | 465 | **448** | 441 | 727 |
+
+A second 24-request run made `TOUCH` look four times *faster* than `CHECK` (58
+against 233), which is the same noise in the opposite direction.
+
+What the adequate sample does show is worth more than the false finding was:
+
+* **Every control operation costs the same** — `CHECK`, `TOUCH`, `RESERVE`,
+  `COMMIT_STORE` and `TAKE_EVENTS` all sit at ~20 us uncontended. None of them is
+  distinguishable by its own work.
+* **Only the payload operations have a distinct cost.** `LOOKUP` is 274 us at one
+  lane against `CHECK`'s 25 — about eleven times — and that gap is the DMA.
+* **Control latency is dominated by queuing, and scales with lane count**: 25, 291
+  and 465 us at 1, 4 and 6 lanes. So a control-operation latency is a statement
+  about concurrency at the server, not about the operation.
+
+The report now prints each operation's request count and marks a count too small
+to quote (`QUOTABLE_REQUESTS = 100`), which is what caught this — the count column
+was already there, and reading it is what turned a plausible finding into a
+retraction.
 
 **A third defect the split exposed: we were transferring into reservations we did
 not hold.** 88 blocks written against 12 declined reserves — `RESERVE` answers
