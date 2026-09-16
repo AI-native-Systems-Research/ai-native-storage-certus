@@ -955,6 +955,11 @@ fn plan(description_path: &Path, until: f64, output: &Path, seed: u64) -> Result
 /// Returns the report text and the exit code, so validity travels in the process status
 /// and not only in the report (FR-062). A sweep driver that treats "the process exited"
 /// as "I have a data point" is exactly how an invalid run gets published.
+///
+/// `--until` is **optional**: absent means an unbounded run (FR-059), which works because
+/// the producer is throttled by the lanes' queues rather than by memory. An earlier cut
+/// pre-built the whole plan and silently substituted a 60-second span, which ran a
+/// different experiment than the one asked for.
 #[cfg(feature = "live")]
 #[allow(clippy::too_many_arguments)]
 fn live_run(
@@ -966,34 +971,18 @@ fn live_run(
     seed: u64,
     report_path: Option<PathBuf>,
 ) -> Result<(String, i32), Failure> {
-    use crate::live::{drive, LiveNode};
-    use crate::report::{LatencyPercentiles, LiveReport, Tuning};
+    use crate::report::{LatencyPercentiles, LiveReport, QueueStats, Tuning};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
     let (description, text, effective) = load(description_path)?;
-    let block_bytes = u32::try_from(description.blocks.bytes)
-        .map_err(|_| Failure::config("blocks.bytes exceeds a 32-bit reservation".to_string()))?;
+    let (client, channels) = crate::live::attach(shm_path, lanes).map_err(Failure::config)?;
+    let node_channels = client.channel_count();
 
-    let node = LiveNode::attach(shm_path, lanes, block_bytes).map_err(Failure::config)?;
-    let batch_keys = batch_keys.min(node.max_batch_keys()).max(1);
-
-    // An unbounded run needs a span to build a plan from, so it builds in windows. This
-    // first cut plans the whole span up front, which bounds a `run` by memory rather
-    // than by the span — see the note in the returned text.
-    let span = until.unwrap_or(60.0);
-    let mut sim = Simulation::new(&description, seed)
-        .map_err(|e| Failure::config(format!("cannot start the simulation: {e}")))?;
-    let mut plan = OperationPlan::default();
-    sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
-    plan.check_ordered()
-        .map_err(|e| Failure::other(format!("the plan is not ordered: {e}")))?;
-
-    // SIGINT/SIGTERM end the run cleanly; an interrupted run is not a failed one
-    // (FR-074), so the handler asks rather than aborts.
+    // SIGINT/SIGTERM end the run cleanly; an interrupted run is not a failed one (FR-074),
+    // so the handler asks rather than aborts.
     install_stop_handler().map_err(Failure::other)?;
     let stop = Arc::new(AtomicBool::new(false));
-    // Bridge the static the handler can touch to the flag the loop polls.
     let watcher = {
         let stop = Arc::clone(&stop);
         std::thread::spawn(move || {
@@ -1007,7 +996,15 @@ fn live_run(
         })
     };
 
-    let stats = drive(&node, &plan, &stop, description.blocks.bytes).map_err(Failure::other)?;
+    let stats = crate::live::run(
+        client,
+        channels,
+        &description,
+        seed,
+        until,
+        Arc::clone(&stop),
+    )
+    .map_err(Failure::other)?;
     stop.store(true, Ordering::Relaxed);
     let _ = watcher.join();
 
@@ -1017,23 +1014,34 @@ fn live_run(
         valid,
         invalid_reason: (!valid).then(|| {
             format!(
-                "the plan queue reached zero ({:.3}% of samples), so the generator did \
-                 not stay ahead of the lanes and the throughput describes the generator \
-                 rather than the server (FR-062)",
-                stats.fraction_at_zero * 100.0
+                "lanes found their queue empty {} times out of {} pops ({:.3}%), so the \
+                 generator and not Certus set the pace at those instants and the \
+                 throughput describes the instrument (FR-062)",
+                stats.empty_pops(),
+                stats.pops(),
+                stats.fraction_starved() * 100.0
             )
         }),
-        requests: stats.requests,
-        key_references: stats.key_references,
+        requests: stats.requests(),
+        key_references: stats.key_references(),
         keys_per_second: stats.keys_per_second(),
         bytes_per_second: stats.bytes_per_second(),
         virtual_to_wallclock: stats.virtual_to_wallclock(),
         elapsed_seconds: stats.elapsed,
         virtual_span: stats.virtual_span,
-        plan_queue_min_depth: stats.min_queue_depth,
-        plan_queue_fraction_at_zero: stats.fraction_at_zero,
-        lanes: stats.lanes,
-        node_channels: node.channel_count(),
+        queue: QueueStats {
+            batches_produced: stats.batches_produced,
+            pops: stats.pops(),
+            empty_pops: stats.empty_pops(),
+            fraction_starved: stats.fraction_starved(),
+            min_depth: stats.min_depth(),
+            capacity_per_lane: crate::live::QUEUE_CAPACITY,
+            per_lane_empty_pops: stats.lanes.iter().map(|l| l.empty_pops).collect(),
+            per_lane_min_depth: stats.lanes.iter().map(|l| l.min_depth).collect(),
+        },
+        producer_completed: stats.producer_completed,
+        lanes: stats.lanes.len(),
+        node_channels,
         latency_us: LatencyPercentiles {
             p50: stats.latency.value_at_quantile(0.50),
             p90: stats.latency.value_at_quantile(0.90),
@@ -1042,13 +1050,13 @@ fn live_run(
         },
         reproduction: Reproduction {
             seed,
-            until: span,
+            until: until.unwrap_or(stats.virtual_span),
             description_digest: digest_of(&text),
             description_path: description_path.display().to_string(),
         },
         tuning: Tuning { batch_keys, lanes },
-        skipped_needing_gpu: stats.skipped_needing_gpu,
-        skipped_keys: stats.skipped_keys,
+        skipped_needing_gpu: stats.skipped_needing_gpu(),
+        skipped_keys: stats.skipped_keys(),
     };
 
     if let Some(path) = report_path {

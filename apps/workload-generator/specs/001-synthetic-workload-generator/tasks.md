@@ -731,8 +731,8 @@ and VFIO per README.md), or a decision to accept unverified code.
 - [x] T043 [US1] Reject a lane count exceeding the node's channel count at
   startup in `crates/workload-gen/src/lanes.rs` — the mailbox is depth-1 per
   channel, so over-subscription would silently serialise
-- [ ] T044 [US1] Implement the plan queue in
-  `crates/workload-gen/src/lanes.rs`, produced ahead of the lanes, recording
+- [x] T044 [US1] Implement the plan queue in
+  `crates/workload-gen/src/live.rs`, produced ahead of the lanes, recording
   **minimum depth** and **fraction of the run at zero** rather than an average,
   which would conceal a brief exhaustion
 - [x] T045 [US1] Add per-request latency into an `hdrhistogram` in
@@ -809,20 +809,42 @@ and the throughput is not comparable with a complete run's. Skipping them
 silently would have produced a keys-per-second figure from a run that never
 transferred a block — the kind of number that gets quoted.
 
-**Two honest limitations, recorded rather than implied:**
+**T044 is now a streaming producer, and the metric has teeth.** The first
+implementation built the whole plan before the drive loop, which made FR-062's
+invalidity unable to fire — a vacuous check. It is now a producer thread
+stepping the simulation in windows of virtual time and pushing one turn at a
+time onto a bounded per-lane `sync_channel`, so a consumer that finds its queue
+empty is a real statement about the generator. Three measurements:
 
-1. **T044's plan queue is currently vacuous.** The plan is built in full before
-   the drive loop, so depth only falls to zero at the very end and FR-062's
-   invalidity can never fire. The metric is wired, reported and tested, but it
-   is not yet *load-bearing* — that needs a producer running ahead of the
-   lanes, which is T044's real intent.
-2. **The run does not pace to virtual time.** It replays as fast as the mailbox
-   allows, so `virtual/wallclock` of 2743 means "2743x faster than the
-   workload's own clock", not a sustained-load figure. Sustained pacing is what
-   makes the throughput number mean what an operator expects.
+| producer | starved | valid | exit |
+| --- | --- | --- | --- |
+| normal | 0 of 24 pops | yes | 0 |
+| +3 ms per batch (injected) | 17 of 24 (70.8%) | **no** | **3** |
+| unbounded, 28 420 batches | 0 | yes (interrupted) | 0 |
+
+**The initial fill is excluded, and the reason is not convenience.** Counting a
+consumer's first look — necessarily at an empty queue, since nothing has been
+produced — made every lane starve exactly once, `[1, 1, 1, 1]`, and every run
+invalid. One vacuous metric traded for another. A lane's first batch is now
+primed without counting, so starvation means "this lane had work and ran out",
+the condition FR-062 is about. Same principle as FR-046 excluding the startup
+cache clear: a run properly begins once its pipeline is full.
+
+Streaming also **bounds memory**: the 20-second unbounded run above held 13.3
+MiB RSS across 28 420 batches, where pre-building would have retained every
+turn's prefixes. That is what makes `--until` genuinely optional (no
+`unwrap_or(60.0)` fallback) and an interrupted run a valid result under FR-074.
+
+**One honest limitation remains: the run does not pace to virtual time.** It
+replays as fast as the mailbox allows, so `virtual/wallclock` of 430 means
+"430x faster than the workload's own clock", not a sustained-load figure.
+Sustained pacing is what makes the throughput number mean what an operator
+expects. Latency also rose from p50 16 µs (pre-built) to p50 62 µs with a
+~13 ms p99, which is the producer thread's contention and is the honest cost of
+not lying about the queue.
 
 **Still open in US1**: T038 (CUDA FFI), T039 (payload buffer), T051 (mock-mailbox op
-stream test), plus the two limitations above.
+stream test), plus the pacing limitation above.
 
 **Checkpoint**: US1 is functional against a live local server for the control path.
 

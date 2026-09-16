@@ -1,61 +1,102 @@
-//! The live path: driving a plan into a Certus node over its `/dev/shm` mailbox.
+//! The live path: a producer building the plan ahead of lanes that consume it.
 //!
-//! # Lanes are channels, because the mailbox is depth-1 per channel
+//! # The queue is the architecture, not instrumentation
 //!
-//! A lane holds one session's turn at a time. The mailbox gives one in-flight request
-//! per channel, so **lane count above channel count does not add concurrency — it
-//! serialises silently** behind a claimed channel. That is why over-subscription is
-//! refused at startup (FR-057's spirit, T043) rather than accepted and absorbed: a run
-//! that quietly ran at a third of its requested concurrency would still produce a
-//! throughput number.
+//! An earlier version of this module built the **entire** plan before issuing anything
+//! and then computed `depth = total - index`. That was a serious deviation from the
+//! design, and it broke two requirements at once in ways that looked fine:
 //!
-//! # The plan queue is measured by its minimum, never its average
+//! - **FR-062 could never fire.** A countdown from `total` to 1 makes the minimum depth
+//!   always 1 and the fraction at zero always 0, so `is_valid()` was a constant `true`.
+//!   Two live runs at different seeds and lane counts reported byte-identical queue
+//!   statistics, which is the signature of a value read off the loop index rather than
+//!   off the system.
+//! - **FR-059's unbounded run could not exist.** Pre-building allocates with the span, so
+//!   an unbounded run was silently substituted with a 60-second one — a different
+//!   experiment, reported as though it were the requested one.
 //!
-//! FR-062 makes a run whose plan queue reached zero **invalid**. An average depth would
-//! conceal exactly that: a queue sitting at 900 for a minute and touching zero once
-//! averages 899, and the run it describes is worthless. So [`LiveStats`] records the
-//! **minimum** depth and the **fraction of samples at zero**, and never a mean.
+//! Both come from the same missing piece. A bounded queue between a producer and the
+//! lanes is simultaneously what bounds memory, so an unbounded run is possible, and what
+//! makes starvation observable, so validity means something.
 //!
-//! # Timing is per request, never per key
+//! # Starvation is counted, never sampled
 //!
-//! A batch of 64 keys is one round trip, so timing each key would measure the same
-//! interval 64 times and put a clock read on the per-key path — instrumentation
-//! becoming the thing it measures (FR-038, T045). Latency is recorded once per request.
+//! Sampling depth as a gauge can miss a brief exhaustion between samples — the same
+//! failure as reporting an average, one level down. So a consumer that finds its queue
+//! empty **is** the starvation event, and it is counted directly. The minimum depth is
+//! recorded at pop time beside it, because a consumer's view of the queue is the one that
+//! matters.
 //!
-//! # What this module does not do
+//! ## The initial fill is excluded, and that is necessary rather than convenient
 //!
-//! No GPU. The payload a store transfers is a pre-filled reusable buffer
-//! ([`crate::payload`]), so nothing here allocates or fills bytes per operation
-//! (FR-038), and no CUDA is required to exercise the operation stream. Node placement
-//! and migration are US3.
+//! At the instant a run starts, every queue is empty because nothing has been produced
+//! yet, so a consumer's first look always finds it so. Counting that made the first
+//! streaming implementation report **every** lane starving exactly once — `[1, 1, 1, 1]`
+//! — and every run invalid, which is as useless as a check that never fires. One vacuous
+//! metric traded for another.
+//!
+//! So a lane's first batch is **primed**: it blocks for it without counting, and only
+//! afterwards does an empty queue mean the producer fell behind. Starvation is therefore
+//! "this lane had work and then ran out", which is the condition FR-062 is about. It is
+//! the same principle as FR-046 excluding the startup cache clear from the timed window —
+//! a run properly begins once its pipeline is full.
+//!
+//! # Lanes are sharded by session, which FR-035 requires
+//!
+//! A session's operations must stay strictly ordered. With one shared queue and several
+//! consumers, two turns of one session could be issued out of order by different lanes.
+//! So each lane owns a queue and the producer routes a turn to `session % lanes` —
+//! per-session order then holds by construction rather than by coordination.
+//!
+//! The cost is head-of-line blocking: a full queue on one lane blocks the producer for
+//! that lane while others drain, so a consumer can log a starvation the routing caused
+//! rather than the producer's speed. [`QUEUE_CAPACITY`] absorbs ordinary imbalance, and
+//! the report gives **per-lane** figures so the pattern is visible rather than averaged
+//! away.
+//!
+//! # What still needs a GPU
+//!
+//! `LOOKUP` and `COPY_TO_STORE` take a handle batch — `(key, IpcHandle)` pairs — because
+//! a load DMAs into a GPU buffer and a store copies out of one. Until the payload buffer
+//! lands (T038, T039) they are counted and skipped, and the report says the run was
+//! partial rather than quietly reporting a throughput for a stream that moved no data.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError};
 use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use hdrhistogram::Histogram;
 use shm_queue::Client;
 use shmq_dispatcher::wire;
-use workload_model::plan::{OpKind, Operation, OperationPlan};
+use workload_model::description::WorkloadDescription;
+use workload_model::plan::{OpKind, OperationPlan};
+use workload_model::sim::Simulation;
 
 use crate::opstream::{forbidden_opcode, Encoding, OpStream};
 
-/// What happened to one operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Issued {
-    /// Sent, with its round-trip time.
-    Sent(Duration),
-    /// Nothing to send.
-    Nothing,
-    /// Skipped for want of a GPU payload buffer, carrying the keys it would have moved.
-    NeedsGpu { keys: usize },
-}
+/// Turn batches a lane's queue holds before the producer blocks.
+///
+/// Each batch is one turn: its operations plus one copy of its prefix. Depth is therefore
+/// in **turns**, and memory is bounded by `lanes * QUEUE_CAPACITY * prefix size` rather
+/// than by the run's span — which is what makes an unbounded run possible at all.
+///
+/// 256 is deep enough to absorb the imbalance session sharding creates and shallow enough
+/// that a long-session workload does not hold hundreds of megabytes.
+pub const QUEUE_CAPACITY: usize = 256;
+
+/// Virtual seconds the producer advances per step.
+///
+/// A window rather than the whole span: a bounded run must not build what it has not been
+/// asked for, and an unbounded one has no whole span to build.
+const PRODUCE_WINDOW: f64 = 5.0;
 
 /// How long `attach` waits for the server to publish its ready flag.
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Spin iterations before a request parks. Matches `apps/remote-lookup-bench`, so the
-/// two tools contend for the mailbox the same way.
+/// Spin iterations before a request parks. Matches `apps/remote-lookup-bench`, so the two
+/// tools contend for the mailbox the same way.
 const SPIN_ITERS: u32 = 20_000;
 
 /// Per-attempt wait before retrying a response poll.
@@ -64,49 +105,103 @@ const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(50);
 /// Overall deadline for one request.
 const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
 
-/// What a live run measured.
-#[derive(Debug, Clone)]
-pub struct LiveStats {
+/// One lane's view of its own queue and its own traffic.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LaneStats {
+    /// Batches taken.
+    pub pops: u64,
+    /// Pops that found the queue **empty** — each one a starvation event, meaning the
+    /// generator was the constraint at that instant (FR-062).
+    pub empty_pops: u64,
+    /// Smallest depth seen at pop time.
+    pub min_depth: usize,
     /// Requests issued.
     pub requests: u64,
-    /// Requests the server answered with an error status.
-    pub errors: u64,
-    /// Key references issued across every request.
+    /// Key references issued.
     pub key_references: u64,
-    /// Bytes the workload's blocks represent, from the description's geometry.
-    pub block_bytes: u64,
-    /// Wallclock seconds of the timed window, excluding any startup cache clear.
-    pub elapsed: f64,
-    /// Virtual seconds the plan advanced over that window.
-    pub virtual_span: f64,
-    /// Smallest plan-queue depth seen. Zero makes the run invalid (FR-062).
-    pub min_queue_depth: usize,
-    /// Fraction of samples at zero depth.
-    pub fraction_at_zero: f64,
-    /// Per-request latency.
-    pub latency: Histogram<u64>,
-    /// Lanes used, which is also channels claimed.
-    pub lanes: usize,
-    /// Operations skipped for want of a GPU payload buffer (`LOOKUP`,
-    /// `COPY_TO_STORE`).
-    ///
-    /// Non-zero means the run exercised the control path but moved no data, so its
-    /// throughput is **not** comparable with a complete run's. The report says so.
+    /// Operations skipped for want of a GPU payload buffer.
     pub skipped_needing_gpu: u64,
     /// Keys those skipped operations would have moved.
     pub skipped_keys: u64,
 }
 
+/// What a live run measured.
+#[derive(Debug, Clone)]
+pub struct LiveStats {
+    /// Per-lane figures, so a routing imbalance is visible rather than averaged away.
+    pub lanes: Vec<LaneStats>,
+    /// Turn batches the producer built.
+    pub batches_produced: u64,
+    /// Whether the producer reached the end of its span rather than being stopped.
+    pub producer_completed: bool,
+    /// Bytes per block, from the description's geometry.
+    pub block_bytes: u64,
+    /// Wallclock seconds of the timed window.
+    pub elapsed: f64,
+    /// Virtual seconds the plan advanced.
+    pub virtual_span: f64,
+    /// Per-request latency across every lane.
+    pub latency: Histogram<u64>,
+}
+
 impl LiveStats {
-    /// Whether the run is valid: the plan queue never reached zero (FR-062).
+    /// Starvation events across all lanes.
+    pub fn empty_pops(&self) -> u64 {
+        self.lanes.iter().map(|l| l.empty_pops).sum()
+    }
+
+    /// Pops across all lanes.
+    pub fn pops(&self) -> u64 {
+        self.lanes.iter().map(|l| l.pops).sum()
+    }
+
+    /// Smallest depth any lane saw at pop time.
+    pub fn min_depth(&self) -> usize {
+        self.lanes.iter().map(|l| l.min_depth).min().unwrap_or(0)
+    }
+
+    /// Fraction of pops that found an empty queue.
+    pub fn fraction_starved(&self) -> f64 {
+        let pops = self.pops();
+        if pops == 0 {
+            0.0
+        } else {
+            self.empty_pops() as f64 / pops as f64
+        }
+    }
+
+    /// Requests issued.
+    pub fn requests(&self) -> u64 {
+        self.lanes.iter().map(|l| l.requests).sum()
+    }
+
+    /// Key references issued.
+    pub fn key_references(&self) -> u64 {
+        self.lanes.iter().map(|l| l.key_references).sum()
+    }
+
+    /// Operations skipped for want of a GPU payload buffer.
+    pub fn skipped_needing_gpu(&self) -> u64 {
+        self.lanes.iter().map(|l| l.skipped_needing_gpu).sum()
+    }
+
+    /// Keys those skipped operations would have moved.
+    pub fn skipped_keys(&self) -> u64 {
+        self.lanes.iter().map(|l| l.skipped_keys).sum()
+    }
+
+    /// Whether the run is valid: **no lane ever found its queue empty** (FR-062).
+    ///
+    /// A starvation means the generator, not Certus, set the pace at that instant, so the
+    /// throughput would describe the instrument rather than the system under test.
     pub fn is_valid(&self) -> bool {
-        self.min_queue_depth > 0
+        self.empty_pops() == 0
     }
 
     /// Keys per second over the timed window.
     pub fn keys_per_second(&self) -> f64 {
         if self.elapsed > 0.0 {
-            self.key_references as f64 / self.elapsed
+            self.key_references() as f64 / self.elapsed
         } else {
             0.0
         }
@@ -119,8 +214,8 @@ impl LiveStats {
 
     /// Virtual seconds advanced per wallclock second.
     ///
-    /// Above 1 means the generator outran the workload's own clock; below 1 means the
-    /// server could not keep up with it.
+    /// A **speedup**, not a sustained-load figure: the run is closed-loop and issues as
+    /// fast as the mailbox allows, because an open-loop paced mode is out of scope.
     pub fn virtual_to_wallclock(&self) -> f64 {
         if self.elapsed > 0.0 {
             self.virtual_span / self.elapsed
@@ -130,300 +225,417 @@ impl LiveStats {
     }
 }
 
-/// A connection to one Certus node's mailbox.
-pub struct LiveNode {
-    client: Client,
-    stream: OpStream,
-    lanes: Vec<usize>,
-}
-
-impl LiveNode {
-    /// Attach to the mailbox at `shm_path` and claim `lanes` channels.
-    ///
-    /// # Errors
-    ///
-    /// If the mailbox cannot be attached, or `lanes` exceeds the node's channel count —
-    /// refused rather than clamped, because the mailbox is depth-1 per channel and
-    /// over-subscription would silently serialise (T043).
-    pub fn attach(shm_path: &str, lanes: usize, block_bytes: u32) -> Result<Self, String> {
-        let client = Client::attach(shm_path, ATTACH_TIMEOUT)
-            .map_err(|e| format!("attach shmq mailbox {shm_path}: {e}"))?;
-        let channels = client.channel_count();
-        if lanes == 0 {
-            return Err("--lanes must be at least 1".to_string());
-        }
-        if lanes > channels {
-            return Err(format!(
-                "refusing to run: {lanes} lanes against a node with {channels} channels. \
-                 The mailbox is depth-1 per channel, so the extra lanes would not add \
-                 concurrency — they would serialise behind a claimed channel and the run \
-                 would report a throughput for a concurrency it never had. Use --lanes \
-                 {channels} or fewer"
-            ));
-        }
-        let mut claimed = Vec::with_capacity(lanes);
-        for _ in 0..lanes {
-            match client.claim_channel() {
-                Some(ch) => claimed.push(ch),
-                None => {
-                    for ch in &claimed {
-                        client.release_channel(*ch);
-                    }
-                    return Err(format!(
-                        "could only claim {} of {lanes} channels; another client holds \
-                         the rest",
-                        claimed.len()
-                    ));
-                }
-            }
-        }
-        Ok(Self {
-            client,
-            stream: OpStream::new(block_bytes),
-            lanes: claimed,
-        })
-    }
-
-    /// Channels this node offers.
-    pub fn channel_count(&self) -> usize {
-        self.client.channel_count()
-    }
-
-    /// Lanes claimed.
-    pub fn lanes(&self) -> usize {
-        self.lanes.len()
-    }
-
-    /// Largest key list that fits the server's request capacity.
-    ///
-    /// A batch beyond this would be rejected by the mailbox's own assertion, so the
-    /// caller's `--batch-keys` is capped against it rather than trusted.
-    pub fn max_batch_keys(&self) -> usize {
-        // `n:u32` then 8 bytes per key, with room for RESERVE's wider entries.
-        (self.client.cap_req().saturating_sub(8)) / 20
-    }
-
-    /// Issue one plan operation on `lane`, returning its latency.
-    ///
-    /// # Errors
-    ///
-    /// If the request fails or the server answers with an error status.
-    fn issue(&self, lane: usize, plan: &OperationPlan, op: &Operation) -> Result<Issued, String> {
-        let encoded = match self.stream.encode(plan, op) {
-            Encoding::Ready(e) => e,
-            // Only `Abort`, which the planner never emits.
-            Encoding::NotPlanned => return Ok(Issued::Nothing),
-            Encoding::NeedsGpuPayload { keys, .. } => {
-                return Ok(Issued::NeedsGpu { keys });
-            }
-        };
-        if let Some(why) = forbidden_opcode(encoded.opcode) {
-            return Err(format!("refusing to issue a forbidden operation: {why}"));
-        }
-        let channel = self.lanes[lane % self.lanes.len()];
-        // One clock read per request, never per key: see the module docs.
-        let started = Instant::now();
-        let (status, body) = self
-            .client
-            .request(
-                channel,
-                encoded.opcode,
-                &encoded.payload,
-                SPIN_ITERS,
-                ATTEMPT_TIMEOUT,
-                REQUEST_DEADLINE,
-            )
-            .map_err(|e| format!("shmq request (op {}) failed: {e}", encoded.opcode))?;
-        let elapsed = started.elapsed();
-        if status != wire::STATUS_OK {
-            return Err(format!(
-                "op {} returned an error status: {}",
-                encoded.opcode,
-                String::from_utf8_lossy(&body)
-            ));
-        }
-        Ok(Issued::Sent(elapsed))
-    }
-}
-
-impl Drop for LiveNode {
-    fn drop(&mut self) {
-        // Give the channels back, so a second run on the same mailbox is not refused
-        // for lack of them.
-        for ch in &self.lanes {
-            self.client.release_channel(*ch);
-        }
-    }
-}
-
-/// Drive `plan` into `node`, sampling the plan queue as it goes.
+/// One turn's operations, owned so they can cross a thread boundary.
 ///
-/// `stop` lets a signal handler end the run cleanly: an interrupted run whose queue
-/// never reached zero is **valid** (FR-074), so interruption is not a failure.
+/// An [`OperationPlan`] holding a single turn is exactly the right container: it interns
+/// the prefix **once** and shares that range between `Check`, `Touch` and `Load`, so a
+/// batch costs one prefix copy rather than three. Reusing it also means the queued form
+/// and the emitted form are the same type, so they cannot drift.
+type Batch = OperationPlan;
+
+/// A lane: one bounded queue and the depth counter its consumer reads.
+struct Lane {
+    tx: SyncSender<Batch>,
+    depth: Arc<AtomicUsize>,
+}
+
+/// Attach to a node's mailbox and claim `lanes` channels.
 ///
 /// # Errors
 ///
-/// If a request fails. A server error ends the run, because continuing would report a
-/// throughput for a workload that was partly refused.
-pub fn drive(
-    node: &LiveNode,
-    plan: &OperationPlan,
-    stop: &Arc<AtomicBool>,
-    block_bytes: u64,
+/// If the mailbox cannot be attached, or `lanes` exceeds the node's channel count —
+/// refused rather than clamped, because the mailbox is depth-1 per channel and
+/// over-subscription would serialise silently behind a claimed channel.
+pub fn attach(shm_path: &str, lanes: usize) -> Result<(Arc<Client>, Vec<usize>), String> {
+    let client = Client::attach(shm_path, ATTACH_TIMEOUT)
+        .map_err(|e| format!("attach shmq mailbox {shm_path}: {e}"))?;
+    let channels = client.channel_count();
+    if lanes == 0 {
+        return Err("--lanes must be at least 1".to_string());
+    }
+    if lanes > channels {
+        return Err(format!(
+            "refusing to run: {lanes} lanes against a node with {channels} channels. The \
+             mailbox is depth-1 per channel, so the extra lanes would not add concurrency \
+             — they would serialise behind a claimed channel and the run would report a \
+             throughput for a concurrency it never had. Use --lanes {channels} or fewer"
+        ));
+    }
+    let mut claimed = Vec::with_capacity(lanes);
+    for _ in 0..lanes {
+        match client.claim_channel() {
+            Some(ch) => claimed.push(ch),
+            None => {
+                for ch in &claimed {
+                    client.release_channel(*ch);
+                }
+                return Err(format!(
+                    "could only claim {} of {lanes} channels; another client holds the rest",
+                    claimed.len()
+                ));
+            }
+        }
+    }
+    Ok((Arc::new(client), claimed))
+}
+
+/// Run the workload: one producer thread, one consumer per lane.
+///
+/// `until` of `None` is an **unbounded** run (FR-059), possible precisely because the
+/// producer is throttled by the queue rather than by memory. It ends when `stop` is set,
+/// and an interrupted run whose lanes never starved is **valid** (FR-074).
+///
+/// # Errors
+///
+/// If a lane's request fails or a lane thread panics.
+pub fn run(
+    client: Arc<Client>,
+    channels: Vec<usize>,
+    description: &WorkloadDescription,
+    seed: u64,
+    until: Option<f64>,
+    stop: Arc<AtomicBool>,
 ) -> Result<LiveStats, String> {
+    let block_bytes = u32::try_from(description.blocks.bytes)
+        .map_err(|_| "blocks.bytes exceeds a 32-bit reservation".to_string())?;
+    let lane_count = channels.len();
+
+    let mut senders: Vec<Lane> = Vec::with_capacity(lane_count);
+    let mut consumers = Vec::with_capacity(lane_count);
+    let started = Instant::now();
+
+    for channel in channels.iter().copied() {
+        let (tx, rx) = sync_channel::<Batch>(QUEUE_CAPACITY);
+        let depth = Arc::new(AtomicUsize::new(0));
+        senders.push(Lane {
+            tx,
+            depth: Arc::clone(&depth),
+        });
+        let client = Arc::clone(&client);
+        let stop = Arc::clone(&stop);
+        consumers.push(thread::spawn(move || {
+            consume(client, channel, block_bytes, rx, depth, stop)
+        }));
+    }
+
+    // The producer runs on this thread. Single-threaded and deterministic, so what it
+    // builds is a function of description and seed alone (FR-072) — lane count changes
+    // only who issues an operation, never which operations exist.
+    let produced = produce(description, seed, until, &senders, &stop);
+    // Dropping the senders closes each queue, which is how a consumer tells "the run is
+    // over" from "the queue is momentarily quiet" — the distinction the starvation count
+    // depends on.
+    drop(senders);
+
+    let mut lanes = Vec::with_capacity(lane_count);
     let mut latency = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
         .map_err(|e| format!("cannot build the latency histogram: {e}"))?;
-    let ops = plan.operations();
-    let total = ops.len();
-
-    let mut requests = 0u64;
-    let mut errors = 0u64;
-    let mut key_references = 0u64;
-    let mut min_queue_depth = usize::MAX;
-    let mut samples = 0u64;
-    let mut at_zero = 0u64;
-    let mut virtual_span = 0.0f64;
-    let mut skipped_needing_gpu = 0u64;
-    let mut skipped_keys = 0u64;
-
-    let started = Instant::now();
-    for (i, op) in ops.iter().enumerate() {
-        if stop.load(Ordering::Relaxed) {
-            break;
-        }
-        // Depth is what remains built but unissued. The plan is built ahead in full
-        // here, so this measures the *consumer* draining it — which is the quantity
-        // FR-062 cares about, and it is sampled per operation rather than averaged.
-        let depth = total - i;
-        min_queue_depth = min_queue_depth.min(depth);
-        samples += 1;
-        if depth == 0 {
-            at_zero += 1;
-        }
-
-        let lane = (op.session() as usize) % node.lanes();
-        match node.issue(lane, plan, op) {
-            Ok(Issued::Sent(d)) => {
-                let micros = d.as_micros().clamp(1, 60_000_000) as u64;
+    let mut first_error = None;
+    for (i, handle) in consumers.into_iter().enumerate() {
+        match handle.join() {
+            Ok(Ok((stats, hist))) => {
+                lanes.push(stats);
                 latency
-                    .record(micros)
-                    .map_err(|e| format!("latency out of histogram range: {e}"))?;
-                requests += 1;
-                if op.kind() != OpKind::PollEvents {
-                    key_references += op.key_count() as u64;
-                }
+                    .add(hist)
+                    .map_err(|e| format!("merging lane {i}'s latencies: {e}"))?;
             }
-            Ok(Issued::Nothing) => {}
-            Ok(Issued::NeedsGpu { keys }) => {
-                skipped_needing_gpu += 1;
-                skipped_keys += keys as u64;
+            Ok(Err(e)) => {
+                lanes.push(LaneStats::default());
+                first_error = first_error.or(Some(format!("lane {i}: {e}")));
             }
-            Err(e) => {
-                // Counted before returning so the field is not dead: a server error ends
-                // the run, because continuing would report a throughput for a workload
-                // that was partly refused.
-                errors += 1;
-                return Err(format!("{e} (after {requests} requests, {errors} errors)"));
+            Err(_) => {
+                lanes.push(LaneStats::default());
+                first_error = first_error.or(Some(format!("lane {i} panicked")));
             }
         }
-        virtual_span = virtual_span.max(op.at());
     }
     let elapsed = started.elapsed().as_secs_f64();
 
+    for ch in &channels {
+        client.release_channel(*ch);
+    }
+    if let Some(e) = first_error {
+        return Err(e);
+    }
+    let (batches_produced, virtual_span, producer_completed) = produced?;
+
     Ok(LiveStats {
-        requests,
-        errors,
-        key_references,
-        block_bytes,
+        lanes,
+        batches_produced,
+        producer_completed,
+        block_bytes: description.blocks.bytes,
         elapsed,
         virtual_span,
-        min_queue_depth: if min_queue_depth == usize::MAX {
-            0
-        } else {
-            min_queue_depth
-        },
-        fraction_at_zero: if samples == 0 {
-            0.0
-        } else {
-            at_zero as f64 / samples as f64
-        },
         latency,
-        lanes: node.lanes(),
-        skipped_needing_gpu,
-        skipped_keys,
     })
+}
+
+/// Build turn batches and push each to its lane, blocking when that lane is full.
+///
+/// Returns `(batches, virtual span reached, completed)`. Blocking on a full queue is the
+/// point: it is the backpressure that bounds memory, and it is what leaves the producer's
+/// speed observable at the consumer instead of absorbed by an ever-growing buffer.
+fn produce(
+    description: &WorkloadDescription,
+    seed: u64,
+    until: Option<f64>,
+    lanes: &[Lane],
+    stop: &Arc<AtomicBool>,
+) -> Result<(u64, f64, bool), String> {
+    let mut sim = Simulation::new(description, seed)
+        .map_err(|e| format!("cannot start the simulation: {e}"))?;
+    let n = lanes.len();
+    let mut batches = 0u64;
+    // Set when a send fails, meaning every consumer has gone.
+    let mut disconnected = false;
+    let mut horizon = PRODUCE_WINDOW;
+
+    loop {
+        if stop.load(Ordering::Relaxed) || disconnected {
+            return Ok((batches, sim.now(), false));
+        }
+        if let Some(cap) = until {
+            horizon = horizon.min(cap);
+        }
+
+        let mut this_window = 0u64;
+        sim.run_until(horizon, &mut |session, turn| {
+            if disconnected {
+                return;
+            }
+            let mut batch = Batch::default();
+            batch.record_turn(session, turn);
+            let lane = (session.id() as usize) % n;
+            lanes[lane].depth.fetch_add(1, Ordering::Relaxed);
+            if lanes[lane].tx.send(batch).is_err() {
+                lanes[lane].depth.fetch_sub(1, Ordering::Relaxed);
+                disconnected = true;
+                return;
+            }
+            this_window += 1;
+        });
+        batches += this_window;
+
+        if let Some(cap) = until {
+            if horizon >= cap {
+                return Ok((batches, cap, true));
+            }
+        }
+        // An unbounded run with nothing left to do — every population mint-once and every
+        // session finished — would otherwise advance the horizon for ever.
+        if this_window == 0 && sim.next_event_at().is_none() {
+            return Ok((batches, sim.now(), true));
+        }
+        horizon += PRODUCE_WINDOW;
+    }
+}
+
+/// Take batches from one lane's queue and issue them.
+///
+/// A `try_recv` that returns empty **is** a starvation event and is counted before the
+/// thread blocks, so the figure is a count of consumer stalls rather than of a sampled
+/// gauge and a brief exhaustion cannot fall between samples.
+fn consume(
+    client: Arc<Client>,
+    channel: usize,
+    block_bytes: u32,
+    rx: Receiver<Batch>,
+    depth: Arc<AtomicUsize>,
+    stop: Arc<AtomicBool>,
+) -> Result<(LaneStats, Histogram<u64>), String> {
+    let stream = OpStream::new(block_bytes);
+    let mut stats = LaneStats {
+        min_depth: usize::MAX,
+        ..LaneStats::default()
+    };
+    let mut latency = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
+        .map_err(|e| format!("cannot build the latency histogram: {e}"))?;
+
+    // Prime: block for the first batch without counting it. Every queue is empty before
+    // the producer has pushed anything, so counting that would invalidate every run —
+    // see the module docs.
+    let mut primed = false;
+
+    loop {
+        let batch = match rx.try_recv() {
+            Ok(b) => b,
+            Err(TryRecvError::Empty) => {
+                if primed {
+                    // This lane had work and ran out: the generator fell behind, which is
+                    // FR-062's event.
+                    stats.empty_pops += 1;
+                    stats.min_depth = 0;
+                }
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                match rx.recv() {
+                    Ok(b) => b,
+                    // Closed while we waited, so the run is over rather than starved.
+                    Err(_) => break,
+                }
+            }
+            Err(TryRecvError::Disconnected) => break,
+        };
+        primed = true;
+        let observed = depth.fetch_sub(1, Ordering::Relaxed).saturating_sub(1);
+        stats.pops += 1;
+        stats.min_depth = stats.min_depth.min(observed);
+
+        for op in batch.operations() {
+            let encoded = match stream.encode(&batch, op) {
+                Encoding::Ready(e) => e,
+                Encoding::NotPlanned => continue,
+                Encoding::NeedsGpuPayload { keys, .. } => {
+                    stats.skipped_needing_gpu += 1;
+                    stats.skipped_keys += keys as u64;
+                    continue;
+                }
+            };
+            if let Some(why) = forbidden_opcode(encoded.opcode) {
+                return Err(format!("refusing to issue a forbidden operation: {why}"));
+            }
+            // One clock read per request, never per key: a batch of 64 keys is one round
+            // trip, so per-key timing would measure the same interval 64 times and put a
+            // clock on the per-key path (FR-038).
+            let started = Instant::now();
+            let (status, body) = client
+                .request(
+                    channel,
+                    encoded.opcode,
+                    &encoded.payload,
+                    SPIN_ITERS,
+                    ATTEMPT_TIMEOUT,
+                    REQUEST_DEADLINE,
+                )
+                .map_err(|e| format!("shmq request (op {}) failed: {e}", encoded.opcode))?;
+            if status != wire::STATUS_OK {
+                return Err(format!(
+                    "op {} returned an error status: {}",
+                    encoded.opcode,
+                    String::from_utf8_lossy(&body)
+                ));
+            }
+            let micros = started.elapsed().as_micros().clamp(1, 60_000_000) as u64;
+            latency
+                .record(micros)
+                .map_err(|e| format!("latency out of histogram range: {e}"))?;
+            stats.requests += 1;
+            if op.kind() != OpKind::PollEvents {
+                stats.key_references += op.key_count() as u64;
+            }
+        }
+    }
+
+    if stats.min_depth == usize::MAX {
+        stats.min_depth = 0;
+    }
+    Ok((stats, latency))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn keys_and_bytes_per_second_come_from_the_timed_window() {
-        let stats = LiveStats {
-            requests: 100,
-            errors: 0,
-            key_references: 2_000,
+    fn stats(lanes: Vec<LaneStats>, elapsed: f64) -> LiveStats {
+        LiveStats {
+            lanes,
+            batches_produced: 10,
+            producer_completed: true,
             block_bytes: 32_768,
-            elapsed: 2.0,
+            elapsed,
             virtual_span: 10.0,
-            min_queue_depth: 5,
-            fraction_at_zero: 0.0,
             latency: Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
-            lanes: 4,
-            skipped_needing_gpu: 0,
-            skipped_keys: 0,
-        };
-        assert_eq!(stats.keys_per_second(), 1_000.0);
-        assert_eq!(stats.bytes_per_second(), 1_000.0 * 32_768.0);
-        assert_eq!(stats.virtual_to_wallclock(), 5.0);
-        assert!(stats.is_valid());
+        }
+    }
+
+    fn lane(pops: u64, empty: u64, min_depth: usize) -> LaneStats {
+        LaneStats {
+            pops,
+            empty_pops: empty,
+            min_depth,
+            ..Default::default()
+        }
     }
 
     #[test]
-    fn a_queue_that_reached_zero_makes_the_run_invalid() {
-        // FR-062. Asserted on the minimum rather than on an average, because an
-        // average conceals exactly this: 900 for a minute with one touch of zero
-        // averages 899 and describes a worthless run.
-        let mut stats = LiveStats {
-            requests: 1,
-            errors: 0,
-            key_references: 1,
-            block_bytes: 1,
-            elapsed: 1.0,
-            virtual_span: 1.0,
-            min_queue_depth: 0,
-            fraction_at_zero: 0.001,
-            latency: Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
-            lanes: 1,
-            skipped_needing_gpu: 0,
-            skipped_keys: 0,
-        };
-        assert!(!stats.is_valid(), "a zero-depth run must be invalid");
-        stats.min_queue_depth = 1;
-        assert!(stats.is_valid());
+    fn a_single_starvation_anywhere_invalidates_the_run() {
+        // FR-062, and the property the old implementation could not express: validity now
+        // depends on something the system does, not on a loop index.
+        let healthy = stats(vec![lane(100, 0, 4), lane(100, 0, 9)], 1.0);
+        assert!(healthy.is_valid());
+        assert_eq!(healthy.min_depth(), 4);
+        assert_eq!(healthy.fraction_starved(), 0.0);
+
+        let starved = stats(vec![lane(100, 0, 4), lane(100, 1, 0)], 1.0);
+        assert!(
+            !starved.is_valid(),
+            "one starvation on one lane must invalidate the run"
+        );
+        assert_eq!(starved.empty_pops(), 1);
+        assert_eq!(starved.min_depth(), 0);
     }
 
     #[test]
-    fn rates_are_zero_rather_than_nan_for_an_empty_window() {
-        // A NaN in a report is worse than a zero: it propagates into every aggregate
-        // that touches it.
-        let stats = LiveStats {
-            requests: 0,
-            errors: 0,
-            key_references: 0,
-            block_bytes: 4_096,
-            elapsed: 0.0,
-            virtual_span: 0.0,
-            min_queue_depth: 0,
-            fraction_at_zero: 0.0,
-            latency: Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
-            lanes: 1,
-            skipped_needing_gpu: 0,
-            skipped_keys: 0,
-        };
-        assert_eq!(stats.keys_per_second(), 0.0);
-        assert_eq!(stats.bytes_per_second(), 0.0);
-        assert_eq!(stats.virtual_to_wallclock(), 0.0);
+    fn per_lane_figures_are_kept_rather_than_averaged() {
+        // Session sharding creates imbalance, and an aggregate would hide a lane that
+        // starved on every pop behind another that never did.
+        let s = stats(vec![lane(10, 10, 0), lane(1_000, 0, 12)], 1.0);
+        assert_eq!(s.lanes[0].empty_pops, 10);
+        assert_eq!(s.lanes[1].empty_pops, 0);
+        assert!(!s.is_valid());
+        // The overall fraction is under 1%, which is exactly why the per-lane figure is
+        // reported beside it rather than instead of it.
+        assert!(s.fraction_starved() < 0.01);
+    }
+
+    #[test]
+    fn rates_aggregate_across_lanes_and_never_produce_a_nan() {
+        let s = stats(
+            vec![
+                LaneStats {
+                    requests: 50,
+                    key_references: 500,
+                    ..Default::default()
+                },
+                LaneStats {
+                    requests: 50,
+                    key_references: 1_500,
+                    ..Default::default()
+                },
+            ],
+            2.0,
+        );
+        assert_eq!(s.requests(), 100);
+        assert_eq!(s.key_references(), 2_000);
+        assert_eq!(s.keys_per_second(), 1_000.0);
+        assert_eq!(s.bytes_per_second(), 1_000.0 * 32_768.0);
+
+        let empty = stats(vec![LaneStats::default()], 0.0);
+        assert_eq!(empty.keys_per_second(), 0.0);
+        assert_eq!(empty.virtual_to_wallclock(), 0.0);
+        assert_eq!(empty.fraction_starved(), 0.0);
+    }
+
+    #[test]
+    fn a_lane_that_never_received_anything_is_not_counted_as_starved() {
+        // The startup transient. A lane with no pops at all never got past priming, so it
+        // contributes no starvation — otherwise a run that ended before a lane's first
+        // batch would be invalid for a reason that says nothing about the generator.
+        let s = stats(vec![lane(0, 0, 0), lane(50, 0, 7)], 1.0);
+        assert!(s.is_valid());
+        assert_eq!(s.empty_pops(), 0);
+    }
+
+    #[test]
+    fn depth_is_in_turns_and_capped_so_memory_does_not_track_the_span() {
+        // The property that makes an unbounded run possible. Stated as an assertion
+        // because it is the reason the queue exists, and a later "let's make it bigger"
+        // should have to argue with it.
+        assert!(QUEUE_CAPACITY > 0);
+        assert!(
+            QUEUE_CAPACITY <= 1024,
+            "a deeper queue holds more prefixes than a long-session workload can afford"
+        );
     }
 }
