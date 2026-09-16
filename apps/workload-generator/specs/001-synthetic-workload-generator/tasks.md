@@ -2129,6 +2129,33 @@ launcher would fail.
   per-op latency and bandwidth are unchanged — they should be, since the agent already times
   its own mailbox requests, and if they move something else is wrong
 
+**T074 done, 3 tests. US3's implementation is complete.** A plan driven through a real
+loopback agent submits **exactly** what the local path would have executed — same sessions,
+same key paths, same event polls, in the same order.
+
+**It lives in `workload-gen/tests/`, not `workload-wire/tests/` as the task said**, because
+that cannot work: the comparison needs a plan and a producer, both in `workload-gen`, which
+already depends on `workload-wire`. A test there would need the dependency to run both ways.
+
+**What it compares, and why that is the whole claim.** Both paths reduce a turn to a session
+id and a key path; what follows is `exec::TurnExecutor`, of which there is exactly one
+(T068a). So identical paths imply identical operations, and the argument has three parts:
+`op_stream.rs` establishes that the executor turns a path into the right mailbox operations,
+checked against the dispatcher's own rules; the single executor is structural rather than
+tested; and **this file establishes that the wire carries the same paths**. Comparing mailbox
+traffic directly would need a live server on both sides or a mailbox trait to mock, and the
+middle part is why that is unnecessary rather than merely inconvenient.
+
+Two supporting tests keep the comparison from being vacuous: a turn's path must run from the
+root and **grow** across a session's turns, so the equivalence is over real prefixes rather
+than empty lists; and a different seed must produce different keys, so the comparison
+demonstrably has teeth.
+
+**This is the evidence T075 needs.** FR-079 collapses the local path onto this one, and a test
+comparing them had to exist *before* one is deleted — otherwise the unification is a change
+nobody can show is inert. After T075 it becomes a regression guard against the deleted
+behaviour.
+
 **Checkpoint**: all three execution paths work; US1 and US2 are unaffected by
 US3.
 
