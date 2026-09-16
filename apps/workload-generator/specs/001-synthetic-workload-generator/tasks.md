@@ -1594,7 +1594,30 @@ local hit rate on the origin node is unchanged.
   server, in `crates/workload-wire/tests/conformance.rs`, covering all six
   cases listed in `contracts/node-agent-wire.md`
 
-**T063/T064 done, 13 conformance tests, no agent and no accelerator needed.**
+**T065 done, 12 client tests.** Two properties are asserted rather than assumed.
+Pipelining depth is proved not to change what is submitted — the frames at depth
+1, 8 and 32 are byte-identical bar their correlation ids, which is FR-072 in its
+transport form. And a reply is **matched by correlation id rather than by arrival
+order**, tested with replies queued newest-first, because the contract permits a
+multiplexed connection and an in-order stream must not become an unstated
+assumption.
+
+`TCP_NODELAY` is checked on a real loopback socket, since it is the one property an
+in-memory transport cannot answer. A synchronous call with turns still in flight is
+**refused**, because the next frame off the socket would be a `TurnOutcome` and
+would be decoded as whatever was asked for — a silent misread rather than an error.
+A clean close is reported as `Closed` distinctly from an I/O error, since a lost
+node must abort the run and be named (FR-064).
+
+**Why pipelining does not break per-session ordering**, recorded because it is a
+requirement on the agent rather than a hope about it: a session's turns must be
+issued in order while different sessions may overlap, and that holds only because
+the agent processes one connection's frames **in arrival order** while a lane owns a
+fixed set of sessions on its own connection. An agent that handed a connection's
+frames to a thread pool would silently reorder a session's turns, and the result
+would look like a cache that had lost blocks it was given.
+
+**T063/T064 done, 15 conformance tests, no agent and no accelerator needed.**
 Two allocation hazards are guarded rather than one: `len` is refused against a
 bound before anything is sized from it, and `SubmitTurn`'s **key count** is
 checked against the bytes actually present before the vector is reserved — a
@@ -1607,7 +1630,7 @@ the generator never sent.
 `PROTO_VERSION` is pinned at 2 with a test that says why: version 1 sent one
 operation per frame, and an agent speaking it would read a key *path* as an
 operation's key list and issue something plausible.
-- [ ] T065 [US3] Implement the client half in
+- [x] T065 [US3] Implement the client half in
   `crates/workload-wire/src/client.rs`: `TCP_NODELAY`, configurable pipelining
   depth independent of lane count, correlation ids
 - [ ] T066 [US3] Implement the server half in
@@ -1632,6 +1655,13 @@ operation's key list and issue something plausible.
   never percentiles: the median of two nodes' medians is not a median, so merging
   percentiles yields a number belonging to no distribution. Needs
   `hdrhistogram`'s `serialization` feature
+- [ ] T068c [US3] Have the **mailbox-facing code be the only collector** of latency
+  and bandwidth, on both paths, and ship its `Counters` back with `Stats`. Only the
+  agent is near a remote mailbox, so only it can time a `LOOKUP` or count a block
+  that moved; a figure derived from wire timings would describe the transport. The
+  counters are **for reporting only** — they may not gate validity, steer
+  submission, or re-enter the workload
+- [x] T065 [US3] *(also covers the depth-invariance property)* — see below
 - [ ] T069 [US3] Implement the agent's pre-filled reusable payload buffer in
   `crates/workload-node-agent/src/payload.rs`, reconstructing block payloads
   from the key so only keys cross the network
