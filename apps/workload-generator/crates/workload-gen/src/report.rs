@@ -327,6 +327,10 @@ pub struct LiveReport {
     pub virtual_span: f64,
     /// The plan queue between the producer and the lanes.
     pub queue: QueueStats,
+    /// What Certus decided per key — outcomes, never failures.
+    pub outcomes: CacheOutcomes,
+    /// Entries the startup memory-tier clear dropped, if `--clear-cache` was given.
+    pub cleared_entries: Option<u64>,
     /// Whether the producer reached the end of its span rather than being interrupted.
     pub producer_completed: bool,
     /// Lanes used, which equals channels claimed.
@@ -382,6 +386,97 @@ pub struct QueueStats {
     pub per_lane_underruns: Vec<u64>,
     /// Minimum depth per lane.
     pub per_lane_min_depth: Vec<usize>,
+}
+
+/// What Certus decided, per key.
+///
+/// **None of these is a generator failure**, and the report must not imply otherwise. We do
+/// not know when Certus will evict anything, and must not: a block stored earlier and absent
+/// later is eviction working, which is the behaviour under measurement. They are here
+/// because a run in which every reserve was declined is a run worth knowing about — the
+/// generator previously ignored the per-key result bytes entirely and reported full
+/// throughput regardless.
+///
+/// # Declines are reported, not interpreted
+///
+/// The wire carries a bare per-key `0` with no reason code, so the report gives the count
+/// and its denominator and stops there. It is not the generator's job to be gracious about
+/// a server that declines a store: if Certus refuses, the number says so.
+///
+/// Measured on node2 with **exactly one** server (see the warning below):
+///
+/// | run | reserves declined | commits declined |
+/// | --- | --- | --- |
+/// | cold cache | 0 of 72 | 0 of 72 |
+/// | same seed again | 72 of 72 | 72 of 72 |
+/// | different seed | 66 of 72 | 66 of 72 |
+/// | warm, `--clear-cache` | **0 of 72** | **72 of 72** |
+///
+/// A cold cache declines nothing, so the store path is sound. A warm one declines because
+/// the key is already there — `create_memory_tier_entry` answers `AlreadyExists`. The last
+/// row is the one to know about: `CLEAR_MEMORY_TIER` frees the memory tier, so `RESERVE`
+/// succeeds, but the dispatch map keeps its disk-backed entries, so the commit still cannot
+/// land. **`--clear-cache` is therefore not a cold cache and is no substitute for
+/// restarting the server.**
+///
+/// A commit is declined when its reserve was, because `op_commit_store` needs a pending
+/// write. Transfers are not, because `copy_gpu_to_memory_async` does not require one —
+/// which is why the counts read 72 / 0 / 72 rather than 72 / 72 / 72.
+///
+/// # Two servers on one mailbox invalidate all of this
+///
+/// While measuring the above I had, without noticing, left **two** `certus-server-yaml`
+/// processes polling the same `/dev/shm` mailbox and the same device file. Each keeps its
+/// own `pending_stores`, so a `RESERVE` answered by one and a `COMMIT_STORE` answered by
+/// the other finds no pending write. Every decline figure taken that way is meaningless,
+/// and nothing in the report could reveal it. Check with
+/// `ps -eo args | awk '$1 ~ /certus-server-yaml$/'` before trusting a number, and beware
+/// that `pkill -f <pattern>` matches the invoking shell's own command line.
+///
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct CacheOutcomes {
+    /// Keys a `CHECK` or `LOOKUP` found present.
+    pub hits: u64,
+    /// Keys a `CHECK` or `LOOKUP` found absent.
+    ///
+    /// A lower bound: `op_lookup` reports a handle it could not open as a miss too, and
+    /// the wire does not distinguish the two.
+    pub misses: u64,
+    /// Keys a `RESERVE` was asked for, so a decline count has a denominator.
+    pub reserves_attempted: u64,
+    /// Keys a `COMMIT_STORE` was asked for.
+    pub commits_attempted: u64,
+    /// Keys a `RESERVE` declined.
+    pub reserves_declined: u64,
+    /// Keys a `COPY_TO_STORE` declined.
+    pub transfers_declined: u64,
+    /// Keys a `COMMIT_STORE` declined, which follows a declined reserve.
+    pub commits_declined: u64,
+}
+
+impl CacheOutcomes {
+    /// Fraction of read references that were present, or `None` if nothing was read.
+    ///
+    /// `None` rather than zero: a run that read nothing has no hit rate, and printing
+    /// 0.000 would read as "everything missed".
+    pub fn hit_rate(&self) -> Option<f64> {
+        let total = self.hits + self.misses;
+        (total > 0).then(|| self.hits as f64 / total as f64)
+    }
+
+    /// Whether the store path was declined anywhere.
+    pub fn any_store_declined(&self) -> bool {
+        self.reserves_declined + self.transfers_declined + self.commits_declined > 0
+    }
+}
+
+/// Render `n` of `d` as a percentage, or `n/a` when nothing was attempted.
+fn pct(n: u64, d: u64) -> String {
+    if d == 0 {
+        "n/a".to_string()
+    } else {
+        format!("{:.1}%", n as f64 / d as f64 * 100.0)
+    }
 }
 
 /// Request latency, in microseconds.
@@ -467,6 +562,40 @@ impl LiveReport {
                 "  interrupted       the producer was stopped before its span ended; an \
                  interrupted run whose lanes never underran is still valid (FR-074)\n",
             );
+        }
+        if let Some(cleared) = self.cleared_entries {
+            out.push_str(&format!(
+                "  cache cleared     {cleared} memory-tier entries dropped before the \
+                 timed window (FR-046); disk-backed entries survive a clear\n"
+            ));
+        }
+        if let Some(rate) = self.outcomes.hit_rate() {
+            out.push_str(&format!(
+                "  cache outcomes    {} hits, {} misses ({:.1}% hit rate)\n",
+                self.outcomes.hits,
+                self.outcomes.misses,
+                rate * 100.0
+            ));
+        }
+        if self.outcomes.any_store_declined() {
+            out.push_str(&format!(
+                "  stores declined   {} of {} reserves ({}), {} transfers, {} of {} \
+                 commits ({}). The wire carries no reason code, so these are \
+                 observations and not a diagnosis\n",
+                self.outcomes.reserves_declined,
+                self.outcomes.reserves_attempted,
+                pct(
+                    self.outcomes.reserves_declined,
+                    self.outcomes.reserves_attempted
+                ),
+                self.outcomes.transfers_declined,
+                self.outcomes.commits_declined,
+                self.outcomes.commits_attempted,
+                pct(
+                    self.outcomes.commits_declined,
+                    self.outcomes.commits_attempted
+                ),
+            ));
         }
         out.push_str(&format!(
             "  lanes             {} of {} channels\n",

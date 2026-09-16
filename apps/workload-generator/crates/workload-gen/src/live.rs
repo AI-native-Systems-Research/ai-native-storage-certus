@@ -89,7 +89,7 @@ use std::time::{Duration, Instant};
 
 use hdrhistogram::Histogram;
 use shm_queue::Client;
-use shmq_dispatcher::wire;
+use shmq_dispatcher::wire::{self, op};
 use workload_model::description::WorkloadDescription;
 use workload_model::plan::OperationPlan;
 use workload_model::sim::Simulation;
@@ -144,6 +144,20 @@ pub struct LaneStats {
     pub skipped_needing_gpu: u64,
     /// Keys those skipped operations would have moved.
     pub skipped_keys: u64,
+    /// Keys a `CHECK` or `LOOKUP` found present.
+    pub hits: u64,
+    /// Keys a `CHECK` or `LOOKUP` found absent.
+    pub misses: u64,
+    /// Keys a `RESERVE` was asked for.
+    pub reserves_attempted: u64,
+    /// Keys a `COMMIT_STORE` was asked for.
+    pub commits_attempted: u64,
+    /// Keys a `RESERVE` declined.
+    pub reserves_declined: u64,
+    /// Keys a `COPY_TO_STORE` declined.
+    pub transfers_declined: u64,
+    /// Keys a `COMMIT_STORE` declined.
+    pub commits_declined: u64,
 }
 
 /// What a live run measured.
@@ -160,6 +174,8 @@ pub struct LiveStats {
     /// Backpressure working, and the positive counterpart to an underrun: it is the
     /// evidence that the generator was ahead rather than merely keeping up.
     pub producer_blocked: u64,
+    /// Entries the startup memory-tier clear dropped, or `None` if no clear was asked for.
+    pub cleared_entries: Option<u64>,
     /// Bytes per block, from the description's geometry.
     pub block_bytes: u64,
     /// Wallclock seconds of the timed window.
@@ -214,6 +230,41 @@ impl LiveStats {
     /// Keys those skipped operations would have moved.
     pub fn skipped_keys(&self) -> u64 {
         self.lanes.iter().map(|l| l.skipped_keys).sum()
+    }
+
+    /// Keys found present by a `CHECK` or `LOOKUP`.
+    pub fn hits(&self) -> u64 {
+        self.lanes.iter().map(|l| l.hits).sum()
+    }
+
+    /// Keys found absent by a `CHECK` or `LOOKUP`.
+    pub fn misses(&self) -> u64 {
+        self.lanes.iter().map(|l| l.misses).sum()
+    }
+
+    /// Keys a `RESERVE` was asked for.
+    pub fn reserves_attempted(&self) -> u64 {
+        self.lanes.iter().map(|l| l.reserves_attempted).sum()
+    }
+
+    /// Keys a `COMMIT_STORE` was asked for.
+    pub fn commits_attempted(&self) -> u64 {
+        self.lanes.iter().map(|l| l.commits_attempted).sum()
+    }
+
+    /// Keys a `RESERVE` declined.
+    pub fn reserves_declined(&self) -> u64 {
+        self.lanes.iter().map(|l| l.reserves_declined).sum()
+    }
+
+    /// Keys a `COPY_TO_STORE` declined.
+    pub fn transfers_declined(&self) -> u64 {
+        self.lanes.iter().map(|l| l.transfers_declined).sum()
+    }
+
+    /// Keys a `COMMIT_STORE` declined.
+    pub fn commits_declined(&self) -> u64 {
+        self.lanes.iter().map(|l| l.commits_declined).sum()
     }
 
     /// Whether the run is valid: **no lane ever underran** (FR-062).
@@ -325,6 +376,15 @@ pub struct RunOptions {
     /// Stamp each stored block with its key. Costs a CUDA call per key; see
     /// [`crate::payload`] on why it is off by default.
     pub stamp_keys: bool,
+    /// Clear the memory tier once before the timed window opens (FR-046).
+    ///
+    /// `CLEAR_MEMORY_TIER` is otherwise forbidden — see [`crate::opstream`] — because
+    /// clearing mid-run would be the generator evicting on the policy's behalf. Exactly
+    /// once, at startup, outside the timed window, is the permitted use.
+    ///
+    /// It clears the **memory tier**; disk-backed entries survive it, so it does not
+    /// guarantee a cold cache.
+    pub clear_cache: bool,
 }
 
 /// Run the workload: one producer thread, one consumer per lane.
@@ -349,6 +409,7 @@ pub fn run(
         batch_keys,
         gpu_device,
         stamp_keys,
+        clear_cache,
     } = *options;
     let block_bytes = u32::try_from(description.blocks.bytes)
         .map_err(|_| "blocks.bytes exceeds a 32-bit reservation".to_string())?;
@@ -367,6 +428,14 @@ pub fn run(
             stamp_keys,
         )?)),
         None => None,
+    };
+
+    // Before the clock starts (FR-046): a clear is setup, and timing it would charge the
+    // run for work no operation in the stream performed.
+    let cleared = if clear_cache {
+        Some(clear_memory_tier(&client, channels[0])?)
+    } else {
+        None
     };
 
     let mut senders: Vec<Lane> = Vec::with_capacity(lane_count);
@@ -444,6 +513,7 @@ pub fn run(
         batches_produced,
         producer_completed,
         producer_blocked,
+        cleared_entries: cleared,
         block_bytes: description.blocks.bytes,
         elapsed,
         virtual_span,
@@ -523,6 +593,83 @@ fn produce(
             return Ok((batches, sim.now(), true, blocked));
         }
         horizon += PRODUCE_WINDOW;
+    }
+}
+
+/// Clear the memory tier once, before the timed window (FR-046).
+///
+/// Returns how many entries the server dropped. Issued on its own path rather than through
+/// [`OpStream`], which refuses the opcode: clearing is setup, and a clear inside the
+/// operation stream would be the generator evicting on the eviction policy's behalf.
+///
+/// # Errors
+///
+/// If the request fails or the server answers with an error status.
+fn clear_memory_tier(client: &Client, channel: usize) -> Result<u64, String> {
+    let (status, body) = client
+        .request(
+            channel,
+            op::CLEAR_MEMORY_TIER,
+            &[],
+            SPIN_ITERS,
+            ATTEMPT_TIMEOUT,
+            REQUEST_DEADLINE,
+        )
+        .map_err(|e| format!("clearing the memory tier failed: {e}"))?;
+    if status != wire::STATUS_OK {
+        return Err(format!(
+            "clearing the memory tier returned an error status: {}",
+            String::from_utf8_lossy(&body)
+        ));
+    }
+    let mut r = wire::Reader::new(&body);
+    Ok(r.u64().unwrap_or(0))
+}
+
+/// Count one response's per-key results.
+///
+/// # These are Certus's decisions, not our failures
+///
+/// Every one of these opcodes answers with one byte per key — `Writer::with_capacity(n)`
+/// then a `w.u8` loop, in `translate.rs`. The generator used to ignore the body entirely
+/// and check only the overall status, so a run in which *every* reserve was declined
+/// reported full throughput: plausible numbers instead of an error, which is the failure
+/// mode this instrument exists to avoid.
+///
+/// They are counted and reported, and deliberately **not** treated as errors. We do not
+/// know when Certus will evict anything, and we must not: a block stored earlier and absent
+/// later is eviction working, which is the behaviour under measurement. A declined reserve
+/// is what a full tier looks like. A `LOOKUP` miss is a cache miss. None of that is a
+/// broken generator, and failing a run on any of it would make the instrument refuse to
+/// measure the very thing it is for.
+fn count_results(opcode: u32, body: &[u8], stats: &mut LaneStats) {
+    match opcode {
+        // 1 = present, 0 = absent. `op_lookup` also reports a handle that failed to open
+        // as a 0, so a miss count is a lower bound on real misses — stated rather than
+        // hidden, because the server does not distinguish them on the wire.
+        op::CHECK | op::LOOKUP => {
+            for b in body {
+                if *b == 1 {
+                    stats.hits += 1;
+                } else {
+                    stats.misses += 1;
+                }
+            }
+        }
+        op::RESERVE => {
+            stats.reserves_attempted += body.len() as u64;
+            stats.reserves_declined += body.iter().filter(|b| **b == 0).count() as u64
+        }
+        op::COPY_TO_STORE => {
+            stats.transfers_declined += body.iter().filter(|b| **b == 0).count() as u64
+        }
+        op::COMMIT_STORE => {
+            stats.commits_attempted += body.len() as u64;
+            stats.commits_declined += body.iter().filter(|b| **b == 0).count() as u64
+        }
+        // A TOUCH answering 0 means the key was not there to reorder, which is eviction
+        // again; TAKE_EVENTS answers with events rather than per-key results.
+        _ => {}
     }
 }
 
@@ -649,6 +796,7 @@ fn consume(c: Consumer) -> Result<(LaneStats, Histogram<u64>), String> {
                     .map_err(|e| format!("latency out of histogram range: {e}"))?;
                 stats.requests += 1;
                 stats.key_references += chunk.len() as u64;
+                count_results(opcode, &body, &mut stats);
                 start = end;
                 if start >= all.len() {
                     break;
@@ -673,6 +821,7 @@ mod tests {
             batches_produced: 10,
             producer_completed: true,
             producer_blocked: 0,
+            cleared_entries: None,
             block_bytes: 32_768,
             elapsed,
             virtual_span: 10.0,

@@ -146,10 +146,16 @@ pub struct OpStream {
     payload: Option<PayloadTarget>,
 }
 
-/// The GPU buffer and this lane's pre-built request template.
+/// This lane's pre-built request template, and the device buffer it names.
+///
+/// The buffer is optional because **the wire protocol does not depend on CUDA** — a
+/// handle batch is bytes, and [`HandleBatchTemplate`] builds them from a handle it is
+/// given. Only stamping touches the device. That split is what lets the operation stream
+/// be tested against a mock mailbox on a machine with no accelerator (T051), which is
+/// where protocol mistakes are cheap to find.
 #[derive(Debug)]
 struct PayloadTarget {
-    buffer: Arc<PayloadBuffer>,
+    buffer: Option<Arc<PayloadBuffer>>,
     slot: usize,
     template: HandleBatchTemplate,
 }
@@ -180,8 +186,22 @@ impl OpStream {
     ///
     /// `slot` is this lane's disjoint region; see [`crate::payload`] on why that is a
     /// correctness requirement rather than tidiness.
-    pub fn with_payload(mut self, buffer: Arc<PayloadBuffer>, slot: usize) -> Self {
+    pub fn with_payload(self, buffer: Arc<PayloadBuffer>, slot: usize) -> Self {
         let template = buffer.template(slot);
+        self.with_template(template, Some(buffer), slot)
+    }
+
+    /// Attach a pre-built request template, with or without a device buffer behind it.
+    ///
+    /// Without a buffer the requests are still exactly what the mailbox expects — the
+    /// protocol is bytes — but no memory backs the handle, so this is for testing the
+    /// operation stream rather than for a run that moves data.
+    pub fn with_template(
+        mut self,
+        template: HandleBatchTemplate,
+        buffer: Option<Arc<PayloadBuffer>>,
+        slot: usize,
+    ) -> Self {
         assert!(
             template.max_keys() >= self.batch_keys,
             "the payload template holds {} keys but requests carry up to {}",
@@ -249,9 +269,13 @@ impl OpStream {
             };
             // A store reads out of our buffer, so its blocks are what a stamp identifies.
             // A load overwrites them, so stamping before one would be wasted work.
-            if kind == OpKind::Transfer && target.buffer.stamping() {
-                for (i, key) in keys.iter().enumerate() {
-                    target.buffer.stamp_key(target.slot, i, *key)?;
+            if kind == OpKind::Transfer {
+                if let Some(buffer) = target.buffer.as_ref() {
+                    if buffer.stamping() {
+                        for (i, key) in keys.iter().enumerate() {
+                            buffer.stamp_key(target.slot, i, *key)?;
+                        }
+                    }
                 }
             }
             return Ok(Encoding::Ready {
