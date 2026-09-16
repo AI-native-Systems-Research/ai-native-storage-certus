@@ -67,7 +67,14 @@ FS_WRITE_THREADS="${FS_WRITE_THREADS:-16}"
 # ── Container / store ────────────────────────────────────────────────────────────
 # The unified offload image (vLLM 0.26 + the native tiering framework) lives in
 # the DEFAULT podman store (unlike the shmq image), so no --root/--runroot flags.
-IMAGE="${IMAGE:-certus-offload-bench}"
+# Default to the -fix026 image: it bakes the vllm-fix2 overlay (the deferred
+# finished-request finalize handshake) that stops the TieringOffloadingManager
+# _req_state KeyError under load. The bare `certus-offload-bench` is the
+# deliberate STOCK/crashing baseline (built --build-arg VLLM_FIX_TIERING=0) and
+# is only useful for reproducing that upstream crash; override IMAGE= to get it.
+# NB: fix026 does NOT touch the separate `len(offload_keys) == len(offload_block_ids)`
+# assertion in _build_store_jobs — that path is identical in both images.
+IMAGE="${IMAGE:-certus-offload-bench-fix026}"
 
 # HF cache on the large filesystem — NOT $HOME/.cache (the /home partition is
 # small and fills up mid-download).
