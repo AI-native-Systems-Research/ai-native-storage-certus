@@ -10,3 +10,5 @@
 //! `proto_version` and `build_id`: a peer built from different source is refused
 //! rather than measured.
 #![warn(missing_docs)]
+
+pub mod frame;
