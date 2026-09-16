@@ -477,12 +477,62 @@ pub struct Session {
     chain: PrefixChain,
     next_input_ordinal: u64,
     next_output_ordinal: u64,
+    /// Which node this session's turns go to.
+    ///
+    /// Placement is a property of the *deployment*, not of the workload, so a run with a
+    /// different node count is a different experiment rather than a different workload —
+    /// see [`Session::node`].
+    node: usize,
+    /// Absolute virtual time of the next migration, or `None` if this session never migrates.
+    next_migration_at: Option<f64>,
 }
 
 impl Session {
     /// Run-global identity, and the salt's `session_id`.
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// The node this session's turns are issued to.
+    ///
+    /// # Why placement is not part of the workload
+    ///
+    /// The description says nothing about nodes — the example input notes the node list is
+    /// deliberately outside it. A session's *migration interval* is workload (a real session
+    /// moves between hosts), but which host it lands on depends on how many there are, so a
+    /// two-node run and a four-node run are different experiments rather than the same
+    /// workload dispatched differently. FR-072's guarantee is unaffected: the plan is still a
+    /// function of description and seed *for a given deployment*.
+    pub fn node(&self) -> usize {
+        self.node
+    }
+
+    /// When this session next migrates, if it ever does.
+    pub fn next_migration_at(&self) -> Option<f64> {
+        self.next_migration_at
+    }
+
+    /// Place this session on `node`.
+    pub(crate) fn place(&mut self, node: usize) {
+        self.node = node;
+    }
+
+    /// Schedule the next migration, or clear it with `None`.
+    pub(crate) fn schedule_migration(&mut self, at: Option<f64>) {
+        self.next_migration_at = at;
+    }
+
+    /// Move to `to`, leaving every already-stored block where it was.
+    ///
+    /// **Nothing about the prefix changes**, and that is the point rather than an omission.
+    /// FR-048 requires a migrated session's stored blocks to stay put, and the way to honour
+    /// that is to do nothing to them: the session's next turn simply offers the same path to a
+    /// different node, where it will miss and be fetched or re-stored. Moving them would be
+    /// modelling a data migration Certus does not perform, and tracking *which* node holds
+    /// each block would duplicate state the cache already owns — and would be wrong the moment
+    /// it evicted one.
+    pub(crate) fn migrate_to(&mut self, to: usize) {
+        self.node = to;
     }
 
     /// Declaration index of the session class this belongs to.
@@ -1064,6 +1114,8 @@ impl SessionPool {
             chain: PrefixChain::default(),
             next_input_ordinal: 0,
             next_output_ordinal: 0,
+            node: 0,
+            next_migration_at: None,
         };
         let handle = match self.free_handles.pop() {
             Some(h) => {

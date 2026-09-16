@@ -89,6 +89,9 @@ use std::collections::BinaryHeap;
 
 use crate::description::WorkloadDescription;
 use crate::pool::SharedPool;
+use rand::Rng as _;
+
+use crate::distribution::Resolved;
 use crate::rng;
 use crate::selection::{SelectionStats, Selector};
 use crate::session::{bind, take_turn, Growth, Session, SessionIds, SessionPool, Turn, Uses};
@@ -100,6 +103,8 @@ struct SessionClassState {
     pool: SessionPool,
     uses: Vec<Uses>,
     growth: Growth,
+    /// How long between this class's migrations, or `None` if it never migrates.
+    migration_interval: Option<Resolved>,
 }
 
 /// A running simulation of one workload description.
@@ -126,6 +131,9 @@ pub struct Simulation {
     turns_taken: u64,
     blocks_read: u64,
     blocks_minted: u64,
+    /// Nodes to place sessions across. One means migration is inert (FR-049).
+    nodes: usize,
+    migrations: u64,
 }
 
 impl Simulation {
@@ -213,6 +221,12 @@ impl Simulation {
                     input: class.input_growth.resolve_integral(None)?,
                     output: class.output_growth.resolve_integral(None)?,
                 },
+                // Continuous, not integral: a migration happens at an instant, not after a
+                // whole number of anything.
+                migration_interval: match &class.migration_interval {
+                    Some(d) => Some(d.resolve(None)?),
+                    None => None,
+                },
             });
         }
 
@@ -222,6 +236,8 @@ impl Simulation {
             sessions,
             ids,
             rng: rng::substream(seed, "sim"),
+            nodes: 1,
+            migrations: 0,
             turns: BinaryHeap::new(),
             now: 0.0,
             turns_taken: 0,
@@ -385,11 +401,112 @@ impl Simulation {
         self.now = self.now.max(until);
     }
 
+    /// Place sessions across `nodes`, and enable migration.
+    ///
+    /// `1` — the default — makes migration **inert** rather than an error (FR-049): a
+    /// single-node run is the ordinary case, and refusing a description that happens to
+    /// declare a `migration_interval` would make every multi-node description unusable
+    /// locally.
+    ///
+    /// # Panics
+    ///
+    /// If `nodes` is zero: there would be nowhere to place a session, and treating it as one
+    /// would hide a caller's arithmetic error behind a working run.
+    pub fn with_nodes(mut self, nodes: usize) -> Self {
+        assert!(nodes > 0, "a run needs at least one node");
+        self.nodes = nodes;
+        self
+    }
+
+    /// Nodes sessions are placed across.
+    pub fn nodes(&self) -> usize {
+        self.nodes
+    }
+
+    /// Migrations performed so far.
+    ///
+    /// Reported because a run whose migration interval is long relative to session lifetime
+    /// performs none, and a multi-node measurement that meant to exercise migration would
+    /// otherwise look like one that did.
+    pub fn migrations(&self) -> u64 {
+        self.migrations
+    }
+
+    /// Place a newly born session, and schedule its first migration.
+    ///
+    /// Uniform over nodes (FR-048). Drawn even when there is only one node, so that the
+    /// sequence of random draws — and therefore every later decision — does not depend on the
+    /// deployment: a description run on one node and on four must produce the same *workload*,
+    /// differing only in where each turn is sent.
+    fn place(&mut self, class: usize, handle: usize) {
+        let node = self.rng.gen_range(0..self.nodes);
+        let interval = self.sessions[class]
+            .migration_interval
+            .as_ref()
+            .map(|i| i.sample(&mut self.rng));
+        let session = self.sessions[class].pool.session_mut(handle);
+        session.place(node);
+        let born = session.born_at();
+        session.schedule_migration(interval.map(|dt| born + dt.max(0.0)));
+    }
+
+    /// Apply any migrations this session is due, before its turn at `at`.
+    ///
+    /// # Lazy, and observably identical to a scheduled event
+    ///
+    /// A session's node matters only when it takes a turn, so a migration between turns is
+    /// invisible except through where the next turn goes. Evaluating it here rather than from a
+    /// second event heap is therefore not an approximation — and it keeps the event loop's
+    /// ordering, which `plan.rs` asserts, in one place.
+    ///
+    /// The loop matters: two intervals may elapse between turns, and applying one migration
+    /// where two were due would leave the session on the wrong node, since "uniform among the
+    /// others" excludes a different node each time.
+    fn migrate_due(&mut self, class: usize, handle: usize, at: f64) {
+        if self.nodes < 2 {
+            // Inert, and not merely a no-op: no draw is taken, so a single-node run does not
+            // consume randomness a multi-node run would spend elsewhere.
+            return;
+        }
+        loop {
+            let session = self.sessions[class].pool.session(handle);
+            let Some(due) = session.next_migration_at() else {
+                return;
+            };
+            if due > at {
+                return;
+            }
+            let from = session.node();
+            // Uniform among the *others* (FR-048): drawing over all nodes would leave a
+            // session where it was with probability 1/nodes, which is not a migration.
+            let step = 1 + self.rng.gen_range(0..self.nodes - 1);
+            let to = (from + step) % self.nodes;
+            let interval = self.sessions[class]
+                .migration_interval
+                .as_ref()
+                .map(|i| i.sample(&mut self.rng));
+            let session = self.sessions[class].pool.session_mut(handle);
+            session.migrate_to(to);
+            // From the due time, not from `at`: pacing the next migration off when we happened
+            // to notice would stretch the interval by however long the session was idle.
+            session.schedule_migration(interval.map(|dt| due + dt.max(0.0)));
+            self.migrations += 1;
+        }
+    }
+
     /// Take one turn, then either reschedule the session or finish it.
     fn take_one_turn<F>(&mut self, class: usize, handle: usize, on_turn: &mut F)
     where
         F: FnMut(&Session, &Turn),
     {
+        // Migrations first: a turn is issued to wherever the session is *now*.
+        let at = self.sessions[class]
+            .pool
+            .session(handle)
+            .next_turn_at()
+            .unwrap_or(self.now);
+        self.migrate_due(class, handle, at);
+
         let growth = self.sessions[class].growth.clone();
         let session = self.sessions[class].pool.session_mut(handle);
         let Some(turn) = take_turn(session, &growth, &mut self.rng) else {
@@ -456,6 +573,10 @@ impl Simulation {
                 &mut self.selectors,
                 &mut self.rng,
             );
+            // Placed after binding, so the draw order is: shared instances, then node. A
+            // session's node is decided once, at birth (FR-048).
+            self.place(class, handle);
+            let pool = &self.sessions[class].pool;
             if let Some(at) = pool.session(handle).next_turn_at() {
                 let id = pool.session(handle).id();
                 self.turns.push(Reverse((at.to_bits(), id, class, handle)));

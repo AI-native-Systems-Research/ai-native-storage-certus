@@ -1873,10 +1873,47 @@ operation's key list and issue something plausible.
 - [x] T069 [US3] Implement the agent's pre-filled reusable payload buffer in
   `crates/workload-node-agent/src/payload.rs`, reconstructing block payloads
   from the key so only keys cross the network
-- [ ] T070 [US3] Implement node placement and migration in
+- [x] T070 [US3] Implement node placement and migration in
   `crates/workload-model/src/sim.rs`: new sessions placed uniformly, a
   migrating session moved uniformly among the others, its stored blocks left
   where they were, and migration inert with fewer than two nodes
+
+**T070 done, 7 tests; 223 in `workload-model`.** `migration_interval` was already in
+the schema per session class, and the example input notes the node *list* is
+deliberately outside the description — so the workload says how often a session moves
+and the deployment says where it can go.
+
+**"Its stored blocks stay where they were" is honoured by doing nothing to them**, which
+is the point rather than an omission. A migration changes one field — the session's node
+— and nothing else: same chain, same growth, same turn schedule. The next turn simply
+offers the same path to a different node, where it misses and is fetched or re-stored.
+Moving blocks would model a data migration Certus does not perform, and tracking *which*
+node holds each block would duplicate state the cache owns and would be wrong the moment
+it evicted one. The test asserts it directly: the keys read with migration are
+**identical** to the keys read with it inert.
+
+**Uniform among the others, not among all** (FR-048): drawing over every node would leave
+a session where it was with probability `1/nodes`, which is not a migration. Implemented
+as `(from + 1 + rand(nodes-1)) % nodes`.
+
+**Migrations are applied lazily, at turn time, and that is exact rather than approximate.**
+A session's node matters only when it takes a turn, so a migration between turns is
+invisible except through where the next turn goes. Evaluating it there avoids a second
+event heap and keeps the ordering `plan.rs` asserts in one place. Two details make it
+faithful: the loop applies *every* elapsed interval, because "uniform among the others"
+excludes a different node each time and collapsing two migrations into one would land the
+session on the wrong node; and the next interval is measured from the **due** time rather
+than from when it was noticed, or an idle session's interval would stretch by however
+long it was idle.
+
+**The node draw is taken even on a single node**, so the workload does not depend on the
+deployment: a description run on 1, 2, 3 and 8 nodes produces the *same* key sequence,
+asserted. FR-049's inertness is therefore a matter of taking no migration draws at all
+rather than of skipping placement.
+
+`Simulation::migrations()` is reported because an interval long relative to session
+lifetime performs none, and a multi-node measurement that meant to exercise migration
+would otherwise look like one that did.
 - [ ] T071 [US3] Implement agent lifecycle in
   `crates/workload-gen/src/agents.rs`: start before the run and stop after,
   both outside the timed window; idempotent startup that replaces a leftover
