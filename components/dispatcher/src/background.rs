@@ -579,6 +579,160 @@ impl Drop for MemoryTierEvictor {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Background Free-Slot Reserve (pre-eviction for cold loads)
+// ---------------------------------------------------------------------------
+
+pub struct FreeSlotReserveConfig {
+    pub target_free_slots: usize,
+    pub slot_size: u32,
+    pub poll_interval: Duration,
+}
+
+pub struct FreeSlotReserve {
+    shutdown: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+    ready_count: Arc<std::sync::atomic::AtomicUsize>,
+    notify: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl FreeSlotReserve {
+    pub fn start(
+        dm: Arc<dyn IDispatchMap + Send + Sync>,
+        mt: Arc<dyn IMemoryTier + Send + Sync>,
+        config: FreeSlotReserveConfig,
+        tier_counters: Arc<crate::TierEventCounters>,
+    ) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+        let ready_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let ready_clone = Arc::clone(&ready_count);
+        let notify = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let notify_clone = Arc::clone(&notify);
+
+        let handle = thread::Builder::new()
+            .name("dispatcher-free-slot-reserve".into())
+            .spawn(move || {
+                Self::reserve_loop(
+                    &shutdown_clone,
+                    &dm,
+                    &mt,
+                    &config,
+                    &ready_clone,
+                    &notify_clone,
+                    &tier_counters,
+                );
+            })
+            .expect("failed to spawn free-slot reserve thread");
+
+        Self {
+            shutdown,
+            handle: Some(handle),
+            ready_count,
+            notify,
+        }
+    }
+
+    #[inline]
+    pub fn try_claim(&self, count: usize) -> usize {
+        let mut current = self.ready_count.load(std::sync::atomic::Ordering::Acquire);
+        loop {
+            let to_claim = current.min(count);
+            if to_claim == 0 {
+                return 0;
+            }
+            match self.ready_count.compare_exchange_weak(
+                current,
+                current - to_claim,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            ) {
+                Ok(_) => return to_claim,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    pub fn notify_refill(&self) {
+        let (lock, cvar) = &*self.notify;
+        let mut needs_refill = lock.lock().unwrap();
+        *needs_refill = true;
+        cvar.notify_one();
+    }
+
+    pub fn shutdown(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        self.notify_refill();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    fn reserve_loop(
+        shutdown: &AtomicBool,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        config: &FreeSlotReserveConfig,
+        ready_count: &std::sync::atomic::AtomicUsize,
+        notify: &(std::sync::Mutex<bool>, std::sync::Condvar),
+        tier_counters: &crate::TierEventCounters,
+    ) {
+        const MAX_SCAN: usize = 4;
+
+        loop {
+            if shutdown.load(Ordering::Acquire) {
+                return;
+            }
+
+            let current = ready_count.load(std::sync::atomic::Ordering::Acquire);
+            if current >= config.target_free_slots {
+                let (lock, cvar) = notify;
+                let guard = lock.lock().unwrap();
+                let _guard = cvar
+                    .wait_timeout(guard, config.poll_interval)
+                    .unwrap()
+                    .0;
+                continue;
+            }
+
+            let capacity = mt.capacity();
+            let used = mt.used();
+            let free = capacity.saturating_sub(used);
+            let needed_bytes = config.slot_size as usize;
+
+            if free >= needed_bytes {
+                ready_count.fetch_add(1, std::sync::atomic::Ordering::Release);
+                continue;
+            }
+
+            let scan = MAX_SCAN;
+            let mut evicted = false;
+            for cand in mt.oldest_keys(scan) {
+                if dm.try_evict_to_block(cand).is_ok() {
+                    let _ = mt.remove(cand);
+                    tier_counters.record_eviction_from_memory();
+                    evicted = true;
+                    break;
+                }
+            }
+
+            if evicted {
+                ready_count.fetch_add(1, std::sync::atomic::Ordering::Release);
+            } else {
+                thread::sleep(config.poll_interval);
+            }
+        }
+    }
+}
+
+impl Drop for FreeSlotReserve {
+    fn drop(&mut self) {
+        if self.handle.is_some() {
+            self.shutdown();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
