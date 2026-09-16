@@ -450,8 +450,8 @@ modes reorder the policies.
 - **FR-055**: System MUST emit a workload trace at the same level of
   abstraction as a real serving trace — sessions, turns, block lists, token
   counts — in two containers holding identical records. Interoperability with
-  other tools' formats MUST be reached by conversion (FR-075) and MUST NOT add
-  further containers to what an emit run writes.
+  other tools' formats is delivered by **projections** (FR-075), which are not
+  containers of the trace and are not required to hold identical records.
 - **FR-056**: The trace MUST be self-describing: a reader MUST learn what it
   supports by reading its manifest, never by recognising which trace it is.
 - **FR-057**: The manifest MUST declare the identifier space in use, since
@@ -470,9 +470,11 @@ modes reorder the policies.
   the tool a wallclock concept.
 - **FR-073**: Before writing anything, an emit run MUST project the output from
   the description's own rates — invocations, distinct keys minted, key
-  references, and bytes per container — and MUST refuse if the projection
-  exceeds either the free space on the output filesystem or a documented size
-  ceiling, naming both figures. Requiring a span is not sufficient protection
+  references, and bytes for each output actually requested — and MUST refuse if
+  the projection exceeds either the free space on the output filesystem or a
+  documented size ceiling, naming both figures. A run asked only for a
+  projection MUST be projected on that basis, not on the native trace it is not
+  writing. Requiring a span is not sufficient protection
   on its own: a legal span on the shipped example costs tens of gigabytes. The
   projection MUST report minted keys and key references separately, since the
   first grows linearly with the span and the second quadratically with session
@@ -495,11 +497,28 @@ modes reorder the policies.
 
 **Interoperability with other tools' trace formats**
 
-- **FR-075**: Every other trace format System speaks MUST be a **conversion**
-  of the emitted trace, not an additional thing an emit run writes. There is no
+- **FR-075**: Every other trace format System speaks MUST be a **projection of
+  the operation plan**, and MUST be obtainable **in one pass during an emit
+  run**. System MUST NOT require the native trace to be written first as an
+  intermediate: producing a projection of a workload nobody wants stored would
+  otherwise cost tens of gigabytes, plus a possible free-space refusal, to
+  arrive at a file that may be a few hundred megabytes. There is no
   standards-body format at this level of abstraction, so the emitted schema is
   chosen for being a superset of the public ones and every target is a
   projection of it. See `research.md` D8 and `contracts/trace-interop.md`.
+- **FR-075a**: System MUST also apply the same projection to an
+  **already-stored trace** in the emitted schema, and both entry points MUST
+  use the same projection so that they cannot disagree. This is not a redundant
+  path to the same place: the emitted schema is shared with a corpus of real
+  traces, so projecting a stored trace is the only way to put a real workload
+  and a generated one through an identical transformation — which is what makes
+  them comparable at all.
+- **FR-075b**: A projection is **not a trace**. It has no manifest, is not
+  self-describing, and MUST NOT be accepted in place of the native trace or the
+  canonical plan when reproducibility is being checked (FR-060, FR-072).
+  Consumer-specific shapes therefore stay out of the trace contract: what a
+  direct projection changes is where bytes are written, never what a trace
+  means.
 - **FR-076**: A conversion target MUST be judged on two properties before it is
   adopted, and System MUST NOT emit a workload in a format that lacks either:
   identifiers scoped to the whole run, and timestamps on a run-global clock.

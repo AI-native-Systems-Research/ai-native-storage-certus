@@ -12,8 +12,9 @@ The workload description file says *what* the workload is. Everything here says
 
 ```text
 workload-gen run     <description.yml> [target options] [tuning] [reporting]
-workload-gen emit    <description.yml> --output <dir> --format jsonl|parquet|both
-                                       --until <virtual-seconds>
+workload-gen emit    <description.yml> --until <virtual-seconds>
+                     [--output <dir> --format jsonl|parquet|both]
+                     [--mooncake <f>] [--cachesim <f>] [--simulator <f>]
 workload-gen plan    <description.yml> --output <file>
 workload-gen convert <trace-dir> --to simulator|mooncake|cachesim
                                  --output <file>
@@ -22,15 +23,31 @@ workload-gen validate <description.yml>
 
 - **`run`** is a *live run*: issues operations to Certus. Unbounded by default
   (spec FR-059); stops on signal.
-- **`emit`** is an *emit run*: writes a trace, contacts no server, needs no
+- **`emit`** is an *emit run*: writes output, contacts no server, needs no
   accelerator. `--until` is **required** (FR-059) — an unbounded file is not a
-  thing.
+  thing. **At least one output is required**, and the two kinds are
+  deliberately spelled differently because they are different things:
+  - `--output <dir>` with `--format` writes the **native trace** — a directory,
+    with a manifest, self-describing, the thing `contracts/trace-io.md`
+    specifies. The two containers hold identical records (SC-004).
+  - `--mooncake`, `--cachesim`, `--simulator` write **projections** — each a
+    single file, lossy, with no manifest, produced in the same pass (FR-075).
+    A projection is not a trace and is not accepted for a reproducibility check
+    (FR-075b).
+
+  Asking for a projection **without** `--output` is the expected case, not a
+  corner: a legal span on the shipped example costs roughly 27 GB as a native
+  trace, and there is no reason to pay that to obtain a Mooncake file. The
+  pre-flight projection sizes only the outputs actually requested (FR-073).
 - **`plan`** writes the canonical operation-plan serialisation — the artifact
   the byte-identity property is asserted against (FR-060, SC-003).
-- **`convert`** projects an emitted trace into another tool's format. Every
-  target is a projection of the emitted schema and none is an additional emit
-  container (FR-075); `contracts/trace-interop.md` specifies each one, what it
-  drops, and which candidates were rejected.
+- **`convert`** applies the same projections to a trace **already on disk**
+  (FR-075a). It is not a second way to do what `emit` just did: its input is
+  the *schema*, and the corpus of real traces is in that schema, so this is how
+  a real workload and a generated one are pushed through an identical
+  transformation. Use it also for a trace whose description is no longer to
+  hand. `contracts/trace-interop.md` specifies each target, what it drops, and
+  which candidates were rejected.
   - `--to simulator` — the shape `apps/eviction-replay-benchmark` reads. See
     `research.md` D1: the simulator reads `{chat_id, parent_chat_id, hash_ids,
     type}`, not the emitted schema, and the projection needs no information the
