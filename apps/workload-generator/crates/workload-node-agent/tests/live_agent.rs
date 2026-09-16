@@ -109,6 +109,26 @@ fn a_turn_submitted_to_a_live_agent_reaches_certus_and_is_found_again() {
         "no per-operation histogram came back, so FR-066a cannot be satisfied for this node"
     );
 
+    // Verification, if the agent was started with --verify-payload. Asserted rather than
+    // assumed: a check that silently no-ops is worse than no check, because the run then
+    // *claims* the data was verified.
+    eprintln!(
+        "verified {} blocks, {} mismatches",
+        stats.counters.payloads_verified, stats.counters.payload_mismatches
+    );
+    if stats.counters.payloads_verified > 0 {
+        assert_eq!(
+            stats.counters.payloads_verified, warm.blocks_read as u64,
+            "every loaded block should have been checked, not some of them"
+        );
+        assert_eq!(
+            stats.counters.payload_mismatches, 0,
+            "Certus returned a block carrying a different key than the one asked for"
+        );
+    } else {
+        eprintln!("note: this agent was started without --verify-payload, so nothing was checked");
+    }
+
     let mut de = Deserializer::new();
     for op in &stats.ops {
         let hist: hdrhistogram::Histogram<u64> = de

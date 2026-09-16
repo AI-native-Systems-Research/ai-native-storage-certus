@@ -52,6 +52,28 @@
 //! **slot** — a disjoint `batch_keys * block_bytes` span — and within a slot each key owns
 //! one block. [`PayloadBuffer::slot_base`] is the only place that arithmetic lives.
 //!
+//! # Stamping is only half of it: a stamp nobody reads proves nothing
+//!
+//! Writing the key into a block says what the block *should* be. Reading it back after a load
+//! says what Certus actually returned. Without the second half every block in the buffer is
+//! interchangeable — the pre-fill is one repeated byte — so a cache that returned the wrong
+//! block, or no block at all, would produce a run indistinguishable from a correct one.
+//! [`PayloadBuffer::read_stamp`] closes that, and [`PayloadBuffer::verifying`] says whether a
+//! run asked for it.
+//!
+//! Two caveats, both real:
+//!
+//! * Verification requires that **every** store of every key in the cache stamped it. A block
+//!   put there by a run with stamping off holds the fill byte, so checking it would report a
+//!   mismatch that is the *instrument's* fault. Verification therefore implies stamping and
+//!   wants a cold cache; against a warm one from a non-stamping run it reports noise.
+//! * It costs a device-to-host copy **per key**, on top of the stamp's host-to-device copy.
+//!   That is per-key work on the critical path, so it is opt-in for the same reason stamping
+//!   is (FR-070).
+//!
+//! It is independent of Certus's own `integrity-check` feature, and deliberately so: a check
+//! that shares an implementation with the thing it checks shares its bugs.
+//!
 //! # The key stamp is off by default, and that is FR-070's doing
 //!
 //! FR-038 permits "a small identifying stamp", and stamping each block's first 8 bytes
@@ -166,6 +188,7 @@ impl HandleBatchTemplate {
 /// requirement. Dropping it frees the allocation.
 pub struct PayloadBuffer {
     base: *mut c_void,
+    verify: bool,
     handle: [u8; cuda::IPC_HANDLE_BYTES],
     gpu_device: i32,
     block_bytes: u32,
@@ -197,6 +220,7 @@ impl PayloadBuffer {
         block_bytes: u32,
         gpu_device: i32,
         stamp: bool,
+        verify: bool,
     ) -> Result<Self, String> {
         assert!(slots > 0 && batch_keys > 0, "a run needs at least one slot");
         let slot_bytes = batch_keys as u64 * block_bytes as u64;
@@ -233,6 +257,8 @@ impl PayloadBuffer {
 
         let me = Self {
             base,
+            // Verification without stamping would compare a key against the fill byte.
+            verify: verify && stamp,
             handle,
             gpu_device,
             block_bytes,
@@ -307,6 +333,49 @@ impl PayloadBuffer {
         self.stamp
     }
 
+    /// Whether loads are checked against their keys.
+    ///
+    /// Implies [`PayloadBuffer::stamping`]: reading a stamp nobody wrote would compare a key
+    /// against the fill byte and report a mismatch that is the instrument's own fault.
+    pub fn verifying(&self) -> bool {
+        self.verify
+    }
+
+    /// Read back the key stamped into a block.
+    ///
+    /// After a `LOOKUP` this is what the cache actually delivered, so comparing it with the
+    /// key that was asked for is the difference between "bytes arrived" and "the right bytes
+    /// arrived". One synchronous device-to-host copy of [`KEY_STAMP_BYTES`] per call.
+    ///
+    /// # Errors
+    ///
+    /// If the copy fails.
+    pub fn read_stamp(&self, slot: usize, index: usize) -> Result<u64, String> {
+        assert!(
+            index < self.batch_keys,
+            "key index {index} of {}",
+            self.batch_keys
+        );
+        let at = self.slot_base(slot) + index as u64 * self.block_bytes as u64;
+        let mut bytes = [0u8; KEY_STAMP_BYTES];
+        // SAFETY: `at` is the start of block `index` in slot `slot`, both range-checked above,
+        // so the 8-byte read lies inside the allocation. `bytes` is a valid host buffer of
+        // exactly that length.
+        unsafe {
+            let src = (self.base as *const u8).add(at as usize) as *const c_void;
+            cuda::check(
+                || format!("cudaMemcpy D2H stamp read at {at}"),
+                cuda::cudaMemcpy(
+                    bytes.as_mut_ptr() as *mut c_void,
+                    src,
+                    KEY_STAMP_BYTES,
+                    cuda::MEMCPY_DEVICE_TO_HOST,
+                ),
+            )?;
+        }
+        Ok(u64::from_le_bytes(bytes))
+    }
+
     /// Stamp key identity into a block, when stamping is on.
     ///
     /// A no-op when off, so the caller needs no branch of its own. When on it is one
@@ -368,6 +437,7 @@ impl std::fmt::Debug for PayloadBuffer {
             .field("total_bytes", &self.total_bytes())
             .field("gpu_device", &self.gpu_device)
             .field("stamping", &self.stamp)
+            .field("verifying", &self.verify)
             .finish()
     }
 }

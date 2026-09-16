@@ -424,6 +424,8 @@ fn counters_round_trip_and_sum_across_nodes() {
         transfers_declined: 0,
         commits_attempted: 37,
         commits_declined: 0,
+        payload_mismatches: 0,
+        payloads_verified: 60,
     };
     let stats = Stats {
         counters: a,
@@ -452,7 +454,7 @@ fn every_counter_field_is_carried_rather_than_some() {
     // the far side, and a bandwidth number computed from it would be too low with no sign
     // that anything was missing. Distinct values per field catch a mis-ordered codec too.
     let mut c = Counters::default();
-    let fields: [&mut u64; 13] = [
+    let fields: [&mut u64; 15] = [
         &mut c.requests,
         &mut c.key_references,
         &mut c.check_resident,
@@ -466,6 +468,8 @@ fn every_counter_field_is_carried_rather_than_some() {
         &mut c.transfers_declined,
         &mut c.commits_attempted,
         &mut c.commits_declined,
+        &mut c.payload_mismatches,
+        &mut c.payloads_verified,
     ];
     for (i, f) in fields.into_iter().enumerate() {
         *f = 1000 + i as u64;
@@ -475,4 +479,33 @@ fn every_counter_field_is_carried_rather_than_some() {
         ops: Vec::new(),
     };
     assert_eq!(Stats::decode(&stats.encode()).unwrap().counters, c);
+}
+
+#[test]
+fn a_payload_mismatch_travels_because_it_is_not_a_cache_outcome() {
+    // Every other counter records something Certus legitimately decided. This one records that
+    // it returned the **wrong block**, which is a correctness failure, so it has to reach the
+    // generator or a multi-node run could not report it at all.
+    let a = Counters {
+        lookup_hits: 100,
+        payloads_verified: 100,
+        payload_mismatches: 3,
+        ..Default::default()
+    };
+    let back = Stats::decode(
+        &Stats {
+            counters: a,
+            ops: Vec::new(),
+        }
+        .encode(),
+    )
+    .unwrap();
+    assert_eq!(back.counters.payload_mismatches, 3);
+    assert_eq!(back.counters.payloads_verified, 100);
+
+    // And it sums, so a run over several nodes reports the total rather than the worst node's.
+    let mut total = a;
+    total.merge(&a);
+    assert_eq!(total.payload_mismatches, 6);
+    assert_eq!(total.payloads_verified, 200);
 }

@@ -1594,6 +1594,51 @@ local hit rate on the origin node is unchanged.
   server, in `crates/workload-wire/tests/conformance.rs`, covering all six
   cases listed in `contracts/node-agent-wire.md`
 
+**T069 done, and the file it names deliberately does not exist.** The task asked for
+`workload-node-agent/src/payload.rs`, but the agent already uses
+`workload_gen::payload::PayloadBuffer` (T039), and a second copy would be exactly the
+duplication T068a exists to prevent: two pre-filled buffers could drift in their block
+layout, and a divergence there would look like a cache returning wrong data. So the agent
+reuses it, and the task is recorded as done by reuse rather than by a new file.
+
+**The real gap was the other half: the stamp was written and never read.** Only keys
+crossed the network already — the buffer is pre-filled locally and the key stamped at a
+known offset. But nothing ever checked a *loaded* block against the key it was loaded
+for, and the pre-fill is one repeated byte, so **every block in the buffer was
+interchangeable**: a cache returning the wrong block, or no block, would have produced a
+run indistinguishable from a correct one. A stamp nobody reads proves nothing.
+
+Added `MEMCPY_DEVICE_TO_HOST`, `PayloadBuffer::read_stamp`, and `--verify-payload` on
+both the generator and the agent. Verified live against a cold cache:
+
+```
+cold  missing 8, granted 8, blocks_written 8
+warm  resident 8, blocks_read 8
+verified 8 blocks, 0 mismatches
+```
+
+The counters carry `payload_mismatches` with `payloads_verified` beside it as its
+denominator, and the test asserts that **every** loaded block was checked rather than
+some — a verification that silently no-ops is worse than none, because the run then
+*claims* the data was checked.
+
+**A mismatch invalidates the run**, unlike every other cache-facing figure. A miss, a
+declined reserve and an eviction are outcomes; a block carrying the wrong key is Certus
+returning wrong data, so the report leads with `WRONG DATA` before any throughput and
+`is_valid()` is false. It is also independent of Certus's own `integrity-check` feature
+by design: a check sharing an implementation with the thing it checks shares its bugs.
+
+Two caveats stated rather than buried: verification **implies stamping** and wants a
+**cold** cache, since a block stored by a non-stamping run holds the fill byte and
+checking it would report a mismatch that is the instrument's own fault; and it costs a
+device-to-host copy per key, so it is opt-in for FR-070's reason.
+
+**Narrowed the provenance hash while here.** Editing a *test* was invalidating deployed
+agents, which is friction with no safety in it — a file compiled into a separate test
+binary is never linked into the agent. `tests/` and `benches/` are now excluded, taking
+the hashed set from 61 files to 44. Inline `#[cfg(test)]` modules inside `src/` are still
+covered, since a path cannot tell them from the code around them.
+
 **T068/a/b/c done. The agent drives a real Certus, end to end.**
 
 **T068a came first, because it is the load-bearing part.** The reactive rule was inside
@@ -1825,7 +1870,7 @@ operation's key list and issue something plausible.
   counters are **for reporting only** — they may not gate validity, steer
   submission, or re-enter the workload
 - [x] T065 [US3] *(also covers the depth-invariance property)* — see below
-- [ ] T069 [US3] Implement the agent's pre-filled reusable payload buffer in
+- [x] T069 [US3] Implement the agent's pre-filled reusable payload buffer in
   `crates/workload-node-agent/src/payload.rs`, reconstructing block payloads
   from the key so only keys cross the network
 - [ ] T070 [US3] Implement node placement and migration in

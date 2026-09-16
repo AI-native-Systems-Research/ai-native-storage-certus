@@ -203,6 +203,12 @@ impl TurnExecutor {
         for opcode in [op::TOUCH, op::LOOKUP] {
             let resident = split.resident().to_vec();
             self.issue(client, channel, opcode, &resident, 0, None)?;
+            // After a load, check that what arrived is what was asked for. A stamp nobody
+            // reads proves nothing: the pre-fill is one repeated byte, so without this a cache
+            // returning the wrong block produces a run indistinguishable from a correct one.
+            if opcode == op::LOOKUP {
+                self.verify_loaded(&resident)?;
+            }
         }
 
         let missing = split.missing().to_vec();
@@ -258,6 +264,34 @@ impl TurnExecutor {
             skipped_needing_gpu: (self.skipped_needing_gpu - skipped_before.0) as u32,
             skipped_keys: (self.skipped_keys - skipped_before.1) as u32,
         })
+    }
+
+    /// Check each loaded block's stamp against the key it was loaded for.
+    ///
+    /// A no-op unless the run asked for verification. A mismatch is **not** a cache outcome
+    /// like a miss or a declined reserve — it means Certus returned the wrong bytes — so it is
+    /// counted separately and the report leads with it.
+    ///
+    /// # Errors
+    ///
+    /// If the device read fails. A *mismatch* is counted rather than raised: one run should
+    /// report how many blocks were wrong, not stop at the first.
+    fn verify_loaded(&mut self, keys: &[u64]) -> Result<(), String> {
+        let Some(buffer) = self.stream.payload_buffer() else {
+            return Ok(());
+        };
+        if !buffer.verifying() {
+            return Ok(());
+        }
+        let slot = self.stream.payload_slot();
+        for (i, key) in keys.iter().enumerate().take(self.batch_keys) {
+            let got = buffer.read_stamp(slot, i)?;
+            self.counters.payloads_verified += 1;
+            if got != *key {
+                self.counters.payload_mismatches += 1;
+            }
+        }
+        Ok(())
     }
 
     /// Payload bytes read and written so far.

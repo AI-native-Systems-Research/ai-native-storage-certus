@@ -38,6 +38,12 @@ pub const SUCCESS: CudaError = 0;
 /// `cudaMemcpyHostToDevice`.
 pub const MEMCPY_HOST_TO_DEVICE: c_int = 1;
 
+/// `cudaMemcpyDeviceToHost`.
+///
+/// Needed to read a block's key stamp back after a load, which is the only way to tell that
+/// Certus returned the block that was asked for rather than merely *a* block.
+pub const MEMCPY_DEVICE_TO_HOST: c_int = 2;
+
 /// Bytes in a CUDA IPC memory handle, and in the wire handle table's entry for one.
 pub const IPC_HANDLE_BYTES: usize = 64;
 

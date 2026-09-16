@@ -292,6 +292,19 @@ impl OpStream {
         self.payload.is_some()
     }
 
+    /// The device buffer behind this lane's template, if there is one.
+    ///
+    /// Exposed so the executor can read a stamp back after a load: only the buffer knows where
+    /// a block lives.
+    pub fn payload_buffer(&self) -> Option<&PayloadBuffer> {
+        self.payload.as_ref().and_then(|t| t.buffer.as_deref())
+    }
+
+    /// This lane's slot within the payload buffer.
+    pub fn payload_slot(&self) -> usize {
+        self.payload.as_ref().map_or(0, |t| t.slot)
+    }
+
     /// Encode one chunk of one operation's keys.
     ///
     /// The caller splits an operation's keys into chunks of at most
