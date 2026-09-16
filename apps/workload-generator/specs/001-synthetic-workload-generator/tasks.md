@@ -1057,6 +1057,29 @@ local Certus. The wire carries only what is deterministic (paths, session
 identity, virtual timing) and never cache outcomes, which keeps FR-072 intact
 across nodes while keeping the chatter host-local.
 
+**PACED MODE IS AGREED AND DEFERRED (FR-078).** To be implemented once
+everything else is settled; the design below is what was agreed, so it should not
+need re-deriving. It is deferred because it changes the spec in several places and
+because supporting both modes is genuinely more code, not because it is unwanted:
+latency is the reason for it, and a percentile gathered while the generator
+sprints describes a queue the real workload would never form.
+
+Deferred tasks, in order:
+
+- [ ] T088 [DEFERRED] Add the paced mode to `crates/workload-gen/src/live.rs`: hold
+  each request until its virtual time is due, `due = t0 + (virtual timestamp −
+  virtual start) / rate`, with a `--rate` multiplier defaulting to 1.0
+- [ ] T089 [DEFERRED] Replace the validity metric under pacing with **lateness**
+  in `crates/workload-gen/src/report.rs`: `lateness = submitted − due`, positive
+  only, reported as percentiles with its request count (FR-066a). A run whose
+  lateness exceeds tolerance is invalid for FR-062's reason — the generator, not
+  Certus, set the pace
+- [ ] T090 [DEFERRED] Make the report name the mode, since a paced throughput and
+  a work-conserving one are not comparable and would otherwise be quoted together
+- [ ] T091 [DEFERRED] Scope FR-031 to the work-conserving mode and re-word FR-062
+  so it does not appear to apply under pacing, where an empty queue is the normal
+  intended state
+
 **If pacing is ever adopted, it replaces a metric rather than adding a delay.**
 Today's run is work-conserving: it issues as fast as the mailbox allows and
 measures the ceiling. A paced run would issue each turn at a wallclock time
