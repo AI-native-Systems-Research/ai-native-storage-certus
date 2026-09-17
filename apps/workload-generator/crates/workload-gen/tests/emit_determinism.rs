@@ -305,3 +305,118 @@ fn plan_writes_a_canonical_file_that_is_byte_identical_at_a_fixed_seed() {
     assert_eq!(a, b);
     assert_ne!(a, c);
 }
+
+/// Run `emit --format <format>` and return (exit code, the output directory).
+fn emit_format(dir: &Path, description: &Path, format: &str) -> (i32, std::path::PathBuf) {
+    let out = dir.join(format!("out-{format}"));
+    let code = workload_gen::cli::run_argv(&[
+        "workload-gen".into(),
+        "emit".into(),
+        description.display().to_string(),
+        "--until".into(),
+        "400".into(),
+        "--output".into(),
+        out.display().to_string(),
+        "--seed".into(),
+        "7".into(),
+        "--format".into(),
+        format.into(),
+    ]);
+    (code, out)
+}
+
+fn part_file(dir: &Path, extension: &str) -> Option<std::path::PathBuf> {
+    let invocations = dir.join("invocations");
+    for entry in fs::read_dir(invocations).ok()? {
+        let sub = entry.ok()?.path();
+        for f in fs::read_dir(sub).ok()? {
+            let f = f.ok()?.path();
+            if f.extension().is_some_and(|e| e == extension) {
+                return Some(f);
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn format_jsonl_writes_only_jsonl() {
+    let tmp = TempDir::new().unwrap();
+    let d = write(tmp.path(), "small.yml", SMALL);
+    let (code, out) = emit_format(tmp.path(), &d, "jsonl");
+    assert_eq!(code, 0);
+    assert!(part_file(&out, "jsonl").is_some());
+    assert!(part_file(&out, "parquet").is_none());
+
+    let report = fs::read_to_string(out.join("report.json")).unwrap();
+    assert!(report.contains("\"parquet\": null"), "{report}");
+}
+
+/// `--format` must actually select containers, not merely be parsed.
+///
+/// This is the shape of failure the whole project keeps finding: a flag accepted,
+/// validated, and then not plumbed through. `--format both` was doing exactly that —
+/// it checked that the build had parquet support and then wrote JSONL alone, so
+/// `records.parquet` was permanently null and SC-004's equivalence claim had nothing
+/// to compare on a real run. Nothing caught it because no test drove `--format`.
+#[cfg(feature = "parquet")]
+#[test]
+fn format_both_writes_both_containers_and_reports_both_counts() {
+    let tmp = TempDir::new().unwrap();
+    let d = write(tmp.path(), "small.yml", SMALL);
+    let (code, out) = emit_format(tmp.path(), &d, "both");
+    assert_eq!(code, 0);
+
+    let jsonl = part_file(&out, "jsonl").expect("no jsonl part file");
+    let parquet = part_file(&out, "parquet").expect("no parquet part file");
+    assert!(fs::metadata(&jsonl).unwrap().len() > 0);
+
+    // Parquet's magic at both ends, so a truncated or empty file cannot pass.
+    let bytes = fs::read(&parquet).unwrap();
+    assert_eq!(&bytes[..4], b"PAR1");
+    assert_eq!(&bytes[bytes.len() - 4..], b"PAR1");
+
+    let rows = fs::read_to_string(&jsonl).unwrap().lines().count() as u64;
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["records"]["jsonl"].as_u64(), Some(rows));
+    assert_eq!(report["records"]["parquet"].as_u64(), Some(rows));
+}
+
+#[cfg(feature = "parquet")]
+#[test]
+fn format_parquet_writes_only_parquet_and_still_writes_a_manifest() {
+    // The manifest's counts come from whichever container was written, so a
+    // parquet-only run must not lose them — that would make the trace unreadable
+    // rather than merely uncounted (FR-073).
+    let tmp = TempDir::new().unwrap();
+    let d = write(tmp.path(), "small.yml", SMALL);
+    let (code, out) = emit_format(tmp.path(), &d, "parquet");
+    assert_eq!(code, 0);
+    assert!(part_file(&out, "parquet").is_some());
+    assert!(part_file(&out, "jsonl").is_none());
+
+    let manifest = fs::read_to_string(out.join("manifest.json")).unwrap();
+    assert!(manifest.contains("\"block_id_space\": \"chained_u64\""));
+    let m: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    let invocations = m["block_stats"]["16"]["invocations"].as_u64().unwrap();
+    assert!(invocations > 0, "parquet-only lost the manifest's counts");
+
+    let report = fs::read_to_string(out.join("report.json")).unwrap();
+    assert!(report.contains("\"jsonl\": null"), "{report}");
+}
+
+#[cfg(not(feature = "parquet"))]
+#[test]
+fn asking_for_parquet_without_the_feature_is_refused_rather_than_silently_jsonl() {
+    let tmp = TempDir::new().unwrap();
+    let d = write(tmp.path(), "small.yml", SMALL);
+    for format in ["parquet", "both"] {
+        let (code, out) = emit_format(tmp.path(), &d, format);
+        assert_eq!(code, 2, "--format {format} should be refused");
+        assert!(
+            part_file(&out, "jsonl").is_none(),
+            "--format {format} wrote a jsonl trace instead of refusing"
+        );
+    }
+}
