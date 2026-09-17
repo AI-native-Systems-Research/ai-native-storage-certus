@@ -25,6 +25,50 @@
 //! absent ones, for the reason `record.rs` gives: a reader must learn what a trace
 //! supports by reading it (FR-056), and an absent column would force it to guess.
 //! Parquet stores an all-null column in a handful of bytes, so this costs nothing.
+//!
+//! # Examples
+//!
+//! The writer is driven exactly like the JSONL one — same records, same counts, a
+//! different container. That is what makes the two interchangeable for a
+//! reproducibility check:
+//!
+//! ```
+//! use workload_model::description::WorkloadDescription;
+//! use workload_model::sim::Simulation;
+//! use workload_trace::parquet::ParquetWriter;
+//!
+//! let description: WorkloadDescription = r#"
+//! version: 1
+//! blocks: {tokens: 16, bytes: 32768}
+//! shared_classes:
+//!   docs: {length: {constant: 3}, lifetime: {constant: .inf}, pool: {size: {exact: 2}}}
+//! session_classes:
+//!   chat:
+//!     pool: {size: {exact: 2}}
+//!     uses: [{class: docs, count: {constant: 1}}]
+//!     turns: {constant: 3}
+//!     input_growth: {constant: 2}
+//!     output_growth: {constant: 1}
+//!     think_time: {constant: 5}
+//! "#
+//! .parse()
+//! .unwrap();
+//!
+//! let mut bytes = Vec::new();
+//! let mut sim = Simulation::new(&description, 7).unwrap();
+//! let mut writer = ParquetWriter::new(&mut bytes, "demo", description.blocks.tokens).unwrap();
+//! sim.run_until(60.0, &mut |s, t| writer.write(s, t).unwrap());
+//! let stats = writer.finish().unwrap();
+//!
+//! // The same counts the JSONL writer's example reports, from the same seed.
+//! assert_eq!(stats.sessions, 9);
+//! assert_eq!(stats.invocations, 24);
+//! assert_eq!(stats.unique_blocks, 78);
+//!
+//! // A parquet file, magic bytes at both ends.
+//! assert_eq!(&bytes[..4], b"PAR1");
+//! assert_eq!(&bytes[bytes.len() - 4..], b"PAR1");
+//! ```
 
 use std::io::Write;
 

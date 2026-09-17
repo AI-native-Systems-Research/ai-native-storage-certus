@@ -54,6 +54,95 @@
 //! Nagle's algorithm withholds a small write until the previous one is acknowledged, which
 //! is precisely the wrong behaviour for a stream of small frames whose latency is the thing
 //! being measured. It is set on connect and is not optional.
+//!
+//! # Examples
+//!
+//! The window is the thing to understand. At depth *d*, the *d+1*-th [`Client::submit`]
+//! has to drain one reply to make room, and it hands that reply back — so a caller that
+//! ignores the return value still gets correct backpressure and merely loses a
+//! measurement:
+//!
+//! ```
+//! use std::sync::atomic::AtomicBool;
+//! use std::sync::Arc;
+//! use std::time::Duration;
+//!
+//! use workload_wire::client::Client;
+//! use workload_wire::frame::SubmitTurn;
+//! use workload_wire::server::{FnFactory, Server, Service};
+//! # use workload_wire::frame::{Hello, HelloAck, TurnOutcome};
+//! # struct EveryKeyResident;
+//! # impl Service for EveryKeyResident {
+//! #     fn hello(&mut self, h: &Hello) -> HelloAck { workload_wire::handshake::answer(h, 8, 32768) }
+//! #     fn submit_turn(&mut self, t: &SubmitTurn) -> TurnOutcome {
+//! #         TurnOutcome { resident: t.path.len() as u32, ..Default::default() }
+//! #     }
+//! # }
+//!
+//! let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(EveryKeyResident)))
+//!     .unwrap()
+//!     .with_linger(Duration::ZERO);
+//! let addr = server.local_addr().unwrap();
+//! let serving = std::thread::spawn(move || {
+//!     server.serve(Arc::new(AtomicBool::new(false))).unwrap();
+//! });
+//!
+//! // Depth 2: a transport choice, and deliberately not a workload one (FR-072).
+//! let mut client = Client::connect(addr, 2, Some(Duration::from_secs(10))).unwrap();
+//! client.handshake("localhost", "/dev/shm/certus-shmq", 2, 32768).unwrap();
+//! assert_eq!(client.depth(), 2);
+//!
+//! let turn = |session: u64, path: Vec<u64>| SubmitTurn { session, flags: 0, path };
+//!
+//! // Two fit in the window, so nothing comes back yet.
+//! assert!(client.submit(&turn(1, vec![10])).unwrap().1.is_none());
+//! assert!(client.submit(&turn(2, vec![20, 21])).unwrap().1.is_none());
+//! assert_eq!(client.inflight(), 2);
+//!
+//! // The third displaces the oldest, and returns its outcome.
+//! let (_corr, displaced) = client.submit(&turn(3, vec![30, 31, 32])).unwrap();
+//! assert_eq!(displaced.unwrap().resident, 1);
+//! assert_eq!(client.inflight(), 2);
+//!
+//! let rest = client.finish().unwrap();
+//! assert_eq!(rest.len(), 2);
+//! assert_eq!(rest[1].resident, 3);
+//!
+//! client.shutdown().unwrap();
+//! serving.join().unwrap();
+//! ```
+//!
+//! The synchronous calls — [`Client::drain`], [`Client::stats`], [`Client::shutdown`] —
+//! refuse while replies are outstanding, rather than reading a `TurnOutcome` as though it
+//! were their own reply:
+//!
+//! ```
+//! # use std::sync::atomic::AtomicBool;
+//! # use std::sync::Arc;
+//! # use std::time::Duration;
+//! # use workload_wire::client::Client;
+//! # use workload_wire::frame::SubmitTurn;
+//! # use workload_wire::server::{FnFactory, Server, Service};
+//! # use workload_wire::frame::{Hello, HelloAck, TurnOutcome};
+//! # struct S;
+//! # impl Service for S {
+//! #     fn hello(&mut self, h: &Hello) -> HelloAck { workload_wire::handshake::answer(h, 8, 32768) }
+//! #     fn submit_turn(&mut self, _t: &SubmitTurn) -> TurnOutcome { TurnOutcome::default() }
+//! # }
+//! # let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(S))).unwrap().with_linger(Duration::ZERO);
+//! # let addr = server.local_addr().unwrap();
+//! # let serving = std::thread::spawn(move || { server.serve(Arc::new(AtomicBool::new(false))).unwrap(); });
+//! let mut client = Client::connect(addr, 4, Some(Duration::from_secs(10))).unwrap();
+//! client.handshake("localhost", "/dev/shm/certus-shmq", 4, 32768).unwrap();
+//!
+//! client.submit(&SubmitTurn { session: 1, flags: 0, path: vec![1] }).unwrap();
+//! assert!(client.drain().is_err()); // one reply is still outstanding
+//!
+//! client.finish().unwrap();
+//! assert_eq!(client.drain().unwrap().pending, 0);
+//! # client.shutdown().unwrap();
+//! # serving.join().unwrap();
+//! ```
 
 use std::collections::VecDeque;
 use std::fmt;

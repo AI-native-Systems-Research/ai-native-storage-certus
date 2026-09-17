@@ -11,6 +11,7 @@
 //!
 //! Exits non-zero if the local mailbox is absent, so a missing server is a startup failure
 //! rather than a run that quietly measures nothing.
+#![warn(missing_docs)]
 
 mod agent;
 

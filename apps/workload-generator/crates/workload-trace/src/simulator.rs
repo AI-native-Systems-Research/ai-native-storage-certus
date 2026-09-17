@@ -37,6 +37,47 @@
 //! into one, or splits one into many, and a lineage-aware eviction policy then scores
 //! against a workload nobody described. That is what `tests/simulator.rs` checks, and
 //! it is why the parent link is asserted here rather than assumed.
+//!
+//! # Examples
+//!
+//! Two interleaved sessions, each numbering its turns from zero. `chat_id` is a
+//! counter over emitted rows, so they do not collide, and each session's chain is
+//! rooted at −1:
+//!
+//! ```
+//! use workload_trace::simulator::convert_jsonl;
+//!
+//! let trace = concat!(
+//!     r#"{"session_id":"a","invocation_index":0,"parent_invocation":-1,"full_input_blocks":[1,2]}"#, "\n",
+//!     r#"{"session_id":"b","invocation_index":0,"parent_invocation":-1,"full_input_blocks":[3,4]}"#, "\n",
+//!     r#"{"session_id":"a","invocation_index":1,"parent_invocation":0,"full_input_blocks":[1,2,5]}"#, "\n",
+//! );
+//!
+//! let mut out = Vec::new();
+//! let stats = convert_jsonl(trace.as_bytes(), &mut out).unwrap();
+//! assert_eq!(stats.records, 3);
+//! assert_eq!(stats.sessions, 2);
+//! assert_eq!(stats.distinct_keys, 5);
+//!
+//! let text = String::from_utf8(out).unwrap();
+//! let lines: Vec<&str> = text.lines().collect();
+//! assert_eq!(lines[0], r#"{"chat_id":0,"parent_chat_id":-1,"hash_ids":[1,2],"type":"request"}"#);
+//! assert_eq!(lines[1], r#"{"chat_id":1,"parent_chat_id":-1,"hash_ids":[3,4],"type":"request"}"#);
+//! // Session a's second turn points at chat_id 0, not at the row before it.
+//! assert_eq!(lines[2], r#"{"chat_id":2,"parent_chat_id":0,"hash_ids":[1,2,5],"type":"request"}"#);
+//! ```
+//!
+//! A chain that does not hold together is refused rather than silently reshaped:
+//!
+//! ```
+//! use workload_trace::simulator::convert_jsonl;
+//!
+//! // Claims a parent, but the converter has no earlier turn for this session.
+//! let orphan = r#"{"session_id":"a","invocation_index":3,"parent_invocation":2,"full_input_blocks":[1]}"#;
+//! let mut out = Vec::new();
+//! let err = convert_jsonl(orphan.as_bytes(), &mut out).unwrap_err();
+//! assert!(err.to_string().contains("silently reshaped"));
+//! ```
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};

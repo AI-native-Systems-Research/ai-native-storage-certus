@@ -54,6 +54,36 @@
 //!   therefore only interpretable by a consumer told what it is, which is why the
 //!   converter reports the block size it used instead of leaving it to be inferred.
 //! - Think time, TTFT and service time, none of which this generator models anyway.
+//!
+//! # Examples
+//!
+//! [`convert_jsonl`] takes emitted trace rows and writes Mooncake lines. Note what
+//! the renumbering does with the shared prefix — it is the whole point of the format
+//! being global rather than per session:
+//!
+//! ```
+//! use workload_trace::mooncake::convert_jsonl;
+//!
+//! // Two turns of one session: the second re-reads the first's prompt.
+//! let trace = concat!(
+//!     r#"{"request_start":0.0,"full_input_blocks":[91,92],"full_output_blocks":[93]}"#, "\n",
+//!     r#"{"request_start":1.5,"full_input_blocks":[91,92,93],"full_output_blocks":[94]}"#, "\n",
+//! );
+//!
+//! let mut out = Vec::new();
+//! let stats = convert_jsonl(trace.as_bytes(), &mut out, 16).unwrap();
+//! assert_eq!(stats.records, 2);
+//! assert_eq!(stats.distinct_ids, 3); // 91, 92, 93 renumbered to 0, 1, 2
+//!
+//! let text = String::from_utf8(out).unwrap();
+//! let lines: Vec<&str> = text.lines().collect();
+//! assert_eq!(lines[0], r#"{"timestamp":0,"input_length":32,"output_length":16,"hash_ids":[0,1]}"#);
+//! // The prefix keeps its identifiers, so the reuse is still visible.
+//! assert_eq!(lines[1], r#"{"timestamp":1500,"input_length":48,"output_length":16,"hash_ids":[0,1,2]}"#);
+//!
+//! // And the conversion says what it gave up, rather than leaving it to be found.
+//! assert!(stats.declared_losses().iter().any(|l| l.contains("16 tokens")));
+//! ```
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
