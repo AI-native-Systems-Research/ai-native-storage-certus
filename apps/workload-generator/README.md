@@ -35,9 +35,9 @@ captured trace. Nothing here claims a generated workload *is* some real one.
 
 ## The five crates
 
-The split is not organisational. Three crates are CUDA-free and are workspace
-default members; two link CUDA and are not. That boundary is what makes "the
-plan is identical across the live and emit paths" a property the compiler
+The split is not organisational. Four crates are CUDA-free and are workspace
+default members; **one** links CUDA and is not. That boundary is what makes
+"the plan is identical across the live and emit paths" a property the compiler
 enforces rather than one a reviewer has to check, because the simulation core
 cannot see a mailbox, a device or an output container.
 
@@ -46,23 +46,31 @@ cannot see a mailbox, a device or an output container.
 | `workload-model` | yes | the simulation core: YAML schema and validation, the five distribution kinds, populations and residual seeding, selection over rank, the key chain, sessions and turns, the virtual-time loop, and the canonical `OperationPlan` |
 | `workload-trace` | yes | output containers (JSONL, parquet behind a non-default feature), the self-describing manifest, and the Mooncake / libCacheSim / cache-simulator projections |
 | `workload-wire` | yes | the generator↔agent TCP protocol: framing, the `Hello` handshake, and its conformance cases |
-| `workload-gen` | **no** | the `workload-gen` binary — CLI, execution lanes, the CUDA payload path, and the structured report |
-| `workload-node-agent` | **no** | the per-node relay daemon for multi-node runs. It holds no simulation state and depends on `workload-gen`'s *library*, so FR-072a's reactive rule has exactly one implementation |
+| `workload-gen` | yes | the `workload-gen` binary — CLI, the plan queue, the driver, pacing, and the structured report. Links no CUDA and attaches to no mailbox |
+| `workload-node-agent` | **no** | the per-node daemon, and **everything that touches the mailbox or the GPU**: the turn executor, the opcode mapping, the payload buffer. It holds no simulation state |
 
-The two binaries are excluded from `default-members`, so a plain `cargo build`
-or `cargo test` at the repository root never reaches CUDA. Build them
-explicitly:
+**Only the agent is excluded from `default-members`**, so a plain `cargo build`
+or `cargo test` at the repository root covers everything except the one crate
+that needs an accelerator.
+
+That is a consequence of routing every node through an agent, including the
+local one (FR-079). The generator used to own a second, direct mailbox path and
+so linked CUDA itself; collapsing the two paths onto one moved that code to the
+crate that uses it, which is also where FR-072a's reactive rule now lives — one
+implementation, structurally, because there is nowhere else for a second to be.
 
 ```bash
-cargo build -p workload-gen
-cargo build -p workload-node-agent
+# Both, together: the provenance digest covers every crate here, so a generator
+# rebuilt after its agent is refused at the handshake — correctly.
+cargo build -p workload-gen -p workload-node-agent
 ```
 
 ## The emit-only build
 
-`workload-gen`'s `live` feature is default-on and gates both the mailbox
-transport and the CUDA link. Turning it off yields a tool that needs no
-accelerator, no server and no cluster:
+`workload-gen`'s `live` feature is default-on and gates the `run` subcommand
+and the agent transport. It no longer gates an accelerator or a mailbox — since
+FR-079 the generator has neither — so an ordinary build already needs no CUDA;
+turning the feature off drops the networking too:
 
 ```bash
 cargo build -p workload-gen --no-default-features
@@ -114,6 +122,41 @@ container stops being text. Native JSONL is 44.1 MB.
 The pre-flight sizes only what you asked for and checks each destination against
 the free space on **its own** filesystem, so a refusal names the flag to drop.
 
+## Two questions, two modes
+
+A live run answers one of two different questions, and the report names which:
+
+| Mode | Answers | Valid when |
+| --- | --- | --- |
+| `--pacing real` (default) | **the latency Certus delivers under the load this workload actually represents** | it kept its own schedule: p99 lateness inside `--lateness-tolerance-ms` |
+| `--pacing none` | **how fast Certus can go** — the ceiling | no lane's plan queue ever ran dry (FR-062) |
+
+**They are not comparable**, which is why the mode is the first line of the
+report. A paced throughput is capped by the rate you asked for; a
+work-conserving one is a saturated queue's.
+
+Paced is the default because the failure modes are asymmetric. Ask for a
+ceiling and get pacing, and the throughput comes back equal to the rate you
+requested — conspicuous, and hard to misquote. Ask for your workload's latency
+and get work-conserving, and the percentiles come back from a queue the
+workload would never form: entirely plausible, and wrong. `think_time`, arrival
+rates and session lifetimes are most of what a description says, and a
+work-conserving default makes all of them decorative for a live run.
+
+`--rate` is virtual seconds per wallclock second and is a **calibration**
+control: a description's durations are arbitrary with respect to any particular
+machine, so this is how one description is aimed at faster or slower hardware
+without being rewritten. It changes only the tempo — the same keys in the same
+order, and a plan fingerprint independent of it — and at rate 1.0 a run costs
+its virtual span, so `--until 3600` is an hour. Sweeping the rate is the
+capacity measurement: `scripts/rate-sweep.sh`.
+
+Under pacing the plan queue stops carrying information: an empty queue is the
+normal, intended state because nothing is due yet. That is why lateness
+*replaces* FR-062 rather than joining it — a node too slow to keep the schedule
+leaves the producer comfortably ahead, so the queue looks healthy while the run
+is failing.
+
 ## Is the generator fast enough?
 
 It has to be, or every measurement made with it is a measurement of it. The claim
@@ -151,10 +194,10 @@ test, exactly as for hit rates below. `benches/plan.rs` carries the full record.
 
 ## Where to go next
 
-- [`quickstart.md`](specs/001-synthetic-workload-generator/quickstart.md) — six
-  scenarios, from validating the shipped example with no hardware to a
-  multi-node run with session migration. Run its commands from *this*
-  directory.
+- [`quickstart.md`](specs/001-synthetic-workload-generator/quickstart.md) —
+  nine scenarios, from validating the shipped example with no hardware to a
+  rate sweep and a multi-node run with session migration. Run its commands from
+  *this* directory.
 - [`contracts/`](specs/001-synthetic-workload-generator/contracts/) — normative:
   the CLI, key derivation, trace I/O and interop, the node-agent wire protocol,
   and `workload-input.example.yml`, the description a test keeps parseable.

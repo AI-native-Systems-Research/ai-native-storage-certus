@@ -19,12 +19,15 @@ identical across live and emit runs" a structural property rather than an
 honour-system one, and lets the whole determinism and distribution test surface
 run with no accelerator and no server.
 
-Five crates: three CUDA-free libraries that are workspace default members
-(`workload-model`, `workload-trace`, `workload-wire`) and two CUDA-linked
-binaries that are not (`workload-gen`, `workload-node-agent`), following the
-precedent of `apps/remote-lookup-bench`. Remote nodes are reached over plain
-pipelined TCP, which the arithmetic in `research.md` D2 shows has an order of
-magnitude of headroom because only keys cross the wire.
+Five crates: four CUDA-free ones that are workspace default members
+(`workload-model`, `workload-trace`, `workload-wire`, `workload-gen`) and a
+single CUDA-linked daemon that is not (`workload-node-agent`), following the
+precedent of `apps/remote-lookup-bench`. `workload-gen` joined them under
+FR-079: every node is driven through an agent, including the local one, so the
+mailbox and the device buffer live in the daemon and the generator links
+neither. Remote nodes are reached over plain pipelined TCP, which the
+arithmetic in `research.md` D2 shows has an order of magnitude of headroom
+because only keys cross the wire.
 
 ## Technical Context
 
@@ -33,18 +36,19 @@ magnitude of headroom because only keys cross the wire.
 **Primary Dependencies**: `clap` 4 (repo convention), `serde` + `serde_yaml`
 0.9 (matching `apps/certus-server-yaml`), `rand` 0.8 + **`rand_chacha`** for
 reproducible sampling, `parquet` **behind a non-default feature**,
-`hdrhistogram` (binary only), `shm-queue` + `shmq-dispatcher` (live path only),
-`criterion` for benchmarks. No hashing crate — key derivation is a specified
-splitmix64 chain.
+`hdrhistogram` (binaries only), `shm-queue` + `shmq-dispatcher` (the node agent
+only, since FR-079), `criterion` for benchmarks. No hashing crate — key
+derivation is a specified splitmix64 chain.
 
 **Storage**: Output files only — a trace directory (JSONL and/or parquet with a
 `manifest.json`) and a plan serialisation. No database, no persistent state;
 the node agent holds none by design.
 
-**Testing**: `cargo test` — unit, doc, and integration. The three library
-crates are default members, so `cargo test --all` covers the simulation core,
-distributions, key chaining, trace writing, and wire framing with no hardware.
-Criterion benchmarks for the per-key plan-generation path.
+**Testing**: `cargo test` — unit, doc, and integration. Four of the five crates
+are default members, so `cargo test --all` covers the simulation core,
+distributions, key chaining, trace writing, wire framing, the driver, the plan
+queue and pacing with no hardware. Criterion benchmarks for the per-key
+plan-generation path.
 
 **Target Platform**: Linux, x86-64 only. The mailbox transport depends on
 x86-TSO store ordering and shared futexes.
@@ -150,20 +154,21 @@ apps/workload-generator/
 │   ├── workload-wire/                   # default member, CUDA-free
 │   │   ├── src/{frame.rs,client.rs,server.rs}
 │   │   └── tests/                       # round-trip, oversize, truncation, Hello
-│   ├── workload-gen/                    # NOT a default member (CUDA)
-│   │   └── src/{main.rs,cli.rs,live.rs,lanes.rs,cuda.rs,report.rs}
+│   ├── workload-gen/                    # default member; no CUDA, no mailbox
+│   │   └── src/{main.rs,cli.rs,live.rs,drive.rs,agents.rs,report.rs}
 │   └── workload-node-agent/             # NOT a default member (CUDA)
-│       └── src/{main.rs,agent.rs,payload.rs}
+│       └── src/{main.rs,lib.rs,agent.rs,exec.rs,opstream.rs,payload.rs,cuda.rs,mailbox.rs}
 └── specs/001-synthetic-workload-generator/
 ```
 
 **Structure Decision**: Crates live under `apps/workload-generator/crates/` so
-the feature's speckit directory and its code sit together, and the three
-library crates join `default-members` in the root `Cargo.toml` while the two
-binaries are added as plain members. `workload-gen` carries a default-on `live`
-feature; building with `--no-default-features` yields an emit-only tool with no
-CUDA and no mailbox dependency, which is what makes User Story 2 and quickstart
-Scenarios 1–3 runnable anywhere.
+the feature's speckit directory and its code sit together, and every crate
+except the node agent joins `default-members` in the root `Cargo.toml`.
+`workload-gen` carries a default-on `live` feature, which now gates the `run`
+subcommand and the agent transport rather than an accelerator: since FR-079 the
+generator has no mailbox and no CUDA in any configuration, so
+`--no-default-features` merely drops the networking as well. Either build makes
+User Story 2 and quickstart Scenarios 1–3 runnable anywhere.
 
 ## Complexity Tracking
 
