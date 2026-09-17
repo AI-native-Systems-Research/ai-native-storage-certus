@@ -142,7 +142,13 @@ fn run(cli: &Cli) -> Result<(), String> {
     // The mailbox, and the channels this agent will hand out one per connection. Absent
     // mailbox is a startup failure: a daemon that came up without one would accept
     // connections and measure nothing.
-    let (client, channels) = mailbox::attach(&cli.shm_path, cli.lanes)?;
+    // Held for the whole of `run`, so the claim is given back on the way out — an ordinary exit
+    // and a panic alike. A claim lives in the shared segment and outlives the process that made
+    // it, so an agent that exited without releasing leaves channels no later run can use until
+    // the server restarts; see `mailbox::Claim`.
+    let claim = mailbox::attach(&cli.shm_path, cli.lanes)?;
+    let client = Arc::clone(claim.client());
+    let channels = claim.channels().to_vec();
     eprintln!(
         "attached {} with {} channels; serving {} lanes",
         cli.shm_path,
@@ -190,6 +196,11 @@ fn run(cli: &Cli) -> Result<(), String> {
     // for a run that never came.
     let stop = Arc::new(AtomicBool::new(false));
     server.serve(stop).map_err(|e| format!("serve: {e}"))?;
-    eprintln!("stopped");
+    // Explicit, though `Drop` would do it: releasing the channels is the last thing this process
+    // owes the mailbox, and saying so here is what makes the count visible in the log a failed
+    // run leaves behind.
+    let released = claim.channels().len();
+    drop(claim);
+    eprintln!("stopped; released {released} mailbox channel(s)");
     Ok(())
 }

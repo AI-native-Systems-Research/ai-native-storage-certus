@@ -205,6 +205,20 @@ pub trait Launcher: Send + Sync {
     ///
     /// If the command could not be issued.
     fn kill(&self, spec: &AgentSpec) -> Result<(), String>;
+
+    /// Anything this launcher knows about why an agent is not answering.
+    ///
+    /// Consulted only when a launch succeeded and the port never came up, which is the one case
+    /// where "connection refused" is a true statement that helps nobody: the agent *started* and
+    /// then failed for a reason it wrote down somewhere. A launcher that can read that reason
+    /// should say so, because the alternative is an operator with a refused connection and no
+    /// hint that a second process was even involved.
+    ///
+    /// `None` by default: over ssh there is nothing to consult without another round trip.
+    fn why_not_listening(&self, spec: &AgentSpec) -> Option<String> {
+        let _ = spec;
+        None
+    }
 }
 
 /// Uses agents that are already running, launching and killing nothing.
@@ -312,6 +326,31 @@ impl Launcher for LocalLauncher {
         Ok(())
     }
 
+    fn why_not_listening(&self, spec: &AgentSpec) -> Option<String> {
+        let mut started = self.started.lock().unwrap_or_else(|e| e.into_inner());
+        let child = started.get_mut(&spec.port)?;
+        // Still running and simply not listening yet is not a diagnosis, so say nothing.
+        let status = child.try_wait().ok().flatten()?;
+        let path = self.log_path(spec.port);
+        // The agent's own last words, which are the actual reason nine times out of ten: a
+        // missing mailbox, or channels another client still holds.
+        let said = std::fs::read_to_string(&path)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        Some(match said {
+            Some(text) => format!(
+                "the local agent exited ({status}) before it could listen, saying: {text} \
+                 (full output in {})",
+                path.display()
+            ),
+            None => format!(
+                "the local agent exited ({status}) before it could listen and wrote nothing to {}",
+                path.display()
+            ),
+        })
+    }
+
     fn kill(&self, spec: &AgentSpec) -> Result<(), String> {
         let mut started = self.started.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(mut child) = started.remove(&spec.port) {
@@ -347,6 +386,24 @@ impl Launcher for LocalLauncher {
     }
 }
 
+/// How long a child gets to finish exiting before it is killed.
+///
+/// `Agents::stop` returns once the agent's **port** has gone quiet, which happens when its
+/// listener closes — and the process still has its own teardown to do after that: releasing
+/// mailbox channels and freeing a device allocation. Without a grace period the reap below
+/// SIGKILLed a healthy agent a few milliseconds into that, printing an alarming line about an
+/// agent that had done nothing wrong and cutting short exactly the cleanup FR-053 is about.
+///
+/// Derived from the agent's own linger rather than picked, and that is the whole point. An agent
+/// whose connections have all closed waits `DEFAULT_LINGER` before believing the run is over — the
+/// grace period that lets a generator open its lanes one at a time — and only then releases its
+/// mailbox channels. A kill inside that window is a kill of a healthy agent mid-cleanup, and
+/// because a **claim outlives the process that made it** the channels are then leaked until the
+/// server restarts. A first attempt at 3 seconds against a 5-second linger did exactly that.
+pub const EXIT_GRACE: Duration = workload_wire::server::DEFAULT_LINGER
+    .saturating_add(Duration::from_secs(5))
+    .saturating_add(STOP_TIMEOUT);
+
 impl Drop for LocalLauncher {
     fn drop(&mut self) {
         // A backstop, not the mechanism: `Agents::stop` asks each agent to exit and verifies its
@@ -354,13 +411,26 @@ impl Drop for LocalLauncher {
         // process holding this node's mailbox channels behind it.
         let mut started = self.started.lock().unwrap_or_else(|e| e.into_inner());
         for (port, child) in started.iter_mut() {
-            match child.try_wait() {
-                Ok(Some(_)) => {}
-                _ => {
-                    eprintln!("killing the local agent on port {port}; it did not exit on its own");
-                    let _ = child.kill();
-                    let _ = child.wait();
+            let deadline = Instant::now() + EXIT_GRACE;
+            let mut exited = false;
+            while Instant::now() < deadline {
+                match child.try_wait() {
+                    Ok(Some(_)) => {
+                        exited = true;
+                        break;
+                    }
+                    Ok(None) => std::thread::sleep(POLL),
+                    // Not waitable at all: killing it is the only thing left to try.
+                    Err(_) => break,
                 }
+            }
+            if !exited {
+                eprintln!(
+                    "killing the local agent on port {port}; it did not exit within {EXIT_GRACE:?} \
+                     of being asked to"
+                );
+                let _ = child.kill();
+                let _ = child.wait();
             }
         }
         started.clear();
@@ -611,6 +681,44 @@ impl Agents {
         depth: usize,
         replace: bool,
     ) -> Result<Self, String> {
+        // What was launched before the failure, so it can be stopped again. Without this a
+        // refused handshake left an agent listening with its mailbox channels claimed: nobody had
+        // asked it to stop, so it waited out its linger — and the local launcher's own backstop
+        // killed it first, which leaks the claims into the shared segment where only a server
+        // restart clears them. Four refused runs against an eight-channel mailbox and the fifth
+        // cannot start. Found by running the same smoke test five times.
+        let mut launched: Vec<AgentSpec> = Vec::new();
+        match Self::start_inner(launcher, specs, depth, replace, &mut launched) {
+            Ok(agents) => Ok(agents),
+            Err(e) => {
+                // Only what **this** launcher started. `replace` false means the caller manages
+                // the daemons ([`NoLaunch`]), and stopping one of theirs on a refusal would leave
+                // them with nothing to talk to and nothing able to start it again — which is the
+                // very reason that flag exists.
+                if replace {
+                    for spec in &launched {
+                        // Asked first, killed second: a `Shutdown` lets the agent release its
+                        // channels and its device memory in order, and it is answered whatever the
+                        // agent's provenance — which matters, because a provenance refusal is the
+                        // commonest way to arrive here.
+                        if let Err(cleanup) = shut_down_or_kill(launcher, spec) {
+                            eprintln!("node {}: {cleanup}", spec.node);
+                        }
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// The body of [`Agents::start_with`], recording what it launched as it goes.
+    fn start_inner<L: Launcher>(
+        launcher: &L,
+        specs: &[AgentSpec],
+        depth: usize,
+        replace: bool,
+        launched: &mut Vec<AgentSpec>,
+    ) -> Result<Self, String> {
         assert!(depth > 0, "a pipelining depth of 0 could never send");
         let mut agents = Vec::with_capacity(specs.len());
         for spec in specs {
@@ -632,6 +740,7 @@ impl Agents {
                 }
             }
             launcher.launch(spec)?;
+            launched.push(spec.clone());
             // One connection per lane: the agent claims a mailbox channel per connection, and the
             // mailbox is depth-1 per channel, so this is the whole of a node's concurrency. The
             // first connection is also what proves the agent came up at all.
@@ -639,7 +748,7 @@ impl Agents {
             let mut ack = None;
             for lane in 0..spec.lanes {
                 let mut client = if lane == 0 {
-                    wait_for_port(spec, depth)?
+                    wait_for_port(launcher, spec, depth)?
                 } else {
                     // The port is already accepting, so a lane that cannot connect is a refusal —
                     // typically the agent having fewer channels than the run asked for, which the
@@ -814,19 +923,41 @@ impl Drop for Agents {
 fn replace_leftover<L: Launcher>(launcher: &L, spec: &AgentSpec) -> Result<Option<()>, String> {
     let probe = Client::<TcpStream>::connect(spec.address(), 1, Some(POLL * 5))
         .and_then(|c| c.with_read_timeout(PROBE_TIMEOUT));
-    let Ok(mut client) = probe else {
+    let Ok(client) = probe else {
         // Nothing listening. Kill anyway: a process that is running but not accepting is the
         // worst leftover of the three, since it holds resources and answers nothing.
         launcher.kill(spec)?;
         return Ok(None);
     };
-    // A leftover is replaced whatever its provenance, so the handshake is not verified here —
-    // only used to reach `Shutdown`. A stale leftover would refuse a verified handshake and
-    // then never be asked to stop.
-    let asked = client
-        .hello(&workload_wire::handshake::hello(&spec.shm_path))
-        .is_ok()
-        && client.shutdown().is_ok();
+    drop(client);
+    shut_down_or_kill(launcher, spec)?;
+    Ok(Some(()))
+}
+
+/// Stop whatever is listening on `spec`'s port, by asking first and killing if that fails.
+///
+/// Used for a leftover found at startup and for an agent this run launched and then could not
+/// use. Both want the same thing and for the same reason: an agent left listening holds mailbox
+/// channels, and a **claim outlives the process that made it**, so killing an agent that had not
+/// been asked to stop leaks those channels into the shared segment until the server restarts.
+///
+/// The handshake here is deliberately **not verified**. It is only a way to reach `Shutdown`, and
+/// verifying it would refuse precisely the two agents most in need of stopping: a stale leftover,
+/// and the freshly launched agent whose provenance refusal brought us here.
+///
+/// # Errors
+///
+/// If the agent would neither stop nor be killed.
+fn shut_down_or_kill<L: Launcher>(launcher: &L, spec: &AgentSpec) -> Result<(), String> {
+    let asked = Client::<TcpStream>::connect(spec.address(), 1, Some(POLL * 5))
+        .and_then(|c| c.with_read_timeout(PROBE_TIMEOUT))
+        .map(|mut client| {
+            client
+                .hello(&workload_wire::handshake::hello(&spec.shm_path))
+                .is_ok()
+                && client.shutdown().is_ok()
+        })
+        .unwrap_or(false);
     if !asked {
         launcher.kill(spec)?;
     }
@@ -834,34 +965,49 @@ fn replace_leftover<L: Launcher>(launcher: &L, spec: &AgentSpec) -> Result<Optio
         launcher.kill(spec)?;
         if !wait_for_quiet(spec) {
             return Err(format!(
-                "node {}: a leftover agent on port {} would neither stop nor be killed, so this \
-                 run would have shared its mailbox channels and reported its counters",
-                spec.node, spec.port
+                "an agent on port {} would neither stop nor be killed, so this run would have \
+                 shared its mailbox channels and reported its counters",
+                spec.port
             ));
         }
     }
-    Ok(Some(()))
+    Ok(())
 }
 
 /// Connect once the agent is listening, or give up.
-fn wait_for_port(spec: &AgentSpec, depth: usize) -> Result<Client<TcpStream>, String> {
+///
+/// Gives up **early** when the launcher can tell us the agent has already exited: waiting out the
+/// full timeout for a process that is gone spends twenty seconds proving nothing.
+fn wait_for_port<L: Launcher>(
+    launcher: &L,
+    spec: &AgentSpec,
+    depth: usize,
+) -> Result<Client<TcpStream>, String> {
     let deadline = Instant::now() + START_TIMEOUT;
     let mut last: Option<ClientError> = None;
+    let mut gone: Option<String> = None;
     while Instant::now() < deadline {
         match Client::<TcpStream>::connect(spec.address(), depth, Some(POLL * 5)) {
             Ok(c) => return Ok(c),
             Err(e) => last = Some(e),
         }
+        gone = launcher.why_not_listening(spec);
+        if gone.is_some() {
+            break;
+        }
         std::thread::sleep(POLL);
     }
+    // The launcher's account first when there is one. "Connection refused" is true and useless;
+    // "the agent exited saying it could claim 0 of 2 channels" is the same failure, actionable.
     Err(format!(
         "node {}: no agent accepted a connection on port {} within {:?}{}",
         spec.node,
         spec.port,
         START_TIMEOUT,
-        match last {
-            Some(e) => format!(" (last error: {e})"),
-            None => String::new(),
+        match (gone, last) {
+            (Some(why), _) => format!(": {why}"),
+            (None, Some(e)) => format!(" (last error: {e})"),
+            (None, None) => String::new(),
         }
     ))
 }

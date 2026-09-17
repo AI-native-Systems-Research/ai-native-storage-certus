@@ -494,3 +494,75 @@ fn a_node_with_no_lanes_is_refused_rather_than_started_and_driven_with_nothing()
     let err = Agents::start_default(&launcher, &[s]).expect_err("zero lanes must be refused");
     assert!(err.contains("--lanes"), "{err}");
 }
+
+#[test]
+fn a_refused_handshake_still_stops_the_agent_it_launched() {
+    // The leak this exists to prevent, found by running one smoke test five times against a real
+    // server. A refused run used to leave its agent listening: nobody had asked it to stop, so it
+    // waited out its linger, and the launcher's own backstop killed it first. A mailbox **claim
+    // outlives the process that made it**, so the channels were then held until the server
+    // restarted — four two-lane refusals against an eight-channel mailbox and the fifth run could
+    // not start, with no agent running and nothing to kill.
+    //
+    // The refusal here is provenance, which is the commonest way to arrive at it in practice: a
+    // generator rebuilt after its agent.
+    let port = free_port();
+    let mut launcher = LocalLauncher::new();
+    launcher.stale = true;
+    let specs = vec![spec(port)];
+
+    Agents::start_default(&launcher, &specs).expect_err("a stale agent must be refused");
+
+    // Whatever was launched must be gone, and gone because it was *asked* — the fixture's `kill`
+    // and its `Shutdown` are distinguishable, and only the orderly one releases channels.
+    let mut quiet = false;
+    for _ in 0..200 {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+            quiet = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(
+        quiet,
+        "a refused run left its agent listening on port {port}, so its mailbox channels stay \
+         claimed until the server restarts"
+    );
+}
+
+#[test]
+fn a_refusal_leaves_an_operators_own_agent_alone() {
+    // The complement, and the reason the cleanup is scoped. `NoLaunch` means the caller manages
+    // the daemons; stopping one of theirs on a refusal would leave them with nothing to talk to
+    // and nothing able to start it again, which is the whole reason that mode exists.
+    let port = free_port();
+    // The fixture stands in for the operator's own daemon; `NoLaunch` is what the generator uses
+    // for `--no-launch`, and it starts and stops nothing.
+    let launcher = LocalLauncher::new();
+    launcher.spawn(port, true);
+    let specs = vec![spec(port)];
+
+    Agents::start_with(&workload_gen::agents::NoLaunch, &specs, 8, false)
+        .expect_err("a stale agent must be refused");
+
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok(),
+        "the refusal stopped an agent this run did not start"
+    );
+    launcher.kill(&specs[0]).expect("clean up the fixture");
+}
+
+#[test]
+// The relationship between the two constants is the point, and clippy's suggestion to drop the
+// comparison would remove the guard rather than simplify it.
+#[allow(clippy::assertions_on_constants)]
+fn the_kill_grace_outlasts_the_agents_own_linger() {
+    // Why this is asserted rather than left to a comment: a grace period shorter than the linger
+    // kills a **healthy** agent partway through releasing its mailbox channels, and because a
+    // claim outlives the process the leak is invisible until a later run cannot start. A first
+    // attempt at 3 seconds against a 5-second linger did exactly that.
+    assert!(
+        workload_gen::agents::EXIT_GRACE > workload_wire::server::DEFAULT_LINGER,
+        "the local launcher would kill an agent inside its own linger window"
+    );
+}
