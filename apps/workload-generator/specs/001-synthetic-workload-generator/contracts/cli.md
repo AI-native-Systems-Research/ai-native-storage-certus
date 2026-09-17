@@ -12,9 +12,13 @@ The workload description file says *what* the workload is. Everything here says
 
 ```text
 workload-gen run     <description.yml> [target options] [tuning] [reporting]
-workload-gen emit    <description.yml> --until <virtual-seconds>
-                     [--output <dir> --format jsonl|parquet|both]
-                     [--mooncake <f>] [--cachesim <f>] [--simulator <f>]
+workload-gen emit    <description.yml> --until <virtual-seconds> --seed <n>
+                     [--certus-unified-jsonl <dir>]
+                     [--certus-unified-parquet <dir>]
+                     [--mooncake <file>]
+                     [--libcachesim <file>]
+                     [--simulator <file>]
+                     [--report <file>] [--force]
 workload-gen plan    <description.yml> --output <file>
 workload-gen convert <trace-dir> --to simulator|mooncake|cachesim
                                  --output <file>
@@ -25,20 +29,49 @@ workload-gen validate <description.yml>
   (spec FR-059); stops on signal.
 - **`emit`** is an *emit run*: writes output, contacts no server, needs no
   accelerator. `--until` is **required** (FR-059) — an unbounded file is not a
-  thing. **At least one output is required**, and the two kinds are
-  deliberately spelled differently because they are different things:
-  - `--output <dir>` with `--format` writes the **native trace** — a directory,
-    with a manifest, self-describing, the thing `contracts/trace-io.md`
-    specifies. The two containers hold identical records (SC-004).
-  - `--mooncake`, `--cachesim`, `--simulator` write **projections** — each a
-    single file, lossy, with no manifest, produced in the same pass (FR-075).
-    A projection is not a trace and is not accepted for a reproducibility check
-    (FR-075b).
+  thing.
 
-  Asking for a projection **without** `--output` is the expected case, not a
-  corner: a legal span on the shipped example costs roughly 27 GB as a native
-  trace, and there is no reason to pay that to obtain a Mooncake file. The
-  pre-flight projection sizes only the outputs actually requested (FR-073).
+  **One flag per format, one destination each, and none of them privileged.**
+  The only rule is that **at least one is required**; there is no default output
+  and no format a run is obliged to produce. A run that asked for nothing is
+  refused with exit 2 and the message names all five flags.
+
+  | Flag | Writes | Destination |
+  | --- | --- | --- |
+  | `--certus-unified-jsonl` | native trace, JSONL container | a **directory** |
+  | `--certus-unified-parquet` | native trace, parquet container | a **directory** |
+  | `--mooncake` | Mooncake projection | a **file** |
+  | `--libcachesim` | libCacheSim CSV projection | a **file** |
+  | `--simulator` | cache-simulator projection | a **file** |
+
+  The native destinations are directories and the projections are files because
+  that is what they are, not by convention: a native trace is **self-describing**,
+  so it is a directory holding `manifest.json` beside its records, exactly as
+  `contracts/trace-io.md` specifies. A projection has no manifest and is not a
+  trace (FR-075b), so it is one file.
+
+  **Both native flags pointed at the same directory** give one trace holding both
+  containers, with one manifest, and the two record counts are checked against
+  each other — that is SC-004's equivalence claim, verified on every such run
+  rather than only in a test. **Different directories** give two independent
+  traces, each with its own manifest.
+
+  Asking for a projection and nothing else is an ordinary case, not a corner: a
+  legal span on the shipped example costs roughly 27 GB as a native trace, and
+  there is no reason to pay that to obtain a Mooncake file a fraction of the size.
+  Such a run leaves **no trace directory at all** — not even an empty one, which
+  would look like an interrupted run.
+
+  `--report <file>` is an additional destination for the structured report, which
+  is also written as `report.json` into every native trace directory and always
+  rendered to the terminal. On a projection-only run it is the only way to keep
+  the structured form.
+
+  The pre-flight sizes **only the outputs requested**, and checks each against the
+  free space on **its own filesystem**, grouping destinations that share one
+  (FR-073). Five independent destinations can be on five different mounts;
+  summing them against one would refuse a run that fits, and checking each alone
+  would admit two large outputs that together overflow a mount they share.
 - **`plan`** writes the canonical operation-plan serialisation — the artifact
   the byte-identity property is asserted against (FR-060, SC-003).
 - **`convert`** applies the same projections to a trace **already on disk**

@@ -1419,13 +1419,31 @@ and is normative for all of them. All are [US2]-scoped: no hardware, no server.
   flags and `convert`'s stored-trace pass (FR-075, FR-075a). Equivalence
   between the two is then structural rather than tested. A projection carries
   no manifest and is refused as an input to the determinism check (FR-075b)
-- [ ] T062y [US2] Wire the emit-time projection flags in
-  `crates/workload-gen/src/cli.rs`: `--mooncake`, `--cachesim`, `--simulator`,
-  each a file, with **at least one output required** across them and
-  `--output`. A projection **without** `--output` is the expected case, not a
-  corner — it is what avoids materialising ~27 GB of native trace to obtain a
-  much smaller file. The pre-flight projection must size only the outputs
-  requested (FR-073)
+- [x] T062y [US2] Give every output format its own flag and destination in
+  `crates/workload-gen/src/cli.rs` — `--certus-unified-jsonl <dir>`,
+  `--certus-unified-parquet <dir>`, `--mooncake <file>`, `--libcachesim <file>`,
+  `--simulator <file>` — with **at least one required** and none privileged. A
+  projection alone is the ordinary case, not a corner: it is what avoids
+  materialising ~27 GB of native trace to obtain a much smaller file. The
+  pre-flight must size only the outputs requested (FR-073).
+
+  **Reshaped by the user mid-task, and the final shape is better than what was
+  specified.** The task originally kept `--output <dir> --format jsonl|parquet|both`
+  for the native trace beside per-projection flags, and asked only that `--output`
+  become optional. Two objections, both right:
+
+  1. **`--format both` does not survive contact with four formats.** `--format`
+     claimed the general word for a narrow thing, and `both` is a two-valued word
+     that would break the moment a third container appeared.
+  2. **The native trace was not entitled to be the privileged output.** Nothing
+     outside this repository reads it; inside it, only the three converters do,
+     each of six fields out of seventeen. A flag layout that made it the default
+     destination encoded an importance it has not earned.
+
+  So `--format` is **deleted** rather than renamed, and presence-of-flag is the
+  selection. An intermediate design — `--format` as a comma-separated list over all
+  five — was considered and dropped: with a destination needed per format anyway,
+  the selector had nothing left to do.
 - [x] T062a [P] [US2] Implement the Mooncake writer in
   `crates/workload-trace/src/mooncake.rs`, emitting `{timestamp, input_length,
   output_length, hash_ids}` one document per line per **request**, `timestamp`
@@ -2421,6 +2439,64 @@ changed.
   first three windows see exactly zero churn and modulation is still 0.44 after
   eight generations, against 0.04 for residual-life seeding. T024 should assert
   that structure rather than the digits, so it cannot go flaky.
+
+**T062y done, and it found a second wrong check in the same code.** Five flags, one
+destination each, at least one required; `--format` and `--output` are gone from
+`emit`. 17 tests with `parquet`, 15 without, and clippy clean in all three feature
+configurations with `--all-targets`.
+
+**FR-055 and SC-004 are amended, deliberately and narrowly.** FR-055 said the system
+MUST emit the trace "in two containers", which made the native format mandatory on
+every emit run and parquet mandatory within it. It now requires the **capability**
+and not the act. SC-004 is scoped to runs that request both containers. Neither
+amendment touches the deferred question of what the native format should ultimately
+be — that is a separate decision, and the user's instruction was to settle the
+generator first.
+
+**Directories for the native format, files for the projections, and that is not a
+convention.** A native trace is self-describing, so the artifact *is* a directory
+holding `manifest.json` beside its records (`trace-io.md`); a projection has no
+manifest and is not a trace (FR-075b), so it is one file. Both native flags on one
+directory give one trace with both containers and one manifest, with the record
+counts compared; different directories give two independent traces, each with its
+own manifest. A projection-only run leaves **no directory at all** — not even an
+empty one, which would look like an interrupted run.
+
+**THE SECOND DEFECT: the pre-flight was sizing the wrong artifact.** `check_size`
+used `projection.plan_bytes` — the size of the **canonical plan**, which only the
+`plan` subcommand writes — for a run that writes traces and projections. Measured
+against what `emit` actually produces, that figure is **2.8x low for JSONL and 3.9x
+low for libCacheSim CSV** (8.2 bytes per key reference assumed, against 23 and 32
+measured). Low is the dangerous direction for a check whose stated job is to stop a
+run filling a filesystem: between roughly 400M and 2.7G key references it would
+admit a run that then ran out of disk. Not exercised, because the arithmetic was
+never compared against a real output.
+
+Now sized per output from constants calibrated on a measured 30-second run, and
+**checked per filesystem**, grouping destinations that share a device. Grouping is
+the only version right in both directions: summing five destinations against one
+mount refuses a run that fits, and checking each alone admits two large outputs that
+together overflow a mount they share. Both are now tests.
+
+**The measured per-reference costs are worth recording, because one is
+counter-intuitive**: JSONL 23, parquet 7, Mooncake 7, libCacheSim CSV 32, simulator
+21. libCacheSim CSV — a standard format — is the **most expensive of the five** while
+carrying the least, because it writes a row per block reference rather than per
+request. And the full 17-field schema in parquet costs the same per reference as
+4-field Mooncake JSONL, so the extra fields are free once the container stops being
+text. Rounded up in every case: an estimator that reads low fails at the one job it
+has.
+
+**Free space stayed injectable.** `check_sizes` takes the free-space lookup as a
+parameter, because on a box with less free space than the 32 GiB ceiling the
+free-space branch always fires first and the ceiling branch would never be reached
+by a test. That property was already there and would have been quietly lost by
+reading `statvfs` inside the check.
+
+**`free_bytes` no longer creates the directory it measures.** It did, to give
+`statvfs` a path that exists — which meant a *refused* run left an empty output
+directory behind, indistinguishable from an interrupted one. It now measures the
+nearest existing ancestor, and a refusal is verified to leave nothing.
 
 **T086 done. The gate passes, and Phase 7 is complete.** Run on 2026-09-17:
 

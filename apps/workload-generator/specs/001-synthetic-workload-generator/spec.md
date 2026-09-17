@@ -475,11 +475,30 @@ modes reorder the policies.
 
 **File output**
 
-- **FR-055**: System MUST emit a workload trace at the same level of
-  abstraction as a real serving trace — sessions, turns, block lists, token
-  counts — in two containers holding identical records. Interoperability with
-  other tools' formats is delivered by **projections** (FR-075), which are not
-  containers of the trace and are not required to hold identical records.
+- **FR-055**: System MUST be **able** to emit a workload trace at the same level
+  of abstraction as a real serving trace — sessions, turns, block lists, token
+  counts — in either of two containers, which hold identical records when both
+  are written. Interoperability with other tools' formats is delivered by
+  **projections** (FR-075), which are not containers of the trace and are not
+  required to hold identical records.
+
+  **No run is obliged to write the native trace.** Every output format, native
+  and projected alike, is requested by its own flag with its own destination, and
+  the only rule is that at least one output must be requested. A run that wants a
+  Mooncake file alone writes that and nothing else.
+
+  *Amended 2026-09-17.* This requirement previously said the system MUST emit the
+  trace "in two containers", which made the native format mandatory on every emit
+  run and parquet mandatory within it. Two things were wrong with that. It forced
+  a run wanting a small projection to also write a native trace costing roughly
+  27 GB at a legal span — the reason `--output` was required and the reason it no
+  longer is. And it made a requirement out of a format whose readership is not yet
+  established: nothing outside this repository reads it, and inside it only the
+  three converters do, each of six fields out of seventeen. The **capability** is
+  required; **producing it on every run** is not. What the native format should
+  ultimately be — named, versioned, extended with a served-by instance column, and
+  published with importers, or dropped in favour of the standard exports — is a
+  decision deliberately deferred until the generator is complete and stable.
 - **FR-056**: The trace MUST be self-describing: a reader MUST learn what it
   supports by reading its manifest, never by recognising which trace it is.
 - **FR-057**: The manifest MUST declare the identifier space in use, since
@@ -917,7 +936,10 @@ modes reorder the policies.
   independent of server speed, of execution mode, and of tuning.
 - **SC-004**: A workload written to both containers yields identical records,
   and 100% of rows satisfy the trace schema's invariants for the encoding
-  declared in the manifest.
+  declared in the manifest. Scoped to runs that request **both** containers,
+  since FR-055 no longer obliges a run to write either; when both are requested
+  the run itself compares their record counts and refuses on a disagreement, so
+  the claim is checked in production and not only in a test.
 - **SC-005**: Sweeping cache size across at least five points spanning a
   hundredfold range produces a monotonically rising **cross-session** hit rate
   in which no single step contributes more than half of the total rise — the

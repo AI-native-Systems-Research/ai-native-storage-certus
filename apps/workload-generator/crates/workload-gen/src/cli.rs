@@ -86,17 +86,6 @@ pub enum ConvertTo {
     OracleGeneral,
 }
 
-/// Which containers to write.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum Format {
-    /// Newline-delimited JSON.
-    Jsonl,
-    /// Parquet. Requires the `parquet` feature.
-    Parquet,
-    /// Both, which is what SC-004's equivalence claim is about.
-    Both,
-}
-
 /// The generator's command line.
 #[derive(Debug, Parser)]
 #[command(
@@ -203,31 +192,45 @@ pub enum Command {
         /// Virtual-second span. **Required**: an unbounded file is not a thing.
         #[arg(long)]
         until: f64,
-        /// Directory for the native trace.
-        #[arg(long)]
-        output: PathBuf,
-        /// Which containers to write.
-        #[arg(long, value_enum, default_value_t = Format::Jsonl)]
-        format: Format,
         /// Seed. Required for reproducibility; there is no random default, because a
         /// run whose seed was never printed cannot be repeated.
         #[arg(long)]
         seed: u64,
-        /// Structured report destination. Defaults to `report.json` in `--output`.
-        #[arg(long)]
-        report: Option<PathBuf>,
-        /// Also write the Mooncake projection here, in the same pass.
+        /// Native trace, JSONL container. **A directory**, not a file.
+        ///
+        /// The native format is a self-describing *directory* — `manifest.json` plus
+        /// `invocations/block_size_<N>/part-0.jsonl` — so this names the directory.
+        /// Point this and `--certus-unified-parquet` at the **same** directory to get
+        /// one trace holding both containers, with one manifest and the two record
+        /// counts checked against each other (SC-004). Different directories give two
+        /// independent traces.
+        #[arg(long = "certus-unified-jsonl")]
+        unified_jsonl: Option<PathBuf>,
+        /// Native trace, parquet container. **A directory**; see
+        /// `--certus-unified-jsonl`. Requires the `parquet` feature.
+        #[arg(long = "certus-unified-parquet")]
+        unified_parquet: Option<PathBuf>,
+        /// Mooncake projection. A single **file**.
         #[arg(long)]
         mooncake: Option<PathBuf>,
-        /// Also write libCacheSim CSV here, in the same pass.
-        #[arg(long)]
+        /// libCacheSim CSV projection. A single **file**.
+        #[arg(long = "libcachesim", alias = "cachesim")]
         cachesim: Option<PathBuf>,
-        /// Also write the cache-simulator projection here, in the same pass.
+        /// Cache-simulator projection, the shape `apps/eviction-replay-benchmark`
+        /// reads. A single **file**.
         ///
-        /// A projection is not a trace (FR-075b): no manifest, and never accepted in
-        /// place of the native trace for a reproducibility check.
+        /// A projection is a file rather than a directory because it is not a trace
+        /// (FR-075b): no manifest, and never accepted in place of the native trace for
+        /// a reproducibility check.
         #[arg(long)]
         simulator: Option<PathBuf>,
+        /// Structured report destination.
+        ///
+        /// Always rendered to the terminal. Written as `report.json` inside each native
+        /// trace directory as well; this names an additional destination, and is the
+        /// only way to keep the structured form of a projection-only run.
+        #[arg(long)]
+        report: Option<PathBuf>,
         /// Override the documented size ceiling. Never overrides the free-space
         /// check.
         #[arg(long)]
@@ -368,26 +371,26 @@ pub fn run(cli: Cli) -> i32 {
         Command::Emit {
             description,
             until,
-            output,
-            format,
             seed,
-            report,
+            unified_jsonl,
+            unified_parquet,
             mooncake,
             cachesim,
             simulator,
+            report,
             force,
         } => match emit(
             &description,
             until,
-            &output,
-            format,
             seed,
-            report,
-            Projections {
+            Outputs {
+                unified_jsonl,
+                unified_parquet,
                 mooncake,
                 cachesim,
                 simulator,
             },
+            report,
             force,
         ) {
             Ok(text) => {
@@ -442,15 +445,61 @@ pub fn run(cli: Cli) -> i32 {
     }
 }
 
-/// Projections an emit run may write alongside the native trace (FR-075).
+/// Where an emit run writes. **At least one** must be set.
+///
+/// Every output is named the same way — one flag, one destination — so nothing is
+/// privileged and no run is obliged to produce a format it does not want. That was not
+/// true while the native trace had `--output` and the projections had their own flags:
+/// obtaining a Mooncake file then meant writing the native trace as well, at gigabytes
+/// for a legal span, to get a file a fraction of the size.
+///
+/// The two native destinations are **directories** and the three projections are
+/// **files**, which reflects a real difference rather than a convention: a native trace
+/// is self-describing, so it is a directory holding a manifest beside its records,
+/// while a projection has no manifest and is not a trace (FR-075b).
 #[derive(Debug, Default)]
-pub struct Projections {
-    /// Mooncake output path.
+pub struct Outputs {
+    /// Native trace directory, JSONL container.
+    pub unified_jsonl: Option<PathBuf>,
+    /// Native trace directory, parquet container.
+    ///
+    /// The same directory as `unified_jsonl` gives one trace with both containers and
+    /// one manifest; a different one gives a second, independent trace.
+    pub unified_parquet: Option<PathBuf>,
+    /// Mooncake projection file.
     pub mooncake: Option<PathBuf>,
-    /// libCacheSim CSV output path.
+    /// libCacheSim CSV projection file.
     pub cachesim: Option<PathBuf>,
-    /// Cache-simulator output path.
+    /// Cache-simulator projection file.
     pub simulator: Option<PathBuf>,
+}
+
+impl Outputs {
+    /// Whether nothing at all was asked for.
+    fn is_empty(&self) -> bool {
+        self.unified_jsonl.is_none()
+            && self.unified_parquet.is_none()
+            && self.mooncake.is_none()
+            && self.cachesim.is_none()
+            && self.simulator.is_none()
+    }
+
+    /// The distinct native trace directories, in flag order.
+    ///
+    /// One entry when both containers share a directory, which is the case that makes
+    /// SC-004's equivalence claim about a single trace rather than about two.
+    fn trace_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        for d in [self.unified_jsonl.as_ref(), self.unified_parquet.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if !dirs.contains(d) {
+                dirs.push(d.clone());
+            }
+        }
+        dirs
+    }
 }
 
 /// The `convert` subcommand.
@@ -700,11 +749,6 @@ fn load(path: &Path) -> Result<(WorkloadDescription, String, String), Failure> {
 /// If the directory cannot be created or `statvfs` fails. Both are refusals: a
 /// projection with nothing to compare against is not a check that passed.
 fn free_bytes(dir: &Path) -> Result<u64, Failure> {
-    fs::create_dir_all(dir)
-        .map_err(|e| Failure::other(format!("cannot create {}: {e}", dir.display())))?;
-    let stat = fs::metadata(dir)
-        .map_err(|e| Failure::other(format!("cannot stat {}: {e}", dir.display())))?;
-    let _ = stat;
     // `statvfs` through the filesystem's own reporting. Read on the *output*
     // directory, since it is routinely a different mount from the working directory.
     let path = std::ffi::CString::new(dir.as_os_str().as_encoded_bytes())
@@ -726,43 +770,235 @@ fn free_bytes(dir: &Path) -> Result<u64, Failure> {
     Ok(free)
 }
 
-/// Refuse if the projection exceeds free space, or the ceiling without `--force`.
+/// Bytes each output kind costs per key reference.
 ///
-/// `free` is passed in rather than read here so both branches are testable: on a box
-/// with less free space than the ceiling the free-space check always fires first, so
-/// a test that only ran the real thing could never reach the ceiling branch.
-fn check_size(projection: &Projection, dir: &Path, free: u64, force: bool) -> Result<(), Failure> {
-    let need = projection.plan_bytes;
-    if need > free {
-        return Err(Failure::config(format!(
-            "refusing to emit: the projection needs {need} bytes and {} has {free} \
-             free. --force does not override this, because overriding it produces a \
-             truncated trace and a full filesystem rather than a trace.\n{}",
-            dir.display(),
-            projection.render()
-        )));
+/// **Calibrated, not derived**: measured on a 30-virtual-second run of the shipped
+/// example (1 962 304 key references), by dividing each file's size by that count.
+/// The reference count is the right denominator because every one of these formats
+/// is dominated by its block lists — a row's fixed fields are noise beside a prefix
+/// of hundreds of keys.
+///
+/// | Output | Measured bytes | Per reference |
+/// | --- | --- | --- |
+/// | native JSONL | 44 122 546 | 22.5 |
+/// | native parquet | 12 181 962 | 6.2 |
+/// | Mooncake JSONL | 12 485 126 | 6.4 |
+/// | libCacheSim CSV | 62 863 382 | 32.0 |
+/// | simulator JSONL | 40 451 114 | 20.6 |
+///
+/// Rounded **up** in every case, because the check exists to refuse a run that would
+/// fill a filesystem and an estimator that reads low fails at exactly the job it has.
+/// Parquet's figure is the compressed size, so it is the one that can be beaten by an
+/// incompressible workload; it is also the smallest, so being wrong about it costs
+/// least. `oracleGeneral` is not here because it is exact — 24 bytes per reference,
+/// fixed layout — and `convert` sizes nothing, since its input is already on disk.
+mod bytes_per_reference {
+    /// Our JSONL container: keys as decimal text, repeated across `full_*` and `new_*`.
+    pub const JSONL: u64 = 23;
+    /// Our parquet container, zstd-compressed.
+    pub const PARQUET: u64 = 7;
+    /// Mooncake: dense small integers, one prompt list per row.
+    pub const MOONCAKE: u64 = 7;
+    /// libCacheSim CSV: one whole row per reference, so the largest of all.
+    pub const CACHESIM: u64 = 32;
+    /// The simulator projection.
+    pub const SIMULATOR: u64 = 21;
+}
+
+/// One requested output: what it is called, where it goes, and what it will cost.
+#[derive(Debug, Clone)]
+struct PlannedOutput {
+    /// The flag that asked for it, for a refusal that names which one to drop.
+    flag: &'static str,
+    /// Its destination.
+    path: PathBuf,
+    /// Projected bytes.
+    bytes: u64,
+}
+
+/// What each requested output will cost.
+///
+/// Only the outputs actually requested are counted (FR-073). Sizing everything the
+/// tool *could* write would refuse runs that write one small file, which is now the
+/// ordinary case rather than a corner.
+fn planned_outputs(projection: &Projection, outputs: &Outputs) -> Vec<PlannedOutput> {
+    let refs = projection.key_references;
+    let mut planned = Vec::new();
+    let mut add = |flag: &'static str, path: &Option<PathBuf>, per: u64| {
+        if let Some(p) = path {
+            planned.push(PlannedOutput {
+                flag,
+                path: p.clone(),
+                bytes: refs.saturating_mul(per),
+            });
+        }
+    };
+    add(
+        "--certus-unified-jsonl",
+        &outputs.unified_jsonl,
+        bytes_per_reference::JSONL,
+    );
+    add(
+        "--certus-unified-parquet",
+        &outputs.unified_parquet,
+        bytes_per_reference::PARQUET,
+    );
+    add(
+        "--mooncake",
+        &outputs.mooncake,
+        bytes_per_reference::MOONCAKE,
+    );
+    add(
+        "--libcachesim",
+        &outputs.cachesim,
+        bytes_per_reference::CACHESIM,
+    );
+    add(
+        "--simulator",
+        &outputs.simulator,
+        bytes_per_reference::SIMULATOR,
+    );
+    planned
+}
+
+/// Check every requested output against the free space on **its own** filesystem.
+///
+/// Outputs are grouped by device before checking, because five independent
+/// destinations can be on five different mounts. Summing them all against one
+/// filesystem would refuse a run that fits — and, worse, checking each alone against
+/// its own would admit two large outputs that together overflow a mount they share.
+/// Grouping is the only version that is right in both directions.
+///
+/// # Errors
+///
+/// [`Failure::config`] naming the flags on the offending filesystem and both figures.
+fn check_sizes(
+    projection: &Projection,
+    planned: &[PlannedOutput],
+    force: bool,
+    free_of: &dyn Fn(&Path) -> Result<u64, Failure>,
+) -> Result<u64, Failure> {
+    use std::collections::BTreeMap;
+    use std::os::unix::fs::MetadataExt;
+
+    // Grouped by the device the destination lands on. `nearest_existing` because a
+    // destination need not exist yet, and creating it to find out would leave a stray
+    // directory behind on a refusal.
+    let mut by_device: BTreeMap<u64, (PathBuf, Vec<&PlannedOutput>)> = BTreeMap::new();
+    for p in planned {
+        let dir = match p.flag {
+            // A native destination is itself a directory; a projection is a file.
+            "--certus-unified-jsonl" | "--certus-unified-parquet" => p.path.clone(),
+            _ => p
+                .path
+                .parent()
+                .filter(|d| !d.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+        };
+        let probe = nearest_existing(&dir);
+        let device = fs::metadata(&probe)
+            .map_err(|e| Failure::other(format!("cannot stat {}: {e}", probe.display())))?
+            .dev();
+        by_device
+            .entry(device)
+            .or_insert_with(|| (probe, Vec::new()))
+            .1
+            .push(p);
     }
-    if need > SIZE_CEILING_BYTES && !force {
-        return Err(Failure::config(format!(
-            "refusing to emit: the projection needs {need} bytes, above the \
-             documented ceiling of {SIZE_CEILING_BYTES}. Shorten --until, or pass \
-             --force if this is deliberate.\n{}",
-            projection.render()
-        )));
+
+    let total: u64 = planned.iter().map(|p| p.bytes).sum();
+    for (probe, group) in by_device.values() {
+        let need: u64 = group.iter().map(|p| p.bytes).sum();
+        // Injected rather than read here, so both refusal branches are testable
+        // deterministically: on a box with less free space than the ceiling the
+        // free-space check always fires first, and the ceiling branch would never run.
+        let free = free_of(probe)?;
+        let breakdown = || {
+            group
+                .iter()
+                .map(|p| {
+                    format!(
+                        "  {:<26} {} bytes -> {}\n",
+                        p.flag,
+                        p.bytes,
+                        p.path.display()
+                    )
+                })
+                .collect::<String>()
+        };
+        if need > free {
+            return Err(Failure::config(format!(
+                "refusing to emit: the outputs on {}'s filesystem need about {need} \
+                 bytes and it has {free} free. --force does not override this, because \
+                 overriding it produces a truncated trace and a full filesystem rather \
+                 than a trace.\n{}{}",
+                probe.display(),
+                breakdown(),
+                projection.render()
+            )));
+        }
+        if need > SIZE_CEILING_BYTES && !force {
+            return Err(Failure::config(format!(
+                "refusing to emit: the outputs on {}'s filesystem need about {need} \
+                 bytes, above the documented ceiling of {SIZE_CEILING_BYTES}. Shorten \
+                 --until, drop an output, or pass --force if this is \
+                 deliberate.\n{}{}",
+                probe.display(),
+                breakdown(),
+                projection.render()
+            )));
+        }
     }
-    Ok(())
+    Ok(total)
+}
+
+/// Create a projection file, making its parent directory if needed.
+///
+/// A projection is a single file and its flag names that file, so `--mooncake
+/// out/mc.jsonl` should work without a separate `mkdir` — unlike a native destination,
+/// where the directory *is* the artifact.
+///
+/// # Errors
+///
+/// If the parent cannot be created or the file cannot be opened.
+fn create_projection_file(path: &Path) -> Result<fs::File, Failure> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|e| Failure::other(format!("cannot create {}: {e}", parent.display())))?;
+        }
+    }
+    fs::File::create(path)
+        .map_err(|e| Failure::other(format!("cannot create {}: {e}", path.display())))
+}
+
+/// The nearest ancestor of `dir` that exists, for a `statvfs` that must not create
+/// anything.
+///
+/// Falls back to `.`, which always exists. `statvfs` needs a path that is really
+/// there, and creating the destination to obtain one would leave an empty directory
+/// behind on a refusal.
+fn nearest_existing(dir: &Path) -> PathBuf {
+    let mut at = dir;
+    loop {
+        if at.exists() {
+            return at.to_path_buf();
+        }
+        match at.parent() {
+            Some(p) if !p.as_os_str().is_empty() => at = p,
+            _ => return PathBuf::from("."),
+        }
+    }
 }
 
 /// The `emit` subcommand.
-#[allow(clippy::too_many_arguments)]
 fn emit(
     description_path: &Path,
     until: f64,
-    output: &Path,
-    format: Format,
     seed: u64,
+    outputs: Outputs,
     report_path: Option<PathBuf>,
-    projections: Projections,
     force: bool,
 ) -> Result<String, Failure> {
     // NaN takes the is_finite branch, so it is refused rather than slipping past a
@@ -772,19 +1008,37 @@ fn emit(
             "--until must be a positive, finite number of virtual seconds".to_string(),
         ));
     }
+
+    // At least one output, and none of the five is privileged. Asking for one
+    // projection and nothing else is the ordinary case: a legal span costs gigabytes as
+    // a native trace, and there is no reason to pay that to obtain a Mooncake file
+    // (`contracts/cli.md`).
+    if outputs.is_empty() {
+        return Err(Failure::config(
+            "nothing to write: pass at least one of --certus-unified-jsonl <dir>, \
+             --certus-unified-parquet <dir>, --mooncake <file>, --libcachesim <file>, \
+             --simulator <file>"
+                .to_string(),
+        ));
+    }
+
     let (description, text, effective) = load(description_path)?;
 
     let projection = project(&description, until, seed)
         .map_err(|e| Failure::config(format!("cannot project the run: {e}")))?;
-    check_size(&projection, output, free_bytes(output)?, force)?;
 
-    if matches!(format, Format::Parquet | Format::Both) && !cfg!(feature = "parquet") {
+    if outputs.unified_parquet.is_some() && !cfg!(feature = "parquet") {
         return Err(Failure::config(
             "this build has no parquet support; rebuild with --features parquet, or \
-             pass --format jsonl"
+             use --certus-unified-jsonl instead"
                 .to_string(),
         ));
     }
+
+    // Sized against exactly what will be written, each destination checked against the
+    // free space on its own filesystem.
+    let planned = planned_outputs(&projection, &outputs);
+    check_sizes(&projection, &planned, force, &|dir| free_bytes(dir))?;
 
     let block_size = description.blocks.tokens;
     let trace_id = description_path
@@ -792,21 +1046,32 @@ fn emit(
         .and_then(|s| s.to_str())
         .unwrap_or("trace")
         .to_string();
-    let dir = output.join(format!("invocations/block_size_{block_size}"));
-    fs::create_dir_all(&dir)
-        .map_err(|e| Failure::other(format!("cannot create {}: {e}", dir.display())))?;
+
+    // Directories are created only for the native destinations actually asked for. A
+    // projection-only run must leave no trace directory behind: an empty one with no
+    // manifest is exactly the incomplete-looking thing FR-073 relies on being
+    // meaningful.
+    let records_dir = |root: &Path| -> Result<PathBuf, Failure> {
+        let d = root.join(format!("invocations/block_size_{block_size}"));
+        fs::create_dir_all(&d)
+            .map_err(|e| Failure::other(format!("cannot create {}: {e}", d.display())))?;
+        Ok(d)
+    };
 
     let mut sim = Simulation::new(&description, seed)
         .map_err(|e| Failure::config(format!("cannot start the simulation: {e}")))?;
 
     let started = Instant::now();
 
-    // Which containers this run writes. `both` is what SC-004's equivalence claim is
-    // about, so it is two writers over one pass rather than a conversion afterwards:
-    // a conversion would prove the converter right and say nothing about the writers.
-    let jsonl_path = dir.join("part-0.jsonl");
-    let mut writer = match format {
-        Format::Jsonl | Format::Both => {
+    // Two writers over one pass rather than a conversion afterwards: a conversion would
+    // prove the converter right and say nothing about the writers, and SC-004's claim
+    // is about the writers.
+    let jsonl_path = match &outputs.unified_jsonl {
+        Some(root) => records_dir(root)?.join("part-0.jsonl"),
+        None => PathBuf::new(),
+    };
+    let mut writer = match &outputs.unified_jsonl {
+        Some(_) => {
             let file = fs::File::create(&jsonl_path).map_err(|e| {
                 Failure::other(format!("cannot create {}: {e}", jsonl_path.display()))
             })?;
@@ -816,14 +1081,17 @@ fn emit(
                 block_size,
             ))
         }
-        Format::Parquet => None,
+        None => None,
     };
 
     #[cfg(feature = "parquet")]
-    let parquet_path = dir.join("part-0.parquet");
+    let parquet_path = match &outputs.unified_parquet {
+        Some(root) => records_dir(root)?.join("part-0.parquet"),
+        None => PathBuf::new(),
+    };
     #[cfg(feature = "parquet")]
-    let mut parquet_writer = match format {
-        Format::Parquet | Format::Both => {
+    let mut parquet_writer = match &outputs.unified_parquet {
+        Some(_) => {
             let file = fs::File::create(&parquet_path).map_err(|e| {
                 Failure::other(format!("cannot create {}: {e}", parquet_path.display()))
             })?;
@@ -833,37 +1101,35 @@ fn emit(
                 })?,
             )
         }
-        Format::Jsonl => None,
+        None => None,
     };
 
-    // The simulator projection, written in the same pass rather than by converting the
-    // trace afterwards (FR-075): a projection of a workload nobody wants stored should
-    // not require storing it first.
-    let mut mooncake_writer = match &projections.mooncake {
+    // The projections, written in the same pass rather than by converting the trace
+    // afterwards (FR-075): a projection of a workload nobody wants stored should not
+    // require storing it first.
+    let mut mooncake_writer = match &outputs.mooncake {
         Some(path) => {
-            let f = fs::File::create(path)
-                .map_err(|e| Failure::other(format!("cannot create {}: {e}", path.display())))?;
+            let f = create_projection_file(path)?;
             Some(MooncakeWriter::new(BufWriter::new(f), block_size))
         }
         None => None,
     };
-    let mut cachesim_writer = match &projections.cachesim {
+    let mut cachesim_writer = match &outputs.cachesim {
         Some(path) => {
             let bytes = u32::try_from(description.blocks.bytes).map_err(|_| {
                 Failure::config("blocks.bytes exceeds a 32-bit object size".to_string())
             })?;
-            let f = fs::File::create(path)
-                .map_err(|e| Failure::other(format!("cannot create {}: {e}", path.display())))?;
-            Some(CsvWriter::new(BufWriter::new(f), bytes))
+            Some(CsvWriter::new(
+                BufWriter::new(create_projection_file(path)?),
+                bytes,
+            ))
         }
         None => None,
     };
-    let mut simulator_writer = match &projections.simulator {
-        Some(path) => {
-            let f = fs::File::create(path)
-                .map_err(|e| Failure::other(format!("cannot create {}: {e}", path.display())))?;
-            Some(SimulatorWriter::new(BufWriter::new(f)))
-        }
+    let mut simulator_writer = match &outputs.simulator {
+        Some(path) => Some(SimulatorWriter::new(BufWriter::new(
+            create_projection_file(path)?,
+        ))),
         None => None,
     };
 
@@ -964,24 +1230,34 @@ fn emit(
             )));
         }
     }
-    // Either container's counts describe the run; they are equal when both were written.
+    // Either container's counts describe the run; they are equal when both were
+    // written, and there are none on a projection-only run.
     let stats: BlockStats = jsonl_stats
         .clone()
         .or_else(|| parquet_stats.clone())
-        .expect("at least one container is always written");
+        .unwrap_or_default();
     let wallclock = started.elapsed().as_secs_f64();
 
-    // The manifest goes last, so a directory without one is incomplete by
-    // construction (FR-073). Nothing between here and the write may fail silently.
+    // Built either way, because the report's reproduction block needs the description
+    // digest — but **written** only into native trace directories. A projection carries
+    // no manifest by design (FR-075b), and writing one beside a projection would make it
+    // look like a trace.
+    //
+    // One per distinct directory: pointing both container flags at the same directory
+    // gives one trace with two containers and therefore one manifest, while separate
+    // directories are two independent traces and each needs its own.
+    //
+    // It goes last, so a directory without one is incomplete by construction (FR-073).
+    // Nothing between here and the write may fail silently.
     let manifest = Manifest::new(&trace_id, &description, &text, seed, until, stats.clone());
-    let manifest_path = output.join("manifest.json");
-    fs::write(
-        &manifest_path,
-        manifest
-            .to_json()
-            .map_err(|e| Failure::other(format!("serialising the manifest: {e}")))?,
-    )
-    .map_err(|e| Failure::other(format!("writing {}: {e}", manifest_path.display())))?;
+    let manifest_json = manifest
+        .to_json()
+        .map_err(|e| Failure::other(format!("serialising the manifest: {e}")))?;
+    for root in outputs.trace_dirs() {
+        let manifest_path = root.join("manifest.json");
+        fs::write(&manifest_path, &manifest_json)
+            .map_err(|e| Failure::other(format!("writing {}: {e}", manifest_path.display())))?;
+    }
 
     // Across every session class, not class 0's: a two-class description would
     // otherwise under-report with nothing to show it had.
@@ -1014,18 +1290,38 @@ fn emit(
         warnings: projection.warnings.clone(),
     };
 
-    let report_path = report_path.unwrap_or_else(|| output.join("report.json"));
-    fs::write(
-        &report_path,
-        report
-            .to_json()
-            .map_err(|e| Failure::other(format!("serialising the report: {e}")))?,
-    )
-    .map_err(|e| Failure::other(format!("writing {}: {e}", report_path.display())))?;
+    // `report.json` goes into every native trace directory, and to `--report` if given.
+    // A projection-only run has nowhere it obviously belongs, so there `--report` is the
+    // only way to keep the structured form — it is rendered to the terminal either way,
+    // so nothing is lost silently.
+    let report_json = report
+        .to_json()
+        .map_err(|e| Failure::other(format!("serialising the report: {e}")))?;
+    let mut report_paths: Vec<PathBuf> = outputs
+        .trace_dirs()
+        .into_iter()
+        .map(|d| d.join("report.json"))
+        .collect();
+    if let Some(explicit) = report_path {
+        if !report_paths.contains(&explicit) {
+            report_paths.push(explicit);
+        }
+    }
+    for path in report_paths {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    Failure::other(format!("cannot create {}: {e}", parent.display()))
+                })?;
+            }
+        }
+        fs::write(&path, &report_json)
+            .map_err(|e| Failure::other(format!("writing {}: {e}", path.display())))?;
+    }
 
     let mut out = effective;
     out.push_str(&report.render());
-    if let (Some(path), Some(s)) = (&projections.mooncake, &mooncake_stats) {
+    if let (Some(path), Some(s)) = (&outputs.mooncake, &mooncake_stats) {
         out.push_str(&format!(
             "  mooncake          {} records to {} ({} distinct identifiers)\n",
             s.records,
@@ -1033,7 +1329,7 @@ fn emit(
             s.distinct_ids
         ));
     }
-    if let (Some(path), Some(s)) = (&projections.cachesim, &cachesim_stats) {
+    if let (Some(path), Some(s)) = (&outputs.cachesim, &cachesim_stats) {
         out.push_str(&format!(
             "  cachesim          {} accesses to {} ({} distinct objects)\n    \
              read it with: {}\n",
@@ -1043,7 +1339,7 @@ fn emit(
             s.example_command(&path.display().to_string())
         ));
     }
-    if let (Some(path), Some(s)) = (&projections.simulator, &simulator_stats) {
+    if let (Some(path), Some(s)) = (&outputs.simulator, &simulator_stats) {
         out.push_str(&format!(
             "  simulator         {} records to {} ({} sessions, {} distinct keys)\n",
             s.records,
@@ -1505,13 +1801,28 @@ mod tests {
         }
     }
 
+    /// One planned output of a given size, so a size check can be exercised without a
+    /// description or a run.
+    fn planned(bytes: u64) -> Vec<PlannedOutput> {
+        vec![PlannedOutput {
+            flag: "--certus-unified-jsonl",
+            path: PathBuf::from("/tmp"),
+            bytes,
+        }]
+    }
+
+    /// A stub filesystem reporting a fixed amount free, whatever it is asked about.
+    fn free_stub(free: u64) -> impl Fn(&Path) -> Result<u64, Failure> {
+        move |_| Ok(free)
+    }
+
     #[test]
     fn free_space_is_a_hard_refusal_that_force_does_not_override() {
         // Overriding it does not produce a trace — it produces a truncated directory
         // and a full filesystem, and on a shared box it does that to other people.
         let p = projection(1_000);
         for force in [false, true] {
-            let err = check_size(&p, Path::new("/tmp"), 500, force).unwrap_err();
+            let err = check_sizes(&p, &planned(1_000), force, &free_stub(500)).unwrap_err();
             assert_eq!(err.code(), exit::CONFIG);
             let msg = err.to_string();
             assert!(
@@ -1528,8 +1839,8 @@ mod tests {
         // accident exactly once. Free space is set generously so this branch is the
         // one under test.
         let p = projection(SIZE_CEILING_BYTES + 1);
-        let free = u64::MAX;
-        let err = check_size(&p, Path::new("/tmp"), free, false).unwrap_err();
+        let big = planned(SIZE_CEILING_BYTES + 1);
+        let err = check_sizes(&p, &big, false, &free_stub(u64::MAX)).unwrap_err();
         assert_eq!(err.code(), exit::CONFIG);
         let msg = err.to_string();
         assert!(
@@ -1542,13 +1853,131 @@ mod tests {
         );
         assert!(msg.contains("--force"), "the way out must be named");
 
-        check_size(&p, Path::new("/tmp"), free, true).expect("--force overrides the ceiling");
+        check_sizes(&p, &big, true, &free_stub(u64::MAX)).expect("--force overrides the ceiling");
     }
 
     #[test]
     fn a_run_within_both_limits_is_permitted() {
         // A guard that always fires is not a guard.
-        check_size(&projection(1_000), Path::new("/tmp"), u64::MAX, false).unwrap();
+        check_sizes(
+            &projection(1_000),
+            &planned(1_000),
+            false,
+            &free_stub(u64::MAX),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_refusal_names_the_flag_that_is_expensive() {
+        // "needs 800 GB" is not actionable; "--libcachesim needs 780 GB of it" says
+        // which flag to drop.
+        let p = projection(1_000);
+        let outputs = vec![
+            PlannedOutput {
+                flag: "--mooncake",
+                path: PathBuf::from("/tmp/mc.jsonl"),
+                bytes: 10,
+            },
+            PlannedOutput {
+                flag: "--libcachesim",
+                path: PathBuf::from("/tmp/lcs.csv"),
+                bytes: 10_000,
+            },
+        ];
+        let msg = check_sizes(&p, &outputs, false, &free_stub(500))
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("--libcachesim"), "{msg}");
+        assert!(msg.contains("10000"), "{msg}");
+        assert!(msg.contains("/tmp/lcs.csv"), "{msg}");
+    }
+
+    #[test]
+    fn outputs_on_one_filesystem_are_summed_rather_than_checked_alone() {
+        // The failure this prevents: two outputs that each fit, and together do not.
+        // Checking them separately admits the run and fills the mount.
+        let p = projection(1_000);
+        let outputs = vec![
+            PlannedOutput {
+                flag: "--mooncake",
+                path: PathBuf::from("/tmp/mc.jsonl"),
+                bytes: 400,
+            },
+            PlannedOutput {
+                flag: "--libcachesim",
+                path: PathBuf::from("/tmp/lcs.csv"),
+                bytes: 400,
+            },
+        ];
+        // Both are under 500 alone; 800 together is not.
+        assert!(check_sizes(&p, &outputs, false, &free_stub(500)).is_err());
+        assert!(check_sizes(&p, &outputs, false, &free_stub(1_000)).is_ok());
+    }
+
+    #[test]
+    fn only_the_outputs_requested_are_sized() {
+        // FR-073. Sizing everything the tool could write would refuse a run that writes
+        // one small file, which is now the ordinary case.
+        let p = Projection {
+            key_references: 1_000,
+            ..projection(0)
+        };
+        let just_mooncake = planned_outputs(
+            &p,
+            &Outputs {
+                mooncake: Some(PathBuf::from("/tmp/mc.jsonl")),
+                ..Default::default()
+            },
+        );
+        assert_eq!(just_mooncake.len(), 1);
+        assert_eq!(just_mooncake[0].flag, "--mooncake");
+        assert_eq!(
+            just_mooncake[0].bytes,
+            1_000 * bytes_per_reference::MOONCAKE
+        );
+
+        // And libCacheSim CSV is the expensive one, which is worth knowing before a
+        // sweep: it writes a row per reference rather than per request.
+        let just_cachesim = planned_outputs(
+            &p,
+            &Outputs {
+                cachesim: Some(PathBuf::from("/tmp/lcs.csv")),
+                ..Default::default()
+            },
+        );
+        assert!(just_cachesim[0].bytes > just_mooncake[0].bytes * 4);
+    }
+
+    #[test]
+    fn both_native_flags_on_one_directory_are_one_trace() {
+        let same = Outputs {
+            unified_jsonl: Some(PathBuf::from("/tmp/t")),
+            unified_parquet: Some(PathBuf::from("/tmp/t")),
+            ..Default::default()
+        };
+        assert_eq!(same.trace_dirs().len(), 1, "one directory is one trace");
+
+        let apart = Outputs {
+            unified_jsonl: Some(PathBuf::from("/tmp/a")),
+            unified_parquet: Some(PathBuf::from("/tmp/b")),
+            ..Default::default()
+        };
+        assert_eq!(
+            apart.trace_dirs().len(),
+            2,
+            "two directories are two traces"
+        );
+
+        // A projection is not a trace, so it contributes no trace directory and
+        // therefore no manifest (FR-075b).
+        let projection_only = Outputs {
+            mooncake: Some(PathBuf::from("/tmp/mc.jsonl")),
+            ..Default::default()
+        };
+        assert!(projection_only.trace_dirs().is_empty());
+        assert!(!projection_only.is_empty(), "it does have an output");
+        assert!(Outputs::default().is_empty());
     }
 
     #[test]
