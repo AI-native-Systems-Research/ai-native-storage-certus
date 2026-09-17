@@ -186,23 +186,45 @@ record count.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `--shm-path <path>` | `/dev/shm/certus-shmq` | the local node's mailbox |
-| `--node <host>:<mailbox>` | none (repeatable) | remote targets, each via its agent |
-| `--agent-port <port>` | 9-something, documented | agent listen port |
+| `--shm-path <path>` | `/dev/shm/certus-shmq` | the mailbox **on each node**, which its agent attaches to |
+| `--node <host>` | none (repeatable) | nodes to drive, each through its agent |
+| `--agent-port <port>` | 7420 | agent listen port |
+| `--agent-binary <path>` | `workload-node-agent` | the agent **on each node**. A bare name is looked for beside the generator's own executable when the node is local |
+| `--no-launch` | off | drive agents that are already running. Weakens FR-052, so it is opt-in |
 
-With no `--node`, the run is single-node and no agent is involved at all (spec
-FR-045, User Story 1). With fewer than two nodes, migration is inert rather
-than an error (FR-049).
+**Every node goes through an agent, including the local one** (FR-079). With no
+`--node` the run drives this host, through an agent the generator launches
+itself as a **child process with no ssh** — `ssh localhost` would want the
+host's own key trusted for its own account, which is a configuration step for
+the simplest possible invocation. So the run still needs no setup, and the
+transport, the driver and the teardown are one mechanism everywhere.
+
+With fewer than two nodes, migration is inert rather than an error (FR-049).
 
 ## Tuning (never in the description file)
 
 | Option | Default | Notes |
 | --- | --- | --- |
 | `--seed <u64>` | required for reproducibility; random otherwise, and the value used is reported | FR-012, FR-063 |
-| `--lanes <n>` | | execution concurrency. MUST NOT exceed the node's channel count; the mailbox is depth-1 per channel, so concurrency *is* channel count and over-subscription silently serialises |
+| `--lanes <n>` | 4 | execution concurrency **per node**: one agent connection and one mailbox channel each. MUST NOT exceed the node's channel count; the mailbox is depth-1 per channel, so concurrency *is* channel count and over-subscription silently serialises |
 | `--batch-keys <n>` | documented default | keys per request. The largest measured performance lever on this hardware — the remote penalty is per batch, not per key — so it is explicit and sweepable (FR-069) |
 | `--pipeline-depth <n>` | 8 | in-flight batches per node. Independent of `--lanes` (FR-072) |
-| `--gpu-device <n>` | 0 | |
+| `--gpu-device <n>` | 0 | passed through to each node's agent, which owns the device buffer |
+| `--pacing real\|none` | `real` | whether a turn waits for its virtual time to be due (FR-080) |
+| `--rate <f64>` | 1.0 | virtual seconds per wallclock second, under `--pacing real`. Refused at zero or below, and refused outright with `--pacing none` |
+| `--lateness-tolerance-ms <n>` | 100 | p99 lateness a paced run accepts before calling itself invalid |
+
+**`--rate` MUST NOT change the workload** (FR-080). It changes only the tempo:
+the same keys in the same order for the same sessions, submitted faster or
+slower, and a run's plan fingerprint is independent of it. It is a
+**calibration** control — a description's durations are arbitrary with respect
+to any particular machine — which is why it is here and never a field of the
+description (FR-069's reasoning, FR-005 portability).
+
+`--rate` with `--pacing none` is **refused, not ignored**: the combination asks
+for two different things, and honouring one silently is how a run gets quoted
+as the other. It is also why the selector is positive rather than `--unpaced`,
+which cannot be read without knowing the default.
 
 **`--batch-keys` and `--lanes` MUST NOT change the plan or the emitted trace**
 (FR-072). They govern only how operations are grouped and dispatched. This is
@@ -223,14 +245,20 @@ structured files, so no one has to scrape terminal text.
 
 **A live run** (FR-061, FR-066, FR-068, FR-070):
 
+- **the mode**: `paced` or `work-conserving`. First, because the two are not
+  comparable and a report without it invites quoting them side by side (FR-080)
 - throughput: keys/second, bytes/second, and
   virtual-seconds-per-wallclock-second
-- request latency: p50, p90, p99, max
+- request latency: p50, p90, p99, max, **per operation** — an aggregate over a
+  mixed stream describes the mix rather than the system
 - plan-queue depth: **minimum over the run** and **fraction of the run at
   zero** — not an average, which would conceal a brief exhaustion
 - lane utilisation
-- validity: valid, or invalid with the reason (plan queue reached zero; a node
-  was lost, named)
+- under `--pacing real`, the **schedule**: the rate asked for, the rate
+  achieved, and lateness percentiles with their turn count
+- validity: valid, or invalid with the reason — and **which reason depends on
+  the mode**: a work-conserving run's plan queue reaching zero, a paced run's
+  lateness exceeding tolerance, a lost node (named), or a wrong block returned
 - reproduction: seed, description identity, effective parameters after
   truncation, `--batch-keys`, `--lanes`
 
@@ -248,7 +276,7 @@ results.
 | --- | --- |
 | 0 | success; for a live run, a **valid** run |
 | 2 | configuration rejected at load (FR-002, FR-004) — nothing was issued |
-| 3 | run completed but is **invalid** (plan queue reached zero, or a node was lost). Distinct from 0 so a sweep script cannot mistake an invalid run for a result |
+| 3 | run completed but is **invalid**: a work-conserving run's plan queue reached zero, a paced run missed its schedule, a node was lost, or a wrong block came back. Distinct from 0 so a sweep script cannot mistake an invalid run for a result |
 | 4 | peer refused: `build_id` or protocol mismatch (FR-051) |
 | 1 | anything else |
 
@@ -259,10 +287,23 @@ invalidity is in the exit status and not only in the report.
 ## `workload-node-agent`
 
 ```text
-workload-node-agent --shm-path <path> --listen <addr:port>
-                    [--gpu-device <n>] [--block-bytes <n>]
+workload-node-agent --shm-path <path> --port <n> [--bind <addr>]
+                    --lanes <n> --block-bytes <n> --batch-keys <n>
+                    [--gpu-device <n> | --no-payload]
+                    [--stamp-keys] [--verify-payload]
 ```
 
-Started before a run and stopped after (FR-050). Holds no persistent state.
+Started before a run and stopped after (FR-050). Holds no persistent state, and
+it is the generator that decides what it does — every `SubmitTurn` carries the
+keys, the session and the virtual time, so the agent never chooses any of them.
+
 Exits non-zero if the mailbox is absent, so a launcher learns immediately
-rather than at first `Submit`.
+rather than at first submission. It **releases its mailbox channels on the way
+out**, which matters more than it sounds: a claim lives in the shared segment
+and outlives the process that made it, so a claim not released is held until
+the server restarts. Under FR-079 an agent is started and stopped for every
+run, including local ones, which turns a leak of one claim into a leak per run.
+
+The generator normally launches this itself — as a child process locally, over
+ssh remotely — and `--no-launch` is for an operator who would rather run it
+themselves.

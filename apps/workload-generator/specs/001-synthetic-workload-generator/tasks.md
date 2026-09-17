@@ -1060,55 +1060,72 @@ local Certus. The wire carries only what is deterministic (paths, session
 identity, virtual timing) and never cache outcomes, which keeps FR-072 intact
 across nodes while keeping the chatter host-local.
 
-**PACED MODE IS AGREED AND DEFERRED (FR-078).** To be implemented once
-everything else is settled; the design below is what was agreed, so it should
-not need re-deriving. It is deferred because it changes the spec in several
-places and because supporting both modes is genuinely more code, not because it
-is unwanted: latency is the reason for it, and a percentile gathered while the
-generator sprints describes a queue the real workload would never form.
+**PACED MODE IS BUILT (FR-080).** Done as one unit with FR-079, which is what
+the note below recommended: pacing changes *when* a request is submitted, so
+with two drivers it would have been built twice.
 
-Deferred tasks, in order:
+**The requirement was renumbered FR-078 -> FR-080.** FR-078 was already taken
+by the conversion's dense-identifier rule, which is referenced from
+`workload-trace/src/mooncake.rs` and its test; two requirements sharing one id
+is a defect, and renumbering the unbuilt one was the cheaper half.
 
-- [ ] T088 [DEFERRED] Add the paced mode to `crates/workload-gen/src/live.rs`:
-  hold each request until its virtual time is due, `due = t0 + (virtual
-  timestamp − virtual start) / rate`, with a `--rate` multiplier defaulting to
-  1.0. **Due times are absolute from `t0`, never relative to the previous
-  submission** — otherwise a slow server stretches think time and dilates the
-  workload it is being judged on
-- [ ] T088a [DEFERRED] Make **paced the default** and the selector positive:
+- [x] T088 [US1] Add the paced mode to the driver: hold each turn until its
+  virtual time is due, `due = t0 + (virtual timestamp - virtual start) / rate`,
+  with a `--rate` multiplier defaulting to 1.0. **Due times are absolute from
+  `t0`, never relative to the previous submission** — otherwise a slow server
+  stretches think time and dilates the workload it is being judged on
+- [x] T088a [US1] Make **paced the default** and the selector positive:
   `--pacing real|none` defaulting to `real`, with `--rate` valid only under
   `real`. `--unpaced` was considered and rejected — a negative flag cannot be
   read without knowing the default, and `--unpaced --rate 10` is a combination
   that would have to be refused
-- [ ] T088b [DEFERRED] Project a paced run's **wallclock cost** before
-  starting, symmetrically with FR-073's size projection: at rate 1.0 a run
-  costs its virtual span, so `--until 3600` is an hour and silence would look
-  like a hang
-- [ ] T088c [DEFERRED] Make `--rate` a **calibration** control, in virtual
-  seconds per wallclock second: a description's durations are arbitrary with
-  respect to any machine, so the same description must be aimable at faster or
-  slower hardware without being rewritten. CLI only, never a description field
-  — it describes the target, not the workload (FR-069's reasoning, FR-005
-  portability). Assert the plan fingerprint is independent of the rate
-- [ ] T088d [DEFERRED] Report the measured `virtual/wallclock` against the
-  requested rate as a **cross-check**: a shortfall is accumulated lateness
-  arriving by a second route, and the two must agree
-- [ ] T088e [DEFERRED] Add a **rate sweep** to find capacity: offered load
-  scales with rate while the workload's shape does not, so the rate at which
-  lateness leaves zero is where this machine stops serving this workload on
-  time. A load-versus-latency curve, which answers "can this machine serve this
-  workload" better than the work-conserving ceiling does
-- [ ] T089 [DEFERRED] Replace the validity metric under pacing with
-  **lateness** in `crates/workload-gen/src/report.rs`: `lateness = submitted −
-  due`, positive only, reported as percentiles with its request count
-  (FR-066a). A run whose lateness exceeds tolerance is invalid for FR-062's
-  reason — the generator, not Certus, set the pace
-- [ ] T090 [DEFERRED] Make the report name the mode, since a paced throughput
-  and a work-conserving one are not comparable and would otherwise be quoted
-  together
-- [ ] T091 [DEFERRED] Scope FR-031 to the work-conserving mode and re-word
-  FR-062 so it does not appear to apply under pacing, where an empty queue is
-  the normal intended state
+- [x] T088b [US1] Project a paced run's **wallclock cost** before starting,
+  symmetrically with FR-073's size projection: at rate 1.0 a run costs its
+  virtual span, so `--until 3600` is an hour and silence would look like a hang
+- [x] T088c [US1] Make `--rate` a **calibration** control, in virtual seconds
+  per wallclock second, CLI only and never a description field. Assert the plan
+  fingerprint is independent of the rate
+- [x] T088d [US1] Report the measured `virtual/wallclock` against the requested
+  rate as a **cross-check**: a shortfall is accumulated lateness arriving by a
+  second route, and the two must agree
+- [x] T088e [US1] Add a **rate sweep** to find capacity:
+  `scripts/rate-sweep.sh`
+- [x] T089 [US1] Replace the validity metric under pacing with **lateness**:
+  `lateness = submitted - due`, positive only, reported as percentiles with its
+  request count (FR-066a)
+- [x] T090 [US1] Make the report name the mode, since a paced throughput and a
+  work-conserving one are not comparable
+- [x] T091 [US1] Scope FR-031 **and FR-062** to the work-conserving mode
+
+**Done, 16 tests** (9 in `pacing.rs`, 3 more in `loopback.rs`, 4 in `live.rs`).
+The schedule is computed from the plan's virtual timestamps and the wallclock
+and depends on nothing a cache answers, so a loopback stub is the *right*
+instrument rather than a weakened one, and the whole of it runs in the ordinary
+gate.
+
+**The metric replacement is the substance, and the test that shows why is the
+interesting one.** A node four times too slow to keep the schedule leaves the
+producer comfortably **ahead** of the lanes — so FR-062 sees a healthy queue
+with **zero** underruns while the run is failing to keep the very schedule it
+set itself. Measured, not argued:
+`a_slow_node_makes_the_run_late_and_that_invalidates_it`. Had pacing been added
+as a delay on top of the existing check, every paced run would have looked
+valid.
+
+**One assertion of mine was wrong, and the fix made the test better.** I
+expected a paced run's queue to run dry and asserted `underruns() > 0`. It does
+not: under pacing the producer runs ahead and fills the queue, which is
+precisely why the queue carries no information about a paced run. The assertion
+is now `underruns() == 0`, which states the point instead of contradicting it.
+
+**Three refusals rather than three silent accommodations.** `--rate 0` would
+make every turn due at `t0`, which is work-conserving wearing a rate's name;
+`--pacing none --rate 10` asks for two different things; a non-finite rate has
+no meaning. All three are exit 2, before anything is launched.
+
+**FR-062 needed scoping too, not just FR-031.** The original note named only
+FR-031. FR-062 is the load-bearing half: under pacing it is not merely
+uninformative but actively wrong, per the slow-node test above.
 
 **If pacing is ever adopted, it replaces a metric rather than adding a delay.**
 Today's run is work-conserving: it issues as fast as the mailbox allows and
@@ -2194,53 +2211,83 @@ model that or it would pass tests the production launcher would fail.
   submitting a plan through a loopback agent stub yields the same operation
   sequence as the local path — the transport-level form of FR-072
 
-- [ ] T092 [US3] *(AGREED, after T074; **recommended trigger: do it with
-  FR-078's paced mode**, because pacing changes when a request is submitted and
-  would otherwise be built in two drivers. Not urgent on its own: T074 plus the
-  single executor already prevent the divergence it guards against. Rule while
-  both paths exist: **add features to neither twice**.)* Proxy the **local**
-  node through an agent too, so there is one transport, one driver and one
-  cleanup mechanism. Have the generator launch a local agent itself without
-  ssh, so `run description.yml` still needs no setup; add `CLEAR_MEMORY_TIER`
-  as a frame, since the generator issues it directly today; then delete the
-  direct mailbox path and let `workload-gen` drop its CUDA and `shm-queue`
+- [x] T092 [US3] Proxy the **local** node through an agent too, so there is one
+  transport, one driver and one cleanup mechanism. The generator launches a
+  local agent itself without ssh, so `run description.yml` still needs no
+  setup; `CLEAR_MEMORY_TIER` became the `ClearCache` frame; the direct mailbox
+  path is deleted and `workload-gen` drops its CUDA and `shm-queue`
   dependencies — which also stops it enabling `interfaces/spdk` transitively,
-  and lets it become a workspace default member
-- [ ] T092a [US3] After T092, re-point the loopback-equivalence test (T074) at
-  the *previous* behaviour as a regression guard, and re-measure the live
-  numbers to confirm the reported per-op latency and bandwidth are unchanged —
-  they should be, since the agent already times its own mailbox requests, and
-  if they move something else is wrong
+  and makes it a workspace default member
+- [x] T092a [US3] Re-point the loopback-equivalence test (T074) at the
+  *previous* behaviour as a regression guard
 
-**T074 done, 3 tests. US3's implementation is complete.** A plan driven through
-a real loopback agent submits **exactly** what the local path would have
-executed — same sessions, same key paths, same event polls, in the same order.
+**T092/T092a done, together with FR-080 as the note recommended.**
+`workload-gen` links no CUDA — `ldd` on the binary names no `cudart` — attaches
+to no mailbox, and is a workspace **default member**, so `cargo build` and
+`cargo test --all` now reach it.
 
-**It lives in `workload-gen/tests/`, not `workload-wire/tests/` as the task
-said**, because that cannot work: the comparison needs a plan and a producer,
-both in `workload-gen`, which already depends on `workload-wire`. A test there
-would need the dependency to run both ways.
+**A lane is a connection, and that turned out to be load-bearing.** `Agents`
+opened one connection per node, while the local path got its concurrency from
+claiming `--lanes` mailbox channels directly. Keeping one connection per node
+would have collapsed a four-lane local run to one lane and reported the
+throughput as though nothing had changed. It is now `lanes` connections per
+node, routed `session % lanes` within the node placement chose — exactly what
+the deleted path did — and `loopback.rs` asserts that four lanes submit what
+one lane does, per session.
 
-**What it compares, and why that is the whole claim.** Both paths reduce a turn
-to a session id and a key path; what follows is `exec::TurnExecutor`, of which
-there is exactly one (T068a). So identical paths imply identical operations,
-and the argument has three parts: `op_stream.rs` establishes that the executor
-turns a path into the right mailbox operations, checked against the
-dispatcher's own rules; the single executor is structural rather than tested;
-and **this file establishes that the wire carries the same paths**. Comparing
-mailbox traffic directly would need a live server on both sides or a mailbox
-trait to mock, and the middle part is why that is unnecessary rather than
-merely inconvenient.
+**Where the mailbox-facing code went, and why the dependency arrow flipped.**
+`exec`, `opstream`, `payload`, `cuda`, the mailbox `attach` and the CUDA build
+script all moved into `workload-node-agent`, which now has a library half.
+FR-072a's rule still has exactly one implementation, but it is now
+*structural*: the generator has no mailbox path, so there is nowhere for a
+second one to live. The agent's dependency on `workload-gen` — documented as
+the wrong direction and accepted for the stronger property — is simply gone.
 
-Two supporting tests keep the comparison from being vacuous: a turn's path must
-run from the root and **grow** across a session's turns, so the equivalence is
-over real prefixes rather than empty lists; and a different seed must produce
-different keys, so the comparison demonstrably has teeth.
+**`op_kind` had to move too, and it exposed a spec/code mismatch.** The
+contract said `op_kind` enumerates the plan's kinds numbered from zero; the
+code has always sent the **mailbox's** opcode. With `shmq-dispatcher` gone from
+`workload-gen` the numbers could not stay where they were, so they live in
+`workload-wire` beside the field, and `workload-node-agent` — the only crate
+that sees both — pins them to the dispatcher in `tests/op_kind.rs`. The
+contract now says what is true.
 
-**This is the evidence T075 needs.** FR-079 collapses the local path onto this
-one, and a test comparing them had to exist *before* one is deleted — otherwise
-the unification is a change nobody can show is inert. After T075 it becomes a
-regression guard against the deleted behaviour.
+**Five defects, all mine, and the last three came only from running it.**
+
+1. Per-node counters were grouped by **hostname**, which merged three nodes
+  into one whenever they shared a host on different ports — which is how the
+  driver tests are written, and how a second run on one host is kept separate.
+2. `Agents::stop` returned on the first node that could not be asked to stop,
+  leaving the rest of the cluster holding its mailbox channels: FR-053's
+  failure by another route.
+3. **The agent never released its mailbox channels.** A claim lives in the
+  shared segment and outlives the process, so before FR-079 the generator
+  released the local ones and the agent — started once per deployment — did
+  not. Starting and stopping an agent for *every* run turned that into a leak
+  of `--lanes` claims per run: four two-lane runs against an eight-channel
+  mailbox and the fifth cannot start, with no agent running and nothing to
+  kill. Found by running one smoke test five times.
+4. **A refused handshake left its agent listening**, so it waited out its
+  linger while the local launcher's backstop killed it first — a SIGKILL
+  mid-release, leaking the claims. Startup now stops what it launched, asking
+  before killing, and *only* for a launcher that owns the lifecycle: under
+  `--no-launch` the operator's own daemon is left alone.
+5. **The kill grace was shorter than the agent's own linger** (3s against 5s),
+  so the backstop killed healthy agents. It is now derived from
+  `DEFAULT_LINGER`, and a test asserts the relationship rather than the number.
+
+**Hardware-verified against a scratch `certus-server-yaml`** — its own mailbox
+and device file, so the box's existing server was untouched. Six consecutive
+local runs valid; real cache traffic (18 blocks read, 18 written, 47%
+resident); `--clear-cache` reporting 18 memory-tier entries dropped;
+over-subscription refused with the mailbox still usable afterwards; and the two
+modes' validity rules visibly different on one workload — paced keeps its
+schedule and is valid, work-conserving reports 33% underruns on the same toy
+description and is invalid.
+
+**A trap worth recording, because it cost two runs.** The source-id digest
+covers every crate under `crates/`, so editing *any* source file changes it —
+and a generator rebuilt after its agent is refused for provenance, correctly.
+Build `-p workload-gen -p workload-node-agent` together, every time.
 
 **Checkpoint**: all three execution paths work; US1 and US2 are unaffected by
 US3.

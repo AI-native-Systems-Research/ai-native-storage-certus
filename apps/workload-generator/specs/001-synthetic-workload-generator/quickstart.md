@@ -241,32 +241,61 @@ where a hit rate means something.
 
 ## Scenario 4 — Drive the local node (needs Certus)
 
-**Build `--release`.** A debug `workload-gen` against a live server is slow
-enough that a 5-virtual-second run of the shipped example does not finish in ten
-minutes, and every figure it would print is a figure about the debug build.
+**Build both binaries, `--release`.** The local node goes through an agent too
+(FR-079), and the generator launches it for you — but it has to exist, and it
+has to be built from the same tree, or the handshake refuses it. Build them
+together, every time: the provenance digest covers every crate here, so a
+generator rebuilt after its agent is correctly refused.
 
-**`--lanes` may not exceed the node's channel count.** Read it off the running
-server rather than guessing:
+```bash
+cargo build --release -p workload-gen -p workload-node-agent
+```
+
+A debug `workload-gen` against a live server is slow enough that a
+5-virtual-second run of the shipped example does not finish in ten minutes, and
+every figure it would print is a figure about the debug build.
+
+**`--lanes` may not exceed the node's channel count.** It is now *connections
+to the agent*, one mailbox channel each. Read the count off the running server
+rather than guessing:
 
 ```bash
 ps -eo args | awk '$1 ~ /certus-server-yaml$/'   # note --channels
 ```
 
 ```bash
-cargo build --release -p workload-gen
 ../../target/release/workload-gen run $E --seed 42 \
   --shm-path /dev/shm/certus-shmq --lanes 8 --batch-keys 64 \
   --until 5 --report /tmp/run.json
 ```
 
+No `--node`, so this drives **this** host — through an agent the generator
+starts as a child process, with no ssh and no setup. Its output goes to
+`/tmp/workload-node-agent.<port>.log`, which is the first place to look if a
+run reports that no agent accepted a connection.
+
 `run` is **unbounded** without `--until`, and stops cleanly on SIGINT or
-SIGTERM; an interrupted run whose plan queue never reached zero is still valid
-(FR-074).
+SIGTERM; an interrupted run that kept its schedule is still valid (FR-074).
+
+**This run is paced by default** (FR-080), which is the mode most people want
+and the one that costs real time: at `--rate 1.0` a run takes wallclock equal
+to its virtual span, so `--until 5` is five seconds and `--until 3600` is an
+hour. The generator prints the projection before it starts, so silence is never
+mistaken for a hang. For the throughput ceiling instead, add `--pacing none`.
 
 **Expect**: sustained traffic, and a terminal summary plus `/tmp/run.json`
-carrying throughput (keys/s, bytes/s, virtual-seconds-per-wallclock-second),
-latency p50/p90/p99/max, plan-queue depth as **minimum and fraction-at-zero**,
-lane utilisation, validity, and the reproduction parameters.
+carrying the **mode**, throughput (keys/s, bytes/s,
+virtual-seconds-per-wallclock-second), latency p50/p90/p99/max **per
+operation**, the schedule it kept (rate asked for, rate achieved, lateness
+percentiles with their turn count), plan-queue depth as **minimum and
+fraction-at-zero**, lane utilisation, validity, and the reproduction
+parameters.
+
+**The two modes are not comparable, and the report says which one ran.** A
+paced throughput is capped by the rate you asked for; a work-conserving one is
+a ceiling. The same toy description on one machine gives a valid paced run and
+an *invalid* work-conserving one — too few turns to keep eight lanes fed —
+which is both modes' validity rules working, not a contradiction.
 
 **The validity check is the point.** Force an invalid run and confirm it is
 labelled, not published:
@@ -279,25 +308,30 @@ echo "exit=$?"
 **Expect**: exit **2**, before anything is issued, naming both figures —
 `refusing to run: 512 lanes against a node with 8 channels`. The mailbox is
 depth-1 per channel, so over-subscription would not add concurrency; it would
-serialise behind a claimed channel and report a throughput for a concurrency the
-run never had. Separately, a run whose plan queue reaches zero must exit **3**
-with the report saying invalid, because a sweep driver that reads "exited 0" as
-"I have a data point" is precisely how an invalid number gets published.
+serialise behind a claimed channel and report a throughput for a concurrency
+the run never had. Separately, a run whose plan queue reaches zero must exit
+**3** with the report saying invalid, because a sweep driver that reads "exited
+0" as "I have a data point" is precisely how an invalid number gets published.
 
-**A generator that dies mid-run leaves its channels claimed.** The next attempt
-then fails with
+**A claimed channel outlives the process that claimed it.** If a run fails with
 
 ```text
 could only claim 4 of 8 channels; another client holds the rest
 ```
 
-and the holder may well be a **dead** process — the claim lives in the mailbox's
+the holder may well be a **dead** process: the claim lives in the mailbox's
 shared memory and nothing reaps it, so the count only recovers when the server
-restarts. If that message appears, check for a live client first
-(`ps -eo pid,args | grep workload-gen`) and restart the server if there is none.
-Do not work around it by lowering `--lanes`: the run would then measure a
-different concurrency from the one asked for, which is the failure the refusal
-exists to prevent.
+restarts.
+
+Ordinary exits and panics now release, and a refused run stops the agent it
+launched rather than leaving it to be killed mid-release — those three paths
+were each a leak, and each was found by running this scenario five times in a
+row. A `SIGKILL` still leaks, because nothing a process contains survives one.
+So if that message appears, check for a live agent first (`ps -eo pid,args |
+grep workload-node-agent`) and restart the server if there is none. Do not work
+around it by lowering `--lanes`: the run would then measure a different
+concurrency from the one asked for, which is the failure the refusal exists to
+prevent.
 
 **Confirm the op stream is faithful** (FR-039..FR-044): the issued sequence
 must be reserve → transfer → commit for stores, must never contain the
@@ -305,6 +339,38 @@ single-shot store operation, must send reference reports without requesting
 promotion, must poll for events, and must never send removal, pinning, or
 promotion. This is checked against the production client's own sequence, not
 against intuition.
+
+## Scenario 4b — Rate sweep: what this machine can serve on time
+
+The rate is the load knob, so sweeping it is the capacity measurement. Offered
+load scales with the rate while the workload's *shape* does not — the same keys
+in the same order, played faster — so the rate at which lateness leaves zero is
+where this machine stops serving this workload on time.
+
+```bash
+UNTIL=60 scripts/rate-sweep.sh $E 1 2 5 10 20 50
+```
+
+**Expect** a table of rate against lateness percentiles, and one figure to read
+off it: **the last rate whose runs are all valid**. Above it the generator
+stopped keeping its own schedule, so those runs' latency describes its backlog
+rather than Certus.
+
+This answers "can this machine serve this workload" in a way the
+work-conserving ceiling cannot. The ceiling reports the latency of a
+**saturated** queue — a queue no real workload forms — which is exactly why it
+is a good bandwidth number and a poor latency one.
+
+Two ways to read it wrong, both worth naming. A rate whose lateness is non-zero
+but inside tolerance is the *interesting* neighbourhood, not a failure: that is
+the knee, and it is where a policy or configuration change shows up first. And
+if **every** rate is invalid, the sweep is above what the machine can serve at
+all, which makes every turn due immediately — work-conserving wearing a rate's
+name.
+
+The sweep refuses to run with two `certus-server-yaml` processes on the host,
+because a figure from a box with two servers belongs to whichever one the
+mailbox path reached and is not a fact about either.
 
 ## Scenario 5 — Multi-node with migration (needs a cluster)
 
@@ -317,17 +383,25 @@ against intuition.
   --lanes 8 --agent-port 7420 --report /tmp/multi.json
 ```
 
-The generator starts each agent over ssh and stops it afterwards, so nothing is
-launched by hand. To drive daemons an operator manages themselves, add
-`--no-launch` and start them like this — noting `--bind` and `--port` as two
-flags, and that `--block-bytes` must match the description's `blocks.bytes` or the
-handshake refuses the node:
+The generator starts each **remote** agent over ssh and stops it afterwards, so
+nothing is launched by hand — the only difference from Scenario 4 is that a
+local node is launched as a child process instead. One transport, one driver,
+one teardown, whichever it is.
+
+To drive daemons an operator manages themselves, add `--no-launch` and start
+them like this — noting `--bind` and `--port` as two flags, and that
+`--block-bytes` must match the description's `blocks.bytes` or the handshake
+refuses the node:
 
 ```bash
 # on each remote node, only with --no-launch:
 workload-node-agent --bind 0.0.0.0 --port 7420 \
   --shm-path /dev/shm/certus-shmq --lanes 8 --block-bytes 65536
 ```
+
+Under `--no-launch` the daemons are yours: a refused run leaves them running,
+because stopping one would leave you with nothing to talk to and nothing able
+to start it again.
 
 **Expect**: sessions distributed uniformly; a migrated session's turns issued
 to a different node while its blocks stay where they were, so the new node

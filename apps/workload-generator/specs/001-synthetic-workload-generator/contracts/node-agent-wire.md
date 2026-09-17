@@ -1,15 +1,19 @@
 # Contract: Generator ↔ Node Agent Wire Protocol
 
-**Version**: 2
+**Version**: 3
 **Status**: Draft
 **Spoken by**: `workload-gen` (client) and `workload-node-agent` (server), both
 via `workload-wire`.
 
 The generator cannot reach a remote Certus directly — the only ingress is a
-host-local shared-memory mailbox — so each remote node runs an agent that
-accepts work over TCP and submits it to its own local mailbox. **Only keys
-cross the network.** The agent reconstructs block payloads from the key (spec
-FR-047).
+host-local shared-memory mailbox — so each node runs an agent that accepts work
+over TCP and submits it to its own local mailbox. **Only keys cross the
+network.** The agent reconstructs block payloads from the key (spec FR-047).
+
+**Every node speaks this protocol, including the local one** (FR-079). The
+generator has no mailbox path of its own: a local run drives an agent the
+generator launches as a child process on this host, so there is one transport,
+one driver and one cleanup mechanism rather than two of each.
 
 ## Why TCP, and why this is not a bottleneck
 
@@ -122,35 +126,50 @@ cache's answer and not a workload decision. Version 1's concern, that deciding
 "what to issue" on the agent would put workload semantics on two sides of a
 network boundary, still holds and is still respected.
 
-**The rule MUST have exactly one implementation.** If the local path and the
-agent each had their own, the two execution paths could diverge and FR-072's
-guarantee — that the same description and seed produce the same workload
-whichever path runs it — would become unverifiable. `workload-node-agent`
-therefore depends on `workload-gen`'s library for the split and the encoders
-rather than reimplementing them. That is the wrong direction for a dependency
-arrow and is accepted for the stronger property; if `workload-gen`'s library
-grows, extracting the executor into its own crate is the tidier form. It cannot
-live in `workload-wire`, which is a CUDA-free workspace default member:
-depending on `shmq-dispatcher` from there would unify `interfaces/spdk` into
-the default build.
+**The rule MUST have exactly one implementation**, and since FR-079 that is
+structural rather than a discipline. If the local path and the agent each had
+their own, the two execution paths could diverge and FR-072's guarantee — that
+the same description and seed produce the same workload whichever path runs it
+— would become unverifiable. There is now nowhere for a second implementation
+to live: the executor, the opcode mapping and the payload buffer are in
+`workload-node-agent`, and the generator depends on none of them.
 
-`op_kind` still enumerates the plan's operation kinds — check, **touch**, load,
-reserve, transfer, commit, abort, poll-events. It is no longer what a
-submission names; it is the key space of the `Stats` reply, and the agent's own
-translation table to the mailbox's opcodes.
+That also fixed a dependency arrow the earlier design had accepted as a cost.
+The agent used to depend on `workload-gen`'s library for the split and the
+encoders — the wrong direction for a daemon, taken deliberately for the
+stronger property. It now owns them, which is both the tidier shape and what
+lets `workload-gen` drop `shm-queue` and CUDA and become a workspace default
+member. None of it can live in `workload-wire`, which is a CUDA-free default
+member: depending on `shmq-dispatcher` from there would unify `interfaces/spdk`
+into every plain `cargo build`.
+
+`op_kind` keys the `Stats` reply's histograms and is **the mailbox's own opcode
+number** — the opcode the agent sent, since the agent is what timed it. The
+names for those numbers are in `workload-wire` beside the field, because one
+end fills it and the other prints it, and `workload-node-agent` — the only
+crate that can see both — pins them to `shmq-dispatcher`'s constants in a test.
+That pin is what makes the duplication safe rather than a second source of
+truth: the failure it prevents is silent, a run reporting a `LOOKUP` percentile
+under the name `RESERVE`.
 
 ### The mailbox-facing code is the only collector
 
 Latency and bandwidth MUST be measured by whatever code talks to the
-shared-memory mailbox — the generator's own executor on a local node, the
-agent's on a remote one — and MUST NOT be inferred from this wire. Only the
-agent is near a remote mailbox, so only the agent can time a `LOOKUP` or count
-a block that moved; a figure derived from wire timings would include the
-network and describe the transport rather than Certus.
+shared-memory mailbox — which since FR-079 is **always the agent**, on every
+node — and MUST NOT be inferred from this wire. Only the agent is near a
+mailbox, so only the agent can time a `LOOKUP` or count a block that moved; a
+figure derived from wire timings would include the network and describe the
+transport rather than Certus.
 
-Because both paths run the **same** executor (see above), the counters mean the
-same thing wherever they were gathered, which is what makes a local number and
-a remote number comparable. Had each path counted for itself, a local/remote
+This is also what makes routing the local node through an agent free for the
+numbers that matter. The loopback hop is outside every reported figure, because
+the agent times its own mailbox requests; what it costs is the rate at which
+the generator can *feed* work, which the plan queue's underrun count (FR-062)
+and paced mode's lateness (FR-080) are there to catch.
+
+Because there is exactly one executor, the counters mean the same thing
+wherever they were gathered, which is what makes one node's number and
+another's comparable. Had each path counted for itself, a local/remote
 difference would be unattributable between the cache and the instrument.
 
 `Counters` carries the fifteen figures the report needs — requests, key
