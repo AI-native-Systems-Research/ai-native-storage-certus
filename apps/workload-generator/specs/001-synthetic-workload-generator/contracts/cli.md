@@ -186,49 +186,115 @@ record count.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `--shm-path <path>` | `/dev/shm/certus-shmq` | the mailbox **on each node**, which its agent attaches to |
-| `--node <host>` | none (repeatable) | nodes to drive, each through its agent |
-| `--agent-port <port>` | 7420 | agent listen port |
-| `--agent-binary <path>` | `workload-node-agent` | the agent **on each node**. A bare name is looked for beside the generator's own executable when the node is local |
+| `--instance <host[:port][:mailbox]>` | this host, `7420`, `/dev/shm/certus-shmq` (repeatable) | one **Certus instance** to drive, through its agent (FR-081) |
+| `--hardware <file>` | `./cluster.yml` if it exists | the hardware file (FR-082) |
+| `--agent-binary <path>` | `workload-node-agent` | the agent **on each host**. A bare name is looked for beside the generator's own executable when the instance is local |
 | `--no-launch` | off | drive agents that are already running. Weakens FR-052, so it is opt-in |
 
-**Every node goes through an agent, including the local one** (FR-079). With no
-`--node` the run drives this host, through an agent the generator launches
-itself as a **child process with no ssh** — `ssh localhost` would want the
-host's own key trusted for its own account, which is a configuration step for
-the simplest possible invocation. So the run still needs no setup, and the
-transport, the driver and the teardown are one mechanism everywhere.
+### An instance is not a machine
 
-With fewer than two nodes, migration is inert rather than an error (FR-049).
+The unit a run addresses is a **Certus instance**, identified by `(host,
+mailbox, port)` — because a machine routinely runs several, one per NUMA domain
+or per NVMe device, as `deploy/multi-instance/` already does. A hostname alone
+is not an identity (FR-081).
+
+The three components may be given in any of four shapes. A component that
+parses as a `u16` is the port; one starting with `/` is the mailbox:
+
+```text
+--instance node5                              # defaults for port and mailbox
+--instance node5:7421                         # own port, default mailbox
+--instance node5:/dev/shm/certus-numa1         # own mailbox, default port
+--instance node5:7421:/dev/shm/certus-numa1    # both
+```
+
+**Two instances given the same port MUST be refused.** Each needs its own
+agent, so a shared port means the second agent's startup finds the first, takes
+it for a leftover of a crashed run and shuts it down (FR-052) — a two-instance
+run would then drive one instance and report it as two.
+
+There is deliberately **no `--shm-path` and no `--agent-port`.** Their only
+remaining job would be to set a uniform *non-default* mailbox or port across
+every instance, which is cheap to say per instance on a command line meant for
+a few of them, and belongs in the hardware file for more. `--agent-binary`
+stays global on a different principle: the handshake **requires** every
+instance to run the same build (FR-051), so a per-instance binary is a
+misconfiguration the protocol already refuses.
+
+**Every instance goes through an agent, including a local one** (FR-079). With
+no `--instance` and no hardware file the run drives this host, through an agent
+the generator launches as a **child process with no ssh** — `ssh localhost`
+would want the host's own key trusted for its own account, which is a
+configuration step for the simplest possible invocation. So the run still needs
+no setup, and the transport, the driver and the teardown are one mechanism
+everywhere.
+
+With fewer than two instances, migration is inert rather than an error
+(FR-049). Note that two *co-resident* instances are two independent caches, so
+a session migrating between them is a genuine cache miss and a legitimate
+experiment.
+
+## The hardware file
+
+YAML, `./cluster.yml` by default, `--hardware` to name another. It carries what
+describes the **target** rather than the workload, and MUST NOT carry any part
+of the workload description (FR-005, FR-082). See `hardware.md` for the schema
+and `hardware.example.yml` for a file a test keeps parseable.
+
+**The command line overrides it, per field.** A rate sweep varies the rate
+while holding the deployment fixed, so the rate has to be settable without
+editing the file that describes the hardware; `--instance` likewise replaces
+the file's instance list rather than adding to it.
+
+**A file picked up implicitly is announced.** When `./cluster.yml` is read
+without being asked for, the run says so on its error stream before it starts,
+and the report records the file's path and digest either way (FR-063) — so a
+run whose deployment came from a file is still reproducible from its own
+report.
 
 ## Tuning (never in the description file)
 
 | Option | Default | Notes |
 | --- | --- | --- |
 | `--seed <u64>` | required for reproducibility; random otherwise, and the value used is reported | FR-012, FR-063 |
-| `--lanes <n>` | 4 | execution concurrency **per node**: one agent connection and one mailbox channel each. MUST NOT exceed the node's channel count; the mailbox is depth-1 per channel, so concurrency *is* channel count and over-subscription silently serialises |
+| `--lanes <n>` | 4 | execution concurrency **per instance**: one agent connection and one mailbox channel each. MUST NOT exceed the instance's channel count; the mailbox is depth-1 per channel, so concurrency *is* channel count and over-subscription silently serialises |
 | `--batch-keys <n>` | documented default | keys per request. The largest measured performance lever on this hardware — the remote penalty is per batch, not per key — so it is explicit and sweepable (FR-069) |
-| `--pipeline-depth <n>` | 8 | in-flight batches per node. Independent of `--lanes` (FR-072) |
-| `--gpu-device <n>` | 0 | passed through to each node's agent, which owns the device buffer |
-| `--pacing real\|none` | `real` | whether a turn waits for its virtual time to be due (FR-080) |
-| `--rate <f64>` | 1.0 | virtual seconds per wallclock second, under `--pacing real`. Refused at zero or below, and refused outright with `--pacing none` |
+| `--gpu-device <n>` | 0 | passed through to each agent, which owns the device buffer |
+| `--rate <f64\|inf>` | 1.0 | virtual seconds per wallclock second. `inf` is the work-conserving mode (FR-080) |
 | `--lateness-tolerance-ms <n>` | 100 | p99 lateness a paced run accepts before calling itself invalid |
+
+**`--rate` is the only pacing knob, and `inf` is not a special case.** Since
+`due = t0 + (virtual timestamp) / rate`, an infinite rate makes every request
+due at `t0` — which is what work-conserving means. A separate `--pacing
+real|none` was implemented first and withdrawn: two knobs that can disagree
+need a rule to police them, and one knob makes `--pacing none --rate 10`
+unsayable rather than refused. The report still names the mode, derived from
+the rate.
+
+**`inf` switches the schedule off; it does not merely divide.** Left to the
+arithmetic, every request would be recorded as late by however long the run had
+been going, and every work-conserving run would report itself invalid.
+
+**A large finite rate is not `inf`.** `--rate 1e12` keeps a schedule the
+machine cannot meet and is correctly invalid for lateness. The help text must
+say so, because someone will type a large number meaning "flat out".
 
 **`--rate` MUST NOT change the workload** (FR-080). It changes only the tempo:
 the same keys in the same order for the same sessions, submitted faster or
 slower, and a run's plan fingerprint is independent of it. It is a
 **calibration** control — a description's durations are arbitrary with respect
-to any particular machine — which is why it is here and never a field of the
-description (FR-069's reasoning, FR-005 portability).
-
-`--rate` with `--pacing none` is **refused, not ignored**: the combination asks
-for two different things, and honouring one silently is how a run gets quoted
-as the other. It is also why the selector is positive rather than `--unpaced`,
-which cannot be read without knowing the default.
+to any particular machine — which is why it is here or in the hardware file,
+and never a field of the description (FR-069's reasoning, FR-005 portability).
 
 **`--batch-keys` and `--lanes` MUST NOT change the plan or the emitted trace**
 (FR-072). They govern only how operations are grouped and dispatched. This is
 directly testable and is listed in `quickstart.md`.
+
+**Specified but not implemented**: `--pipeline-depth <n>`, in-flight turns per
+connection, independent of `--lanes` (FR-072). The depth exists and defaults to
+8; it is not settable from the command line. Recorded here rather than quietly
+dropped, because a contract that lists a flag the binary does not accept is
+worse than one that says which flag is missing.
 
 ## Reporting
 
@@ -254,7 +320,7 @@ structured files, so no one has to scrape terminal text.
 - plan-queue depth: **minimum over the run** and **fraction of the run at
   zero** — not an average, which would conceal a brief exhaustion
 - lane utilisation
-- under `--pacing real`, the **schedule**: the rate asked for, the rate
+- under a **finite** rate, the **schedule**: the rate asked for, the rate
   achieved, and lateness percentiles with their turn count
 - validity: valid, or invalid with the reason — and **which reason depends on
   the mode**: a work-conserving run's plan queue reaching zero, a paced run's

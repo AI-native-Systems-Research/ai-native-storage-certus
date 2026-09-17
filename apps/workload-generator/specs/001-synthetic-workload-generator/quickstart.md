@@ -265,14 +265,14 @@ ps -eo args | awk '$1 ~ /certus-server-yaml$/'   # note --channels
 
 ```bash
 ../../target/release/workload-gen run $E --seed 42 \
-  --shm-path /dev/shm/certus-shmq --lanes 8 --batch-keys 64 \
+  --lanes 8 --batch-keys 64 \
   --until 5 --report /tmp/run.json
 ```
 
-No `--node`, so this drives **this** host — through an agent the generator
-starts as a child process, with no ssh and no setup. Its output goes to
-`/tmp/workload-node-agent.<port>.log`, which is the first place to look if a
-run reports that no agent accepted a connection.
+No `--instance` and no `./cluster.yml`, so this drives **this** host — through
+an agent the generator starts as a child process, with no ssh and no setup. Its
+output goes to `/tmp/workload-node-agent.<port>.log`, which is the first place
+to look if a run reports that no agent accepted a connection.
 
 `run` is **unbounded** without `--until`, and stops cleanly on SIGINT or
 SIGTERM; an interrupted run that kept its schedule is still valid (FR-074).
@@ -281,7 +281,11 @@ SIGTERM; an interrupted run that kept its schedule is still valid (FR-074).
 and the one that costs real time: at `--rate 1.0` a run takes wallclock equal
 to its virtual span, so `--until 5` is five seconds and `--until 3600` is an
 hour. The generator prints the projection before it starts, so silence is never
-mistaken for a hang. For the throughput ceiling instead, add `--pacing none`.
+mistaken for a hang. For the throughput ceiling instead, `--rate inf` — an
+infinite rate makes every turn due immediately, which is what work-conserving
+means. Note that a large finite rate is *not* the same thing: it keeps a
+schedule the machine cannot meet and is correctly reported invalid for
+lateness.
 
 **Expect**: sustained traffic, and a terminal summary plus `/tmp/run.json`
 carrying the **mode**, throughput (keys/s, bytes/s,
@@ -375,13 +379,33 @@ mailbox path reached and is not a fact about either.
 ## Scenario 5 — Multi-node with migration (needs a cluster)
 
 ```bash
-# on the driving node. --node takes a BARE HOSTNAME, as ssh understands it:
-# the mailbox comes from --shm-path and the port from --agent-port, because
-# both are properties of the deployment rather than of any one node.
+# on the driving host. --instance names a CERTUS INSTANCE, not a machine:
+# host[:port][:mailbox], where a component that parses as a u16 is the port and
+# one starting with / is the mailbox. A machine running several instances — one
+# per NUMA domain, say — appears here several times (FR-081).
 ../../target/release/workload-gen run $E --seed 42 \
-  --node node5 --node node7 \
-  --lanes 8 --agent-port 7420 --report /tmp/multi.json
+  --instance node5 --instance node7 \
+  --lanes 8 --report /tmp/multi.json
+
+# The same cluster with two instances per host, one per NUMA domain:
+../../target/release/workload-gen run $E --seed 42 \
+  --instance node5:7420:/dev/shm/certus-numa0 \
+  --instance node5:7421:/dev/shm/certus-numa1 \
+  --instance node7:7420:/dev/shm/certus-numa0 \
+  --instance node7:7421:/dev/shm/certus-numa1 \
+  --lanes 8 --report /tmp/multi.json
+
+# Or put the deployment in a file and stop retyping it. ./cluster.yml is picked
+# up automatically — and the run says so, and records its digest in the report:
+../../target/release/workload-gen run $E --seed 42 --lanes 8 \
+  --hardware cluster.yml --report /tmp/multi.json
 ```
+
+**Two instances on one host are two independent caches**, so a session
+migrating between them is a genuine cache miss and a legitimate experiment
+rather than a no-op. Each needs its own port: two sharing one would have the
+second agent's startup take the first for a leftover and shut it down, so the
+run would drive one instance while reporting two. That is refused.
 
 The generator starts each **remote** agent over ssh and stops it afterwards, so
 nothing is launched by hand — the only difference from Scenario 4 is that a
