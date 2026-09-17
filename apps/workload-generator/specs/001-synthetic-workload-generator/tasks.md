@@ -2390,7 +2390,7 @@ changed.
   drift between the guide and the implementation
 - [x] T085 [P] Record a Criterion baseline for the per-key plan-generation
   benchmark and note it in `README.md`, so later regressions are detectable
-- [ ] T086 Final gate: `cargo fmt --check`, `cargo clippy -- -D warnings`,
+- [x] T086 Final gate: `cargo fmt --check`, `cargo clippy -- -D warnings`,
   `cargo doc --no-deps`, `cargo test --all -- --test-threads 1`, plus the two
   non-default-member crates built and tested explicitly with `-p`
 - [x] T087 [P] Land the population simulation from `~scooter/popsim/` in the
@@ -2421,6 +2421,40 @@ changed.
   first three windows see exactly zero churn and modulation is still 0.44 after
   eight generations, against 0.04 for residual-life seeding. T024 should assert
   that structure rather than the digits, so it cannot go flaky.
+
+**T086 done. The gate passes, and Phase 7 is complete.** Run on 2026-09-17:
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --check` | clean for this feature; **38 files elsewhere in the repo are unformatted**, none of them touched by this branch (checked by intersecting the diff-against-`origin/unstable` file list with the drift list — the intersection is empty) |
+| `cargo clippy --no-deps -- -D warnings` (default members) | clean |
+| `cargo clippy --no-deps --all-targets -- -D warnings` on `-p workload-gen` in all three feature configurations and `-p workload-node-agent` | clean |
+| `cargo doc --no-deps` | clean for this feature; **2 pre-existing warnings** in `lib/shm-queue` (a private intra-doc link) and `lib/component-core` (an unresolved `deactivate` link), neither in a file this branch touched |
+| `cargo test -- --test-threads 1` (default members) | **all pass**, 922 tests over 62 binaries |
+| `cargo test -p workload-gen --features live -- --test-threads 1` | **all pass**, 104 tests, 1 ignored (the 5-seed sweep) |
+| `cargo test -p workload-gen --no-default-features --features parquet` | **all pass**, 25 tests |
+| `cargo test -p workload-trace --features parquet` | **all pass**, 60 tests |
+| `cargo test -p workload-node-agent` | **all pass**, 2 ignored — both need a live server, a live agent on 7420 and a GPU, and say so in their `#[ignore]` reasons |
+
+**T005's two expected pre-existing failures behaved differently than predicted,
+and the difference is worth recording.** It warned that `cargo test --all` fails
+in `dispatcher-p2p` on `libgdrapi.so.2` and that
+`cargo clippy -p workload-gen -- -D warnings` fails on two `manual_checked_ops`
+lints in `components/interfaces`. Now:
+
+- The `manual_checked_ops` problem is **real and still latent**, and it is why
+  every clippy invocation above carries `--no-deps`. Without it the lint fires on
+  repo code this feature does not own and aborts the run, which silently masked
+  several of this app's own lints earlier in the branch.
+- `cargo test --all --no-run` **builds clean** — the GDRCopy link failure is a
+  runtime one, so `--all` still cannot be the gate on a box without the library.
+  The gate this feature holds is plain `cargo test` plus explicit `-p` runs, as
+  T005 concluded.
+
+The two `cargo doc` warnings were **not** predicted by T005 and are also not this
+feature's; both are in `lib/` code last touched by the crate-move commit
+`dcbfc4c2`. Recorded rather than fixed, on the same principle: a gate that fixes
+unrelated code stops being a gate on this feature.
 
 **T085 done, and the baseline is a range rather than a table of digits, because
 one run of this benchmark is not a measurement.** Recorded in `benches/plan.rs`
