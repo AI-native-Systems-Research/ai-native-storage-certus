@@ -384,6 +384,32 @@ impl WorkloadDescription {
     ///
     /// If the file cannot be read, does not parse, or names a sample file that
     /// cannot be read.
+    ///
+    /// # Examples
+    ///
+    /// Loading `contracts/workload-input.example.yml`, which is **normative** for
+    /// this schema. Reading it here rather than inlining a copy is the point: an
+    /// inlined copy would let the file and the parser drift apart without anything
+    /// noticing, and this schema's own specification is that file.
+    ///
+    /// The path is resolved against `CARGO_MANIFEST_DIR` rather than the working
+    /// directory, so it holds wherever the tests are run from.
+    ///
+    /// ```
+    /// use std::path::PathBuf;
+    /// use workload_model::description::WorkloadDescription;
+    ///
+    /// let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+    ///     "../../specs/001-synthetic-workload-generator/contracts/workload-input.example.yml",
+    /// );
+    ///
+    /// let description = WorkloadDescription::from_path(&example).unwrap();
+    /// let report = description.validate().unwrap();
+    ///
+    /// assert_eq!(description.version, 1);
+    /// assert_eq!(description.blocks.tokens, 16);
+    /// assert!(report.refusals().is_empty());
+    /// ```
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let text = std::fs::read_to_string(path)

@@ -1291,7 +1291,10 @@ feature-gated test nobody enables is indistinguishable from no test.
   virtual-to-wallclock ratio are **omitted, not zeroed**
 - [x] T057 [US2] Wire the `emit` subcommand in
   `crates/workload-gen/src/cli.rs`: `--until` **required**, `--output`,
-  `--format jsonl|parquet|both`
+  `--format jsonl|parquet|both`. **`--format` was only half wired and this
+  checkbox was wrong until T084**: `parquet` and `both` checked the feature and
+  then wrote JSONL alone. Completed at T084, with the four tests that would have
+  caught it; see T084's note.
 - [x] T058 [US2] Wire the projection into `emit` in
   `crates/workload-gen/src/cli.rs`: project before writing, compare against
   free space via `statvfs`, and refuse past the free space or a documented
@@ -2380,10 +2383,10 @@ changed.
   examples, including ones for `const HELLO` and for `extern "C"` declarations
   that cannot run, which would have added a large gate cost and a lot of
   near-duplicate snippets to document a contract that has no second party.
-- [ ] T083 [P] Add a doc test asserting that
+- [x] T083 [P] Add a doc test asserting that
   `specs/001-synthetic-workload-generator/contracts/workload-input.example.yml`
   parses and validates, so the shipped example cannot drift from the parser
-- [ ] T084 Run every scenario in `quickstart.md` end to end and correct any
+- [x] T084 Run every scenario in `quickstart.md` end to end and correct any
   drift between the guide and the implementation
 - [ ] T085 [P] Record a Criterion baseline for the per-key plan-generation
   benchmark and note it in `README.md`, so later regressions are detectable
@@ -2418,6 +2421,102 @@ changed.
   first three windows see exactly zero churn and modulation is still 0.44 after
   eight generations, against 0.04 for residual-life seeding. T024 should assert
   that structure rather than the digits, so it cannot go flaky.
+
+**T084 done, and it found a real defect rather than only guide drift.** Every
+command in `quickstart.md` was executed on 2026-09-17 except Scenario 5 (needs a
+cluster) and Scenario 4's *successful* case (see below). The guide now says at
+the top which commands were run, and every number in it is measured.
+
+**THE DEFECT: `--format parquet` and `--format both` never wrote parquet.**
+`Format` was parsed, and used for exactly one thing — checking that the build had
+the feature — and then the emit path wrote JSONL unconditionally.
+`records.parquet` was therefore permanently `null`, no `.parquet` file was ever
+produced by the tool, and **SC-004's equivalence claim had nothing to compare on
+a real run**. `ParquetWriter` itself was complete and tested (T054/T055); only the
+wiring was missing, so T057's checkbox was wrong.
+
+This is the third instance in this feature of the same failure shape — a flag
+accepted, validated, and not plumbed through (`--batch-keys` was the first,
+`rank_by` the second) — and it survived for the same reason each time: **no test
+drove the flag**. `emit_determinism.rs` exercised `emit` extensively and never
+passed `--format`. Now fixed, with four tests that would each have caught it:
+`format_jsonl_writes_only_jsonl`, `format_both_writes_both_containers_and_reports_both_counts`,
+`format_parquet_writes_only_parquet_and_still_writes_a_manifest`, and — on a build
+without the feature — `asking_for_parquet_without_the_feature_is_refused_rather_than_silently_jsonl`.
+
+Two things fell out of doing the wiring properly:
+
+- **The manifest's counts can no longer come from "the JSONL writer".** They come
+  from whichever container was written, so a parquet-only run keeps them; without
+  that a parquet-only trace would have been unreadable rather than merely
+  uncounted (FR-073).
+- **With both containers written, their counts are compared and a disagreement is
+  a refusal.** SC-004's equivalence is now checked on every real `--format both`
+  run, not only by the test that compares a handful of records. Measured
+  side-effect worth recording: parquet is **3.6x smaller** (12.2 MB against 44.1
+  MB at a 30-second span), which is the justification for the dependency,
+  confirmed rather than assumed.
+
+**Drift corrected in the guide, scenario by scenario. Every item was a command
+that failed or a number that was wrong** — not one was cosmetic:
+
+- **Scenario 1**: the effective mean was quoted as ~5.57 and the refusal's as
+  4.218. Both are the *continuous* truncated means; the tool reports the means of
+  the **rounded** variable, 5.1435 and 3.9515, because a count is integral. The
+  example file's own comment already recorded this correction and the guide had
+  not been updated. The guide now states both and says why they differ.
+- **Scenario 2**: `plan` requires `--until`, which the guide omitted, so its
+  first command failed. Worse, the third command passed `--batch-keys` and
+  `--lanes` to `plan`, **which has neither flag** — an `unexpected argument`
+  error, not a passing comparison. That half of FR-072 cannot be checked through
+  `plan` at all, and pretending it could was the guide asserting a property it
+  never tested. It now points at
+  `op_stream::batch_keys_changes_the_requests_but_not_the_workload`, which does
+  test it, and says why the CLI cannot. Also: `plan` prints a fingerprint, so
+  `cmp` is the expensive form of the check, and these files are 98 MB at
+  `--until 60` and 535 MB at 300 — worth saying before someone runs it four
+  times.
+- **Scenario 3**: `--format both` needs `--features parquet` and the guide's own
+  `$G` alias has `--no-default-features`, so the command as written refused.
+  `--until 3600` on the shipped example projects a **7.33 GiB** plan; the guide
+  now uses 30 seconds and shows `validate --until` as the pre-flight. The `ls`
+  comment listed a `blocks/` directory that `contracts/trace-io.md` explicitly
+  says does not exist, and omitted `report.json`. And
+  `eviction-replay-benchmark`'s flag is `--file`, not `--trace`.
+- **Scenario 4**: `--lanes 16` against this host's 8-channel server is refused
+  (correctly, exit 2, naming both figures). A **debug** build did not finish a
+  5-virtual-second run in ten minutes, so the guide now says `--release` — every
+  figure this scenario prints is a throughput, and a debug throughput is a figure
+  about the debug build.
+- **Scenario 5**: `--node` takes a **bare hostname**. The guide passed
+  `node5:/dev/shm/certus-shmq`, which would be used verbatim as an ssh host; the
+  mailbox comes from `--shm-path` and the port from `--agent-port`. The agent's
+  flags are `--bind` and `--port` (default **7420**, not the 9420 the guide
+  showed), and the hand-start line contradicted its own comment saying the
+  launcher does it — it belongs to `--no-launch`, which is now what it says.
+- **Scenario 6**: correct as written. 25 s for the gate, 122 s for the seed
+  sweep, matching its "~2 min".
+
+**Scenario 4's successful case could not be completed, and why is worth
+recording: a generator that dies mid-run leaks its mailbox channel claims.** The
+host's server had 4 of 8 channels already held by a dead client before this
+session touched it; the debug run that had to be killed took the other 4. The
+claim lives in the mailbox's shared memory and nothing reaps it, so the count
+only recovers when the server restarts. The generator's *refusal* is correct and
+well-worded ("could only claim 4 of 8 channels; another client holds the rest")
+but does not hint that the holder may be dead, which is the state an operator
+will actually be in. Documented in the guide, including that the wrong fix is to
+lower `--lanes` — that measures a different concurrency from the one asked for,
+which is exactly what the lane check exists to prevent. **Not filed as a task:
+whether the mailbox should reap a dead client's claims is a `shm-queue` question,
+not this feature's.**
+
+**T083 done**, as a doc test on `WorkloadDescription::from_path` that loads the
+normative example through `CARGO_MANIFEST_DIR` and asserts it validates with no
+refusals. `tests/description.rs` already asserted the same thing, so this is the
+*documentation* half the task asked for: the example is what `from_path` is for,
+and reading the real file rather than inlining a copy is the point — an inlined
+copy is the drift the task exists to prevent.
 
 **T082 done, 62 doc tests** (41 `workload-model`, 10 `workload-trace` with
 `parquet` on, 11 `workload-wire`, 1 `workload-gen`), and `cargo doc --no-deps` is

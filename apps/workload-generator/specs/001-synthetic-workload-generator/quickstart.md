@@ -1,10 +1,16 @@
 # Quickstart & Validation Guide: Synthetic Workload Generator
 
-**Feature**: `001-synthetic-workload-generator` | **Date**: 2026-09-15
+**Feature**: `001-synthetic-workload-generator` | **Date**: 2026-09-17
 
 Runnable scenarios that prove the feature works, ordered so that each needs
 strictly more hardware than the last. Scenarios 1–3 need **no accelerator, no
 Certus, and no cluster** — they are the bulk of the acceptance surface.
+
+Every command below was **run** as written on 2026-09-17, except Scenario 5,
+which needs a cluster, and Scenario 4's successful case, which needs a server
+with free mailbox channels. Numbers quoted in the expectations are measured, not
+illustrative — so a figure that no longer matches is either drift or a change
+worth explaining.
 
 Details live in the contracts rather than here: `contracts/cli.md` for options,
 `contracts/key-derivation.md` for keys, `contracts/node-agent-wire.md` for the
@@ -31,16 +37,31 @@ cargo run -p workload-gen --no-default-features -- \
 ```
 
 **Expect**: exit 0, and a report of the **effective** distribution for every
-field whose truncated value differs from what was written. The example is
-deliberately informative here: `doc_analysis` draws `long_document` counts from
-`exponential(mean 5)` against a pool of 20, so the implied maximum discards
-~1.8% of the mass and the effective mean is ~5.57 rather than 5. That line
-appearing is the check working (FR-003).
+field whose truncated value differs from what was written — thirteen lines on
+this file. The example is deliberately informative here: `doc_analysis` draws
+`long_document` counts from `exponential(mean 5)` against a pool of 20, so the
+implied maximum discards 1.83% of the mass and the effective mean is **5.1435**
+rather than 5. That line appearing is the check working (FR-003).
 
-**Also expect it to refuse a bad file.** Lower that pool to 10 and re-run: the
-implied maximum then discards 13.5%, over the 5% threshold, so it exits **2**
-and names both the requested mean (5) and the effective one (4.218) — see
-FR-004. Nothing is issued.
+**Also expect it to refuse a bad file.** Lower that pool to 10 and re-run:
+
+```bash
+sed 's/^      size: 20$/      size: 10/' \
+  specs/001-synthetic-workload-generator/contracts/workload-input.example.yml \
+  > /tmp/pool10.yml
+cargo run -p workload-gen --no-default-features -- validate /tmp/pool10.yml
+echo "exit=$?"
+```
+
+The implied maximum then discards 13.5%, over the 5% threshold, so it exits
+**2** and names both the requested mean (5) and the effective one (**3.9515**) —
+see FR-004. Nothing is issued.
+
+Those two effective means are the means of the **rounded** variable, because a
+count is integral. The continuous truncated means of the same distributions are
+5.565 and 4.218, and an earlier draft of this guide quoted those — but no draw
+ever realises them, so they describe a quantity nothing observes. The example
+file's own comment records the same correction.
 
 ## Scenario 2 — Determinism, and independence from tuning (no hardware)
 
@@ -51,67 +72,148 @@ here.
 E=specs/001-synthetic-workload-generator/contracts/workload-input.example.yml
 G="cargo run -q -p workload-gen --no-default-features --"
 
-$G plan $E --seed 42 --output /tmp/plan-a.bin
-$G plan $E --seed 42 --output /tmp/plan-b.bin
-$G plan $E --seed 42 --batch-keys 1024 --lanes 64 --output /tmp/plan-c.bin
-cmp /tmp/plan-a.bin /tmp/plan-b.bin && cmp /tmp/plan-a.bin /tmp/plan-c.bin
+$G plan $E --seed 42 --until 60 --output /tmp/plan-a.bin
+$G plan $E --seed 42 --until 60 --output /tmp/plan-b.bin
+cmp /tmp/plan-a.bin /tmp/plan-b.bin
 ```
 
-**Expect**: both comparisons silent. The third is the one that catches real
-bugs — if batching or lane count leaks into the plan, the trace stops being a
-function of description and seed, and every generated trace becomes
-unreproducible without recording the tuning that produced it.
+**Expect**: silent, and both runs print the same `fingerprint`. Comparing the
+fingerprints is the cheap form of this check — `cmp` reads the whole file, and
+these are not small: the shipped example writes about 100 MB per plan at
+`--until 60` and 535 MB at `--until 300`. Delete them afterwards.
+
+`--until` is **required** on `plan`; an unbounded plan file is not a thing.
 
 ```bash
-$G plan $E --seed 43 --output /tmp/plan-d.bin
+$G plan $E --seed 43 --until 60 --output /tmp/plan-d.bin
 cmp /tmp/plan-a.bin /tmp/plan-d.bin      # MUST differ
+rm -f /tmp/plan-*.bin
 ```
 
 **Expect**: differs. A seed that changes nothing means the seed is not wired
 through, which would look like determinism while being its opposite.
 
-## Scenario 3 — Emit a trace, both containers, and feed the simulator
+**The other half of FR-072 — independence from `--batch-keys` and `--lanes` —
+cannot be checked here, and that is the point.** `plan` has no such flags: they
+belong to the live path, and `workload-model` has no parameter through which a
+batch size or a lane count could arrive. Passing them to `plan` is an
+`unexpected argument` error rather than a passing comparison. So the guarantee
+rests on the crate boundary, and its executable form is a test rather than a CLI
+invocation:
 
 ```bash
-$G emit $E --seed 42 --until 3600 --format both --output /tmp/trace
-ls /tmp/trace                            # manifest.json, invocations/, blocks/
+cargo test -p workload-gen --features live --test op_stream \
+  batch_keys_changes_the_requests_but_not_the_workload
 ```
 
-**Expect**:
+**Expect**: passes. It drives one plan at `--batch-keys 4` and at 4096 through a
+mock mailbox and asserts the requests differ while the workload does not. That
+property was silently untrue for a while when `--batch-keys` was parsed but never
+plumbed through — a boundary is an argument, not a check.
+
+## Scenario 3 — Emit a trace, both containers, and feed the simulator
+
+**Check the size before writing.** `validate --until` is the pre-flight, and the
+shipped example is denser than it looks — a 3600-second span projects a 7.33 GiB
+plan and a trace larger again:
+
+```bash
+$G validate $E --until 3600 | tail -8
+```
+
+An emit run does this check itself and refuses past free space (which `--force`
+does not override) or past a 32 GiB ceiling (which it does). Below, a 30-second
+span, which writes about 54 MiB across the two containers:
+
+```bash
+# --format both needs the parquet feature: it is non-default so that a plain
+# workspace build never pulls arrow.
+P="cargo run -q -p workload-gen --no-default-features --features parquet --"
+$P emit $E --seed 42 --until 30 --format both --output /tmp/trace
+find /tmp/trace -type f
+```
+
+**Expect** exactly four files, and no `blocks/` directory — block role is
+something real traces recover from text, and this generator does not model it
+(`contracts/trace-io.md`):
+
+```text
+/tmp/trace/manifest.json
+/tmp/trace/report.json
+/tmp/trace/invocations/block_size_16/part-0.jsonl
+/tmp/trace/invocations/block_size_16/part-0.parquet
+```
 
 - `manifest.json` declares the encoding (`source_class: pre_hashed`, full
-  encoding), the block geometry, and `block_id_space` recording that
-  identifiers are chained u64 keys rather than dense mint-order integers
-  (FR-057).
+  encoding), the block geometry, and `block_id_space: chained_u64` recording that
+  identifiers are chained keys rather than dense mint-order integers (FR-057).
 - The JSONL and parquet records are **identical**, and every row satisfies the
   full-encoding invariants including the trailing-partial-block convention
-  (SC-004, FR-058).
+  (SC-004, FR-058). The run checks the two containers' counts against each other
+  and refuses if they disagree, so `jsonl records` and `parquet records` in the
+  report being equal is that check having passed rather than a coincidence.
+  Parquet is about 3.6x smaller here — 12.2 MB against 44.1 MB — which is the
+  whole reason the dependency is justified.
 - The run report states completeness — sessions, turns, blocks, virtual-time
   span, records written — and **omits** latency, lane utilisation, and the
   virtual-to-wallclock ratio entirely. Their presence as zeros is a failure,
   not a cosmetic issue: a zero is indistinguishable from a measurement
-  (FR-071).
+  (FR-071). Check it: `grep -c latency /tmp/trace/report.json` must be 0.
+- Expect **warnings**, not silence: at 30 seconds every class's mean lifetime is
+  longer than the span, so the run says it cannot exhibit the pool turnover the
+  description asks for. That is the projection earning its place.
+
+`--format parquet` writes only parquet. The projections below read the JSONL
+schema, so a parquet-only trace has nothing for `convert` to read.
 
 Then the deferred integration question, now settled (`research.md` D1):
 
 ```bash
 $G convert /tmp/trace --to simulator --output /tmp/trace-sim.jsonl
-cargo run -p eviction-replay-benchmark -- --trace /tmp/trace-sim.jsonl
+cargo run --release -p eviction-replay-benchmark -- \
+  --file /tmp/trace-sim.jsonl --policy lru --cache-size 4096
 ```
 
-**Expect**: the simulator loads it and reports a hit-rate curve. Its loader
-derives sessions by walking `parent_chat_id` to a root, so a converted trace
-whose `parent_chat_id` chain is wrong will still *load* while collapsing every
-session into one — check that its reported distinct-key count and session count
-match the emit report rather than only checking that it ran.
+**Expect**: the simulator loads it and reports a hit rate. Its loader derives
+sessions by walking `parent_chat_id` to a root, so a converted trace whose
+`parent_chat_id` chain is wrong will still *load* while collapsing every session
+into one — so check the numbers agree rather than only that it ran. `convert`
+prints `records / sessions / distinct keys / key references` and the simulator
+prints `requests / working-set / accesses(block-refs)`; the three that overlap
+must match:
+
+```text
+convert:    records 6109  sessions 4238  distinct keys 1106136  key references 1962304
+simulator:  requests=6109  accesses(block-refs)=1962304  working-set(distinct blocks)=1106136
+```
+
+Its default cache sizes are 256–4096 **blocks** against a working set of over a
+million, so a low hit rate there says nothing about the workload. Scenario 6 is
+where a hit rate means something.
 
 ## Scenario 4 — Drive the local node (needs Certus)
 
+**Build `--release`.** A debug `workload-gen` against a live server is slow
+enough that a 5-virtual-second run of the shipped example does not finish in ten
+minutes, and every figure it would print is a figure about the debug build.
+
+**`--lanes` may not exceed the node's channel count.** Read it off the running
+server rather than guessing:
+
 ```bash
-cargo run -p workload-gen -- run $E --seed 42 \
-  --shm-path /dev/shm/certus-shmq --lanes 16 --batch-keys 64 \
-  --report /tmp/run.json
+ps -eo args | awk '$1 ~ /certus-server-yaml$/'   # note --channels
 ```
+
+```bash
+cargo build --release -p workload-gen
+../../target/release/workload-gen run $E --seed 42 \
+  --shm-path /dev/shm/certus-shmq --lanes 8 --batch-keys 64 \
+  --until 5 --report /tmp/run.json
+```
+
+`run` is **unbounded** without `--until`, and stops cleanly on SIGINT or
+SIGTERM; an interrupted run whose plan queue never reached zero is still valid
+(FR-074).
 
 **Expect**: sustained traffic, and a terminal summary plus `/tmp/run.json`
 carrying throughput (keys/s, bytes/s, virtual-seconds-per-wallclock-second),
@@ -122,14 +224,32 @@ lane utilisation, validity, and the reproduction parameters.
 labelled, not published:
 
 ```bash
-cargo run -p workload-gen -- run $E --lanes 512 --report /tmp/bad.json; echo "exit=$?"
+../../target/release/workload-gen run $E --seed 42 --lanes 512 --report /tmp/bad.json
+echo "exit=$?"
 ```
 
-**Expect**: `--lanes` beyond the server's channel count is rejected at startup
-— the mailbox is depth-1 per channel, so over-subscription would silently
-serialise. Separately, a run whose plan queue reaches zero must exit **3** with
-the report saying invalid, because a sweep driver that reads "exited 0" as "I
-have a data point" is precisely how an invalid number gets published.
+**Expect**: exit **2**, before anything is issued, naming both figures —
+`refusing to run: 512 lanes against a node with 8 channels`. The mailbox is
+depth-1 per channel, so over-subscription would not add concurrency; it would
+serialise behind a claimed channel and report a throughput for a concurrency the
+run never had. Separately, a run whose plan queue reaches zero must exit **3**
+with the report saying invalid, because a sweep driver that reads "exited 0" as
+"I have a data point" is precisely how an invalid number gets published.
+
+**A generator that dies mid-run leaves its channels claimed.** The next attempt
+then fails with
+
+```text
+could only claim 4 of 8 channels; another client holds the rest
+```
+
+and the holder may well be a **dead** process — the claim lives in the mailbox's
+shared memory and nothing reaps it, so the count only recovers when the server
+restarts. If that message appears, check for a live client first
+(`ps -eo pid,args | grep workload-gen`) and restart the server if there is none.
+Do not work around it by lowering `--lanes`: the run would then measure a
+different concurrency from the one asked for, which is the failure the refusal
+exists to prevent.
 
 **Confirm the op stream is faithful** (FR-039..FR-044): the issued sequence
 must be reserve → transfer → commit for stores, must never contain the
@@ -141,13 +261,24 @@ against intuition.
 ## Scenario 5 — Multi-node with migration (needs a cluster)
 
 ```bash
-# on each remote node, started by the launcher, not by hand:
-workload-node-agent --shm-path /dev/shm/certus-shmq --listen 0.0.0.0:9420
+# on the driving node. --node takes a BARE HOSTNAME, as ssh understands it:
+# the mailbox comes from --shm-path and the port from --agent-port, because
+# both are properties of the deployment rather than of any one node.
+../../target/release/workload-gen run $E --seed 42 \
+  --node node5 --node node7 \
+  --lanes 8 --agent-port 7420 --report /tmp/multi.json
+```
 
-# on the driving node:
-cargo run -p workload-gen -- run $E --seed 42 \
-  --node node5:/dev/shm/certus-shmq --node node7:/dev/shm/certus-shmq \
-  --lanes 16 --report /tmp/multi.json
+The generator starts each agent over ssh and stops it afterwards, so nothing is
+launched by hand. To drive daemons an operator manages themselves, add
+`--no-launch` and start them like this — noting `--bind` and `--port` as two
+flags, and that `--block-bytes` must match the description's `blocks.bytes` or the
+handshake refuses the node:
+
+```bash
+# on each remote node, only with --no-launch:
+workload-node-agent --bind 0.0.0.0 --port 7420 \
+  --shm-path /dev/shm/certus-shmq --lanes 8 --block-bytes 65536
 ```
 
 **Expect**: sessions distributed uniformly; a migrated session's turns issued

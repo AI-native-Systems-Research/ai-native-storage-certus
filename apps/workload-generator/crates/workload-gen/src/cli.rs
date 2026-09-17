@@ -38,6 +38,8 @@ use workload_trace::cachesim::CsvWriter;
 use workload_trace::jsonl::JsonlWriter;
 use workload_trace::manifest::{BlockStats, Manifest};
 use workload_trace::mooncake::MooncakeWriter;
+#[cfg(feature = "parquet")]
+use workload_trace::parquet::ParquetWriter;
 use workload_trace::record::InvocationRecord;
 use workload_trace::simulator::SimulatorWriter;
 
@@ -798,10 +800,41 @@ fn emit(
         .map_err(|e| Failure::config(format!("cannot start the simulation: {e}")))?;
 
     let started = Instant::now();
+
+    // Which containers this run writes. `both` is what SC-004's equivalence claim is
+    // about, so it is two writers over one pass rather than a conversion afterwards:
+    // a conversion would prove the converter right and say nothing about the writers.
     let jsonl_path = dir.join("part-0.jsonl");
-    let file = fs::File::create(&jsonl_path)
-        .map_err(|e| Failure::other(format!("cannot create {}: {e}", jsonl_path.display())))?;
-    let mut writer = JsonlWriter::new(BufWriter::new(file), &trace_id, block_size);
+    let mut writer = match format {
+        Format::Jsonl | Format::Both => {
+            let file = fs::File::create(&jsonl_path).map_err(|e| {
+                Failure::other(format!("cannot create {}: {e}", jsonl_path.display()))
+            })?;
+            Some(JsonlWriter::new(
+                BufWriter::new(file),
+                &trace_id,
+                block_size,
+            ))
+        }
+        Format::Parquet => None,
+    };
+
+    #[cfg(feature = "parquet")]
+    let parquet_path = dir.join("part-0.parquet");
+    #[cfg(feature = "parquet")]
+    let mut parquet_writer = match format {
+        Format::Parquet | Format::Both => {
+            let file = fs::File::create(&parquet_path).map_err(|e| {
+                Failure::other(format!("cannot create {}: {e}", parquet_path.display()))
+            })?;
+            Some(
+                ParquetWriter::new(BufWriter::new(file), &trace_id, block_size).map_err(|e| {
+                    Failure::other(format!("cannot start {}: {e}", parquet_path.display()))
+                })?,
+            )
+        }
+        Format::Jsonl => None,
+    };
 
     // The simulator projection, written in the same pass rather than by converting the
     // trace afterwards (FR-075): a projection of a workload nobody wants stored should
@@ -834,41 +867,49 @@ fn emit(
         None => None,
     };
 
-    let mut write_error = None;
+    // A message rather than an `io::Error`, because the parquet writer's error type is
+    // its own and every one of these failures wants naming its file anyway.
+    let mut write_error: Option<String> = None;
     sim.run_until(until, &mut |s, t| {
         if write_error.is_none() {
-            if let Err(e) = writer.write(s, t) {
-                write_error = Some(e);
-                return;
+            if let Some(w) = writer.as_mut() {
+                if let Err(e) = w.write(s, t) {
+                    write_error = Some(format!("writing {}: {e}", jsonl_path.display()));
+                    return;
+                }
+            }
+            #[cfg(feature = "parquet")]
+            if let Some(w) = parquet_writer.as_mut() {
+                if let Err(e) = w.write(s, t) {
+                    write_error = Some(format!("writing {}: {e}", parquet_path.display()));
+                    return;
+                }
             }
             if mooncake_writer.is_some() || cachesim_writer.is_some() || simulator_writer.is_some()
             {
                 let record = InvocationRecord::from_turn(&trace_id, s, t, block_size);
                 if let Some(w) = mooncake_writer.as_mut() {
                     if let Err(e) = w.write_record(&record) {
-                        write_error = Some(e);
+                        write_error = Some(format!("writing the mooncake projection: {e}"));
                         return;
                     }
                 }
                 if let Some(w) = cachesim_writer.as_mut() {
                     if let Err(e) = w.write_record(&record) {
-                        write_error = Some(e);
+                        write_error = Some(format!("writing the cachesim projection: {e}"));
                         return;
                     }
                 }
                 if let Some(w) = simulator_writer.as_mut() {
                     if let Err(e) = w.write_record(&record) {
-                        write_error = Some(e);
+                        write_error = Some(format!("writing the simulator projection: {e}"));
                     }
                 }
             }
         }
     });
     if let Some(e) = write_error {
-        return Err(Failure::other(format!(
-            "writing {}: {e}",
-            jsonl_path.display()
-        )));
+        return Err(Failure::other(e));
     }
     let mooncake_stats = match mooncake_writer {
         Some(w) => Some(
@@ -891,9 +932,43 @@ fn emit(
         ),
         None => None,
     };
-    let stats: BlockStats = writer
-        .finish()
-        .map_err(|e| Failure::other(format!("closing {}: {e}", jsonl_path.display())))?;
+    let jsonl_stats: Option<BlockStats> = match writer {
+        Some(w) => Some(
+            w.finish()
+                .map_err(|e| Failure::other(format!("closing {}: {e}", jsonl_path.display())))?,
+        ),
+        None => None,
+    };
+
+    #[cfg(feature = "parquet")]
+    let parquet_stats: Option<BlockStats> = match parquet_writer {
+        Some(w) => Some(
+            w.finish()
+                .map_err(|e| Failure::other(format!("closing {}: {e}", parquet_path.display())))?,
+        ),
+        None => None,
+    };
+    #[cfg(not(feature = "parquet"))]
+    let parquet_stats: Option<BlockStats> = None;
+
+    // With both containers written, their counts must agree — that is SC-004's
+    // equivalence claim, checked on every real run rather than only in the test that
+    // compares a handful of records. A disagreement here means one writer dropped or
+    // duplicated a row, which is exactly the failure that would otherwise be found by
+    // whoever later compared the two files.
+    if let (Some(j), Some(p)) = (jsonl_stats.as_ref(), parquet_stats.as_ref()) {
+        if j != p {
+            return Err(Failure::other(format!(
+                "the two containers disagree: jsonl wrote {j:?} and parquet wrote {p:?}. \
+                 One of them dropped or duplicated a row (SC-004)"
+            )));
+        }
+    }
+    // Either container's counts describe the run; they are equal when both were written.
+    let stats: BlockStats = jsonl_stats
+        .clone()
+        .or_else(|| parquet_stats.clone())
+        .expect("at least one container is always written");
     let wallclock = started.elapsed().as_secs_f64();
 
     // The manifest goes last, so a directory without one is incomplete by
@@ -920,8 +995,8 @@ fn emit(
         block_references: sim.blocks_read(),
         virtual_span: until,
         records: ContainerRecords {
-            jsonl: Some(stats.invocations),
-            parquet: None,
+            jsonl: jsonl_stats.as_ref().map(|s| s.invocations),
+            parquet: parquet_stats.as_ref().map(|s| s.invocations),
         },
         generation_rate_invocations_per_second: if wallclock > 0.0 {
             sim.turns_taken() as f64 / wallclock
