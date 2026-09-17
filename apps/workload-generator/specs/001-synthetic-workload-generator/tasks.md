@@ -1078,7 +1078,10 @@ is a defect, and renumbering the unbuilt one was the cheaper half.
   `--pacing real|none` defaulting to `real`, with `--rate` valid only under
   `real`. `--unpaced` was considered and rejected — a negative flag cannot be
   read without knowing the default, and `--unpaced --rate 10` is a combination
-  that would have to be refused
+  that would have to be refused. **SUPERSEDED by T099**: `--rate inf` expresses
+  the mode, so `--pacing` is withdrawn and the combination that had to be
+  refused becomes unsayable. Paced-by-default survives unchanged as `--rate
+  1.0`
 - [x] T088b [US1] Project a paced run's **wallclock cost** before starting,
   symmetrically with FR-073's size projection: at rate 1.0 a run costs its
   virtual span, so `--until 3600` is an hour and silence would look like a hang
@@ -2875,6 +2878,102 @@ description schema is in `data-model.md`, not in `contracts/`, and `research/`
 holds only `population/`.
 
 ---
+
+## Phase 8: Per-instance addressing and the hardware file (FR-081, FR-082)
+
+**Goal**: a run can name the Certus instance it drives, so a machine holding
+several — one per NUMA domain, or one per NVMe as `deploy/multi-instance/` does
+— can be driven as the several independent caches it is.
+
+**Why this exists**: FR-079 collapsed every node onto one agent transport and
+left the addressing as it was — a bare hostname, with one global `--shm-path`
+and one global `--agent-port` applied to every entry. So `--node node5 --node
+node5` produces two *identical* specs, the second agent's startup takes the
+first for a leftover and shuts it down, and a two-instance run drives one
+instance while reporting two. The deployment is not merely awkward to express;
+it is unrepresentable.
+
+**Two things to notice before starting.** The pre-existing `cli.md` already
+said `--node <host>:<mailbox>` and was right; the implementation shipped a bare
+hostname and T092's documentation pass then edited the *contract* down to match
+the code, which is the wrong direction to reconcile a mismatch. And the
+hostname-keyed per-node counter defect found during T092 was this same finding
+arriving early — it was fixed as a grouping bug without drawing the conclusion.
+
+**Independent test**: two Certus instances on one host, different ports and
+different mailboxes, both driven in one run; per-instance figures
+distinguishable in the report; and a session migrating between them recorded as
+a real cache miss.
+
+- [ ] T093 [US3] Replace `--node`/`--shm-path`/`--agent-port` with a repeatable
+  `--instance <host[:port][:mailbox]>` in `crates/workload-gen/src/cli.rs`. A
+  component that parses as a `u16` is the port, one starting with `/` is the
+  mailbox, so all four shapes are unambiguous without an empty middle field.
+  `--agent-binary` stays global: the handshake requires every instance to run
+  the same build (FR-051), so a per-instance binary is a misconfiguration the
+  protocol already refuses
+- [ ] T094 [US3] Refuse a duplicate `(host, port)` across instances, naming
+  both entries. Without it the second agent's startup shuts the first down as a
+  leftover (FR-052) and the run reports two instances while driving one — the
+  failure this phase exists to prevent, and it is silent
+- [ ] T095 [P] [US3] Make per-instance reporting distinguishable: `NodeLost`
+  and the report's per-node rows must name the instance, not the host, or two
+  rows read identically. Note the counters are already keyed by index rather
+  than by hostname — T092 fixed that — so this is the presentation half only
+- [ ] T096 [US3] Read the hardware file (`contracts/hardware.md`):
+  `./cluster.yml` by default, `--hardware <file>` to name another, built-in
+  defaults when neither exists. Refuse an unknown `version` (FR-006's
+  reasoning) and an unknown field, so a typo is not silently a default
+- [ ] T097 [US3] Announce an implicitly picked-up `./cluster.yml` on the error
+  stream, and record the file's path and digest in the report under FR-063.
+  Together these are what keep an implicit file from changing a run's meaning
+  invisibly; they are required rather than courtesies
+- [ ] T098 [US3] Command line overrides the file **per field**, with
+  `--instance` replacing the whole instance list rather than adding to it. The
+  case that forces this is a rate sweep, which varies the rate while holding
+  the deployment fixed
+- [ ] T099 [US1] Make `--rate` the only pacing knob: accept `inf` (`.inf` in
+  the file), derive the mode from it, and **delete `--pacing`** along with the
+  refusal that policed `--pacing none --rate 10`, which becomes unsayable
+- [ ] T099a [US1] **`inf` must switch the schedule off, not divide by
+  infinity.** Left to the arithmetic, `due = t0 + virtual/inf` gives `due ==
+  t0`, so every request is recorded as late by however long the run has been
+  going, lateness grows without bound, and every work-conserving run reports
+  *itself* invalid. Test that a work-conserving run has an empty lateness
+  histogram and is judged on the plan queue instead
+- [ ] T099b [P] [US1] Document that a large finite rate is **not** `inf` —
+  `--rate 1e12` keeps a schedule the machine cannot meet and is correctly
+  invalid for lateness. Somebody will type a large number meaning "flat out",
+  and the report's existing wording is honest but not obvious
+- [ ] T100 [P] [US3] Tests: `hardware.example.yml` parses (the example cannot
+  rot); two instances on one host are both driven; a duplicate `(host, port)`
+  is refused; `--instance` replaces the file's list and `--rate` overrides its
+  rate; and nothing belonging to the description is accepted in the hardware
+  file
+- [ ] T101 [US3] Re-verify on hardware. The scratch-server recipe from T092 is
+  the cheap version: a second `certus-server-yaml` on its own `--shm-path` and
+  its own 16 GiB device file leaves an existing server untouched. Two scratch
+  servers on one host is the case this phase is about
+- [ ] T102 [P] Update `scripts/rate-sweep.sh` for `--rate inf` and the hardware
+  file, and re-point its `--node` usage at `--instance`
+
+**Terminology, settled**: "node" is kept for the concept because Zyre already
+uses it for an instance regardless of machine, and the model's placement is
+written in those terms — `session.node()`, FR-048, FR-049 and FR-064 all stay.
+The *flag* is `--instance` because on a command line the ambiguity with
+"machine" is expensive, and it is the mistake that produced this phase. FR-081
+says this once, explicitly, so a reader does not have to infer it.
+
+**Deferred deliberately, and named in `hardware.md`**: per-instance CPU/NUMA
+affinity, which needs an affinity option on `workload-node-agent` first, and
+per-instance GPU device. The affinity one is a measurement hazard rather than
+tidiness — an agent serving a NUMA-local mailbox can land its threads and
+device buffer in the wrong domain, and cross-socket DMA has measured 16%
+run-to-run variance on this hardware.
+
+**One pre-existing mismatch recorded rather than fixed**: `cli.md` lists
+`--pipeline-depth <n>`, which the binary does not accept. The depth exists and
+defaults to 8; only the flag is missing. `cli.md` now says so.
 
 ## Dependencies & Execution Order
 

@@ -128,8 +128,8 @@ A live run answers one of two different questions, and the report names which:
 
 | Mode | Answers | Valid when |
 | --- | --- | --- |
-| `--pacing real` (default) | **the latency Certus delivers under the load this workload actually represents** | it kept its own schedule: p99 lateness inside `--lateness-tolerance-ms` |
-| `--pacing none` | **how fast Certus can go** — the ceiling | no lane's plan queue ever ran dry (FR-062) |
+| `--rate <n>`, default 1.0 | **the latency Certus delivers under the load this workload actually represents** | it kept its own schedule: p99 lateness inside `--lateness-tolerance-ms` |
+| `--rate inf` | **how fast Certus can go** — the ceiling | no lane's plan queue ever ran dry (FR-062) |
 
 **They are not comparable**, which is why the mode is the first line of the
 report. A paced throughput is capped by the rate you asked for; a
@@ -143,13 +143,21 @@ workload would never form: entirely plausible, and wrong. `think_time`, arrival
 rates and session lifetimes are most of what a description says, and a
 work-conserving default makes all of them decorative for a live run.
 
+**The rate is the only knob, and `inf` is the arithmetic limit rather than a
+special case.** Since `due = t0 + (virtual timestamp) / rate`, an infinite rate
+makes every request due at `t0`, which is what work-conserving means. A large
+*finite* rate is not the same thing: it keeps a schedule the machine cannot
+meet, and the run is then correctly reported invalid for lateness.
+
 `--rate` is virtual seconds per wallclock second and is a **calibration**
 control: a description's durations are arbitrary with respect to any particular
 machine, so this is how one description is aimed at faster or slower hardware
-without being rewritten. It changes only the tempo — the same keys in the same
-order, and a plan fingerprint independent of it — and at rate 1.0 a run costs
-its virtual span, so `--until 3600` is an hour. Sweeping the rate is the
-capacity measurement: `scripts/rate-sweep.sh`.
+without being rewritten. Being a property of the target rather than the
+workload, it also belongs in the hardware file (`contracts/hardware.md`). It
+changes only the tempo — the same keys in the same order, and a plan
+fingerprint independent of it — and at rate 1.0 a run costs its virtual span,
+so `--until 3600` is an hour. Sweeping the rate is the capacity measurement:
+`scripts/rate-sweep.sh`.
 
 Under pacing the plan queue stops carrying information: an empty queue is the
 normal, intended state because nothing is due yet. That is why lateness

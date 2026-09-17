@@ -254,9 +254,15 @@ modes reorder the policies.
 - **FR-004**: System MUST refuse a configuration in which an implied maximum
   discards more than 5% of a distribution's mass.
 - **FR-005**: A workload description MUST NOT contain host-specific or tuning
-  settings; node targets, run length, output destination, concurrency, keys per
-  request, and seed are supplied per invocation, so one description is portable
-  across clusters unchanged.
+  settings; instance targets, run length, output destination, concurrency, keys
+  per request, pacing rate, and seed are supplied per invocation — on the
+  command line, or in the hardware file of FR-082 — so one description is
+  portable across clusters unchanged.
+
+The hardware file does not weaken this requirement, it discharges it: those
+  settings have to be written down *somewhere* for a cluster that is used
+  repeatedly, and the choice is between a second file that is explicitly about
+  the target and a description that is quietly no longer portable.
 - **FR-006**: System MUST carry a schema version in the description and reject
   versions it does not understand.
 
@@ -375,11 +381,11 @@ modes reorder the policies.
 
 **Virtual time and execution**
 
-- **FR-031** *(scoped to the work-conserving mode)*: Under `--pacing none`,
-  virtual time MUST exist only to decide the order of operations, and MUST NOT
-  be mapped to wallclock time. That is what makes such a run a measurement of
-  capability: it issues as fast as the transport allows, and FR-062's
-  plan-queue check proves the generator was not the constraint.
+- **FR-031** *(scoped to the work-conserving mode)*: Under an **infinite
+  rate**, virtual time MUST exist only to decide the order of operations, and
+  MUST NOT be mapped to wallclock time. That is what makes such a run a
+  measurement of capability: it issues as fast as the transport allows, and
+  FR-062's plan-queue check proves the generator was not the constraint.
 
   This requirement **does not apply to the default paced mode**, where mapping
   virtual time onto wallclock is the entire point (FR-080). The scoping is not
@@ -437,8 +443,10 @@ modes reorder the policies.
 
 - **FR-045**: System MUST drive Certus on the local host with no daemon and no
   node list configured.
-- **FR-046**: System MUST drive Certus on remote hosts by way of a per-node
-  daemon that accepts work and submits it to that node's local ingress.
+- **FR-046**: System MUST drive Certus by way of a daemon **per instance** that
+  accepts work and submits it to that instance's local ingress. One daemon
+  serves one Certus instance, so a machine running several instances runs
+  several daemons; see FR-081.
 - **FR-047**: Only keys MUST cross the network; the daemon MUST reconstruct
   block payloads from the key.
 - **FR-048**: New sessions MUST be placed uniformly across configured nodes; a
@@ -824,21 +832,21 @@ modes reorder the policies.
     FR-066a.
   - FR-072 and FR-072a MUST continue to hold: pacing changes *when* a request
     is submitted, never which keys a turn names or how sessions interleave.
-  - A **rate multiplier MUST exist**, expressed as virtual seconds per
-    wallclock second, and it is a calibration control rather than a
-    convenience. A description's durations are arbitrary with respect to any
-    particular machine: `think_time` and session lifetimes reflect whatever
-    hardware the workload was observed on or imagined for, so on faster
-    hardware the same description under-drives the system and on slower
-    hardware it over-drives it. The multiplier is how one description is aimed
-    at different targets without being rewritten, and it also controls cost,
-    since a paced run takes wallclock equal to its virtual span divided by the
-    rate.
+  - A **rate MUST exist**, expressed as virtual seconds per wallclock second,
+    and it is a calibration control rather than a convenience. A description's
+    durations are arbitrary with respect to any particular machine:
+    `think_time` and session lifetimes reflect whatever hardware the workload
+    was observed on or imagined for, so on faster hardware the same description
+    under-drives the system and on slower hardware it over-drives it. The
+    multiplier is how one description is aimed at different targets without
+    being rewritten, and it also controls cost, since a paced run takes
+    wallclock equal to its virtual span divided by the rate.
 
-    It belongs on the command line and **MUST NOT be a field of the
-    description**, for FR-069's reason exactly: it describes the target
-    hardware rather than the workload, so putting it in the YAML would conflate
-    the two and break FR-005 portability.
+It belongs on the command line, or in the **hardware file** of FR-082, and
+    **MUST NOT be a field of the description**, for FR-069's reason exactly: it
+    describes the target hardware rather than the workload, so putting it in
+    the description would conflate the two and break FR-005 portability. The
+    hardware file is where that same reasoning says it positively belongs.
 
   - **The rate is the load knob, so a rate sweep is the capacity measurement.**
     Offered load scales with the rate while the workload's shape does not, so
@@ -882,12 +890,36 @@ modes reorder the policies.
   and session lifetimes are most of what a description says, and a
   work-conserving default makes those fields decorative for a live run.
 
-  **The selector MUST be positive rather than `--unpaced`.** A negative flag
-  cannot be read without already knowing the default, and it collides with the
-  rate multiplier — `--unpaced --rate 10` has no meaning and would have to be
-  rejected. `--pacing real|none`, defaulting to `real`, with `--rate` valid
-  only under `real`, keeps the flag one-to-one with the mode the report is
-  required to name.
+**The rate is the only knob, and an infinite rate IS the work-conserving mode**
+  *(revised; supersedes `--pacing`)*. Since `due = t0 + (virtual timestamp) /
+  rate`, at `rate = inf` every due time collapses to `t0` and every request is
+  due immediately — which is the definition of work-conserving. So the two
+  modes are the two ends of one control rather than a mode flag plus a
+  multiplier, and `--rate inf` selects it (`.inf` in the hardware file,
+  matching the description's own spelling for an unbounded lifetime).
+
+A separate `--pacing real|none` was implemented first and is **withdrawn**. Two
+  knobs that can disagree need a rule to police them — `--pacing none --rate
+  10` had to be refused as asking for two different things — and one knob makes
+  the contradiction unsayable. The report still names the mode, derived from
+  the rate, because the requirement to name it was never about the flag.
+
+**An infinite rate MUST switch the schedule off, not merely divide by
+  infinity.** The distinction is a real defect if missed: the arithmetic alone
+  gives `due == t0` for every request, so each one is recorded as late by
+  however long the run has been going, lateness grows without bound, and every
+  work-conserving run reports *itself* invalid. At an infinite rate there is no
+  schedule, no lateness, and validity falls back to FR-062's plan-queue check —
+  which is unchanged in every respect: it is the **plan** queue between the
+  producer and the lanes, not the mailbox; it is counted when a consumer takes
+  work rather than sampled; and a lane's first batch is excluded, because every
+  queue is empty before the producer has pushed anything.
+
+**A large finite rate is NOT an infinite one**, and this MUST be documented
+  where the flag is. `--rate 1e12` keeps a schedule the machine cannot meet and
+  is correctly reported invalid for lateness; someone will type a large number
+  meaning "flat out", and the report saying "this machine could not serve this
+  workload at this rate" is the honest answer but not an obvious one.
 
   **Due times MUST be absolute, and this is a correctness requirement rather
   than a style choice.** `due` is computed from `t0` and the request's virtual
@@ -923,14 +955,108 @@ modes reorder the policies.
   accumulates lateness past its tolerance and is reported invalid **while the
   plan queue stays healthy**, that a wide enough tolerance accepts the same
   late run, and that the rate is refused at zero or below and refused outright
-  beside `--pacing none`. `crates/workload-gen/tests/loopback.rs` asserts the
-  workload-invariance directly: identical turns per session at rates 1, 1 000,
-  5 000, 20 000 and 50 000, and a plan fingerprint that depends on the seed and
-  not on the rate.
+  beside `--pacing none` — a refusal that this requirement's later revision
+  made unnecessary, since one knob cannot contradict itself.
+  `crates/workload-gen/tests/loopback.rs` asserts the workload-invariance
+  directly: identical turns per session at rates 1, 1 000, 5 000, 20 000 and 50
+  000, and a plan fingerprint that depends on the seed and not on the rate.
 
   What no test here can show is that a *real* Certus keeps a schedule, which is
   the measurement the mode exists for and belongs on hardware.
   `scripts/rate-sweep.sh` is the harness for it.
+
+### Per-instance addressing, and the hardware file
+
+- **FR-081** *(AGREED, not yet implemented)*: The unit a run addresses is a
+  **Certus instance**, identified by the triple **(host, mailbox path, agent
+  port)**. A hostname alone MUST NOT be treated as an instance identity.
+
+**A machine routinely runs several instances**, and this repository already
+  does it: `deploy/multi-instance/` launches one Certus per NVMe device,
+  `numactl`-bound to that device's NUMA domain, with mailboxes
+  `/dev/shm/certus-shmq-0`, `-1`, … The same shape appears in the RDMA work,
+  where a well-known responder port was **rejected** precisely because
+  instances are co-resident, and peers are correlated by Zyre UUID rather than
+  by source IP for the same reason. A run that identifies a target by hostname
+  cannot express that deployment at all.
+
+Consequences, each of which is a thing that would otherwise fail quietly:
+
+  - **Each instance needs its own agent, and therefore its own port.** Two
+    instances given the same port MUST be refused. Without the refusal the
+    second agent's startup finds the first on that port, takes it for a
+    leftover of a crashed run, and shuts it down (FR-052) — so a two-instance
+    run would drive one instance and report it as two.
+  - **Every "node" in this document is an instance**, not a machine: placement
+    (FR-048), migration (FR-049) and loss (FR-064) all range over instances. A
+    session migrating between two co-resident instances is a **genuine cache
+    miss**, because they are independent caches, and is a legitimate experiment
+    rather than a no-op.
+  - **The report MUST distinguish instances that share a host.** Two rows
+    reading `node5` are not a report, and per-instance figures MUST NOT be
+    keyed by hostname — a defect of exactly that kind merged three targets into
+    one during FR-079's implementation.
+
+**The word "node" is retained** for the concept, because Zyre already uses it
+  for an instance regardless of which machine it runs on, and the model's
+  placement is written in those terms. The command-line flag is nonetheless
+  `--instance`, because on a command line the ambiguity with "machine" is
+  expensive and was the mistake that produced this requirement.
+
+- **FR-082** *(AGREED, not yet implemented)*: Deployment facts MAY be supplied
+  in a **hardware file** — YAML, `./cluster.yml` by default and overridable on
+  the command line — and MUST NOT be supplied in the workload description
+  (FR-005).
+
+**What belongs in it** is anything that describes the *target* rather than the
+  workload: the instance list of FR-081, and target-dependent scalars, of which
+  the pacing rate is the first. That the rate belongs here is FR-080's own
+  argument arriving at its conclusion — the rate exists because a description's
+  durations are arbitrary with respect to any particular machine, so the
+  machine is what should carry it.
+
+  - **The command line overrides the file, per field.** This is not a
+    preference: a rate sweep varies the rate while holding the deployment
+    constant, so the rate must be settable without editing the file that
+    describes the hardware.
+  - **The report MUST record which file was used, and its digest**, under
+    FR-063. A run whose deployment came from a file it does not name cannot be
+    reproduced from its own report, which is the whole of what FR-063 asks.
+  - **The default is `./cluster.yml`**, used when it exists and no file is
+    named, with a command-line option to name a different one. A cluster is
+    used repeatedly and its description does not change between runs, so
+    requiring the flag every time would be friction with nothing bought by it.
+
+**Two safeguards make the implicit pickup visible rather than silent**, and
+    they are required, not optional. A run that reads a file it was not asked
+    for MUST say so on its error stream before it starts; and the report MUST
+    record the file's path and digest under FR-063 either way. Without them a
+    run's meaning would depend on state nobody named in the invocation, which
+    is this specification's recurring failure class — a plausible number for a
+    different experiment rather than an error. With them, the invocation is
+    still reproducible from its own report, which is the property that actually
+    matters.
+
+Absent both a flag and a `./cluster.yml`, a run uses built-in defaults — this
+    host, the default port, the default mailbox, rate 1.0 — and reads no file
+    at all, so the simplest invocation stays free of configuration.
+
+**This is a deliberate departure from the repository's convention**, recorded
+  rather than discovered later. Deployment here is otherwise env-var-shaped —
+  an ordered host list in `CERTUS_TEST_NODES`, scalars in
+  `CERTUS_TEST_SHM_PATH` and friends, and a documented caller contract in
+  `scripts/lib/cluster-launch.sh` — and `certus-server-yaml`'s YAML is claimed
+  by build-time component composition and carries no deployment facts at all.
+  YAML is chosen over another env-var family for extensibility: the fields
+  already anticipated but **deliberately not included yet** are per-instance
+  CPU/NUMA affinity and per-instance GPU device, named here so that the
+  format's growth is visible rather than accidental.
+
+Note that the deployment layer already *generates* an equivalent table:
+  `deploy/multi-instance/launch-servers.sh` writes an `instances.tsv` of `IDX
+  BDF(s)  NUMA  SHM_PATH  POLLER_CPU`. Consuming it directly was considered and
+  is not required, but a hardware file whose fields cannot be filled from it
+  should be treated as suspect.
 
 ### Key Entities
 
