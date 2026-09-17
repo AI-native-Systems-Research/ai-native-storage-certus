@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use workload_wire::client::{Client, ClientError};
 use workload_wire::frame::{
-    opcode, Counters, DrainAck, Hello, HelloAck, OpHistogram, ShutdownAck, Stats, SubmitTurn,
-    TurnOutcome, Writer, BUILD_ID_BYTES, PROTO_VERSION,
+    opcode, ClearCacheAck, Counters, DrainAck, Hello, HelloAck, OpHistogram, ShutdownAck, Stats,
+    SubmitTurn, TurnOutcome, Writer, BUILD_ID_BYTES, PROTO_VERSION,
 };
 use workload_wire::server::{
     serve_connection, FnFactory, Served, Server, ServerError, Service, ServiceFactory,
@@ -65,6 +65,12 @@ impl Service for Recorder {
                 histogram: vec![1, 2, 3],
             }],
         }
+    }
+
+    fn clear_cache(&mut self) -> ClearCacheAck {
+        // A number nothing else in this file uses, so a default answer cannot masquerade as a
+        // real one — the default is a *refusal*, and this test is about the success path.
+        ClearCacheAck::cleared(1_234)
     }
 
     fn shutdown(&mut self) -> ShutdownAck {
@@ -354,6 +360,12 @@ fn a_live_client_and_server_agree_over_tcp() {
     assert_eq!(stats.counters.blocks_read(), 9, "counters must survive TCP");
     assert_eq!(stats.ops.len(), 1);
     assert_eq!(stats.ops[0].histogram, vec![1, 2, 3]);
+
+    // The clear crosses the wire and its entry count comes back (FR-046 via FR-079: the
+    // generator has no mailbox of its own to clear).
+    let cleared = client.clear_cache().expect("clear_cache");
+    assert!(cleared.is_ok(), "{}", cleared.error);
+    assert_eq!(cleared.entries, 1_234, "the entry count must survive TCP");
 
     let bye = client.shutdown().expect("shutdown");
     assert_eq!(bye.ops_submitted, 42);

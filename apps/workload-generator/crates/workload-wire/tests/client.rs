@@ -225,6 +225,11 @@ fn a_synchronous_call_is_refused_while_replies_are_outstanding() {
     );
     assert!(c.drain().is_err());
     assert!(c.shutdown().is_err());
+    assert!(
+        c.clear_cache().is_err(),
+        "clearing the cache must refuse with a turn in flight; it is setup, and a clear that \
+         raced a turn already issued would evict a block the run had just stored"
+    );
     // Once drained it is allowed.
     c.finish().unwrap();
     assert!(c.stats().is_ok());

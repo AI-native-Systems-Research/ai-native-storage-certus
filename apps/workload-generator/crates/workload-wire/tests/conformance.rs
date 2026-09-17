@@ -10,9 +10,11 @@
 //! be checked rarely.
 
 use workload_wire::frame::{
-    opcode, submit_flags, Counters, DrainAck, Header, Hello, HelloAck, OpHistogram, ShutdownAck,
-    Stats, SubmitTurn, TurnOutcome, WireError, BUILD_ID_BYTES, HEADER_BYTES, PROTO_VERSION,
+    opcode, submit_flags, ClearCacheAck, Counters, DrainAck, Header, Hello, HelloAck, OpHistogram,
+    ShutdownAck, Stats, SubmitTurn, TurnOutcome, WireError, BUILD_ID_BYTES, HEADER_BYTES,
+    PROTO_VERSION,
 };
+use workload_wire::server::Service;
 
 /// A recognisable digest, so a shifted or truncated copy is visible rather than plausible.
 fn build_id(seed: u8) -> [u8; BUILD_ID_BYTES] {
@@ -93,6 +95,47 @@ fn every_body_round_trips() {
 
     let drain = DrainAck { pending: 4 };
     assert_eq!(DrainAck::decode(&drain.encode()).unwrap(), drain);
+
+    let cleared = ClearCacheAck::cleared(9_001);
+    assert_eq!(ClearCacheAck::decode(&cleared.encode()).unwrap(), cleared);
+    let refused = ClearCacheAck::failed("no mailbox on this node");
+    assert_eq!(ClearCacheAck::decode(&refused.encode()).unwrap(), refused);
+}
+
+#[test]
+fn a_clear_that_did_not_happen_says_so_rather_than_reporting_zero_entries() {
+    // The distinction the frame exists for. "0 entries dropped" is a legitimate answer — a
+    // cache that was already empty — so it cannot also mean "I could not clear". Conflating
+    // them would let a run report a cold cache it never had, which is a plausible number for a
+    // different experiment rather than an error.
+    let empty_cache = ClearCacheAck::cleared(0);
+    assert!(empty_cache.is_ok(), "clearing an empty cache succeeded");
+    assert_eq!(empty_cache.entries, 0);
+
+    let could_not = ClearCacheAck::failed("the mailbox refused CLEAR_MEMORY_TIER");
+    assert!(!could_not.is_ok());
+    assert_eq!(could_not.entries, 0);
+    assert_ne!(
+        empty_cache, could_not,
+        "an empty cache and a failed clear must not encode alike"
+    );
+
+    // And the default a transport-only service gives is the refusal, not the success: a stub
+    // that has no mailbox must not answer as though it had cleared one.
+    struct NoMailbox;
+    impl Service for NoMailbox {
+        fn hello(&mut self, h: &Hello) -> HelloAck {
+            workload_wire::handshake::answer(h, 1, 32768)
+        }
+        fn submit_turn(&mut self, _t: &SubmitTurn) -> TurnOutcome {
+            TurnOutcome::default()
+        }
+    }
+    assert!(
+        !NoMailbox.clear_cache().is_ok(),
+        "the default ClearCache must refuse, or a service without a mailbox would claim to \
+         have cleared one"
+    );
 }
 
 #[test]
@@ -247,12 +290,17 @@ fn hello_survives_a_round_trip_so_a_mismatch_is_detectable_rather_than_lost() {
 }
 
 #[test]
-fn the_protocol_version_is_two_because_submit_became_per_turn() {
+fn the_protocol_version_is_three_because_the_frame_set_changed_twice() {
     // Pinned deliberately. Version 1 sent one operation per frame; version 2 sends a
     // turn's key path and the agent applies FR-072a's rule. An agent speaking version 1
     // would interpret a path as an operation's key list and issue something plausible, so
     // the version must not be bumped silently.
-    assert_eq!(PROTO_VERSION, 2);
+    //
+    // Version 3 added `ClearCache`. That one *would* fail safely — a version-2 agent answers
+    // `UnknownOpcode` and closes the connection, which the generator reports as a lost node —
+    // but it is still a different frame set, and the handshake compares exactly so the operator
+    // learns which side is old rather than seeing a run abort on its first frame.
+    assert_eq!(PROTO_VERSION, 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +372,20 @@ fn every_body_truncated_at_every_length_is_an_error_never_a_partial_value() {
             "stats cut to {cut} parsed"
         );
     }
+
+    // A clear whose reason is cut short must not decode as a *success*: the entries count comes
+    // first on the wire, so a lenient decoder would drop the error text and report a clear that
+    // never happened.
+    let refused = ClearCacheAck::failed("the mailbox refused it");
+    let full = refused.encode();
+    for cut in 0..full.len() {
+        assert!(
+            ClearCacheAck::decode(&full[..cut]).is_err(),
+            "a clear ack cut to {cut} of {} bytes parsed",
+            full.len()
+        );
+    }
+    assert!(ClearCacheAck::decode(&full).is_ok());
 }
 
 #[test]
