@@ -32,9 +32,9 @@ workload-gen validate <description.yml>
   thing.
 
   **One flag per format, one destination each, and none of them privileged.**
-  The only rule is that **at least one is required**; there is no default output
-  and no format a run is obliged to produce. A run that asked for nothing is
-  refused with exit 2 and the message names all five flags.
+  The only rule is that **at least one is required**; there is no default
+  output and no format a run is obliged to produce. A run that asked for
+  nothing is refused with exit 2 and the message names all five flags.
 
   | Flag | Writes | Destination |
   | --- | --- | --- |
@@ -45,33 +45,34 @@ workload-gen validate <description.yml>
   | `--simulator` | cache-simulator projection | a **file** |
 
   The native destinations are directories and the projections are files because
-  that is what they are, not by convention: a native trace is **self-describing**,
-  so it is a directory holding `manifest.json` beside its records, exactly as
-  `contracts/trace-io.md` specifies. A projection has no manifest and is not a
-  trace (FR-075b), so it is one file.
+  that is what they are, not by convention: a native trace is
+  **self-describing**, so it is a directory holding `manifest.json` beside its
+  records, exactly as `contracts/trace-io.md` specifies. A projection has no
+  manifest and is not a trace (FR-075b), so it is one file.
 
-  **Both native flags pointed at the same directory** give one trace holding both
-  containers, with one manifest, and the two record counts are checked against
-  each other — that is SC-004's equivalence claim, verified on every such run
-  rather than only in a test. **Different directories** give two independent
-  traces, each with its own manifest.
+  **Both native flags pointed at the same directory** give one trace holding
+  both containers, with one manifest, and the two record counts are checked
+  against each other — that is SC-004's equivalence claim, verified on every
+  such run rather than only in a test. **Different directories** give two
+  independent traces, each with its own manifest.
 
   Asking for a projection and nothing else is an ordinary case, not a corner: a
   legal span on the shipped example costs roughly 27 GB as a native trace, and
-  there is no reason to pay that to obtain a Mooncake file a fraction of the size.
-  Such a run leaves **no trace directory at all** — not even an empty one, which
-  would look like an interrupted run.
+  there is no reason to pay that to obtain a Mooncake file a fraction of the
+  size. Such a run leaves **no trace directory at all** — not even an empty
+  one, which would look like an interrupted run.
 
-  `--report <file>` is an additional destination for the structured report, which
-  is also written as `report.json` into every native trace directory and always
-  rendered to the terminal. On a projection-only run it is the only way to keep
-  the structured form.
+  `--report <file>` is an additional destination for the structured report,
+  which is also written as `report.json` into every native trace directory and
+  always rendered to the terminal. On a projection-only run it is the only way
+  to keep the structured form.
 
-  The pre-flight sizes **only the outputs requested**, and checks each against the
-  free space on **its own filesystem**, grouping destinations that share one
-  (FR-073). Five independent destinations can be on five different mounts;
-  summing them against one would refuse a run that fits, and checking each alone
-  would admit two large outputs that together overflow a mount they share.
+  The pre-flight sizes **only the outputs requested**, and checks each against
+  the free space on **its own filesystem**, grouping destinations that share
+  one (FR-073). Five independent destinations can be on five different mounts;
+  summing them against one would refuse a run that fits, and checking each
+  alone would admit two large outputs that together overflow a mount they
+  share.
 - **`plan`** writes the canonical operation-plan serialisation — the artifact
   the byte-identity property is asserted against (FR-060, SC-003).
 - **`convert`** applies the same projections to a trace **already on disk**

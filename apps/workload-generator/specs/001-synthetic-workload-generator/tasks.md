@@ -832,8 +832,8 @@ invalid. One vacuous metric traded for another. A lane's first batch is now
 primed without counting, so an underrun means "this lane had work and ran out",
 the condition FR-062 is about. The producer blocking on a full queue is counted
 as the positive counterpart, so a run can show that the queue *did* its job
-rather than only that it never quite failed. Same principle as FR-046 excluding the startup
-cache clear: a run properly begins once its pipeline is full.
+rather than only that it never quite failed. Same principle as FR-046 excluding
+the startup cache clear: a run properly begins once its pipeline is full.
 
 Streaming also **bounds memory**: the 20-second unbounded run above held 13.3
 MiB RSS across 28 420 batches, where pre-building would have retained every
@@ -841,19 +841,20 @@ turn's prefixes. That is what makes `--until` genuinely optional (no
 `unwrap_or(60.0)` fallback) and an interrupted run a valid result under FR-074.
 
 **On pacing — I mislabelled this, and the correction matters.** Earlier notes
-called "the run does not pace to virtual time" an open limitation. It is not: it
-is the specified design. **FR-031** says virtual time "MUST exist only to decide
-the order of operations, and MUST NOT be mapped to wallclock time", and the
-clarification record settles it — virtual time orders, wallclock measures, and
-their ratio is itself a reported metric (FR-066). So `virtual/wallclock` of 430
-is a *capability* figure, and FR-062's plan-queue check exists precisely to prove
-the generator was not the bottleneck while that ceiling was measured. Pacing is
-therefore a **change of experiment**, not a missing feature, and it is discussed
-under "If pacing is ever adopted" below rather than tracked as a task.
+called "the run does not pace to virtual time" an open limitation. It is not:
+it is the specified design. **FR-031** says virtual time "MUST exist only to
+decide the order of operations, and MUST NOT be mapped to wallclock time", and
+the clarification record settles it — virtual time orders, wallclock measures,
+and their ratio is itself a reported metric (FR-066). So `virtual/wallclock` of
+430 is a *capability* figure, and FR-062's plan-queue check exists precisely to
+prove the generator was not the bottleneck while that ceiling was measured.
+Pacing is therefore a **change of experiment**, not a missing feature, and it
+is discussed under "If pacing is ever adopted" below rather than tracked as a
+task.
 
-Latency did rise from p50 16 µs (pre-built) to p50 62 µs with a ~13 ms p99, which
-is the producer thread's contention and is the honest cost of not lying about the
-queue.
+Latency did rise from p50 16 µs (pre-built) to p50 62 µs with a ~13 ms p99,
+which is the producer thread's contention and is the honest cost of not lying
+about the queue.
 
 **T038/T039: the live path is now COMPLETE rather than partial.** The two
 data-moving operations are issued, and the `PARTIAL RUN` declaration is gone.
@@ -885,42 +886,42 @@ Key references identical, request count different — FR-069 with FR-072 intact.
 first complete run reported 68 keys/s with a 9.8 **second** p99. Nothing was
 wrong with the code: the server still held debris from an earlier run killed
 mid-flight — `reclaimed N stale reservation(s) (uncommitted > 30s)` repeating,
-158 267 accumulated store-backpressure events and 113 772 memory-tier evictions.
-Restarting the server gave 5544 keys/s and a 1627 µs max, an **81x** difference.
-The run was reported **valid** both times, because FR-062's validity is a
-property of *our* queue and says nothing about the state of the server. A
-future task should have a live run record the server's tier-event counters at
-start and end, so a contaminated baseline declares itself instead of being
-quoted.
+158 267 accumulated store-backpressure events and 113 772 memory-tier
+evictions. Restarting the server gave 5544 keys/s and a 1627 µs max, an **81x**
+difference. The run was reported **valid** both times, because FR-062's
+validity is a property of *our* queue and says nothing about the state of the
+server. A future task should have a live run record the server's tier-event
+counters at start and end, so a contaminated baseline declares itself instead
+of being quoted.
 
-**T051: the mock is a protocol checker, not a recorder.** Writing down
-`Check, Touch, Load, Reserve, Transfer, Commit, Poll` and asserting the encoder
+**T051: the mock is a protocol checker, not a recorder.** Writing down `Check,
+Touch, Load, Reserve, Transfer, Commit, Poll` and asserting the encoder
 produces it would be vacuous — both sides from the code under test, passing
 equally well when the mapping is wrong, which this feature has already been
 bitten by three times. So every rule the mock enforces is sourced outside the
 crate: the `IDispatcher` contract's error conditions (`KeyNotFound` without a
 pending write, `InvalidParameter` on size 0), `check_duplicate_keys` in
 `shmq-dispatcher::translate`, and FR-040/043/044/069/072. It decodes with the
-server's own `wire::Reader`. 11 tests, one of which (`the_mock_can_actually_fail`)
-provokes four violations deliberately, because a checker that cannot object is
-decoration.
+server's own `wire::Reader`. 11 tests, one of which
+(`the_mock_can_actually_fail`) provokes four violations deliberately, because a
+checker that cannot object is decoration.
 
 **A second inert option found: `--clear-cache` did not exist.** T050 is ticked
-and lists it, but nothing wired it. Now implemented, issued once on its own path
-before the timed window opens (FR-046) — `OpStream` still refuses the opcode, as
-a clear inside the operation stream would be the generator evicting on the
-policy's behalf.
+and lists it, but nothing wired it. Now implemented, issued once on its own
+path before the timed window opens (FR-046) — `OpStream` still refuses the
+opcode, as a clear inside the operation stream would be the generator evicting
+on the policy's behalf.
 
 **The per-key result bytes were being thrown away.** Every one of `CHECK`,
-`TOUCH`, `RESERVE`, `COPY_TO_STORE`, `COMMIT_STORE` and `LOOKUP` answers with one
-byte per key, and the client checked only the overall status — so a run in which
-*every* store was declined reported full throughput. They are now counted and
-reported with denominators. They are **outcomes, never generator errors**: we do
-not know when Certus will evict anything, and a block stored earlier and absent
-later is eviction working, which is the behaviour under measurement. Equally, it
-is not the generator's job to be gracious about a server that declines a store —
-the report gives the count and refuses to guess the cause, because the wire
-carries no reason code.
+`TOUCH`, `RESERVE`, `COPY_TO_STORE`, `COMMIT_STORE` and `LOOKUP` answers with
+one byte per key, and the client checked only the overall status — so a run in
+which *every* store was declined reported full throughput. They are now counted
+and reported with denominators. They are **outcomes, never generator errors**:
+we do not know when Certus will evict anything, and a block stored earlier and
+absent later is eviction working, which is the behaviour under measurement.
+Equally, it is not the generator's job to be gracious about a server that
+declines a store — the report gives the count and refuses to guess the cause,
+because the wire carries no reason code.
 
 Measured on node2 with **exactly one** server running:
 
@@ -933,19 +934,19 @@ Measured on node2 with **exactly one** server running:
 
 A cold cache declines nothing, so the store path is sound. A warm one declines
 because the key is already there (`create_memory_tier_entry` answers
-`AlreadyExists`). The last row matters most: `CLEAR_MEMORY_TIER` frees the memory
-tier so `RESERVE` succeeds, but the dispatch map keeps its disk-backed entries so
-the commit still cannot land — **`--clear-cache` is not a cold cache and is no
-substitute for restarting the server.** A different seed still declines 91.7%
-because shared-prefix keys largely survive a seed change. Transfers never decline
-because `copy_gpu_to_memory_async` needs no pending write, which is why the
-counts read 72 / 0 / 72.
+`AlreadyExists`). The last row matters most: `CLEAR_MEMORY_TIER` frees the
+memory tier so `RESERVE` succeeds, but the dispatch map keeps its disk-backed
+entries so the commit still cannot land — **`--clear-cache` is not a cold cache
+and is no substitute for restarting the server.** A different seed still
+declines 91.7% because shared-prefix keys largely survive a seed change.
+Transfers never decline because `copy_gpu_to_memory_async` needs no pending
+write, which is why the counts read 72 / 0 / 72.
 
 Certus's disk-tier eviction is not yet implemented, so a long streaming run may
 eventually see stores fail for that reason; that would be a genuine limitation
 rather than intended behaviour, and it is not distinguishable on the wire from
-the rows above. Nothing measured here reached it — these runs move about 2.25 MiB
-against a 3.7 GiB device.
+the rows above. Nothing measured here reached it — these runs move about 2.25
+MiB against a 3.7 GiB device.
 
 **A trap of my own making, recorded because the report cannot detect it.** Two
 `certus-server-yaml` processes were left polling the same mailbox and device
@@ -956,18 +957,18 @@ figure taken that way is meaningless. Verify with
 note that `pkill -f <pattern>` matches the invoking shell's own command line,
 which killed this session's shell twice.
 
-**A DEFECT FOUND BY QUESTIONING THE HIT RATE: shared-prefix blocks are read
-but never stored.** The reported hit figures did not reconcile with the declined
+**A DEFECT FOUND BY QUESTIONING THE HIT RATE: shared-prefix blocks are read but
+never stored.** The reported hit figures did not reconcile with the declined
 stores, and chasing that turned up two things.
 
 First, a real bug in the new accounting: `op_check` answers a **three-valued**
 `check_state` (`MISS` 0, `RESIDENT` 1, `PENDING` 2) while `op_lookup` answers a
 binary flag, and both were counted in one arm as "1 means hit". That made every
-`PENDING` key a miss, although `wire.rs` says explicitly that `byte != 0` is the
-correct existence test. `CHECK` and `LOOKUP` are now counted and reported
-separately, `PENDING` in its own column — excluded from the hit numerator because
-the key is not loadable at that instant, and kept in the denominator because the
-cache does hold it.
+`PENDING` key a miss, although `wire.rs` says explicitly that `byte != 0` is
+the correct existence test. `CHECK` and `LOOKUP` are now counted and reported
+separately, `PENDING` in its own column — excluded from the hit numerator
+because the key is not loadable at that instant, and kept in the denominator
+because the cache does hold it.
 
 Second, and structural. Measured on one fresh server, a **cold** and a **warm**
 run of the same seed report byte-identical results — 60 resident, 0 pending, 96
@@ -979,21 +980,23 @@ run stored. The plan explains it exactly:
               + 120 refs to session-private keys stored earlier (always hit)
 ```
 
-and the measured misses are `96 + 96 = 192`. Every miss in the run is a reference
-to a shared-object block, and **no operation ever reserves one**. So
-cross-session prefix sharing — the phenomenon this generator exists to exercise —
-contributes **zero** cache hits, only intra-session prefix reuse does, and every
-live hit rate is structurally understated. Equilibrium seeding places shared
-objects as though they already existed, but nothing puts them into Certus.
+and the measured misses are `96 + 96 = 192`. Every miss in the run is a
+reference to a shared-object block, and **no operation ever reserves one**. So
+cross-session prefix sharing — the phenomenon this generator exists to exercise
+— contributes **zero** cache hits, only intra-session prefix reuse does, and
+every live hit rate is structurally understated. Equilibrium seeding places
+shared objects as though they already existed, but nothing puts them into
+Certus.
 
 `spec.md`'s own race note ("two sessions race to mint the same shared prefix,
 both may miss and both store") presumes sessions *do* store shared prefixes, so
 this contradicts the spec rather than implementing it. The fix cannot be "store
-on miss", because a plan that reacts to run-time outcomes is no longer a function
-of description and seed (FR-072). The deterministic form is available: **the
-session that mints a shared instance stores its blocks**, minting already being a
-plan-time event on `SharedInstance::mint`. Later sessions read and hit. Left
-unfixed pending a decision, because it changes which operations a plan contains.
+on miss", because a plan that reacts to run-time outcomes is no longer a
+function of description and seed (FR-072). The deterministic form is available:
+**the session that mints a shared instance stores its blocks**, minting already
+being a plan-time event on `SharedInstance::mint`. Later sessions read and hit.
+Left unfixed pending a decision, because it changes which operations a plan
+contains.
 
 **Keys derive from structural position, not from the seed.** A different seed
 declined 66 of 72 reserves, which measured out as exactly 66 of 72 stored keys
@@ -1001,21 +1004,21 @@ shared between seed 7 and seed 99 (91.7%). Not a collision — keys are 64-bit
 `splitmix64` outputs and the salt encodes `(tag, class, instance_index,
 block_ordinal)`, all structural counters with no seed component, so the same
 coordinate yields the same key in every run. The seed changes which coordinates
-are used and when. Consequence for experiment hygiene: **a new seed does not give
-a fresh key space against a warm server.**
+are used and when. Consequence for experiment hygiene: **a new seed does not
+give a fresh key space against a warm server.**
 
-Declines and hit rate were never comparable quantities, which was the smell worth
-following: declines concern the 72 session-private keys the run stores, misses
-concern the 4 shared keys it never stores. Disjoint populations.
+Declines and hit rate were never comparable quantities, which was the smell
+worth following: declines concern the 72 session-private keys the run stores,
+misses concern the 4 shared keys it never stores. Disjoint populations.
 
 **THE LIVE PATH IS NOW REACTIVE (FR-072a), which fixes the shared-block defect
-and one more nobody had raised.** A turn offers every key from the **root** of its
-prefix through the end of its new growth, then touches and loads what came back
-resident and stores what came back absent. Cache outcomes change the
+and one more nobody had raised.** A turn offers every key from the **root** of
+its prefix through the end of its new growth, then touches and loads what came
+back resident and stores what came back absent. Cache outcomes change the
 *interaction* and never the workload: the virtual clock, the session
-interleaving, the turn schedule and the key path remain functions of description
-and seed, which holds structurally because the producer builds turns from the
-simulation without seeing any response.
+interleaving, the turn schedule and the key path remain functions of
+description and seed, which holds structurally because the producer builds
+turns from the simulation without seeing any response.
 
 Measured on node2, one fresh server, seed 7, 4 lanes, 60 s:
 
@@ -1034,20 +1037,20 @@ The 8 declined reserves pair exactly with the 8 `PENDING` checks, and that is
 FR-036's race actually occurring: two lanes both miss the same shared block and
 both store it, one wins. It is counted, not treated as an error.
 
-**Two properties a fixed operation list could not express**, both now guarded by
-tests:
+**Two properties a fixed operation list could not express**, both now guarded
+by tests:
 
-1. **An evicted block is stored again.** Certus may evict at any time; without a
-   re-store a run's hit rate can only decay and the generator measures a cache it
-   never refills.
-2. **Shared prefix blocks are stored at all.** No turn mints them, so the plan's
-   own `Reserve` operations exclude them and nothing stored them ever.
+1. **An evicted block is stored again.** Certus may evict at any time; without
+   a re-store a run's hit rate can only decay and the generator measures a
+   cache it never refills.
+2. **Shared prefix blocks are stored at all.** No turn mints them, so the
+   plan's own `Reserve` operations exclude them and nothing stored them ever.
 
-The mock mailbox now answers `CHECK` from its own committed and pending sets, as
-`op_check` does, so the resident branch is actually exercised — a mock that
-always said `MISS` would store on every turn and test nothing. It also objects to
-a `LOOKUP` for a key it never committed, since the executor must load only what
-`CHECK` reported resident. 15 tests.
+The mock mailbox now answers `CHECK` from its own committed and pending sets,
+as `op_check` does, so the resident branch is actually exercised — a mock that
+always said `MISS` would store on every turn and test nothing. It also objects
+to a `LOOKUP` for a key it never committed, since the executor must load only
+what `CHECK` reported resident. 15 tests.
 
 **US3 architecture settled (FR-072b): the key path crosses the wire, not the
 operations.** The reactive rule costs several round trips per turn — fine at
@@ -1058,85 +1061,88 @@ identity, virtual timing) and never cache outcomes, which keeps FR-072 intact
 across nodes while keeping the chatter host-local.
 
 **PACED MODE IS AGREED AND DEFERRED (FR-078).** To be implemented once
-everything else is settled; the design below is what was agreed, so it should not
-need re-deriving. It is deferred because it changes the spec in several places and
-because supporting both modes is genuinely more code, not because it is unwanted:
-latency is the reason for it, and a percentile gathered while the generator
-sprints describes a queue the real workload would never form.
+everything else is settled; the design below is what was agreed, so it should
+not need re-deriving. It is deferred because it changes the spec in several
+places and because supporting both modes is genuinely more code, not because it
+is unwanted: latency is the reason for it, and a percentile gathered while the
+generator sprints describes a queue the real workload would never form.
 
 Deferred tasks, in order:
 
-- [ ] T088 [DEFERRED] Add the paced mode to `crates/workload-gen/src/live.rs`: hold
-  each request until its virtual time is due, `due = t0 + (virtual timestamp −
-  virtual start) / rate`, with a `--rate` multiplier defaulting to 1.0. **Due times
-  are absolute from `t0`, never relative to the previous submission** — otherwise a
-  slow server stretches think time and dilates the workload it is being judged on
+- [ ] T088 [DEFERRED] Add the paced mode to `crates/workload-gen/src/live.rs`:
+  hold each request until its virtual time is due, `due = t0 + (virtual
+  timestamp − virtual start) / rate`, with a `--rate` multiplier defaulting to
+  1.0. **Due times are absolute from `t0`, never relative to the previous
+  submission** — otherwise a slow server stretches think time and dilates the
+  workload it is being judged on
 - [ ] T088a [DEFERRED] Make **paced the default** and the selector positive:
-  `--pacing real|none` defaulting to `real`, with `--rate` valid only under `real`.
-  `--unpaced` was considered and rejected — a negative flag cannot be read without
-  knowing the default, and `--unpaced --rate 10` is a combination that would have
-  to be refused
-- [ ] T088b [DEFERRED] Project a paced run's **wallclock cost** before starting,
-  symmetrically with FR-073's size projection: at rate 1.0 a run costs its virtual
-  span, so `--until 3600` is an hour and silence would look like a hang
-- [ ] T088c [DEFERRED] Make `--rate` a **calibration** control, in virtual seconds
-  per wallclock second: a description's durations are arbitrary with respect to any
-  machine, so the same description must be aimable at faster or slower hardware
-  without being rewritten. CLI only, never a description field — it describes the
-  target, not the workload (FR-069's reasoning, FR-005 portability). Assert the plan
-  fingerprint is independent of the rate
+  `--pacing real|none` defaulting to `real`, with `--rate` valid only under
+  `real`. `--unpaced` was considered and rejected — a negative flag cannot be
+  read without knowing the default, and `--unpaced --rate 10` is a combination
+  that would have to be refused
+- [ ] T088b [DEFERRED] Project a paced run's **wallclock cost** before
+  starting, symmetrically with FR-073's size projection: at rate 1.0 a run
+  costs its virtual span, so `--until 3600` is an hour and silence would look
+  like a hang
+- [ ] T088c [DEFERRED] Make `--rate` a **calibration** control, in virtual
+  seconds per wallclock second: a description's durations are arbitrary with
+  respect to any machine, so the same description must be aimable at faster or
+  slower hardware without being rewritten. CLI only, never a description field
+  — it describes the target, not the workload (FR-069's reasoning, FR-005
+  portability). Assert the plan fingerprint is independent of the rate
 - [ ] T088d [DEFERRED] Report the measured `virtual/wallclock` against the
-  requested rate as a **cross-check**: a shortfall is accumulated lateness arriving
-  by a second route, and the two must agree
-- [ ] T088e [DEFERRED] Add a **rate sweep** to find capacity: offered load scales
-  with rate while the workload's shape does not, so the rate at which lateness
-  leaves zero is where this machine stops serving this workload on time. A
-  load-versus-latency curve, which answers "can this machine serve this workload"
-  better than the work-conserving ceiling does
-- [ ] T089 [DEFERRED] Replace the validity metric under pacing with **lateness**
-  in `crates/workload-gen/src/report.rs`: `lateness = submitted − due`, positive
-  only, reported as percentiles with its request count (FR-066a). A run whose
-  lateness exceeds tolerance is invalid for FR-062's reason — the generator, not
-  Certus, set the pace
-- [ ] T090 [DEFERRED] Make the report name the mode, since a paced throughput and
-  a work-conserving one are not comparable and would otherwise be quoted together
-- [ ] T091 [DEFERRED] Scope FR-031 to the work-conserving mode and re-word FR-062
-  so it does not appear to apply under pacing, where an empty queue is the normal
-  intended state
+  requested rate as a **cross-check**: a shortfall is accumulated lateness
+  arriving by a second route, and the two must agree
+- [ ] T088e [DEFERRED] Add a **rate sweep** to find capacity: offered load
+  scales with rate while the workload's shape does not, so the rate at which
+  lateness leaves zero is where this machine stops serving this workload on
+  time. A load-versus-latency curve, which answers "can this machine serve this
+  workload" better than the work-conserving ceiling does
+- [ ] T089 [DEFERRED] Replace the validity metric under pacing with
+  **lateness** in `crates/workload-gen/src/report.rs`: `lateness = submitted −
+  due`, positive only, reported as percentiles with its request count
+  (FR-066a). A run whose lateness exceeds tolerance is invalid for FR-062's
+  reason — the generator, not Certus, set the pace
+- [ ] T090 [DEFERRED] Make the report name the mode, since a paced throughput
+  and a work-conserving one are not comparable and would otherwise be quoted
+  together
+- [ ] T091 [DEFERRED] Scope FR-031 to the work-conserving mode and re-word
+  FR-062 so it does not appear to apply under pacing, where an empty queue is
+  the normal intended state
 
 **If pacing is ever adopted, it replaces a metric rather than adding a delay.**
 Today's run is work-conserving: it issues as fast as the mailbox allows and
 measures the ceiling. A paced run would issue each turn at a wallclock time
-proportional to its virtual timestamp, so think time becomes real waiting and the
-offered load equals the workload's own rate. That answers a different question —
-"can Certus serve *this* workload with acceptable latency?" instead of "how fast
-can Certus go?" — and it would buy realistic concurrency (today the in-flight
-session count is whatever the lanes allow, not arrival rate x duration) and put
-the server's time-dependent behaviour on the right timeline (eviction, background
-write-through and the 30-second checkpoints we observed all run on wallclock, and
-compressing 60 virtual seconds into 0.14 s means the cache never sees the idle
-periods the workload describes).
+proportional to its virtual timestamp, so think time becomes real waiting and
+the offered load equals the workload's own rate. That answers a different
+question — "can Certus serve *this* workload with acceptable latency?" instead
+of "how fast can Certus go?" — and it would buy realistic concurrency (today
+the in-flight session count is whatever the lanes allow, not arrival rate x
+duration) and put the server's time-dependent behaviour on the right timeline
+(eviction, background write-through and the 30-second checkpoints we observed
+all run on wallclock, and compressing 60 virtual seconds into 0.14 s means the
+cache never sees the idle periods the workload describes).
 
 The catch is FR-062. Under pacing an **empty plan queue is the normal, intended
 state** — no work is due yet — so "a lane found its queue empty" stops meaning
 "the generator was the constraint". The validity metric would have to become
 **schedule lateness**: how far past its due time each turn was actually issued.
-Adopting pacing therefore means replacing the underrun check, not adding a sleep,
-and it makes every experiment cost real time equal to its virtual span.
+Adopting pacing therefore means replacing the underrun check, not adding a
+sleep, and it makes every experiment cost real time equal to its virtual span.
 
 **Bandwidth and latency were both measuring the wrong thing (FR-066, FR-066a,
 FR-066b).** Capturing hit/miss turned out to be *required* for bandwidth, not
 merely informative.
 
-`bytes_per_second` was `key_references * block_bytes`, which charges a full block
-to every key of every request — but `CHECK`, `TOUCH`, `RESERVE` and
+`bytes_per_second` was `key_references * block_bytes`, which charges a full
+block to every key of every request — but `CHECK`, `TOUCH`, `RESERVE` and
 `COMMIT_STORE` move **no payload at all**. Under the reactive rule a resident
 block produces three key references and transfers one block, a missing one
 produces four and transfers one, so the figure overstated bandwidth **4.9x**
 (219.5 -> 45.1 MiB/s on the same run) and conflated reads with writes. Payload
-now comes from the only place the information exists — the hit/miss results — and
-is reported per direction: **read 32.7 MiB/s (140 blocks), write 17.8 MiB/s (76
-blocks)**.
+now comes from the only place the information exists — the hit/miss results —
+and is reported per direction: **read 32.7 MiB/s (140 blocks), write 17.8 MiB/s
+(76 blocks)**.
 
 Aggregate latency was similarly a blend. Split per operation:
 
@@ -1150,16 +1156,16 @@ Aggregate latency was similarly a blend. Split per operation:
 | LOOKUP | 20 | 276 | 476 | 686 | 686 |
 | **COPY_TO_STORE** | 24 | **435** | 1230 | 1671 | 1671 |
 
-The aggregate p50 of 243 us is between `CHECK` at 79 and `COPY_TO_STORE` at 435,
-describing the mix rather than the server — and it would move with the hit rate
-even if Certus did not. `TOUCH` and `LOOKUP` show 20 requests to the others' 24
-because they are issued only when something is resident, and the first turn of
-each session has nothing.
+The aggregate p50 of 243 us is between `CHECK` at 79 and `COPY_TO_STORE` at
+435, describing the mix rather than the server — and it would move with the hit
+rate even if Certus did not. `TOUCH` and `LOOKUP` show 20 requests to the
+others' 24 because they are issued only when something is resident, and the
+first turn of each session has nothing.
 
 **RETRACTED: `TOUCH` is not slower than `CHECK`.** The table above appeared to
-show it three times slower, which was a p50 over **20 requests** — noise. At 8000
-requests per operation the two are within a microsecond, and `TOUCH` is marginally
-the faster in most runs:
+show it three times slower, which was a p50 over **20 requests** — noise. At
+8000 requests per operation the two are within a microsecond, and `TOUCH` is
+marginally the faster in most runs:
 
 | lanes | CHECK | TOUCH | TAKE_EVENTS | LOOKUP |
 | --- | --- | --- | --- | --- |
@@ -1173,25 +1179,26 @@ against 233), which is the same noise in the opposite direction.
 What the adequate sample does show is worth more than the false finding was:
 
 * **Every control operation costs the same** — `CHECK`, `TOUCH`, `RESERVE`,
-  `COMMIT_STORE` and `TAKE_EVENTS` all sit at ~20 us uncontended. None of them is
-  distinguishable by its own work.
-* **Only the payload operations have a distinct cost.** `LOOKUP` is 274 us at one
-  lane against `CHECK`'s 25 — about eleven times — and that gap is the DMA.
-* **Control latency is dominated by queuing, and scales with lane count**: 25, 291
-  and 465 us at 1, 4 and 6 lanes. So a control-operation latency is a statement
-  about concurrency at the server, not about the operation.
+  `COMMIT_STORE` and `TAKE_EVENTS` all sit at ~20 us uncontended. None of them
+  is distinguishable by its own work.
+* **Only the payload operations have a distinct cost.** `LOOKUP` is 274 us at
+  one lane against `CHECK`'s 25 — about eleven times — and that gap is the DMA.
+* **Control latency is dominated by queuing, and scales with lane count**: 25,
+  291 and 465 us at 1, 4 and 6 lanes. So a control-operation latency is a
+  statement about concurrency at the server, not about the operation.
 
-The report now prints each operation's request count and marks a count too small
-to quote (`QUOTABLE_REQUESTS = 100`), which is what caught this — the count column
-was already there, and reading it is what turned a plausible finding into a
-retraction.
+The report now prints each operation's request count and marks a count too
+small to quote (`QUOTABLE_REQUESTS = 100`), which is what caught this — the
+count column was already there, and reading it is what turned a plausible
+finding into a retraction.
 
-**A third defect the split exposed: we were transferring into reservations we did
-not hold.** 88 blocks written against 12 declined reserves — `RESERVE` answers
-per key and the executor ignored it, so 12 blocks of payload went to no slot and
-their commits then failed for want of a pending write. With the filter: 76
-written, **0 of 76 commits declined**, and the only remaining declines are the 8
-reserve declines that pair with the 8 `PENDING` — FR-036's mint race.
+**A third defect the split exposed: we were transferring into reservations we
+did not hold.** 88 blocks written against 12 declined reserves — `RESERVE`
+answers per key and the executor ignored it, so 12 blocks of payload went to no
+slot and their commits then failed for want of a pending write. With the
+filter: 76 written, **0 of 76 commits declined**, and the only remaining
+declines are the 8 reserve declines that pair with the 8 `PENDING` — FR-036's
+mint race.
 
 **US1 is complete.** Nothing is open against it.
 
@@ -1293,8 +1300,8 @@ feature-gated test nobody enables is indistinguishable from no test.
   `crates/workload-gen/src/cli.rs`: `--until` **required**, `--output`,
   `--format jsonl|parquet|both`. **`--format` was only half wired and this
   checkbox was wrong until T084**: `parquet` and `both` checked the feature and
-  then wrote JSONL alone. Completed at T084, with the four tests that would have
-  caught it; see T084's note.
+  then wrote JSONL alone. Completed at T084, with the four tests that would
+  have caught it; see T084's note.
 - [x] T058 [US2] Wire the projection into `emit` in
   `crates/workload-gen/src/cli.rs`: project before writing, compare against
   free space via `statvfs`, and refuse past the free space or a documented
@@ -1421,29 +1428,29 @@ and is normative for all of them. All are [US2]-scoped: no hardware, no server.
   no manifest and is refused as an input to the determinism check (FR-075b)
 - [x] T062y [US2] Give every output format its own flag and destination in
   `crates/workload-gen/src/cli.rs` — `--certus-unified-jsonl <dir>`,
-  `--certus-unified-parquet <dir>`, `--mooncake <file>`, `--libcachesim <file>`,
-  `--simulator <file>` — with **at least one required** and none privileged. A
-  projection alone is the ordinary case, not a corner: it is what avoids
-  materialising ~27 GB of native trace to obtain a much smaller file. The
-  pre-flight must size only the outputs requested (FR-073).
+  `--certus-unified-parquet <dir>`, `--mooncake <file>`, `--libcachesim
+  <file>`, `--simulator <file>` — with **at least one required** and none
+  privileged. A projection alone is the ordinary case, not a corner: it is what
+  avoids materialising ~27 GB of native trace to obtain a much smaller file.
+  The pre-flight must size only the outputs requested (FR-073).
 
   **Reshaped by the user mid-task, and the final shape is better than what was
-  specified.** The task originally kept `--output <dir> --format jsonl|parquet|both`
-  for the native trace beside per-projection flags, and asked only that `--output`
-  become optional. Two objections, both right:
+  specified.** The task originally kept `--output <dir> --format
+  jsonl|parquet|both` for the native trace beside per-projection flags, and
+  asked only that `--output` become optional. Two objections, both right:
 
   1. **`--format both` does not survive contact with four formats.** `--format`
-     claimed the general word for a narrow thing, and `both` is a two-valued word
-     that would break the moment a third container appeared.
+     claimed the general word for a narrow thing, and `both` is a two-valued
+     word that would break the moment a third container appeared.
   2. **The native trace was not entitled to be the privileged output.** Nothing
      outside this repository reads it; inside it, only the three converters do,
-     each of six fields out of seventeen. A flag layout that made it the default
-     destination encoded an importance it has not earned.
+     each of six fields out of seventeen. A flag layout that made it the
+     default destination encoded an importance it has not earned.
 
   So `--format` is **deleted** rather than renamed, and presence-of-flag is the
-  selection. An intermediate design — `--format` as a comma-separated list over all
-  five — was considered and dropped: with a destination needed per format anyway,
-  the selector had nothing left to do.
+  selection. An intermediate design — `--format` as a comma-separated list over
+  all five — was considered and dropped: with a destination needed per format
+  anyway, the selector had nothing left to do.
 - [x] T062a [P] [US2] Implement the Mooncake writer in
   `crates/workload-trace/src/mooncake.rs`, emitting `{timestamp, input_length,
   output_length, hash_ids}` one document per line per **request**, `timestamp`
@@ -1615,22 +1622,25 @@ local hit rate on the origin node is unchanged.
   server, in `crates/workload-wire/tests/conformance.rs`, covering all six
   cases listed in `contracts/node-agent-wire.md`
 
-**T069 done, and the file it names deliberately does not exist.** The task asked for
-`workload-node-agent/src/payload.rs`, but the agent already uses
-`workload_gen::payload::PayloadBuffer` (T039), and a second copy would be exactly the
-duplication T068a exists to prevent: two pre-filled buffers could drift in their block
-layout, and a divergence there would look like a cache returning wrong data. So the agent
-reuses it, and the task is recorded as done by reuse rather than by a new file.
+**T069 done, and the file it names deliberately does not exist.** The task
+asked for `workload-node-agent/src/payload.rs`, but the agent already uses
+`workload_gen::payload::PayloadBuffer` (T039), and a second copy would be
+exactly the duplication T068a exists to prevent: two pre-filled buffers could
+drift in their block layout, and a divergence there would look like a cache
+returning wrong data. So the agent reuses it, and the task is recorded as done
+by reuse rather than by a new file.
 
-**The real gap was the other half: the stamp was written and never read.** Only keys
-crossed the network already — the buffer is pre-filled locally and the key stamped at a
-known offset. But nothing ever checked a *loaded* block against the key it was loaded
-for, and the pre-fill is one repeated byte, so **every block in the buffer was
-interchangeable**: a cache returning the wrong block, or no block, would have produced a
-run indistinguishable from a correct one. A stamp nobody reads proves nothing.
+**The real gap was the other half: the stamp was written and never read.** Only
+keys crossed the network already — the buffer is pre-filled locally and the key
+stamped at a known offset. But nothing ever checked a *loaded* block against
+the key it was loaded for, and the pre-fill is one repeated byte, so **every
+block in the buffer was interchangeable**: a cache returning the wrong block,
+or no block, would have produced a run indistinguishable from a correct one. A
+stamp nobody reads proves nothing.
 
-Added `MEMCPY_DEVICE_TO_HOST`, `PayloadBuffer::read_stamp`, and `--verify-payload` on
-both the generator and the agent. Verified live against a cold cache:
+Added `MEMCPY_DEVICE_TO_HOST`, `PayloadBuffer::read_stamp`, and
+`--verify-payload` on both the generator and the agent. Verified live against a
+cold cache:
 
 ```
 cold  missing 8, granted 8, blocks_written 8
@@ -1638,44 +1648,49 @@ warm  resident 8, blocks_read 8
 verified 8 blocks, 0 mismatches
 ```
 
-The counters carry `payload_mismatches` with `payloads_verified` beside it as its
-denominator, and the test asserts that **every** loaded block was checked rather than
-some — a verification that silently no-ops is worse than none, because the run then
-*claims* the data was checked.
+The counters carry `payload_mismatches` with `payloads_verified` beside it as
+its denominator, and the test asserts that **every** loaded block was checked
+rather than some — a verification that silently no-ops is worse than none,
+because the run then *claims* the data was checked.
 
-**A mismatch invalidates the run**, unlike every other cache-facing figure. A miss, a
-declined reserve and an eviction are outcomes; a block carrying the wrong key is Certus
-returning wrong data, so the report leads with `WRONG DATA` before any throughput and
-`is_valid()` is false. It is also independent of Certus's own `integrity-check` feature
-by design: a check sharing an implementation with the thing it checks shares its bugs.
+**A mismatch invalidates the run**, unlike every other cache-facing figure. A
+miss, a declined reserve and an eviction are outcomes; a block carrying the
+wrong key is Certus returning wrong data, so the report leads with `WRONG DATA`
+before any throughput and `is_valid()` is false. It is also independent of
+Certus's own `integrity-check` feature by design: a check sharing an
+implementation with the thing it checks shares its bugs.
 
-Two caveats stated rather than buried: verification **implies stamping** and wants a
-**cold** cache, since a block stored by a non-stamping run holds the fill byte and
-checking it would report a mismatch that is the instrument's own fault; and it costs a
-device-to-host copy per key, so it is opt-in for FR-070's reason.
+Two caveats stated rather than buried: verification **implies stamping** and
+wants a **cold** cache, since a block stored by a non-stamping run holds the
+fill byte and checking it would report a mismatch that is the instrument's own
+fault; and it costs a device-to-host copy per key, so it is opt-in for FR-070's
+reason.
 
-**Narrowed the provenance hash while here.** Editing a *test* was invalidating deployed
-agents, which is friction with no safety in it — a file compiled into a separate test
-binary is never linked into the agent. `tests/` and `benches/` are now excluded, taking
-the hashed set from 61 files to 44. Inline `#[cfg(test)]` modules inside `src/` are still
-covered, since a path cannot tell them from the code around them.
+**Narrowed the provenance hash while here.** Editing a *test* was invalidating
+deployed agents, which is friction with no safety in it — a file compiled into
+a separate test binary is never linked into the agent. `tests/` and `benches/`
+are now excluded, taking the hashed set from 61 files to 44. Inline
+`#[cfg(test)]` modules inside `src/` are still covered, since a path cannot
+tell them from the code around them.
 
 **T068/a/b/c done. The agent drives a real Certus, end to end.**
 
-**T068a came first, because it is the load-bearing part.** The reactive rule was inside
-`live::consume`, so an agent written beside it would have been a *second*
-implementation — free to drift, with a fix applied on one side and forgotten on the
-other surfacing as a local/remote difference that looked like a property of the
-network. It is now `workload-gen`'s `exec::TurnExecutor`, and both paths call it. The
-local path was re-measured after the extraction and is **byte-identical** to before
-(140 resident / 88 miss of 228, 76 written, 12 reserve declines), so the refactor is
-behaviour-preserving rather than merely compiling.
+**T068a came first, because it is the load-bearing part.** The reactive rule
+was inside `live::consume`, so an agent written beside it would have been a
+*second* implementation — free to drift, with a fix applied on one side and
+forgotten on the other surfacing as a local/remote difference that looked like
+a property of the network. It is now `workload-gen`'s `exec::TurnExecutor`, and
+both paths call it. The local path was re-measured after the extraction and is
+**byte-identical** to before (140 resident / 88 miss of 228, 76 written, 12
+reserve declines), so the refactor is behaviour-preserving rather than merely
+compiling.
 
-`LaneStats` now *holds* `workload_wire::frame::Counters` instead of duplicating those
-fields, so a local figure and a remote figure are the same measurement rather than two
-that happen to be named alike (T068c).
+`LaneStats` now *holds* `workload_wire::frame::Counters` instead of duplicating
+those fields, so a local figure and a remote figure are the same measurement
+rather than two that happen to be named alike (T068c).
 
-**Measured against a live agent and a live server** (`tests/live_agent.rs`, `--ignored`):
+**Measured against a live agent and a live server** (`tests/live_agent.rs`,
+`--ignored`):
 
 ```
 cold  missing: 8, granted: 8, blocks_written: 8
@@ -1684,177 +1699,192 @@ counters: 7 requests, 56 refs, read 8 blocks, wrote 8 blocks
   CHECK 30us  TOUCH 14us  RESERVE 33us  COPY_TO_STORE 663us  COMMIT_STORE 34us  LOOKUP 237us
 ```
 
-Eight fresh keys all miss and are stored; the same path again comes back **fully
-resident and read back**, which is the assertion that distinguishes "the agent sent
-frames" from "the agent reached a cache". The per-operation shape matches the local
-path's — control operations in the tens of microseconds, the two data movers far higher.
+Eight fresh keys all miss and are stored; the same path again comes back
+**fully resident and read back**, which is the assertion that distinguishes
+"the agent sent frames" from "the agent reached a cache". The per-operation
+shape matches the local path's — control operations in the tens of
+microseconds, the two data movers far higher.
 
 **Three defects that only running it could have found:**
 
-1. **`Counters.blocks_read`/`blocks_written` were fields nothing populated.** The
-   counters said 0 while the per-turn outcomes said 8. They duplicated what
-   `lookup_hits` and `transfers_attempted − declined` already say, so they are now
+1. **`Counters.blocks_read`/`blocks_written` were fields nothing populated.**
+   The counters said 0 while the per-turn outcomes said 8. They duplicated what
+   `lookup_hits` and `transfers_attempted − declined` already say, so they are
+   now
    **derived methods**: two representations of one quantity can disagree, one cannot.
-2. **A closed connection never returned its mailbox channel.** An agent could serve
-   `--lanes` connections *in its whole lifetime* and then refuse every client with a
-   connection reset — found by running the test twice. Channels and payload slots now
-   go back to the pool on drop, including when `accept` fails part-way.
-3. **The provenance check fired on a genuinely stale binary** — mine, two minutes old
-   (`70e22ba5…` against `448629b9…`), refused by name. Good demonstration, and also the
-   friction predicted: the agent must be rebuilt after any source edit.
+2. **A closed connection never returned its mailbox channel.** An agent could
+   serve `--lanes` connections *in its whole lifetime* and then refuse every
+   client with a connection reset — found by running the test twice. Channels
+   and payload slots now go back to the pool on drop, including when `accept`
+   fails part-way.
+3. **The provenance check fired on a genuinely stale binary** — mine, two
+   minutes old (`70e22ba5…` against `448629b9…`), refused by name. Good
+   demonstration, and also the friction predicted: the agent must be rebuilt
+   after any source edit.
 
-`Stats` returns serialized V2 histograms plus the counters (T068b), and the test
-deserialises them, checks each histogram's length against its reported request count,
-and confirms a serialize/deserialize round trip preserves quantiles — because a
-multi-node merge that silently changed the numbers would be worse than no merge.
+`Stats` returns serialized V2 histograms plus the counters (T068b), and the
+test deserialises them, checks each histogram's length against its reported
+request count, and confirms a serialize/deserialize round trip preserves
+quantiles — because a multi-node merge that silently changed the numbers would
+be worse than no merge.
 
 **T067 done, 12 handshake tests; 51 in the crate.**
 
-**`build_id` had to become a *source* identity, not a binary digest.** The contract
-called it "a 32-byte digest of the agent binary", but the generator and the agent are
-different binaries, so their digests differ by construction and the check could never
-pass. **FR-051 asks the right question** — whether the daemon "was built from the same
-**sources** as the generator" — so the identity is a build-time source id: commit,
-plus a hash of the tracked diff, plus a hash of the porcelain status.
+**`build_id` had to become a *source* identity, not a binary digest.** The
+contract called it "a 32-byte digest of the agent binary", but the generator
+and the agent are different binaries, so their digests differ by construction
+and the check could never pass. **FR-051 asks the right question** — whether
+the daemon "was built from the same **sources** as the generator" — so the
+identity is a build-time source id: commit, plus a hash of the tracked diff,
+plus a hash of the porcelain status.
 
-It is computed **once**, in `workload-wire`'s build script, and both binaries obtain
-it by depending on that crate. Two build scripts computing it independently could
-disagree — a stale cache on one, a different working directory on the other — and a
-provenance check that can disagree with itself is worse than none.
+It is computed **once**, in `workload-wire`'s build script, and both binaries
+obtain it by depending on that crate. Two build scripts computing it
+independently could disagree — a stale cache on one, a different working
+directory on the other — and a provenance check that can disagree with itself
+is worse than none.
 
-**The first version asked git, and that was the wrong instrument.** Asking "what
-happens to a build from a tarball?" exposed three faults at once, all fixed by
-hashing the source files directly instead:
+**The first version asked git, and that was the wrong instrument.** Asking
+"what happens to a build from a tarball?" exposed three faults at once, all
+fixed by hashing the source files directly instead:
 
-1. **A tarball has no git.** The build still succeeded, but the identity fell back to
-   `unknown` and every multi-node run from a release tarball would have been refused —
-   a cost imposed by the mechanism rather than by the requirement.
-2. **Untracked files were invisible.** A new file on one node and absent on the other
-   changed behaviour without changing the identity, which is precisely the divergence
-   the check exists to catch.
+1. **A tarball has no git.** The build still succeeded, but the identity fell
+   back to `unknown` and every multi-node run from a release tarball would have
+   been refused — a cost imposed by the mechanism rather than by the
+   requirement.
+2. **Untracked files were invisible.** A new file on one node and absent on the
+   other changed behaviour without changing the identity, which is precisely
+   the divergence the check exists to catch.
 3. **Cargo could not know when to re-run the script.** `.git/index` moves on
    `git add`, not on a bare edit, so an uncommitted change could leave a stale
    identity compiled in.
 
 The identity is now a digest of every `.rs` and `Cargo.toml` under
-`apps/workload-generator/crates/`, sorted by path, each file contributing its path as
-well as its bytes so that moving code between files changes it. Each file is declared
-to cargo, which closes fault 3. **Verified on a git-free copy**: the build succeeds
-and produces a real identity (`src:58:948426:…`) rather than `unknown`, a source edit
-of ten bytes moves the fold, and restoring the file brings it back.
+`apps/workload-generator/crates/`, sorted by path, each file contributing its
+path as well as its bytes so that moving code between files changes it. Each
+file is declared to cargo, which closes fault 3. **Verified on a git-free
+copy**: the build succeeds and produces a real identity (`src:58:948426:…`)
+rather than `unknown`, a source edit of ten bytes moves the fold, and restoring
+the file brings it back.
 
 **The boundary that is not covered** is workspace dependencies outside this
-application — a node running a different `shmq-dispatcher` would not be caught. That
-is deliberate: hashing the whole repository would make the identity change on every
-unrelated edit, and a check that fires constantly gets ignored within a week.
+application — a node running a different `shmq-dispatcher` would not be caught.
+That is deliberate: hashing the whole repository would make the identity change
+on every unrelated edit, and a check that fires constantly gets ignored within
+a week.
 
-**Cost, measured rather than assumed.** It hashes 58 files and 948 KB in **1.2 ms**
-(0.5 ms walking, 0.7 ms folding), and only when one of those files changes, since each
-is declared to cargo — a no-op rebuild re-runs nothing, and an edit that does trigger
-it already costs ~0.43 s of recompilation, so the hash is ~0.3% of a bill the edit was
-paying anyway. It does **not** touch the Certus source. For scale: every `.rs` and
-`Cargo.toml` in the whole repository is 410 files / 4.6 MB at **189 ms**, and including
-SPDK's C and the Python is 9 819 files / 153 MB at **447 ms** — of which 181 ms is the
-directory *walk* against `deps/` rather than the hashing. So widening the scope is
-affordable; the reason to stay narrow is identity churn, not milliseconds.
+**Cost, measured rather than assumed.** It hashes 58 files and 948 KB in **1.2
+ms** (0.5 ms walking, 0.7 ms folding), and only when one of those files
+changes, since each is declared to cargo — a no-op rebuild re-runs nothing, and
+an edit that does trigger it already costs ~0.43 s of recompilation, so the
+hash is ~0.3% of a bill the edit was paying anyway. It does **not** touch the
+Certus source. For scale: every `.rs` and `Cargo.toml` in the whole repository
+is 410 files / 4.6 MB at **189 ms**, and including SPDK's C and the Python is 9
+819 files / 153 MB at **447 ms** — of which 181 ms is the directory *walk*
+against `deps/` rather than the hashing. So widening the scope is affordable;
+the reason to stay narrow is identity churn, not milliseconds.
 
 **It is strict, and the cost is honest**: a comment change anywhere in these crates
-invalidates a deployed agent, so a multi-node run needs the agent redeployed after any
-edit. That is the price of a check that cannot be talked out of firing by "it is only
-a constant", which is how staleness gets in.
+invalidates a deployed agent, so a multi-node run needs the agent redeployed
+after any edit. That is the price of a check that cannot be talked out of
+firing by "it is only a constant", which is how staleness gets in.
 
-**Unknown provenance is refused, not assumed** — it now means the source files could
-not be read at all, which is a real problem rather than a portability case.
-`WORKLOAD_SOURCE_ID` overrides everything, for a packager with a better answer.
+**Unknown provenance is refused, not assumed** — it now means the source files
+could not be read at all, which is a real problem rather than a portability
+case. `WORKLOAD_SOURCE_ID` overrides everything, for a packager with a better
+answer.
 
-**Both ends check**, which is what makes a refusal legible: the agent replies with a
-non-zero status *and always sends its own identity even while refusing*, so the
-generator's message can name both sides. Every refusal names the node, since on a
-cluster the useful part is which machine is wrong. The protocol version is checked
-**first**, because if the versions differ the rest of the reply may not mean what it
-appears to and reporting a build mismatch would send an operator after the wrong
-problem.
+**Both ends check**, which is what makes a refusal legible: the agent replies
+with a non-zero status *and always sends its own identity even while refusing*,
+so the generator's message can name both sides. Every refusal names the node,
+since on a cluster the useful part is which machine is wrong. The protocol
+version is checked **first**, because if the versions differ the rest of the
+reply may not mean what it appears to and reporting a build mismatch would send
+an operator after the wrong problem.
 
-Capacity is checked too: more lanes than channels is refused because the mailbox is
-depth-1 per channel, so over-subscription does not fail — it **serialises silently**,
-which reads as a slow server rather than a misconfigured run. A block-size
-disagreement is refused for the same shape of reason.
+Capacity is checked too: more lanes than channels is refused because the
+mailbox is depth-1 per channel, so over-subscription does not fail — it
+**serialises silently**, which reads as a slow server rather than a
+misconfigured run. A block-size disagreement is refused for the same shape of
+reason.
 
 Not cryptographic, and does not need to be: the failure being prevented is an
-accident — a node left running yesterday's build — and anyone able to replace the
-binary can replace the identity it reports.
+accident — a node left running yesterday's build — and anyone able to replace
+the binary can replace the identity it reports.
 
 **T066 done, 10 server tests; 37 in the crate.** Transport only — it reads a
-frame, dispatches and replies, and knows nothing of mailboxes or keys. The work is
-a `Service` the agent implements, which is what lets the whole protocol be driven
-in-process with no agent and no accelerator, including a full client↔server
-conversation over an in-memory pipe and a live one over TCP.
+frame, dispatches and replies, and knows nothing of mailboxes or keys. The work
+is a `Service` the agent implements, which is what lets the whole protocol be
+driven in-process with no agent and no accelerator, including a full
+client↔server conversation over an in-memory pipe and a live one over TCP.
 
-**`&mut self` is how the causal ordering rule became structural.** `Service` takes
-`&mut self` and is built per connection by `ServiceFactory::accept`, so a handler
-cannot be shared across a connection's frames without the compiler objecting — the
-thread pool that would silently reorder a session's turns cannot be written by
-accident rather than merely being warned against. Per connection also because a
-connection is a lane and a lane claims its own mailbox channel, which is depth-1.
+**`&mut self` is how the causal ordering rule became structural.** `Service`
+takes `&mut self` and is built per connection by `ServiceFactory::accept`, so a
+handler cannot be shared across a connection's frames without the compiler
+objecting — the thread pool that would silently reorder a session's turns
+cannot be written by accident rather than merely being warned against. Per
+connection also because a connection is a lane and a lane claims its own
+mailbox channel, which is depth-1.
 
-**A design flaw found by a test that hung.** `serve` joined its connection threads
-on the way out, but a connection thread blocks reading the next frame, so one idle
-peer prevented teardown indefinitely — and FR-053 requires teardown to be *verified*,
-a teardown bug having already invalidated an A/B series in this repository. Accepted
-sockets now carry a read timeout, and a timeout **between** frames is the moment to
-check whether the run stopped, while a timeout **part-way through** a frame is
-retried because the peer is mid-send and giving up there would make a slow network
-indistinguishable from a broken one. The same test now finishes in 0.01 s instead of
-never.
+**A design flaw found by a test that hung.** `serve` joined its connection
+threads on the way out, but a connection thread blocks reading the next frame,
+so one idle peer prevented teardown indefinitely — and FR-053 requires teardown
+to be *verified*, a teardown bug having already invalidated an A/B series in
+this repository. Accepted sockets now carry a read timeout, and a timeout
+**between** frames is the moment to check whether the run stopped, while a
+timeout **part-way through** a frame is retried because the peer is mid-send
+and giving up there would make a slow network indistinguishable from a broken
+one. The same test now finishes in 0.01 s instead of never.
 
-A protocol violation closes the connection rather than replying: there is no error
-frame, and inventing one would let a peer keep a connection alive by sending
-nonsense. A close *between* frames is how a run ends; a close *mid-frame* is
-`UnexpectedEof`, and conflating the two would end a run quietly as though the
-generator had finished. `Shutdown` is answered **before** the loop returns, since a
-close is what FR-064 reads as a lost node and an orderly stop would otherwise be
-reported as a failure.
+A protocol violation closes the connection rather than replying: there is no
+error frame, and inventing one would let a peer keep a connection alive by
+sending nonsense. A close *between* frames is how a run ends; a close
+*mid-frame* is `UnexpectedEof`, and conflating the two would end a run quietly
+as though the generator had finished. `Shutdown` is answered **before** the
+loop returns, since a close is what FR-064 reads as a lost node and an orderly
+stop would otherwise be reported as a failure.
 
-**T065 done, 12 client tests.** Two properties are asserted rather than assumed.
-Pipelining depth is proved not to change what is submitted — the frames at depth
-1, 8 and 32 are byte-identical bar their correlation ids, which is FR-072 in its
-transport form. And a reply is **matched by correlation id rather than by arrival
-order**, tested with replies queued newest-first, because the contract permits a
-multiplexed connection and an in-order stream must not become an unstated
-assumption.
+**T065 done, 12 client tests.** Two properties are asserted rather than
+assumed. Pipelining depth is proved not to change what is submitted — the
+frames at depth 1, 8 and 32 are byte-identical bar their correlation ids, which
+is FR-072 in its transport form. And a reply is **matched by correlation id
+rather than by arrival order**, tested with replies queued newest-first,
+because the contract permits a multiplexed connection and an in-order stream
+must not become an unstated assumption.
 
-`TCP_NODELAY` is checked on a real loopback socket, since it is the one property an
-in-memory transport cannot answer. A synchronous call with turns still in flight is
-**refused**, because the next frame off the socket would be a `TurnOutcome` and
-would be decoded as whatever was asked for — a silent misread rather than an error.
-A clean close is reported as `Closed` distinctly from an I/O error, since a lost
-node must abort the run and be named (FR-064).
+`TCP_NODELAY` is checked on a real loopback socket, since it is the one
+property an in-memory transport cannot answer. A synchronous call with turns
+still in flight is **refused**, because the next frame off the socket would be
+a `TurnOutcome` and would be decoded as whatever was asked for — a silent
+misread rather than an error. A clean close is reported as `Closed` distinctly
+from an I/O error, since a lost node must abort the run and be named (FR-064).
 
-**Ordering: the generator owns one causal rule, and nothing more.** Turn *n+1* of a
-session contains the blocks turn *n* stored, so two turns of one session must not be
-in flight together. Pipelining preserves that because the agent takes a connection's
-frames in arrival order and a lane owns a fixed set of sessions on its own
-connection. The symptom of breaking it is quiet rather than loud: turn *n+1* would
-check a prefix turn *n* had not stored yet, find it absent and store it again, so the
-run completes with inflated store counts and a depressed hit rate.
+**Ordering: the generator owns one causal rule, and nothing more.** Turn *n+1*
+of a session contains the blocks turn *n* stored, so two turns of one session
+must not be in flight together. Pipelining preserves that because the agent
+takes a connection's frames in arrival order and a lane owns a fixed set of
+sessions on its own connection. The symptom of breaking it is quiet rather than
+loud: turn *n+1* would check a prefix turn *n* had not stored yet, find it
+absent and store it again, so the run completes with inflated store counts and
+a depressed hit rate.
 
-**Reordering after submission is Certus-internal and not a generator concern.** The
-mailbox has parallel channels and the server runs multiple threads, so two submitted
-requests may be processed in either order, and preventing that would mean one channel
-and no parallelism — removing the thing the measurement exists to exercise. No
-end-to-end ordering claim is made on either path, and neither should be changed to
-enforce one. `CHECK`'s `PENDING` state is the evidence that Certus already expects
-concurrent stores of one key and reports them.
+**Reordering after submission is Certus-internal and not a generator concern.**
+The mailbox has parallel channels and the server runs multiple threads, so two
+submitted requests may be processed in either order, and preventing that would
+mean one channel and no parallelism — removing the thing the measurement exists
+to exercise. No end-to-end ordering claim is made on either path, and neither
+should be changed to enforce one. `CHECK`'s `PENDING` state is the evidence
+that Certus already expects concurrent stores of one key and reports them.
 
 **T063/T064 done, 15 conformance tests, no agent and no accelerator needed.**
 Two allocation hazards are guarded rather than one: `len` is refused against a
 bound before anything is sized from it, and `SubmitTurn`'s **key count** is
 checked against the bytes actually present before the vector is reserved — a
-peer-supplied `u32` would otherwise let a 14-byte frame ask for 32 GB. Truncation
-is tested **exhaustively at every prefix length** of every body rather than at one
-illustrative cut, because a decoder that stops early returns a value with its
-remaining fields zeroed, and a half-decoded `SubmitTurn` submits a turn whose keys
-the generator never sent.
+peer-supplied `u32` would otherwise let a 14-byte frame ask for 32 GB.
+Truncation is tested **exhaustively at every prefix length** of every body
+rather than at one illustrative cut, because a decoder that stops early returns
+a value with its remaining fields zeroed, and a half-decoded `SubmitTurn`
+submits a turn whose keys the generator never sent.
 
 `PROTO_VERSION` is pinned at 2 with a test that says why: version 1 sent one
 operation per frame, and an agent speaking it would read a key *path* as an
@@ -1871,25 +1901,25 @@ operation's key list and issue something plausible.
   capacity
 - [x] T068 [US3] Implement the node agent binary in
   `crates/workload-node-agent/src/main.rs` and `agent.rs`: attach to the local
-  mailbox and serve `SubmitTurn` by applying FR-072a's rule against it — check the
-  path, load what is resident, store what is absent. It decides no *workload*:
-  which keys, which session and which virtual time all come from the generator.
-  Exit non-zero if the mailbox is absent
-- [x] T068a [US3] Depend on `workload-gen`'s library for the split and encoders so
-  the reactive rule has **one** implementation. Two would let the local and remote
-  paths diverge and make FR-072's guarantee unverifiable. It cannot live in
-  `workload-wire`, a CUDA-free default member, since depending on `shmq-dispatcher`
-  there would unify `interfaces/spdk` into the default build
-- [x] T068b [US3] Serve `Stats` returning **serialized histograms** per `op_kind`,
-  never percentiles: the median of two nodes' medians is not a median, so merging
-  percentiles yields a number belonging to no distribution. Needs
-  `hdrhistogram`'s `serialization` feature
-- [x] T068c [US3] Have the **mailbox-facing code be the only collector** of latency
-  and bandwidth, on both paths, and ship its `Counters` back with `Stats`. Only the
-  agent is near a remote mailbox, so only it can time a `LOOKUP` or count a block
-  that moved; a figure derived from wire timings would describe the transport. The
-  counters are **for reporting only** — they may not gate validity, steer
-  submission, or re-enter the workload
+  mailbox and serve `SubmitTurn` by applying FR-072a's rule against it — check
+  the path, load what is resident, store what is absent. It decides no
+  *workload*: which keys, which session and which virtual time all come from
+  the generator. Exit non-zero if the mailbox is absent
+- [x] T068a [US3] Depend on `workload-gen`'s library for the split and encoders
+  so the reactive rule has **one** implementation. Two would let the local and
+  remote paths diverge and make FR-072's guarantee unverifiable. It cannot live
+  in `workload-wire`, a CUDA-free default member, since depending on
+  `shmq-dispatcher` there would unify `interfaces/spdk` into the default build
+- [x] T068b [US3] Serve `Stats` returning **serialized histograms** per
+  `op_kind`, never percentiles: the median of two nodes' medians is not a
+  median, so merging percentiles yields a number belonging to no distribution.
+  Needs `hdrhistogram`'s `serialization` feature
+- [x] T068c [US3] Have the **mailbox-facing code be the only collector** of
+  latency and bandwidth, on both paths, and ship its `Counters` back with
+  `Stats`. Only the agent is near a remote mailbox, so only it can time a
+  `LOOKUP` or count a block that moved; a figure derived from wire timings
+  would describe the transport. The counters are **for reporting only** — they
+  may not gate validity, steer submission, or re-enter the workload
 - [x] T065 [US3] *(also covers the depth-invariance property)* — see below
 - [x] T069 [US3] Implement the agent's pre-filled reusable payload buffer in
   `crates/workload-node-agent/src/payload.rs`, reconstructing block payloads
@@ -1899,42 +1929,44 @@ operation's key list and issue something plausible.
   migrating session moved uniformly among the others, its stored blocks left
   where they were, and migration inert with fewer than two nodes
 
-**T070 done, 7 tests; 223 in `workload-model`.** `migration_interval` was already in
-the schema per session class, and the example input notes the node *list* is
-deliberately outside the description — so the workload says how often a session moves
-and the deployment says where it can go.
+**T070 done, 7 tests; 223 in `workload-model`.** `migration_interval` was
+already in the schema per session class, and the example input notes the node
+*list* is deliberately outside the description — so the workload says how often
+a session moves and the deployment says where it can go.
 
-**"Its stored blocks stay where they were" is honoured by doing nothing to them**, which
-is the point rather than an omission. A migration changes one field — the session's node
-— and nothing else: same chain, same growth, same turn schedule. The next turn simply
-offers the same path to a different node, where it misses and is fetched or re-stored.
-Moving blocks would model a data migration Certus does not perform, and tracking *which*
-node holds each block would duplicate state the cache owns and would be wrong the moment
-it evicted one. The test asserts it directly: the keys read with migration are
+**"Its stored blocks stay where they were" is honoured by doing nothing to
+them**, which is the point rather than an omission. A migration changes one
+field — the session's node — and nothing else: same chain, same growth, same
+turn schedule. The next turn simply offers the same path to a different node,
+where it misses and is fetched or re-stored. Moving blocks would model a data
+migration Certus does not perform, and tracking *which* node holds each block
+would duplicate state the cache owns and would be wrong the moment it evicted
+one. The test asserts it directly: the keys read with migration are
 **identical** to the keys read with it inert.
 
-**Uniform among the others, not among all** (FR-048): drawing over every node would leave
-a session where it was with probability `1/nodes`, which is not a migration. Implemented
-as `(from + 1 + rand(nodes-1)) % nodes`.
+**Uniform among the others, not among all** (FR-048): drawing over every node
+would leave a session where it was with probability `1/nodes`, which is not a
+migration. Implemented as `(from + 1 + rand(nodes-1)) % nodes`.
 
-**Migrations are applied lazily, at turn time, and that is exact rather than approximate.**
-A session's node matters only when it takes a turn, so a migration between turns is
-invisible except through where the next turn goes. Evaluating it there avoids a second
-event heap and keeps the ordering `plan.rs` asserts in one place. Two details make it
-faithful: the loop applies *every* elapsed interval, because "uniform among the others"
-excludes a different node each time and collapsing two migrations into one would land the
-session on the wrong node; and the next interval is measured from the **due** time rather
-than from when it was noticed, or an idle session's interval would stretch by however
-long it was idle.
+**Migrations are applied lazily, at turn time, and that is exact rather than
+approximate.** A session's node matters only when it takes a turn, so a
+migration between turns is invisible except through where the next turn goes.
+Evaluating it there avoids a second event heap and keeps the ordering `plan.rs`
+asserts in one place. Two details make it faithful: the loop applies *every*
+elapsed interval, because "uniform among the others" excludes a different node
+each time and collapsing two migrations into one would land the session on the
+wrong node; and the next interval is measured from the **due** time rather than
+from when it was noticed, or an idle session's interval would stretch by
+however long it was idle.
 
-**The node draw is taken even on a single node**, so the workload does not depend on the
-deployment: a description run on 1, 2, 3 and 8 nodes produces the *same* key sequence,
-asserted. FR-049's inertness is therefore a matter of taking no migration draws at all
-rather than of skipping placement.
+**The node draw is taken even on a single node**, so the workload does not
+depend on the deployment: a description run on 1, 2, 3 and 8 nodes produces the
+*same* key sequence, asserted. FR-049's inertness is therefore a matter of
+taking no migration draws at all rather than of skipping placement.
 
-`Simulation::migrations()` is reported because an interval long relative to session
-lifetime performs none, and a multi-node measurement that meant to exercise migration
-would otherwise look like one that did.
+`Simulation::migrations()` is reported because an interval long relative to
+session lifetime performs none, and a multi-node measurement that meant to
+exercise migration would otherwise look like one that did.
 - [x] T071 [US3] Implement agent lifecycle in
   `crates/workload-gen/src/agents.rs`: start before the run and stop after,
   both outside the timed window; idempotent startup that replaces a leftover
@@ -1943,80 +1975,88 @@ would otherwise look like one that did.
 
 **T071 done, 9 lifecycle tests + 3 unit; 139 in gen+wire.**
 
-**FR-052 and FR-053 turn out to be two halves of one mechanism**, and reading them
-separately makes the second look impossible: a generator killed with `SIGKILL` runs no
-code, so no teardown it contains can run. Together they work — teardown covers the
-ordinary exit and the panic (a `Drop` guard on `Agents`), and **leftover replacement is
-the backstop for everything else**. A generator that dies without stopping its agents
-leaves them running, and the next run finds them, stops them and starts fresh ones.
-Treating them as separate features is how a teardown bug survives, and this repository
-has already lost an A/B series to one that failed nondeterministically rather than
-visibly.
+**FR-052 and FR-053 turn out to be two halves of one mechanism**, and reading
+them separately makes the second look impossible: a generator killed with
+`SIGKILL` runs no code, so no teardown it contains can run. Together they work
+— teardown covers the ordinary exit and the panic (a `Drop` guard on `Agents`),
+and **leftover replacement is the backstop for everything else**. A generator
+that dies without stopping its agents leaves them running, and the next run
+finds them, stops them and starts fresh ones. Treating them as separate
+features is how a teardown bug survives, and this repository has already lost
+an A/B series to one that failed nondeterministically rather than visibly.
 
-**A leftover is replaced even when it is the current build.** The provenance check makes
-reusing a *stale* agent impossible but says nothing about a current one — same sources,
-still listening, left from a crashed run. That agent holds mailbox channels claimed for
-the previous run, a device allocation filled for its geometry, and counters that would be
-reported as this run's. FR-052 says "replaced, never silently reused", and the operative
-word is *silently*: reuse would produce a run whose numbers included another run's. One
-that answers is asked to stop, which lets it release its channels in order; one that will
-not answer is killed.
+**A leftover is replaced even when it is the current build.** The provenance
+check makes reusing a *stale* agent impossible but says nothing about a current
+one — same sources, still listening, left from a crashed run. That agent holds
+mailbox channels claimed for the previous run, a device allocation filled for
+its geometry, and counters that would be reported as this run's. FR-052 says
+"replaced, never silently reused", and the operative word is *silently*: reuse
+would produce a run whose numbers included another run's. One that answers is
+asked to stop, which lets it release its channels in order; one that will not
+answer is killed.
 
-**`Launcher` is a trait, which is what makes the policy testable.** Ssh appears in exactly
-one impl and nowhere else (FR-054), so detect-replace-verify runs here against a real
-agent on a real loopback port — including a leftover of the current build, a stale
-leftover, a silent squatter, a node that never comes up, and a `Drop` with no explicit
-stop. A policy exercisable only on a cluster would be exercised rarely.
+**`Launcher` is a trait, which is what makes the policy testable.** Ssh appears
+in exactly one impl and nowhere else (FR-054), so detect-replace-verify runs
+here against a real agent on a real loopback port — including a leftover of the
+current build, a stale leftover, a silent squatter, a node that never comes up,
+and a `Drop` with no explicit stop. A policy exercisable only on a cluster
+would be exercised rarely.
 
-**Teardown is verified rather than assumed** (FR-053): `Teardown::port_released` records
-whether the port actually went quiet. An agent that acknowledged a shutdown and kept its
-channels would leave the next run unable to claim them, and that failure would present as
-a mailbox problem rather than a teardown one. A busy port is reported, not raised — the
-run's measurements are already taken, so the caller should see the whole picture.
+**Teardown is verified rather than assumed** (FR-053):
+`Teardown::port_released` records whether the port actually went quiet. An
+agent that acknowledged a shutdown and kept its channels would leave the next
+run unable to claim them, and that failure would present as a mailbox problem
+rather than a teardown one. A busy port is reported, not raised — the run's
+measurements are already taken, so the caller should see the whole picture.
 
-**A defect the test found: the client could hang forever.** `Client` had no read timeout,
-so a peer that accepted a connection and never answered blocked the generator
-indefinitely — the run neither finished nor failed. That contradicts FR-064 in substance:
-a node becoming unreachable must abort the run, and **a hang is not an abort**. Added
-`DEFAULT_READ_TIMEOUT` (30 s, generous because a turn does real work on the far side) plus
-`with_read_timeout` for probes, which the leftover check uses at 2 s — a squatter must be
-discovered in a moment, not after the default.
+**A defect the test found: the client could hang forever.** `Client` had no
+read timeout, so a peer that accepted a connection and never answered blocked
+the generator indefinitely — the run neither finished nor failed. That
+contradicts FR-064 in substance: a node becoming unreachable must abort the
+run, and **a hang is not an abort**. Added `DEFAULT_READ_TIMEOUT` (30 s,
+generous because a turn does real work on the far side) plus
+`with_read_timeout` for probes, which the leftover check uses at 2 s — a
+squatter must be discovered in a moment, not after the default.
 - [x] T072 [US3] Implement node-loss handling in
   `crates/workload-gen/src/agents.rs`: abort the whole run, report it invalid,
   name the lost node, exit 3. Never continue on the survivors — a lost node
   makes its sessions' prefixes unreachable, shrinks the migration target set,
   and redistributes load, so any later number describes a different experiment
 
-**The agent now exits on disconnect, not on idleness** — raised as a question about paced
-mode and it found a real gap.
+**The agent now exits on disconnect, not on idleness** — raised as a question
+about paced mode and it found a real gap.
 
-Two things were checked before changing anything. An established connection has **no idle
-timeout**: `read_header` treats a read timeout with nothing received as a gap, polls the
-stop flag and loops, so arbitrarily long think time is fine. And the client's 30-second
-timeout only applies while a read is outstanding, which in paced mode it is not during
-think time. So a quiet node was never at risk.
+Two things were checked before changing anything. An established connection has
+**no idle timeout**: `read_header` treats a read timeout with nothing received
+as a gap, polls the stop flag and loops, so arbitrarily long think time is
+fine. And the client's 30-second timeout only applies while a read is
+outstanding, which in paced mode it is not during think time. So a quiet node
+was never at risk.
 
-The gap was the other end. `serve` looped on `accept` until stopped, so when the control
-process died the connection threads saw EOF and exited while **the agent kept listening
-forever**, holding its mailbox channels and device allocation. Only the next run's leftover
-replacement cleaned that up, which means FR-053's "release resources even when the
-generator exits abnormally" was *deferred* rather than satisfied.
+The gap was the other end. `serve` looped on `accept` until stopped, so when
+the control process died the connection threads saw EOF and exited while **the
+agent kept listening forever**, holding its mailbox channels and device
+allocation. Only the next run's leftover replacement cleaned that up, which
+means FR-053's "release resources even when the generator exits abnormally" was
+*deferred* rather than satisfied.
 
-A closed socket is the right signal, and better than a timeout: TCP reports that the
-control process is gone — exited, panicked or killed — without anyone having to guess how
-long silence is acceptable. The agent now exits when every connection it once had has
-closed, with two guards so it cannot fire wrongly: a `--linger-secs` grace (default 5) for
-a generator opening its lanes one at a time, and the rule applying only *after* a first
-connection, so a freshly launched agent is not killed for having no clients yet. That case
-has its own much longer `--first-connect-secs` (default 300), because an agent nobody
+A closed socket is the right signal, and better than a timeout: TCP reports
+that the control process is gone — exited, panicked or killed — without anyone
+having to guess how long silence is acceptable. The agent now exits when every
+connection it once had has closed, with two guards so it cannot fire wrongly: a
+`--linger-secs` grace (default 5) for a generator opening its lanes one at a
+time, and the rule applying only *after* a first connection, so a freshly
+launched agent is not killed for having no clients yet. That case has its own
+much longer `--first-connect-secs` (default 300), because an agent nobody
 connects to was launched for a run that never came.
 
-Verified live: an agent whose peer vanished without a `Shutdown` logged *"every connection
-closed and none reopened within 3s; the control process is gone, so releasing this node's
-resources"* and exited. FR-053 amended to require it, and to forbid an idle timeout.
+Verified live: an agent whose peer vanished without a `Shutdown` logged *"every
+connection closed and none reopened within 3s; the control process is gone, so
+releasing this node's resources"* and exited. FR-053 amended to require it, and
+to forbid an idle timeout.
 
-**T073b done: a cluster run works end to end.** Driven over TCP through the agent into a real
-Certus, exit 0:
+**T073b done: a cluster run works end to end.** Driven over TCP through the
+agent into a real Certus, exit 0:
 
 ```
 check   152 resident, 0 pending, 76 miss of 228 (66.7% resident)
@@ -2025,160 +2065,182 @@ CHECK 12us  TOUCH 15  RESERVE 23  COPY_TO_STORE 186  COMMIT_STORE 26  LOOKUP 208
 nodes 1 →  127.0.0.1   166 requests, 152 blocks read, 76 written
 ```
 
-The two moves came first, as recorded: the description is now loaded and the stop handler
-installed **before** the node check, and `attach` happens only on the local branch — so a
-remote run no longer requires a local mailbox, which is what FR-079's off-cluster goal needs.
-`live_report` is extracted, so both paths render one report and neither can say something the
-other would not.
+The two moves came first, as recorded: the description is now loaded and the
+stop handler installed **before** the node check, and `attach` happens only on
+the local branch — so a remote run no longer requires a local mailbox, which is
+what FR-079's off-cluster goal needs. `live_report` is extracted, so both paths
+render one report and neither can say something the other would not.
 
-**Two gaps the first live attempt exposed.** The generator tried to **ssh to localhost** and was
-refused on host-key verification — correct behaviour, exit 4, but it showed there was no way to
-use an agent somebody else is managing. `--no-launch` now covers that, with `NoLaunch` skipping
-both the launch and the leftover replacement: shutting an agent down and then being unable to
-start one would leave the run with nothing to talk to. It weakens FR-052 deliberately, for the
-case where the caller owns the daemon's lifecycle, which is why it is opt-in.
+**Two gaps the first live attempt exposed.** The generator tried to **ssh to
+localhost** and was refused on host-key verification — correct behaviour, exit
+4, but it showed there was no way to use an agent somebody else is managing.
+`--no-launch` now covers that, with `NoLaunch` skipping both the launch and the
+leftover replacement: shutting an agent down and then being unable to start one
+would leave the run with nothing to talk to. It weakens FR-052 deliberately,
+for the case where the caller owns the daemon's lifecycle, which is why it is
+opt-in.
 
-And **`kill -9` on an agent leaks its mailbox channel claims.** The server cannot know the
-holder is gone, so they stay claimed until it restarts — the next agent reported "could only
-claim 0 of 2 channels". That is the operational reason FR-052's replacement path asks a leftover
-to stop rather than killing it, and a reason not to `-9` an agent.
+And **`kill -9` on an agent leaks its mailbox channel claims.** The server
+cannot know the holder is gone, so they stay claimed until it restarts — the
+next agent reported "could only claim 0 of 2 channels". That is the operational
+reason FR-052's replacement path asks a leftover to stop rather than killing
+it, and a reason not to `-9` an agent.
 
-Also fixed a wrong number rather than a missing one: the remote report printed `1 of 0 channels`
-because the node capacity was passed as zero. It is now the sum the nodes reported, captured
-before they are stopped.
+Also fixed a wrong number rather than a missing one: the remote report printed
+`1 of 0 channels` because the node capacity was passed as zero. It is now the
+sum the nodes reported, captured before they are stopped.
 
-**T073a done: the remote driver, 3 tests.** Written in the shape FR-079's single driver will
-take, not as a counterpart to `live::run`. The producer is now **shared**, with routing as a
-closure — locally session-id-modulo-lanes, remotely `session.node()` — because the only thing
-that differs between the paths is where a turn is sent. Scoped threads hand each lane a
-distinct `&mut Agent`, so the compiler establishes what a raw-pointer split would have had a
+**T073a done: the remote driver, 3 tests.** Written in the shape FR-079's
+single driver will take, not as a counterpart to `live::run`. The producer is
+now **shared**, with routing as a closure — locally session-id-modulo-lanes,
+remotely `session.node()` — because the only thing that differs between the
+paths is where a turn is sent. Scoped threads hand each lane a distinct `&mut
+Agent`, so the compiler establishes what a raw-pointer split would have had a
 comment promise.
 
 **Two defects the tests caught, both invisible in a single-node run:**
 
-1. **`produce` created the simulation without the node count**, so every session was placed on
-   node 0 and a three-node run drove one node. Placement belongs to the simulation (FR-048) and
-   the router only reads the answer — the node count had to be passed in.
-2. **Each node's counters were merged into a local total but never written into the lane stats
-   the report reads**, so a completed cluster run reported having moved nothing.
+1. **`produce` created the simulation without the node count**, so every
+   session was placed on node 0 and a three-node run drove one node. Placement
+   belongs to the simulation (FR-048) and the router only reads the answer —
+   the node count had to be passed in.
+2. **Each node's counters were merged into a local total but never written into
+   the lane stats the report reads**, so a completed cluster run reported
+   having moved nothing.
 
-Counters sum and **histograms merge**: three stubs recording three samples each give a merged
-histogram of nine, asserted — not three, which taking one node's would give, and not an average.
-Losing a node mid-run aborts and names it.
+Counters sum and **histograms merge**: three stubs recording three samples each
+give a merged histogram of nine, asserted — not three, which taking one node's
+would give, and not an average. Losing a node mid-run aborts and names it.
 
-**Not yet wired to the CLI (T073b).** `--node` still starts, verifies and refuses. Two things
-must move first: `attach` runs before the node check, so a remote run would still demand a local
-mailbox — contradicting FR-079's off-cluster goal — and the description is loaded after the
-point the remote branch needs it. `live_report` is extracted ready for it, so both paths render
-one report. Attempting the move with little room left produced a tangle that was reverted rather
-than committed half-done.
+**Not yet wired to the CLI (T073b).** `--node` still starts, verifies and
+refuses. Two things must move first: `attach` runs before the node check, so a
+remote run would still demand a local mailbox — contradicting FR-079's
+off-cluster goal — and the description is loaded after the point the remote
+branch needs it. `live_report` is extracted ready for it, so both paths render
+one report. Attempting the move with little room left produced a tangle that
+was reverted rather than committed half-done.
 
-**T073 done: the flags and the exit code, and a gap in this list named rather than
-papered over.** `--node` (repeatable), `--agent-port` and `--agent-binary` are in, and a
-refused peer is **exit 4**, distinct from a completed-but-invalid run (3) because the actions
-differ: an invalid run may be worth repeating, while a refused peer means the deployment is
-wrong — a stale agent, a lane count the node cannot serve, a block size disagreeing with the
-description — and repeating it will fail identically. `exit`'s `dead_code` allowance is gone,
+**T073 done: the flags and the exit code, and a gap in this list named rather
+than papered over.** `--node` (repeatable), `--agent-port` and `--agent-binary`
+are in, and a refused peer is **exit 4**, distinct from a completed-but-invalid
+run (3) because the actions differ: an invalid run may be worth repeating,
+while a refused peer means the deployment is wrong — a stale agent, a lane
+count the node cannot serve, a block size disagreeing with the description —
+and repeating it will fail identically. `exit`'s `dead_code` allowance is gone,
 since `PEER` is now used.
 
-**No task covered the remote driver**, which is an omission in this list rather than a
-deliberate deferral: T063-T074 cover the wire, the handshake, the agent, placement, lifecycle,
-node loss, the CLI and an equivalence test — but nothing routes turns to nodes. It is now
-T073a, and FR-079 makes it the *single* driver, so it should be built once in the shape the
-local path will adopt rather than as a second driver beside one that is about to be deleted.
+**No task covered the remote driver**, which is an omission in this list rather
+than a deliberate deferral: T063-T074 cover the wire, the handshake, the agent,
+placement, lifecycle, node loss, the CLI and an equivalence test — but nothing
+routes turns to nodes. It is now T073a, and FR-079 makes it the *single*
+driver, so it should be built once in the shape the local path will adopt
+rather than as a second driver beside one that is about to be deleted.
 
-`--node` therefore starts and verifies the agents — startup is outside the timed window
-(FR-050) — and then **refuses plainly**, naming T073a. A flag that connected and drove
-nothing would report a run that never happened, which is the one outcome worse than an error.
-The agents are torn down on the way out, so the refusal leaves nothing holding channels.
+`--node` therefore starts and verifies the agents — startup is outside the
+timed window (FR-050) — and then **refuses plainly**, naming T073a. A flag that
+connected and drove nothing would report a run that never happened, which is
+the one outcome worse than an error. The agents are torn down on the way out,
+so the refusal leaves nothing holding channels.
 
-**T072 done, 3 more tests; 142 in gen+wire.** `NodeLost` carries the node, what the run
-was doing, and the transport's own words, and its message spells out all three reasons
-continuing is wrong — because "carry on with the survivors" is the tempting thing to do
-and it produces a *plausible* number for a different experiment.
+**T072 done, 3 more tests; 142 in gen+wire.** `NodeLost` carries the node, what
+the run was doing, and the transport's own words, and its message spells out
+all three reasons continuing is wrong — because "carry on with the survivors"
+is the tempting thing to do and it produces a *plausible* number for a
+different experiment.
 
-**Every transport failure counts as losing the node, with no retry.** A clean close, a
-timeout, a protocol error: to a run they all mean the node is not usable, and a retry only
-extends the window in which the run is measuring a cluster it no longer has.
+**Every transport failure counts as losing the node, with no retry.** A clean
+close, a timeout, a protocol error: to a run they all mean the node is not
+usable, and a retry only extends the window in which the run is measuring a
+cluster it no longer has.
 
-`lost_node` is a **separate report field** rather than only prose in `invalid_reason`, so a
-sweep driver can act on it without parsing English: a lost node is worth retrying the run
-for, whereas an underrun means the generator itself needs looking at.
+`lost_node` is a **separate report field** rather than only prose in
+`invalid_reason`, so a sweep driver can act on it without parsing English: a
+lost node is worth retrying the run for, whereas an underrun means the
+generator itself needs looking at.
 
-**This is where T071's read timeout pays off.** A node that accepts and stops answering is
-now detected in bounded time and asserted as such — before the timeout it would have hung,
-and a run that neither finishes nor fails cannot even be *reported* as invalid. A failed
-run still tears its remaining agents down, because a run that failed must still leave
-nothing holding mailbox channels.
+**This is where T071's read timeout pays off.** A node that accepts and stops
+answering is now detected in bounded time and asserted as such — before the
+timeout it would have hung, and a run that neither finishes nor fails cannot
+even be *reported* as invalid. A failed run still tears its remaining agents
+down, because a run that failed must still leave nothing holding mailbox
+channels.
 
-**Two fixture bugs worth recording, both mine.** The first test claimed a dead node went
-unnoticed; it had killed the agent but not waited for it to actually go down, and a
-connection already accepted served one more frame. The second surfaced only after that
-fix: `LocalLauncher::kill` stopped *every* agent, so starting a second one killed the
-first — because replacing a non-existent leftover calls `kill`. The real
-`SshLauncher::kill` is port-scoped precisely so it cannot kill another run's agent on the
-same host, and the fixture had to model that or it would pass tests the production
-launcher would fail.
+**Two fixture bugs worth recording, both mine.** The first test claimed a dead
+node went unnoticed; it had killed the agent but not waited for it to actually
+go down, and a connection already accepted served one more frame. The second
+surfaced only after that fix: `LocalLauncher::kill` stopped *every* agent, so
+starting a second one killed the first — because replacing a non-existent
+leftover calls `kill`. The real `SshLauncher::kill` is port-scoped precisely so
+it cannot kill another run's agent on the same host, and the fixture had to
+model that or it would pass tests the production launcher would fail.
 - [x] T073 [US3] Add `--node` and `--agent-port` to
   `crates/workload-gen/src/cli.rs`, with exit code 4 for a refused peer
-- [x] T073a [US3] **The remote driver itself**, which no task covered — an omission in this
-  list rather than work anybody chose to defer. It routes each turn to `session.node()`'s
-  agent, collects `TurnOutcome`s, and merges each node's `Counters` and **histograms** at the
-  end (counters sum; quantiles do not, so the merge is of distributions and the percentiles are
-  taken after). Under FR-079 this **is** the single driver, so it should be built once, in the
-  shape the local path will adopt, rather than as a second driver beside it. It also needs the
-  producer currently private to `live.rs` — that should be shared rather than copied, for
-  T068a's reason
-- [x] T073b [US3] Wire `remote::run` into `live_run`. Two things must move for it: `attach`
-  currently runs **before** the node check, so a remote run would still demand a local mailbox —
-  which contradicts FR-079's off-cluster goal — and the description is loaded after the point the
-  remote branch needs it. The report builder is already extracted for this (`live_report`), so
-  both paths render one report
+- [x] T073a [US3] **The remote driver itself**, which no task covered — an
+  omission in this list rather than work anybody chose to defer. It routes each
+  turn to `session.node()`'s agent, collects `TurnOutcome`s, and merges each
+  node's `Counters` and **histograms** at the end (counters sum; quantiles do
+  not, so the merge is of distributions and the percentiles are taken after).
+  Under FR-079 this **is** the single driver, so it should be built once, in
+  the shape the local path will adopt, rather than as a second driver beside
+  it. It also needs the producer currently private to `live.rs` — that should
+  be shared rather than copied, for T068a's reason
+- [x] T073b [US3] Wire `remote::run` into `live_run`. Two things must move for
+  it: `attach` currently runs **before** the node check, so a remote run would
+  still demand a local mailbox — which contradicts FR-079's off-cluster goal —
+  and the description is loaded after the point the remote branch needs it. The
+  report builder is already extracted for this (`live_report`), so both paths
+  render one report
 - [x] T074 [P] [US3] Test in `crates/workload-wire/tests/loopback.rs`:
   submitting a plan through a loopback agent stub yields the same operation
   sequence as the local path — the transport-level form of FR-072
 
-- [ ] T092 [US3] *(AGREED, after T074; **recommended trigger: do it with FR-078's paced mode**,
-  because pacing changes when a request is submitted and would otherwise be built in two drivers.
-  Not urgent on its own: T074 plus the single executor already prevent the divergence it guards
-  against. Rule while both paths exist: **add features to neither twice**.)* Proxy the **local** node through an agent
-  too, so there is one transport, one driver and one cleanup mechanism. Have the generator
-  launch a local agent itself without ssh, so `run description.yml` still needs no setup; add
-  `CLEAR_MEMORY_TIER` as a frame, since the generator issues it directly today; then delete
-  the direct mailbox path and let `workload-gen` drop its CUDA and `shm-queue` dependencies —
-  which also stops it enabling `interfaces/spdk` transitively, and lets it become a workspace
-  default member
-- [ ] T092a [US3] After T092, re-point the loopback-equivalence test (T074) at the *previous*
-  behaviour as a regression guard, and re-measure the live numbers to confirm the reported
-  per-op latency and bandwidth are unchanged — they should be, since the agent already times
-  its own mailbox requests, and if they move something else is wrong
+- [ ] T092 [US3] *(AGREED, after T074; **recommended trigger: do it with
+  FR-078's paced mode**, because pacing changes when a request is submitted and
+  would otherwise be built in two drivers. Not urgent on its own: T074 plus the
+  single executor already prevent the divergence it guards against. Rule while
+  both paths exist: **add features to neither twice**.)* Proxy the **local**
+  node through an agent too, so there is one transport, one driver and one
+  cleanup mechanism. Have the generator launch a local agent itself without
+  ssh, so `run description.yml` still needs no setup; add `CLEAR_MEMORY_TIER`
+  as a frame, since the generator issues it directly today; then delete the
+  direct mailbox path and let `workload-gen` drop its CUDA and `shm-queue`
+  dependencies — which also stops it enabling `interfaces/spdk` transitively,
+  and lets it become a workspace default member
+- [ ] T092a [US3] After T092, re-point the loopback-equivalence test (T074) at
+  the *previous* behaviour as a regression guard, and re-measure the live
+  numbers to confirm the reported per-op latency and bandwidth are unchanged —
+  they should be, since the agent already times its own mailbox requests, and
+  if they move something else is wrong
 
-**T074 done, 3 tests. US3's implementation is complete.** A plan driven through a real
-loopback agent submits **exactly** what the local path would have executed — same sessions,
-same key paths, same event polls, in the same order.
+**T074 done, 3 tests. US3's implementation is complete.** A plan driven through
+a real loopback agent submits **exactly** what the local path would have
+executed — same sessions, same key paths, same event polls, in the same order.
 
-**It lives in `workload-gen/tests/`, not `workload-wire/tests/` as the task said**, because
-that cannot work: the comparison needs a plan and a producer, both in `workload-gen`, which
-already depends on `workload-wire`. A test there would need the dependency to run both ways.
+**It lives in `workload-gen/tests/`, not `workload-wire/tests/` as the task
+said**, because that cannot work: the comparison needs a plan and a producer,
+both in `workload-gen`, which already depends on `workload-wire`. A test there
+would need the dependency to run both ways.
 
-**What it compares, and why that is the whole claim.** Both paths reduce a turn to a session
-id and a key path; what follows is `exec::TurnExecutor`, of which there is exactly one
-(T068a). So identical paths imply identical operations, and the argument has three parts:
-`op_stream.rs` establishes that the executor turns a path into the right mailbox operations,
-checked against the dispatcher's own rules; the single executor is structural rather than
-tested; and **this file establishes that the wire carries the same paths**. Comparing mailbox
-traffic directly would need a live server on both sides or a mailbox trait to mock, and the
-middle part is why that is unnecessary rather than merely inconvenient.
+**What it compares, and why that is the whole claim.** Both paths reduce a turn
+to a session id and a key path; what follows is `exec::TurnExecutor`, of which
+there is exactly one (T068a). So identical paths imply identical operations,
+and the argument has three parts: `op_stream.rs` establishes that the executor
+turns a path into the right mailbox operations, checked against the
+dispatcher's own rules; the single executor is structural rather than tested;
+and **this file establishes that the wire carries the same paths**. Comparing
+mailbox traffic directly would need a live server on both sides or a mailbox
+trait to mock, and the middle part is why that is unnecessary rather than
+merely inconvenient.
 
-Two supporting tests keep the comparison from being vacuous: a turn's path must run from the
-root and **grow** across a session's turns, so the equivalence is over real prefixes rather
-than empty lists; and a different seed must produce different keys, so the comparison
-demonstrably has teeth.
+Two supporting tests keep the comparison from being vacuous: a turn's path must
+run from the root and **grow** across a session's turns, so the equivalence is
+over real prefixes rather than empty lists; and a different seed must produce
+different keys, so the comparison demonstrably has teeth.
 
-**This is the evidence T075 needs.** FR-079 collapses the local path onto this one, and a test
-comparing them had to exist *before* one is deleted — otherwise the unification is a change
-nobody can show is inert. After T075 it becomes a regression guard against the deleted
-behaviour.
+**This is the evidence T075 needs.** FR-079 collapses the local path onto this
+one, and a test comparing them had to exist *before* one is deleted — otherwise
+the unification is a change nobody can show is inert. After T075 it becomes a
+regression guard against the deleted behaviour.
 
 **Checkpoint**: all three execution paths work; US1 and US2 are unaffected by
 US3.
@@ -2219,45 +2281,46 @@ step-shaped, and the two ranking modes reorder the policies.
 
 **T079 done, 5 tests (1 `#[ignore]`d); 386 across the three crates.** The check
 replays the plan's own reference stream through an LRU simulator at five
-capacities, so it needs no server, no accelerator and no cluster and runs in the
-ordinary gate. That is deliberately not a test of Certus's policy: it is a test
-of whether the *workload* produces a reference pattern two policies could differ
-over at all — a necessary condition for the real measurement.
+capacities, so it needs no server, no accelerator and no cluster and runs in
+the ordinary gate. That is deliberately not a test of Certus's policy: it is a
+test of whether the *workload* produces a reference pattern two policies could
+differ over at all — a necessary condition for the real measurement.
 
 **Getting it to have teeth took three corrections, all found by measuring, and
-SC-005 and Scenario 6 are amended accordingly.** Each one had the check passing a
-uniform workload, which is the failure this task exists to prevent:
+SC-005 and Scenario 6 are amended accordingly.** Each one had the check passing
+a uniform workload, which is the failure this task exists to prevent:
 
 1. **The overall hit rate is the wrong curve.** The reactive rule (FR-072a)
    re-offers a session's whole prefix every turn, so most references are a
-   session re-reading what it stored moments ago; they miss below the concurrent
-   footprint and hit above it. That is a cliff — measured, ~85% of the rise in
-   one step — and it is a cliff whether popularity is concentrated or flat, so
-   the overall curve fails for *both* descriptions and separates neither. The
-   swept curve is now the **cross-session** hit rate: references to a block some
-   other session brought in, which are exactly the references a replacement
-   decision decides. 40% in its largest step concentrated, 94% uniform.
+   session re-reading what it stored moments ago; they miss below the
+   concurrent footprint and hit above it. That is a cliff — measured, ~85% of
+   the rise in one step — and it is a cliff whether popularity is concentrated
+   or flat, so the overall curve fails for *both* descriptions and separates
+   neither. The swept curve is now the **cross-session** hit rate: references
+   to a block some other session brought in, which are exactly the references a
+   replacement decision decides. 40% in its largest step concentrated, 94%
+   uniform.
 2. **The ladder must stop below the key space.** The first version ran 1%-100%
-   of the key space. At 100% nothing is ever evicted, so the hit rate is 1.0 for
-   any workload at all, and both curves were pinned there — which flattered
-   every shape that reached it and is how a uniform workload first passed. It is
-   also the one capacity at which no policy can differ from another, so it is the
-   least informative point available. Now 0.1%-10%, still a hundredfold, wholly
-   inside the region where eviction bites.
+   of the key space. At 100% nothing is ever evicted, so the hit rate is 1.0
+   for any workload at all, and both curves were pinned there — which flattered
+   every shape that reached it and is how a uniform workload first passed. It
+   is also the one capacity at which no policy can differ from another, so it
+   is the least informative point available. Now 0.1%-10%, still a hundredfold,
+   wholly inside the region where eviction bites.
 3. **A rise must also be substantial, not merely smooth.** "No step over half"
-   is scale-free and so passes a curve that barely moves; a 6-point rise across a
-   hundredfold capacity range gives two policies almost nothing to differ over.
-   `MINIMUM_RISE` is 10 points.
+   is scale-free and so passes a curve that barely moves; a 6-point rise across
+   a hundredfold capacity range gives two policies almost nothing to differ
+   over. `MINIMUM_RISE` is 10 points.
 
 **Two findings about descriptions came out of it, both now in the quickstart.**
 Concentration is not enough — it has to be *scale-free*: an `exponential`
 selection produces one hot band and therefore one cliff, while an `empirical`
-ladder `[1, 4, 16, ...]` with `interpolate: true` puts equal mass in each octave
-of rank, which is a power law over instance index. And popularity being
+ladder `[1, 4, 16, ...]` with `interpolate: true` puts equal mass in each
+octave of rank, which is a power law over instance index. And popularity being
 scale-free is not sufficient either: with `turns` and `uses.count` held
 constant every session has the same footprint, so the aggregate working set has
-one characteristic size and the curve cliffs there however the pool is selected.
-The working set has to be scale-free too.
+one characteristic size and the curve cliffs there however the pool is
+selected. The working set has to be scale-free too.
 
 **"A uniform workload fails by construction" is withdrawn as too strong.** It
 fails by *measurement* — at five seeds of five, with the largest step steady
@@ -2267,11 +2330,12 @@ producing conclusions that later measurement reversed; the seed sweep is
 `#[ignore]`d for runtime and named in the module docs.
 
 Not a finding, but worth recording since it cost time: clippy 1.96 added
-`manual_checked_ops`, which fires on `components/interfaces/src/iblock_device.rs`
-(lines 243 and 252) and so aborts `cargo clippy -D warnings` for any crate that
-compiles that module — which under `--features live` includes `workload-gen`.
-That masked several new lints in this app until `--no-deps` was used. Both are
-pre-existing repo code, unrelated to this branch.
+`manual_checked_ops`, which fires on
+`components/interfaces/src/iblock_device.rs` (lines 243 and 252) and so aborts
+`cargo clippy -D warnings` for any crate that compiles that module — which
+under `--features live` includes `workload-gen`. That masked several new lints
+in this app until `--no-deps` was used. Both are pre-existing repo code,
+unrelated to this branch.
 - [x] T080 [US4] Document the policy-comparison procedure in `README.md`,
   including that hit-dependent comparisons need repetition with a stated
   significance test because mint races are preserved deliberately, and that n ≥
@@ -2282,89 +2346,100 @@ orientation half — so this created it with the comparison procedure and a note
 saying what is still missing, rather than waiting for T081 and leaving the
 measurement undocumented in the meantime.
 
-Four sections, because the task's two requirements are only half of what makes a
-policy comparison trustworthy here:
+Four sections, because the task's two requirements are only half of what makes
+a policy comparison trustworthy here:
 
 - **Why hit-dependent comparisons are not reproducible**, stated as a
   consequence of a deliberate decision rather than a caveat: the plan is
   deterministic but mint races are preserved (FR-035, FR-036), so a run's hit
-  rate is a sample. Hence repetition, a significance test stated *before* looking
-  at the numbers, and **n >= 8** — justified by the two recorded incidents rather
-  than asserted, since a floor with a reason attached survives contact with a
-  deadline better than one without.
+  rate is a sample. Hence repetition, a significance test stated *before*
+  looking at the numbers, and **n >= 8** — justified by the two recorded
+  incidents rather than asserted, since a floor with a reason attached survives
+  contact with a deadline better than one without.
 - **The four checks before quoting a figure**, each of which corresponds to a
   measurement this project has already got wrong: two servers on one mailbox, a
-  percentile without its n, a warm tier from the previous arm, and a stale agent
-  build.
+  percentile without its n, a warm tier from the previous arm, and a stale
+  agent build.
 - **Sweeping capacity**, pointing at T079's check and carrying its three
   corrections forward, so someone writing a description to sweep does not
   rediscover them.
 - **Figures that do not combine across nodes** — counters sum, percentiles must
-  be merged as histograms, distinct keys must not be added at all. Worth a table
-  because the last two are the same arithmetic error one type apart, and the
-  report's shape (merged histograms, `distinct_keys` as the generator's own
+  be merged as histograms, distinct keys must not be added at all. Worth a
+  table because the last two are the same arithmetic error one type apart, and
+  the report's shape (merged histograms, `distinct_keys` as the generator's own
   count) is otherwise unexplained.
 
-Also ticked T074, whose checkbox was missed when it was committed as `2e5e7626`;
-its progress note was already in place.
+Also ticked T074, whose checkbox was missed when it was committed as
+`2e5e7626`; its progress note was already in place.
 
-**T078 done.** The hit/miss/pending split was already there from FR-072a's work, so what this
-added were the two fields a sweep cannot do without.
+**T078 done.** The hit/miss/pending split was already there from FR-072a's
+work, so what this added were the two fields a sweep cannot do without.
 
-**`distinct_keys` is the generator's count, not the nodes'.** Distinct counts do **not** sum: a
-shared prefix block referenced by sessions on two nodes is one key, and adding each node's count
-would double it — the same arithmetic error as averaging two nodes' percentiles, one type along.
-So it is counted once, by the producer, over the paths it built. It is `None` unless asked for,
-because maintaining the set costs an insert per key reference on the producer's own path: a
-throughput run should not pay that, and a sweep needs it, since a hit rate is only interpretable
-against the size of the key space it was measured over.
+**`distinct_keys` is the generator's count, not the nodes'.** Distinct counts
+do **not** sum: a shared prefix block referenced by sessions on two nodes is
+one key, and adding each node's count would double it — the same arithmetic
+error as averaging two nodes' percentiles, one type along. So it is counted
+once, by the producer, over the paths it built. It is `None` unless asked for,
+because maintaining the set costs an insert per key reference on the producer's
+own path: a throughput run should not pay that, and a sweep needs it, since a
+hit rate is only interpretable against the size of the key space it was
+measured over.
 
-**`working_set` reports what the `selection` spread actually covers**, per shared class, as the
-spread's p90 after truncation — the rank band carrying most of the mass. Deliberately *not* a
-count of ranks ever drawn, which would grow with the run's length and so describe the run rather
-than the description; and p90 rather than the mean, because a concentrated distribution's mean
-sits near rank 0 and says nothing about how far its references reach.
+**`working_set` reports what the `selection` spread actually covers**, per
+shared class, as the spread's p90 after truncation — the rank band carrying
+most of the mass. Deliberately *not* a count of ranks ever drawn, which would
+grow with the run's length and so describe the run rather than the description;
+and p90 rather than the mean, because a concentrated distribution's mean sits
+near rank 0 and says nothing about how far its references reach.
 
-`None` there is the case a sweep must be able to recognise rather than infer: it means selection
-is uniform, so the working set *is* the key space, the curve will step rather than slope, and the
-run cannot discriminate between policies however it is swept. Reporting that as a field is what
-stops it being guessed from the shape of the answer.
+`None` there is the case a sweep must be able to recognise rather than infer:
+it means selection is uniform, so the working set *is* the key space, the curve
+will step rather than slope, and the run cannot discriminate between policies
+however it is swept. Reporting that as a field is what stops it being guessed
+from the shape of the answer.
 
-**T075-T077 done, 5 tests; 228 in `workload-model`.** The `selection` distribution is over
-**rank**, so a spread narrower than the pool makes the working set smaller than the key space
-while the key space stays as large as the pool. That is the knob a capacity sweep needs: under
-uniform selection the working set *is* the whole key space, so a cache either holds all of it or
-thrashes, the curve has a step rather than a slope, and no two eviction policies can be
-distinguished — which is the measurement US4 exists to make possible.
+**T075-T077 done, 5 tests; 228 in `workload-model`.** The `selection`
+distribution is over **rank**, so a spread narrower than the pool makes the
+working set smaller than the key space while the key space stays as large as
+the pool. That is the knob a capacity sweep needs: under uniform selection the
+working set *is* the whole key space, so a cache either holds all of it or
+thrashes, the curve has a step rather than a slope, and no two eviction
+policies can be distinguished — which is the measurement US4 exists to make
+possible.
 
-**T075 and T076 were one change, not two.** `rank_by` was inert *by construction* rather than by
-omission: a uniform draw is the same distribution however the ranks are numbered. Only a
-concentrated distribution over rank makes `slot` and `recency` differ — under `slot` a position
-is hot and each new occupant inherits that heat, under `recency` rank 0 is the newest instance so
+**T075 and T076 were one change, not two.** `rank_by` was inert *by
+construction* rather than by omission: a uniform draw is the same distribution
+however the ranks are numbered. Only a concentrated distribution over rank
+makes `slot` and `recency` differ — under `slot` a position is hot and each new
+occupant inherits that heat, under `recency` rank 0 is the newest instance so
 heat decays as newer ones arrive. Measured both ways.
 
-**Rejection has a budget, and running out is counted.** Sampling without replacement from a
-concentrated distribution has no closed form, and the obvious alternative — drawing into the
-shrinking list of remaining candidates — reshapes the distribution as the list shrinks, so a
-concentrated draw would flatten exactly when asked for the most instances. A duplicate rank is
-therefore redrawn, and when the budget runs out the remainder is filled **in rank order**, the
-least distorting completion available. `SelectionStats::exhausted_retries` counts it, because
-that case means the description asked one session for more instances than its spread covers and
-the symptom would otherwise be a hit-rate curve that merely looked a little flat.
+**Rejection has a budget, and running out is counted.** Sampling without
+replacement from a concentrated distribution has no closed form, and the
+obvious alternative — drawing into the shrinking list of remaining candidates —
+reshapes the distribution as the list shrinks, so a concentrated draw would
+flatten exactly when asked for the most instances. A duplicate rank is
+therefore redrawn, and when the budget runs out the remainder is filled **in
+rank order**, the least distorting completion available.
+`SelectionStats::exhausted_retries` counts it, because that case means the
+description asked one session for more instances than its spread covers and the
+symptom would otherwise be a hit-rate curve that merely looked a little flat.
 
-**Why the draw is sorted into slot order — the reason that was not written down.** Asked
-directly, and the recorded reason (a session's prefix must not be rearranged as recency ranks
-change) is the lesser one. Keys are a rolling prefix, so two sessions share a prefix only if they
-lay the same instances down in the same *order*. Returning them in sampled order would have two
-sessions holding the same set of *k* instances agree only when their orderings coincided —
-`1/k!` — so the shared pools would produce almost no reuse while appearing to be shared. **A
-canonical order takes that from `1/k!` to certain**, and it makes partial sharing systematic:
-`{3,7}` and `{3,9}` share slot 3 and diverge after, because the common part of their sets is a
-common prefix once sorted. Slot order in particular interacts with `rank_by: slot`, where a
-concentrated selection favours low ranks — so the hottest instances also sit at the *front* of a
-chain, putting the heaviest sharing at the prefix root, which is the shape a real workload has.
-That was not designed; it falls out of the two choices, and it is now recorded before either is
-changed.
+**Why the draw is sorted into slot order — the reason that was not written
+down.** Asked directly, and the recorded reason (a session's prefix must not be
+rearranged as recency ranks change) is the lesser one. Keys are a rolling
+prefix, so two sessions share a prefix only if they lay the same instances down
+in the same *order*. Returning them in sampled order would have two sessions
+holding the same set of *k* instances agree only when their orderings coincided
+— `1/k!` — so the shared pools would produce almost no reuse while appearing to
+be shared. **A canonical order takes that from `1/k!` to certain**, and it
+makes partial sharing systematic: `{3,7}` and `{3,9}` share slot 3 and diverge
+after, because the common part of their sets is a common prefix once sorted.
+Slot order in particular interacts with `rank_by: slot`, where a concentrated
+selection favours low ranks — so the hottest instances also sit at the *front*
+of a chain, putting the heaviest sharing at the prefix root, which is the shape
+a real workload has. That was not designed; it falls out of the two choices,
+and it is now recorded before either is changed.
 
 **Checkpoint**: all four stories are independently functional.
 
@@ -2382,11 +2457,12 @@ changed.
     module-level example in every public module, and a runnable example on each
     principal public type and the entry points a caller drives it through.
   - **The two binaries** (`workload-gen`, `workload-node-agent`) get enough
-    detail to read the program: module headers saying what the module is for and
-    doc comments on its items. Their `pub` surface exists for reuse *inside* this
-    application — `workload-node-agent` depending on `workload-gen`'s library so
-    FR-072a has one implementation — not as an API for anyone else, so an example
-    is added where it teaches something and not as a rule.
+    detail to read the program: module headers saying what the module is for
+    and doc comments on its items. Their `pub` surface exists for reuse
+    *inside* this application — `workload-node-agent` depending on
+    `workload-gen`'s library so FR-072a has one implementation — not as an API
+    for anyone else, so an example is added where it teaches something and not
+    as a rule.
   - **Not required anywhere**: an example per trivial accessor, per byte-level
     primitive (`Writer::u8`), or per constant. FFI declarations cannot carry a
     runnable example and are exempt.
@@ -2395,12 +2471,13 @@ changed.
   with runnable examples", by the user's decision, and the reason is worth
   keeping**: that convention comes from the component framework, where an
   interface is a contract between independently developed components and an
-  example is how the contract is pinned. Nothing here is published for others to
-  build against — these five crates are one application, and its `pub` keywords
-  are mostly crate-boundary plumbing. Taken literally the rule wanted 552 new
-  examples, including ones for `const HELLO` and for `extern "C"` declarations
-  that cannot run, which would have added a large gate cost and a lot of
-  near-duplicate snippets to document a contract that has no second party.
+  example is how the contract is pinned. Nothing here is published for others
+  to build against — these five crates are one application, and its `pub`
+  keywords are mostly crate-boundary plumbing. Taken literally the rule wanted
+  552 new examples, including ones for `const HELLO` and for `extern "C"`
+  declarations that cannot run, which would have added a large gate cost and a
+  lot of near-duplicate snippets to document a contract that has no second
+  party.
 - [x] T083 [P] Add a doc test asserting that
   `specs/001-synthetic-workload-generator/contracts/workload-input.example.yml`
   parses and validates, so the shipped example cannot drift from the parser
@@ -2440,63 +2517,66 @@ changed.
   eight generations, against 0.04 for residual-life seeding. T024 should assert
   that structure rather than the digits, so it cannot go flaky.
 
-**T062y done, and it found a second wrong check in the same code.** Five flags, one
-destination each, at least one required; `--format` and `--output` are gone from
-`emit`. 17 tests with `parquet`, 15 without, and clippy clean in all three feature
-configurations with `--all-targets`.
+**T062y done, and it found a second wrong check in the same code.** Five flags,
+one destination each, at least one required; `--format` and `--output` are gone
+from `emit`. 17 tests with `parquet`, 15 without, and clippy clean in all three
+feature configurations with `--all-targets`.
 
-**FR-055 and SC-004 are amended, deliberately and narrowly.** FR-055 said the system
-MUST emit the trace "in two containers", which made the native format mandatory on
-every emit run and parquet mandatory within it. It now requires the **capability**
-and not the act. SC-004 is scoped to runs that request both containers. Neither
-amendment touches the deferred question of what the native format should ultimately
-be — that is a separate decision, and the user's instruction was to settle the
-generator first.
+**FR-055 and SC-004 are amended, deliberately and narrowly.** FR-055 said the
+system MUST emit the trace "in two containers", which made the native format
+mandatory on every emit run and parquet mandatory within it. It now requires
+the **capability** and not the act. SC-004 is scoped to runs that request both
+containers. Neither amendment touches the deferred question of what the native
+format should ultimately be — that is a separate decision, and the user's
+instruction was to settle the generator first.
 
-**Directories for the native format, files for the projections, and that is not a
-convention.** A native trace is self-describing, so the artifact *is* a directory
-holding `manifest.json` beside its records (`trace-io.md`); a projection has no
-manifest and is not a trace (FR-075b), so it is one file. Both native flags on one
-directory give one trace with both containers and one manifest, with the record
-counts compared; different directories give two independent traces, each with its
-own manifest. A projection-only run leaves **no directory at all** — not even an
-empty one, which would look like an interrupted run.
+**Directories for the native format, files for the projections, and that is not
+a convention.** A native trace is self-describing, so the artifact *is* a
+directory holding `manifest.json` beside its records (`trace-io.md`); a
+projection has no manifest and is not a trace (FR-075b), so it is one file.
+Both native flags on one directory give one trace with both containers and one
+manifest, with the record counts compared; different directories give two
+independent traces, each with its own manifest. A projection-only run leaves
+**no directory at all** — not even an empty one, which would look like an
+interrupted run.
 
-**THE SECOND DEFECT: the pre-flight was sizing the wrong artifact.** `check_size`
-used `projection.plan_bytes` — the size of the **canonical plan**, which only the
-`plan` subcommand writes — for a run that writes traces and projections. Measured
-against what `emit` actually produces, that figure is **2.8x low for JSONL and 3.9x
-low for libCacheSim CSV** (8.2 bytes per key reference assumed, against 23 and 32
-measured). Low is the dangerous direction for a check whose stated job is to stop a
-run filling a filesystem: between roughly 400M and 2.7G key references it would
-admit a run that then ran out of disk. Not exercised, because the arithmetic was
-never compared against a real output.
+**THE SECOND DEFECT: the pre-flight was sizing the wrong artifact.**
+`check_size` used `projection.plan_bytes` — the size of the **canonical plan**,
+which only the `plan` subcommand writes — for a run that writes traces and
+projections. Measured against what `emit` actually produces, that figure is
+**2.8x low for JSONL and 3.9x low for libCacheSim CSV** (8.2 bytes per key
+reference assumed, against 23 and 32 measured). Low is the dangerous direction
+for a check whose stated job is to stop a run filling a filesystem: between
+roughly 400M and 2.7G key references it would admit a run that then ran out of
+disk. Not exercised, because the arithmetic was never compared against a real
+output.
 
 Now sized per output from constants calibrated on a measured 30-second run, and
-**checked per filesystem**, grouping destinations that share a device. Grouping is
-the only version right in both directions: summing five destinations against one
-mount refuses a run that fits, and checking each alone admits two large outputs that
-together overflow a mount they share. Both are now tests.
+**checked per filesystem**, grouping destinations that share a device. Grouping
+is the only version right in both directions: summing five destinations against
+one mount refuses a run that fits, and checking each alone admits two large
+outputs that together overflow a mount they share. Both are now tests.
 
 **The measured per-reference costs are worth recording, because one is
-counter-intuitive**: JSONL 23, parquet 7, Mooncake 7, libCacheSim CSV 32, simulator
-21. libCacheSim CSV — a standard format — is the **most expensive of the five** while
-carrying the least, because it writes a row per block reference rather than per
-request. And the full 17-field schema in parquet costs the same per reference as
-4-field Mooncake JSONL, so the extra fields are free once the container stops being
-text. Rounded up in every case: an estimator that reads low fails at the one job it
-has.
+counter-intuitive**: JSONL 23, parquet 7, Mooncake 7, libCacheSim CSV 32,
+simulator
+21. libCacheSim CSV — a standard format — is the **most expensive of the five**
+    while carrying the least, because it writes a row per block reference
+    rather than per request. And the full 17-field schema in parquet costs the
+    same per reference as 4-field Mooncake JSONL, so the extra fields are free
+    once the container stops being text. Rounded up in every case: an estimator
+    that reads low fails at the one job it has.
 
-**Free space stayed injectable.** `check_sizes` takes the free-space lookup as a
-parameter, because on a box with less free space than the 32 GiB ceiling the
-free-space branch always fires first and the ceiling branch would never be reached
-by a test. That property was already there and would have been quietly lost by
-reading `statvfs` inside the check.
+**Free space stayed injectable.** `check_sizes` takes the free-space lookup as
+a parameter, because on a box with less free space than the 32 GiB ceiling the
+free-space branch always fires first and the ceiling branch would never be
+reached by a test. That property was already there and would have been quietly
+lost by reading `statvfs` inside the check.
 
 **`free_bytes` no longer creates the directory it measures.** It did, to give
 `statvfs` a path that exists — which meant a *refused* run left an empty output
-directory behind, indistinguishable from an interrupted one. It now measures the
-nearest existing ancestor, and a refusal is verified to leave nothing.
+directory behind, indistinguishable from an interrupted one. It now measures
+the nearest existing ancestor, and a refusal is verified to leave nothing.
 
 **T086 done. The gate passes, and Phase 7 is complete.** Run on 2026-09-17:
 
@@ -2513,24 +2593,24 @@ nearest existing ancestor, and a refusal is verified to leave nothing.
 | `cargo test -p workload-node-agent` | **all pass**, 2 ignored — both need a live server, a live agent on 7420 and a GPU, and say so in their `#[ignore]` reasons |
 
 **T005's two expected pre-existing failures behaved differently than predicted,
-and the difference is worth recording.** It warned that `cargo test --all` fails
-in `dispatcher-p2p` on `libgdrapi.so.2` and that
-`cargo clippy -p workload-gen -- -D warnings` fails on two `manual_checked_ops`
-lints in `components/interfaces`. Now:
+and the difference is worth recording.** It warned that `cargo test --all`
+fails in `dispatcher-p2p` on `libgdrapi.so.2` and that `cargo clippy -p
+workload-gen -- -D warnings` fails on two `manual_checked_ops` lints in
+`components/interfaces`. Now:
 
 - The `manual_checked_ops` problem is **real and still latent**, and it is why
-  every clippy invocation above carries `--no-deps`. Without it the lint fires on
-  repo code this feature does not own and aborts the run, which silently masked
-  several of this app's own lints earlier in the branch.
+  every clippy invocation above carries `--no-deps`. Without it the lint fires
+  on repo code this feature does not own and aborts the run, which silently
+  masked several of this app's own lints earlier in the branch.
 - `cargo test --all --no-run` **builds clean** — the GDRCopy link failure is a
-  runtime one, so `--all` still cannot be the gate on a box without the library.
-  The gate this feature holds is plain `cargo test` plus explicit `-p` runs, as
-  T005 concluded.
+  runtime one, so `--all` still cannot be the gate on a box without the
+  library. The gate this feature holds is plain `cargo test` plus explicit `-p`
+  runs, as T005 concluded.
 
-The two `cargo doc` warnings were **not** predicted by T005 and are also not this
-feature's; both are in `lib/` code last touched by the crate-move commit
-`dcbfc4c2`. Recorded rather than fixed, on the same principle: a gate that fixes
-unrelated code stops being a gate on this feature.
+The two `cargo doc` warnings were **not** predicted by T005 and are also not
+this feature's; both are in `lib/` code last touched by the crate-move commit
+`dcbfc4c2`. Recorded rather than fixed, on the same principle: a gate that
+fixes unrelated code stops being a gate on this feature.
 
 **T085 done, and the baseline is a range rather than a table of digits, because
 one run of this benchmark is not a measurement.** Recorded in `benches/plan.rs`
@@ -2541,21 +2621,21 @@ and summarised in `README.md`. Per key reference, three consecutive runs:
 **The headline claim survives the spread easily**: against Certus's measured
 ~5.6 µs/key, plan generation is 0.08% to 0.22% of the budget, so one thread has
 450x to 1300x of headroom. Principle I's "never the bottleneck" is quantitative
-now, and a plan queue that reaches zero means something is wrong rather than that
-generation is slow. The benchmark's own prediction also holds in every run: long
-sessions are 2.0–2.9x *cheaper* per key than short ones.
+now, and a plan queue that reaches zero means something is wrong rather than
+that generation is slow. The benchmark's own prediction also holds in every
+run: long sessions are 2.0–2.9x *cheaper* per key than short ones.
 
 **The finding worth keeping is that Criterion's change verdict is unusable
 here.** Three identical runs, no code change between them: `long_sessions`
-reported +21% and then +12%, `short_sessions` −0.6% then +7.0%, every one at
-p = 0.00. The first run of a session is the worst — 13% and 47% outlier rates, and
-a `long_sessions` confidence interval eleven times wider than the next run's. So
-the recorded procedure is: run twice, discard the first, treat under ~35% on
-`long_sessions` or ~8% on the others as noise, and for a real before/after use
-repetition with a stated test. That is the same n ≥ 8 rule the README already
-states for hit rates, arrived at independently on a benchmark with no server, no
-cache and no network in it — which is worth knowing, because it means the rule is
-about this hardware and not about mint races.
+reported +21% and then +12%, `short_sessions` −0.6% then +7.0%, every one at p
+= 0.00. The first run of a session is the worst — 13% and 47% outlier rates,
+and a `long_sessions` confidence interval eleven times wider than the next
+run's. So the recorded procedure is: run twice, discard the first, treat under
+~35% on `long_sessions` or ~8% on the others as noise, and for a real
+before/after use repetition with a stated test. That is the same n ≥ 8 rule the
+README already states for hit rates, arrived at independently on a benchmark
+with no server, no cache and no network in it — which is worth knowing, because
+it means the rule is about this hardware and not about mint races.
 
 **The 2026-09-15 baseline was stale rather than wrong** and is superseded:
 `short_sessions` 19.0 → ~11.5 ns and `many_shared` 7.9 → ~5.3 ns, about 1.5x
@@ -2565,156 +2645,161 @@ misleading in two weeks, which is the argument for T085 asking for it in the
 README where someone will see it.
 
 **T084 done, and it found a real defect rather than only guide drift.** Every
-command in `quickstart.md` was executed on 2026-09-17 except Scenario 5 (needs a
-cluster) and Scenario 4's *successful* case (see below). The guide now says at
-the top which commands were run, and every number in it is measured.
+command in `quickstart.md` was executed on 2026-09-17 except Scenario 5 (needs
+a cluster) and Scenario 4's *successful* case (see below). The guide now says
+at the top which commands were run, and every number in it is measured.
 
 **THE DEFECT: `--format parquet` and `--format both` never wrote parquet.**
-`Format` was parsed, and used for exactly one thing — checking that the build had
-the feature — and then the emit path wrote JSONL unconditionally.
+`Format` was parsed, and used for exactly one thing — checking that the build
+had the feature — and then the emit path wrote JSONL unconditionally.
 `records.parquet` was therefore permanently `null`, no `.parquet` file was ever
-produced by the tool, and **SC-004's equivalence claim had nothing to compare on
-a real run**. `ParquetWriter` itself was complete and tested (T054/T055); only the
-wiring was missing, so T057's checkbox was wrong.
+produced by the tool, and **SC-004's equivalence claim had nothing to compare
+on a real run**. `ParquetWriter` itself was complete and tested (T054/T055);
+only the wiring was missing, so T057's checkbox was wrong.
 
 This is the third instance in this feature of the same failure shape — a flag
 accepted, validated, and not plumbed through (`--batch-keys` was the first,
-`rank_by` the second) — and it survived for the same reason each time: **no test
-drove the flag**. `emit_determinism.rs` exercised `emit` extensively and never
-passed `--format`. Now fixed, with four tests that would each have caught it:
-`format_jsonl_writes_only_jsonl`, `format_both_writes_both_containers_and_reports_both_counts`,
-`format_parquet_writes_only_parquet_and_still_writes_a_manifest`, and — on a build
-without the feature — `asking_for_parquet_without_the_feature_is_refused_rather_than_silently_jsonl`.
+`rank_by` the second) — and it survived for the same reason each time: **no
+test drove the flag**. `emit_determinism.rs` exercised `emit` extensively and
+never passed `--format`. Now fixed, with four tests that would each have caught
+it: `format_jsonl_writes_only_jsonl`,
+`format_both_writes_both_containers_and_reports_both_counts`,
+`format_parquet_writes_only_parquet_and_still_writes_a_manifest`, and — on a
+build without the feature —
+`asking_for_parquet_without_the_feature_is_refused_rather_than_silently_jsonl`.
 
 Two things fell out of doing the wiring properly:
 
-- **The manifest's counts can no longer come from "the JSONL writer".** They come
-  from whichever container was written, so a parquet-only run keeps them; without
-  that a parquet-only trace would have been unreadable rather than merely
-  uncounted (FR-073).
-- **With both containers written, their counts are compared and a disagreement is
-  a refusal.** SC-004's equivalence is now checked on every real `--format both`
-  run, not only by the test that compares a handful of records. Measured
-  side-effect worth recording: parquet is **3.6x smaller** (12.2 MB against 44.1
-  MB at a 30-second span), which is the justification for the dependency,
+- **The manifest's counts can no longer come from "the JSONL writer".** They
+  come from whichever container was written, so a parquet-only run keeps them;
+  without that a parquet-only trace would have been unreadable rather than
+  merely uncounted (FR-073).
+- **With both containers written, their counts are compared and a disagreement
+  is a refusal.** SC-004's equivalence is now checked on every real `--format
+  both` run, not only by the test that compares a handful of records. Measured
+  side-effect worth recording: parquet is **3.6x smaller** (12.2 MB against
+  44.1 MB at a 30-second span), which is the justification for the dependency,
   confirmed rather than assumed.
 
 **Drift corrected in the guide, scenario by scenario. Every item was a command
 that failed or a number that was wrong** — not one was cosmetic:
 
 - **Scenario 1**: the effective mean was quoted as ~5.57 and the refusal's as
-  4.218. Both are the *continuous* truncated means; the tool reports the means of
-  the **rounded** variable, 5.1435 and 3.9515, because a count is integral. The
-  example file's own comment already recorded this correction and the guide had
-  not been updated. The guide now states both and says why they differ.
+  4.218. Both are the *continuous* truncated means; the tool reports the means
+  of the **rounded** variable, 5.1435 and 3.9515, because a count is integral.
+  The example file's own comment already recorded this correction and the guide
+  had not been updated. The guide now states both and says why they differ.
 - **Scenario 2**: `plan` requires `--until`, which the guide omitted, so its
   first command failed. Worse, the third command passed `--batch-keys` and
   `--lanes` to `plan`, **which has neither flag** — an `unexpected argument`
-  error, not a passing comparison. That half of FR-072 cannot be checked through
-  `plan` at all, and pretending it could was the guide asserting a property it
-  never tested. It now points at
+  error, not a passing comparison. That half of FR-072 cannot be checked
+  through `plan` at all, and pretending it could was the guide asserting a
+  property it never tested. It now points at
   `op_stream::batch_keys_changes_the_requests_but_not_the_workload`, which does
   test it, and says why the CLI cannot. Also: `plan` prints a fingerprint, so
   `cmp` is the expensive form of the check, and these files are 98 MB at
   `--until 60` and 535 MB at 300 — worth saying before someone runs it four
   times.
-- **Scenario 3**: `--format both` needs `--features parquet` and the guide's own
-  `$G` alias has `--no-default-features`, so the command as written refused.
-  `--until 3600` on the shipped example projects a **7.33 GiB** plan; the guide
-  now uses 30 seconds and shows `validate --until` as the pre-flight. The `ls`
-  comment listed a `blocks/` directory that `contracts/trace-io.md` explicitly
-  says does not exist, and omitted `report.json`. And
+- **Scenario 3**: `--format both` needs `--features parquet` and the guide's
+  own `$G` alias has `--no-default-features`, so the command as written
+  refused. `--until 3600` on the shipped example projects a **7.33 GiB** plan;
+  the guide now uses 30 seconds and shows `validate --until` as the pre-flight.
+  The `ls` comment listed a `blocks/` directory that `contracts/trace-io.md`
+  explicitly says does not exist, and omitted `report.json`. And
   `eviction-replay-benchmark`'s flag is `--file`, not `--trace`.
 - **Scenario 4**: `--lanes 16` against this host's 8-channel server is refused
   (correctly, exit 2, naming both figures). A **debug** build did not finish a
-  5-virtual-second run in ten minutes, so the guide now says `--release` — every
-  figure this scenario prints is a throughput, and a debug throughput is a figure
-  about the debug build.
+  5-virtual-second run in ten minutes, so the guide now says `--release` —
+  every figure this scenario prints is a throughput, and a debug throughput is
+  a figure about the debug build.
 - **Scenario 5**: `--node` takes a **bare hostname**. The guide passed
-  `node5:/dev/shm/certus-shmq`, which would be used verbatim as an ssh host; the
-  mailbox comes from `--shm-path` and the port from `--agent-port`. The agent's
-  flags are `--bind` and `--port` (default **7420**, not the 9420 the guide
-  showed), and the hand-start line contradicted its own comment saying the
-  launcher does it — it belongs to `--no-launch`, which is now what it says.
+  `node5:/dev/shm/certus-shmq`, which would be used verbatim as an ssh host;
+  the mailbox comes from `--shm-path` and the port from `--agent-port`. The
+  agent's flags are `--bind` and `--port` (default **7420**, not the 9420 the
+  guide showed), and the hand-start line contradicted its own comment saying
+  the launcher does it — it belongs to `--no-launch`, which is now what it
+  says.
 - **Scenario 6**: correct as written. 25 s for the gate, 122 s for the seed
   sweep, matching its "~2 min".
 
 **Scenario 4's successful case could not be completed, and why is worth
-recording: a generator that dies mid-run leaks its mailbox channel claims.** The
-host's server had 4 of 8 channels already held by a dead client before this
+recording: a generator that dies mid-run leaks its mailbox channel claims.**
+The host's server had 4 of 8 channels already held by a dead client before this
 session touched it; the debug run that had to be killed took the other 4. The
 claim lives in the mailbox's shared memory and nothing reaps it, so the count
-only recovers when the server restarts. The generator's *refusal* is correct and
-well-worded ("could only claim 4 of 8 channels; another client holds the rest")
-but does not hint that the holder may be dead, which is the state an operator
-will actually be in. Documented in the guide, including that the wrong fix is to
-lower `--lanes` — that measures a different concurrency from the one asked for,
-which is exactly what the lane check exists to prevent. **Not filed as a task:
-whether the mailbox should reap a dead client's claims is a `shm-queue` question,
-not this feature's.**
+only recovers when the server restarts. The generator's *refusal* is correct
+and well-worded ("could only claim 4 of 8 channels; another client holds the
+rest") but does not hint that the holder may be dead, which is the state an
+operator will actually be in. Documented in the guide, including that the wrong
+fix is to lower `--lanes` — that measures a different concurrency from the one
+asked for, which is exactly what the lane check exists to prevent. **Not filed
+as a task: whether the mailbox should reap a dead client's claims is a
+`shm-queue` question, not this feature's.**
 
 **T083 done**, as a doc test on `WorkloadDescription::from_path` that loads the
 normative example through `CARGO_MANIFEST_DIR` and asserts it validates with no
-refusals. `tests/description.rs` already asserted the same thing, so this is the
-*documentation* half the task asked for: the example is what `from_path` is for,
-and reading the real file rather than inlining a copy is the point — an inlined
-copy is the drift the task exists to prevent.
+refusals. `tests/description.rs` already asserted the same thing, so this is
+the *documentation* half the task asked for: the example is what `from_path` is
+for, and reading the real file rather than inlining a copy is the point — an
+inlined copy is the drift the task exists to prevent.
 
 **T082 done, 62 doc tests** (41 `workload-model`, 10 `workload-trace` with
-`parquet` on, 11 `workload-wire`, 1 `workload-gen`), and `cargo doc --no-deps` is
-warning-free on all five crates.
+`parquet` on, 11 `workload-wire`, 1 `workload-gen`), and `cargo doc --no-deps`
+is warning-free on all five crates.
 
 **An audit came first, and it is what produced the scoping decision above.**
 Every public item already had a doc comment — `#![warn(missing_docs)]` is on in
-four crates, and is now on in the fifth (`workload-node-agent`'s `main.rs`, which
-had been missed) — so what was missing was *examples*: 552 of 583 public items
-had none. The gap was not evenly spread. **22 modules had no runnable code at
-all**, including the crate root of all four library-bearing crates and every one
-of `workload-wire`'s four modules, while `workload-model` was already largely
-covered. So the work was module-shaped rather than item-shaped.
+four crates, and is now on in the fifth (`workload-node-agent`'s `main.rs`,
+which had been missed) — so what was missing was *examples*: 552 of 583 public
+items had none. The gap was not evenly spread. **22 modules had no runnable
+code at all**, including the crate root of all four library-bearing crates and
+every one of `workload-wire`'s four modules, while `workload-model` was already
+largely covered. So the work was module-shaped rather than item-shaped.
 
 What was added, by crate:
 
-- **`workload-model`**: a crate-root example — parse, simulate, record — plus the
-  seed-reproducibility pair, since determinism is the property the whole crate
-  exists to have. Its modules were already covered.
+- **`workload-model`**: a crate-root example — parse, simulate, record — plus
+  the seed-reproducibility pair, since determinism is the property the whole
+  crate exists to have. Its modules were already covered.
 - **`workload-trace`**: a crate-root example that writes a container and then
-  projects it, because the container/projection distinction is the thing a reader
-  most needs and cannot see from the module list. Module examples for `jsonl`,
-  `parquet`, `mooncake`, `cachesim` and `simulator`.
+  projects it, because the container/projection distinction is the thing a
+  reader most needs and cannot see from the module list. Module examples for
+  `jsonl`, `parquet`, `mooncake`, `cachesim` and `simulator`.
 - **`workload-wire`**: a crate-root example running a real client↔server
   conversation over loopback, and module examples for all four modules —
   `frame` (round trip plus both refusals), `handshake` (both ends, and two
   refusals), `client` (the pipelining window), `server` (an accept loop, and a
   frame before `Hello`).
-- **`workload-gen`**: one example, on `EmitReport::render`, because the report is
-  the artifact everyone reads and its shape is otherwise only asserted in tests.
+- **`workload-gen`**: one example, on `EmitReport::render`, because the report
+  is the artifact everyone reads and its shape is otherwise only asserted in
+  tests.
 
 **Three of the new examples are the documentation, not decoration.** `client`'s
-shows that the *d+1*-th `submit` returns a displaced outcome, which is the API's
-one surprising signature; `server`'s shows a pre-`Hello` frame closing the
-connection; and `report`'s asserts that the emit report's JSON contains no
+shows that the *d+1*-th `submit` returns a displaced outcome, which is the
+API's one surprising signature; `server`'s shows a pre-`Hello` frame closing
+the connection; and `report`'s asserts that the emit report's JSON contains no
 latency or lane field at all — FR-071's omitted-not-zeroed rule, checked rather
 than described.
 
 **Two mechanical traps, recorded because both cost a cycle.** `Writer::bytes`
-returns `&mut Self` while `Writer::frame` takes `self`, so the natural one-liner
-does not compile; and the `jsonl` example's first assertion guessed 2 sessions
-from `pool: {size: {exact: 2}}` and measured 9 — `pool.size` is how many sessions
-are *live at once*, not how many a span contains. The corrected example says so,
-since that is exactly the misreading a description author would make.
+returns `&mut Self` while `Writer::frame` takes `self`, so the natural
+one-liner does not compile; and the `jsonl` example's first assertion guessed 2
+sessions from `pool: {size: {exact: 2}}` and measured 9 — `pool.size` is how
+many sessions are *live at once*, not how many a span contains. The corrected
+example says so, since that is exactly the misreading a description author
+would make.
 
-`workload-trace`'s crate-root example writes through `&mut Vec<u8>` and takes the
-bytes back after `finish()` releases the borrow, rather than through a
-`sink_mut()` accessor added for the example's convenience — a doc example should
-not grow the API it documents.
+`workload-trace`'s crate-root example writes through `&mut Vec<u8>` and takes
+the bytes back after `finish()` releases the borrow, rather than through a
+`sink_mut()` accessor added for the example's convenience — a doc example
+should not grow the API it documents.
 
 **T081 done.** The four sections the task asked for now sit above T080's
 comparison procedure, and the placeholder blockquote saying orientation was
 missing is gone.
 
-Two of them say more than "what this is", because the orientation a reader needs
-here is not a feature list:
+Two of them say more than "what this is", because the orientation a reader
+needs here is not a feature list:
 
 - **Purpose** is stated against the alternative — replaying a captured trace —
   since that is the thing a reader arriving at a workload generator will assume
@@ -2723,16 +2808,17 @@ here is not a feature list:
   *outcome* is not. That asymmetry is stated up front and linked forward to the
   comparison section, because it is simultaneously the property that makes A/B
   work possible and the trap that makes it easy to get wrong.
-- **The crate table** leads with the default-member column, because the split is
-  not organisational and a reader who reads it as organisational will put the
-  wrong code in the wrong crate. The CUDA-free boundary is what makes FR-072
-  compiler-enforced: the simulation core cannot see a mailbox, a device or a
-  container, so a second execution path cannot silently diverge from the first.
+- **The crate table** leads with the default-member column, because the split
+  is not organisational and a reader who reads it as organisational will put
+  the wrong code in the wrong crate. The CUDA-free boundary is what makes
+  FR-072 compiler-enforced: the simulation core cannot see a mailbox, a device
+  or a container, so a second execution path cannot silently diverge from the
+  first.
 
-Also added a stated non-goal — it is not a trace replayer and claims no fidelity
-to any particular captured trace — because the branch's own history is largely a
-record of trying to make that claim and failing, and a reader who infers it from
-"synthetic workload generator" will over-trust the output.
+Also added a stated non-goal — it is not a trace replayer and claims no
+fidelity to any particular captured trace — because the branch's own history is
+largely a record of trying to make that claim and failing, and a reader who
+infers it from "synthetic workload generator" will over-trust the output.
 
 **Verified rather than described**: `cargo build -p workload-gen
 --no-default-features` was run, and its `--help` confirms the emit-only build

@@ -376,16 +376,16 @@ modes reorder the policies.
 **Virtual time and execution**
 
 - **FR-031** *(scoped to the work-conserving mode)*: Under `--pacing none`,
-  virtual time MUST exist only to decide the order of operations, and MUST NOT be
-  mapped to wallclock time. That is what makes such a run a measurement of
-  capability: it issues as fast as the transport allows, and FR-062's plan-queue
-  check proves the generator was not the constraint.
+  virtual time MUST exist only to decide the order of operations, and MUST NOT
+  be mapped to wallclock time. That is what makes such a run a measurement of
+  capability: it issues as fast as the transport allows, and FR-062's
+  plan-queue check proves the generator was not the constraint.
 
   This requirement **does not apply to the default paced mode**, where mapping
-  virtual time onto wallclock is the entire point (FR-080). The scoping is not a
-  weakening: the two modes answer different questions, and a requirement that
-  forbade the mapping outright would forbid the mode that measures the latency a
-  workload actually produces.
+  virtual time onto wallclock is the entire point (FR-080). The scoping is not
+  a weakening: the two modes answer different questions, and a requirement that
+  forbade the mapping outright would forbid the mode that measures the latency
+  a workload actually produces.
 - **FR-032**: The virtual clock MUST be the minimum timestamp among operations
   still in flight. When the server applies backpressure, a lane blocks and the
   clock holds — it MUST NOT advance, skip, or dilate unevenly.
@@ -454,20 +454,20 @@ modes reorder the policies.
   crashed run MUST be detected and replaced, never silently reused.
 - **FR-053**: Teardown MUST release the daemon's resources even when the
   generator exits abnormally, and MUST be verified rather than assumed. The
-  daemon MUST therefore exit when **every connection it once had has closed**: a
-  closed socket is TCP reporting that the control process is gone, however it
+  daemon MUST therefore exit when **every connection it once had has closed**:
+  a closed socket is TCP reporting that the control process is gone, however it
   went, and it is more reliable than any silence-based guess. Without it a
   generator killed outright would leave a daemon holding mailbox channels and a
   device allocation until someone next started a run.
 
-  A daemon MUST NOT exit merely because it is **idle**. Under FR-080's paced mode
-  a session's think time is real waiting, so a node may legitimately receive
-  nothing for minutes; a daemon that took silence for failure would exit in the
-  middle of the workload it was serving. A grace period after the last
-  disconnection is permitted, and is needed because a generator opening its lanes
-  one at a time passes briefly through zero connections. A daemon nobody ever
-  connects to MUST also give up eventually, since it was launched for a run that
-  never came.
+  A daemon MUST NOT exit merely because it is **idle**. Under FR-080's paced
+  mode a session's think time is real waiting, so a node may legitimately
+  receive nothing for minutes; a daemon that took silence for failure would
+  exit in the middle of the workload it was serving. A grace period after the
+  last disconnection is permitted, and is needed because a generator opening
+  its lanes one at a time passes briefly through zero connections. A daemon
+  nobody ever connects to MUST also give up eventually, since it was launched
+  for a run that never came.
 - **FR-054**: Continuous load MUST be driven over the fast transport, not by
   repeated remote command invocation, which cannot sustain it.
 - **FR-064**: When a configured node or its daemon becomes unreachable during a
@@ -480,30 +480,31 @@ modes reorder the policies.
 
 **File output**
 
-- **FR-055**: System MUST be **able** to emit a workload trace at the same level
-  of abstraction as a real serving trace — sessions, turns, block lists, token
-  counts — in either of two containers, which hold identical records when both
-  are written. Interoperability with other tools' formats is delivered by
+- **FR-055**: System MUST be **able** to emit a workload trace at the same
+  level of abstraction as a real serving trace — sessions, turns, block lists,
+  token counts — in either of two containers, which hold identical records when
+  both are written. Interoperability with other tools' formats is delivered by
   **projections** (FR-075), which are not containers of the trace and are not
   required to hold identical records.
 
   **No run is obliged to write the native trace.** Every output format, native
-  and projected alike, is requested by its own flag with its own destination, and
-  the only rule is that at least one output must be requested. A run that wants a
-  Mooncake file alone writes that and nothing else.
+  and projected alike, is requested by its own flag with its own destination,
+  and the only rule is that at least one output must be requested. A run that
+  wants a Mooncake file alone writes that and nothing else.
 
-  *Amended 2026-09-17.* This requirement previously said the system MUST emit the
-  trace "in two containers", which made the native format mandatory on every emit
-  run and parquet mandatory within it. Two things were wrong with that. It forced
-  a run wanting a small projection to also write a native trace costing roughly
-  27 GB at a legal span — the reason `--output` was required and the reason it no
-  longer is. And it made a requirement out of a format whose readership is not yet
-  established: nothing outside this repository reads it, and inside it only the
-  three converters do, each of six fields out of seventeen. The **capability** is
-  required; **producing it on every run** is not. What the native format should
-  ultimately be — named, versioned, extended with a served-by instance column, and
-  published with importers, or dropped in favour of the standard exports — is a
-  decision deliberately deferred until the generator is complete and stable.
+  *Amended 2026-09-17.* This requirement previously said the system MUST emit
+  the trace "in two containers", which made the native format mandatory on
+  every emit run and parquet mandatory within it. Two things were wrong with
+  that. It forced a run wanting a small projection to also write a native trace
+  costing roughly 27 GB at a legal span — the reason `--output` was required
+  and the reason it no longer is. And it made a requirement out of a format
+  whose readership is not yet established: nothing outside this repository
+  reads it, and inside it only the three converters do, each of six fields out
+  of seventeen. The **capability** is required; **producing it on every run**
+  is not. What the native format should ultimately be — named, versioned,
+  extended with a served-by instance column, and published with importers, or
+  dropped in favour of the standard exports — is a decision deliberately
+  deferred until the generator is complete and stable.
 - **FR-056**: The trace MUST be self-describing: a reader MUST learn what it
   supports by reading its manifest, never by recognising which trace it is.
 - **FR-057**: The manifest MUST declare the identifier space in use, since
@@ -605,10 +606,10 @@ modes reorder the policies.
 
   The replacement is not a formality. A node too slow to keep a paced schedule
   leaves the producer comfortably ahead of the lanes, so this check sees a
-  **healthy** queue with zero underruns while the run is failing to keep the very
-  schedule it set itself. That is measured, in
-  `crates/workload-gen/tests/pacing.rs`, and it is the reason the metric had to be
-  replaced rather than supplemented.
+  **healthy** queue with zero underruns while the run is failing to keep the
+  very schedule it set itself. That is measured, in
+  `crates/workload-gen/tests/pacing.rs`, and it is the reason the metric had to
+  be replaced rather than supplemented.
 - **FR-063**: Run reports MUST record the seed, the description file identity,
   and the effective parameter values after truncation, so a run can be
   reproduced from its own report.
@@ -629,30 +630,31 @@ modes reorder the policies.
   FR-072a requires capturing them. Deriving it from key references instead
   charges a full block to every control operation and overstated bandwidth by
   4.9x when measured.
-- **FR-066a**: Latency MUST be reported **per operation**, not only in aggregate.
-  A control operation costs tens of microseconds uncontended; a `LOOKUP` DMAs a
-  block per key and was measured at eleven times that. An aggregate percentile
-  therefore describes the operation mix a description happens to produce rather
-  than anything about Certus, and changes when the hit rate changes even if the
-  server does not.
+- **FR-066a**: Latency MUST be reported **per operation**, not only in
+  aggregate. A control operation costs tens of microseconds uncontended; a
+  `LOOKUP` DMAs a block per key and was measured at eleven times that. An
+  aggregate percentile therefore describes the operation mix a description
+  happens to produce rather than anything about Certus, and changes when the
+  hit rate changes even if the server does not.
 
-  Each operation's **request count MUST be reported beside its percentiles**, and
-  a count too small to support them MUST be marked. A p50 over a few dozen
+  Each operation's **request count MUST be reported beside its percentiles**,
+  and a count too small to support them MUST be marked. A p50 over a few dozen
   requests is noise and a p99 over a few dozen *is* the maximum. This is not
   hypothetical: a 24-request run appeared to show `TOUCH` costing three times
-  `CHECK`, and a second 24-request run appeared to show it four times faster. At
-  8000 requests each they differ by one microsecond.
-- **FR-066b**: A store MUST transfer only into a reservation the server granted.
-  `RESERVE` answers per key, and transferring for a declined key sends a payload
-  to no slot and then fails its commit for want of a pending write. Measured
-  without the filter: 88 blocks written against 12 declined reserves and 12
-  declined commits; with it, 76 written and zero declined commits. Reporting wallclock
-  throughput does not conflict with FR-031: virtual time decides the *order* of
-  operations while wallclock measures how fast that order was executed, and
-  because the virtual clock holds during a stall (FR-032) the ratio between
-  them is a measurement rather than an identity. Keys and bytes per second are
-  comparable across workload descriptions; the virtual-time ratio is not, since
-  it depends on the description's own virtual-time density.
+  `CHECK`, and a second 24-request run appeared to show it four times faster.
+  At 8000 requests each they differ by one microsecond.
+- **FR-066b**: A store MUST transfer only into a reservation the server
+  granted. `RESERVE` answers per key, and transferring for a declined key sends
+  a payload to no slot and then fails its commit for want of a pending write.
+  Measured without the filter: 88 blocks written against 12 declined reserves
+  and 12 declined commits; with it, 76 written and zero declined commits.
+  Reporting wallclock throughput does not conflict with FR-031: virtual time
+  decides the *order* of operations while wallclock measures how fast that
+  order was executed, and because the virtual clock holds during a stall
+  (FR-032) the ratio between them is a measurement rather than an identity.
+  Keys and bytes per second are comparable across workload descriptions; the
+  virtual-time ratio is not, since it depends on the description's own
+  virtual-time density.
 - **FR-067**: For a **live run**, the timed window MUST exclude daemon startup
   and teardown and any startup cache clear, so setup cost is never attributed
   to the system under test.
@@ -691,228 +693,244 @@ modes reorder the policies.
   and seed, and SC-003 would be false; with it, a trace generated on a laptop
   is known to be the workload a cluster would have been driven with.
 - **FR-072a**: Cache outcomes MUST NOT change the workload, and MUST change the
-  interaction. The virtual clock, the session interleaving, the turn schedule and
-  the **key path** of each turn are functions of description and seed alone; a
-  hit or a miss may not perturb any of them. But the **operations issued** to
-  Certus are a function of that path *and of what the cache reports*, because a
-  real prefix-caching client does not know in advance what it must store: it
-  offers every key from the root of the prefix through the end of the turn's new
-  growth, loads what came back resident, and stores what came back absent.
+  interaction. The virtual clock, the session interleaving, the turn schedule
+  and the **key path** of each turn are functions of description and seed
+  alone; a hit or a miss may not perturb any of them. But the **operations
+  issued** to Certus are a function of that path *and of what the cache
+  reports*, because a real prefix-caching client does not know in advance what
+  it must store: it offers every key from the root of the prefix through the
+  end of the turn's new growth, loads what came back resident, and stores what
+  came back absent.
 
   This is what FR-036's race describes — two sessions racing to mint the same
-  shared prefix both miss and both store — and it is what a fixed operation list
-  cannot express. Two consequences follow, and both are requirements rather than
-  side effects. A block **evicted mid-run MUST be stored again** when a later turn
-  finds it absent; otherwise a run's hit rate can only decay and the generator
-  would be measuring a cache it never refills. And **shared prefix blocks MUST be
-  stored**, by whichever turn first finds them missing; no turn mints them, so a
-  fixed operation list stored them never, and cross-session prefix sharing — the
-  phenomenon this generator exists to exercise — produced no cache hits at all.
+  shared prefix both miss and both store — and it is what a fixed operation
+  list cannot express. Two consequences follow, and both are requirements
+  rather than side effects. A block **evicted mid-run MUST be stored again**
+  when a later turn finds it absent; otherwise a run's hit rate can only decay
+  and the generator would be measuring a cache it never refills. And **shared
+  prefix blocks MUST be stored**, by whichever turn first finds them missing;
+  no turn mints them, so a fixed operation list stored them never, and
+  cross-session prefix sharing — the phenomenon this generator exists to
+  exercise — produced no cache hits at all.
 
-  A key reported `PENDING` MUST NOT be re-stored or loaded: another lane's store
-  is in flight, so storing would duplicate it and loading would race the writer.
+  A key reported `PENDING` MUST NOT be re-stored or loaded: another lane's
+  store is in flight, so storing would duplicate it and loading would race the
+  writer.
 - **FR-072b**: For a remote node, the **key path MUST cross the wire, not the
-  operations**. The reactive rule of FR-072a costs several round trips per turn,
-  which is nothing at `/dev/shm` latency and unacceptable over a fabric, so a
-  resident per-node agent receives the turn's path and performs the check, the
-  loads and the stores against its own local Certus. The wire therefore carries
-  what is deterministic — paths, session identity and virtual timing — and never
-  cache outcomes, which keeps FR-072's guarantee intact across nodes while
-  keeping the chatter host-local.
+  operations**. The reactive rule of FR-072a costs several round trips per
+  turn, which is nothing at `/dev/shm` latency and unacceptable over a fabric,
+  so a resident per-node agent receives the turn's path and performs the check,
+  the loads and the stores against its own local Certus. The wire therefore
+  carries what is deterministic — paths, session identity and virtual timing —
+  and never cache outcomes, which keeps FR-072's guarantee intact across nodes
+  while keeping the chatter host-local.
 
 ### One transport: the local node goes through an agent too
 
 - **FR-079** *(IMPLEMENTED, T092/T092a)*: The generator MUST reach every node
-  through its per-node agent, **including the local one**, rather than talking to a
-  local mailbox directly. One transport, one driver, one cleanup mechanism.
+  through its per-node agent, **including the local one**, rather than talking
+  to a local mailbox directly. One transport, one driver, one cleanup
+  mechanism.
 
-  **The measurement objection does not apply**, which is what made this affordable. A
-  loopback hop would normally inflate the latency being measured, but FR-066/FR-072a already
-  require the mailbox-facing code to be the sole collector: the agent times its own mailbox
-  requests, so reported per-op latency and bandwidth exclude the hop. It affects only how
-  fast the generator can *feed* work, which FR-062's plan-queue check and FR-080's lateness
+  **The measurement objection does not apply**, which is what made this
+  affordable. A loopback hop would normally inflate the latency being measured,
+  but FR-066/FR-072a already require the mailbox-facing code to be the sole
+  collector: the agent times its own mailbox requests, so reported per-op
+  latency and bandwidth exclude the hop. It affects only how fast the generator
+  can *feed* work, which FR-062's plan-queue check and FR-080's lateness
   already guard. Loopback round trips at the pipelining depth of
-  `contracts/node-agent-wire.md` are three orders of magnitude above any rate measured on
-  this hardware.
+  `contracts/node-agent-wire.md` are three orders of magnitude above any rate
+  measured on this hardware.
 
   What it bought, in order:
 
-  1. **One driver.** FR-072a's *rule* already had one implementation, but the local and
-     remote paths were two drivers. Collapsing them **removes** the divergence class FR-072
-     exists to guard, rather than testing for it.
-  2. **One cleanup mechanism.** FR-052 and FR-053 are now satisfied the same way everywhere.
-     Two mechanisms had already produced two defects here — a mailbox channel not returned
-     when a connection closed, and an agent listening forever after its control process died.
-  3. **The generator no longer depends on CUDA or on the mailbox**, and so no longer enables
-     `interfaces/spdk` transitively. It **is** a workspace default member, verified by `ldd`
-     naming no `cudart` on the binary.
-  4. **The generator can run off-cluster**, on a host with no Certus and no accelerator. Not
-     a requirement; a consequence.
+  1. **One driver.** FR-072a's *rule* already had one implementation, but the
+     local and remote paths were two drivers. Collapsing them **removes** the
+     divergence class FR-072 exists to guard, rather than testing for it.
+  2. **One cleanup mechanism.** FR-052 and FR-053 are now satisfied the same
+     way everywhere. Two mechanisms had already produced two defects here — a
+     mailbox channel not returned when a connection closed, and an agent
+     listening forever after its control process died.
+  3. **The generator no longer depends on CUDA or on the mailbox**, and so no
+     longer enables `interfaces/spdk` transitively. It **is** a workspace
+     default member, verified by `ldd` naming no `cudart` on the binary.
+  4. **The generator can run off-cluster**, on a host with no Certus and no
+     accelerator. Not a requirement; a consequence.
 
-  Two costs, both paid rather than discovered later. An extra process for the simplest run,
-  which the generator hides by launching a **local agent itself with no ssh** — `ssh
-  localhost` would want the host's own key trusted for its own account, which is a
-  configuration step for the simplest possible invocation. And `CLEAR_MEMORY_TIER`, which the
-  generator used to issue directly and is now the `ClearCache` frame (protocol version 3).
+  Two costs, both paid rather than discovered later. An extra process for the
+  simplest run, which the generator hides by launching a **local agent itself
+  with no ssh** — `ssh localhost` would want the host's own key trusted for its
+  own account, which is a configuration step for the simplest possible
+  invocation. And `CLEAR_MEMORY_TIER`, which the generator used to issue
+  directly and is now the `ClearCache` frame (protocol version 3).
 
-  **A lane is a connection, on every node.** The mailbox is depth-1 per channel and the agent
-  claims one per connection, so `--lanes n` means *n connections per node*, routed
-  `session % n` within the node the session was placed on. That is what the deleted local
-  path did, and it is load-bearing rather than incidental: a single connection per node would
-  have collapsed a four-lane local run to one lane and reported the throughput as though
-  nothing had changed.
+  **A lane is a connection, on every node.** The mailbox is depth-1 per channel
+  and the agent claims one per connection, so `--lanes n` means *n connections
+  per node*, routed `session % n` within the node the session was placed on.
+  That is what the deleted local path did, and it is load-bearing rather than
+  incidental: a single connection per node would have collapsed a four-lane
+  local run to one lane and reported the throughput as though nothing had
+  changed.
 
-  **A hazard it removes rather than adds:** a generator killed outright used to leak its
-  mailbox channel claims, with no recovery path until the server restarted. The agent's
-  leftover replacement now covers that case.
+  **A hazard it removes rather than adds:** a generator killed outright used to
+  leak its mailbox channel claims, with no recovery path until the server
+  restarted. The agent's leftover replacement now covers that case.
 
-  A cost recorded in the interest of not overselling this: the loopback hop is free for
-  reported latency, since the agent times its own mailbox requests, but it is not free for
-  the rate at which the generator can *feed* work — and FR-080's rate sweep exists to push
-  that rate until something breaks. Measured: pipelining depth 8 at a ~30 µs loopback round
-  trip is ~260 000 turns/second against ~1 000 turns/second observed, so roughly 250x
-  headroom. Not binding, but it is the number to re-check if a sweep ever reports the
+  A cost recorded in the interest of not overselling this: the loopback hop is
+  free for reported latency, since the agent times its own mailbox requests,
+  but it is not free for the rate at which the generator can *feed* work — and
+  FR-080's rate sweep exists to push that rate until something breaks.
+  Measured: pipelining depth 8 at a ~30 µs loopback round trip is ~260 000
+  turns/second against ~1 000 turns/second observed, so roughly 250x headroom.
+  Not binding, but it is the number to re-check if a sweep ever reports the
   generator as the limit.
 
-  **Sequencing was part of the decision, and it was honoured.** This came *after* the
-  loopback-equivalence test (T074), never before: that test is the instrument that
-  demonstrates the unification changed nothing, and unifying first would have collapsed onto
-  a path never shown equivalent while destroying the means of showing it. T092a re-points it
-  at the deleted path's behaviour, so it is now a regression guard rather than a comparison
-  of two implementations that both still ship.
+  **Sequencing was part of the decision, and it was honoured.** This came
+  *after* the loopback-equivalence test (T074), never before: that test is the
+  instrument that demonstrates the unification changed nothing, and unifying
+  first would have collapsed onto a path never shown equivalent while
+  destroying the means of showing it. T092a re-points it at the deleted path's
+  behaviour, so it is now a regression guard rather than a comparison of two
+  implementations that both still ship.
 
 ### Paced mode
 
 - **FR-080** *(IMPLEMENTED, T088-T091)*: System MUST offer a **paced** mode
-  alongside the work-conserving one, in which a request is **held back until its
-  virtual time is due**, so that the offered load matches the workload's own rate. The two
-  modes answer different questions and both are wanted: work-conserving measures
-  *how fast Certus can go*, paced measures *the latency Certus delivers under the
-  load this workload actually represents*. Latency is the reason for the feature —
-  a percentile gathered while the generator sprints describes a queue that the
-  real workload would never form.
+  alongside the work-conserving one, in which a request is **held back until
+  its virtual time is due**, so that the offered load matches the workload's
+  own rate. The two modes answer different questions and both are wanted:
+  work-conserving measures *how fast Certus can go*, paced measures *the
+  latency Certus delivers under the load this workload actually represents*.
+  Latency is the reason for the feature — a percentile gathered while the
+  generator sprints describes a queue that the real workload would never form.
 
-  **The validity metric changes with the mode, and that was the substance of the
-  work rather than a detail.** FR-062 invalidates a run whose plan queue reached
-  zero, which is meaningful only when the generator is trying to sprint. Under
-  pacing an empty queue is the normal, intended state — nothing is due yet — so
-  that test must be replaced by **lateness**: for each request, `due =
-  t0 + (virtual timestamp − virtual start) / rate`, and `lateness = submitted −
-  due`, positive meaning the generator missed its slot. Pacing never submits early
-  by construction, so lateness is one-sided. A run whose lateness exceeds its
-  tolerance is invalid for the same reason FR-062 exists: the generator, not
-  Certus, set the pace.
+  **The validity metric changes with the mode, and that was the substance of
+  the work rather than a detail.** FR-062 invalidates a run whose plan queue
+  reached zero, which is meaningful only when the generator is trying to
+  sprint. Under pacing an empty queue is the normal, intended state — nothing
+  is due yet — so that test must be replaced by **lateness**: for each request,
+  `due = t0 + (virtual timestamp − virtual start) / rate`, and `lateness =
+  submitted − due`, positive meaning the generator missed its slot. Pacing
+  never submits early by construction, so lateness is one-sided. A run whose
+  lateness exceeds its tolerance is invalid for the same reason FR-062 exists:
+  the generator, not Certus, set the pace.
 
   Requirements that follow:
 
-  - The report MUST name the mode, because a throughput from a paced run and one
-    from a work-conserving run are not comparable and would otherwise be quoted
-    side by side.
-  - Lateness MUST be reported as percentiles with its request count, per FR-066a.
-  - FR-072 and FR-072a MUST continue to hold: pacing changes *when* a request is
-    submitted, never which keys a turn names or how sessions interleave.
-  - A **rate multiplier MUST exist**, expressed as virtual seconds per wallclock
-    second, and it is a calibration control rather than a convenience. A
-    description's durations are arbitrary with respect to any particular machine:
-    `think_time` and session lifetimes reflect whatever hardware the workload was
-    observed on or imagined for, so on faster hardware the same description
-    under-drives the system and on slower hardware it over-drives it. The
-    multiplier is how one description is aimed at different targets without being
-    rewritten, and it also controls cost, since a paced run takes wallclock equal
-    to its virtual span divided by the rate.
+  - The report MUST name the mode, because a throughput from a paced run and
+    one from a work-conserving run are not comparable and would otherwise be
+    quoted side by side.
+  - Lateness MUST be reported as percentiles with its request count, per
+    FR-066a.
+  - FR-072 and FR-072a MUST continue to hold: pacing changes *when* a request
+    is submitted, never which keys a turn names or how sessions interleave.
+  - A **rate multiplier MUST exist**, expressed as virtual seconds per
+    wallclock second, and it is a calibration control rather than a
+    convenience. A description's durations are arbitrary with respect to any
+    particular machine: `think_time` and session lifetimes reflect whatever
+    hardware the workload was observed on or imagined for, so on faster
+    hardware the same description under-drives the system and on slower
+    hardware it over-drives it. The multiplier is how one description is aimed
+    at different targets without being rewritten, and it also controls cost,
+    since a paced run takes wallclock equal to its virtual span divided by the
+    rate.
 
-    It belongs on the command line and **MUST NOT be a field of the description**,
-    for FR-069's reason exactly: it describes the target hardware rather than the
-    workload, so putting it in the YAML would conflate the two and break FR-005
-    portability.
+    It belongs on the command line and **MUST NOT be a field of the
+    description**, for FR-069's reason exactly: it describes the target
+    hardware rather than the workload, so putting it in the YAML would conflate
+    the two and break FR-005 portability.
 
   - **The rate is the load knob, so a rate sweep is the capacity measurement.**
     Offered load scales with the rate while the workload's shape does not, so
     sweeping it and watching where lateness leaves zero gives the rate at which
-    this machine stops serving this workload on time — a load-versus-latency curve
-    rather than a single number. That is a better instrument for "can this machine
-    serve this workload" than the work-conserving ceiling, which reports a
-    saturated queue's latency; the work-conserving mode remains useful for a pure
-    bandwidth ceiling with no schedule to keep.
+    this machine stops serving this workload on time — a load-versus-latency
+    curve rather than a single number. That is a better instrument for "can
+    this machine serve this workload" than the work-conserving ceiling, which
+    reports a saturated queue's latency; the work-conserving mode remains
+    useful for a pure bandwidth ceiling with no schedule to keep.
 
-  - **Rate MUST NOT change the workload.** It changes only the tempo at which the
-    plan is played: the same keys in the same order with the same virtual
+  - **Rate MUST NOT change the workload.** It changes only the tempo at which
+    the plan is played: the same keys in the same order with the same virtual
     interleaving and the same session concurrency, submitted faster or slower.
-    FR-072 continues to hold, and a run's plan fingerprint MUST be independent of
-    the rate.
+    FR-072 continues to hold, and a run's plan fingerprint MUST be independent
+    of the rate.
 
-  - **In paced mode the reported `virtual/wallclock` ratio becomes a check on the
-    requested rate.** It should come out at approximately the rate asked for; a
-    measured ratio below the requested one is the same information as accumulated
-    lateness, arriving by a second route, and the two MUST agree.
-  - FR-031 and FR-062 are **scoped to the work-conserving mode**, which is where
-    they are stated above. FR-062's scoping is the load-bearing half: a node too
-    slow to keep a paced schedule leaves the producer comfortably ahead, so the
-    plan-queue check reports a healthy queue while the run is failing.
+  - **In paced mode the reported `virtual/wallclock` ratio becomes a check on
+    the requested rate.** It should come out at approximately the rate asked
+    for; a measured ratio below the requested one is the same information as
+    accumulated lateness, arriving by a second route, and the two MUST agree.
+  - FR-031 and FR-062 are **scoped to the work-conserving mode**, which is
+    where they are stated above. FR-062's scoping is the load-bearing half: a
+    node too slow to keep a paced schedule leaves the producer comfortably
+    ahead, so the plan-queue check reports a healthy queue while the run is
+    failing.
 
-  **Paced MUST be the default, and the argument is the constitution's own.** Its
-  rationale for the three measurement principles is that each guards "a specific
-  failure mode that produces plausible numbers rather than an error". Apply that
-  test to the choice of default and it is asymmetric:
+  **Paced MUST be the default, and the argument is the constitution's own.**
+  Its rationale for the three measurement principles is that each guards "a
+  specific failure mode that produces plausible numbers rather than an error".
+  Apply that test to the choice of default and it is asymmetric:
 
   * Paced by default, when the operator wanted a ceiling: throughput comes back
     capped at the rate they asked for and lateness is ~0. The number equals the
     request, which is conspicuous and hard to misquote.
-  * Work-conserving by default, when the operator wanted their workload's latency:
-    percentiles come back from a **saturated** queue. They look entirely plausible
-    and describe a queue the workload would never form.
+  * Work-conserving by default, when the operator wanted their workload's
+    latency: percentiles come back from a **saturated** queue. They look
+    entirely plausible and describe a queue the workload would never form.
 
   The second is the failure mode the constitution names, so the default must be
-  paced. A supporting argument from the data model: `think_time`, arrival rates and
-  session lifetimes are most of what a description says, and a work-conserving
-  default makes those fields decorative for a live run.
+  paced. A supporting argument from the data model: `think_time`, arrival rates
+  and session lifetimes are most of what a description says, and a
+  work-conserving default makes those fields decorative for a live run.
 
-  **The selector MUST be positive rather than `--unpaced`.** A negative flag cannot
-  be read without already knowing the default, and it collides with the rate
-  multiplier — `--unpaced --rate 10` has no meaning and would have to be rejected.
-  `--pacing real|none`, defaulting to `real`, with `--rate` valid only under
-  `real`, keeps the flag one-to-one with the mode the report is required to name.
+  **The selector MUST be positive rather than `--unpaced`.** A negative flag
+  cannot be read without already knowing the default, and it collides with the
+  rate multiplier — `--unpaced --rate 10` has no meaning and would have to be
+  rejected. `--pacing real|none`, defaulting to `real`, with `--rate` valid
+  only under `real`, keeps the flag one-to-one with the mode the report is
+  required to name.
 
-  **Due times MUST be absolute, and this is a correctness requirement rather than
-  a style choice.** `due` is computed from `t0` and the request's virtual
-  timestamp, **never** from the previous submission. If a late request pushed later
-  due times back, a slow server would silently stretch think time and dilate the
-  workload — which is precisely the hazard the constitution names when it warns
-  that "a wallclock-coupled clock lets a slow server quietly reshape the workload
-  it is being judged on". With absolute due times the schedule is fixed in advance
-  and lateness accumulates as a *measured error*, so pacing measures the deviation
-  instead of absorbing it.
+  **Due times MUST be absolute, and this is a correctness requirement rather
+  than a style choice.** `due` is computed from `t0` and the request's virtual
+  timestamp, **never** from the previous submission. If a late request pushed
+  later due times back, a slow server would silently stretch think time and
+  dilate the workload — which is precisely the hazard the constitution names
+  when it warns that "a wallclock-coupled clock lets a slow server quietly
+  reshape the workload it is being judged on". With absolute due times the
+  schedule is fixed in advance and lateness accumulates as a *measured error*,
+  so pacing measures the deviation instead of absorbing it.
 
-  **A paced run MUST project its wallclock cost before starting**, symmetrically
-  with FR-073's size projection for an emit run: at rate 1.0 a paced run takes
-  wallclock equal to its virtual span, so `--until 3600` costs an hour and a tool
-  that simply went quiet would look hung. Naming the figure up front is the
-  difference between a long run and an apparently broken one.
+  **A paced run MUST project its wallclock cost before starting**,
+  symmetrically with FR-073's size projection for an emit run: at rate 1.0 a
+  paced run takes wallclock equal to its virtual span, so `--until 3600` costs
+  an hour and a tool that simply went quiet would look hung. Naming the figure
+  up front is the difference between a long run and an apparently broken one.
 
   **Known cost, now paid**: two modes means two validity rules, two meanings for
-  the virtual-to-wallclock ratio, and a report that must be unambiguous about which
-  it is showing. That complexity was accepted deliberately, and it is why this was
-  deferred until FR-079 had collapsed the two drivers into one — pacing decides when
-  a request is submitted, so with two drivers it would have been built twice.
+  the virtual-to-wallclock ratio, and a report that must be unambiguous about
+  which it is showing. That complexity was accepted deliberately, and it is why
+  this was deferred until FR-079 had collapsed the two drivers into one —
+  pacing decides when a request is submitted, so with two drivers it would have
+  been built twice.
 
   **What was built, and where each requirement above is checked.**
-  `crates/workload-gen/tests/pacing.rs` drives a loopback stub, which is the right
-  instrument rather than a weakened one: the schedule is computed from the plan's
-  virtual timestamps and the wallclock and depends on nothing a cache answers, so it
-  is checkable in the ordinary gate with no server, no accelerator and no cluster.
-  It asserts the cost identity (a 2-virtual-second run at rate 1.0 waits, the same
-  run at rate 20 does not, and a work-conserving run waits not at all), that a node
-  four times too slow accumulates lateness past its tolerance and is reported
-  invalid **while the plan queue stays healthy**, that a wide enough tolerance
-  accepts the same late run, and that the rate is refused at zero or below and
-  refused outright beside `--pacing none`. `crates/workload-gen/tests/loopback.rs`
-  asserts the workload-invariance directly: identical turns per session at rates 1,
-  1 000, 5 000, 20 000 and 50 000, and a plan fingerprint that depends on the seed
-  and not on the rate.
+  `crates/workload-gen/tests/pacing.rs` drives a loopback stub, which is the
+  right instrument rather than a weakened one: the schedule is computed from
+  the plan's virtual timestamps and the wallclock and depends on nothing a
+  cache answers, so it is checkable in the ordinary gate with no server, no
+  accelerator and no cluster. It asserts the cost identity (a 2-virtual-second
+  run at rate 1.0 waits, the same run at rate 20 does not, and a
+  work-conserving run waits not at all), that a node four times too slow
+  accumulates lateness past its tolerance and is reported invalid **while the
+  plan queue stays healthy**, that a wide enough tolerance accepts the same
+  late run, and that the rate is refused at zero or below and refused outright
+  beside `--pacing none`. `crates/workload-gen/tests/loopback.rs` asserts the
+  workload-invariance directly: identical turns per session at rates 1, 1 000,
+  5 000, 20 000 and 50 000, and a plan fingerprint that depends on the seed and
+  not on the rate.
 
-  What no test here can show is that a *real* Certus keeps a schedule, which is the
-  measurement the mode exists for and belongs on hardware. `scripts/rate-sweep.sh`
-  is the harness for it.
+  What no test here can show is that a *real* Certus keeps a schedule, which is
+  the measurement the mode exists for and belongs on hardware.
+  `scripts/rate-sweep.sh` is the harness for it.
 
 ### Key Entities
 
@@ -994,20 +1012,21 @@ modes reorder the policies.
     and hit above it, which is a cliff, and the overall curve puts ~85% of its
     rise in one step whether popularity is concentrated or flat. The criterion
     is now the cross-session hit rate — references to a block some *other*
-    session brought in, which are the references a replacement decision decides.
-  - The hundredfold span must sit **below** the key space (0.1%-10% of it). At a
-    capacity equal to the key space nothing is evicted, so the hit rate is 1.0
-    for any workload at all, and a ladder ending there flatters every shape that
-    reaches it.
+    session brought in, which are the references a replacement decision
+    decides.
+  - The hundredfold span must sit **below** the key space (0.1%-10% of it). At
+    a capacity equal to the key space nothing is evicted, so the hit rate is
+    1.0 for any workload at all, and a ladder ending there flatters every shape
+    that reaches it.
   - The rise must also be **substantial** (>= 10 points), since a curve that
     barely moves satisfies "no step over half" trivially.
 
   "By construction" was too strong and is withdrawn: a uniform workload fails
   the corrected criterion by *measurement*, at five seeds out of five, not by
   arithmetic necessity. It is also not enough for popularity alone to be
-  scale-free — with constant `turns` and `uses.count` every session has the same
-  footprint, so the working set has one characteristic size and the curve cliffs
-  there however the pool is selected.
+  scale-free — with constant `turns` and `uses.count` every session has the
+  same footprint, so the working set has one characteristic size and the curve
+  cliffs there however the pool is selected.
 - **SC-006**: Holding workload and cache size fixed, the two popularity ranking
   modes reverse the measured ranking of two eviction policies, with the
   difference significant across repeated runs — demonstrating the tool can
