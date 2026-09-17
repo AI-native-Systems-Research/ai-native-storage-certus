@@ -375,12 +375,17 @@ modes reorder the policies.
 
 **Virtual time and execution**
 
-- **FR-031**: In the default **work-conserving** mode, virtual time MUST exist
-  only to decide the order of operations, and MUST NOT be mapped to wallclock
-  time. This is what makes the run a measurement of capability: it issues as fast
-  as the mailbox allows and FR-062's plan-queue check proves the generator was not
-  the constraint. FR-078 adds a second, **paced** mode in which the mapping is the
-  point; until that lands, this requirement is unqualified in practice.
+- **FR-031** *(scoped to the work-conserving mode)*: Under `--pacing none`,
+  virtual time MUST exist only to decide the order of operations, and MUST NOT be
+  mapped to wallclock time. That is what makes such a run a measurement of
+  capability: it issues as fast as the transport allows, and FR-062's plan-queue
+  check proves the generator was not the constraint.
+
+  This requirement **does not apply to the default paced mode**, where mapping
+  virtual time onto wallclock is the entire point (FR-080). The scoping is not a
+  weakening: the two modes answer different questions, and a requirement that
+  forbade the mapping outright would forbid the mode that measures the latency a
+  workload actually produces.
 - **FR-032**: The virtual clock MUST be the minimum timestamp among operations
   still in flight. When the server applies backpressure, a lane blocks and the
   clock holds — it MUST NOT advance, skip, or dilate unevenly.
@@ -455,7 +460,7 @@ modes reorder the policies.
   generator killed outright would leave a daemon holding mailbox channels and a
   device allocation until someone next started a run.
 
-  A daemon MUST NOT exit merely because it is **idle**. Under FR-078's paced mode
+  A daemon MUST NOT exit merely because it is **idle**. Under FR-080's paced mode
   a session's think time is real waiting, so a node may legitimately receive
   nothing for minutes; a daemon that took silence for failure would exit in the
   middle of the workload it was serving. A grace period after the last
@@ -588,10 +593,22 @@ modes reorder the policies.
   lane utilisation, and request-latency percentiles alongside throughput. These
   measure the system under test and have no meaning in an **emit run**, which
   has no lanes, no requests, and no server; see FR-071.
-- **FR-062**: A **live run** whose plan queue reached zero MUST be reported as
-  invalid, and its throughput MUST NOT be presented as a result. In an emit run
-  a drained plan queue carries no such meaning — it means only that the writer
-  outran the simulation — and MUST NOT be treated as invalidity.
+- **FR-062** *(scoped to the work-conserving mode)*: A **work-conserving live
+  run** whose plan queue reached zero MUST be reported as invalid, and its
+  throughput MUST NOT be presented as a result.
+
+  It carries no such meaning in two other places, and MUST NOT be treated as
+  invalidity in either. In an **emit run** a drained plan queue means only that
+  the writer outran the simulation. In a **paced run** an empty queue is the
+  normal, intended state — no work is due yet — so the check is not merely
+  uninformative there but actively wrong, and FR-080's lateness replaces it.
+
+  The replacement is not a formality. A node too slow to keep a paced schedule
+  leaves the producer comfortably ahead of the lanes, so this check sees a
+  **healthy** queue with zero underruns while the run is failing to keep the very
+  schedule it set itself. That is measured, in
+  `crates/workload-gen/tests/pacing.rs`, and it is the reason the metric had to be
+  replaced rather than supplemented.
 - **FR-063**: Run reports MUST record the seed, the description file identity,
   and the effective parameter values after truncation, so a run can be
   reproduced from its own report.
@@ -703,81 +720,79 @@ modes reorder the policies.
   cache outcomes, which keeps FR-072's guarantee intact across nodes while
   keeping the chatter host-local.
 
-### Agreed: proxy the local node through an agent too
+### One transport: the local node goes through an agent too
 
-- **FR-079** *(AGREED, to be implemented after T074)*: The generator SHOULD reach every node
-  through its per-node agent, **including the local one**, rather than talking to a local
-  mailbox directly. One transport, one driver, one cleanup mechanism.
+- **FR-079** *(IMPLEMENTED, T092/T092a)*: The generator MUST reach every node
+  through its per-node agent, **including the local one**, rather than talking to a
+  local mailbox directly. One transport, one driver, one cleanup mechanism.
 
-  **The measurement objection does not apply**, which is what makes this affordable. A
+  **The measurement objection does not apply**, which is what made this affordable. A
   loopback hop would normally inflate the latency being measured, but FR-066/FR-072a already
   require the mailbox-facing code to be the sole collector: the agent times its own mailbox
   requests, so reported per-op latency and bandwidth exclude the hop. It affects only how
-  fast the generator can *feed* work, which FR-062's plan-queue check already guards.
-  Loopback round trips at the pipelining depth of `contracts/node-agent-wire.md` are three
-  orders of magnitude above any rate measured on this hardware.
+  fast the generator can *feed* work, which FR-062's plan-queue check and FR-080's lateness
+  already guard. Loopback round trips at the pipelining depth of
+  `contracts/node-agent-wire.md` are three orders of magnitude above any rate measured on
+  this hardware.
 
-  What it buys, in order:
+  What it bought, in order:
 
-  1. **One driver.** FR-072a's *rule* already has one implementation, but the local and remote
-     paths are still two drivers. Collapsing them removes the divergence class FR-072 exists
-     to guard, rather than testing for it.
-  2. **One cleanup mechanism.** FR-052 and FR-053 are then satisfied the same way everywhere.
-     Two mechanisms have already produced two defects here — a mailbox channel not returned
+  1. **One driver.** FR-072a's *rule* already had one implementation, but the local and
+     remote paths were two drivers. Collapsing them **removes** the divergence class FR-072
+     exists to guard, rather than testing for it.
+  2. **One cleanup mechanism.** FR-052 and FR-053 are now satisfied the same way everywhere.
+     Two mechanisms had already produced two defects here — a mailbox channel not returned
      when a connection closed, and an agent listening forever after its control process died.
-  3. **The generator stops depending on CUDA and on the mailbox**, and therefore stops
-     enabling `interfaces/spdk` transitively. It could become a workspace default member, and
-     the `live` feature's purpose largely disappears.
-  4. **The generator can run off-cluster**, on a host with no Certus and no accelerator. Not a
-     requirement; a consequence.
+  3. **The generator no longer depends on CUDA or on the mailbox**, and so no longer enables
+     `interfaces/spdk` transitively. It **is** a workspace default member, verified by `ldd`
+     naming no `cudart` on the binary.
+  4. **The generator can run off-cluster**, on a host with no Certus and no accelerator. Not
+     a requirement; a consequence.
 
-  Costs, recorded rather than discovered later: an extra process for the simplest run, which
-  the generator SHOULD hide by launching a local agent itself without ssh; and
-  `CLEAR_MEMORY_TIER`, which the generator issues directly today and would need as a frame.
+  Two costs, both paid rather than discovered later. An extra process for the simplest run,
+  which the generator hides by launching a **local agent itself with no ssh** — `ssh
+  localhost` would want the host's own key trusted for its own account, which is a
+  configuration step for the simplest possible invocation. And `CLEAR_MEMORY_TIER`, which the
+  generator used to issue directly and is now the `ClearCache` frame (protocol version 3).
 
-  **When to do it.** After T074, which now exists — and the recommendation is to wait for
-  FR-078 rather than to do it next. Two reasons, one of which retires the original urgency:
+  **A lane is a connection, on every node.** The mailbox is depth-1 per channel and the agent
+  claims one per connection, so `--lanes n` means *n connections per node*, routed
+  `session % n` within the node the session was placed on. That is what the deleted local
+  path did, and it is load-bearing rather than incidental: a single connection per node would
+  have collapsed a four-lane local run to one lane and reported the throughput as though
+  nothing had changed.
 
-  * **The divergence it prevents is already guarded.** T074 compares the two paths and the
-    executor is single, so they cannot silently drift today. That was the argument for doing it
-    soon, and it is spent. What remains is structural tidiness and the dependency win — real,
-    but not time-critical, and paid for against a local path that is complete and *measured*.
-  * **FR-078 is the moment the cost becomes payable.** Pacing changes *when* a request is
-    submitted, which lives in the driver, so with two drivers it is built twice. Unify first,
-    then implement pacing once.
+  **A hazard it removes rather than adds:** a generator killed outright used to leak its
+  mailbox channel claims, with no recovery path until the server restarted. The agent's
+  leftover replacement now covers that case.
 
-  One rule holds either way: **do not add features to both paths while both exist.** That is
-  precisely how they diverge, and it is what would make T074 begin failing for a real reason.
+  A cost recorded in the interest of not overselling this: the loopback hop is free for
+  reported latency, since the agent times its own mailbox requests, but it is not free for
+  the rate at which the generator can *feed* work — and FR-080's rate sweep exists to push
+  that rate until something breaks. Measured: pipelining depth 8 at a ~30 µs loopback round
+  trip is ~260 000 turns/second against ~1 000 turns/second observed, so roughly 250x
+  headroom. Not binding, but it is the number to re-check if a sweep ever reports the
+  generator as the limit.
 
-  A cost recorded in the interest of not overselling this: the loopback hop is free for reported
-  latency, since the agent times its own mailbox requests, but it is not free for the rate at
-  which the generator can *feed* work — and FR-078's rate sweep exists to push that rate until
-  something breaks. Measured: pipelining depth 8 at a ~30 µs loopback round trip is ~260 000
-  turns/second against ~1 000 turns/second observed, so roughly 250x headroom. Not binding, but
-  it is the number to re-check if a sweep ever reports the generator as the limit.
+  **Sequencing was part of the decision, and it was honoured.** This came *after* the
+  loopback-equivalence test (T074), never before: that test is the instrument that
+  demonstrates the unification changed nothing, and unifying first would have collapsed onto
+  a path never shown equivalent while destroying the means of showing it. T092a re-points it
+  at the deleted path's behaviour, so it is now a regression guard rather than a comparison
+  of two implementations that both still ship.
 
-  And one hazard it *removes* rather than adds: a generator killed outright leaks its mailbox
-  channel claims today, with no recovery path until the server restarts. Under FR-079 the
-  agent's leftover replacement covers that case.
+### Paced mode
 
-  **Sequencing is part of the decision.** This MUST come after the loopback-equivalence test
-  (T074), not before. Tracked as **T092/T092a** — the numbers T075-T080 were already US4's. That test is what compares the two paths, so it is the instrument that
-  demonstrates the unification changed nothing — unifying first would collapse onto a path
-  never shown equivalent, and would destroy the means of showing it.
-
-### Deferred: paced mode
-
-- **FR-078** *(DEFERRED — agreed design, to be implemented once everything else
-  is settled)*: System MUST offer a **paced** mode alongside the default
-  work-conserving one, in which a request is **held back until its virtual time
-  is due**, so that the offered load matches the workload's own rate. The two
+- **FR-080** *(IMPLEMENTED, T088-T091)*: System MUST offer a **paced** mode
+  alongside the work-conserving one, in which a request is **held back until its
+  virtual time is due**, so that the offered load matches the workload's own rate. The two
   modes answer different questions and both are wanted: work-conserving measures
   *how fast Certus can go*, paced measures *the latency Certus delivers under the
   load this workload actually represents*. Latency is the reason for the feature —
   a percentile gathered while the generator sprints describes a queue that the
   real workload would never form.
 
-  **The validity metric changes with the mode, and this is the substance of the
+  **The validity metric changes with the mode, and that was the substance of the
   work rather than a detail.** FR-062 invalidates a run whose plan queue reached
   zero, which is meaningful only when the generator is trying to sprint. Under
   pacing an empty queue is the normal, intended state — nothing is due yet — so
@@ -830,7 +845,10 @@ modes reorder the policies.
     requested rate.** It should come out at approximately the rate asked for; a
     measured ratio below the requested one is the same information as accumulated
     lateness, arriving by a second route, and the two MUST agree.
-  - FR-031 MUST be scoped to the work-conserving mode when this lands.
+  - FR-031 and FR-062 are **scoped to the work-conserving mode**, which is where
+    they are stated above. FR-062's scoping is the load-bearing half: a node too
+    slow to keep a paced schedule leaves the producer comfortably ahead, so the
+    plan-queue check reports a healthy queue while the run is failing.
 
   **Paced MUST be the default, and the argument is the constitution's own.** Its
   rationale for the three measurement principles is that each guards "a specific
@@ -871,10 +889,30 @@ modes reorder the policies.
   that simply went quiet would look hung. Naming the figure up front is the
   difference between a long run and an apparently broken one.
 
-  **Known cost**: two modes means two validity rules, two meanings for the
-  virtual-to-wallclock ratio, and a report that must be unambiguous about which it
-  is showing. That complexity is accepted deliberately and is the reason this is
-  deferred rather than folded into US1.
+  **Known cost, now paid**: two modes means two validity rules, two meanings for
+  the virtual-to-wallclock ratio, and a report that must be unambiguous about which
+  it is showing. That complexity was accepted deliberately, and it is why this was
+  deferred until FR-079 had collapsed the two drivers into one — pacing decides when
+  a request is submitted, so with two drivers it would have been built twice.
+
+  **What was built, and where each requirement above is checked.**
+  `crates/workload-gen/tests/pacing.rs` drives a loopback stub, which is the right
+  instrument rather than a weakened one: the schedule is computed from the plan's
+  virtual timestamps and the wallclock and depends on nothing a cache answers, so it
+  is checkable in the ordinary gate with no server, no accelerator and no cluster.
+  It asserts the cost identity (a 2-virtual-second run at rate 1.0 waits, the same
+  run at rate 20 does not, and a work-conserving run waits not at all), that a node
+  four times too slow accumulates lateness past its tolerance and is reported
+  invalid **while the plan queue stays healthy**, that a wide enough tolerance
+  accepts the same late run, and that the rate is refused at zero or below and
+  refused outright beside `--pacing none`. `crates/workload-gen/tests/loopback.rs`
+  asserts the workload-invariance directly: identical turns per session at rates 1,
+  1 000, 5 000, 20 000 and 50 000, and a plan fingerprint that depends on the seed
+  and not on the rate.
+
+  What no test here can show is that a *real* Certus keeps a schedule, which is the
+  measurement the mode exists for and belongs on hardware. `scripts/rate-sweep.sh`
+  is the harness for it.
 
 ### Key Entities
 
