@@ -80,124 +80,127 @@ ClearCache  (6): req  { }
 
 ### `ClearCache` exists because the generator has no mailbox (v3)
 
-FR-046 lets a run clear the memory tier **once, before the timed window opens**, and
-the generator used to issue `CLEAR_MEMORY_TIER` itself. Under FR-079 it has no
-mailbox of its own, so the clear has to be asked for.
+FR-046 lets a run clear the memory tier **once, before the timed window
+opens**, and the generator used to issue `CLEAR_MEMORY_TIER` itself. Under
+FR-079 it has no mailbox of its own, so the clear has to be asked for.
 
 `error` empty means the clear happened and `entries` is what it dropped. A
 **non-empty `error` is not a zero count**: "0 entries dropped" is a legitimate
 answer for an already-empty cache, so a service that cannot clear MUST say why
-rather than answer as though it had. A run that believed its cache was cold when it
-was not would report a plausible hit rate for a different experiment, which is the
-failure class the constitution's measurement principles name. The generator
-therefore refuses to run on a non-empty `error`, and `Service::clear_cache`'s
-default is that refusal rather than a success.
+rather than answer as though it had. A run that believed its cache was cold
+when it was not would report a plausible hit rate for a different experiment,
+which is the failure class the constitution's measurement principles name. The
+generator therefore refuses to run on a non-empty `error`, and
+`Service::clear_cache`'s default is that refusal rather than a success.
 
-It is setup and MUST NOT be issued inside the timed window or mid-run: clearing then
-would be the generator evicting on the eviction policy's behalf (FR-043). The client
-refuses it while any turn is outstanding, for the same reason the other synchronous
-calls are refused — and here it also means a clear cannot race a store the run has
-already issued.
+It is setup and MUST NOT be issued inside the timed window or mid-run: clearing
+then would be the generator evicting on the eviction policy's behalf (FR-043).
+The client refuses it while any turn is outstanding, for the same reason the
+other synchronous calls are refused — and here it also means a clear cannot
+race a store the run has already issued.
 
 ### `SubmitTurn` carries a key path, not an operation (v2)
 
-Version 1 sent **one operation per frame** — `{ op_kind, session, keys }` — with
-the generator deciding each operation and the agent relaying it. FR-072a makes
-that impossible: a turn's operations are not known until the cache has answered,
-because a client offers its whole path and stores what came back absent. Relaying
-would also mean six or more network round trips per turn, which FR-072b rejects:
-the reactive rule is cheap at `/dev/shm` latency and ruinous over a fabric.
+Version 1 sent **one operation per frame** — `{ op_kind, session, keys }` —
+with the generator deciding each operation and the agent relaying it. FR-072a
+makes that impossible: a turn's operations are not known until the cache has
+answered, because a client offers its whole path and stores what came back
+absent. Relaying would also mean six or more network round trips per turn,
+which FR-072b rejects: the reactive rule is cheap at `/dev/shm` latency and
+ruinous over a fabric.
 
-So a frame now carries **one turn's key path**, root of the prefix through the end
-of the new growth, and the agent performs the check, the loads and the stores
-against its own local mailbox. `flags` bit 0 requests an event poll after the
-turn, which is the plan's decision and so stays with the generator.
+So a frame now carries **one turn's key path**, root of the prefix through the
+end of the new growth, and the agent performs the check, the loads and the
+stores against its own local mailbox. `flags` bit 0 requests an event poll
+after the turn, which is the plan's decision and so stays with the generator.
 
 **What this does and does not move across the boundary.** The workload stays
-entirely on the generator: which keys, in which order, for which session, at which
-virtual time. What the agent applies is the *client rule* — load what is resident,
-store what is absent — which is a mechanical consequence of the cache's answer and
-not a workload decision. Version 1's concern, that deciding "what to issue" on the
-agent would put workload semantics on two sides of a network boundary, still
-holds and is still respected.
+entirely on the generator: which keys, in which order, for which session, at
+which virtual time. What the agent applies is the *client rule* — load what is
+resident, store what is absent — which is a mechanical consequence of the
+cache's answer and not a workload decision. Version 1's concern, that deciding
+"what to issue" on the agent would put workload semantics on two sides of a
+network boundary, still holds and is still respected.
 
-**The rule MUST have exactly one implementation.** If the local path and the agent
-each had their own, the two execution paths could diverge and FR-072's guarantee —
-that the same description and seed produce the same workload whichever path runs
-it — would become unverifiable. `workload-node-agent` therefore depends on
-`workload-gen`'s library for the split and the encoders rather than reimplementing
-them. That is the wrong direction for a dependency arrow and is accepted for the
-stronger property; if `workload-gen`'s library grows, extracting the executor into
-its own crate is the tidier form. It cannot live in `workload-wire`, which is a
-CUDA-free workspace default member: depending on `shmq-dispatcher` from there would
-unify `interfaces/spdk` into the default build.
+**The rule MUST have exactly one implementation.** If the local path and the
+agent each had their own, the two execution paths could diverge and FR-072's
+guarantee — that the same description and seed produce the same workload
+whichever path runs it — would become unverifiable. `workload-node-agent`
+therefore depends on `workload-gen`'s library for the split and the encoders
+rather than reimplementing them. That is the wrong direction for a dependency
+arrow and is accepted for the stronger property; if `workload-gen`'s library
+grows, extracting the executor into its own crate is the tidier form. It cannot
+live in `workload-wire`, which is a CUDA-free workspace default member:
+depending on `shmq-dispatcher` from there would unify `interfaces/spdk` into
+the default build.
 
 `op_kind` still enumerates the plan's operation kinds — check, **touch**, load,
-reserve, transfer, commit, abort, poll-events. It is no longer what a submission
-names; it is the key space of the `Stats` reply, and the agent's own translation
-table to the mailbox's opcodes.
+reserve, transfer, commit, abort, poll-events. It is no longer what a
+submission names; it is the key space of the `Stats` reply, and the agent's own
+translation table to the mailbox's opcodes.
 
 ### The mailbox-facing code is the only collector
 
-Latency and bandwidth MUST be measured by whatever code talks to the shared-memory
-mailbox — the generator's own executor on a local node, the agent's on a remote
-one — and MUST NOT be inferred from this wire. Only the agent is near a remote
-mailbox, so only the agent can time a `LOOKUP` or count a block that moved; a
-figure derived from wire timings would include the network and describe the
-transport rather than Certus.
+Latency and bandwidth MUST be measured by whatever code talks to the
+shared-memory mailbox — the generator's own executor on a local node, the
+agent's on a remote one — and MUST NOT be inferred from this wire. Only the
+agent is near a remote mailbox, so only the agent can time a `LOOKUP` or count
+a block that moved; a figure derived from wire timings would include the
+network and describe the transport rather than Certus.
 
 Because both paths run the **same** executor (see above), the counters mean the
-same thing wherever they were gathered, which is what makes a local number and a
-remote number comparable. Had each path counted for itself, a local/remote
+same thing wherever they were gathered, which is what makes a local number and
+a remote number comparable. Had each path counted for itself, a local/remote
 difference would be unattributable between the cache and the instrument.
 
 `Counters` carries the fifteen figures the report needs — requests, key
 references, the three `CHECK` states, `LOOKUP` hits and misses, attempted and
-declined counts for reserve, transfer and commit, and the blocks actually read and
-written. Bandwidth follows from the last two: a block is read on a `LOOKUP` hit
-and written on an accepted `COPY_TO_STORE`, and no control operation moves a byte
-(FR-066). Counters **sum** exactly across nodes, which is why bandwidth can be
-totalled where a percentile cannot.
+declined counts for reserve, transfer and commit, and the blocks actually read
+and written. Bandwidth follows from the last two: a block is read on a `LOOKUP`
+hit and written on an accepted `COPY_TO_STORE`, and no control operation moves
+a byte (FR-066). Counters **sum** exactly across nodes, which is why bandwidth
+can be totalled where a percentile cannot.
 
-They travel back **for reporting only**. Nothing the generator does may depend on
-them: they do not gate validity, steer submission, or re-enter the workload.
+They travel back **for reporting only**. Nothing the generator does may depend
+on them: they do not gate validity, steer submission, or re-enter the workload.
 
 ### Ordering: one causal rule for the generator, everything else is Certus's
 
-The generator owns exactly one ordering property, and it is **causal** rather than
-general: turn *n+1* of a session contains the blocks turn *n* stored, so two turns
-of the same session MUST NOT be in flight together. The agent therefore processes
-one connection's frames in arrival order, and a lane owns a fixed set of sessions
-on its own connection; overlap comes from having several lanes. An agent that
-handed a connection's frames to a thread pool would violate this, and the symptom
-would be quiet — turn *n+1* would check a prefix turn *n* had not yet stored, find
-it absent, and store it again, so the run would complete with inflated store counts
-and a depressed hit rate.
+The generator owns exactly one ordering property, and it is **causal** rather
+than general: turn *n+1* of a session contains the blocks turn *n* stored, so
+two turns of the same session MUST NOT be in flight together. The agent
+therefore processes one connection's frames in arrival order, and a lane owns a
+fixed set of sessions on its own connection; overlap comes from having several
+lanes. An agent that handed a connection's frames to a thread pool would
+violate this, and the symptom would be quiet — turn *n+1* would check a prefix
+turn *n* had not yet stored, find it absent, and store it again, so the run
+would complete with inflated store counts and a depressed hit rate.
 
 **Reordering after submission is Certus-internal and explicitly not a generator
-concern.** The mailbox has parallel channels and the server runs multiple threads,
-so two submitted requests may be processed in either order; preventing that would
-mean one channel and no parallelism, which would remove the thing the measurement
-exists to exercise. Neither the generator nor the agent makes an end-to-end
-ordering claim, and neither should be changed to try to enforce one. `CHECK`'s
-`PENDING` state is the evidence that Certus already expects concurrent stores of
-one key and reports them rather than treating them as an error.
+concern.** The mailbox has parallel channels and the server runs multiple
+threads, so two submitted requests may be processed in either order; preventing
+that would mean one channel and no parallelism, which would remove the thing
+the measurement exists to exercise. Neither the generator nor the agent makes
+an end-to-end ordering claim, and neither should be changed to try to enforce
+one. `CHECK`'s `PENDING` state is the evidence that Certus already expects
+concurrent stores of one key and reports them rather than treating them as an
+error.
 
 ### `Stats` returns histograms, because percentiles do not merge
 
-The agent times each local request, so per-operation latency (FR-066a) can only be
-measured there. It MUST be returned as **serialized histograms**, never as
+The agent times each local request, so per-operation latency (FR-066a) can only
+be measured there. It MUST be returned as **serialized histograms**, never as
 percentiles.
 
-Merging percentiles is arithmetically wrong: the median of two nodes' medians is
-not the median of their requests, and the same holds for every quantile. Averaging
-per-node p99s would produce a number that looks authoritative and belongs to no
-distribution — the failure mode this project has repeatedly caught elsewhere. HDR
-histograms merge exactly, so the wire carries the histogram and the generator
-merges before taking any quantile.
+Merging percentiles is arithmetically wrong: the median of two nodes' medians
+is not the median of their requests, and the same holds for every quantile.
+Averaging per-node p99s would produce a number that looks authoritative and
+belongs to no distribution — the failure mode this project has repeatedly
+caught elsewhere. HDR histograms merge exactly, so the wire carries the
+histogram and the generator merges before taking any quantile.
 
-Each entry also carries `requests` so the generator can mark a count too small to
-quote (FR-066a).
+Each entry also carries `requests` so the generator can mark a count too small
+to quote (FR-066a).
 
 **`touch` was missing from this list and from the plan, and that was a defect
 rather than an omission.** It is the reference report (FR-041), and in the
@@ -277,7 +280,8 @@ experiment than the one requested.
 
 The wire format MUST be tested without a live agent and without an accelerator:
 
-1. Round-trip encode/decode for every opcode, including a zero-key `SubmitTurn`.
+1. Round-trip encode/decode for every opcode, including a zero-key
+   `SubmitTurn`.
 2. An oversized `len` is rejected without allocating.
 3. `Hello` with a mismatched `build_id` is refused, and the refusal names the
    node.
@@ -289,7 +293,8 @@ The wire format MUST be tested without a live agent and without an accelerator:
    paths share one implementation rather than two that happen to agree today.
 7. Two histograms merged from a `Stats` reply give the same quantiles as one
    histogram of the same samples, and a merge of per-node **percentiles** does
-   not — asserted so the wrong method cannot be reintroduced as an optimisation.
+   not — asserted so the wrong method cannot be reintroduced as an
+   optimisation.
 8. A `ClearCache` that did not happen does not encode like one that dropped no
    entries, and `Service::clear_cache`'s default is the refusal — so a service
    with no mailbox cannot answer as though it had cleared one.
