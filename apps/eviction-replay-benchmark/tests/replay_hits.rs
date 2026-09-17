@@ -25,6 +25,12 @@ fn run_session_lists(trace: &Trace, cache_size: usize) -> SimStats {
     simulate(&*ep, trace, cache_size)
 }
 
+fn run_optimized(trace: &Trace, cache_size: usize) -> SimStats {
+    let comp = eviction_policy_optimized::EvictionPolicyOptimizedComponent::new_default();
+    let ep = query_interface!(comp, IEvictionPolicy).unwrap();
+    simulate(&*ep, trace, cache_size)
+}
+
 fn write_tmp(tag: &str, contents: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!("erb-test-{}-{}.jsonl", std::process::id(), tag));
@@ -90,7 +96,11 @@ fn no_eviction_when_cache_holds_working_set() {
         distinct_keys: 3,
         total_key_refs: 6,
     };
-    for stats in [run_lru(&trace, 3), run_session_lists(&trace, 3)] {
+    for stats in [
+        run_lru(&trace, 3),
+        run_session_lists(&trace, 3),
+        run_optimized(&trace, 3),
+    ] {
         assert_eq!(stats.accesses, 6);
         assert_eq!(stats.misses, 3);
         assert_eq!(stats.insertions, 3);
@@ -144,12 +154,37 @@ fn lru_hit_count_is_monotonic_in_cache_size() {
     }
 }
 
+/// `eviction-policy-optimized` currently ports the LRU implementation verbatim,
+/// so it must reproduce LRU's hit/eviction counts exactly across cache sizes.
+#[test]
+fn optimized_matches_lru() {
+    let t = synth_pressure_trace();
+    for w in [4usize, 8, 16, 32] {
+        let lru = run_lru(&t, w);
+        let opt = run_optimized(&t, w);
+        assert_eq!(opt.hits, lru.hits, "hits differ at cache size {w}");
+        assert_eq!(opt.misses, lru.misses, "misses differ at cache size {w}");
+        assert_eq!(
+            opt.evictions, lru.evictions,
+            "evictions differ at cache size {w}"
+        );
+        assert_eq!(
+            opt.resident, lru.resident,
+            "resident set differs at cache size {w}"
+        );
+    }
+}
+
 /// Core bookkeeping invariants hold for both policies under eviction pressure.
 #[test]
 fn simulation_invariants_hold_under_pressure() {
     let t = synth_pressure_trace();
     let cache_size = 16;
-    for stats in [run_lru(&t, cache_size), run_session_lists(&t, cache_size)] {
+    for stats in [
+        run_lru(&t, cache_size),
+        run_session_lists(&t, cache_size),
+        run_optimized(&t, cache_size),
+    ] {
         assert_eq!(stats.accesses, t.total_key_refs as u64);
         assert_eq!(
             stats.hits + stats.misses,
@@ -180,7 +215,11 @@ fn simulation_invariants_hold_under_pressure() {
 #[test]
 fn latency_metrics_are_recorded() {
     let t = synth_pressure_trace();
-    for stats in [run_lru(&t, 16), run_session_lists(&t, 16)] {
+    for stats in [
+        run_lru(&t, 16),
+        run_session_lists(&t, 16),
+        run_optimized(&t, 16),
+    ] {
         assert_eq!(stats.touch_calls, stats.hits, "one touch per hit");
         assert!(stats.evict_calls > 0, "eviction path exercised");
         assert!(stats.track_calls > 0, "track path exercised");

@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 eviction-policy-lru.workspace = true
 eviction-policy-session-lists.workspace = true
+eviction-policy-optimized.workspace = true
 interfaces.workspace = true
 component-core.workspace = true
 clap = { version = "4", features = ["derive"] }

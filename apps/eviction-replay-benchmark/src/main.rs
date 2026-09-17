@@ -28,6 +28,9 @@ enum PolicyArg {
     /// Session-lineage policy (`eviction-policy-session-lists`).
     #[value(name = "eviction-policy-session-lists", alias = "session-lists")]
     SessionLists,
+    /// Optimized LRU policy (`eviction-policy-optimized`).
+    #[value(name = "eviction-policy-optimized", alias = "optimized")]
+    Optimized,
     /// Run all policies and print them side by side.
     #[value(alias = "both")]
     All,
@@ -63,6 +66,7 @@ impl Dataset {
 enum PolicyKind {
     Lru,
     SessionLists,
+    Optimized,
 }
 
 impl PolicyKind {
@@ -70,6 +74,7 @@ impl PolicyKind {
         match self {
             PolicyKind::Lru => "lru",
             PolicyKind::SessionLists => "session-lists",
+            PolicyKind::Optimized => "optimized",
         }
     }
 
@@ -88,6 +93,13 @@ impl PolicyKind {
                     );
                 let ep = query_interface!(comp, IEvictionPolicy)
                     .expect("eviction-policy-session-lists provides IEvictionPolicy");
+                simulate(&*ep, trace, cache_size)
+            }
+            PolicyKind::Optimized => {
+                let comp =
+                    eviction_policy_optimized::EvictionPolicyOptimizedComponent::new_default();
+                let ep = query_interface!(comp, IEvictionPolicy)
+                    .expect("eviction-policy-optimized provides IEvictionPolicy");
                 simulate(&*ep, trace, cache_size)
             }
         }
@@ -213,10 +225,15 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let all_kinds: &[PolicyKind] = &[PolicyKind::Lru, PolicyKind::SessionLists];
+    let all_kinds: &[PolicyKind] = &[
+        PolicyKind::Lru,
+        PolicyKind::SessionLists,
+        PolicyKind::Optimized,
+    ];
     let kinds: &[PolicyKind] = match cli.policy {
         PolicyArg::Lru => &[PolicyKind::Lru],
         PolicyArg::SessionLists => &[PolicyKind::SessionLists],
+        PolicyArg::Optimized => &[PolicyKind::Optimized],
         PolicyArg::All | PolicyArg::Best => all_kinds,
     };
     let best_only = cli.policy == PolicyArg::Best;
