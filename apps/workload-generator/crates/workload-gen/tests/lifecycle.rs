@@ -396,9 +396,11 @@ fn losing_a_node_is_detected_rather_than_hung_on() {
     };
     // Submitting and draining must fail rather than block. The submit itself may succeed into a
     // socket buffer, so the drain is what has to notice.
-    let outcome = agents.agents()[0]
-        .submit(&turn)
-        .and_then(|_| agents.agents()[0].finish().map(|_| ()));
+    let outcome = {
+        let mut lanes = agents.lanes();
+        let lane = &mut lanes[0];
+        lane.submit(&turn).and_then(|_| lane.finish().map(|_| ()))
+    };
     let elapsed = started.elapsed();
     assert!(
         outcome.is_err(),
@@ -412,4 +414,83 @@ fn losing_a_node_is_detected_rather_than_hung_on() {
     );
     // The guard still tears down what remains: a failed run must leave nothing holding channels.
     drop(agents);
+}
+
+// ---------------------------------------------------------------------------
+// T092: the local node is launched as a child process, with no ssh (FR-079).
+// ---------------------------------------------------------------------------
+
+// Aliased: this file's own fixture launcher is called `LocalLauncher` too, and it stands in
+// for an agent rather than starting one. The production launcher really does spawn a child
+// process, which is what these tests are about.
+use workload_gen::agents::{local_agent_binary, LocalLauncher as ChildLauncher};
+
+#[test]
+fn a_missing_local_agent_binary_says_how_to_build_it() {
+    // The first thing anybody hits: `workload-gen run description.yml` on a tree where only the
+    // generator was built. The message has to name the fix, because "No such file or directory"
+    // from a launcher gives no clue which file, or that a second binary exists at all.
+    let launcher = ChildLauncher::with_log_dir(std::env::temp_dir());
+    let mut s = spec(free_port());
+    s.binary = "/nonexistent/workload-node-agent".into();
+    let err = launcher.launch(&s).expect_err("nothing to start");
+    assert!(err.contains("/nonexistent/workload-node-agent"), "{err}");
+    assert!(
+        err.contains("cargo build -p workload-node-agent"),
+        "the message must name the fix: {err}"
+    );
+    assert!(err.contains("--agent-binary"), "and the override: {err}");
+}
+
+#[test]
+fn killing_a_port_nothing_was_started_on_is_not_an_error() {
+    // `Agents::start` calls `kill` when it finds nothing listening — a process that is running but
+    // not accepting is the worst leftover of the three — so "nothing to kill" is the expected case
+    // and must not fail the run.
+    let launcher = ChildLauncher::with_log_dir(std::env::temp_dir());
+    launcher
+        .kill(&spec(free_port()))
+        .expect("a kill with nothing to kill must succeed");
+}
+
+#[test]
+fn a_local_agent_is_looked_for_beside_the_generator_before_the_path() {
+    // Where a cargo build puts it, which is what makes `run description.yml` need no setup. The
+    // test binary stands in for the generator: both live in the same target directory, so asking
+    // for a file that is there resolves to a path and one that is not stays bare for `PATH`.
+    let exe = std::env::current_exe().expect("a test binary has a path");
+    let dir = exe.parent().expect("and a directory");
+    let mine = exe.file_name().unwrap().to_string_lossy().to_string();
+
+    let resolved = local_agent_binary(&mine);
+    assert_eq!(
+        resolved,
+        dir.join(&mine).display().to_string(),
+        "a bare name that exists beside the generator must resolve to it"
+    );
+
+    // Nothing of that name beside us: left bare, so `PATH` still applies and the failure names
+    // what it could not start rather than a path nobody asked for.
+    assert_eq!(
+        local_agent_binary("workload-node-agent-that-does-not-exist"),
+        "workload-node-agent-that-does-not-exist"
+    );
+
+    // An explicit path is taken as given. It must be: on a remote node the path belongs to that
+    // filesystem, and resolving it against this one would name a file that node does not have.
+    assert_eq!(
+        local_agent_binary("/opt/certus/workload-node-agent"),
+        "/opt/certus/workload-node-agent"
+    );
+}
+
+#[test]
+fn a_node_with_no_lanes_is_refused_rather_than_started_and_driven_with_nothing() {
+    // `--lanes 0` would start an agent, claim nothing, and drive nothing — a run that reports a
+    // throughput of zero for a cluster that was never asked to do anything.
+    let launcher = ChildLauncher::with_log_dir(std::env::temp_dir());
+    let mut s = spec(free_port());
+    s.lanes = 0;
+    let err = Agents::start_default(&launcher, &[s]).expect_err("zero lanes must be refused");
+    assert!(err.contains("--lanes"), "{err}");
 }

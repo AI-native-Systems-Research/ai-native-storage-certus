@@ -61,6 +61,14 @@
 //! the same principle as FR-046 excluding the startup cache clear from the timed window —
 //! a run properly begins once its pipeline is full.
 //!
+//! # What is here, and what moved
+//!
+//! This module is the **producer** and the figures a run reports. It no longer executes anything:
+//! FR-079 routes every node through an agent, so the mailbox-facing code — the executor, the
+//! payload buffer, the opcode mapping — lives in `workload-node-agent`, and the submission side
+//! lives in [`crate::drive`]. What is left here is what both need and neither owns: the bounded
+//! queue, the routing seam, and [`LiveStats`].
+//!
 //! # Lanes are sharded by session, which FR-035 requires
 //!
 //! A session's operations must stay strictly ordered. With one shared queue and several
@@ -74,29 +82,25 @@
 //! the report gives **per-lane** figures so the pattern is visible rather than averaged
 //! away.
 //!
-//! # What still needs a GPU
+//! # Underrun means something different under pacing (FR-080)
 //!
-//! `LOOKUP` and `COPY_TO_STORE` take a handle batch — `(key, IpcHandle)` pairs — because
-//! a load DMAs into a GPU buffer and a store copies out of one. Until the payload buffer
-//! lands (T038, T039) they are counted and skipped, and the report says the run was
-//! partial rather than quietly reporting a throughput for a stream that moved no data.
+//! Everything above describes a **work-conserving** run, which issues as fast as the mailbox
+//! allows and measures the ceiling. Under [`Pacing::Real`] an empty queue is the normal, intended
+//! state — nothing is due yet — so an underrun stops meaning "the generator was the constraint"
+//! and validity becomes **lateness** instead: how far past its due time each turn was submitted.
+//! Adopting pacing therefore *replaced* a metric rather than adding a delay, which is why
+//! [`LiveStats::is_valid`] asks which mode the run was in.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TryRecvError, TrySendError};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
 
 use hdrhistogram::Histogram;
-use shm_queue::Client;
 use workload_model::description::WorkloadDescription;
-use workload_model::plan::{OpKind, OperationPlan};
+use workload_model::plan::OperationPlan;
 use workload_model::sim::Simulation;
 use workload_wire::frame::Counters;
-
-use crate::exec::{clear_memory_tier, TurnExecutor};
-use crate::payload::PayloadBuffer;
 
 /// Turn batches a lane's queue holds before the producer blocks.
 ///
@@ -114,8 +118,46 @@ pub const QUEUE_CAPACITY: usize = 256;
 /// asked for, and an unbounded one has no whole span to build.
 const PRODUCE_WINDOW: f64 = 5.0;
 
-/// How long `attach` waits for the server to publish its ready flag.
-const ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
+/// Whether a run holds each turn until its virtual time is due.
+///
+/// The two modes answer different questions and both are wanted: work-conserving measures *how
+/// fast Certus can go*, paced measures *the latency Certus delivers under the load this workload
+/// actually represents*. They are not comparable, which is why the report names the mode.
+///
+/// **Paced is the default**, and the argument is the constitution's own — each measurement
+/// principle guards a failure mode that produces plausible numbers rather than an error, and the
+/// two defaults are asymmetric under that test. Paced when a ceiling was wanted returns a
+/// throughput capped at the rate that was asked for, which is conspicuous. Work-conserving when
+/// the workload's latency was wanted returns percentiles from a **saturated** queue, which look
+/// entirely plausible and describe a queue the workload would never form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pacing {
+    /// Hold each turn until its virtual time is due.
+    #[default]
+    Real,
+    /// Issue as fast as the transport allows, and measure the ceiling.
+    None,
+}
+
+impl Pacing {
+    /// The name the report prints, since a paced figure and a work-conserving one are not
+    /// comparable and would otherwise be quoted side by side.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Real => "paced",
+            Self::None => "work-conserving",
+        }
+    }
+}
+
+/// Lateness a paced run tolerates at the 99th percentile, in microseconds.
+///
+/// Coarse on purpose, and the two bounds are what set it. It has to be well **above** the jitter
+/// of asking an OS to wake a thread at a time — a millisecond of sleep granularity must never
+/// invalidate a run — and well **below** anything that would disturb the figures being reported,
+/// which are per-operation latencies in the tens to hundreds of microseconds. 100 ms sits between
+/// those by three orders of magnitude at each end.
+pub const DEFAULT_LATENESS_TOLERANCE_US: u64 = 100_000;
 
 /// One lane's view of its own queue and its own traffic.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -131,11 +173,14 @@ pub struct LaneStats {
     pub skipped_needing_gpu: u64,
     /// Keys those skipped operations would have moved.
     pub skipped_keys: u64,
-    /// What this lane's mailbox-facing code counted.
+    /// Turns this lane held for their due time, which is every turn under pacing and none
+    /// otherwise. Reported so a lateness percentile always has its `n` beside it (FR-066a).
+    pub paced_turns: u64,
+    /// What the mailbox-facing code on this lane's node counted.
     ///
-    /// Held rather than duplicated: [`crate::exec::TurnExecutor`] gathers these, and the node
-    /// agent ships back the very same type, so a local figure and a remote figure are the
-    /// same measurement rather than two that happen to be named alike.
+    /// The agent's `TurnExecutor` gathers these and ships back this very type, rather than the
+    /// generator counting anything of its own — which is what makes one node's figure and
+    /// another's the same measurement rather than two that happen to be named alike.
     pub counters: Counters,
 }
 
@@ -170,6 +215,17 @@ pub struct LiveStats {
     /// description happens to produce rather than anything about Certus. Splitting them is
     /// what makes the number a statement about the system.
     pub latency_by_op: BTreeMap<u32, Histogram<u64>>,
+    /// Which mode the run was in, which decides what its validity means.
+    pub pacing: Pacing,
+    /// Virtual seconds per wallclock second the run was aimed at.
+    pub rate: f64,
+    /// How far past its due time each turn was submitted, in microseconds (FR-080).
+    ///
+    /// One-sided by construction: pacing never submits early, so there is nothing negative to
+    /// record. Empty under [`Pacing::None`], which has no schedule to be late for.
+    pub lateness: Histogram<u64>,
+    /// The 99th-percentile lateness this run tolerated before calling itself invalid.
+    pub lateness_tolerance_us: u64,
 }
 
 impl LiveStats {
@@ -353,16 +409,55 @@ impl LiveStats {
         self.lanes.iter().map(|l| l.counters.commits_declined).sum()
     }
 
-    /// Whether the run is valid: **no lane ever underran** (FR-062).
+    /// Turns held for their due time — the `n` a lateness percentile needs (FR-066a).
+    pub fn paced_turns(&self) -> u64 {
+        self.lanes.iter().map(|l| l.paced_turns).sum()
+    }
+
+    /// Lateness at a quantile, in microseconds.
+    pub fn lateness_us(&self, quantile: f64) -> u64 {
+        self.lateness.value_at_quantile(quantile)
+    }
+
+    /// Worst lateness seen, in microseconds.
+    pub fn max_lateness_us(&self) -> u64 {
+        self.lateness.max()
+    }
+
+    /// Whether the run kept the schedule it set itself (FR-080).
     ///
-    /// An underrun means the generator, not Certus, set the pace at that instant, so the
-    /// throughput would describe the instrument rather than the system under test.
+    /// Only meaningful under [`Pacing::Real`]; a work-conserving run has no schedule, so this is
+    /// vacuously true there and [`LiveStats::is_valid`] uses the underrun count instead.
+    pub fn kept_the_schedule(&self) -> bool {
+        if self.pacing == Pacing::None || self.lateness.is_empty() {
+            return true;
+        }
+        self.lateness_us(0.99) <= self.lateness_tolerance_us
+    }
+
+    /// Whether the run is valid — and **which test that is depends on the mode**.
+    ///
+    /// Work-conserving: **no lane ever underran** (FR-062). An underrun means the generator, not
+    /// Certus, set the pace at that instant, so the throughput would describe the instrument
+    /// rather than the system under test.
+    ///
+    /// Paced: **the schedule was kept** (FR-080). An empty queue is the normal, intended state
+    /// there — nothing is due yet — so the underrun count carries no information at all and
+    /// applying FR-062 would invalidate every paced run. What replaces it is lateness, and it
+    /// fails for the same underlying reason: the pace came from somewhere other than the
+    /// workload's own timing.
     pub fn is_valid(&self) -> bool {
-        // A wrong block invalidates as surely as an underrun, and for the same reason: the
+        // A wrong block invalidates as surely as either, and for the same reason: the
         // throughput would describe something other than the system serving this workload
         // correctly. It is the one cache-facing figure that is a failure rather than an
-        // outcome.
-        self.underruns() == 0 && self.payload_mismatches() == 0
+        // outcome, and it holds in both modes.
+        if self.payload_mismatches() != 0 {
+            return false;
+        }
+        match self.pacing {
+            Pacing::Real => self.kept_the_schedule(),
+            Pacing::None => self.underruns() == 0,
+        }
     }
 
     /// Keys per second over the timed window.
@@ -399,14 +494,28 @@ impl LiveStats {
 
     /// Virtual seconds advanced per wallclock second.
     ///
-    /// A **speedup**, not a sustained-load figure: the run is closed-loop and issues as
-    /// fast as the mailbox allows, because an open-loop paced mode is out of scope.
+    /// Two different things depending on the mode. Work-conserving, it is a **speedup**: the run
+    /// is closed-loop and issues as fast as the transport allows. Paced, it is a **cross-check on
+    /// the requested rate** — it should come out at approximately [`LiveStats::rate`], and a
+    /// shortfall is accumulated lateness arriving by a second route. The two must agree; if they
+    /// do not, one of them is measuring something else.
     pub fn virtual_to_wallclock(&self) -> f64 {
         if self.elapsed > 0.0 {
             self.virtual_span / self.elapsed
         } else {
             0.0
         }
+    }
+
+    /// How far the achieved rate fell short of the requested one, as a fraction.
+    ///
+    /// `None` for a work-conserving run, which asked for no rate. Zero or negative means the
+    /// schedule was kept; positive is the same information the lateness percentiles carry.
+    pub fn rate_shortfall(&self) -> Option<f64> {
+        if self.pacing == Pacing::None || self.rate <= 0.0 {
+            return None;
+        }
+        Some((self.rate - self.virtual_to_wallclock()) / self.rate)
     }
 }
 
@@ -443,255 +552,77 @@ impl Lane {
     }
 }
 
-/// Attach to a node's mailbox and claim `lanes` channels.
+/// What a run needs beyond its description and its nodes.
 ///
-/// # Errors
+/// A struct rather than a row of positional arguments, because `run(d, 7, None, 64, false,
+/// Real, 1.0, stop)` is a line nobody can read or safely reorder.
 ///
-/// If the mailbox cannot be attached, or `lanes` exceeds the node's channel count —
-/// refused rather than clamped, because the mailbox is depth-1 per channel and
-/// over-subscription would serialise silently behind a claimed channel.
-pub fn attach(shm_path: &str, lanes: usize) -> Result<(Arc<Client>, Vec<usize>), String> {
-    let client = Client::attach(shm_path, ATTACH_TIMEOUT)
-        .map_err(|e| format!("attach shmq mailbox {shm_path}: {e}"))?;
-    let channels = client.channel_count();
-    if lanes == 0 {
-        return Err("--lanes must be at least 1".to_string());
-    }
-    if lanes > channels {
-        return Err(format!(
-            "refusing to run: {lanes} lanes against a node with {channels} channels. The \
-             mailbox is depth-1 per channel, so the extra lanes would not add concurrency \
-             — they would serialise behind a claimed channel and the run would report a \
-             throughput for a concurrency it never had. Use --lanes {channels} or fewer"
-        ));
-    }
-    let mut claimed = Vec::with_capacity(lanes);
-    for _ in 0..lanes {
-        match client.claim_channel() {
-            Some(ch) => claimed.push(ch),
-            None => {
-                for ch in &claimed {
-                    client.release_channel(*ch);
-                }
-                return Err(format!(
-                    "could only claim {} of {lanes} channels; another client holds the rest",
-                    claimed.len()
-                ));
-            }
-        }
-    }
-    Ok((Arc::new(client), claimed))
-}
-
-/// What a live run needs beyond its description and its mailbox.
-///
-/// A struct rather than seven positional arguments, because `run(client, ch, d, 7, None,
-/// 64, Some(0), false, stop)` is a line nobody can read or safely reorder.
+/// Everything that describes the **payload** — the GPU device, key stamping, verification — used
+/// to live here and is now an agent argument: the agent owns the device buffer, and under FR-079
+/// the generator has none. Everything left is either the workload's identity or the tempo it is
+/// played at.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RunOptions {
     /// Seed: with the description, this alone determines the operation stream (FR-072).
     pub seed: u64,
     /// Virtual seconds to run, or `None` for an unbounded run (FR-059).
     pub until: Option<f64>,
-    /// Keys per request (FR-069), which also sizes the payload template.
+    /// Keys per request (FR-069).
     pub batch_keys: usize,
-    /// GPU device for the payload buffer, or `None` for a control-path-only run.
+    /// Clear every node's memory tier once before the timed window opens (FR-046).
     ///
-    /// `None` is honest but partial: `LOOKUP` and `COPY_TO_STORE` are counted and declared
-    /// rather than issued, so the throughput is not comparable with a complete run's.
-    pub gpu_device: Option<i32>,
-    /// Stamp each stored block with its key. Costs a CUDA call per key; see
-    /// [`crate::payload`] on why it is off by default.
-    pub stamp_keys: bool,
-    /// Check each loaded block against its key.
+    /// `CLEAR_MEMORY_TIER` is otherwise forbidden — clearing mid-run would be the generator
+    /// evicting on the policy's behalf (FR-043). Exactly once, at startup, outside the timed
+    /// window, is the permitted use.
     ///
-    /// Implies `stamp_keys`, and costs a device-to-host copy per key on top of the stamp's
-    /// host-to-device one. Wants a cold cache: a block stored by a run that did not stamp
-    /// holds the fill byte, so checking it reports a mismatch that is the instrument's fault.
-    pub verify_payload: bool,
-    /// Clear the memory tier once before the timed window opens (FR-046).
-    ///
-    /// `CLEAR_MEMORY_TIER` is otherwise forbidden — see [`crate::opstream`] — because
-    /// clearing mid-run would be the generator evicting on the policy's behalf. Exactly
-    /// once, at startup, outside the timed window, is the permitted use.
-    ///
-    /// It clears the **memory tier**; disk-backed entries survive it, so it does not
-    /// guarantee a cold cache.
+    /// It clears the **memory tier**; disk-backed entries survive it, so it does not guarantee a
+    /// cold cache.
     pub clear_cache: bool,
+    /// Whether each turn waits for its virtual time to be due (FR-080).
+    pub pacing: Pacing,
+    /// Virtual seconds per wallclock second, under [`Pacing::Real`].
+    ///
+    /// A **calibration** control, not a convenience. A description's durations are arbitrary with
+    /// respect to any particular machine — `think_time` and session lifetimes reflect whatever
+    /// hardware the workload was observed on — so on faster hardware the same description
+    /// under-drives the system and on slower hardware it over-drives it. This is how one
+    /// description is aimed at different targets without being rewritten, which is also why it is
+    /// a command-line option and never a field of the description (FR-069's reasoning, FR-005
+    /// portability).
+    ///
+    /// It changes only the **tempo**: the same keys in the same order with the same virtual
+    /// interleaving, submitted faster or slower. A run's plan fingerprint is independent of it.
+    pub rate: f64,
+    /// The 99th-percentile lateness a paced run tolerates before calling itself invalid.
+    pub lateness_tolerance_us: u64,
 }
 
-/// Run the workload: one producer thread, one consumer per lane.
-///
-/// `until` of `None` is an **unbounded** run (FR-059), possible precisely because the
-/// producer is throttled by the queue rather than by memory. It ends when `stop` is set,
-/// and an interrupted run whose lanes never underran is **valid** (FR-074).
-///
-/// # Errors
-///
-/// If a lane's request fails or a lane thread panics.
-pub fn run(
-    client: Arc<Client>,
-    channels: Vec<usize>,
-    description: &WorkloadDescription,
-    options: &RunOptions,
-    stop: Arc<AtomicBool>,
-) -> Result<LiveStats, String> {
-    let RunOptions {
-        seed,
-        until,
-        batch_keys,
-        gpu_device,
-        stamp_keys,
-        verify_payload,
-        clear_cache,
-    } = *options;
-    let block_bytes = u32::try_from(description.blocks.bytes)
-        .map_err(|_| "blocks.bytes exceeds a 32-bit reservation".to_string())?;
-    let lane_count = channels.len();
-
-    // One allocation for the whole run, filled before the timed window (FR-038). Without
-    // it the two data-moving operations cannot be issued and the report says the run was
-    // partial — which is a legitimate mode on a node with no accelerator, but never a
-    // silent fallback after a device was asked for.
-    let payload = match gpu_device {
-        Some(device) => Some(Arc::new(PayloadBuffer::new(
-            lane_count,
-            batch_keys,
-            block_bytes,
-            device,
-            stamp_keys || verify_payload,
-            verify_payload,
-        )?)),
-        None => None,
-    };
-
-    // Before the clock starts (FR-046): a clear is setup, and timing it would charge the
-    // run for work no operation in the stream performed.
-    let cleared = if clear_cache {
-        Some(clear_memory_tier(&client, channels[0])?)
-    } else {
-        None
-    };
-
-    let mut senders: Vec<Lane> = Vec::with_capacity(lane_count);
-    let mut consumers = Vec::with_capacity(lane_count);
-    let started = Instant::now();
-
-    for (i, channel) in channels.iter().copied().enumerate() {
-        let (tx, rx) = sync_channel::<Batch>(QUEUE_CAPACITY);
-        let depth = Arc::new(AtomicUsize::new(0));
-        senders.push(Lane {
-            tx,
-            depth: Arc::clone(&depth),
-        });
-        let client = Arc::clone(&client);
-        let stop = Arc::clone(&stop);
-        let payload = payload.clone();
-        consumers.push(thread::spawn(move || {
-            consume(Consumer {
-                client,
-                channel,
-                slot: i,
-                block_bytes,
-                batch_keys,
-                payload,
-                rx,
-                depth,
-                stop,
-            })
-        }));
-    }
-
-    // The producer runs on this thread. Single-threaded and deterministic, so what it
-    // builds is a function of description and seed alone (FR-072) — lane count changes
-    // only who issues an operation, never which operations exist.
-    // Local routing: a lane per session, which is what the mailbox's channels are.
-    let produced = produce(
-        description,
-        seed,
-        until,
-        // One node: this path is the local mailbox, so migration is inert (FR-049).
-        1,
-        &senders,
-        |session, n| (session.id() as usize) % n,
-        &stop,
-    );
-    // Dropping the senders closes each queue, which is how a consumer tells "the run is
-    // over" from "the queue is momentarily quiet" — the distinction the underrun count
-    // depends on.
-    drop(senders);
-
-    let mut lanes = Vec::with_capacity(lane_count);
-    let mut latency = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
-        .map_err(|e| format!("cannot build the latency histogram: {e}"))?;
-    let mut latency_by_op: BTreeMap<u32, Histogram<u64>> = BTreeMap::new();
-    let mut first_error = None;
-    for (i, handle) in consumers.into_iter().enumerate() {
-        match handle.join() {
-            Ok(Ok((stats, hist, per_op))) => {
-                lanes.push(stats);
-                latency
-                    .add(hist)
-                    .map_err(|e| format!("merging lane {i}'s latencies: {e}"))?;
-                for (opcode, h) in per_op {
-                    match latency_by_op.entry(opcode) {
-                        std::collections::btree_map::Entry::Occupied(mut e) => e.get_mut().add(h),
-                        std::collections::btree_map::Entry::Vacant(e) => {
-                            e.insert(h);
-                            Ok(())
-                        }
-                    }
-                    .map_err(|e| format!("merging lane {i}'s opcode {opcode} latencies: {e}"))?;
-                }
-            }
-            Ok(Err(e)) => {
-                lanes.push(LaneStats::default());
-                first_error = first_error.or(Some(format!("lane {i}: {e}")));
-            }
-            Err(_) => {
-                lanes.push(LaneStats::default());
-                first_error = first_error.or(Some(format!("lane {i} panicked")));
-            }
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            until: None,
+            batch_keys: 64,
+            clear_cache: false,
+            pacing: Pacing::default(),
+            rate: 1.0,
+            lateness_tolerance_us: DEFAULT_LATENESS_TOLERANCE_US,
         }
     }
-    let elapsed = started.elapsed().as_secs_f64();
-
-    for ch in &channels {
-        client.release_channel(*ch);
-    }
-    if let Some(e) = first_error {
-        return Err(e);
-    }
-    let (batches_produced, virtual_span, producer_completed, producer_blocked) = produced?;
-
-    Ok(LiveStats {
-        lanes,
-        batches_produced,
-        producer_completed,
-        producer_blocked,
-        cleared_entries: cleared,
-        block_bytes: description.blocks.bytes,
-        elapsed,
-        virtual_span,
-        latency,
-        latency_by_op,
-    })
 }
 
-/// Build turn batches and push each to its lane, blocking when that lane is full.
+/// Build turns and route each to a lane, blocking when that lane's queue is full.
 ///
-/// Returns `(batches, virtual span reached, completed)`. Blocking on a full queue is the
-/// point: it is the backpressure that bounds memory, and it is what leaves the producer's
+/// Returns `(batches, virtual span reached, completed, times blocked)`. Blocking on a full queue
+/// is the point: it is the backpressure that bounds memory, and it is what leaves the producer's
 /// speed observable at the consumer instead of absorbed by an ever-growing buffer.
-/// Build turns and route each to a target, blocking when a target's queue is full.
 ///
 /// # Why the routing is a parameter
 ///
-/// A target is "somewhere a turn can be sent", and what that means differs between the two
-/// execution paths: locally it is a lane on this node's mailbox, remotely it is a lane on some
-/// node's agent. Nothing else differs — the same simulation, the same turns, the same order —
-/// so the producer takes a routing closure rather than being written twice. Under FR-079 the
-/// local path becomes a special case of the remote one and this is the seam where they meet.
+/// A target is "somewhere a turn can be sent", and one node's lane is not distinguishable here
+/// from another's — the same simulation, the same turns, the same order. Keeping the routing out
+/// of the producer is what let the local and the remote path share it while both existed, and
+/// what now lets [`crate::drive`] compose placement with a within-node lane in one expression.
 ///
 /// `route` MUST be a function of the session alone, and MUST NOT consult anything the cache
 /// reported: routing decides *where* a turn goes, never *what* it is (FR-072).
@@ -775,110 +706,15 @@ where
     }
 }
 
-/// Take batches from one lane's queue and issue them.
-///
-/// A `try_recv` that returns empty **is** the underrun and is counted before the thread
-/// blocks, so the figure is a count of consumer stalls rather than of a sampled gauge and
-/// a brief exhaustion cannot fall between samples.
-struct Consumer {
-    client: Arc<Client>,
-    channel: usize,
-    /// This lane's disjoint region of the payload buffer.
-    slot: usize,
-    block_bytes: u32,
-    batch_keys: usize,
-    payload: Option<Arc<PayloadBuffer>>,
-    rx: Receiver<Batch>,
-    depth: Arc<AtomicUsize>,
-    stop: Arc<AtomicBool>,
-}
-
-type LaneLatency = (LaneStats, Histogram<u64>, BTreeMap<u32, Histogram<u64>>);
-
-fn consume(c: Consumer) -> Result<LaneLatency, String> {
-    let Consumer {
-        client,
-        channel,
-        slot,
-        block_bytes,
-        batch_keys,
-        payload,
-        rx,
-        depth,
-        stop,
-    } = c;
-    // The shared executor, so the local path and the node agent apply one rule rather than
-    // two that could drift apart (see `crate::exec`).
-    let mut exec = TurnExecutor::new(block_bytes, batch_keys)?;
-    if let Some(buffer) = payload {
-        exec = exec.with_payload(buffer, slot);
-    }
-    let mut path: Vec<u64> = Vec::new();
-    let mut stats = LaneStats {
-        min_depth: usize::MAX,
-        ..LaneStats::default()
-    };
-
-    // Prime: block for the first batch without counting it. Every queue is empty before the
-    // producer has pushed anything, so counting that would invalidate every run — see the
-    // module docs.
-    let mut primed = false;
-
-    loop {
-        let batch = match rx.try_recv() {
-            Ok(b) => b,
-            Err(TryRecvError::Empty) => {
-                if primed {
-                    // This lane had work and ran out: the generator fell behind, which is
-                    // FR-062's event.
-                    stats.underruns += 1;
-                    stats.min_depth = 0;
-                }
-                if stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                match rx.recv() {
-                    Ok(b) => b,
-                    // Closed while we waited, so the run is over rather than underrunning.
-                    Err(_) => break,
-                }
-            }
-            Err(TryRecvError::Disconnected) => break,
-        };
-        primed = true;
-        let observed = depth.fetch_sub(1, Ordering::Relaxed).saturating_sub(1);
-        stats.pops += 1;
-        stats.min_depth = stats.min_depth.min(observed);
-
-        // Everything about which keys, which session and when came from the producer; the
-        // executor decides only load-versus-store, from what the cache reports.
-        batch.key_path(&mut path);
-        let session = batch
-            .operations()
-            .first()
-            .map(|o| o.session())
-            .unwrap_or_default();
-        let polls = batch
-            .operations()
-            .iter()
-            .any(|o| o.kind() == OpKind::PollEvents);
-        exec.run_turn(&client, channel, session, &path, polls)?;
-    }
-
-    if stats.min_depth == usize::MAX {
-        stats.min_depth = 0;
-    }
-    stats.counters = *exec.counters();
-    let (skipped, skipped_keys) = exec.skipped();
-    stats.skipped_needing_gpu = skipped;
-    stats.skipped_keys = skipped_keys;
-    Ok((stats, exec.latency().clone(), exec.latency_by_op().clone()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn hist() -> Histogram<u64> {
+        Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap()
+    }
+
+    /// A **work-conserving** run's figures, so the underrun tests read as they always did.
     fn stats(lanes: Vec<LaneStats>, elapsed: f64) -> LiveStats {
         LiveStats {
             lanes,
@@ -890,8 +726,22 @@ mod tests {
             block_bytes: 32_768,
             elapsed,
             virtual_span: 10.0,
-            latency: Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap(),
+            latency: hist(),
+            pacing: Pacing::None,
+            rate: 1.0,
+            lateness: hist(),
+            lateness_tolerance_us: DEFAULT_LATENESS_TOLERANCE_US,
         }
+    }
+
+    /// The same run, paced, with `lateness` in microseconds.
+    fn paced(lanes: Vec<LaneStats>, elapsed: f64, lateness_us: &[u64]) -> LiveStats {
+        let mut s = stats(lanes, elapsed);
+        s.pacing = Pacing::Real;
+        for v in lateness_us {
+            s.lateness.record(*v).unwrap();
+        }
+        s
     }
 
     fn lane(pops: u64, empty: u64, min_depth: usize) -> LaneStats {
@@ -1032,6 +882,103 @@ mod tests {
         let s = stats(vec![lane(0, 0, 0), lane(50, 0, 7)], 1.0);
         assert!(s.is_valid());
         assert_eq!(s.underruns(), 0);
+    }
+
+    #[test]
+    fn under_pacing_an_empty_queue_is_normal_and_lateness_is_the_test_instead() {
+        // FR-080's substance. A paced run's queue is *supposed* to run dry — nothing is due yet —
+        // so applying FR-062 there would invalidate every paced run for the thing it was designed
+        // to do. The replacement fails for the same underlying reason: the pace came from
+        // somewhere other than the workload's own timing.
+        let underran_but_on_time = paced(vec![lane(100, 90, 0)], 1.0, &[0, 1_000, 2_000]);
+        assert!(
+            underran_but_on_time.is_valid(),
+            "90 underruns out of 100 pops must not invalidate a paced run"
+        );
+        assert!(underran_but_on_time.kept_the_schedule());
+
+        // The same queue statistics *do* invalidate a work-conserving run.
+        let same_run_unpaced = stats(vec![lane(100, 90, 0)], 1.0);
+        assert!(!same_run_unpaced.is_valid());
+
+        // And lateness beyond tolerance invalidates the paced one, where the queue could not.
+        let late = paced(
+            vec![lane(100, 0, 8)],
+            1.0,
+            &[DEFAULT_LATENESS_TOLERANCE_US * 4; 50],
+        );
+        assert!(
+            !late.is_valid(),
+            "a schedule this badly missed is not a run"
+        );
+        assert!(!late.kept_the_schedule());
+        assert!(late.underruns() == 0, "and not because of the queue");
+    }
+
+    #[test]
+    fn lateness_percentiles_come_with_their_request_count() {
+        // FR-066a, and the recorded reason for it: a p50 over 20 requests once appeared to show
+        // TOUCH three times slower than CHECK, and at 8000 requests the two were within a
+        // microsecond. A percentile without its `n` is not a measurement.
+        let s = paced(
+            vec![LaneStats {
+                paced_turns: 4,
+                ..lane(4, 0, 3)
+            }],
+            1.0,
+            &[10, 20, 30, 4_000],
+        );
+        assert_eq!(s.paced_turns(), 4);
+        // A histogram reports the top of the bucket a value fell in, not the value: at three
+        // significant figures 4000 µs comes back as the highest microsecond equivalent to it. So
+        // this is a range rather than an equality — asserting the exact number would be asserting
+        // the bucket layout, which is not what is under test.
+        let max = s.max_lateness_us();
+        assert!((4_000..4_010).contains(&max), "{max}");
+        assert!(s.lateness_us(0.5) < 4_000);
+    }
+
+    #[test]
+    fn a_paced_run_that_kept_its_rate_reports_no_shortfall_and_an_unpaced_one_reports_none() {
+        // The cross-check T088d asks for: the achieved virtual/wallclock ratio and the lateness
+        // percentiles are two routes to the same fact, and they must agree.
+        let mut on_time = paced(vec![lane(10, 0, 4)], 10.0, &[5]);
+        on_time.virtual_span = 10.0;
+        on_time.rate = 1.0;
+        assert!((on_time.virtual_to_wallclock() - 1.0).abs() < 1e-9);
+        assert!(on_time.rate_shortfall().unwrap().abs() < 1e-9);
+
+        // Half the schedule achieved is a 50% shortfall, and it is the same information as the
+        // accumulated lateness beside it.
+        let mut behind = paced(vec![lane(10, 0, 4)], 20.0, &[5]);
+        behind.virtual_span = 10.0;
+        behind.rate = 1.0;
+        assert!((behind.rate_shortfall().unwrap() - 0.5).abs() < 1e-9);
+
+        // A work-conserving run asked for no rate, so there is no shortfall to report — its
+        // virtual/wallclock is a speedup and comparing it with 1.0 would mean nothing.
+        assert!(stats(vec![lane(10, 0, 4)], 1.0).rate_shortfall().is_none());
+    }
+
+    #[test]
+    fn wrong_data_invalidates_a_run_in_either_mode() {
+        // The one figure that is a correctness failure rather than a cache outcome, so it cannot
+        // depend on which question the run was asking.
+        let mismatched = LaneStats {
+            counters: Counters {
+                payload_mismatches: 1,
+                payloads_verified: 100,
+                ..Default::default()
+            },
+            ..lane(100, 0, 9)
+        };
+        assert!(!stats(vec![mismatched], 1.0).is_valid());
+        let paced_run = paced(vec![mismatched], 1.0, &[0]);
+        assert!(paced_run.kept_the_schedule(), "the schedule was kept");
+        assert!(
+            !paced_run.is_valid(),
+            "a wrong block must invalidate a paced run that kept its schedule perfectly"
+        );
     }
 
     #[test]

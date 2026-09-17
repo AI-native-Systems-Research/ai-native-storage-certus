@@ -6,25 +6,23 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
-# The generator binary. NOT a workspace default member: with the default `live`
-# feature on it links CUDA, so a plain `cargo build` of the workspace must not
-# reach it. Build it explicitly with `-p workload-gen`.
+# The generator binary, and a workspace **default member**: it links no CUDA and
+# attaches to no mailbox, so `cargo build` and `cargo test --all` reach it.
 #
-# Like `apps/remote-lookup-bench`, this deliberately does NOT depend on
-# `gpu-services`. That crate's `IGpuServices` impl is only complete when its own
-# `spdk` feature is on, so any cargo invocation that also builds a crate
-# enabling `interfaces/spdk` would unify features and leave it an incomplete
-# impl. The handful of CUDA symbols needed here are declared locally instead
-# (Principle II, and plan.md's Constitution Check).
+# That is a consequence of FR-079. Every node — including the local one — is driven
+# through `workload-node-agent` over TCP, so the mailbox-facing code (the executor,
+# the opcode mapping, the device buffer) lives in that crate. This one keeps the
+# simulation, the plan queue, the driver and the report, and depends on `shm-queue`
+# and on CUDA not at all — which is also what stops it enabling `interfaces/spdk`
+# transitively.
 
 [features]
-# `live` is default-ON, and gates the mailbox transport and the CUDA link.
-# `cargo build -p workload-gen --no-default-features` therefore yields an
-# emit-only tool that builds and runs on a machine with no accelerator and no
-# server, which is what makes User Story 2 and quickstart Scenarios 1-3
-# runnable anywhere.
+# `live` gates the `run` subcommand and the agent transport, so
+# `cargo build -p workload-gen --no-default-features` yields an emit-only tool with
+# no networking at all. It no longer gates an accelerator or a mailbox: since FR-079
+# there is nothing here to gate. Default-ON, because driving a run is the point.
 default = ["live"]
-live = ["dep:shm-queue", "dep:shmq-dispatcher"]
+live = []
 # Pass-through for the trace crate's non-default parquet container.
 parquet = ["workload-trace/parquet"]
 
@@ -35,17 +33,13 @@ workload-wire.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Latency percentiles live in the binary only, never in the simulation core.
-#  so the node agent can ship a histogram back: quantiles do not merge
-# across nodes, but histograms do (contracts/node-agent-wire.md).
+# Latency percentiles live in the binary only, never in the simulation core. The
+# agent ships back a histogram rather than percentiles, because quantiles do not
+# merge across nodes and histograms do (contracts/node-agent-wire.md).
 hdrhistogram = { version = "7", features = ["serialization"] }
 # `statvfs` for the emit path's free-space refusal (FR-073). Needed in the
 # emit-only build too, which is why it is not behind the `live` feature.
 libc = "0.2"
-# Live path only: the /dev/shm mailbox and its wire framing, so the generator
-# speaks exactly what the server serves.
-shm-queue = { workspace = true, optional = true }
-shmq-dispatcher = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

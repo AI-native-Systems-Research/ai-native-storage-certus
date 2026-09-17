@@ -1,39 +1,39 @@
-//! FR-072 at the transport level: driving through an agent submits exactly what the local path
-//! would have executed (T074).
+//! FR-072 at the transport level, and the **regression guard** for the path FR-079 deleted
+//! (T074, re-pointed by T092a).
 //!
-//! # Why this test lives here and not in `workload-wire`
+//! # What this compared, and what it guards now
 //!
-//! The task named `crates/workload-wire/tests/loopback.rs`, which cannot work: the comparison
-//! needs a plan and a producer, both of which live in `workload-gen`, and `workload-gen` already
-//! depends on `workload-wire`. A test there would need the dependency to run both ways. So it
-//! lives in the crate that can see both halves.
+//! It was written while there were two execution paths — a local one that claimed mailbox
+//! channels directly and a remote one that went through an agent — to establish that they issued
+//! the same thing. That was the precondition for deleting one: unifying first would have
+//! collapsed onto a path never shown equivalent, and destroyed the means of showing it.
 //!
-//! # What is compared, and why that is the whole claim
+//! The local path is now gone, so `local_turns` no longer describes code that exists. It
+//! describes the **behaviour** that code had, derived from the plan the way `live::consume` derived
+//! it — group the plan by `(session, instant)`, take the turn's key path — and that is exactly what
+//! makes this a regression guard rather than a comparison of two live implementations. If the one
+//! remaining path ever stops submitting what the deleted one would have executed, this fails.
+//!
+//! # Why comparing paths is the whole claim
 //!
 //! Both paths reduce a turn to the same two things: a session id and a key path, root of the
 //! prefix through the end of the new growth. What happens next — check the path, load what is
-//! resident, store what is absent — is [`workload_gen::exec::TurnExecutor`], and there is exactly
-//! one of it (T068a): the local driver calls it directly and the agent calls the same code. So if
-//! the paths crossing the wire are identical to the paths the local driver feeds its executor,
-//! the two execution paths issue identical operations, and FR-072 holds across the transport.
+//! resident, store what is absent — is `workload_node_agent::exec::TurnExecutor`, and there is
+//! exactly one of it. So if the paths crossing the wire are identical to the paths the local
+//! driver fed its executor, the two execution paths issue identical operations, and FR-072 holds
+//! across the transport.
 //!
 //! That is the argument this test completes. Its three parts, and where each is established:
 //!
 //! | claim | established by |
 //! | --- | --- |
-//! | the executor turns a path into the right mailbox operations | `op_stream.rs`, against the dispatcher's own rules |
-//! | there is one executor, not two | `exec.rs` exists and both callers use it — structural, not tested |
+//! | the executor turns a path into the right mailbox operations | `workload-node-agent`'s `op_stream.rs`, against the dispatcher's own rules |
+//! | there is one executor, not two | structural: the generator has no mailbox path at all since FR-079 |
 //! | **the wire carries the same paths the local path would execute** | **this file** |
 //!
 //! What it deliberately does *not* do is compare mailbox traffic, which would need a live server
 //! on both sides or a mailbox trait to mock. The middle row is why that is unnecessary rather
 //! than merely inconvenient.
-//!
-//! # This is also the evidence T075 needs
-//!
-//! FR-079 collapses the local path onto this one. A test that compares them has to exist
-//! *before* one is deleted, or the unification is a change nobody can show is inert. After T075
-//! it becomes a regression guard against the deleted behaviour rather than a comparison.
 
 #![cfg(feature = "live")]
 
@@ -41,8 +41,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use workload_gen::agents::{AgentSpec, Agents, NoLaunch};
-use workload_gen::live::RunOptions;
-use workload_gen::remote;
+use workload_gen::drive;
+use workload_gen::live::{Pacing, RunOptions};
 use workload_model::description::WorkloadDescription;
 use workload_model::plan::{OpKind, OperationPlan};
 use workload_model::sim::Simulation;
@@ -73,10 +73,12 @@ session_classes:
 const SPAN: f64 = 120.0;
 const SEED: u64 = 31;
 
-/// What the **local** path would feed its executor, taken from the plan itself.
+/// What the **deleted local path** would have fed its executor, taken from the plan itself.
 ///
-/// This is the same reduction `live::consume` performs — group a plan by `(session, instant)`,
-/// take the turn's key path — so it is the local path's input without needing a mailbox.
+/// This is the reduction the old `live::consume` performed — group a plan by `(session, instant)`,
+/// take the turn's key path. It is written out here rather than called, because the code it
+/// describes no longer exists: that is what makes this a regression guard against the behaviour
+/// FR-079 removed rather than a comparison of two implementations that both still ship.
 fn local_turns() -> Vec<Turn> {
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
     let mut sim = Simulation::new(&d, SEED).unwrap();
@@ -142,8 +144,21 @@ impl Service for Stub {
     }
 }
 
-/// What the **remote** path submitted, driven through a real loopback agent.
-fn remote_turns() -> Vec<Turn> {
+/// A work-conserving run's options: what these fixtures use unless the point is pacing.
+fn unpaced() -> RunOptions {
+    RunOptions {
+        seed: SEED,
+        until: Some(SPAN),
+        batch_keys: 64,
+        clear_cache: false,
+        pacing: Pacing::None,
+        rate: 1.0,
+        lateness_tolerance_us: 0,
+    }
+}
+
+/// What crossed the wire, driven through a real loopback agent on `lanes` connections.
+fn driven_turns(lanes: usize, options: &RunOptions) -> Vec<Turn> {
     let seen = Recorded::default();
     let port = {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -179,7 +194,7 @@ fn remote_turns() -> Vec<Turn> {
         port,
         shm_path: "/dev/shm/certus-shmq".into(),
         binary: "workload-node-agent".into(),
-        lanes: 1,
+        lanes,
         block_bytes: 32768,
         batch_keys: 64,
         extra_args: Vec::new(),
@@ -188,16 +203,7 @@ fn remote_turns() -> Vec<Turn> {
     let mut agents =
         Agents::start_with(&NoLaunch, &specs, 8, false).expect("handshake with the loopback agent");
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
-    let options = RunOptions {
-        seed: SEED,
-        until: Some(SPAN),
-        batch_keys: 64,
-        gpu_device: None,
-        stamp_keys: false,
-        verify_payload: false,
-        clear_cache: false,
-    };
-    remote::run(&mut agents, &d, &options, Arc::new(AtomicBool::new(false)))
+    drive::run(&mut agents, &d, options, Arc::new(AtomicBool::new(false)))
         .expect("drive the loopback agent");
     agents.stop().expect("stop");
     stop_server.store(true, Ordering::Relaxed);
@@ -205,6 +211,24 @@ fn remote_turns() -> Vec<Turn> {
 
     let v = seen.0.lock().unwrap().clone();
     v
+}
+
+/// What one lane submitted, in submission order.
+fn remote_turns() -> Vec<Turn> {
+    driven_turns(1, &unpaced())
+}
+
+/// Turns grouped by session, in each session's own submission order.
+///
+/// The comparison to make when several lanes are running: turns of *different* sessions interleave
+/// however the lanes happen to be scheduled, and that is allowed. What is not allowed is a
+/// session's own turns arriving out of order, because turn n+1's path holds what turn n stored.
+fn by_session(turns: &[Turn]) -> std::collections::BTreeMap<u64, Vec<Turn>> {
+    let mut out: std::collections::BTreeMap<u64, Vec<Turn>> = Default::default();
+    for t in turns {
+        out.entry(t.0).or_default().push(t.clone());
+    }
+    out
 }
 
 #[test]
@@ -293,4 +317,124 @@ fn the_comparison_would_notice_a_difference() {
         a_keys, other_path,
         "two different seeds produced the same keys, so the comparison cannot detect a change"
     );
+}
+
+#[test]
+fn several_lanes_carry_the_same_turns_and_keep_each_sessions_order() {
+    // FR-072 against the lane fan-out FR-079 needed. `--lanes n` is now *n connections per node*,
+    // and the local path used to get its concurrency from claiming n mailbox channels directly. A
+    // single connection per node would have collapsed a four-lane run to one lane and reported the
+    // throughput as though nothing had changed, so the property worth asserting is that four lanes
+    // submit exactly what one lane does.
+    //
+    // Across sessions the order is *not* the plan's — that is what several lanes are for — so this
+    // compares per session, which is the ordering the design actually owns: turn n+1's path holds
+    // what turn n stored.
+    let one = by_session(&driven_turns(1, &unpaced()));
+    let four = by_session(&driven_turns(4, &unpaced()));
+
+    assert!(!one.is_empty(), "the description produced no turns");
+    assert_eq!(
+        one.keys().collect::<Vec<_>>(),
+        four.keys().collect::<Vec<_>>(),
+        "a different set of sessions reached the agent at four lanes"
+    );
+    for (session, turns) in &one {
+        assert_eq!(
+            four.get(session),
+            Some(turns),
+            "session {session}'s turns differ between one lane and four"
+        );
+    }
+    // And the fan-out really happened: a routing of `session % lanes` puts these sessions on more
+    // than one lane, so a run that quietly served everything on one connection would fail here.
+    assert!(
+        one.len() > 1,
+        "only {} session(s), so lane routing is untested",
+        one.len()
+    );
+}
+
+#[test]
+fn the_rate_and_the_pacing_mode_do_not_change_what_is_submitted() {
+    // FR-080's central constraint, and the one that keeps a rate sweep interpretable: the rate is
+    // a **tempo** control. It changes when a turn is submitted and nothing else — the same keys,
+    // in the same order, for the same sessions — so a curve swept over rate is a curve over
+    // offered load rather than over three different workloads.
+    //
+    // Rate 5000 so the whole 120 virtual seconds costs about 24 ms of wallclock: enough for the
+    // schedule arithmetic to run on every turn, cheap enough for the ordinary gate.
+    let reference = by_session(&driven_turns(1, &unpaced()));
+    for rate in [5_000.0, 20_000.0] {
+        let paced = by_session(&driven_turns(
+            1,
+            &RunOptions {
+                pacing: Pacing::Real,
+                rate,
+                lateness_tolerance_us: u64::MAX,
+                ..unpaced()
+            },
+        ));
+        assert_eq!(
+            paced.keys().collect::<Vec<_>>(),
+            reference.keys().collect::<Vec<_>>(),
+            "pacing at rate {rate} changed which sessions ran"
+        );
+        for (session, turns) in &reference {
+            assert_eq!(
+                paced.get(session),
+                Some(turns),
+                "pacing at rate {rate} changed session {session}'s turns"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_plan_fingerprint_does_not_depend_on_the_rate() {
+    // The same claim one level in, and where it is structural: the rate never reaches the
+    // simulation. `RunOptions.rate` is read by the driver's schedule and by nothing that builds a
+    // turn, so the plan a run replays is a function of description and seed alone (FR-072).
+    //
+    // Asserted against the canonical serialisation rather than inferred from the code, because
+    // "this field is not read over there" is exactly the kind of claim that stops being true.
+    let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
+    let fingerprint = |seed: u64| {
+        let mut sim = Simulation::new(&d, seed).unwrap();
+        let mut plan = OperationPlan::default();
+        sim.run_until(SPAN, &mut |s, t| plan.record_turn(s, t));
+        plan.fingerprint()
+    };
+    let reference = fingerprint(SEED);
+    assert_eq!(reference, fingerprint(SEED), "the plan is not reproducible");
+    assert_ne!(
+        reference,
+        fingerprint(SEED + 1),
+        "two seeds share a fingerprint, so this comparison has no teeth"
+    );
+
+    // The turns that actually crossed the wire under three different tempos, against the plan the
+    // fingerprint belongs to.
+    let flatten = |turns: &[Turn]| -> Vec<(u64, Vec<u64>)> {
+        by_session(turns)
+            .into_iter()
+            .flat_map(|(s, ts)| ts.into_iter().map(move |t| (s, t.1)))
+            .collect()
+    };
+    let reference_turns = flatten(&driven_turns(1, &unpaced()));
+    for rate in [1_000.0, 50_000.0] {
+        let paced = flatten(&driven_turns(
+            1,
+            &RunOptions {
+                pacing: Pacing::Real,
+                rate,
+                lateness_tolerance_us: u64::MAX,
+                ..unpaced()
+            },
+        ));
+        assert_eq!(
+            paced, reference_turns,
+            "the keys submitted differ at rate {rate}, so the rate reached the workload"
+        );
+    }
 }

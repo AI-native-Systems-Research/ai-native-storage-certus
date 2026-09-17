@@ -98,92 +98,144 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// How a run's requests are timed (FR-080).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum PacingArg {
+    /// Hold each turn until its virtual time is due. The default.
+    #[default]
+    Real,
+    /// Issue as fast as the transport allows, and measure the ceiling.
+    None,
+}
+
+/// Everything `run` takes.
+///
+/// A struct rather than fifteen enum fields threaded through a fifteen-argument call, which is
+/// how a `--stamp-keys` ended up where a `--verify-payload` was meant more than once.
+#[cfg(feature = "live")]
+#[derive(Debug, clap::Args)]
+pub struct RunArgs {
+    /// The workload description.
+    pub description: PathBuf,
+    /// Optional virtual-second cap. Absent means run until interrupted.
+    #[arg(long)]
+    pub until: Option<f64>,
+    /// The mailbox **on each node**, which its agent attaches to.
+    #[arg(long, default_value = "/dev/shm/certus-shmq")]
+    pub shm_path: String,
+    /// Execution concurrency, per node: one agent connection and one mailbox channel each.
+    ///
+    /// Refused above the node's channel count, because the mailbox is depth-1 per channel and
+    /// the extra lanes would serialise silently.
+    #[arg(long, default_value_t = 4)]
+    pub lanes: usize,
+    /// Keys per request. MUST NOT change the plan (FR-072).
+    #[arg(long, default_value_t = 64)]
+    pub batch_keys: usize,
+    /// Seed.
+    #[arg(long)]
+    pub seed: u64,
+    /// GPU device for each agent's payload buffer.
+    ///
+    /// `LOOKUP` and `COPY_TO_STORE` name GPU memory — a load DMAs into a device buffer and a
+    /// store copies out of one — so without a device those two operations cannot be issued.
+    #[arg(long, default_value_t = 0)]
+    pub gpu_device: i32,
+    /// Run the control path only, issuing no data-moving operations.
+    ///
+    /// For a node with no accelerator. The run is **partial** and its report says so,
+    /// because a throughput from a stream missing its loads and stores is not
+    /// comparable with a complete run's.
+    #[arg(long)]
+    pub no_payload: bool,
+    /// Clear every node's memory tier once before the timed window opens (FR-046).
+    ///
+    /// Setup, not part of the operation stream, and never timed. It clears the memory
+    /// tier only — disk-backed entries survive — so it does not guarantee a cold cache.
+    #[arg(long)]
+    pub clear_cache: bool,
+    /// Check each loaded block against its key, and report mismatches.
+    ///
+    /// Implies `--stamp-keys`. This is what distinguishes "bytes arrived" from "the right
+    /// bytes arrived": without it every block in the buffer is interchangeable, so a cache
+    /// returning the wrong block would produce a run that looked correct. Costs a
+    /// device-to-host copy per key, and wants a **cold** cache — a block stored by a run
+    /// that did not stamp holds the fill byte.
+    #[arg(long)]
+    pub verify_payload: bool,
+    /// Stamp each stored block with its key, for identity checking.
+    ///
+    /// Costs one host-to-device copy per key, which puts work on the per-key path
+    /// (FR-070), so it is opt-in.
+    #[arg(long)]
+    pub stamp_keys: bool,
+    /// A node to drive, repeatable. Absent means this host alone.
+    ///
+    /// Every node runs an agent and the generator reaches it over TCP, so only keys cross the
+    /// network (FR-047) — **including the local node**, which is launched as a child process
+    /// rather than over ssh (FR-079). Sessions are placed uniformly across the nodes given, and
+    /// a session with a `migration_interval` moves between them (FR-048), so the node list is a
+    /// property of the deployment and deliberately not of the description.
+    #[arg(long = "node")]
+    pub nodes: Vec<String>,
+    /// Port each node's agent listens on.
+    #[arg(long, default_value_t = 7420)]
+    pub agent_port: u16,
+    /// Path to the agent binary **on each node**.
+    ///
+    /// A bare name is looked for beside the generator's own executable when the node is local,
+    /// which is where a cargo build puts it.
+    #[arg(long, default_value = "workload-node-agent")]
+    pub agent_binary: String,
+    /// Use agents that are already running instead of launching them.
+    ///
+    /// For an operator managing the daemons themselves. It weakens FR-052 — a leftover of the
+    /// current build is reused rather than replaced — which is why it is opt-in.
+    #[arg(long)]
+    pub no_launch: bool,
+    /// Whether each turn waits for its virtual time to be due (FR-080).
+    ///
+    /// **`real` is the default**, and the two modes answer different questions: work-conserving
+    /// measures how fast Certus can go, paced measures the latency Certus delivers under the
+    /// load this workload actually represents. Paced by default when a ceiling was wanted
+    /// returns a throughput capped at the rate asked for, which is conspicuous; work-conserving
+    /// by default when the workload's latency was wanted returns percentiles from a saturated
+    /// queue, which look plausible and describe a queue the workload would never form.
+    #[arg(long, value_enum, default_value_t = PacingArg::Real)]
+    pub pacing: PacingArg,
+    /// Virtual seconds per wallclock second, under `--pacing real`.
+    ///
+    /// A **calibration** control: a description's durations are arbitrary with respect to any
+    /// particular machine, so this is how one description is aimed at faster or slower hardware
+    /// without being rewritten. It changes only the tempo — the same keys in the same order —
+    /// and a run's plan fingerprint is independent of it.
+    ///
+    /// It also sets the cost: at rate 1.0 a run takes wallclock equal to its virtual span.
+    #[arg(long, default_value_t = 1.0)]
+    pub rate: f64,
+    /// The 99th-percentile lateness a paced run tolerates, in milliseconds (FR-080).
+    ///
+    /// Beyond this the run is **invalid**: the generator, not Certus, set the pace, so its
+    /// latency percentiles describe a schedule that was not kept.
+    #[arg(long, default_value_t = crate::live::DEFAULT_LATENESS_TOLERANCE_US / 1_000)]
+    pub lateness_tolerance_ms: u64,
+    /// Structured report destination.
+    #[arg(long)]
+    pub report: Option<PathBuf>,
+}
+
 /// Subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Drive a live Certus node over its `/dev/shm` mailbox.
+    /// Drive Certus through a per-node agent, on the local node or across a cluster.
     ///
     /// Unbounded by default (FR-059); stops cleanly on SIGINT/SIGTERM, and an
-    /// interrupted run whose plan queue never reached zero is **valid** (FR-074).
+    /// interrupted run that kept its schedule is **valid** (FR-074).
     #[cfg(feature = "live")]
     Run {
-        /// The workload description.
-        description: PathBuf,
-        /// Optional virtual-second cap. Absent means run until interrupted.
-        #[arg(long)]
-        until: Option<f64>,
-        /// The node's mailbox.
-        #[arg(long, default_value = "/dev/shm/certus-shmq")]
-        shm_path: String,
-        /// Execution concurrency. Refused above the node's channel count, because the
-        /// mailbox is depth-1 per channel and the extra lanes would serialise silently.
-        #[arg(long, default_value_t = 4)]
-        lanes: usize,
-        /// Keys per request. MUST NOT change the plan (FR-072).
-        #[arg(long, default_value_t = 64)]
-        batch_keys: usize,
-        /// Seed.
-        #[arg(long)]
-        seed: u64,
-        /// GPU device for the payload buffer.
-        ///
-        /// `LOOKUP` and `COPY_TO_STORE` name GPU memory — a load DMAs into a device
-        /// buffer and a store copies out of one — so without a device those two
-        /// operations cannot be issued.
-        #[arg(long, default_value_t = 0)]
-        gpu_device: i32,
-        /// Run the control path only, issuing no data-moving operations.
-        ///
-        /// For a node with no accelerator. The run is **partial** and its report says so,
-        /// because a throughput from a stream missing its loads and stores is not
-        /// comparable with a complete run's.
-        #[arg(long)]
-        no_payload: bool,
-        /// Clear the memory tier once before the timed window opens (FR-046).
-        ///
-        /// Setup, not part of the operation stream, and never timed. It clears the memory
-        /// tier only — disk-backed entries survive — so it does not guarantee a cold cache.
-        #[arg(long)]
-        clear_cache: bool,
-        /// Check each loaded block against its key, and report mismatches.
-        ///
-        /// Implies `--stamp-keys`. This is what distinguishes "bytes arrived" from "the right
-        /// bytes arrived": without it every block in the buffer is interchangeable, so a cache
-        /// returning the wrong block would produce a run that looked correct. Costs a
-        /// device-to-host copy per key, and wants a **cold** cache — a block stored by a run
-        /// that did not stamp holds the fill byte.
-        #[arg(long)]
-        verify_payload: bool,
-        /// Stamp each stored block with its key, for identity checking.
-        ///
-        /// Costs one host-to-device copy per key, which puts generator work on the
-        /// per-key path (FR-070), so it is opt-in.
-        #[arg(long)]
-        stamp_keys: bool,
-        /// A node to drive, repeatable. Absent means the local mailbox only.
-        ///
-        /// Each node runs an agent, and the generator reaches it over TCP: only keys cross the
-        /// network (FR-047). Sessions are placed uniformly across the nodes given, and a
-        /// session with a `migration_interval` moves between them (FR-048) — so the node list
-        /// is a property of the deployment and deliberately not of the description.
-        #[arg(long = "node")]
-        nodes: Vec<String>,
-        /// Port each node's agent listens on.
-        #[arg(long, default_value_t = 7420)]
-        agent_port: u16,
-        /// Path to the agent binary **on each node**.
-        #[arg(long, default_value = "workload-node-agent")]
-        agent_binary: String,
-        /// Use agents that are already running instead of launching them over ssh.
-        ///
-        /// For an operator managing the daemons themselves, and for a local node where ssh is
-        /// unnecessary. It weakens FR-052 — a leftover of the current build is reused rather
-        /// than replaced — which is why it is opt-in.
-        #[arg(long)]
-        no_launch: bool,
-        /// Structured report destination.
-        #[arg(long)]
-        report: Option<PathBuf>,
+        /// Everything a run takes, as one struct so nothing is passed positionally.
+        #[command(flatten)]
+        args: Box<RunArgs>,
     },
     /// Write a trace file. Contacts no server and needs no accelerator.
     Emit {
@@ -325,40 +377,7 @@ pub fn run_argv(argv: &[String]) -> i32 {
 pub fn run(cli: Cli) -> i32 {
     match cli.command {
         #[cfg(feature = "live")]
-        Command::Run {
-            description,
-            until,
-            shm_path,
-            lanes,
-            batch_keys,
-            seed,
-            gpu_device,
-            no_payload,
-            clear_cache,
-            stamp_keys,
-            verify_payload,
-            nodes,
-            agent_port,
-            agent_binary,
-            no_launch,
-            report,
-        } => match live_run(
-            &description,
-            until,
-            &shm_path,
-            lanes,
-            batch_keys,
-            seed,
-            (!no_payload).then_some(gpu_device),
-            stamp_keys,
-            verify_payload,
-            clear_cache,
-            &nodes,
-            agent_port,
-            &agent_binary,
-            no_launch,
-            report,
-        ) {
+        Command::Run { args } => match live_run(&args) {
             Ok((text, code)) => {
                 print!("{text}");
                 code
@@ -1403,47 +1422,65 @@ fn plan(description_path: &Path, until: f64, output: &Path, seed: u64) -> Result
     Ok(out)
 }
 
-/// The `run` subcommand: drive a live node.
+/// The `run` subcommand: drive Certus through its per-node agents.
 ///
 /// Returns the report text and the exit code, so validity travels in the process status
-/// and not only in the report (FR-062). A sweep driver that treats "the process exited"
+/// and not only in the report (FR-062, FR-080). A sweep driver that treats "the process exited"
 /// as "I have a data point" is exactly how an invalid run gets published.
 ///
 /// `--until` is **optional**: absent means an unbounded run (FR-059), which works because
 /// the producer is throttled by the lanes' queues rather than by memory. An earlier cut
 /// pre-built the whole plan and silently substituted a 60-second span, which ran a
 /// different experiment than the one asked for.
+///
+/// # One path, local and remote (FR-079)
+///
+/// There is no separate local branch. With no `--node` the generator drives **this** host through
+/// an agent it launches itself, as a child process with no ssh — so the simplest possible
+/// invocation still needs no setup, while the transport, the driver and the teardown are the same
+/// mechanism everywhere. The description is loaded and the signal handler installed before
+/// anything is started, and nothing here requires a local mailbox: a run can be driven from a
+/// host with no Certus and no accelerator on it at all.
+///
+/// # Errors
+///
+/// [`Failure`] with the exit code the contract gives that outcome: 2 for a refused invocation, 3
+/// for a run that began and was abandoned, 4 for a peer refused before it started.
 #[cfg(feature = "live")]
-#[allow(clippy::too_many_arguments)]
-fn live_run(
-    description_path: &Path,
-    until: Option<f64>,
-    shm_path: &str,
-    lanes: usize,
-    batch_keys: usize,
-    seed: u64,
-    gpu_device: Option<i32>,
-    stamp_keys: bool,
-    verify_payload: bool,
-    clear_cache: bool,
-    nodes: &[String],
-    agent_port: u16,
-    agent_binary: &str,
-    no_launch: bool,
-    report_path: Option<PathBuf>,
-) -> Result<(String, i32), Failure> {
+fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    // Remote mode starts and verifies the agents here — startup is outside the timed window
-    // (FR-050) — and the turn-routing driver that follows is T073a. Refusing plainly is the
-    // honest state: a `--node` that connected and then drove nothing would report a run that
-    // never happened.
-    // Loaded and the handler installed before anything is claimed. A remote run needs the
-    // description and must NOT need a local mailbox: FR-079's point is that the generator can
-    // drive a cluster from a host running no Certus, and calling `attach` first quietly required
-    // one.
-    let (description, text, effective) = load(description_path)?;
+    use crate::live::{Pacing, RunOptions};
+
+    let pacing = match args.pacing {
+        PacingArg::Real => Pacing::Real,
+        PacingArg::None => Pacing::None,
+    };
+    // Refused rather than clamped. A rate of zero would make every turn due at `t0` and quietly
+    // run work-conserving; a negative one has no meaning at all.
+    if pacing == Pacing::Real && !(args.rate.is_finite() && args.rate > 0.0) {
+        return Err(Failure::config(format!(
+            "--rate must be finite and greater than zero, not {}. It is virtual seconds per \
+             wallclock second, so zero would mean a run that never becomes due",
+            args.rate
+        )));
+    }
+    // Refused rather than ignored: `--pacing none --rate 10` asks for two different things, and
+    // honouring one of them silently is how a run gets quoted as the other.
+    if pacing == Pacing::None && args.rate != 1.0 {
+        return Err(Failure::config(
+            "--rate applies only to --pacing real; a work-conserving run issues as fast as the \
+             transport allows and has no rate to aim at"
+                .to_string(),
+        ));
+    }
+
+    // Loaded first, and before anything is started or claimed.
+    let (description, text, effective) = load(&args.description)?;
+    let block_bytes = u32::try_from(description.blocks.bytes)
+        .map_err(|_| Failure::config("blocks.bytes exceeds a 32-bit reservation"))?;
+    let _ = text;
 
     // SIGINT/SIGTERM end the run cleanly; an interrupted run is not a failed one (FR-074),
     // so the handler asks rather than aborts.
@@ -1462,145 +1499,181 @@ fn live_run(
         })
     };
 
-    // Remote mode. Agents are started and verified before the clock starts (FR-050), driven
-    // over TCP by the one driver `remote::run`, then stopped with their teardown checked.
-    if !nodes.is_empty() {
-        let block_bytes = u32::try_from(description.blocks.bytes)
-            .map_err(|_| Failure::config("blocks.bytes exceeds a 32-bit reservation"))?;
-        let specs: Vec<crate::agents::AgentSpec> = nodes
-            .iter()
-            .map(|node| crate::agents::AgentSpec {
-                node: node.clone(),
-                port: agent_port,
-                shm_path: shm_path.to_string(),
-                binary: agent_binary.to_string(),
-                lanes,
-                block_bytes,
-                batch_keys,
-                extra_args: Vec::new(),
-            })
-            .collect();
-        // A peer refused for provenance or capacity is exit 4: the deployment is wrong, and
-        // rerunning it will fail identically.
-        let depth = workload_wire::client::DEFAULT_DEPTH;
-        let mut agents = if no_launch {
-            crate::agents::Agents::start_with(&crate::agents::NoLaunch, &specs, depth, false)
-        } else {
-            crate::agents::Agents::start_with(
-                &crate::agents::SshLauncher::default(),
-                &specs,
-                depth,
-                true,
-            )
+    // What a run costs in wallclock, said before it starts. At rate 1.0 a paced run takes its
+    // virtual span, so `--until 3600` is an hour — and an hour of silence looks like a hang.
+    // Symmetrical with FR-073's size projection on the emit path.
+    if pacing == Pacing::Real {
+        match args.until {
+            Some(span) => eprintln!(
+                "paced at {:.3} virtual seconds per wallclock second: this run will take about \
+                 {} of wallclock time, because a paced run's cost *is* its virtual span divided \
+                 by the rate",
+                args.rate,
+                humanise(span / args.rate)
+            ),
+            None => eprintln!(
+                "paced at {:.3} virtual seconds per wallclock second, unbounded: this run \
+                 continues until interrupted, and a paced run is often idle by design",
+                args.rate
+            ),
         }
-        .map_err(Failure::peer)?;
-        let options = crate::live::RunOptions {
-            seed,
-            until,
-            batch_keys,
-            gpu_device,
-            stamp_keys,
-            verify_payload,
-            clear_cache,
-        };
-        // Captured before the agents are stopped: the report names the capacity the nodes
-        // actually reported, and printing 0 there would be a wrong number rather than a missing
-        // one.
-        let node_channels: usize = agents
-            .agents()
-            .iter()
-            .map(|a| a.ack.channels as usize)
-            .sum();
-        let driven = crate::remote::run(&mut agents, &description, &options, Arc::clone(&stop));
-        stop.store(true, Ordering::Relaxed);
-        let _ = watcher.join();
-        // Stopped whatever happened, and its teardown checked: a run that failed must still
-        // leave nothing holding mailbox channels (FR-053).
-        if let Err(e) = agents.stop() {
-            eprintln!("warning: agent teardown: {e}");
-        }
-        let out = match driven {
-            Ok(o) => o,
-            // A lost node is exit 3, not 4: the run began and was abandoned, rather than the
-            // deployment being refused before it started.
-            Err(lost) => {
-                return Err(Failure {
-                    message: format!("RUN INVALID \u{2014} {lost}"),
-                    code: exit::INVALID,
-                })
-            }
-        };
-        let mut rendered = effective;
-        rendered.push_str(&live_report(
-            &out.stats,
-            None,
-            node_channels,
-            lanes,
-            batch_keys,
-            seed,
-            description_path,
-            report_path,
-        )?);
-        rendered.push_str(&format!("  nodes             {}\n", nodes.len()));
-        for (node, c) in &out.per_node {
-            rendered.push_str(&format!(
-                "    {node:<20} {:>8} requests, {:>7} blocks read, {:>7} written\n",
-                c.requests,
-                c.blocks_read(),
-                c.blocks_written()
-            ));
-        }
-        let _ = text;
-        let code = if out.stats.is_valid() {
-            exit::OK
-        } else {
-            exit::INVALID
-        };
-        return Ok((rendered, code));
     }
 
-    let (client, channels) = crate::live::attach(shm_path, lanes).map_err(Failure::config)?;
-    let node_channels = client.channel_count();
+    // The node list, and the local node when none was named. Every node goes through an agent,
+    // so this is the only place the two differ at all: which launcher starts them.
+    let local = args.nodes.is_empty();
+    let node_names: Vec<String> = if local {
+        vec![LOCAL_NODE.to_string()]
+    } else {
+        args.nodes.clone()
+    };
+    let binary = if local {
+        crate::agents::local_agent_binary(&args.agent_binary)
+    } else {
+        args.agent_binary.clone()
+    };
+    // The payload options are the agent's, not the generator's: the agent owns the device buffer,
+    // and under FR-079 the generator has none. Passing them on the command line is what keeps
+    // `--no-payload` and `--verify-payload` meaning the same thing they always did.
+    let mut extra_args = Vec::new();
+    if args.no_payload {
+        extra_args.push("--no-payload".to_string());
+    } else {
+        extra_args.push("--gpu-device".to_string());
+        extra_args.push(args.gpu_device.to_string());
+    }
+    if args.stamp_keys {
+        extra_args.push("--stamp-keys".to_string());
+    }
+    if args.verify_payload {
+        extra_args.push("--verify-payload".to_string());
+    }
+    let specs: Vec<crate::agents::AgentSpec> = node_names
+        .iter()
+        .map(|node| crate::agents::AgentSpec {
+            node: node.clone(),
+            port: args.agent_port,
+            shm_path: args.shm_path.clone(),
+            binary: binary.clone(),
+            lanes: args.lanes,
+            block_bytes,
+            batch_keys: args.batch_keys,
+            extra_args: extra_args.clone(),
+        })
+        .collect();
 
-    let stats = crate::live::run(
-        client,
-        channels,
-        &description,
-        &crate::live::RunOptions {
-            seed,
-            until,
-            batch_keys,
-            gpu_device,
-            stamp_keys,
-            verify_payload,
-            clear_cache,
-        },
-        Arc::clone(&stop),
-    )
-    .map_err(Failure::other)?;
+    // Agents are started and verified **before the clock starts** (FR-050): launching, waiting
+    // for a port and replacing a leftover are setup, and charging them to the system under test
+    // would make a slow launch look like a slow cache. A peer refused for provenance or capacity
+    // is exit 4 — the deployment is wrong, and rerunning it will fail identically.
+    //
+    // The launcher outlives the agents deliberately: declared first, so it is dropped last, and
+    // its own teardown can reap a child that ignored `Shutdown`.
+    let depth = workload_wire::client::DEFAULT_DEPTH;
+    let launcher = (!args.no_launch && local).then(crate::agents::LocalLauncher::default);
+    let mut agents = match (&launcher, args.no_launch) {
+        (_, true) => {
+            crate::agents::Agents::start_with(&crate::agents::NoLaunch, &specs, depth, false)
+        }
+        (Some(l), false) => crate::agents::Agents::start(l, &specs, depth),
+        (None, false) => {
+            crate::agents::Agents::start(&crate::agents::SshLauncher::default(), &specs, depth)
+        }
+    }
+    .map_err(Failure::peer)?;
+
+    let options = RunOptions {
+        seed: args.seed,
+        until: args.until,
+        batch_keys: args.batch_keys,
+        clear_cache: args.clear_cache,
+        pacing,
+        rate: args.rate,
+        lateness_tolerance_us: args.lateness_tolerance_ms.saturating_mul(1_000),
+    };
+    // Captured before the agents are stopped: the report names the capacity the nodes actually
+    // reported, and printing 0 there would be a wrong number rather than a missing one.
+    let node_channels: usize = agents
+        .agents()
+        .iter()
+        .map(|a| a.ack.channels as usize)
+        .sum();
+    let lanes = agents.total_lanes();
+
+    let driven = crate::drive::run(&mut agents, &description, &options, Arc::clone(&stop));
     stop.store(true, Ordering::Relaxed);
     let _ = watcher.join();
+    // Stopped whatever happened, and its teardown checked: a run that failed must still
+    // leave nothing holding mailbox channels (FR-053).
+    if let Err(e) = agents.stop() {
+        eprintln!("warning: agent teardown: {e}");
+    }
+    let out = match driven {
+        Ok(o) => o,
+        // A lost node is exit 3, not 4: the run began and was abandoned, rather than the
+        // deployment being refused before it started. A refused setup issued nothing at all, so
+        // it is exit 2 like any other rejected invocation.
+        Err(crate::drive::DriveError::Lost(lost)) => {
+            return Err(Failure {
+                message: format!("RUN INVALID \u{2014} {lost}"),
+                code: exit::INVALID,
+            })
+        }
+        Err(crate::drive::DriveError::Setup(why)) => return Err(Failure::config(why)),
+    };
 
-    let text_out = live_report(
-        &stats,
+    let mut rendered = effective;
+    rendered.push_str(&live_report(
+        &out.stats,
         None,
         node_channels,
         lanes,
-        batch_keys,
-        seed,
-        description_path,
-        report_path,
-    )?;
-    let mut out = effective;
-    out.push_str(&text_out);
-    Ok((
-        out,
-        if stats.is_valid() {
-            exit::OK
-        } else {
-            exit::INVALID
-        },
-    ))
+        args.batch_keys,
+        args.seed,
+        &args.description,
+        args.report.clone(),
+    )?);
+    rendered.push_str(&format!("  nodes             {}\n", node_names.len()));
+    for (node, c) in &out.per_node {
+        rendered.push_str(&format!(
+            "    {node:<20} {:>8} requests, {:>7} blocks read, {:>7} written\n",
+            c.requests,
+            c.blocks_read(),
+            c.blocks_written()
+        ));
+    }
+    let code = if out.stats.is_valid() {
+        exit::OK
+    } else {
+        exit::INVALID
+    };
+    Ok((rendered, code))
+}
+
+/// The node a run drives when `--node` was not given.
+///
+/// `127.0.0.1` rather than `localhost`, so it cannot resolve to an IPv6 address the agent's
+/// default bind does not listen on — a failure that presents as "no agent accepted a connection"
+/// with an agent plainly running.
+#[cfg(feature = "live")]
+const LOCAL_NODE: &str = "127.0.0.1";
+
+/// A duration a person can read, for the wallclock projection.
+#[cfg(feature = "live")]
+fn humanise(seconds: f64) -> String {
+    if !seconds.is_finite() || seconds < 0.0 {
+        return "an unknown amount".to_string();
+    }
+    if seconds < 90.0 {
+        return format!("{seconds:.0} seconds");
+    }
+    if seconds < 5_400.0 {
+        return format!("{:.1} minutes", seconds / 60.0);
+    }
+    if seconds < 172_800.0 {
+        return format!("{:.1} hours", seconds / 3_600.0);
+    }
+    format!("{:.1} days", seconds / 86_400.0)
 }
 
 /// Build a live run's report.
@@ -1626,19 +1699,57 @@ fn live_report(
 ) -> Result<String, Failure> {
     use crate::report::{LatencyPercentiles, LiveReport, QueueStats, Tuning};
 
+    use crate::live::Pacing;
+
     let valid = stats.is_valid();
     let report = LiveReport {
         run_kind: "live",
         valid,
+        // Which reason, because the two modes fail differently — and a report that gave the
+        // underrun reason for a paced run would send a reader to look at a queue that was
+        // supposed to be empty.
         invalid_reason: (!valid).then(|| {
-            format!(
-                "the plan queue underran {} times out of {} pops ({:.3}%), so the \
-                 generator and not Certus set the pace at those instants and the \
-                 throughput describes the instrument (FR-062)",
-                stats.underruns(),
-                stats.pops(),
-                stats.fraction_underrun() * 100.0
-            )
+            if stats.payload_mismatches() > 0 {
+                format!(
+                    "Certus returned the wrong block for {} of {} loaded keys. That is a \
+                     correctness failure rather than a cache outcome, so no throughput from \
+                     this run is a result",
+                    stats.payload_mismatches(),
+                    stats.payloads_verified()
+                )
+            } else if stats.pacing == Pacing::Real {
+                format!(
+                    "the run missed its own schedule: p99 lateness {} us over {} turns, above \
+                     the {} us tolerance, so the generator and not Certus set the pace and the \
+                     latency percentiles describe a schedule that was not kept (FR-080)",
+                    stats.lateness_us(0.99),
+                    stats.paced_turns(),
+                    stats.lateness_tolerance_us
+                )
+            } else {
+                format!(
+                    "the plan queue underran {} times out of {} pops ({:.3}%), so the \
+                     generator and not Certus set the pace at those instants and the \
+                     throughput describes the instrument (FR-062)",
+                    stats.underruns(),
+                    stats.pops(),
+                    stats.fraction_underrun() * 100.0
+                )
+            }
+        }),
+        mode: stats.pacing.name(),
+        schedule: (stats.pacing == Pacing::Real).then(|| crate::report::Schedule {
+            rate: stats.rate,
+            rate_shortfall: stats.rate_shortfall().unwrap_or(0.0),
+            turns: stats.paced_turns(),
+            lateness_us: LatencyPercentiles {
+                p50: stats.lateness_us(0.50),
+                p90: stats.lateness_us(0.90),
+                p99: stats.lateness_us(0.99),
+                max: stats.max_lateness_us(),
+            },
+            tolerance_us: stats.lateness_tolerance_us,
+            kept: stats.kept_the_schedule(),
         }),
         requests: stats.requests(),
         key_references: stats.key_references(),

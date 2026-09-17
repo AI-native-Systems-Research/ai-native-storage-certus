@@ -1,7 +1,3 @@
-//! Requires the `live` feature: the mailbox protocol, and therefore the whole point of
-//! this suite, is what `live` gates. An emit-only build has no operation stream to check.
-#![cfg(feature = "live")]
-
 //! The issued operation stream, checked against a mock mailbox (T051).
 //!
 //! # Where the expected answer comes from, and why that matters
@@ -54,11 +50,11 @@
 use std::collections::{HashMap, HashSet};
 
 use shmq_dispatcher::wire::{self, op};
-use workload_gen::opstream::{forbidden_opcode, Encoding, OpStream, TurnSplit};
-use workload_gen::payload::HandleBatchTemplate;
 use workload_model::description::WorkloadDescription;
 use workload_model::plan::{OpKind, OperationPlan};
 use workload_model::sim::Simulation;
+use workload_node_agent::opstream::{forbidden_opcode, Encoding, OpStream, TurnSplit};
+use workload_node_agent::payload::HandleBatchTemplate;
 
 /// A workload with shared prefixes, several turns and growth, so the plan contains every
 /// operation kind and long enough key lists to exercise chunking.
