@@ -71,6 +71,102 @@
 //! generator sees that as [`crate::client::ClientError::Closed`], names the node and aborts
 //! the run (FR-064) — which is the correct outcome, since a peer that cannot speak the
 //! protocol cannot be measured.
+//!
+//! # Examples
+//!
+//! A whole conversation over loopback. The [`Service`] is all the work; the server is only
+//! the accept loop and the frame loop:
+//!
+//! ```
+//! use std::sync::atomic::AtomicBool;
+//! use std::sync::Arc;
+//! use std::time::Duration;
+//!
+//! use workload_wire::client::Client;
+//! use workload_wire::frame::{Hello, HelloAck, SubmitTurn, TurnOutcome};
+//! use workload_wire::handshake;
+//! use workload_wire::server::{FnFactory, Server, Service};
+//!
+//! /// One of these exists per connection, and it sees that connection's frames one at a
+//! /// time — which is what keeps a session's causally dependent turns from overlapping.
+//! struct EveryKeyResident {
+//!     turns: usize,
+//! }
+//!
+//! impl Service for EveryKeyResident {
+//!     fn hello(&mut self, hello: &Hello) -> HelloAck {
+//!         // The fail-closed comparison is the implementor's: this module cannot know
+//!         // what a correct build_id is, so it does not try.
+//!         handshake::answer(hello, 8, 32768)
+//!     }
+//!
+//!     fn submit_turn(&mut self, turn: &SubmitTurn) -> TurnOutcome {
+//!         self.turns += 1;
+//!         TurnOutcome {
+//!             resident: turn.path.len() as u32,
+//!             blocks_read: turn.path.len() as u32,
+//!             ..Default::default()
+//!         }
+//!     }
+//! }
+//!
+//! let server = Server::bind("127.0.0.1:0", FnFactory(|| Ok(EveryKeyResident { turns: 0 })))
+//!     .unwrap()
+//!     // Zero linger is what a test wants and what a run does not: a generator opening
+//!     // its lanes one at a time would be cut off by it.
+//!     .with_linger(Duration::ZERO);
+//! let addr = server.local_addr().unwrap();
+//!
+//! let serving = std::thread::spawn(move || {
+//!     server.serve(Arc::new(AtomicBool::new(false))).unwrap();
+//! });
+//!
+//! let mut client = Client::connect(addr, 4, Some(Duration::from_secs(10))).unwrap();
+//! client.handshake("localhost", "/dev/shm/certus-shmq", 4, 32768).unwrap();
+//!
+//! client.submit(&SubmitTurn { session: 1, flags: 0, path: vec![10, 11, 12] }).unwrap();
+//! let outcomes = client.finish().unwrap();
+//! assert_eq!(outcomes[0].resident, 3);
+//!
+//! // `shutdown` stops the accept loop, so `serve` returns and the agent releases its
+//! // resources rather than leaving them to whoever next starts a run (FR-053).
+//! client.shutdown().unwrap();
+//! serving.join().unwrap();
+//! ```
+//!
+//! A frame before `Hello` closes the connection rather than being served, because a peer
+//! that has not identified itself must be refused rather than measured:
+//!
+//! ```
+//! use std::io::Write;
+//! use std::net::TcpStream;
+//!
+//! use workload_wire::frame::{opcode, SubmitTurn, Writer};
+//! use workload_wire::server::{serve_tcp, ServerError, Service};
+//! # use workload_wire::frame::{Hello, HelloAck, TurnOutcome};
+//! # struct S;
+//! # impl Service for S {
+//! #     fn hello(&mut self, h: &Hello) -> HelloAck { workload_wire::handshake::answer(h, 8, 32768) }
+//! #     fn submit_turn(&mut self, _t: &SubmitTurn) -> TurnOutcome { TurnOutcome::default() }
+//! # }
+//!
+//! let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//! let addr = listener.local_addr().unwrap();
+//!
+//! let sending = std::thread::spawn(move || {
+//!     let mut socket = TcpStream::connect(addr).unwrap();
+//!     let mut w = Writer::new();
+//!     w.bytes(&SubmitTurn { session: 1, flags: 0, path: vec![7] }.encode());
+//!     socket.write_all(&w.frame(opcode::SUBMIT_TURN, 0, 1)).unwrap();
+//!     // Hold the socket open so the server's error is the protocol one, not a close.
+//!     std::thread::sleep(std::time::Duration::from_millis(200));
+//! });
+//!
+//! let (mut accepted, _) = listener.accept().unwrap();
+//! let err = serve_tcp(&mut accepted, &mut S, 65536).unwrap_err();
+//! assert!(matches!(err, ServerError::HelloNotFirst { opcode: 2 }));
+//! sending.join().unwrap();
+//! ```
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};

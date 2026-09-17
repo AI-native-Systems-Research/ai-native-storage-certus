@@ -52,6 +52,59 @@
 //! there is no padding to reproduce. `-1` is the "never again" sentinel the reader
 //! normalises. And `clock_time` being 32 bits caps millisecond timestamps at **49.7
 //! days** of virtual time, which the writer refuses rather than wrapping.
+//!
+//! # Examples
+//!
+//! CSV, one line per block reference — and the parameter string that makes the file
+//! interpretable, which is not optional here:
+//!
+//! ```
+//! use workload_trace::cachesim::convert_jsonl_csv;
+//!
+//! let trace = concat!(
+//!     r#"{"request_start":0.0,"full_input_blocks":[91,92]}"#, "\n",
+//!     r#"{"request_start":1.5,"full_input_blocks":[91,92,93]}"#, "\n",
+//! );
+//!
+//! let mut out = Vec::new();
+//! let stats = convert_jsonl_csv(trace.as_bytes(), &mut out, 32768).unwrap();
+//! assert_eq!(stats.accesses, 5); // references, not requests
+//! assert_eq!(stats.distinct_objects, 3);
+//!
+//! let text = String::from_utf8(out).unwrap();
+//! assert_eq!(text.lines().next(), Some("0,91,32768"));
+//! assert_eq!(text.lines().count(), 5);
+//!
+//! // A CSV file cannot say what its own columns mean, so the layout travels with it.
+//! assert_eq!(stats.params(), "time-col=1, obj-id-col=2, obj-size-col=3, obj-id-is-num=1");
+//! ```
+//!
+//! `oracleGeneral`, where the emit run's knowledge of its own future becomes
+//! `next_access_vtime` — the field a captured trace cannot fill without an offline
+//! pass, and the one that makes a Belady baseline possible:
+//!
+//! ```
+//! use workload_trace::cachesim::{convert_jsonl_oracle, NEVER_AGAIN, ORACLE_RECORD_BYTES};
+//!
+//! let trace = concat!(
+//!     r#"{"request_start":0.0,"full_input_blocks":[91,92]}"#, "\n",
+//!     r#"{"request_start":1.5,"full_input_blocks":[91]}"#, "\n",
+//! );
+//!
+//! let mut out = Vec::new();
+//! let stats = convert_jsonl_oracle(trace.as_bytes(), &mut out, 32768).unwrap();
+//! assert_eq!(stats.accesses, 3);
+//! assert_eq!(out.len(), 3 * ORACLE_RECORD_BYTES);
+//!
+//! // Read `next_access_vtime` back out of each packed record: an ordinal, not a time.
+//! let next_access = |i: usize| -> i64 {
+//!     let base = i * ORACLE_RECORD_BYTES + 16;
+//!     i64::from_ne_bytes(out[base..base + 8].try_into().unwrap())
+//! };
+//! assert_eq!(next_access(0), 2);          // key 91 is touched again at ordinal 2
+//! assert_eq!(next_access(1), NEVER_AGAIN); // key 92 never is
+//! assert_eq!(next_access(2), NEVER_AGAIN);
+//! ```
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};

@@ -20,6 +20,62 @@
 //! Every decoder either consumes exactly the fields it declares or fails. A truncated body
 //! is [`WireError::Truncated`], never a partial value with the rest left at zero: a
 //! half-decoded `SubmitTurn` would submit a turn with keys the generator never sent.
+//!
+//! # Examples
+//!
+//! A frame is a body plus a header, and every body round-trips:
+//!
+//! ```
+//! use workload_wire::frame::{opcode, submit_flags, Header, SubmitTurn, Writer, HEADER_BYTES};
+//!
+//! let turn = SubmitTurn {
+//!     session: 17,
+//!     flags: submit_flags::POLL_EVENTS,
+//!     path: vec![0xaaaa, 0xbbbb, 0xcccc],
+//! };
+//!
+//! let body = turn.encode();
+//! let mut writer = Writer::new();
+//! writer.bytes(&body);
+//! let frame = writer.frame(opcode::SUBMIT_TURN, 0, 9);
+//!
+//! let header = Header::decode(&frame, 4096).unwrap();
+//! assert_eq!(header.opcode, opcode::SUBMIT_TURN);
+//! assert_eq!(header.corr, 9);
+//! assert_eq!(header.len as usize, body.len());
+//!
+//! let back = SubmitTurn::decode(&frame[HEADER_BYTES..]).unwrap();
+//! assert_eq!(back, turn);
+//! assert!(back.polls_events());
+//! ```
+//!
+//! The two ways a decode refuses, both of which exist because the bytes come from a
+//! peer. An oversized `len` is rejected before anything is sized from it:
+//!
+//! ```
+//! use workload_wire::frame::{Header, WireError};
+//!
+//! let mut frame = [0u8; 12];
+//! frame[0..4].copy_from_slice(&(64 * 1024u32).to_le_bytes());
+//! assert_eq!(
+//!     Header::decode(&frame, 4096),
+//!     Err(WireError::TooLarge { len: 65536, max: 4096 }),
+//! );
+//! ```
+//!
+//! And a truncated body is an error rather than a partial value:
+//!
+//! ```
+//! use workload_wire::frame::{SubmitTurn, WireError};
+//!
+//! let full = SubmitTurn { session: 1, flags: 0, path: vec![7, 8, 9] }.encode();
+//! // One key short of what the body's own count declares.
+//! let clipped = &full[..full.len() - 8];
+//! assert!(matches!(
+//!     SubmitTurn::decode(clipped),
+//!     Err(WireError::Truncated { .. }),
+//! ));
+//! ```
 
 use std::fmt;
 

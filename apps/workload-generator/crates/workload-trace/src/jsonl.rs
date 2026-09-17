@@ -21,17 +21,50 @@
 //!
 //! # Examples
 //!
-//! ```no_run
-//! use std::fs::File;
-//! use std::io::BufWriter;
+//! The writer takes a turn at a time, so the sink can be anything that writes — a
+//! `BufWriter<File>` in the tool, a `Vec<u8>` here:
+//!
+//! ```
+//! use workload_model::description::WorkloadDescription;
+//! use workload_model::sim::Simulation;
 //! use workload_trace::jsonl::JsonlWriter;
 //!
-//! let file = BufWriter::new(File::create("part-0.jsonl").unwrap());
-//! let mut writer = JsonlWriter::new(file, "demo", 16);
-//! // ... writer.write(session, turn)? per turn ...
+//! let description: WorkloadDescription = r#"
+//! version: 1
+//! blocks: {tokens: 16, bytes: 32768}
+//! shared_classes:
+//!   docs: {length: {constant: 3}, lifetime: {constant: .inf}, pool: {size: {exact: 2}}}
+//! session_classes:
+//!   chat:
+//!     pool: {size: {exact: 2}}
+//!     uses: [{class: docs, count: {constant: 1}}]
+//!     turns: {constant: 3}
+//!     input_growth: {constant: 2}
+//!     output_growth: {constant: 1}
+//!     think_time: {constant: 5}
+//! "#
+//! .parse()
+//! .unwrap();
+//!
+//! let mut sim = Simulation::new(&description, 7).unwrap();
+//! let mut writer = JsonlWriter::new(Vec::new(), "demo", description.blocks.tokens);
+//! sim.run_until(60.0, &mut |session, turn| writer.write(session, turn).unwrap());
 //! let stats = writer.finish().unwrap();
-//! assert_eq!(stats.invocations, 0);
+//!
+//! // Row verification is on, so every line written already satisfied the schema's
+//! // own invariants (FR-058) — including the append-only one, which needs the
+//! // previous row of the same session and so cannot be checked after the fact.
+//! //
+//! // Nine sessions from a pool of two: `pool.size` is how many are live at once,
+//! // not how many the span contains. Sessions are born and retire throughout.
+//! assert_eq!(stats.sessions, 9);
+//! assert_eq!(stats.invocations, 24);
+//! assert_eq!(stats.unique_blocks, 78);
 //! ```
+//!
+//! Statistics come back from [`JsonlWriter::finish`] because they are accumulated on
+//! the way past; the manifest that carries them is written afterwards, which is what
+//! makes an incomplete trace unreadable rather than mislabelled (FR-073).
 
 use std::collections::BTreeSet;
 use std::io::{self, Write};

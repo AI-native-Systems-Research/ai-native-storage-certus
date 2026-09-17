@@ -126,6 +126,54 @@ impl EmitReport {
     ///
     /// The projection and the actual are printed **side by side**, because a
     /// projection nobody checks is a projection that quietly stops being accurate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use workload_gen::report::{
+    ///     ContainerRecords, EmitReport, ProjectionSummary, Reproduction,
+    /// };
+    ///
+    /// let report = EmitReport {
+    ///     run_kind: "emit",
+    ///     sessions_started: 40,
+    ///     sessions_completed: 31,
+    ///     invocations: 214,
+    ///     blocks_minted: 642,
+    ///     block_references: 1_908,
+    ///     virtual_span: 300.0,
+    ///     records: ContainerRecords { jsonl: Some(214), parquet: None },
+    ///     generation_rate_invocations_per_second: 178_000.0,
+    ///     generation_wallclock_seconds: 0.0012,
+    ///     reproduction: Reproduction {
+    ///         seed: 42,
+    ///         until: 300.0,
+    ///         description_digest: "9f1c2e".to_string(),
+    ///         description_path: "chat.yml".to_string(),
+    ///     },
+    ///     projection: ProjectionSummary {
+    ///         invocations: 220,
+    ///         keys_minted: 660,
+    ///         key_references: 1_960,
+    ///     },
+    ///     warnings: vec![],
+    /// };
+    ///
+    /// let text = report.render();
+    /// // Projected against actual, on the same line, so drift is visible.
+    /// assert!(text.contains("invocations       214 (projected 220)"));
+    /// // The one wallclock figure allowed, and it says whose speed it is.
+    /// assert!(text.contains("not a server result"));
+    /// // Fewer completed than started is right-censoring: the span cut the last
+    /// // generation short, and the manifest declares it.
+    /// assert!(text.contains("40 started, 31 completed"));
+    ///
+    /// // And the structured form carries no latency, lane or ratio field at all —
+    /// // an emit run did not measure them, so there is nowhere to put a zero.
+    /// let json = report.to_json().unwrap();
+    /// assert!(!json.contains("latency"));
+    /// assert!(!json.contains("lane"));
+    /// ```
     pub fn render(&self) -> String {
         let mut out = String::new();
         out.push_str("emit run complete\n");

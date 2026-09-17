@@ -8,9 +8,92 @@ Start with [`specs/001-synthetic-workload-generator/quickstart.md`](specs/001-sy
 for the scenarios, and read this file before running any comparison whose
 conclusion depends on a hit rate.
 
-> Orientation — purpose, the five crates, and the emit-only build — is T081 and
-> is not written yet. What follows is T080: how to compare two eviction policies
-> without fooling yourself.
+## What it is for
+
+Certus caches KV blocks for inferencing, and the questions worth asking of it —
+does this eviction policy beat that one, how much of the working set has to fit
+before the hit rate moves, what does a remote tier cost — all need a workload
+that has the *reuse structure* real inferencing traffic has. Replaying a
+captured trace gives you one workload at one scale. This gives you a family of
+them: a description names distributions, and the generator turns them into
+sessions whose turns share prefixes the way conversations and agent runs do.
+
+Two things follow from that, and they are the whole design:
+
+- **The description is small and the plan is large.** A few dozen lines of YAML
+  expand into an unbounded stream of operations. You tune the workload by
+  editing distributions, not by recording a longer trace.
+- **The plan is deterministic and the outcome is not.** A description plus a
+  seed fixes every session, turn and key, on every machine, independent of
+  batching and lane count (FR-072). What is *not* fixed is whether a given
+  reference hits, because the cluster races. That asymmetry is what makes the
+  tool usable for A/B work at all, and it is also the trap — see
+  [Comparing two eviction policies](#comparing-two-eviction-policies) below.
+
+Non-goal: it is not a trace replayer and not a fidelity model of any particular
+captured trace. Nothing here claims a generated workload *is* some real one.
+
+## The five crates
+
+The split is not organisational. Three crates are CUDA-free and are workspace
+default members; two link CUDA and are not. That boundary is what makes "the
+plan is identical across the live and emit paths" a property the compiler
+enforces rather than one a reviewer has to check, because the simulation core
+cannot see a mailbox, a device or an output container.
+
+| crate | default member | what it owns |
+| --- | --- | --- |
+| `workload-model` | yes | the simulation core: YAML schema and validation, the five distribution kinds, populations and residual seeding, selection over rank, the key chain, sessions and turns, the virtual-time loop, and the canonical `OperationPlan` |
+| `workload-trace` | yes | output containers (JSONL, parquet behind a non-default feature), the self-describing manifest, and the Mooncake / libCacheSim / cache-simulator projections |
+| `workload-wire` | yes | the generator↔agent TCP protocol: framing, the `Hello` handshake, and its conformance cases |
+| `workload-gen` | **no** | the `workload-gen` binary — CLI, execution lanes, the CUDA payload path, and the structured report |
+| `workload-node-agent` | **no** | the per-node relay daemon for multi-node runs. It holds no simulation state and depends on `workload-gen`'s *library*, so FR-072a's reactive rule has exactly one implementation |
+
+The two binaries are excluded from `default-members`, so a plain `cargo build`
+or `cargo test` at the repository root never reaches CUDA. Build them
+explicitly:
+
+```bash
+cargo build -p workload-gen
+cargo build -p workload-node-agent
+```
+
+## The emit-only build
+
+`workload-gen`'s `live` feature is default-on and gates both the mailbox
+transport and the CUDA link. Turning it off yields a tool that needs no
+accelerator, no server and no cluster:
+
+```bash
+cargo build -p workload-gen --no-default-features
+```
+
+That build drops the `run` subcommand and keeps the other four — `emit`,
+`convert`, `validate` and `plan` — which is enough to write a trace, project it
+into another tool's format, check a description, and produce the canonical plan
+serialisation that reproducibility is asserted against. Quickstart Scenarios 1–3
+and the whole of User Story 2 run on it, on any machine.
+
+Add `--features parquet` for the parquet container; it pulls the arrow family,
+which is why it is not on by default.
+
+## Where to go next
+
+- [`quickstart.md`](specs/001-synthetic-workload-generator/quickstart.md) — six
+  scenarios, from validating the shipped example with no hardware to a
+  multi-node run with session migration. Run its commands from *this*
+  directory.
+- [`contracts/`](specs/001-synthetic-workload-generator/contracts/) — normative:
+  the CLI, key derivation, trace I/O and interop, the node-agent wire protocol,
+  and `workload-input.example.yml`, the description a test keeps parseable.
+- [`data-model.md`](specs/001-synthetic-workload-generator/data-model.md) — the
+  description schema field by field.
+- [`spec.md`](specs/001-synthetic-workload-generator/spec.md) and
+  [`plan.md`](specs/001-synthetic-workload-generator/plan.md) — requirements and
+  the design decisions behind the crate split.
+- [`research/population/`](research/population/) — the population simulation
+  behind FR-013 to FR-016, landed so those measurements are reproducible here
+  rather than external.
 
 ## Comparing two eviction policies
 

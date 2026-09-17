@@ -2351,10 +2351,35 @@ changed.
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T081 [P] Write `apps/workload-generator/README.md`: purpose, the five
+- [x] T081 [P] Write `apps/workload-generator/README.md`: purpose, the five
   crates, the emit-only build, and a pointer to `quickstart.md`
-- [ ] T082 [P] Add doc comments with runnable `# Examples` to every public item
-  across `crates/*/src/`, and confirm `cargo doc --no-deps` is warning-free
+- [x] T082 [P] Document `crates/*/src/` at the granularity each crate's role
+  earns, and confirm `cargo doc --no-deps` is warning-free:
+
+  - **The three library crates** (`workload-model`, `workload-trace`,
+    `workload-wire`) get a runnable crate-level `# Examples`, a runnable
+    module-level example in every public module, and a runnable example on each
+    principal public type and the entry points a caller drives it through.
+  - **The two binaries** (`workload-gen`, `workload-node-agent`) get enough
+    detail to read the program: module headers saying what the module is for and
+    doc comments on its items. Their `pub` surface exists for reuse *inside* this
+    application — `workload-node-agent` depending on `workload-gen`'s library so
+    FR-072a has one implementation — not as an API for anyone else, so an example
+    is added where it teaches something and not as a rule.
+  - **Not required anywhere**: an example per trivial accessor, per byte-level
+    primitive (`Writer::u8`), or per constant. FFI declarations cannot carry a
+    runnable example and are exempt.
+
+  **This deviates from the root `CLAUDE.md`'s "public APIs require doc comments
+  with runnable examples", by the user's decision, and the reason is worth
+  keeping**: that convention comes from the component framework, where an
+  interface is a contract between independently developed components and an
+  example is how the contract is pinned. Nothing here is published for others to
+  build against — these five crates are one application, and its `pub` keywords
+  are mostly crate-boundary plumbing. Taken literally the rule wanted 552 new
+  examples, including ones for `const HELLO` and for `extern "C"` declarations
+  that cannot run, which would have added a large gate cost and a lot of
+  near-duplicate snippets to document a contract that has no second party.
 - [ ] T083 [P] Add a doc test asserting that
   `specs/001-synthetic-workload-generator/contracts/workload-input.example.yml`
   parses and validates, so the shipped example cannot drift from the parser
@@ -2393,6 +2418,87 @@ changed.
   first three windows see exactly zero churn and modulation is still 0.44 after
   eight generations, against 0.04 for residual-life seeding. T024 should assert
   that structure rather than the digits, so it cannot go flaky.
+
+**T082 done, 62 doc tests** (41 `workload-model`, 10 `workload-trace` with
+`parquet` on, 11 `workload-wire`, 1 `workload-gen`), and `cargo doc --no-deps` is
+warning-free on all five crates.
+
+**An audit came first, and it is what produced the scoping decision above.**
+Every public item already had a doc comment — `#![warn(missing_docs)]` is on in
+four crates, and is now on in the fifth (`workload-node-agent`'s `main.rs`, which
+had been missed) — so what was missing was *examples*: 552 of 583 public items
+had none. The gap was not evenly spread. **22 modules had no runnable code at
+all**, including the crate root of all four library-bearing crates and every one
+of `workload-wire`'s four modules, while `workload-model` was already largely
+covered. So the work was module-shaped rather than item-shaped.
+
+What was added, by crate:
+
+- **`workload-model`**: a crate-root example — parse, simulate, record — plus the
+  seed-reproducibility pair, since determinism is the property the whole crate
+  exists to have. Its modules were already covered.
+- **`workload-trace`**: a crate-root example that writes a container and then
+  projects it, because the container/projection distinction is the thing a reader
+  most needs and cannot see from the module list. Module examples for `jsonl`,
+  `parquet`, `mooncake`, `cachesim` and `simulator`.
+- **`workload-wire`**: a crate-root example running a real client↔server
+  conversation over loopback, and module examples for all four modules —
+  `frame` (round trip plus both refusals), `handshake` (both ends, and two
+  refusals), `client` (the pipelining window), `server` (an accept loop, and a
+  frame before `Hello`).
+- **`workload-gen`**: one example, on `EmitReport::render`, because the report is
+  the artifact everyone reads and its shape is otherwise only asserted in tests.
+
+**Three of the new examples are the documentation, not decoration.** `client`'s
+shows that the *d+1*-th `submit` returns a displaced outcome, which is the API's
+one surprising signature; `server`'s shows a pre-`Hello` frame closing the
+connection; and `report`'s asserts that the emit report's JSON contains no
+latency or lane field at all — FR-071's omitted-not-zeroed rule, checked rather
+than described.
+
+**Two mechanical traps, recorded because both cost a cycle.** `Writer::bytes`
+returns `&mut Self` while `Writer::frame` takes `self`, so the natural one-liner
+does not compile; and the `jsonl` example's first assertion guessed 2 sessions
+from `pool: {size: {exact: 2}}` and measured 9 — `pool.size` is how many sessions
+are *live at once*, not how many a span contains. The corrected example says so,
+since that is exactly the misreading a description author would make.
+
+`workload-trace`'s crate-root example writes through `&mut Vec<u8>` and takes the
+bytes back after `finish()` releases the borrow, rather than through a
+`sink_mut()` accessor added for the example's convenience — a doc example should
+not grow the API it documents.
+
+**T081 done.** The four sections the task asked for now sit above T080's
+comparison procedure, and the placeholder blockquote saying orientation was
+missing is gone.
+
+Two of them say more than "what this is", because the orientation a reader needs
+here is not a feature list:
+
+- **Purpose** is stated against the alternative — replaying a captured trace —
+  since that is the thing a reader arriving at a workload generator will assume
+  it competes with. The two consequences are the design: a small description
+  expands into an unbounded plan, and the plan is deterministic while the
+  *outcome* is not. That asymmetry is stated up front and linked forward to the
+  comparison section, because it is simultaneously the property that makes A/B
+  work possible and the trap that makes it easy to get wrong.
+- **The crate table** leads with the default-member column, because the split is
+  not organisational and a reader who reads it as organisational will put the
+  wrong code in the wrong crate. The CUDA-free boundary is what makes FR-072
+  compiler-enforced: the simulation core cannot see a mailbox, a device or a
+  container, so a second execution path cannot silently diverge from the first.
+
+Also added a stated non-goal — it is not a trace replayer and claims no fidelity
+to any particular captured trace — because the branch's own history is largely a
+record of trying to make that claim and failing, and a reader who infers it from
+"synthetic workload generator" will over-trust the output.
+
+**Verified rather than described**: `cargo build -p workload-gen
+--no-default-features` was run, and its `--help` confirms the emit-only build
+drops `run` and keeps exactly `emit`, `convert`, `validate` and `plan`. The
+"where to go next" links were checked against what is actually on disk — the
+description schema is in `data-model.md`, not in `contracts/`, and `research/`
+holds only `population/`.
 
 ---
 

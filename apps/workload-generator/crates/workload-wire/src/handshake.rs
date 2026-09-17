@@ -35,6 +35,61 @@
 //! the node's real mailbox capacity. The mailbox is depth-1 per channel, so asking for more
 //! lanes than channels does not fail — it **serialises silently**, which would look like a
 //! slow server rather than a misconfigured run. See [`check_capacity`].
+//!
+//! # Examples
+//!
+//! Both ends of an accepted handshake, with no socket involved — [`answer`] is the
+//! agent's side and [`verify`] the generator's:
+//!
+//! ```
+//! use workload_wire::handshake::{self, status};
+//!
+//! let hello = handshake::hello("/dev/shm/certus-shmq");
+//! let ack = handshake::answer(&hello, 8, 32768);
+//!
+//! assert_eq!(ack.status, status::OK);
+//! handshake::verify("node2", &ack).unwrap();
+//!
+//! // Capacity is a separate check, because it is about the run's shape rather than
+//! // about who the peer is.
+//! handshake::check_capacity("node2", &ack, 4, 32768).unwrap();
+//! ```
+//!
+//! A refusal names the node and says what each side thought, which is what makes it
+//! actionable on a cluster:
+//!
+//! ```
+//! use workload_wire::handshake::{self, Refused};
+//!
+//! let hello = handshake::hello("/dev/shm/certus-shmq");
+//! let mut ack = handshake::answer(&hello, 8, 32768);
+//!
+//! // An agent built from a different tree.
+//! ack.build_id = handshake::digest("some other source tree");
+//! let refused = handshake::verify("node7", &ack).unwrap_err();
+//! assert!(matches!(refused, Refused::SourceIdentity { .. }));
+//! assert!(refused.to_string().contains("node7"));
+//! assert!(refused.to_string().contains("FR-051"));
+//! ```
+//!
+//! And the capacity check is what stops the failure that would otherwise look like a
+//! slow server:
+//!
+//! ```
+//! use workload_wire::handshake::{self, Refused};
+//!
+//! let hello = handshake::hello("/dev/shm/certus-shmq");
+//! let ack = handshake::answer(&hello, 4, 32768);
+//!
+//! // Eight lanes over four depth-1 channels would serialise, not fail.
+//! let refused = handshake::check_capacity("node5", &ack, 8, 32768).unwrap_err();
+//! assert!(matches!(refused, Refused::TooManyLanes { channels: 4, .. }));
+//! assert!(refused.to_string().contains("serialise silently"));
+//! ```
+//!
+//! Both of the accepting examples above assume this build's provenance is known. If it
+//! is not — [`is_known`] is false, because the source files could not be read at build
+//! time — `verify` refuses instead, which is the fail-closed direction.
 
 use std::fmt;
 
