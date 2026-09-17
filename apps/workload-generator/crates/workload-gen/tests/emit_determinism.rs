@@ -68,7 +68,7 @@ fn emit(dir: &Path, description: &Path, until: f64, seed: u64, force: bool) -> (
         description.display().to_string(),
         "--until".to_string(),
         until.to_string(),
-        "--output".to_string(),
+        "--certus-unified-jsonl".to_string(),
         out.display().to_string(),
         "--seed".to_string(),
         seed.to_string(),
@@ -198,7 +198,7 @@ fn an_invalid_description_exits_two_and_writes_nothing() {
         d.display().to_string(),
         "--until".into(),
         "100".into(),
-        "--output".into(),
+        "--certus-unified-jsonl".into(),
         out.display().to_string(),
         "--seed".into(),
         "1".into(),
@@ -221,7 +221,7 @@ fn a_non_positive_span_is_refused() {
             d.display().to_string(),
             "--until".into(),
             until.into(),
-            "--output".into(),
+            "--certus-unified-jsonl".into(),
             tmp.path().join("nope").display().to_string(),
             "--seed".into(),
             "1".into(),
@@ -247,7 +247,7 @@ fn an_oversized_run_is_refused_before_writing_anything() {
         d.display().to_string(),
         "--until".into(),
         "1000000".into(),
-        "--output".into(),
+        "--certus-unified-jsonl".into(),
         out.display().to_string(),
         "--seed".into(),
         "1".into(),
@@ -306,23 +306,25 @@ fn plan_writes_a_canonical_file_that_is_byte_identical_at_a_fixed_seed() {
     assert_ne!(a, c);
 }
 
-/// Run `emit --format <format>` and return (exit code, the output directory).
-fn emit_format(dir: &Path, description: &Path, format: &str) -> (i32, std::path::PathBuf) {
-    let out = dir.join(format!("out-{format}"));
-    let code = workload_gen::cli::run_argv(&[
+/// Run `emit` with an arbitrary set of output flags.
+///
+/// Each entry is `(flag, destination)`. Every output is named the same way, so a test
+/// asking for one format and a test asking for four differ only in this list.
+fn emit_outputs(description: &Path, outputs: &[(&str, &Path)]) -> i32 {
+    let mut argv: Vec<String> = vec![
         "workload-gen".into(),
         "emit".into(),
         description.display().to_string(),
         "--until".into(),
         "400".into(),
-        "--output".into(),
-        out.display().to_string(),
         "--seed".into(),
         "7".into(),
-        "--format".into(),
-        format.into(),
-    ]);
-    (code, out)
+    ];
+    for (flag, path) in outputs {
+        argv.push((*flag).to_string());
+        argv.push(path.display().to_string());
+    }
+    workload_gen::cli::run_argv(&argv)
 }
 
 fn part_file(dir: &Path, extension: &str) -> Option<std::path::PathBuf> {
@@ -340,11 +342,11 @@ fn part_file(dir: &Path, extension: &str) -> Option<std::path::PathBuf> {
 }
 
 #[test]
-fn format_jsonl_writes_only_jsonl() {
+fn the_native_jsonl_flag_alone_writes_only_jsonl() {
     let tmp = TempDir::new().unwrap();
     let d = write(tmp.path(), "small.yml", SMALL);
-    let (code, out) = emit_format(tmp.path(), &d, "jsonl");
-    assert_eq!(code, 0);
+    let out = tmp.path().join("j");
+    assert_eq!(emit_outputs(&d, &[("--certus-unified-jsonl", &out)]), 0);
     assert!(part_file(&out, "jsonl").is_some());
     assert!(part_file(&out, "parquet").is_none());
 
@@ -352,20 +354,83 @@ fn format_jsonl_writes_only_jsonl() {
     assert!(report.contains("\"parquet\": null"), "{report}");
 }
 
-/// `--format` must actually select containers, not merely be parsed.
-///
-/// This is the shape of failure the whole project keeps finding: a flag accepted,
-/// validated, and then not plumbed through. `--format both` was doing exactly that —
-/// it checked that the build had parquet support and then wrote JSONL alone, so
-/// `records.parquet` was permanently null and SC-004's equivalence claim had nothing
-/// to compare on a real run. Nothing caught it because no test drove `--format`.
-#[cfg(feature = "parquet")]
 #[test]
-fn format_both_writes_both_containers_and_reports_both_counts() {
+fn no_outputs_at_all_is_refused_and_names_every_flag() {
+    // The one rule the five destinations are under. A run with nowhere to write is a
+    // simulation nobody asked for, and exiting 0 having written nothing is the shape a
+    // sweep driver would read as a data point.
     let tmp = TempDir::new().unwrap();
     let d = write(tmp.path(), "small.yml", SMALL);
-    let (code, out) = emit_format(tmp.path(), &d, "both");
-    assert_eq!(code, 0);
+    assert_eq!(emit_outputs(&d, &[]), 2);
+}
+
+#[test]
+fn a_projection_alone_leaves_no_trace_directory_behind() {
+    // The case the old `--output`-required CLI could not express at all: obtaining a
+    // projection meant writing the native trace too, at gigabytes for a legal span.
+    // A projection carries no manifest (FR-075b), so there must be no directory that
+    // looks like an incomplete trace either.
+    let tmp = TempDir::new().unwrap();
+    let d = write(tmp.path(), "small.yml", SMALL);
+    let mooncake = tmp.path().join("mc.jsonl");
+    assert_eq!(emit_outputs(&d, &[("--mooncake", &mooncake)]), 0);
+
+    assert!(mooncake.exists(), "no mooncake file");
+    assert!(fs::metadata(&mooncake).unwrap().len() > 0);
+    let stray: Vec<_> = fs::read_dir(tmp.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "a projection-only run created {} directory/ies",
+        stray.len()
+    );
+    // And no report file, since none was asked for: it went to the terminal.
+    assert!(!tmp.path().join("report.json").exists());
+}
+
+#[test]
+fn a_projection_alone_still_keeps_its_report_when_asked() {
+    let tmp = TempDir::new().unwrap();
+    let d = write(tmp.path(), "small.yml", SMALL);
+    let mooncake = tmp.path().join("mc.jsonl");
+    let report = tmp.path().join("r.json");
+    assert_eq!(
+        emit_outputs(&d, &[("--mooncake", &mooncake), ("--report", &report)]),
+        0
+    );
+    let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&report).unwrap()).unwrap();
+    // No container was written, so neither count is a number.
+    assert!(v["records"]["jsonl"].is_null());
+    assert!(v["records"]["parquet"].is_null());
+    assert!(v["invocations"].as_u64().unwrap() > 0);
+}
+
+/// Every requested format must actually be produced, not merely accepted.
+///
+/// This is the shape of failure the project keeps finding: a flag parsed, validated,
+/// and then not plumbed through. `--format both` did exactly that — it checked the
+/// build had parquet support and then wrote JSONL alone, so `records.parquet` was
+/// permanently null and SC-004's equivalence claim had nothing to compare on a real
+/// run. Nothing caught it because no test drove the selector.
+#[cfg(feature = "parquet")]
+#[test]
+fn both_native_flags_on_one_directory_give_one_trace_with_both_containers() {
+    let tmp = TempDir::new().unwrap();
+    let d = write(tmp.path(), "small.yml", SMALL);
+    let out = tmp.path().join("both");
+    assert_eq!(
+        emit_outputs(
+            &d,
+            &[
+                ("--certus-unified-jsonl", &out),
+                ("--certus-unified-parquet", &out),
+            ]
+        ),
+        0
+    );
 
     let jsonl = part_file(&out, "jsonl").expect("no jsonl part file");
     let parquet = part_file(&out, "parquet").expect("no parquet part file");
@@ -376,6 +441,9 @@ fn format_both_writes_both_containers_and_reports_both_counts() {
     assert_eq!(&bytes[..4], b"PAR1");
     assert_eq!(&bytes[bytes.len() - 4..], b"PAR1");
 
+    // One directory means one trace, so exactly one manifest describes both.
+    assert!(out.join("manifest.json").exists());
+
     let rows = fs::read_to_string(&jsonl).unwrap().lines().count() as u64;
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out.join("report.json")).unwrap()).unwrap();
@@ -385,14 +453,46 @@ fn format_both_writes_both_containers_and_reports_both_counts() {
 
 #[cfg(feature = "parquet")]
 #[test]
-fn format_parquet_writes_only_parquet_and_still_writes_a_manifest() {
+fn separate_directories_give_two_independent_traces() {
+    // Each is a complete, self-describing trace, so each needs its own manifest — a
+    // directory holding records and no manifest is what FR-073 makes unreadable.
+    let tmp = TempDir::new().unwrap();
+    let d = write(tmp.path(), "small.yml", SMALL);
+    let j = tmp.path().join("j");
+    let p = tmp.path().join("p");
+    assert_eq!(
+        emit_outputs(
+            &d,
+            &[
+                ("--certus-unified-jsonl", &j),
+                ("--certus-unified-parquet", &p)
+            ]
+        ),
+        0
+    );
+    for dir in [&j, &p] {
+        assert!(
+            dir.join("manifest.json").exists(),
+            "{dir:?} has no manifest"
+        );
+        assert!(dir.join("report.json").exists(), "{dir:?} has no report");
+    }
+    assert!(part_file(&j, "jsonl").is_some());
+    assert!(part_file(&j, "parquet").is_none());
+    assert!(part_file(&p, "parquet").is_some());
+    assert!(part_file(&p, "jsonl").is_none());
+}
+
+#[cfg(feature = "parquet")]
+#[test]
+fn the_native_parquet_flag_alone_writes_only_parquet_and_still_writes_a_manifest() {
     // The manifest's counts come from whichever container was written, so a
     // parquet-only run must not lose them — that would make the trace unreadable
     // rather than merely uncounted (FR-073).
     let tmp = TempDir::new().unwrap();
     let d = write(tmp.path(), "small.yml", SMALL);
-    let (code, out) = emit_format(tmp.path(), &d, "parquet");
-    assert_eq!(code, 0);
+    let out = tmp.path().join("p");
+    assert_eq!(emit_outputs(&d, &[("--certus-unified-parquet", &out)]), 0);
     assert!(part_file(&out, "parquet").is_some());
     assert!(part_file(&out, "jsonl").is_none());
 
@@ -411,12 +511,14 @@ fn format_parquet_writes_only_parquet_and_still_writes_a_manifest() {
 fn asking_for_parquet_without_the_feature_is_refused_rather_than_silently_jsonl() {
     let tmp = TempDir::new().unwrap();
     let d = write(tmp.path(), "small.yml", SMALL);
-    for format in ["parquet", "both"] {
-        let (code, out) = emit_format(tmp.path(), &d, format);
-        assert_eq!(code, 2, "--format {format} should be refused");
-        assert!(
-            part_file(&out, "jsonl").is_none(),
-            "--format {format} wrote a jsonl trace instead of refusing"
-        );
-    }
+    let out = tmp.path().join("p");
+    assert_eq!(
+        emit_outputs(&d, &[("--certus-unified-parquet", &out)]),
+        2,
+        "--certus-unified-parquet should be refused without the feature"
+    );
+    assert!(
+        part_file(&out, "jsonl").is_none(),
+        "it wrote a jsonl trace instead of refusing"
+    );
 }

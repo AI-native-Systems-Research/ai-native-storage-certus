@@ -125,11 +125,18 @@ An emit run does this check itself and refuses past free space (which `--force`
 does not override) or past a 32 GiB ceiling (which it does). Below, a 30-second
 span, which writes about 54 MiB across the two containers:
 
+**One flag per format, and at least one is required.** There is no default output
+and no format a run must produce — asking for a Mooncake file alone writes exactly
+that. Pointing both native flags at the same directory is how you get one trace
+holding both containers:
+
 ```bash
-# --format both needs the parquet feature: it is non-default so that a plain
-# workspace build never pulls arrow.
+# The parquet container needs the parquet feature: it is non-default so that a
+# plain workspace build never pulls arrow.
 P="cargo run -q -p workload-gen --no-default-features --features parquet --"
-$P emit $E --seed 42 --until 30 --format both --output /tmp/trace
+$P emit $E --seed 42 --until 30 \
+  --certus-unified-jsonl /tmp/trace \
+  --certus-unified-parquet /tmp/trace
 find /tmp/trace -type f
 ```
 
@@ -163,8 +170,49 @@ something real traces recover from text, and this generator does not model it
   longer than the span, so the run says it cannot exhibit the pool turnover the
   description asks for. That is the projection earning its place.
 
-`--format parquet` writes only parquet. The projections below read the JSONL
-schema, so a parquet-only trace has nothing for `convert` to read.
+Point them at **different** directories and you get two independent traces, each
+with its own manifest. Ask for only `--certus-unified-parquet` and only parquet is
+written — but note the projections below read the JSONL schema, so a parquet-only
+trace has nothing for `convert` to read.
+
+## Scenario 3b — The standard formats, without writing a trace first
+
+This is the cheap path, and the one to reach for by default: no native trace, no
+`convert` step, both standard formats written in the same pass.
+
+```bash
+$G emit $E --seed 42 --until 30 \
+  --mooncake /tmp/mc.jsonl \
+  --libcachesim /tmp/lcs.csv
+ls -l /tmp/mc.jsonl /tmp/lcs.csv
+```
+
+**Expect** the two files and **nothing else** — no trace directory, not even an
+empty one, because a directory holding records with no manifest is precisely what
+FR-073 makes unreadable. The report is rendered to the terminal; pass `--report
+<file>` to keep its structured form, which is the only way to keep it on a run
+with no trace directory to hold `report.json`.
+
+Measured at a 30-second span, so the trade is concrete:
+
+| Output | Bytes | Carries |
+| --- | --- | --- |
+| `--mooncake` | 12.5 MB | 4 fields: timestamp, two lengths, prompt block ids |
+| `--libcachesim` | 62.9 MB | `(time, id, size)` triples, one row **per block reference** |
+| `--certus-unified-parquet` | 12.2 MB | the full 17-field schema |
+| `--certus-unified-jsonl` | 44.1 MB | the same, as text |
+
+Two things worth reading off that table. libCacheSim CSV is the **largest** of the
+four while carrying the least, because it writes a row per reference rather than
+per request — an existing standard format is not automatically the lean choice. And
+the full schema in parquet is *smaller* than raw Mooncake JSONL, so the extra
+fifteen fields cost nothing once the container stops being text.
+
+Both projections declare what they dropped (FR-077), and `--libcachesim` prints the
+`--trace-type-params` string its reader needs, since libCacheSim's columns are
+configurable and a CSV file cannot say what its own columns mean.
+
+## Scenario 3c — Converting a stored trace
 
 Then the deferred integration question, now settled (`research.md` D1):
 

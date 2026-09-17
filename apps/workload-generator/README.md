@@ -77,6 +77,43 @@ and the whole of User Story 2 run on it, on any machine.
 Add `--features parquet` for the parquet container; it pulls the arrow family,
 which is why it is not on by default.
 
+## Which formats an emit run writes
+
+**One flag per format, one destination each, at least one required.** There is no
+default output and no format a run is obliged to produce:
+
+| Flag | Writes | Destination |
+| --- | --- | --- |
+| `--certus-unified-jsonl` | native trace, JSONL container | a directory |
+| `--certus-unified-parquet` | native trace, parquet container | a directory |
+| `--mooncake` | Mooncake FAST'25 projection | a file |
+| `--libcachesim` | libCacheSim CSV projection | a file |
+| `--simulator` | the shape `apps/eviction-replay-benchmark` reads | a file |
+
+The native destinations are directories because a native trace is
+self-describing — a `manifest.json` beside its records. A projection has no
+manifest and is not a trace, so it is one file. Point both native flags at the
+**same** directory for one trace holding both containers, whose record counts the
+run then checks against each other.
+
+The cheap path is to ask for a standard format and nothing else, which writes no
+trace directory at all:
+
+```bash
+cargo run -p workload-gen --no-default-features -- emit description.yml \
+  --until 300 --seed 42 --mooncake mc.jsonl --libcachesim accesses.csv
+```
+
+Sizes measured at a 30-second span on the shipped example, since the trade is not
+what you would guess: **libCacheSim CSV is the largest of the four** (62.9 MB)
+while carrying the least, because it writes a row per block reference rather than
+per request; and the full 17-field schema in parquet (12.2 MB) is *smaller* than
+4-field Mooncake JSONL (12.5 MB), so the extra fields cost nothing once the
+container stops being text. Native JSONL is 44.1 MB.
+
+The pre-flight sizes only what you asked for and checks each destination against
+the free space on **its own** filesystem, so a refusal names the flag to drop.
+
 ## Is the generator fast enough?
 
 It has to be, or every measurement made with it is a measurement of it. The claim
