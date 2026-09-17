@@ -177,8 +177,8 @@ use std::time::Duration;
 
 use crate::client::DEFAULT_MAX_BODY;
 use crate::frame::{
-    opcode, DrainAck, Header, Hello, HelloAck, ShutdownAck, Stats, SubmitTurn, TurnOutcome,
-    WireError, Writer, HEADER_BYTES,
+    opcode, ClearCacheAck, DrainAck, Header, Hello, HelloAck, ShutdownAck, Stats, SubmitTurn,
+    TurnOutcome, WireError, Writer, HEADER_BYTES,
 };
 
 /// How long the accept loop waits between polls when idle.
@@ -230,6 +230,18 @@ pub trait Service: Send + 'static {
     /// Report what the mailbox-facing code measured — for the generator's report only.
     fn stats(&mut self) -> Stats {
         Stats::default()
+    }
+
+    /// Clear the node's memory tier, before the timed window opens (FR-046).
+    ///
+    /// The default **refuses**, because a service that cannot clear must not answer as though it
+    /// had: a run that believed its cache was cold when it was not would report a plausible hit
+    /// rate for a different experiment. A stub that wants the frame accepted says so explicitly.
+    fn clear_cache(&mut self) -> ClearCacheAck {
+        ClearCacheAck::failed(
+            "this agent does not implement ClearCache, so the run would have measured a cache \
+             whose state it does not know",
+        )
     }
 
     /// Final tally.
@@ -380,6 +392,7 @@ pub fn serve_connection_until<S: Read + Write, H: Service>(
             }
             opcode::DRAIN => service.drain().encode(),
             opcode::STATS => service.stats().encode(),
+            opcode::CLEAR_CACHE => service.clear_cache().encode(),
             opcode::SHUTDOWN => {
                 let ack = service.shutdown().encode();
                 write_frame(stream, header.opcode, header.corr, &ack).map_err(ServerError::Io)?;

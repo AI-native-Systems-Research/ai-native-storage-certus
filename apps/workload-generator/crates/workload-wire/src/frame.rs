@@ -84,10 +84,12 @@ pub const HEADER_BYTES: usize = 12;
 
 /// The protocol version this build speaks.
 ///
-/// Version 2 replaced a per-operation `Submit` with a per-turn `SubmitTurn`; see the
-/// contract. `Hello` compares this exactly and refuses a mismatch, so an old agent cannot
-/// be driven by a new generator and quietly do something reasonable-looking.
-pub const PROTO_VERSION: u32 = 2;
+/// Version 2 replaced a per-operation `Submit` with a per-turn `SubmitTurn`; version 3 added
+/// `ClearCache`, which FR-079 needs because the generator no longer touches a mailbox and so
+/// cannot issue `CLEAR_MEMORY_TIER` itself. See the contract. `Hello` compares this exactly and
+/// refuses a mismatch, so an old agent cannot be driven by a new generator and quietly do
+/// something reasonable-looking.
+pub const PROTO_VERSION: u32 = 3;
 
 /// Bytes in a `build_id` digest.
 pub const BUILD_ID_BYTES: usize = 32;
@@ -108,6 +110,13 @@ pub mod opcode {
     pub const SHUTDOWN: u16 = 4;
     /// Per-operation latency histograms.
     pub const STATS: u16 = 5;
+    /// Clear the node's memory tier, once, before the timed window opens (FR-046).
+    ///
+    /// A frame rather than something the generator does for itself, because under FR-079 the
+    /// generator has no mailbox of its own to issue `CLEAR_MEMORY_TIER` on. It is setup and is
+    /// never part of the measured stream — see [`super::ClearCacheAck`] on why it answers with a
+    /// refusal rather than a zero when a service cannot do it.
+    pub const CLEAR_CACHE: u16 = 6;
 }
 
 /// `SubmitTurn` flag bits.
@@ -836,6 +845,73 @@ impl ShutdownAck {
         Ok(Self {
             ops_submitted: r.u64()?,
             ops_failed: r.u64()?,
+        })
+    }
+}
+
+/// `ClearCache`'s reply.
+///
+/// # Why a failure is a field rather than a silent zero
+///
+/// `--clear-cache` exists so a run starts from a known cache state (FR-046). An agent that
+/// could not clear and answered "0 entries" would produce a run that quietly measured a warm
+/// cache while its report said the cache had been cleared — a plausible number for a different
+/// experiment, which is exactly the failure class the constitution's measurement principles
+/// name. So the reply carries the reason, and the generator refuses to run.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClearCacheAck {
+    /// Entries the clear dropped.
+    pub entries: u64,
+    /// Empty when the clear succeeded; otherwise why it did not.
+    pub error: String,
+}
+
+impl ClearCacheAck {
+    /// A successful clear of `entries` entries.
+    pub fn cleared(entries: u64) -> Self {
+        Self {
+            entries,
+            error: String::new(),
+        }
+    }
+
+    /// A clear that did not happen, and why.
+    pub fn failed(why: impl Into<String>) -> Self {
+        Self {
+            entries: 0,
+            error: why.into(),
+        }
+    }
+
+    /// Whether the clear happened.
+    pub fn is_ok(&self) -> bool {
+        self.error.is_empty()
+    }
+
+    /// Encode the body.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut w = Writer::with_capacity(12 + self.error.len());
+        w.u64(self.entries)
+            .u32(u32::try_from(self.error.len()).unwrap_or(u32::MAX))
+            .bytes(self.error.as_bytes());
+        w.into_bytes()
+    }
+
+    /// Decode the body.
+    ///
+    /// # Errors
+    ///
+    /// If truncated. A reason that is not UTF-8 is replaced rather than refused: losing the
+    /// wording of a failure must not turn it into a protocol error, which would report the
+    /// wrong cause.
+    pub fn decode(body: &[u8]) -> Result<Self, WireError> {
+        let mut r = Reader::new(body);
+        let entries = r.u64()?;
+        let len = r.u32()? as usize;
+        let text = r.bytes(len)?;
+        Ok(Self {
+            entries,
+            error: String::from_utf8_lossy(text).into_owned(),
         })
     }
 }

@@ -73,7 +73,31 @@ Drain       (3): req  { }
 
 Shutdown    (4): req  { }
                  resp { ops_submitted:u64, ops_failed:u64 }
+
+ClearCache  (6): req  { }
+                 resp { entries:u64, error_len:u32, error:[u8] }
 ```
+
+### `ClearCache` exists because the generator has no mailbox (v3)
+
+FR-046 lets a run clear the memory tier **once, before the timed window opens**, and
+the generator used to issue `CLEAR_MEMORY_TIER` itself. Under FR-079 it has no
+mailbox of its own, so the clear has to be asked for.
+
+`error` empty means the clear happened and `entries` is what it dropped. A
+**non-empty `error` is not a zero count**: "0 entries dropped" is a legitimate
+answer for an already-empty cache, so a service that cannot clear MUST say why
+rather than answer as though it had. A run that believed its cache was cold when it
+was not would report a plausible hit rate for a different experiment, which is the
+failure class the constitution's measurement principles name. The generator
+therefore refuses to run on a non-empty `error`, and `Service::clear_cache`'s
+default is that refusal rather than a success.
+
+It is setup and MUST NOT be issued inside the timed window or mid-run: clearing then
+would be the generator evicting on the eviction policy's behalf (FR-043). The client
+refuses it while any turn is outstanding, for the same reason the other synchronous
+calls are refused — and here it also means a clear cannot race a store the run has
+already issued.
 
 ### `SubmitTurn` carries a key path, not an operation (v2)
 
@@ -235,7 +259,10 @@ window (spec FR-050, FR-067).
   entire A/B series in this repository, and it failed nondeterministically
   rather than visibly, so teardown MUST be checked rather than assumed.
 - **Only launching goes over ssh.** Load is driven over this transport. An
-  ssh-batch harness cannot sustain continual load (spec FR-054).
+  ssh-batch harness cannot sustain continual load (spec FR-054). The **local**
+  node is launched without ssh at all (FR-079): ssh to `localhost` is
+  unnecessary, and on a host whose own key is not trusted it is refused, which
+  would make the simplest possible run need setup.
 
 ## Failure handling
 
@@ -263,3 +290,6 @@ The wire format MUST be tested without a live agent and without an accelerator:
 7. Two histograms merged from a `Stats` reply give the same quantiles as one
    histogram of the same samples, and a merge of per-node **percentiles** does
    not — asserted so the wrong method cannot be reintroduced as an optimisation.
+8. A `ClearCache` that did not happen does not encode like one that dropped no
+   entries, and `Service::clear_cache`'s default is the refusal — so a service
+   with no mailbox cannot answer as though it had cleared one.

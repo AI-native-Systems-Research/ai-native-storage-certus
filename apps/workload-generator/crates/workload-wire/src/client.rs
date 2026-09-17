@@ -151,8 +151,8 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 use crate::frame::{
-    opcode, DrainAck, Header, Hello, HelloAck, ShutdownAck, Stats, SubmitTurn, TurnOutcome,
-    WireError, Writer, HEADER_BYTES,
+    opcode, ClearCacheAck, DrainAck, Header, Hello, HelloAck, ShutdownAck, Stats, SubmitTurn,
+    TurnOutcome, WireError, Writer, HEADER_BYTES,
 };
 use crate::handshake::{self, Refused};
 
@@ -493,6 +493,23 @@ impl<S: Read + Write> Client<S> {
         Ok(Stats::decode(&body)?)
     }
 
+    /// Ask the node to clear its memory tier, before the timed window opens (FR-046).
+    ///
+    /// The generator has no mailbox of its own under FR-079, so this is the only way a run can
+    /// start from a known cache state. It is **setup**: never issued inside the timed window, and
+    /// never mid-run, because clearing then would be the generator evicting on the policy's
+    /// behalf (FR-043).
+    ///
+    /// # Errors
+    ///
+    /// If anything is still pipelined, or the socket fails. A node that *answers* but could not
+    /// clear reports that in [`ClearCacheAck::error`], which the caller must not ignore.
+    pub fn clear_cache(&mut self) -> Result<ClearCacheAck, ClientError> {
+        self.require_quiet("clear_cache")?;
+        let body = self.request(opcode::CLEAR_CACHE, 0, &[])?;
+        Ok(ClearCacheAck::decode(&body)?)
+    }
+
     /// Stop the agent.
     ///
     /// # Errors
@@ -517,6 +534,7 @@ impl<S: Read + Write> Client<S> {
                 got: match what {
                     "drain" => opcode::DRAIN,
                     "stats" => opcode::STATS,
+                    "clear_cache" => opcode::CLEAR_CACHE,
                     _ => opcode::SHUTDOWN,
                 },
             })
