@@ -2388,7 +2388,7 @@ changed.
   parses and validates, so the shipped example cannot drift from the parser
 - [x] T084 Run every scenario in `quickstart.md` end to end and correct any
   drift between the guide and the implementation
-- [ ] T085 [P] Record a Criterion baseline for the per-key plan-generation
+- [x] T085 [P] Record a Criterion baseline for the per-key plan-generation
   benchmark and note it in `README.md`, so later regressions are detectable
 - [ ] T086 Final gate: `cargo fmt --check`, `cargo clippy -- -D warnings`,
   `cargo doc --no-deps`, `cargo test --all -- --test-threads 1`, plus the two
@@ -2421,6 +2421,38 @@ changed.
   first three windows see exactly zero churn and modulation is still 0.44 after
   eight generations, against 0.04 for residual-life seeding. T024 should assert
   that structure rather than the digits, so it cannot go flaky.
+
+**T085 done, and the baseline is a range rather than a table of digits, because
+one run of this benchmark is not a measurement.** Recorded in `benches/plan.rs`
+and summarised in `README.md`. Per key reference, three consecutive runs:
+`short_sessions` 11.4–12.3 ns, `long_sessions` 4.2–5.7 ns, `many_shared`
+5.25–5.45 ns, `projection_10k_sessions` 97.5–112 µs.
+
+**The headline claim survives the spread easily**: against Certus's measured
+~5.6 µs/key, plan generation is 0.08% to 0.22% of the budget, so one thread has
+450x to 1300x of headroom. Principle I's "never the bottleneck" is quantitative
+now, and a plan queue that reaches zero means something is wrong rather than that
+generation is slow. The benchmark's own prediction also holds in every run: long
+sessions are 2.0–2.9x *cheaper* per key than short ones.
+
+**The finding worth keeping is that Criterion's change verdict is unusable
+here.** Three identical runs, no code change between them: `long_sessions`
+reported +21% and then +12%, `short_sessions` −0.6% then +7.0%, every one at
+p = 0.00. The first run of a session is the worst — 13% and 47% outlier rates, and
+a `long_sessions` confidence interval eleven times wider than the next run's. So
+the recorded procedure is: run twice, discard the first, treat under ~35% on
+`long_sessions` or ~8% on the others as noise, and for a real before/after use
+repetition with a stated test. That is the same n ≥ 8 rule the README already
+states for hit rates, arrived at independently on a benchmark with no server, no
+cache and no network in it — which is worth knowing, because it means the rule is
+about this hardware and not about mint races.
+
+**The 2026-09-15 baseline was stale rather than wrong** and is superseded:
+`short_sessions` 19.0 → ~11.5 ns and `many_shared` 7.9 → ~5.3 ns, about 1.5x
+faster, from US4's selection work rather than from anything aimed at this
+benchmark. A baseline recorded once and never re-run had drifted into being
+misleading in two weeks, which is the argument for T085 asking for it in the
+README where someone will see it.
 
 **T084 done, and it found a real defect rather than only guide drift.** Every
 command in `quickstart.md` was executed on 2026-09-17 except Scenario 5 (needs a

@@ -77,6 +77,41 @@ and the whole of User Story 2 run on it, on any machine.
 Add `--features parquet` for the parquet container; it pulls the arrow family,
 which is why it is not on by default.
 
+## Is the generator fast enough?
+
+It has to be, or every measurement made with it is a measurement of it. The claim
+is that plan generation is never the bottleneck, and it is a measurement rather
+than an argument:
+
+```bash
+cargo bench -p workload-model --bench plan
+```
+
+Baseline on this box, 2026-09-17, one thread, per **key reference** — the unit
+Certus's own cost is quoted in:
+
+| Case | Per key | Against a ~5.6 µs/key server |
+| --- | --- | --- |
+| `short_sessions` (5 turns) | 11.4–12.3 ns | 0.22% |
+| `long_sessions` (40 turns) | 4.2–5.7 ns | 0.08% |
+| `many_shared` (2000 instances, draw 16) | 5.25–5.45 ns | 0.10% |
+
+So one generator thread has 450x to 1300x of headroom, and a plan queue that
+reaches zero means something is wrong rather than that generation is slow. Long
+sessions are *cheaper* per key than short ones, by 2–2.9x: per-turn overhead
+amortises over a longer prefix. If that inverted it would mean something in the
+turn path had become superlinear, which is what the benchmark is for.
+
+`projection_10k_sessions` runs in 97.5–112 µs, so `validate --until n` stays an
+interactive query.
+
+**Those are ranges because a single run of this benchmark is not a measurement.**
+Across three identical runs with no code change, `long_sessions` moved +21% and
+then +12%, each at p = 0.00, and the first run of a session had a 47% outlier
+rate. Run it twice and discard the first; treat under ~35% on `long_sessions`, or
+~8% on the others, as noise. For a real before/after use repetition and a stated
+test, exactly as for hit rates below. `benches/plan.rs` carries the full record.
+
 ## Where to go next
 
 - [`quickstart.md`](specs/001-synthetic-workload-generator/quickstart.md) — six
