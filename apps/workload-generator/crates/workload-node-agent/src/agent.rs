@@ -8,10 +8,11 @@
 //! check the path, load what is resident, store what is absent. That is a mechanical
 //! consequence of what the cache reports, not a choice about the workload.
 //!
-//! And it applies that rule by calling [`workload_gen::exec::TurnExecutor`], the same code
-//! the generator's local path runs. There is deliberately no second implementation here: two
-//! would be free to drift, and a fix applied on one side and forgotten on the other would
-//! surface as a local/remote difference that looked like a property of the network.
+//! And it applies that rule by calling [`crate::exec::TurnExecutor`], of which there is exactly
+//! one. Two would be free to drift, and a fix applied on one side and forgotten on the other
+//! would surface as a local/remote difference that looked like a property of the network. Under
+//! FR-079 that is now structural rather than a discipline: the generator has no mailbox path at
+//! all, so there is nowhere for a second implementation to live.
 //!
 //! # One connection, one channel, one executor
 //!
@@ -42,12 +43,13 @@ use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::exec::TurnExecutor;
+use crate::payload::PayloadBuffer;
 use hdrhistogram::serialization::{Serializer, V2Serializer};
 use shm_queue::Client;
-use workload_gen::exec::TurnExecutor;
-use workload_gen::payload::PayloadBuffer;
 use workload_wire::frame::{
-    DrainAck, Hello, HelloAck, OpHistogram, ShutdownAck, Stats, SubmitTurn, TurnOutcome,
+    ClearCacheAck, DrainAck, Hello, HelloAck, OpHistogram, ShutdownAck, Stats, SubmitTurn,
+    TurnOutcome,
 };
 use workload_wire::handshake;
 use workload_wire::server::{Service, ServiceFactory};
@@ -235,6 +237,23 @@ impl Service for Agent {
         Stats {
             counters: *self.exec.counters(),
             ops: serialize_histograms(&mut self.exec),
+        }
+    }
+
+    fn clear_cache(&mut self) -> ClearCacheAck {
+        // FR-046's one permitted use of `CLEAR_MEMORY_TIER`, which is otherwise forbidden — see
+        // `crate::opstream`. The generator asks for it because under FR-079 it has no mailbox of
+        // its own; the frame is refused by the client while any turn is outstanding, so this
+        // cannot race a store the run has already issued.
+        //
+        // A failure is reported rather than swallowed: answering "0 entries" would let the run
+        // report a cold cache it never had.
+        match crate::exec::clear_memory_tier(&self.client, self.channel) {
+            Ok(entries) => ClearCacheAck::cleared(entries),
+            Err(e) => {
+                eprintln!("channel {}: {e}", self.channel);
+                ClearCacheAck::failed(e)
+            }
         }
     }
 

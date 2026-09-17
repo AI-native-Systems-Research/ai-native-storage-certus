@@ -27,18 +27,38 @@
 //! So startup always replaces. A leftover that answers is asked to stop, which is orderly and
 //! lets it release its channels; one that does not answer is killed.
 //!
-//! # Only launching goes over ssh
+//! # Only launching goes over ssh, and the local node not even that
 //!
 //! FR-054: load is driven over the fast transport, never by repeated remote command
 //! invocation, which cannot sustain it. Ssh appears here and nowhere else, which is also why
 //! [`Launcher`] is a trait — the lifecycle *policy* is then testable against a local agent,
 //! and only the ssh mechanics are not.
+//!
+//! The **local** node is launched by [`LocalLauncher`], which spawns a child process and never
+//! shells out to ssh. FR-079 makes every node — including this one — go through an agent, and
+//! `ssh localhost` would have made `workload-gen run description.yml` need a trusted key for the
+//! host's own account. It also lets a kill be by **PID**, which is stricter than any pattern:
+//! `pkill -f` on this host would match the generator's own command line if the pattern ever
+//! loosened.
+//!
+//! # A lane is a connection, on every node
+//!
+//! The mailbox is depth-1 per channel, so a lane needs its own channel, and the agent claims one
+//! per connection. `--lanes n` therefore means *n connections per node*, and a session is routed
+//! to one of them for its whole life so that its causally dependent turns stay ordered. Before
+//! FR-079 the local path got its concurrency from claiming n channels directly; a single
+//! connection per node would have silently collapsed a four-lane local run to one lane and
+//! reported the throughput as though nothing had changed.
 
+use std::collections::HashMap;
 use std::net::TcpStream;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use workload_wire::client::{Client, ClientError, HandshakeError, DEFAULT_DEPTH};
-use workload_wire::frame::{HelloAck, ShutdownAck};
+use workload_wire::frame::{ClearCacheAck, HelloAck, ShutdownAck};
 
 /// How long to wait for a freshly launched agent to accept a connection.
 pub const START_TIMEOUT: Duration = Duration::from_secs(20);
@@ -212,6 +232,163 @@ impl Launcher for NoLaunch {
     }
 }
 
+/// Launches an agent on **this** host as a child process, with no ssh at all.
+///
+/// FR-079 routes every node through an agent, including the local one, and `run description.yml`
+/// must still need no setup — so `ssh localhost` is not an option: it wants the host's own key
+/// trusted for its own account, which is a configuration step for the simplest possible run.
+///
+/// A child process rather than a thread because the agent is a separate binary, and because that
+/// is what makes the local and remote lifecycles the same mechanism rather than two.
+///
+/// # Killing by PID, not by pattern
+///
+/// [`SshLauncher::kill`] matches `--port N` because it has nothing better to go on. Here we
+/// started the process, so a kill goes to the PID we have. That matters more locally than
+/// remotely: a pattern matched against this host's process list can match the **generator's own**
+/// command line, and `pkill -f` self-terminating is a failure this repository has already had.
+/// The pattern is the fallback for a leftover from a *previous* process, whose PID is gone.
+#[derive(Debug)]
+pub struct LocalLauncher {
+    /// Children this process started, by port.
+    started: Mutex<HashMap<u16, Child>>,
+    /// Where an agent's own output goes, so it does not interleave with the report.
+    log_dir: PathBuf,
+}
+
+impl Default for LocalLauncher {
+    fn default() -> Self {
+        Self {
+            started: Mutex::new(HashMap::new()),
+            log_dir: std::env::temp_dir(),
+        }
+    }
+}
+
+impl LocalLauncher {
+    /// A launcher writing agent output under `log_dir`.
+    pub fn with_log_dir(log_dir: PathBuf) -> Self {
+        Self {
+            started: Mutex::new(HashMap::new()),
+            log_dir,
+        }
+    }
+
+    /// Where this launcher would put the agent's output for `port`.
+    pub fn log_path(&self, port: u16) -> PathBuf {
+        self.log_dir.join(format!("workload-node-agent.{port}.log"))
+    }
+}
+
+impl Launcher for LocalLauncher {
+    fn launch(&self, spec: &AgentSpec) -> Result<(), String> {
+        let path = self.log_path(spec.port);
+        // Truncated per launch: the log describes *this* agent, and a growing file would leave
+        // the last run's mailbox complaint sitting above this run's startup.
+        let log = std::fs::File::create(&path)
+            .map_err(|e| format!("cannot open {} for the agent's output: {e}", path.display()))?;
+        let errors = log
+            .try_clone()
+            .map_err(|e| format!("cannot share {}: {e}", path.display()))?;
+        let args = spec.command();
+        let child = Command::new(&args[0])
+            .args(&args[1..])
+            .stdin(Stdio::null())
+            .stdout(log)
+            .stderr(errors)
+            .spawn()
+            .map_err(|e| {
+                format!(
+                    "cannot start {}: {e}. Build it with `cargo build -p workload-node-agent`, \
+                     or name it with --agent-binary",
+                    args[0]
+                )
+            })?;
+        self.started
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(spec.port, child);
+        eprintln!("local agent on port {}: {}", spec.port, path.display());
+        Ok(())
+    }
+
+    fn kill(&self, spec: &AgentSpec) -> Result<(), String> {
+        let mut started = self.started.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(mut child) = started.remove(&spec.port) {
+            // Already gone is the ordinary case after a clean `Shutdown`, and killing a reaped
+            // PID would be at best pointless and at worst somebody else's process.
+            match child.try_wait() {
+                Ok(Some(_)) => return Ok(()),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Ok(());
+                }
+            }
+        }
+        drop(started);
+        // A leftover from a *previous* generator process: its PID is gone, so the port-scoped
+        // pattern is all there is. `|| true` because nothing to kill is the expected case.
+        let pattern = format!("workload-node-agent .*--port {}", spec.port);
+        let out = Command::new("pkill")
+            .arg("-f")
+            .arg(&pattern)
+            .output()
+            .map_err(|e| format!("pkill: {e}"))?;
+        // Exit 1 is "no process matched", which is success here.
+        if !out.status.success() && out.status.code() != Some(1) {
+            return Err(format!(
+                "pkill -f {pattern} exited {}: {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for LocalLauncher {
+    fn drop(&mut self) {
+        // A backstop, not the mechanism: `Agents::stop` asks each agent to exit and verifies its
+        // port went quiet. This reaps a child that ignored that, so a generator run cannot leave a
+        // process holding this node's mailbox channels behind it.
+        let mut started = self.started.lock().unwrap_or_else(|e| e.into_inner());
+        for (port, child) in started.iter_mut() {
+            match child.try_wait() {
+                Ok(Some(_)) => {}
+                _ => {
+                    eprintln!("killing the local agent on port {port}; it did not exit on its own");
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
+        started.clear();
+    }
+}
+
+/// Resolve the agent binary for a **local** launch.
+///
+/// A bare name is looked for next to the generator's own executable first, because that is where
+/// a cargo build puts it and `run description.yml` is meant to need no setup. A name containing a
+/// separator is taken as given. Remote specs are never resolved here: the path belongs to the
+/// remote filesystem, and guessing from this one would name a file that node does not have.
+pub fn local_agent_binary(name: &str) -> String {
+    if name.contains('/') {
+        return name.to_string();
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let beside = dir.join(name);
+            if beside.is_file() {
+                return beside.display().to_string();
+            }
+        }
+    }
+    // Left bare, so `PATH` still applies and the failure names what it could not start.
+    name.to_string()
+}
+
 /// Launches over ssh, which is the only thing ssh is used for (FR-054).
 #[derive(Debug, Clone, Default)]
 pub struct SshLauncher {
@@ -278,23 +455,48 @@ fn shell_join(args: &[String]) -> String {
         .join(" ")
 }
 
-/// One started agent, and the connection the run drives it over.
+/// One started agent, and the connections the run drives it over — one per lane.
 #[derive(Debug)]
 pub struct Agent {
     /// The node, named in every message about it.
     pub node: String,
     /// What the handshake reported: channels and block size.
     pub ack: HelloAck,
-    client: Client<TcpStream>,
+    /// One connection per lane. The mailbox is depth-1 per channel and the agent claims a channel
+    /// per connection, so this is where a node's concurrency comes from.
+    lanes: Vec<Client<TcpStream>>,
     spec: AgentSpec,
 }
 
 impl Agent {
-    /// The connection, for submitting turns.
-    pub fn client(&mut self) -> &mut Client<TcpStream> {
-        &mut self.client
+    /// Lanes on this node.
+    pub fn lane_count(&self) -> usize {
+        self.lanes.len()
     }
 
+    /// What this agent was started from.
+    pub fn spec(&self) -> &AgentSpec {
+        &self.spec
+    }
+}
+
+/// One lane on one node: the connection a consumer thread drives, and the node to blame.
+///
+/// A borrow rather than a handle, so the compiler establishes that two lanes never share a
+/// connection — a promise a comment would otherwise have to make, and the one whose breach
+/// would reorder a session's causally dependent turns.
+#[derive(Debug)]
+pub struct AgentLane<'a> {
+    /// The node this lane talks to, named in every failure.
+    pub node: String,
+    /// Which node, for aggregating per-node figures.
+    pub node_index: usize,
+    /// Which lane on that node, so a per-lane figure can be attributed.
+    pub lane_index: usize,
+    client: &'a mut Client<TcpStream>,
+}
+
+impl AgentLane<'_> {
     /// Submit a turn, treating any transport failure as the loss of this node (FR-064).
     ///
     /// # Errors
@@ -321,12 +523,12 @@ impl Agent {
             .map_err(|e| NodeLost::from_client(&self.node, "draining its outstanding turns", e))
     }
 
-    /// Collect this node's counters and histograms.
+    /// Collect this lane's counters and histograms.
     ///
     /// # Errors
     ///
     /// [`NodeLost`], naming this node. Statistics are gathered after the timed window, so losing
-    /// a node here still invalidates the run: the figures would be missing one node's share and
+    /// a node here still invalidates the run: the figures would be missing one lane's share and
     /// the totals would silently describe a smaller cluster.
     pub fn stats(&mut self) -> Result<workload_wire::frame::Stats, NodeLost> {
         self.client
@@ -334,9 +536,17 @@ impl Agent {
             .map_err(|e| NodeLost::from_client(&self.node, "collecting its statistics", e))
     }
 
-    /// What this agent was started from.
-    pub fn spec(&self) -> &AgentSpec {
-        &self.spec
+    /// Ask this node to clear its memory tier, before the timed window opens (FR-046).
+    ///
+    /// # Errors
+    ///
+    /// [`NodeLost`] if the node cannot be reached. A node that answers and could *not* clear
+    /// reports that in [`ClearCacheAck::error`], which the caller must refuse to run past — see
+    /// the frame's own documentation on why that is not a zero count.
+    pub fn clear_cache(&mut self) -> Result<ClearCacheAck, NodeLost> {
+        self.client
+            .clear_cache()
+            .map_err(|e| NodeLost::from_client(&self.node, "clearing its memory tier", e))
     }
 }
 
@@ -404,6 +614,13 @@ impl Agents {
         assert!(depth > 0, "a pipelining depth of 0 could never send");
         let mut agents = Vec::with_capacity(specs.len());
         for spec in specs {
+            if spec.lanes == 0 {
+                return Err(format!(
+                    "node {}: --lanes must be at least 1; a node with no lane would be started \
+                     and driven with nothing",
+                    spec.node
+                ));
+            }
             // Always replace, even a current build: a leftover holds the previous run's
             // channels, device memory and counters, and reusing it would report another run's
             // numbers as this one's (FR-052).
@@ -415,14 +632,41 @@ impl Agents {
                 }
             }
             launcher.launch(spec)?;
-            let mut client = wait_for_port(spec, depth)?;
-            let ack = client
-                .handshake(&spec.node, &spec.shm_path, spec.lanes, spec.block_bytes)
-                .map_err(|e| describe(spec, e))?;
+            // One connection per lane: the agent claims a mailbox channel per connection, and the
+            // mailbox is depth-1 per channel, so this is the whole of a node's concurrency. The
+            // first connection is also what proves the agent came up at all.
+            let mut lanes = Vec::with_capacity(spec.lanes);
+            let mut ack = None;
+            for lane in 0..spec.lanes {
+                let mut client = if lane == 0 {
+                    wait_for_port(spec, depth)?
+                } else {
+                    // The port is already accepting, so a lane that cannot connect is a refusal —
+                    // typically the agent having fewer channels than the run asked for, which the
+                    // handshake's capacity check should have caught first.
+                    Client::<TcpStream>::connect(spec.address(), depth, Some(POLL * 5)).map_err(
+                        |e| {
+                            format!(
+                                "node {}: lane {lane} of {} could not connect to port {}: {e}. \
+                                 The agent serves one connection per mailbox channel it claimed",
+                                spec.node, spec.lanes, spec.port
+                            )
+                        },
+                    )?
+                };
+                // Every connection handshakes: `Hello` is mandatory per connection, and a
+                // provenance check on only the first would let a run be driven over connections
+                // it never verified.
+                let this = client
+                    .handshake(&spec.node, &spec.shm_path, spec.lanes, spec.block_bytes)
+                    .map_err(|e| describe(spec, e))?;
+                ack = Some(this);
+                lanes.push(client);
+            }
             agents.push(Agent {
                 node: spec.node.clone(),
-                ack,
-                client,
+                ack: ack.expect("at least one lane, checked above"),
+                lanes,
                 spec: spec.clone(),
             });
         }
@@ -446,9 +690,42 @@ impl Agents {
         &mut self.agents
     }
 
+    /// Every lane, node-major: all of node 0's lanes, then all of node 1's.
+    ///
+    /// Node-major so the flat index is `node * lanes + lane`, which is what the driver's routing
+    /// computes. A lane borrows its own connection, so the compiler — rather than a comment —
+    /// establishes that no two lanes share one.
+    pub fn lanes(&mut self) -> Vec<AgentLane<'_>> {
+        let mut out = Vec::with_capacity(self.total_lanes());
+        for (node_index, agent) in self.agents.iter_mut().enumerate() {
+            // Destructured so the name and the connections are disjoint borrows of one `Agent`.
+            let Agent { node, lanes, .. } = agent;
+            let name = node.clone();
+            for (lane_index, client) in lanes.iter_mut().enumerate() {
+                out.push(AgentLane {
+                    node: name.clone(),
+                    node_index,
+                    lane_index,
+                    client,
+                });
+            }
+        }
+        out
+    }
+
     /// How many nodes are in the run.
     pub fn len(&self) -> usize {
         self.agents.len()
+    }
+
+    /// Lanes across every node, which is how many consumers the driver runs.
+    pub fn total_lanes(&self) -> usize {
+        self.agents.iter().map(|a| a.lanes.len()).sum()
+    }
+
+    /// Lanes per node, which is uniform because every spec is built from one `--lanes`.
+    pub fn lanes_per_node(&self) -> usize {
+        self.agents.first().map(|a| a.lanes.len()).unwrap_or(0)
     }
 
     /// Whether no agent was started.
@@ -476,18 +753,39 @@ impl Agents {
 
     fn stop_inner(&mut self) -> Result<Vec<Teardown>, String> {
         let mut out = Vec::with_capacity(self.agents.len());
+        let mut first_error: Option<String> = None;
         for agent in &mut self.agents {
-            let ack = agent
-                .client
-                .shutdown()
-                .map_err(|e| format!("node {}: asking the agent to stop: {e}", agent.node))?;
-            out.push(Teardown {
-                node: agent.node.clone(),
-                ack,
-                port_released: wait_for_quiet(&agent.spec),
-            });
+            // `Shutdown` stops the whole agent, so it goes down **one** connection and the rest
+            // are simply closed. Sending it on every lane would ask an agent that has already
+            // gone, and the second refusal would be reported as a teardown failure that never
+            // happened. The agent's own `Shutdown` tally is process-wide, so nothing is lost.
+            let Some(first) = agent.lanes.first_mut() else {
+                continue;
+            };
+            let asked = first.shutdown();
+            // Closed here rather than at the end of the loop: the agent exits on `Shutdown`, and
+            // leaving our other ends open only delays it noticing.
+            agent.lanes.clear();
+            match asked {
+                Ok(ack) => out.push(Teardown {
+                    node: agent.node.clone(),
+                    ack,
+                    port_released: wait_for_quiet(&agent.spec),
+                }),
+                // Recorded and carried on with, never returned from here: a node that cannot be
+                // asked to stop must not stop the *other* nodes being asked, or one lost node
+                // would leave the rest of the cluster holding its mailbox channels — which is the
+                // teardown failure FR-053 exists for, arriving by a different route.
+                Err(e) => {
+                    let text = format!("node {}: asking the agent to stop: {e}", agent.node);
+                    first_error = first_error.or(Some(text));
+                }
+            }
         }
-        Ok(out)
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(out),
+        }
     }
 }
 

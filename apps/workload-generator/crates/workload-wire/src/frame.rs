@@ -119,6 +119,57 @@ pub mod opcode {
     pub const CLEAR_CACHE: u16 = 6;
 }
 
+/// The `op_kind` values a `Stats` reply's histograms are keyed by.
+///
+/// # These are the **mailbox's** opcode numbers, and that is deliberate
+///
+/// A histogram is per operation *as Certus saw it*, and the agent is what timed it, so the key is
+/// the opcode the agent sent to the mailbox rather than a re-numbering of the plan's abstract
+/// kinds. The names here are the only thing the generator needs — it renders them and never acts
+/// on them — and they live in the wire because the field does: one end fills it and the other
+/// prints it, so a table in either alone would be a private opinion about a shared field.
+///
+/// The numbers are read from `lib/shmq-dispatcher/src/wire.rs` and are pinned to it by a test in
+/// `workload-node-agent`, which is the only crate that can see both. That test is the reason this
+/// duplication is safe rather than a second source of truth.
+pub mod op_kind {
+    /// Ask which of a set of keys is resident.
+    pub const CHECK: u8 = 1;
+    /// Update eviction ordering for keys already present.
+    pub const TOUCH: u8 = 2;
+    /// Reserve space for keys about to be stored.
+    pub const RESERVE: u8 = 3;
+    /// Copy payload from the client's device buffer into the cache.
+    pub const COPY_TO_STORE: u8 = 4;
+    /// Make a reserved-and-copied key visible.
+    pub const COMMIT_STORE: u8 = 5;
+    /// Abandon a reservation.
+    pub const ABORT_STORE: u8 = 6;
+    /// Load resident keys into the client's device buffer.
+    pub const LOOKUP: u8 = 9;
+    /// Collect cache events.
+    pub const TAKE_EVENTS: u8 = 10;
+
+    /// The name for an `op_kind`, for a report a human reads.
+    ///
+    /// An unknown value is named rather than refused: a `Stats` reply carrying an opcode this
+    /// build does not know is a reporting curiosity, and losing the whole run's latency figures
+    /// over it would be the wrong trade.
+    pub fn name(kind: u32) -> &'static str {
+        match u8::try_from(kind) {
+            Ok(CHECK) => "CHECK",
+            Ok(TOUCH) => "TOUCH",
+            Ok(RESERVE) => "RESERVE",
+            Ok(COPY_TO_STORE) => "COPY_TO_STORE",
+            Ok(COMMIT_STORE) => "COMMIT_STORE",
+            Ok(ABORT_STORE) => "ABORT_STORE",
+            Ok(LOOKUP) => "LOOKUP",
+            Ok(TAKE_EVENTS) => "TAKE_EVENTS",
+            _ => "other",
+        }
+    }
+}
+
 /// `SubmitTurn` flag bits.
 pub mod submit_flags {
     /// Poll for cache events after the turn. The plan decides how often, so this stays

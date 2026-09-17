@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use hdrhistogram::serialization::{Serializer, V2Serializer};
 use workload_gen::agents::{AgentSpec, Agents, Launcher};
-use workload_gen::live::RunOptions;
-use workload_gen::remote;
+use workload_gen::drive::{self, DriveError};
+use workload_gen::live::{Pacing, RunOptions};
 use workload_model::description::WorkloadDescription;
 use workload_wire::frame::{
     Counters, Hello, HelloAck, OpHistogram, ShutdownAck, Stats, SubmitTurn, TurnOutcome,
@@ -177,10 +177,13 @@ fn options() -> RunOptions {
         seed: 21,
         until: Some(120.0),
         batch_keys: 64,
-        gpu_device: None,
-        stamp_keys: false,
-        verify_payload: false,
         clear_cache: false,
+        // Work-conserving, so these fixtures assert what a turn stream is rather than when it is
+        // submitted. Pacing has its own tests, and holding every turn for its virtual time would
+        // make a 120-virtual-second fixture take two wallclock minutes.
+        pacing: Pacing::None,
+        rate: 1.0,
+        lateness_tolerance_us: 0,
     }
 }
 
@@ -195,7 +198,7 @@ fn every_turn_goes_to_the_node_its_session_is_placed_on() {
 
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
     let stop = Arc::new(AtomicBool::new(false));
-    let out = remote::run(&mut agents, &d, &options(), Arc::clone(&stop)).expect("drive");
+    let out = drive::run(&mut agents, &d, &options(), Arc::clone(&stop)).expect("drive");
 
     // Every node saw traffic, and no session appeared on two nodes at once — with no migration
     // interval a session stays where it was placed, so a session on two nodes means routing is
@@ -230,7 +233,7 @@ fn counters_sum_and_histograms_merge_across_nodes() {
     let specs: Vec<AgentSpec> = (0..3).map(|_| spec(free_port())).collect();
     let mut agents = Agents::start_default(&launcher, &specs).expect("start");
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
-    let out = remote::run(
+    let out = drive::run(
         &mut agents,
         &d,
         &options(),
@@ -279,13 +282,16 @@ fn losing_a_node_mid_run_aborts_and_names_it() {
         until: Some(100_000.0),
         ..options()
     };
-    let result = remote::run(&mut agents, &d, &long, Arc::new(AtomicBool::new(false)));
+    let result = drive::run(&mut agents, &d, &long, Arc::new(AtomicBool::new(false)));
     match result {
-        Err(lost) => {
+        // A node taken down mid-run is `Lost`, not `Setup`: the distinction is what tells a sweep
+        // driver to retry the run rather than to go and fix the invocation.
+        Err(DriveError::Lost(lost)) => {
             assert_eq!(lost.node, "127.0.0.1");
             let text = lost.to_string();
             assert!(text.contains("FR-064"), "{text}");
         }
+        Err(DriveError::Setup(e)) => panic!("a lost node was reported as a setup failure: {e}"),
         Ok(_) => panic!("the run completed although a node was taken down"),
     }
 }

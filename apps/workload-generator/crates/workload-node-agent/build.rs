@@ -1,10 +1,14 @@
-//! Emit CUDA runtime link directives, but only for the `live` feature.
+//! Emit CUDA runtime link directives.
 //!
-//! The emit path must build and run on a machine with no accelerator — that is what
-//! makes User Story 2 and quickstart Scenarios 1-3 runnable anywhere — so the link
-//! directive is gated on `CARGO_FEATURE_LIVE`. A `--no-default-features` build therefore
-//! never asks the linker for `cudart`, and a machine without CUDA can still produce
-//! traces.
+//! This crate is the only one in the workload generator that touches a GPU: FR-079 left the
+//! agent as the only thing that talks to a Certus mailbox, and the payload buffer lives beside
+//! that. It is a workspace member but not a **default** member for exactly this reason, so a
+//! plain `cargo build` never asks the linker for `cudart`.
+//!
+//! It used to live in `workload-gen`, gated behind that crate's `live` feature so the emit path
+//! would still build on a machine with no accelerator. The gate is unnecessary here: everything
+//! in this crate needs the mailbox and the device, so there is no configuration of it that does
+//! not.
 //!
 //! The search paths mirror `components/gpu-services/build.rs` and
 //! `apps/remote-lookup-bench/build.rs` so a node with CUDA in any of the usual places
@@ -38,7 +42,5 @@ fn link_cuda() {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    if env::var_os("CARGO_FEATURE_LIVE").is_some() {
-        link_cuda();
-    }
+    link_cuda();
 }

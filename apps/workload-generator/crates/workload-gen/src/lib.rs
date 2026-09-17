@@ -9,15 +9,7 @@
 pub mod agents;
 pub mod cli;
 #[cfg(feature = "live")]
-pub mod cuda;
-#[cfg(feature = "live")]
-pub mod exec;
+pub mod drive;
 #[cfg(feature = "live")]
 pub mod live;
-#[cfg(feature = "live")]
-pub mod opstream;
-#[cfg(feature = "live")]
-pub mod payload;
-#[cfg(feature = "live")]
-pub mod remote;
 pub mod report;

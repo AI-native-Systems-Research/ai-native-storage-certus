@@ -6,25 +6,24 @@
 //!
 //! It is not a second generator. Which keys, which session and which virtual time all come
 //! from the generator's single simulation core, and the rule it applies is
-//! [`workload_gen::exec::TurnExecutor`] — the same code the local path runs, so the two cannot
-//! drift (see `agent`).
+//! [`workload_node_agent::exec::TurnExecutor`] — of which there is exactly one, in this crate,
+//! since FR-079 left the agent as the only thing that talks to a mailbox.
+//!
+//! Everything is in [`workload_node_agent`]; this file is the command line and nothing else.
 //!
 //! Exits non-zero if the local mailbox is absent, so a missing server is a startup failure
 //! rather than a run that quietly measures nothing.
 #![warn(missing_docs)]
 
-mod agent;
-
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use clap::Parser;
-use workload_gen::live;
-use workload_gen::payload::PayloadBuffer;
+use workload_node_agent::agent::AgentFactory;
+use workload_node_agent::mailbox;
+use workload_node_agent::payload::PayloadBuffer;
 use workload_wire::handshake;
 use workload_wire::server::Server;
-
-use crate::agent::AgentFactory;
 
 /// Exit codes. Non-zero for anything that means the node cannot serve a run.
 mod exit {
@@ -143,7 +142,7 @@ fn run(cli: &Cli) -> Result<(), String> {
     // The mailbox, and the channels this agent will hand out one per connection. Absent
     // mailbox is a startup failure: a daemon that came up without one would accept
     // connections and measure nothing.
-    let (client, channels) = live::attach(&cli.shm_path, cli.lanes)?;
+    let (client, channels) = mailbox::attach(&cli.shm_path, cli.lanes)?;
     eprintln!(
         "attached {} with {} channels; serving {} lanes",
         cli.shm_path,

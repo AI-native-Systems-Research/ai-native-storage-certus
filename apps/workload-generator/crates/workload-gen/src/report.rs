@@ -352,13 +352,22 @@ mod tests {
 pub struct LiveReport {
     /// Always `"live"`.
     pub run_kind: &'static str,
-    /// **Whether this run's numbers may be used at all** (FR-062).
+    /// **Whether this run's numbers may be used at all** (FR-062, FR-080).
     ///
     /// First field on purpose: a reader scanning a directory of reports should meet the
     /// validity before the throughput, not after it.
     pub valid: bool,
     /// Why, when it is not.
     pub invalid_reason: Option<String>,
+    /// Which question this run was asking: `paced` or `work-conserving` (FR-080).
+    ///
+    /// Named on the report rather than left to be remembered, because the two are **not
+    /// comparable**: a paced throughput is capped by the rate that was asked for and a
+    /// work-conserving one is a ceiling. Two reports side by side with no mode on them is how
+    /// they get quoted as though they measured the same thing.
+    pub mode: &'static str,
+    /// The schedule the run set itself, and how well it kept it. `None` when unpaced.
+    pub schedule: Option<Schedule>,
     /// Requests issued.
     pub requests: u64,
     /// Key references issued.
@@ -437,6 +446,35 @@ pub struct LiveReport {
     pub skipped_needing_gpu: u64,
     /// Keys those skipped operations would have moved.
     pub skipped_keys: u64,
+}
+
+/// What a paced run asked for, and what it achieved (FR-080).
+///
+/// # Lateness is the validity metric here, and the queue is not
+///
+/// FR-062 invalidates a run whose plan queue reached zero, which is meaningful only while the
+/// generator is trying to sprint. Under pacing an empty queue is the normal, intended state —
+/// nothing is due yet — so the queue carries no information and this replaces it. The failure it
+/// catches is the same one: the pace came from somewhere other than the workload's own timing.
+///
+/// `virtual_to_wallclock` beside `rate` is a **second route to the same fact**. A run that fell
+/// behind shows it as accumulated lateness and as a ratio below the rate it asked for, and the two
+/// must agree; if they do not, one of them is measuring something else.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Schedule {
+    /// Virtual seconds per wallclock second the run was aimed at.
+    pub rate: f64,
+    /// The fraction of that rate the run fell short by. Negative means it ran ahead.
+    pub rate_shortfall: f64,
+    /// Turns held for their due time — the `n` the percentiles below belong to (FR-066a).
+    pub turns: u64,
+    /// How far past its due time each turn was submitted, in microseconds. One-sided: pacing
+    /// never submits early.
+    pub lateness_us: LatencyPercentiles,
+    /// The 99th-percentile lateness this run tolerated before calling itself invalid.
+    pub tolerance_us: u64,
+    /// Whether it stayed inside that.
+    pub kept: bool,
 }
 
 /// The plan queue's own figures (FR-037, FR-062).
@@ -636,23 +674,14 @@ pub struct OpLatency {
     pub us: LatencyPercentiles,
 }
 
-/// The dispatcher's name for an opcode, for a report a human reads.
+/// The name for an operation, for a report a human reads.
 ///
-/// Gated with the transport: an emit-only build has no opcodes to name.
-#[cfg(feature = "live")]
+/// Delegated to [`workload_wire::frame::op_kind`], which is where the field itself is defined.
+/// The generator no longer depends on `shmq-dispatcher` at all — that is most of the point of
+/// FR-079 — so it could not read the dispatcher's own constants even if it wanted to; the wire
+/// carries the number and the agent-side test pins it to the dispatcher.
 pub fn opcode_name(opcode: u32) -> &'static str {
-    use shmq_dispatcher::wire::op;
-    match opcode {
-        op::CHECK => "CHECK",
-        op::TOUCH => "TOUCH",
-        op::LOOKUP => "LOOKUP",
-        op::RESERVE => "RESERVE",
-        op::COPY_TO_STORE => "COPY_TO_STORE",
-        op::COMMIT_STORE => "COMMIT_STORE",
-        op::ABORT_STORE => "ABORT_STORE",
-        op::TAKE_EVENTS => "TAKE_EVENTS",
-        _ => "other",
-    }
+    workload_wire::frame::op_kind::name(opcode)
 }
 
 /// What one shared class's `selection` spread actually covers.
@@ -714,10 +743,36 @@ impl LiveReport {
         } else {
             out.push_str("live run complete and valid\n");
         }
+        // Before the figures, always. A paced throughput and a work-conserving one are not
+        // comparable, so the mode has to be read before the number it qualifies.
+        out.push_str(&format!("  mode              {}\n", self.mode));
         out.push_str(&format!(
             "  requests          {}\n  key references    {}\n",
             self.requests, self.key_references
         ));
+        if let Some(s) = &self.schedule {
+            out.push_str(&format!(
+                "  schedule          rate {:.3} virtual s/wallclock s, achieved {:.3} ({:+.1}% \
+                 short)\n  \
+                 lateness us       p50 {} p90 {} p99 {} max {} over {} turns, tolerance {}\n",
+                s.rate,
+                self.virtual_to_wallclock,
+                s.rate_shortfall * 100.0,
+                s.lateness_us.p50,
+                s.lateness_us.p90,
+                s.lateness_us.p99,
+                s.lateness_us.max,
+                s.turns,
+                s.tolerance_us,
+            ));
+            if !s.kept {
+                out.push_str(
+                    "                    the schedule was NOT kept, so this machine could not \
+                     serve this workload at this rate; the latency below describes a queue the \
+                     workload would not have formed (FR-080)\n",
+                );
+            }
+        }
         if self.valid {
             out.push_str(&format!(
                 "  payload bw        read {:.1} MiB/s ({} blocks), write {:.1} MiB/s ({} \
