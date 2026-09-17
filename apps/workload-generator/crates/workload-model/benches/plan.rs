@@ -25,29 +25,48 @@
 //! or a copy of the read list — which is exactly the regression this benchmark
 //! exists to catch.
 //!
-//! # Recorded baseline, 2026-09-15
+//! # Recorded baseline, 2026-09-17 (T085)
 //!
-//! First run on this box, one thread, so these are a reference point rather than a
-//! specification. Per key reference:
+//! **Three consecutive runs**, one thread, because one run of this benchmark cannot
+//! be trusted — see below. Per key reference, low to high across the three:
 //!
 //! | Case | Throughput | Per key |
 //! | --- | --- | --- |
-//! | `short_sessions` (5 turns) | 52.7 Melem/s | **19.0 ns** |
-//! | `long_sessions` (40 turns) | 150.4 Melem/s | **6.6 ns** |
-//! | `many_shared` (2000 instances, draw 16) | 126.5 Melem/s | **7.9 ns** |
+//! | `short_sessions` (5 turns) | 81.3–87.6 Melem/s | **11.4–12.3 ns** |
+//! | `long_sessions` (40 turns) | 175.4–237.3 Melem/s | **4.2–5.7 ns** |
+//! | `many_shared` (2000 instances, draw 16) | 183.4–190.6 Melem/s | **5.25–5.45 ns** |
+//! | `projection_10k_sessions` | — | **97.5–112 µs** |
 //!
-//! The prediction above holds: long sessions are **2.9x cheaper per key** than short
-//! ones, because per-turn overhead amortises over a longer prefix and nothing in the
-//! turn path rescans it.
+//! The prediction above holds in every run: long sessions are **2.0x to 2.9x cheaper
+//! per key** than short ones, because per-turn overhead amortises over a longer
+//! prefix and nothing in the turn path rescans it.
 //!
-//! Against Certus's measured ~5.6 µs/key, plan generation costs **0.1% to 0.3%** of
-//! the budget — roughly 300x to 850x of headroom on one thread. That is the
-//! quantitative form of Principle I's claim, and it is now a measurement rather than
-//! an expectation.
+//! Against Certus's measured ~5.6 µs/key, plan generation costs **0.08% to 0.22%** of
+//! the budget — roughly 450x to 1300x of headroom on one thread. That is the
+//! quantitative form of Principle I's claim, and it holds with a wide margin whichever
+//! end of the spread is taken. `projection_10k_sessions` keeps `validate --until n` an
+//! interactive query for a 10 000-session description over a 100 000-second span, by
+//! four orders of magnitude.
 //!
-//! `projection_10k_sessions` runs in **102 µs** for a 10 000-session description
-//! over a 100 000-second span, which keeps `validate --until n` an interactive
-//! query — its own budget, and met by four orders of magnitude.
+//! ## Criterion's change verdict is not usable on this benchmark
+//!
+//! **Run-to-run drift exceeds the effect sizes Criterion declares significant**, so a
+//! single run's "performance has improved/regressed (p < 0.05)" says nothing here.
+//! Measured across the three identical runs above, with no code change between them:
+//! `long_sessions` moved **+21% then +12%**, monotonically, and `short_sessions` moved
+//! **−0.6% then +7.0%** — each reported at p = 0.00. The first run of a session is the
+//! worst: it produced 13% and 47% outlier rates and a `long_sessions` confidence
+//! interval eleven times wider than the next run's.
+//!
+//! So: run it at least twice and discard the first, treat anything under ~35% on
+//! `long_sessions` or ~8% on the others as noise, and for a real comparison use
+//! repetition with a stated test rather than Criterion's verdict — the same n ≥ 8
+//! rule the README states for hit-rate comparisons, and for the same reason.
+//!
+//! **The earlier baseline (2026-09-15) is superseded and was stale, not wrong.** It
+//! recorded 19.0 ns for `short_sessions` and 7.9 ns for `many_shared`; both are now
+//! about 1.5x faster, from the selection work in US4 rather than from anything aimed
+//! at this benchmark.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use workload_model::description::WorkloadDescription;
