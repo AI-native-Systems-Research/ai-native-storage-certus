@@ -232,7 +232,9 @@ everywhere.
 With fewer than two instances, migration is inert rather than an error
 (FR-049). Note that two *co-resident* instances are two independent caches, so
 a session migrating between them is a genuine cache miss and a legitimate
-experiment.
+experiment — unless the deployment enables Certus's remote lookup, in which
+case the arriving instance may fetch the prefix from the one the session left
+and the migration is a remote hit instead. See `hardware.md`.
 
 ## The hardware file
 

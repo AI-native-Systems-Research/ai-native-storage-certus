@@ -991,7 +991,10 @@ Consequences, each of which is a thing that would otherwise fail quietly:
     (FR-048), migration (FR-049) and loss (FR-064) all range over instances. A
     session migrating between two co-resident instances is a **genuine cache
     miss**, because they are independent caches, and is a legitimate experiment
-    rather than a no-op.
+    rather than a no-op. That holds only while the instances do not share:
+    Certus's remote-lookup feature makes such a migration a remote *hit*
+    instead, which `contracts/hardware.md` records along with why the generator
+    cannot currently see the difference.
   - **The report MUST distinguish instances that share a host.** Two rows
     reading `node5` are not a report, and per-instance figures MUST NOT be
     keyed by hostname — a defect of exactly that kind merged three targets into

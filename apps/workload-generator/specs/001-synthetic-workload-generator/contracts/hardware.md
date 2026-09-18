@@ -74,6 +74,40 @@ Two co-resident instances are two independent caches. A session migrating
 between them is a genuine cache miss (FR-048, FR-049) and a legitimate
 experiment, not a no-op.
 
+### Unless the instances share: remote lookup changes what a migration means
+
+That independence is a property of the **deployment, not of this generator**.
+With Certus's remote-lookup feature enabled, the instance a session arrives on
+may fetch the whole prefix from the instance it left, over the fabric — so the
+migration is a remote *hit*, and the run measures the remote path instead of a
+cold prefix. Both are legitimate experiments, but they are different ones, and
+the same description and seed produce both.
+
+**The generator cannot currently tell them apart.** Nothing on the wire
+distinguishes a local hit from a remote one: the counters carry residency, not
+provenance. So a migration under remote lookup does not merely behave
+differently, it *reads* as an ordinary hit, and two runs with identical reports
+can have measured different things — the same hazard as an implicitly picked-up
+hardware file, which is why that one must be announced and digested.
+
+A `remote_lookup:` field is deliberately **not** specified here. Nothing could
+validate the declaration, and an unvalidated field that can be silently wrong
+is worse than a documented gap — the same reasoning that makes an unknown field
+a refusal rather than a default. The fix is served-by tier attribution, which
+is specified separately; until it exists, an operator comparing runs across
+server profiles has to know which profile each run used.
+
+There is a second-order effect, recorded because it is easy to mistake for a
+defect: with remote lookup on, the turn immediately after a migration can race
+the last turn on the old instance, since the two sit on different connections
+and nothing orders them. Whether the prefix has landed decides whether the
+remote fetch finds it. The exposure is bounded by the migration count, which
+the report already prints, and it belongs to a class the methodology already
+answers — concurrent stores of one key are expected (`CHECK` reports
+`PENDING`), races are preserved deliberately (FR-035, FR-036), and
+hit-dependent comparisons therefore need n >= 8 runs. It needs no new
+machinery.
+
 ## Precedence
 
 The command line overrides the file, **per field**, and `--instance` replaces
