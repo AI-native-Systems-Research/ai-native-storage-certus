@@ -209,6 +209,15 @@ IMAGE_ID="$(podman image inspect "${IMAGE}" --format '{{.Id}}' 2>/dev/null)"
 hf_env=()
 [[ -n "${HF_TOKEN:-}" ]] && hf_env+=(-e "HF_TOKEN=${HF_TOKEN}")
 
+# ── HF offline (disconnected node) ──
+# The benchmark hosts have no route to huggingface.co. Without this, vLLM/HF
+# hits the Hub on every file lookup (config, tokenizer, weight index, …) and
+# each attempt burns a ~9-min connect timeout before falling back to the
+# mounted cache — minutes of dead air per lookup. Force offline so it loads
+# straight from ${HF_CACHE}. A connected host can override with HF_HUB_OFFLINE=0.
+hf_env+=(-e "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}" \
+         -e "TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}")
+
 # ── HF cache mount (only if the dir exists) ──
 cache_mount=()
 if [[ -d "${HF_CACHE}" ]]; then
