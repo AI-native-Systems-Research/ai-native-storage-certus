@@ -149,6 +149,12 @@ IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-bench}"
 # it beside this script — accept either.
 DATASET_HOST="${SCRIPT_DIR}/../../data/sharegpt_12turn_450.json"
 [[ -f "$DATASET_HOST" ]] || DATASET_HOST="${SCRIPT_DIR}/sharegpt_12turn_450.json"
+# --dataset <path>: replay an arbitrary ShareGPT-format JSON (a list of
+# {"id","conversations":[{"from","value"},...]}) instead of the baked set. When
+# set (below, after arg parse) it replaces DATASET_HOST and is forwarded to
+# run-bench.sh, which bind-mounts it read-only and points DATASET_PATH at it
+# (winning over the baked default). Empty = the baked/named dataset.
+DATASET_OVERRIDE=""
 SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
 # llmd_fs_backend repo (for --rebuild of the SharedStorage image). Empty = auto:
 # resolved after --model-fs is parsed, preferring <model-fs>/llm-d-kv-cache/...
@@ -170,6 +176,13 @@ Flags (all optional; defaults shown):
   --model <hf-id>               Model applied to all four variants.
                                 [NousResearch/Meta-Llama-3-8B]
   --num-convs <n>               Conversations to replay. [450]
+  --dataset <path>              Replay an arbitrary ShareGPT-format JSON on the
+                               host (a list of {"id","conversations":[{"from",
+                               "value"},...]}) instead of the baked/named set.
+                               Mounted read-only into the client; DATASET_PATH
+                               points at it, winning over the baked default. Pair
+                               with --num-convs to set how many of its convs run
+                               (else the sharegpt default, 450 at 12/12, caps it).
   --max-rounds <n>              Cap every backend at N rounds/turns (MAX_ROUNDS env).
                                 0 = replay all 12 turns. [0]
   --output-tokens <n>          Generated tokens per turn (for uniform tok/s). [150]
@@ -273,6 +286,7 @@ while [[ $# -gt 0 ]]; do
         --model-fs)         MODEL_FS="$2"; shift 2;;
         --model)            MODEL="$2"; shift 2;;
         --num-convs)        NUM_CONVS="$2"; shift 2;;
+        --dataset)          DATASET_OVERRIDE="$2"; shift 2;;
         --max-rounds)       MAX_ROUNDS="$2"; shift 2;;
         --output-tokens)    OUTPUT_TOKENS="$2"; shift 2;;
         --max-model-len)    MAX_MODEL_LEN="$2"; shift 2;;
@@ -302,6 +316,16 @@ while [[ $# -gt 0 ]]; do
         *) echo "error: unknown argument '$1'" >&2; usage >&2; exit 2;;
     esac
 done
+
+# --dataset override wins over the baked/named dataset: repoint DATASET_HOST at
+# it (used by the preflight check and forwarded to run-bench.sh, which mounts it
+# and sets DATASET_PATH). Fail fast if the file is missing rather than silently
+# falling back to the baked set. warn() isn't defined yet here, so echo to stderr.
+if [[ -n "$DATASET_OVERRIDE" ]]; then
+    [[ -f "$DATASET_OVERRIDE" ]] || { echo "error: --dataset file not found: $DATASET_OVERRIDE" >&2; exit 2; }
+    DATASET_HOST="$DATASET_OVERRIDE"
+    [[ -z "$NUM_CONVS" ]] && echo "[profile] note: --dataset set without --num-convs; the sharegpt default conv count applies (450 at 12/12) and may cap your file" >&2
+fi
 
 # --min-turns/--max-turns only mean anything for the sharegpt workload, so
 # supplying either without --workload implies it. Without this, turn flags alone
@@ -1360,6 +1384,7 @@ if want certus-spdk; then
             GPU="$GPU" \
             SHM_PATH="$SHM_PATH" \
             NUM_CONVS="$NUM_CONVS" \
+            DATASET_HOST="$DATASET_OVERRIDE" \
             MAX_ROUNDS="$MAX_ROUNDS" \
             MODEL="$MODEL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
