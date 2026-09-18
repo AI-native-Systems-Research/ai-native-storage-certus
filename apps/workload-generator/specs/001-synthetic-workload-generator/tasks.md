@@ -2993,7 +2993,7 @@ a real cache miss.
   is refused; `--instance` replaces the file's list and `--rate` overrides its
   rate; and nothing belonging to the description is accepted in the hardware
   file
-- [ ] T101 [US3] Re-verify on hardware. The scratch-server recipe from T092 is
+- [X] T101 [US3] Re-verify on hardware. The scratch-server recipe from T092 is
   the cheap version: a second `certus-server-yaml` on its own `--shm-path` and
   its own 16 GiB device file leaves an existing server untouched. Two scratch
   servers on one host is the case this phase is about
@@ -3019,6 +3019,26 @@ derived rather than drawn from a shared stream) is written up as **D10 in
 `research.md`** and is **deferred, not scheduled** — it is a new capability
 whose real value is making the trace corpus driveable, not replaying our own
 output.
+
+**T101 verified on hardware, 2026-09-18.** Two co-resident instances on
+node2, one per NUMA domain with four NUMA-local drives each (the
+`deploy/k8s/certus-server-numa.yaml.tpl` selection rule), plus a separate
+cross-machine run against node2 and node5. Both valid. Per-instance rows are
+distinguishable (`127.0.0.1:7420` / `:7421`, each with its own mailbox and its
+own counters), which is the deployment that was unrepresentable before FR-081.
+
+The migration check is a controlled comparison rather than an inspection: the
+same description and seed against **one** instance gives 14150 resident of
+15758 (89.8%), against **two** gives 11847 of 15722 (75.4%) — misses rise from
+1608 to 3875 on freshly formatted drives. The migrated prefixes really are cold
+on arrival, and nothing moved the blocks.
+
+Two defects fell out of the run, both fixed in `620e696f`: `SshLauncher::kill`
+self-killed its own remote shell and made every multi-node run impossible, and
+`migrations` never reached either report form. A third thing to know: the miss
+comparison needs `--format`, not `--clear-cache` — a clear drops the memory
+tier only, and disk-backed entries survive, so a repeat run reads 100%
+resident.
 
 **Terminology, settled**: "node" is kept for the concept because Zyre already
 uses it for an instance regardless of machine, and the model's placement is
