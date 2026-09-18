@@ -231,6 +231,12 @@ Flags (all optional; defaults shown):
                                LONGDOC_NUM_DOCS / LONGDOC_SEED (defaults 4000/8/1000);
                                NUM_CONVS defaults to LONGDOC_NUM_DOCS. Big docs need a
                                matching --max-model-len.
+                               "synth-multiturn" = the Claude-authored synthetic
+                               multi-turn ShareGPT corpus baked into the image
+                               (data/synth_multiturn.json.gz; ~1000 convs, mean-50
+                               human turns — a heavy multi-turn KV working set for
+                               offload stress). Self-contained (no mount/DATASET_HOST);
+                               NUM_CONVS defaults to 1000.
                                "synthetic-agentic" = the inference-perf agentic
                                ReplayGraph DAG (tool loops, sub-agent fan-out, context
                                compaction). It is HTTP-only, so each backend is run in
@@ -373,6 +379,11 @@ if [[ -z "$NUM_CONVS" ]]; then
         # a literal here (not read from the workload) so the sharegpt-shaped
         # defaulting below stays untouched for that workload.
         NUM_CONVS="${LONGDOC_NUM_DOCS:-1000}"
+    elif [[ "$WORKLOAD_NAME" == "synth-multiturn" ]]; then
+        # The synthetic multi-turn corpus is exactly 1000 convs; draw them all.
+        # Pinned here (not left empty) so the 12/12 branch below can't cap it at
+        # 450, and so an empty NUM_CONVS never reaches resolve_workload's int().
+        NUM_CONVS=1000
     elif [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
         NUM_CONVS=450     # exactly-12/12 subset
     else

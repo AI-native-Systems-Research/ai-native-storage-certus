@@ -141,6 +141,8 @@ ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-0}"
 if [[ -z "${NUM_CONVS}" ]]; then
     if [[ "${WORKLOAD_NAME}" == "long-doc-qa" ]]; then
         NUM_CONVS="${LONGDOC_NUM_DOCS:-1000}"   # whole generated corpus; load_convs caps here
+    elif [[ "${WORKLOAD_NAME}" == "synth-multiturn" ]]; then
+        NUM_CONVS=1000    # synthetic multi-turn corpus is exactly 1000 convs; draw all
     elif [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
         NUM_CONVS=450     # exactly-12/12 subset
     else
