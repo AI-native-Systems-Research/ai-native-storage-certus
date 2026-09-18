@@ -1321,6 +1321,7 @@ if want certus-spdk; then
             MODEL="$MODEL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
+            GPU_MEM_UTIL="$GPU_MEM_UTIL" \
             ENFORCE_EAGER="$ENFORCE_EAGER" \
             WORKLOAD_MODE="$WORKLOAD_MODE" \
             TRACE_OFFLOAD="$TRACE_OFFLOAD" \

@@ -377,4 +377,5 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "LONGDOC_NUM_DOCS=${LONGDOC_NUM_DOCS}" \
     -e "LONGDOC_SEED=${LONGDOC_SEED}" \
     -e "DTYPE=${DTYPE:-float16}" \
+    -e "GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.90}" \
     "${IMAGE}"
