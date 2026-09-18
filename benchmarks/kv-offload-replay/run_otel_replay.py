@@ -77,6 +77,12 @@ if __name__ == "__main__":
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 131072))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))
     ACTIVE_SESSIONS = int(os.environ.get("ACTIVE_SESSIONS", 0))
+    # Closed-loop admission order: "sequential" (ascending-index admit-on-finish,
+    # the default) or "random" (uniform pick from the arrival-gated ready set,
+    # seeded by ADMIT_SEED). Only meaningful when ACTIVE_SESSIONS > 0.
+    ADMIT_ORDER = os.environ.get("ADMIT_ORDER", "sequential").strip().lower()
+    ADMIT_SEED = (int(os.environ["ADMIT_SEED"])
+                  if os.environ.get("ADMIT_SEED", "").strip() else None)
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
     CPU_BYTES = int(os.environ.get("CPU_BYTES", 4 * (1 << 30)))
     # Per-turn max_tokens comes from each span; clamp with MAX_OUTPUT_TOKENS if set.
@@ -124,14 +130,22 @@ if __name__ == "__main__":
               file=sys.stderr, flush=True)
 
     # ── Load the OTel corpus ──────────────────────────────────────────────
+    # Per-conversation arrival offsets are only needed for the random-admission
+    # timing gate; skip that work (and keep the plain return type) otherwise.
     t_load = time.time()
-    convs = load_otel_convs(args.dir, args.num)
+    arrivals = None
+    if ADMIT_ORDER == "random":
+        convs, arrivals = load_otel_convs(args.dir, args.num, with_arrivals=True)
+    else:
+        convs = load_otel_convs(args.dir, args.num)
     if not convs:
         print(f"[run] no conversations loaded from {args.dir}", file=sys.stderr)
         sys.exit(1)
     if DP_SIZE > 1:
         _global_total = len(convs)
         convs = convs[DP_RANK::DP_SIZE]
+        if arrivals is not None:
+            arrivals = arrivals[DP_RANK::DP_SIZE]
         print(f"[run] DP shard rank={DP_RANK}/{DP_SIZE}: {len(convs)} of "
               f"{_global_total} conversations", file=sys.stderr)
     _turns = sorted(len(c) for c in convs)
@@ -261,6 +275,9 @@ if __name__ == "__main__":
         capture_metrics=CAPTURE_METRICS,
         disk_rw_bytes=disk_rw_bytes,
         active_sessions=ACTIVE_SESSIONS,
+        admit_order=ADMIT_ORDER,
+        admit_seed=ADMIT_SEED,
+        arrivals=arrivals,
         summary_base={
             "workload": "otel-replay",
             "corpus": args.dir,

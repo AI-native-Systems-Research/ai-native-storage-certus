@@ -24,6 +24,10 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
 CONTEXT_CAP="${CONTEXT_CAP:-120000}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-64}"
 ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-0}"      # 0 = open loop; N = closed loop
+# Closed-loop admission order (only used when ACTIVE_SESSIONS>0):
+#   sequential = ascending-index admit-on-finish (default, unchanged behavior)
+#   random     = uniform pick from the arrival-gated ready set, seeded by ADMIT_SEED
+ADMIT_ORDER="${ADMIT_ORDER:-sequential}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
 GPU="${GPU:-all}"
 
@@ -51,6 +55,7 @@ COMMON_RUN_ARGS=(
   -e "CONTEXT_CAP=${CONTEXT_CAP}"
   -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}"
   -e "ACTIVE_SESSIONS=${ACTIVE_SESSIONS}"
+  -e "ADMIT_ORDER=${ADMIT_ORDER}"
   -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}"
   # TENSOR_PARALLEL_SIZE spans each vLLM engine across N GPUs (TP). Podman does
   # not inherit host env, so this -e is the only path that delivers it.
@@ -69,6 +74,11 @@ COMMON_RUN_ARGS=(
 )
 if [[ -n "$NUM_CONVS" ]]; then
   COMMON_RUN_ARGS+=(-e "NUM_CONVS=${NUM_CONVS}")
+fi
+# ADMIT_SEED is optional: forward it only when set so an unset seed leaves the
+# random admission RNG unseeded (nondeterministic draw sequence).
+if [[ -n "${ADMIT_SEED:-}" ]]; then
+  COMMON_RUN_ARGS+=(-e "ADMIT_SEED=${ADMIT_SEED}")
 fi
 
 # stamp — a HHMMSS suffix for default log names.
