@@ -49,6 +49,40 @@
 //! while under load. A probe that only wants to know whether *anything* is there should set a
 //! short one with [`Client::with_read_timeout`] rather than wait for the default.
 //!
+//! # The window is a buffer bound, not only a pipeline
+//!
+//! [`Client::submit`] reads a reply only when the window is full, so `inflight` counts
+//! **replies not yet read** rather than work the far side has not finished. Under a finite
+//! pacing rate the window therefore still fills and stays full, with the replies sitting
+//! unread in the receive buffer — it does not go idle, which is the opposite of what the
+//! name suggests.
+//!
+//! That makes the window load-bearing for two reasons beyond hiding a round trip, and both
+//! survive eager reaping:
+//!
+//! 1. **The plan queue must be the only buffer.** Lateness is stamped when a frame is handed
+//!    to the socket, so turns idling in a kernel send buffer would record as on time while
+//!    the agent ran minutes behind. The window bounds that gap to `depth` turns; without it
+//!    a run that missed its schedule could report itself punctual, and FR-062's underrun
+//!    count would go quiet at the same time. The metric would lie in the flattering
+//!    direction.
+//! 2. **A hung peer must abort, not hang.** At the limit we block in a *read*, which
+//!    [`DEFAULT_READ_TIMEOUT`] turns into a bounded `NodeLost`. Writing until the socket
+//!    blocked instead would park us in `write_all`, and a run that neither finishes nor
+//!    fails cannot even be reported as invalid.
+//!
+//! # Reaping replies eagerly, so a lost node is noticed now
+//!
+//! Because a full window drains exactly one reply, a node that dies is noticed only when its
+//! turn reaches the front of the queue — up to `depth` turns late, which under pacing can be
+//! many seconds. [`Client::reap_ready`] closes that: it takes every reply already waiting
+//! without blocking, so death is seen at the next submission rather than `depth` submissions
+//! later. It costs one non-blocking read per submit, usually `EWOULDBLOCK`.
+//!
+//! It is deliberately **not** a separate reaper thread. `inflight` is driven through
+//! `&mut self`, so a reaper would need a mutex on the submit path and would buy nothing that
+//! a non-blocking read on the same thread does not.
+//!
 //! # `TCP_NODELAY`, always
 //!
 //! Nagle's algorithm withholds a small write until the previous one is acknowledged, which
@@ -211,6 +245,14 @@ pub const DEFAULT_DEPTH: usize = 8;
 /// unreachable peer into an error rather than a hang, not to bound normal latency.
 pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Default write timeout.
+///
+/// Not a live hazard while the pipelining window holds — a `SubmitTurn` with a 64-key path is
+/// about 526 bytes, so a write blocks only once buffers are full, which the window prevents.
+/// It closes the same class of gap [`DEFAULT_READ_TIMEOUT`] closed: an unbounded block is a run
+/// that neither finishes nor fails, and that cannot even be reported as invalid.
+pub const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Default largest body accepted, in bytes.
 ///
 /// A `SubmitTurn` is 14 bytes plus 8 per key, so this admits a path of about 130 000 keys —
@@ -315,6 +357,9 @@ impl Client<TcpStream> {
         // Without this, a peer that accepts and never answers hangs the run instead of failing
         // it, which FR-064 forbids in substance if not in words.
         stream.set_read_timeout(Some(DEFAULT_READ_TIMEOUT))?;
+        // The same gap on the writing side. The window makes it unreachable in practice; it is
+        // set anyway, because the cost is nothing and the failure it prevents is a hang.
+        stream.set_write_timeout(Some(DEFAULT_WRITE_TIMEOUT))?;
         Ok(Self::with_transport(stream, depth))
     }
 }
@@ -331,6 +376,97 @@ impl Client<TcpStream> {
     pub fn with_read_timeout(self, timeout: Duration) -> Result<Self, ClientError> {
         self.stream.set_read_timeout(Some(timeout))?;
         Ok(self)
+    }
+
+    /// Take every reply already waiting, without blocking, and return how many.
+    ///
+    /// Call it before [`Client::submit`]. It returns credits to the window early, so a peer that
+    /// has died is seen at the next submission instead of `depth` submissions later — under a
+    /// paced run, seconds rather than turns. With nothing waiting it costs one `EWOULDBLOCK`.
+    ///
+    /// A count rather than the outcomes themselves: the driver discards them, and allocating a
+    /// vector per submission to be dropped would be a cost on the hot path for nothing. The
+    /// outcomes are still available through [`Client::submit`] and [`Client::finish`].
+    ///
+    /// # Errors
+    ///
+    /// If the peer closed, sent something malformed, or echoed an unknown correlation id.
+    /// Draining is where a dead node is now discovered, so these are real failures rather than
+    /// conditions to skip past.
+    pub fn reap_ready(&mut self) -> Result<usize, ClientError> {
+        let mut reaped = 0usize;
+        // Guarded on `inflight`: with nothing outstanding there is no reply to be had, and a
+        // read would steal a frame that belongs to a later synchronous call.
+        while !self.inflight.is_empty() {
+            let Some((header, body)) = self.reap_one()? else {
+                break;
+            };
+            self.match_outcome(&header, &body)?;
+            reaped += 1;
+        }
+        Ok(reaped)
+    }
+
+    /// Read one whole frame if one has already arrived, otherwise `None`.
+    ///
+    /// Only the *first* look is non-blocking. Bytes cannot be pushed back onto a stream, so
+    /// once any byte of a header is taken the frame must be completed — blocking, under the
+    /// read timeout, exactly as [`Client::recv_outcome`] would have.
+    fn reap_one(&mut self) -> Result<Option<(Header, Vec<u8>)>, ClientError> {
+        let mut head = [0u8; HEADER_BYTES];
+        let got = self.read_available(&mut head)?;
+        if got == 0 {
+            return Ok(None);
+        }
+        if got < HEADER_BYTES {
+            Self::fill(&mut self.stream, &mut head[got..])?;
+        }
+        let header = Header::decode(&head, self.max_body)?;
+        // Taken out of `self` so the read borrows the stream and the buffer separately, then put
+        // back so the allocation is reused across frames.
+        let mut body = std::mem::take(&mut self.body);
+        body.clear();
+        body.resize(header.len as usize, 0);
+        let read = Self::fill(&mut self.stream, &mut body);
+        let out = body.clone();
+        self.body = body;
+        read?;
+        Ok(Some((header, out)))
+    }
+
+    /// Read whatever is available into `buf` without blocking, returning how many bytes.
+    ///
+    /// Zero means nothing had arrived. A short count means a frame is part-way here and the
+    /// caller must finish it.
+    fn read_available(&mut self, buf: &mut [u8]) -> Result<usize, ClientError> {
+        self.stream.set_nonblocking(true)?;
+        let outcome = {
+            let mut at = 0usize;
+            loop {
+                match self.stream.read(&mut buf[at..]) {
+                    // End of stream, whether or not part of a header arrived first: a run must
+                    // name the lost node and abort rather than carry on (FR-064).
+                    Ok(0) => break Err(ClientError::Closed),
+                    Ok(n) => {
+                        at += n;
+                        if at == buf.len() {
+                            break Ok(at);
+                        }
+                    }
+                    // The whole point of the call: nothing more is here yet.
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break Ok(at),
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => break Err(ClientError::Io(e)),
+                }
+            }
+        };
+        // Restored on every path, including the failing ones. A socket left non-blocking would
+        // turn every later blocking read into a spurious `WouldBlock`, which the read timeout is
+        // indistinguishable from — so the run would report a lost node for a bookkeeping slip.
+        let restored = self.stream.set_nonblocking(false);
+        let n = outcome?;
+        restored?;
+        Ok(n)
     }
 }
 
@@ -446,12 +582,25 @@ impl<S: Read + Write> Client<S> {
     ///
     /// If nothing is outstanding, the socket fails, or the reply does not match.
     pub fn recv_outcome(&mut self) -> Result<(u32, TurnOutcome), ClientError> {
-        let expect = self
-            .inflight
-            .front()
-            .copied()
-            .ok_or(ClientError::Unexpected { corr: 0 })?;
+        // Checked before reading rather than after: with nothing outstanding there is no reply
+        // coming, and blocking here would consume a frame belonging to a later synchronous call.
+        if self.inflight.is_empty() {
+            return Err(ClientError::Unexpected { corr: 0 });
+        }
         let (header, body) = self.read_frame()?;
+        self.match_outcome(&header, &body)
+    }
+
+    /// Account one `SUBMIT_TURN` reply against the window and decode it.
+    ///
+    /// Shared by the blocking and the eager paths, so the two cannot drift on which replies
+    /// they accept — a divergence that would show up as a correlation-id error under load and
+    /// nowhere else.
+    fn match_outcome(
+        &mut self,
+        header: &Header,
+        body: &[u8],
+    ) -> Result<(u32, TurnOutcome), ClientError> {
         if header.opcode != opcode::SUBMIT_TURN {
             return Err(ClientError::Mismatched {
                 want: opcode::SUBMIT_TURN,
@@ -460,16 +609,14 @@ impl<S: Read + Write> Client<S> {
         }
         // Matched rather than assumed: the contract permits a multiplexed connection, so an
         // in-order reply stream must not become an unstated assumption here.
-        if header.corr != expect {
-            let known = self.inflight.iter().any(|c| *c == header.corr);
-            if !known {
-                return Err(ClientError::Unexpected { corr: header.corr });
-            }
+        if self.inflight.front().copied() == Some(header.corr) {
+            self.inflight.pop_front();
+        } else if self.inflight.iter().any(|c| *c == header.corr) {
             self.inflight.retain(|c| *c != header.corr);
         } else {
-            self.inflight.pop_front();
+            return Err(ClientError::Unexpected { corr: header.corr });
         }
-        Ok((header.corr, TurnOutcome::decode(&body)?))
+        Ok((header.corr, TurnOutcome::decode(body)?))
     }
 
     /// Wait for every outstanding turn.

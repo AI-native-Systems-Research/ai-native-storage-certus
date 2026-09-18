@@ -569,6 +569,15 @@ pub struct AgentLane<'a> {
 impl AgentLane<'_> {
     /// Submit a turn, treating any transport failure as the loss of this node (FR-064).
     ///
+    /// Replies already waiting are taken first. Without that, a full window drains exactly one
+    /// reply per submission, so a node that has died is noticed only when its turn reaches the
+    /// front of the queue — up to `depth` turns late, and under a paced run those turns can be
+    /// many seconds apart.
+    ///
+    /// A lane sleeping out a think time still will not notice until its next due turn. That is
+    /// accepted: it has no work to issue in the gap, so the only cost is believing the node
+    /// alive slightly longer.
+    ///
     /// # Errors
     ///
     /// [`NodeLost`], naming this node. The caller must abort the whole run rather than carry on
@@ -577,6 +586,9 @@ impl AgentLane<'_> {
         &mut self,
         turn: &workload_wire::frame::SubmitTurn,
     ) -> Result<(u32, Option<workload_wire::frame::TurnOutcome>), NodeLost> {
+        self.client
+            .reap_ready()
+            .map_err(|e| NodeLost::from_client(&self.node, "reaping earlier turns' replies", e))?;
         self.client
             .submit(turn)
             .map_err(|e| NodeLost::from_client(&self.node, "submitting a turn", e))
