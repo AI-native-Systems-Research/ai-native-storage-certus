@@ -416,8 +416,8 @@ fn run_argv(extra: &[&str]) -> i32 {
         "--until".into(),
         "1".into(),
         "--no-launch".into(),
-        "--agent-port".into(),
-        free_port().to_string(),
+        "--instance".into(),
+        format!("127.0.0.1:{}", free_port()),
     ];
     argv.extend(extra.iter().map(|s| (*s).to_string()));
     workload_gen::cli::run_argv(&argv)
@@ -437,15 +437,27 @@ fn a_rate_of_zero_or_less_is_refused_rather_than_quietly_running_work_conserving
 }
 
 #[test]
-fn a_rate_with_pacing_none_is_refused_rather_than_ignored() {
-    // `--pacing none --rate 10` asks for two different things. Honouring one silently is how a run
-    // gets quoted as the other, so the invocation is refused — which is also why `--unpaced` was
-    // rejected as a spelling: a negative flag makes this combination unreadable.
-    assert_eq!(run_argv(&["--pacing", "none", "--rate", "10"]), 2);
-    // The same flags apart are both fine, so the refusal is about the combination.
-    assert_ne!(
+fn the_contradiction_that_needed_a_refusal_is_now_unsayable() {
+    // `--pacing none --rate 10` asked for two different things, and honouring one silently is how
+    // a run gets quoted as the other. FR-081 deletes the flag instead of policing the pair: with
+    // `--rate` the only knob, the mode is derived from the value and the two cannot disagree.
+    assert_eq!(
         run_argv(&["--pacing", "none"]),
         2,
-        "a work-conserving run at the default rate must not be refused for its rate"
+        "--pacing must no longer be accepted at all"
     );
+    // And the mode it used to select is now a value of the rate.
+    assert_ne!(
+        run_argv(&["--rate", "inf"]),
+        2,
+        "--rate inf is a work-conserving run, not a bad argument"
+    );
+}
+
+#[test]
+fn a_large_finite_rate_is_not_inf_and_keeps_its_schedule() {
+    // Somebody will type a large number meaning "flat out". It is accepted, because it is a
+    // legitimate calibration, and it stays *paced* — so a machine that cannot keep up records
+    // real lateness and the run is correctly invalid. Only `inf` switches the schedule off.
+    assert_ne!(run_argv(&["--rate", "1e12"]), 2);
 }

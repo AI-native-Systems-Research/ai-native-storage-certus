@@ -407,7 +407,10 @@ fn losing_a_node_is_detected_rather_than_hung_on() {
         "a dead node was not noticed after {elapsed:?}"
     );
     let lost = outcome.unwrap_err();
-    assert_eq!(lost.node, "127.0.0.1");
+    // Named by instance rather than by host (FR-081). A host runs several instances, so
+    // "127.0.0.1" alone would not say which of them died — and on the driver's own tests, which
+    // put every instance on this host, it would name them all identically.
+    assert_eq!(lost.node, format!("127.0.0.1:{port}"));
     assert!(
         elapsed < std::time::Duration::from_secs(35),
         "took {elapsed:?} to notice a dead node; a run must abort, not hang"

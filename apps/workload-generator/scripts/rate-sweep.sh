@@ -45,7 +45,10 @@
 #   UNTIL     virtual seconds per run (default 60)
 #   SEED      seed, held fixed across the sweep so every rung plays one workload
 #   LANES     lanes per node (default 4)
-#   NODES     space-separated node list; empty means this host alone
+#   INSTANCES space-separated instance list, each host[:port][:mailbox];
+#             empty means the hardware file's list, or this host alone
+#   HARDWARE  a hardware file to pass as --hardware; empty means ./cluster.yml
+#             if it exists (the generator announces an implicit pickup)
 #   OUT       directory for the JSON reports (default a fresh mktemp -d)
 #   REPEATS   runs per rate (default 1)
 #   GEN       path to the workload-gen binary
@@ -65,13 +68,20 @@ RATES=("$@")
 if [ "${#RATES[@]}" -eq 0 ]; then
     # A decade and a half, in steps that roughly double: enough to bracket the
     # knee without spending a run on every integer.
+    #
+    # `inf` is deliberately NOT in the default list. It is a different
+    # measurement — the ceiling, judged on the plan queue rather than on
+    # lateness — so its rows are not comparable with the paced ones and putting
+    # it in the same table invites reading them as one curve. Pass it
+    # explicitly to get a ceiling row, knowing that is what you asked for.
     RATES=(1 2 5 10 20 50 100)
 fi
 
 UNTIL="${UNTIL:-60}"
 SEED="${SEED:-1}"
 LANES="${LANES:-4}"
-NODES="${NODES:-}"
+INSTANCES="${INSTANCES:-}"
+HARDWARE="${HARDWARE:-}"
 REPEATS="${REPEATS:-1}"
 OUT="${OUT:-$(mktemp -d)}"
 GEN="${GEN:-$(dirname "$0")/../../../target/release/workload-gen}"
@@ -92,10 +102,16 @@ if [ "$servers" -gt 1 ]; then
     exit 2
 fi
 
-node_args=()
-for n in $NODES; do
-    node_args+=(--node "$n")
+# The deployment is held fixed while the rate varies, which is exactly the case
+# the command line's per-field override of the hardware file exists for: --rate
+# below wins over the file's rate without the file being edited.
+target_args=()
+for n in $INSTANCES; do
+    target_args+=(--instance "$n")
 done
+if [ -n "$HARDWARE" ]; then
+    target_args+=(--hardware "$HARDWARE")
+fi
 
 mkdir -p "$OUT"
 echo "# rate sweep: $DESCRIPTION, until=$UNTIL seed=$SEED lanes=$LANES repeats=$REPEATS"
@@ -113,10 +129,9 @@ for rate in "${RATES[@]}"; do
             --until "$UNTIL" \
             --seed "$SEED" \
             --lanes "$LANES" \
-            --pacing real \
             --rate "$rate" \
             --report "$report" \
-            "${node_args[@]}" >"$OUT/rate-$rate-run-$run.txt" 2>&1
+            "${target_args[@]}" >"$OUT/rate-$rate-run-$run.txt" 2>&1
         code=$?
 
         if [ ! -f "$report" ]; then
