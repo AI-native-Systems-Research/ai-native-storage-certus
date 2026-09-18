@@ -239,6 +239,73 @@ Its default cache sizes are 256–4096 **blocks** against a working set of over 
 million, so a low hit rate there says nothing about the workload. Scenario 6 is
 where a hit rate means something.
 
+## Scenario 3d — Standard formats from a stored trace, and checking reuse
+
+The same projections Scenario 3b wrote in one pass, applied instead to a trace
+already on disk (FR-075a) — the path that lets a **real** corpus trace and a
+generated one go through an identical transformation:
+
+```bash
+$G emit $E --seed 42 --until 10 --certus-unified-jsonl /tmp/qs-trace
+$G convert /tmp/qs-trace --to mooncake       --output /tmp/qs-mc.jsonl
+$G convert /tmp/qs-trace --to oracle-general --output /tmp/qs-og.bin
+```
+
+**Expect** both conversions to declare what they dropped and to end with the
+FR-075b line, and their counts to agree:
+
+```text
+mooncake:       records 1943  distinct identifiers 411430  references 655104
+oracleGeneral:  accesses 655104  distinct objects 411430  object size 65536 bytes
+```
+
+Those two writers share nothing but the record stream, so the agreement is
+worth reading as a check rather than a formality: `distinct identifiers ==
+distinct objects` and `references == accesses`. The binary is **15 722 496
+bytes**, which is exactly `655104 × 24` — the verified `oracleGeneral` record
+size, confirmed against real output rather than against the prose that
+documents it.
+
+`convert` reads block geometry from the trace's `manifest.json`, because
+neither format carries it. That is also why a **projection** cannot be fed
+back in: it has no manifest, so it is refused with exit 2 (FR-075b).
+
+### The reuse check, and why the obvious form of it is vacuous
+
+FR-078 is the one mistake here that would look like success: renumbering per
+session yields a file that loads and replays while cross-session reuse has
+silently vanished. The check that catches it is the **global identifier
+count**, against the native trace's own distinct keys:
+
+```bash
+python3 - <<'PY'
+import json
+native = [json.loads(l) for l in
+          open('/tmp/qs-trace/invocations/block_size_16/part-0.jsonl')]
+mc = [json.loads(l) for l in open('/tmp/qs-mc.jsonl')]
+keys = {k for r in native for k in r['full_input_blocks']}
+ids  = {i for r in mc for i in r['hash_ids']}
+print('native distinct keys ', len(keys))
+print('mooncake identifiers ', len(ids), 'dense:', max(ids) + 1 == len(ids))
+PY
+```
+
+**Expect** `411430` from both lines, and `dense: True`. That equality is what
+global scope means. Measured on this trace, the two wrong renumberings would
+give **1970** instead — the largest session's own key count, which is also the
+longest prompt — so the defect shows up as a **209×** collapse and cannot be
+mistaken for noise.
+
+**Do not check it positionally.** Comparing a shared key's identifier at its
+position in two sessions' rows looks like the more direct test and proves
+nothing: on this trace **all 28 149** cross-session shared keys sit at the
+*same* prompt position in both sessions, and **none** at differing positions.
+Shared objects are prompt prefixes, so their position is fixed by the prefix
+layout — which means a per-session renumbering restarting at zero reproduces
+the same number at the same position and passes. The unit test
+`the_prompt_prefix_structure_survives_the_conversion` is annotated as weak for
+exactly this reason; the count is the assertion with teeth.
+
 ## Scenario 4 — Drive the local node (needs Certus)
 
 **Build both binaries, `--release`.** The local node goes through an agent too
