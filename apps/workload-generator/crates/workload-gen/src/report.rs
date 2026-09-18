@@ -399,6 +399,12 @@ pub struct LiveReport {
     pub cleared_entries: Option<u64>,
     /// Whether the producer reached the end of its span rather than being interrupted.
     pub producer_completed: bool,
+    /// Migrations the simulation performed (FR-048, FR-049).
+    ///
+    /// Present even when zero, and zero is a finding: a multi-instance run whose migration
+    /// interval is long relative to session lifetime performs none, which is indistinguishable
+    /// from a run that exercised the case unless the count is on the report.
+    pub migrations: u64,
     /// Distinct keys the run referenced, when it was asked to count them.
     ///
     /// # Why this is the generator's count and not the nodes'

@@ -172,6 +172,26 @@ session_classes:
     think_time: {constant: 5}
 "#;
 
+/// The same shape as `DESCRIPTION`, with a migration interval short relative to a session's
+/// life, so a run over 60 virtual seconds must perform migrations rather than merely be able to.
+const MIGRATING: &str = r#"
+version: 1
+blocks: {tokens: 16, bytes: 32768}
+shared_classes:
+  manual:
+    length: {constant: 4}
+    lifetime: {constant: .inf}
+session_classes:
+  chat:
+    pool: {size: {exact: 10}}
+    uses: [{class: manual, count: {constant: 1}}]
+    turns: {constant: 8}
+    input_growth: {constant: 2}
+    output_growth: {constant: 1}
+    think_time: {constant: 1}
+    migration_interval: {constant: 1.0}
+"#;
+
 fn options() -> RunOptions {
     RunOptions {
         seed: 21,
@@ -297,4 +317,39 @@ fn losing_a_node_mid_run_aborts_and_names_it() {
         Err(DriveError::Setup(e)) => panic!("a lost node was reported as a setup failure: {e}"),
         Ok(_) => panic!("the run completed although a node was taken down"),
     }
+}
+
+#[test]
+fn migrations_reach_the_report_rather_than_staying_at_zero() {
+    // `DriveStats::migrations` existed, was documented as being there "so a run that exercised
+    // none is visible", and was never filled in or printed — `drive::run` hard-coded 0 and left a
+    // comment saying the caller would fill it. Nothing did. Found by running T101 on hardware and
+    // looking for the count the check depends on.
+    //
+    // Two instances and a migration interval short relative to session lifetime, so the
+    // simulation must perform some; the assertion is that a non-zero count *arrives*, not what it
+    // equals, which is the simulation's business and is tested in `workload-model`.
+    let launcher = LocalLauncher::new();
+    let specs: Vec<AgentSpec> = (0..2).map(|_| spec(free_port())).collect();
+    let mut agents = Agents::start_default(&launcher, &specs).expect("start");
+
+    let d: WorkloadDescription = MIGRATING.parse().expect("a migrating description");
+    let out = drive::run(
+        &mut agents,
+        &d,
+        &RunOptions {
+            until: Some(60.0),
+            ..options()
+        },
+        Arc::new(AtomicBool::new(false)),
+    )
+    .expect("drive");
+    agents.stop().expect("stop");
+
+    assert!(
+        out.migrations > 0,
+        "two instances and a 1s migration interval over 60 virtual seconds performed no \
+         migrations, so either the simulation did not migrate or the count is not reaching the \
+         report — the defect this test exists for"
+    );
 }

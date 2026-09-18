@@ -1659,6 +1659,7 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
     rendered.push_str(&live_report(
         &out.stats,
         None,
+        out.migrations,
         node_channels,
         lanes,
         args.batch_keys,
@@ -1696,6 +1697,21 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
             c.blocks_written()
         ));
     }
+    // Printed always, including zero. A multi-instance run whose migration interval is long
+    // relative to session lifetime performs none, and it would otherwise be indistinguishable
+    // from one that exercised the case — which is what FR-049's "inert rather than an error"
+    // makes easy to arrive at by accident. Zero here is a finding, not a missing field.
+    rendered.push_str(&format!(
+        "  migrations        {}{}\n",
+        out.migrations,
+        if instances.len() < 2 {
+            " (inert: migration needs two or more instances, FR-049)"
+        } else if out.migrations == 0 {
+            " — none performed, so this run did not exercise a cold prefix on arrival"
+        } else {
+            ""
+        }
+    ));
     let code = if out.stats.is_valid() {
         exit::OK
     } else {
@@ -1744,6 +1760,7 @@ fn humanise(seconds: f64) -> String {
 fn live_report(
     stats: &crate::live::LiveStats,
     lost_node: Option<String>,
+    migrations: u64,
     node_channels: usize,
     lanes: usize,
     batch_keys: usize,
@@ -1866,6 +1883,7 @@ fn live_report(
         distinct_keys: None,
         working_set: Vec::new(),
         producer_completed: stats.producer_completed,
+        migrations,
         lanes: stats.lanes.len(),
         node_channels,
         latency_us: LatencyPercentiles {

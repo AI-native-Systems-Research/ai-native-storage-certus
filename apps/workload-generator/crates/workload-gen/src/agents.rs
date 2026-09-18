@@ -489,11 +489,22 @@ impl Launcher for SshLauncher {
     }
 
     fn kill(&self, spec: &AgentSpec) -> Result<(), String> {
-        // Matched on the binary's own name and its port, so a run does not kill an agent that
-        // another run on the same host is using. `|| true` because "nothing to kill" is the
-        // expected case and must not be an error.
+        // The first character is bracketed so this cannot kill **the remote shell running it**.
+        // A plain `pkill -f 'workload-node-agent .*--port N'` matches that shell, because the
+        // pattern is part of its own argv: it killed the shell, ssh returned 255, and
+        // `Agents::start` correctly reported a failed launch — which made every multi-node run
+        // impossible. The local launcher kills by PID for exactly this reason; only this path had
+        // not been fixed.
+        //
+        // `[w]orkload…` still matches the agent's argv, while the shell's argv contains the
+        // literal brackets and so does not match. **`pgrep -x` is not the answer here**: it
+        // matches `comm`, which Linux truncates to 15 characters, and this binary's name is 19 —
+        // so `pgrep -x workload-node-agent` silently matches nothing at all.
+        //
+        // Still matched on the port, so a run does not kill an agent another run on the same host
+        // is using. `|| true` because "nothing to kill" is the expected case, not an error.
         let remote = format!(
-            "pkill -f 'workload-node-agent .*--port {}' || true",
+            "pkill -f '[w]orkload-node-agent .*--port {} ' || true",
             spec.port
         );
         self.ssh(spec, &remote)

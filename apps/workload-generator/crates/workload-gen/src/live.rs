@@ -617,6 +617,26 @@ impl Default for RunOptions {
 /// is the point: it is the backpressure that bounds memory, and it is what leaves the producer's
 /// speed observable at the consumer instead of absorbed by an ever-growing buffer.
 ///
+/// What a production run got through.
+///
+/// A struct rather than a tuple because the tuple was already four wide and the fifth element
+/// is exactly the one that went missing: `migrations` existed on `DriveStats`, documented as
+/// being there "so a run that exercised none is visible", and was never filled in or printed.
+/// A named field cannot be dropped on the floor by a destructuring that ignores it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Produced {
+    /// Batches pushed to the lanes.
+    pub batches: u64,
+    /// Virtual seconds covered.
+    pub virtual_span: f64,
+    /// Whether the run reached its own end rather than being stopped.
+    pub completed: bool,
+    /// Times the producer blocked on a full queue.
+    pub blocked: u64,
+    /// Migrations the simulation performed (FR-048, FR-049).
+    pub migrations: u64,
+}
+
 /// # Why the routing is a parameter
 ///
 /// A target is "somewhere a turn can be sent", and one node's lane is not distinguishable here
@@ -634,7 +654,7 @@ pub(crate) fn produce<R>(
     lanes: &[Lane],
     route: R,
     stop: &Arc<AtomicBool>,
-) -> Result<(u64, f64, bool, u64), String>
+) -> Result<Produced, String>
 where
     R: Fn(&workload_model::session::Session, usize) -> usize,
 {
@@ -654,7 +674,13 @@ where
 
     loop {
         if stop.load(Ordering::Relaxed) || disconnected {
-            return Ok((batches, sim.now(), false, blocked));
+            return Ok(Produced {
+                batches,
+                virtual_span: sim.now(),
+                completed: false,
+                blocked,
+                migrations: sim.migrations(),
+            });
         }
         if let Some(cap) = until {
             horizon = horizon.min(cap);
@@ -694,13 +720,25 @@ where
 
         if let Some(cap) = until {
             if horizon >= cap {
-                return Ok((batches, cap, true, blocked));
+                return Ok(Produced {
+                    batches,
+                    virtual_span: cap,
+                    completed: true,
+                    blocked,
+                    migrations: sim.migrations(),
+                });
             }
         }
         // An unbounded run with nothing left to do — every population mint-once and every
         // session finished — would otherwise advance the horizon for ever.
         if this_window == 0 && sim.next_event_at().is_none() {
-            return Ok((batches, sim.now(), true, blocked));
+            return Ok(Produced {
+                batches,
+                virtual_span: sim.now(),
+                completed: true,
+                blocked,
+                migrations: sim.migrations(),
+            });
         }
         horizon += PRODUCE_WINDOW;
     }
