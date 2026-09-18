@@ -13,11 +13,32 @@
 //!
 //! Only one ordering property is the generator's, and it is a **causal** one: a session's
 //! turns depend on each other, because turn *n+1*'s path contains the blocks turn *n*
-//! stored. So two turns of the same session must not be in flight together. Pipelining
-//! preserves that because the agent takes one connection's frames in arrival order and a
-//! lane owns a fixed set of sessions on its own connection, so overlap comes from having
-//! several lanes rather than from reordering within one. An agent that handed a
-//! connection's frames to a thread pool would break it.
+//! stored. So two turns of the same session must not be in flight together **on one
+//! instance**. Pipelining preserves that because the agent takes one connection's frames in
+//! arrival order and a lane owns a fixed set of sessions on its own connection, so overlap
+//! comes from having several lanes rather than from reordering within one. An agent that
+//! handed a connection's frames to a thread pool would break it.
+//!
+//! ## A migration is the exception, and it is benign by construction
+//!
+//! The premise above — a lane owns a fixed set of sessions — does not survive a migration.
+//! A session's within-instance lane index does not change, but its *instance* does, so its
+//! turns move to a different queue served by a different thread, and nothing orders the two.
+//! Turn *n* can still be in flight on the old instance while turn *n+1* goes out on the new
+//! one. Most likely in work-conserving mode, where no think time separates them.
+//!
+//! It is harmless for two reasons worth stating rather than assuming. The two turns touch
+//! **different caches**, so turn *n+1* misses on arrival whether or not turn *n* has
+//! finished — nothing moved the blocks. And the generator never reads anything back to build
+//! a turn: a path is computed by the model from the session's own history, so a pending turn
+//! cannot corrupt the plan. The causal dependency is a claim about what a cache ought to
+//! hold, not a data dependency in the driver.
+//!
+//! **One deployment weakens the first reason**: with Certus's remote lookup enabled the
+//! caches are not independent, and whether the old instance's store has landed decides
+//! whether the new one's remote fetch finds the prefix. That race is bounded by the
+//! migration count and falls inside a class the measurement methodology already answers —
+//! see `contracts/hardware.md`.
 //!
 //! The symptom if it were broken is worth knowing, because it is quiet: turn *n+1* would
 //! `CHECK` a prefix turn *n* had not yet stored, find it absent and store it **again**.
