@@ -254,7 +254,7 @@ pub fn run(
     if let Some(e) = lost.into_iter().flatten().next() {
         return Err(DriveError::Lost(e));
     }
-    let (batches, virtual_span, completed, blocked) = produced.map_err(|e| {
+    let produced = produced.map_err(|e| {
         DriveError::Lost(NodeLost {
             node: "the generator".into(),
             during: "building the plan",
@@ -315,13 +315,13 @@ pub fn run(
     Ok(DriveStats {
         stats: LiveStats {
             lanes: lanes_out,
-            batches_produced: batches,
-            producer_completed: completed,
-            producer_blocked: blocked,
+            batches_produced: produced.batches,
+            producer_completed: produced.completed,
+            producer_blocked: produced.blocked,
             cleared_entries: cleared,
             block_bytes,
             elapsed,
-            virtual_span,
+            virtual_span: produced.virtual_span,
             latency: combined,
             latency_by_op: by_op,
             pacing: options.pacing,
@@ -330,8 +330,10 @@ pub fn run(
             lateness_tolerance_us: options.lateness_tolerance_us,
         },
         per_node: per_node_counters,
-        // Filled by the caller, which owns the simulation's report.
-        migrations: 0,
+        // Taken from the simulation rather than left for the caller to fill: it was declared
+        // "so a run that exercised none is visible" and then never filled or printed, which is
+        // the failure it was meant to prevent, one level up.
+        migrations: produced.migrations,
     })
 }
 
