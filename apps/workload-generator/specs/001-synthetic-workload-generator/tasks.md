@@ -2292,6 +2292,49 @@ covers every crate under `crates/`, so editing *any* source file changes it —
 and a generator rebuilt after its agent is refused for provenance, correctly.
 Build `-p workload-gen -p workload-node-agent` together, every time.
 
+- [x] T092b [US3] Settle the pipelining depth: **no `--pipeline-depth` flag**,
+  and the missing half of `node-agent-wire.md`'s requirement asserted instead
+
+**T092b done, 2 tests.** The contract listed `--pipeline-depth` and the binary
+never accepted it. Resolved by removing the flag from the contract rather than
+implementing it, on three grounds: depth 8 at a ~30 µs loopback round trip is
+about 260 000 turns/second against roughly 1 000 observed, so the headroom is
+not close; a finite pacing rate makes the window nearly irrelevant, since turns
+go out when they are due rather than as fast as possible; and FR-072's
+requirement is that depth never reach the producer, which a test establishes
+and a flag does not.
+
+**What depth actually buys is hiding round-trip latency, not concurrency.** The
+agent handles one connection's frames one at a time in arrival order, so a
+deeper window only keeps the socket from idling between turns — which is also
+why depth is safe for FR-035 even though two turns of one session may be in
+flight on the wire.
+
+`loopback.rs` now varies depth (1, 2, 8, 32) and the four combinations of depth
+against lane count, comparing the turns submitted per session. Depth 1 is the
+load-bearing end: `Client::submit` drains a reply whenever the window is full,
+so every submit after the first waits for the previous outcome and the
+transport is round-trip bound rather than pipelined.
+
+**A flake of mine, found and fixed while doing this.** One `pacing.rs` run
+failed and then passed seven times, including under load. From the cumulative
+counts it was that suite — the one with wallclock bounds, all written today.
+Three of its assertions were absolute millisecond bounds, which are statements
+about how busy the machine running the test is rather than about pacing. They
+are now either **hang guards** (loose, where the load-bearing claim is the
+*lower* bound: the run must have waited) or **ratios measured against a
+rate-1.0 baseline in the same test** (where the claim is that a faster rate
+costs less, which is a comparison and not a duration). The achieved-rate window
+is one-sided for the same reason: overshooting the requested rate means the
+schedule was not kept, while a loaded machine may legitimately undershoot.
+
+**One stale justification corrected.** `DEFAULT_DEPTH`'s doc said a bigger
+window "would only add queueing delay to a latency measurement". FR-066 makes
+the mailbox-facing code the sole collector and FR-079 makes that always the
+agent, timing its own mailbox requests — so wire queueing is outside every
+reported latency figure and the claim is withdrawn. The honest reason not to
+raise it is weaker: there is nothing to gain.
+
 **Checkpoint**: all three execution paths work; US1 and US2 are unaffected by
 US3.
 

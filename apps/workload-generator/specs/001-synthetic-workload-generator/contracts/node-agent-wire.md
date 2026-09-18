@@ -35,7 +35,10 @@ does not have, at the cost of coupling the tool to specific NICs. See
 - One connection per lane, or a multiplexed connection with correlation ids.
   Either is conforming; the depth of pipelining MUST be configurable and MUST
   be independent of lane count, because FR-072 requires transport concurrency
-  not to affect the plan.
+  not to affect the plan. **Configurable means a parameter, not necessarily a
+  command-line flag** — what the requirement is about is that depth never
+  reaches the producer, and what establishes that is a test varying it and
+  comparing what crossed the wire. See `cli.md` on why no flag is exposed.
 - All integers little-endian and explicitly sized. No padding, no native
   alignment assumptions.
 

@@ -180,11 +180,29 @@ impl fmt::Display for HandshakeError {
 
 impl std::error::Error for HandshakeError {}
 
-/// Default pipelining depth.
+/// Default pipelining depth, and the only one — there is deliberately no flag for it.
 ///
 /// The contract's arithmetic: at 1M keys/second in 64-key batches — beyond anything measured
 /// on this hardware — a 50 µs round trip needs 0.78 batches in flight, so 8 is an order of
-/// magnitude of headroom. Bigger would only add queueing delay to a latency measurement.
+/// magnitude of headroom. Measured on loopback, depth 8 at a ~30 µs round trip is about
+/// 260 000 turns/second against roughly 1 000 observed.
+///
+/// # Why a bigger window would not cost a latency measurement
+///
+/// It used to be documented here that raising it "would only add queueing delay to a latency
+/// measurement". **That reasoning is stale and the claim is withdrawn**: FR-066 makes the
+/// mailbox-facing code the sole collector, and since FR-079 that is always the agent, timing
+/// its own mailbox requests. Wire queueing is therefore outside every reported latency figure.
+///
+/// The honest reason not to raise it is weaker and simpler: there is nothing to gain. A deeper
+/// window hides round-trip latency, and none is currently being felt. It is also worth knowing
+/// that depth buys **no concurrency at all** — the agent handles one connection's frames one at
+/// a time in arrival order, so a deeper window only keeps the socket from idling between turns.
+/// Concurrency comes from having several lanes.
+///
+/// Under a finite pacing rate the window is nearly irrelevant, since turns are submitted when
+/// they are due rather than as fast as possible. If a rate sweep ever reports the generator as
+/// the limit, this is the first number to try raising.
 pub const DEFAULT_DEPTH: usize = 8;
 
 /// Default read timeout.

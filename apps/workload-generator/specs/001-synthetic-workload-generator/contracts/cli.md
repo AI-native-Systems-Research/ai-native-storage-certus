@@ -290,11 +290,37 @@ and never a field of the description (FR-069's reasoning, FR-005 portability).
 (FR-072). They govern only how operations are grouped and dispatched. This is
 directly testable and is listed in `quickstart.md`.
 
-**Specified but not implemented**: `--pipeline-depth <n>`, in-flight turns per
-connection, independent of `--lanes` (FR-072). The depth exists and defaults to
-8; it is not settable from the command line. Recorded here rather than quietly
-dropped, because a contract that lists a flag the binary does not accept is
-worse than one that says which flag is missing.
+**There is deliberately no `--pipeline-depth`.** The pipelining window — turns
+outstanding on one agent connection — is a **library parameter**
+(`workload_wire::client::DEFAULT_DEPTH`, 8, threaded through `Agents::start`),
+not a command-line option. An earlier revision of this contract listed the
+flag; it was never implemented, and it should not be.
+
+What the window buys is **hiding round-trip latency, not concurrency**. The
+agent handles one connection's frames one at a time in arrival order, so a
+deeper window does not overlap execution at the mailbox; it only keeps the
+socket from idling for an RTT between turns. Concurrency comes from `--lanes`.
+This is also why depth is safe for FR-035: two turns of one session may be in
+flight on the wire, but the agent still executes them in order.
+
+Three reasons the flag is not wanted:
+
+- **The headroom is not close.** Depth 8 at a ~30 µs loopback round trip is
+  about 260 000 turns/second against roughly 1 000 observed. A 100 µs fabric
+  round trip still leaves 80 000/second.
+- **Pacing shrank its relevance.** Under the default finite rate the generator
+  is not sprinting: turns go out when they are due, so the in-flight count sits
+  near 1 whatever the depth. Depth is load-bearing only under `--rate inf`.
+- **FR-072's requirement does not need a flag.** What satisfies it is that
+  depth never reaches the producer; what *demonstrates* it is a test that
+  varies depth and compares what crossed the wire, which
+  `crates/workload-gen/tests/loopback.rs` does. A flag would let an operator
+  vary it; it would not make the property truer or better checked.
+
+If a rate sweep ever reports the generator as the limit, depth is the first
+knob to reach for, and exposing it is then a two-line change. Recording the
+arithmetic here is what makes that decision cheap; the flag itself is
+speculative.
 
 ## Reporting
 

@@ -159,6 +159,11 @@ fn unpaced() -> RunOptions {
 
 /// What crossed the wire, driven through a real loopback agent on `lanes` connections.
 fn driven_turns(lanes: usize, options: &RunOptions) -> Vec<Turn> {
+    driven_turns_at_depth(lanes, workload_wire::client::DEFAULT_DEPTH, options)
+}
+
+/// The same, at an explicit pipelining depth.
+fn driven_turns_at_depth(lanes: usize, depth: usize, options: &RunOptions) -> Vec<Turn> {
     let seen = Recorded::default();
     let port = {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -200,8 +205,8 @@ fn driven_turns(lanes: usize, options: &RunOptions) -> Vec<Turn> {
         extra_args: Vec::new(),
     }];
     // Already running, so nothing is launched and nothing is replaced.
-    let mut agents =
-        Agents::start_with(&NoLaunch, &specs, 8, false).expect("handshake with the loopback agent");
+    let mut agents = Agents::start_with(&NoLaunch, &specs, depth, false)
+        .expect("handshake with the loopback agent");
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
     drive::run(&mut agents, &d, options, Arc::new(AtomicBool::new(false)))
         .expect("drive the loopback agent");
@@ -435,6 +440,66 @@ fn the_plan_fingerprint_does_not_depend_on_the_rate() {
         assert_eq!(
             paced, reference_turns,
             "the keys submitted differ at rate {rate}, so the rate reached the workload"
+        );
+    }
+}
+
+#[test]
+fn the_pipelining_depth_does_not_change_what_is_submitted() {
+    // The half of `contracts/node-agent-wire.md`'s requirement that lane count does not cover:
+    // "the depth of pipelining MUST be configurable and MUST be independent of lane count,
+    // because FR-072 requires transport concurrency not to affect the plan."
+    //
+    // Depth is a *transport* choice — how many turns may be outstanding on one connection before
+    // a reply is drained to make room — so it must not reach the producer. Asserted rather than
+    // argued, because this is the property that makes a flag unnecessary: what FR-072 wants is
+    // that depth cannot change the workload, and a test that varies it is what shows that,
+    // whereas exposing it on the command line would only let an operator vary it.
+    //
+    // Depth 1 is the interesting end. `Client::submit` drains a reply whenever the window is
+    // full, so at depth 1 every submit after the first waits for the previous turn's outcome and
+    // the transport is round-trip bound rather than pipelined. That is a different transport by
+    // construction; the turns it carries must be identical anyway.
+    let reference = by_session(&driven_turns_at_depth(1, 1, &unpaced()));
+    assert!(!reference.is_empty(), "the description produced no turns");
+
+    for depth in [2, 8, 32] {
+        let other = by_session(&driven_turns_at_depth(1, depth, &unpaced()));
+        assert_eq!(
+            other.keys().collect::<Vec<_>>(),
+            reference.keys().collect::<Vec<_>>(),
+            "depth {depth} changed which sessions ran"
+        );
+        for (session, turns) in &reference {
+            assert_eq!(
+                other.get(session),
+                Some(turns),
+                "depth {depth} changed session {session}'s turns"
+            );
+        }
+    }
+}
+
+#[test]
+fn depth_and_lane_count_are_independent_of_each_other() {
+    // The other direction of the same requirement: neither knob may need the other adjusted, so
+    // the four combinations must all submit the same work. A transport that coupled them — a
+    // depth expressed per lane, say — would satisfy the test above and still make one setting
+    // depend on the other.
+    let reference = by_session(&driven_turns_at_depth(1, 1, &unpaced()));
+    for (lanes, depth) in [(1, 8), (4, 1), (4, 8)] {
+        let other = by_session(&driven_turns_at_depth(lanes, depth, &unpaced()));
+        for (session, turns) in &reference {
+            assert_eq!(
+                other.get(session),
+                Some(turns),
+                "lanes {lanes} at depth {depth} changed session {session}'s turns"
+            );
+        }
+        assert_eq!(
+            other.len(),
+            reference.len(),
+            "lanes {lanes} at depth {depth} ran a different set of sessions"
         );
     }
 }
