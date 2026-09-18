@@ -244,3 +244,76 @@ fn the_captured_identity_is_a_digest_of_the_sources_and_needs_no_repository() {
     assert!(count > 20, "only {count} source files hashed");
     assert!(bytes > 100_000, "only {bytes} bytes hashed");
 }
+
+/// Walk up from the crate root for the workspace lockfile, as `build.rs` does.
+fn lockfile() -> Option<std::path::PathBuf> {
+    let mut dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    for _ in 0..8 {
+        let candidate = dir.join("Cargo.lock");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        dir = dir.join("..");
+    }
+    None
+}
+
+/// Files `build.rs` hashes under `crates/`: `.rs` and `Cargo.toml`, skipping the dirs it skips.
+fn hashed_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if path.is_dir() {
+            if !matches!(name.as_ref(), "target" | "tests" | "benches") && !name.starts_with('.') {
+                hashed_sources(&path, out);
+            }
+        } else if name.ends_with(".rs") || name == "Cargo.toml" {
+            out.push(path);
+        }
+    }
+}
+
+#[test]
+fn the_workspace_lockfile_is_part_of_the_identity() {
+    // Two nodes that resolved a registry dependency to different versions — one built either
+    // side of a `cargo update` — passed the provenance check while running different code,
+    // because the digest walked `crates/` and the lockfile lives above it. It is the one file
+    // outside that directory now covered, and it is cheap: it changes only when dependencies
+    // change, which is exactly the change that matters.
+    //
+    // Asserted by counting: the identity carries its own file count, so a lockfile silently
+    // dropped from the set shows up here as an off-by-one rather than as a silent hole.
+    let lock = lockfile().expect("a workspace Cargo.lock above crates/");
+    let lock_bytes = std::fs::metadata(&lock).expect("stat the lockfile").len() as usize;
+
+    let mut files = Vec::new();
+    hashed_sources(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".."),
+        &mut files,
+    );
+    let source_bytes: usize = files
+        .iter()
+        .map(|p| std::fs::metadata(p).map(|m| m.len() as usize).unwrap_or(0))
+        .sum();
+
+    let parts: Vec<&str> = SOURCE_ID.split(':').collect();
+    let count: usize = parts[1].parse().expect("a file count");
+    let bytes: usize = parts[2].parse().expect("a byte total");
+
+    assert_eq!(
+        count,
+        files.len() + 1,
+        "the identity counts {count} files against {} sources plus one lockfile; if this is \
+         off by one the lockfile has been dropped from the digest",
+        files.len()
+    );
+    assert_eq!(
+        bytes,
+        source_bytes + lock_bytes,
+        "the identity's byte total does not account for the lockfile's {lock_bytes} bytes"
+    );
+}

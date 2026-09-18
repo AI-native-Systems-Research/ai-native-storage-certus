@@ -381,6 +381,12 @@ assignment either, so one derivation serves both.
 
 - **A replay report MUST record the instance count and the derivation salt**,
   or two replays are incomparable. Same argument as the hardware file's digest.
-- **Placement is a declared loss for the projections.** Neither `cachesim` nor
-  `mooncake` has any notion of it, so `declared_losses()` has to say so rather
-  than let a reader assume it survived (FR-077).
+- **The loss is at the emit boundary, not the projection boundary.** This was
+  first written here as "placement is a declared loss for the projections", and
+  that was **wrong**: a projection's `declared_losses()` names what the *trace*
+  carries and the target cannot, and the trace never carried placement, so
+  declaring it there puts the loss one stage later than it happens. What is
+  missing from an emitted trace is the migration **event**, and the emit path
+  now declares that — FR-077 applied where the loss occurs. If the placement
+  epoch above is ever built the projections *will* then drop it and a
+  `declared_losses()` entry becomes correct, but not before.

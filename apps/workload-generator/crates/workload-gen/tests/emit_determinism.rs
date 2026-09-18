@@ -522,3 +522,71 @@ fn asking_for_parquet_without_the_feature_is_refused_rather_than_silently_jsonl(
         "it wrote a jsonl trace instead of refusing"
     );
 }
+
+#[test]
+fn an_emitted_trace_declares_that_it_carries_no_migrations() {
+    // FR-077 at the emit boundary. A trace is deliberately free of instance identities — that
+    // is what makes one file replayable against any deployment — but `with_nodes` is only
+    // called by the live driver, so an emit run simulates a single node where migration is
+    // inert (FR-049). A description declaring a `migration_interval` therefore emits a trace in
+    // which no session migrates, and the missing part is the **event**, not its target: a
+    // migrated session's prefix is cold on arrival, which is why FR-048 exists.
+    //
+    // Deliberately not a projection `declared_losses` entry: the projections drop what the
+    // trace carries, and the trace never carried this, so declaring it there would place the
+    // loss one stage later than it happens.
+    let dir = tempfile::TempDir::new().unwrap();
+    let migrating = SMALL.replace(
+        "    think_time: {constant: 10}",
+        "    think_time: {constant: 10}\n    migration_interval: {constant: 1.0}",
+    );
+    let path = write(dir.path(), "migrating.yml", &migrating);
+    let report = dir.path().join("migrating-report.json");
+    let code = workload_gen::cli::run_argv(&[
+        "workload-gen".into(),
+        "emit".into(),
+        path.display().to_string(),
+        "--until".into(),
+        "20".into(),
+        "--seed".into(),
+        "1".into(),
+        "--certus-unified-jsonl".into(),
+        dir.path().join("mig-out").display().to_string(),
+        "--report".into(),
+        report.display().to_string(),
+    ]);
+    assert_eq!(code, 0, "the emit itself must succeed, not be refused");
+    let text = fs::read_to_string(&report).expect("a report");
+    assert!(
+        text.contains("migration is NOT represented"),
+        "the report must declare the loss: {text}"
+    );
+    assert!(
+        text.contains("chat"),
+        "the declaration must name the class that asked for it: {text}"
+    );
+
+    // And it must stay quiet when nothing asked for migration, or it is noise rather than a
+    // declaration — the same description without the interval.
+    let plain = write(dir.path(), "plain.yml", SMALL);
+    let report2 = dir.path().join("plain-report.json");
+    let code = workload_gen::cli::run_argv(&[
+        "workload-gen".into(),
+        "emit".into(),
+        plain.display().to_string(),
+        "--until".into(),
+        "20".into(),
+        "--seed".into(),
+        "1".into(),
+        "--certus-unified-jsonl".into(),
+        dir.path().join("plain-out").display().to_string(),
+        "--report".into(),
+        report2.display().to_string(),
+    ]);
+    assert_eq!(code, 0);
+    let text2 = fs::read_to_string(&report2).expect("a report");
+    assert!(
+        !text2.contains("migration"),
+        "a description that never migrates must not be warned about it: {text2}"
+    );
+}
