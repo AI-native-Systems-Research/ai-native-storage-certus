@@ -11,5 +11,7 @@ pub mod cli;
 #[cfg(feature = "live")]
 pub mod drive;
 #[cfg(feature = "live")]
+pub mod hardware;
+#[cfg(feature = "live")]
 pub mod live;
 pub mod report;

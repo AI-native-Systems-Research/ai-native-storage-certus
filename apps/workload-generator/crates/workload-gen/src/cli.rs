@@ -98,16 +98,6 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// How a run's requests are timed (FR-080).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
-pub enum PacingArg {
-    /// Hold each turn until its virtual time is due. The default.
-    #[default]
-    Real,
-    /// Issue as fast as the transport allows, and measure the ceiling.
-    None,
-}
-
 /// Everything `run` takes.
 ///
 /// A struct rather than fifteen enum fields threaded through a fifteen-argument call, which is
@@ -120,10 +110,7 @@ pub struct RunArgs {
     /// Optional virtual-second cap. Absent means run until interrupted.
     #[arg(long)]
     pub until: Option<f64>,
-    /// The mailbox **on each node**, which its agent attaches to.
-    #[arg(long, default_value = "/dev/shm/certus-shmq")]
-    pub shm_path: String,
-    /// Execution concurrency, per node: one agent connection and one mailbox channel each.
+    /// Execution concurrency, per instance: one agent connection and one mailbox channel each.
     ///
     /// Refused above the node's channel count, because the mailbox is depth-1 per channel and
     /// the extra lanes would serialise silently.
@@ -169,19 +156,30 @@ pub struct RunArgs {
     /// (FR-070), so it is opt-in.
     #[arg(long)]
     pub stamp_keys: bool,
-    /// A node to drive, repeatable. Absent means this host alone.
+    /// A Certus instance to drive, as `host[:port][:mailbox]`, repeatable.
     ///
-    /// Every node runs an agent and the generator reaches it over TCP, so only keys cross the
-    /// network (FR-047) — **including the local node**, which is launched as a child process
-    /// rather than over ssh (FR-079). Sessions are placed uniformly across the nodes given, and
-    /// a session with a `migration_interval` moves between them (FR-048), so the node list is a
+    /// **An instance, not a machine** (FR-081): a host routinely runs several — one per NUMA
+    /// domain, or one per NVMe device — so a hostname is not an identity and two entries may
+    /// share a host. A component that parses as a number is the port, one starting with `/` is
+    /// the mailbox, so `node5`, `node5:7001`, `node5:/dev/shm/certus-shmq-1` and
+    /// `node5:7001:/dev/shm/certus-shmq-1` are all unambiguous.
+    ///
+    /// Every instance runs an agent and the generator reaches it over TCP, so only keys cross
+    /// the network (FR-047) — **including the local one**, which is launched as a child process
+    /// rather than over ssh (FR-079). Sessions are placed uniformly across the instances given
+    /// and a session with a `migration_interval` moves between them (FR-048), so this list is a
     /// property of the deployment and deliberately not of the description.
-    #[arg(long = "node")]
-    pub nodes: Vec<String>,
-    /// Port each node's agent listens on.
-    #[arg(long, default_value_t = 7420)]
-    pub agent_port: u16,
-    /// Path to the agent binary **on each node**.
+    ///
+    /// Absent, the hardware file's list is used; absent that, this host alone. Given, it
+    /// **replaces** the file's list rather than adding to it.
+    #[arg(long = "instance", value_name = "HOST[:PORT][:MAILBOX]")]
+    pub instances: Vec<crate::hardware::Instance>,
+    /// The hardware file, describing the deployment rather than the workload (FR-082).
+    ///
+    /// Absent, `./cluster.yml` is read if it exists. The command line overrides it per field.
+    #[arg(long, value_name = "FILE")]
+    pub hardware: Option<PathBuf>,
+    /// Path to the agent binary **on each instance**.
     ///
     /// A bare name is looked for beside the generator's own executable when the node is local,
     /// which is where a cargo build puts it.
@@ -193,17 +191,19 @@ pub struct RunArgs {
     /// current build is reused rather than replaced — which is why it is opt-in.
     #[arg(long)]
     pub no_launch: bool,
-    /// Whether each turn waits for its virtual time to be due (FR-080).
+    /// Virtual seconds per wallclock second, or `inf` to issue as fast as the transport allows.
     ///
-    /// **`real` is the default**, and the two modes answer different questions: work-conserving
-    /// measures how fast Certus can go, paced measures the latency Certus delivers under the
-    /// load this workload actually represents. Paced by default when a ceiling was wanted
-    /// returns a throughput capped at the rate asked for, which is conspicuous; work-conserving
-    /// by default when the workload's latency was wanted returns percentiles from a saturated
-    /// queue, which look plausible and describe a queue the workload would never form.
-    #[arg(long, value_enum, default_value_t = PacingArg::Real)]
-    pub pacing: PacingArg,
-    /// Virtual seconds per wallclock second, under `--pacing real`.
+    /// **The only pacing knob** (FR-081). A finite rate paces the run: each turn is held until
+    /// its virtual time is due, and the run measures the latency Certus delivers under the load
+    /// this workload actually represents. `inf` makes it work-conserving, which measures how
+    /// fast Certus can go. One knob rather than two makes the contradiction the old
+    /// `--pacing none --rate 10` needed a refusal for unsayable.
+    ///
+    /// **Paced is the default**, because the failure of the other default is quiet: paced when a
+    /// ceiling was wanted returns a throughput capped at the rate asked for, which is
+    /// conspicuous, while work-conserving when the workload's latency was wanted returns
+    /// percentiles from a saturated queue — plausible-looking figures describing a queue the
+    /// workload would never form.
     ///
     /// A **calibration** control: a description's durations are arbitrary with respect to any
     /// particular machine, so this is how one description is aimed at faster or slower hardware
@@ -211,6 +211,10 @@ pub struct RunArgs {
     /// and a run's plan fingerprint is independent of it.
     ///
     /// It also sets the cost: at rate 1.0 a run takes wallclock equal to its virtual span.
+    ///
+    /// A large **finite** rate is not `inf`. `--rate 1e12` keeps a schedule the machine cannot
+    /// meet, so its lateness is real and the run is correctly invalid; `inf` has no schedule to
+    /// miss. Somebody will type a large number meaning "flat out".
     #[arg(long, default_value_t = 1.0)]
     pub rate: f64,
     /// The 99th-percentile lateness a paced run tolerates, in milliseconds (FR-080).
@@ -1453,27 +1457,46 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
 
     use crate::live::{Pacing, RunOptions};
 
-    let pacing = match args.pacing {
-        PacingArg::Real => Pacing::Real,
-        PacingArg::None => Pacing::None,
+    // The deployment: the command line over the hardware file over the built-in defaults, per
+    // field (FR-082). Read before anything is launched, because a refusal here has issued
+    // nothing and is exit 2 rather than an abandoned run.
+    let hardware = crate::hardware::read(args.hardware.as_deref()).map_err(Failure::config)?;
+    if let Some(h) = &hardware {
+        // An implicit file changes a run's meaning without appearing in the command line, so it
+        // is announced as well as recorded in the report (FR-063). Required, not a courtesy.
+        if h.implicit {
+            eprintln!(
+                "using the hardware file {} ({}), found by default; --hardware names another",
+                h.path, h.digest
+            );
+        }
+    }
+    // `--rate` overrides the file's; the default value is indistinguishable from an explicit
+    // 1.0, so the file wins only when the flag was left alone.
+    let rate = match hardware.as_ref().and_then(|h| h.rate) {
+        Some(from_file) if args.rate == 1.0 => from_file,
+        _ => args.rate,
+    };
+    // Derived, never given: `inf` *is* work-conserving, so the two cannot disagree.
+    //
+    // It must switch the schedule off rather than divide by it. Left to the arithmetic,
+    // `due = t0 + virtual/inf` gives `due == t0`, so every turn records as late by however long
+    // the run has been going, lateness grows without bound, and every work-conserving run
+    // reports *itself* invalid.
+    let pacing = if rate.is_infinite() {
+        Pacing::None
+    } else {
+        Pacing::Real
     };
     // Refused rather than clamped. A rate of zero would make every turn due at `t0` and quietly
-    // run work-conserving; a negative one has no meaning at all.
-    if pacing == Pacing::Real && !(args.rate.is_finite() && args.rate > 0.0) {
+    // run work-conserving; a negative one has no meaning at all; NaN compares false with
+    // everything and would pace on a coin toss.
+    if pacing == Pacing::Real && !(rate.is_finite() && rate > 0.0) {
         return Err(Failure::config(format!(
-            "--rate must be finite and greater than zero, not {}. It is virtual seconds per \
-             wallclock second, so zero would mean a run that never becomes due",
-            args.rate
+            "--rate must be greater than zero, not {rate}. It is virtual seconds per wallclock \
+             second, so zero would mean a run that never becomes due. Use `inf` for a \
+             work-conserving run"
         )));
-    }
-    // Refused rather than ignored: `--pacing none --rate 10` asks for two different things, and
-    // honouring one of them silently is how a run gets quoted as the other.
-    if pacing == Pacing::None && args.rate != 1.0 {
-        return Err(Failure::config(
-            "--rate applies only to --pacing real; a work-conserving run issues as fast as the \
-             transport allows and has no rate to aim at"
-                .to_string(),
-        ));
     }
 
     // Loaded first, and before anything is started or claimed.
@@ -1505,28 +1528,38 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
     if pacing == Pacing::Real {
         match args.until {
             Some(span) => eprintln!(
-                "paced at {:.3} virtual seconds per wallclock second: this run will take about \
-                 {} of wallclock time, because a paced run's cost *is* its virtual span divided \
-                 by the rate",
-                args.rate,
-                humanise(span / args.rate)
+                "paced at {rate:.3} virtual seconds per wallclock second: this run will take \
+                 about {} of wallclock time, because a paced run's cost *is* its virtual span \
+                 divided by the rate",
+                humanise(span / rate)
             ),
             None => eprintln!(
-                "paced at {:.3} virtual seconds per wallclock second, unbounded: this run \
-                 continues until interrupted, and a paced run is often idle by design",
-                args.rate
+                "paced at {rate:.3} virtual seconds per wallclock second, unbounded: this run \
+                 continues until interrupted, and a paced run is often idle by design"
             ),
         }
     }
 
-    // The node list, and the local node when none was named. Every node goes through an agent,
-    // so this is the only place the two differ at all: which launcher starts them.
-    let local = args.nodes.is_empty();
-    let node_names: Vec<String> = if local {
-        vec![LOCAL_NODE.to_string()]
+    // The instance list: the command line replaces the file's rather than adding to it, because
+    // the case that forces the choice is a rate sweep — vary the rate, hold the deployment — and
+    // appending would silently double a cluster on the second invocation.
+    let instances: Vec<crate::hardware::Instance> = if !args.instances.is_empty() {
+        args.instances.clone()
     } else {
-        args.nodes.clone()
+        match hardware.as_ref().map(|h| h.instances.clone()) {
+            Some(from_file) if !from_file.is_empty() => from_file,
+            // This host alone, through an agent launched as a child process.
+            _ => vec![crate::hardware::Instance {
+                host: LOCAL_NODE.to_string(),
+                port: crate::hardware::DEFAULT_PORT,
+                mailbox: crate::hardware::DEFAULT_MAILBOX.to_string(),
+            }],
+        }
     };
+    crate::hardware::check_distinct(&instances).map_err(Failure::config)?;
+    // Local means every instance is on this host, so the child-process launcher applies. A
+    // mixed list is driven over ssh, which reaches a local host too.
+    let local = instances.iter().all(|i| i.host == LOCAL_NODE);
     let binary = if local {
         crate::agents::local_agent_binary(&args.agent_binary)
     } else {
@@ -1548,12 +1581,12 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
     if args.verify_payload {
         extra_args.push("--verify-payload".to_string());
     }
-    let specs: Vec<crate::agents::AgentSpec> = node_names
+    let specs: Vec<crate::agents::AgentSpec> = instances
         .iter()
-        .map(|node| crate::agents::AgentSpec {
-            node: node.clone(),
-            port: args.agent_port,
-            shm_path: args.shm_path.clone(),
+        .map(|instance| crate::agents::AgentSpec {
+            node: instance.host.clone(),
+            port: instance.port,
+            shm_path: instance.mailbox.clone(),
             binary: binary.clone(),
             lanes: args.lanes,
             block_bytes,
@@ -1588,7 +1621,7 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
         batch_keys: args.batch_keys,
         clear_cache: args.clear_cache,
         pacing,
-        rate: args.rate,
+        rate,
         lateness_tolerance_us: args.lateness_tolerance_ms.saturating_mul(1_000),
     };
     // Captured before the agents are stopped: the report names the capacity the nodes actually
@@ -1633,10 +1666,31 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
         &args.description,
         args.report.clone(),
     )?);
-    rendered.push_str(&format!("  nodes             {}\n", node_names.len()));
+    rendered.push_str(&format!("  instances         {}\n", instances.len()));
+    // Named by instance, not by host: two instances on one machine would otherwise produce two
+    // rows reading `node5`, which is not a report. The mailbox is listed here once rather than
+    // repeated on every counter row.
+    for instance in &instances {
+        rendered.push_str(&format!(
+            "    {:<24} mailbox {}\n",
+            instance.label(),
+            instance.mailbox
+        ));
+    }
+    if let Some(h) = &hardware {
+        // Recorded under FR-063 so a report says which deployment file this was, not only that
+        // there was one. Together with the announcement above, this is what keeps an implicit
+        // file from changing a run's meaning invisibly.
+        rendered.push_str(&format!(
+            "  hardware file     {} ({}{})\n",
+            h.path,
+            h.digest,
+            if h.implicit { ", by default" } else { "" }
+        ));
+    }
     for (node, c) in &out.per_node {
         rendered.push_str(&format!(
-            "    {node:<20} {:>8} requests, {:>7} blocks read, {:>7} written\n",
+            "    {node:<24} {:>8} requests, {:>7} blocks read, {:>7} written\n",
             c.requests,
             c.blocks_read(),
             c.blocks_written()

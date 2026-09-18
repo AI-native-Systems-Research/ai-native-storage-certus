@@ -105,10 +105,10 @@ impl std::fmt::Display for NodeLost {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "node {} became unreachable while {} ({}). The run is aborted and invalid: \
-             continuing on the surviving nodes would measure a different experiment, because \
-             this node's sessions' prefixes are now unreachable, the set of migration targets \
-             has shrunk, and the survivors have absorbed its load (FR-064)",
+            "instance {} became unreachable while {} ({}). The run is aborted and invalid: \
+             continuing on the surviving instances would measure a different experiment, because \
+             this one's sessions' prefixes are now unreachable, the set of migration targets has \
+             shrunk, and the survivors have absorbed its load (FR-064)",
             self.node, self.during, self.reason
         )
     }
@@ -179,6 +179,16 @@ impl AgentSpec {
     /// `host:port`, which is what the client connects to.
     pub fn address(&self) -> String {
         format!("{}:{}", self.node, self.port)
+    }
+
+    /// This instance's identity in every message and report row (FR-081).
+    ///
+    /// The same text as [`AgentSpec::address`], and deliberately a separate method: they
+    /// coincide because an instance is reached where it is, but one is a socket address and the
+    /// other is a name. `node` alone will not do — a host runs several instances, so two rows
+    /// reading `node5` are not a report.
+    pub fn label(&self) -> String {
+        self.address()
     }
 }
 
@@ -714,7 +724,7 @@ impl Agents {
                         // agent's provenance — which matters, because a provenance refusal is the
                         // commonest way to arrive here.
                         if let Err(cleanup) = shut_down_or_kill(launcher, spec) {
-                            eprintln!("node {}: {cleanup}", spec.node);
+                            eprintln!("instance {}: {cleanup}", spec.label());
                         }
                     }
                 }
@@ -736,9 +746,9 @@ impl Agents {
         for spec in specs {
             if spec.lanes == 0 {
                 return Err(format!(
-                    "node {}: --lanes must be at least 1; a node with no lane would be started \
-                     and driven with nothing",
-                    spec.node
+                    "instance {}: --lanes must be at least 1; an instance with no lane would \
+                     be started and driven with nothing",
+                    spec.label()
                 ));
             }
             // Always replace, even a current build: a leftover holds the previous run's
@@ -746,7 +756,7 @@ impl Agents {
             // numbers as this one's (FR-052).
             if replace {
                 match replace_leftover(launcher, spec) {
-                    Ok(Some(())) => eprintln!("{}: replaced a leftover agent", spec.node),
+                    Ok(Some(())) => eprintln!("{}: replaced a leftover agent", spec.label()),
                     Ok(None) => {}
                     Err(e) => return Err(e),
                 }
@@ -768,9 +778,10 @@ impl Agents {
                     Client::<TcpStream>::connect(spec.address(), depth, Some(POLL * 5)).map_err(
                         |e| {
                             format!(
-                                "node {}: lane {lane} of {} could not connect to port {}: {e}. \
-                                 The agent serves one connection per mailbox channel it claimed",
-                                spec.node, spec.lanes, spec.port
+                                "instance {}: lane {lane} of {} could not connect: {e}. The \
+                                 agent serves one connection per mailbox channel it claimed",
+                                spec.label(),
+                                spec.lanes
                             )
                         },
                     )?
@@ -779,13 +790,13 @@ impl Agents {
                 // provenance check on only the first would let a run be driven over connections
                 // it never verified.
                 let this = client
-                    .handshake(&spec.node, &spec.shm_path, spec.lanes, spec.block_bytes)
+                    .handshake(&spec.label(), &spec.shm_path, spec.lanes, spec.block_bytes)
                     .map_err(|e| describe(spec, e))?;
                 ack = Some(this);
                 lanes.push(client);
             }
             agents.push(Agent {
-                node: spec.node.clone(),
+                node: spec.label(),
                 ack: ack.expect("at least one lane, checked above"),
                 lanes,
                 spec: spec.clone(),
@@ -898,7 +909,7 @@ impl Agents {
                 // would leave the rest of the cluster holding its mailbox channels — which is the
                 // teardown failure FR-053 exists for, arriving by a different route.
                 Err(e) => {
-                    let text = format!("node {}: asking the agent to stop: {e}", agent.node);
+                    let text = format!("instance {}: asking the agent to stop: {e}", agent.node);
                     first_error = first_error.or(Some(text));
                 }
             }
@@ -1012,9 +1023,8 @@ fn wait_for_port<L: Launcher>(
     // The launcher's account first when there is one. "Connection refused" is true and useless;
     // "the agent exited saying it could claim 0 of 2 channels" is the same failure, actionable.
     Err(format!(
-        "node {}: no agent accepted a connection on port {} within {:?}{}",
-        spec.node,
-        spec.port,
+        "instance {}: no agent accepted a connection within {:?}{}",
+        spec.label(),
         START_TIMEOUT,
         match (gone, last) {
             (Some(why), _) => format!(": {why}"),
@@ -1036,11 +1046,11 @@ fn wait_for_quiet(spec: &AgentSpec) -> bool {
     false
 }
 
-/// Name the node in a handshake failure, since on a cluster that is the useful part.
+/// Name the instance in a handshake failure, since on a cluster that is the useful part.
 fn describe(spec: &AgentSpec, e: HandshakeError) -> String {
     match e {
         HandshakeError::Refused(r) => format!("{r}"),
-        HandshakeError::Transport(t) => format!("node {}: {t}", spec.node),
+        HandshakeError::Transport(t) => format!("instance {}: {t}", spec.label()),
     }
 }
 

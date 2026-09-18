@@ -287,7 +287,10 @@ fn losing_a_node_mid_run_aborts_and_names_it() {
         // A node taken down mid-run is `Lost`, not `Setup`: the distinction is what tells a sweep
         // driver to retry the run rather than to go and fix the invocation.
         Err(DriveError::Lost(lost)) => {
-            assert_eq!(lost.node, "127.0.0.1");
+            // Named by instance, not by host (FR-081). Both instances of this test are on
+            // 127.0.0.1, so "the host" would not say which one died — and this test is the shape
+            // the defect hid in: several instances of one run sharing a machine.
+            assert_eq!(lost.node, format!("127.0.0.1:{}", ports[1]));
             let text = lost.to_string();
             assert!(text.contains("FR-064"), "{text}");
         }
