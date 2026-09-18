@@ -86,7 +86,10 @@ fn run(seed: u64, span: f64, dir: &std::path::Path) -> Converted {
     let converted = convert_jsonl(input, out).unwrap();
 
     Converted {
-        trace: replay::load(&sim_path).expect("the simulator must load the conversion"),
+        // `None` is "no conversation cap", which this file requires rather than
+        // merely prefers: every assertion below compares the loader's counts against
+        // the whole converted trace, so a cap would make them disagree by design.
+        trace: replay::load(&sim_path, None).expect("the simulator must load the conversion"),
         sessions_in_run: stats.sessions,
         converter_distinct: converted.distinct_keys,
         converter_references: converted.key_references,
