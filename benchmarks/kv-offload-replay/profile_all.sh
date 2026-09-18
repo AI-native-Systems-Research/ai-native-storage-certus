@@ -1282,6 +1282,44 @@ if want certus-spdk; then
         # can't fool the client preflight (the server recreates it anyway).
         rm -f "$SHM_PATH"
         log "starting Certus-SPDK server: ${dev_flags[*]} --memory-tier-size ${MEM_TIER_SIZE} shm=${SHM_PATH} channels=${CHANNELS} (numa node ${HUGEPAGES_1G_NODE})"
+        # certus-server-yaml bundles libcudart, which dlopen()s libcuda.so.1 (the
+        # NVIDIA driver's userspace API lib). Normally that's in the ldconfig cache
+        # and this block is a no-op; where the driver lives off the default loader
+        # path -- ostree/RHCOS (/var/home/core/nvdrv/NVIDIA-<ver>) or a GPU-operator
+        # driver container (/run/nvidia/driver/...) -- CUDA init otherwise fails with
+        # cudaErrorInsufficientDriver ("driver version is insufficient"). Discover
+        # the dir and put it on LD_LIBRARY_PATH so the launch never depends on the
+        # caller's environment.
+        _libcuda_ok=0
+        if ldconfig -p 2>/dev/null | grep -q 'libcuda\.so\.1'; then _libcuda_ok=1; fi
+        if [[ "$_libcuda_ok" -eq 0 && -n "${LD_LIBRARY_PATH:-}" ]]; then
+            _oldifs=$IFS; IFS=:
+            for _d in $LD_LIBRARY_PATH; do
+                if [[ -e "$_d/libcuda.so.1" ]]; then _libcuda_ok=1; break; fi
+            done
+            IFS=$_oldifs
+        fi
+        if [[ "$_libcuda_ok" -eq 0 ]]; then
+            _cuda_dir=""
+            _nv_ver="$(cat /sys/module/nvidia/version 2>/dev/null || true)"
+            for _d in \
+                ${_nv_ver:+"/var/home/core/nvdrv/NVIDIA-$_nv_ver"} \
+                /run/nvidia/driver/usr/lib64 \
+                /run/nvidia/driver/usr/lib/x86_64-linux-gnu \
+                /usr/lib64 /usr/lib/x86_64-linux-gnu; do
+                if [[ -e "$_d/libcuda.so.1" ]]; then _cuda_dir="$_d"; break; fi
+            done
+            if [[ -z "$_cuda_dir" ]]; then
+                _hit="$(find /var/home/core/nvdrv /run/nvidia /opt/nvidia -maxdepth 5 -name 'libcuda.so.1' -print -quit 2>/dev/null || true)"
+                if [[ -n "$_hit" ]]; then _cuda_dir="$(dirname "$_hit")"; fi
+            fi
+            if [[ -n "$_cuda_dir" ]]; then
+                export LD_LIBRARY_PATH="${_cuda_dir}:${LD_LIBRARY_PATH:-}"
+                log "Certus-SPDK server: added ${_cuda_dir} to LD_LIBRARY_PATH for libcuda.so.1"
+            else
+                warn "Certus-SPDK server: libcuda.so.1 not found off the ldconfig path; CUDA init may fail (set LD_LIBRARY_PATH to the NVIDIA driver dir)"
+            fi
+        fi
         "${numa_prefix[@]}" "$SERVER_BIN" "${dev_flags[@]}" \
             --memory-tier-size "$MEM_TIER_SIZE" \
             --memory-tier-eviction-threshold "$EVICT_THRESH" \
