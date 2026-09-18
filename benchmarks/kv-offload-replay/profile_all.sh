@@ -53,6 +53,7 @@ OUTPUT_TOKENS=150
 MAX_MODEL_LEN=8192
 MAX_NUM_SEQS=64
 GPU_MEM_UTIL=0.90
+GPU_KV_GB=""            # --gpu-kv-gb: absolute GPU KV cache size (GiB); empty = off
 GPU="all"
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # Certus-SPDK shmq mailbox (host <-> client)
 CHANNELS="${CHANNELS:-32}"                      # server worker threads / max in-flight requests
@@ -175,6 +176,9 @@ Flags (all optional; defaults shown):
   --max-model-len <n>          vLLM max model length. [8192]
   --max-num-seqs <n>           vLLM max concurrent sequences. [64]
   --gpu-mem-util <f>           vLLM GPU memory utilization. [0.90]
+  --gpu-kv-gb <N>              Pin GPU KV cache to N GiB (absolute; vLLM
+                               kv_cache_memory_bytes). Overrides the KV slice
+                               of --gpu-mem-util; forces overflow to Certus tiers.
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
   --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). Wins over
                                --total-mem if both are given. [CERTUS_HUGEPAGES-3 G]
@@ -274,6 +278,7 @@ while [[ $# -gt 0 ]]; do
         --max-model-len)    MAX_MODEL_LEN="$2"; shift 2;;
         --max-num-seqs)     MAX_NUM_SEQS="$2"; shift 2;;
         --gpu-mem-util)     GPU_MEM_UTIL="$2"; shift 2;;
+        --gpu-kv-gb)        GPU_KV_GB="$2"; shift 2;;
         --gpu)              GPU="$2"; shift 2;;
         --memory-tier-size) MEM_TIER_SIZE="$2"; MEM_TIER_EXPLICIT=1; shift 2;;
         --total-mem)        TOTAL_MEM_GIB="$2"; shift 2;;
@@ -1322,6 +1327,7 @@ if want certus-spdk; then
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
             GPU_MEM_UTIL="$GPU_MEM_UTIL" \
+            GPU_KV_GB="$GPU_KV_GB" \
             ENFORCE_EAGER="$ENFORCE_EAGER" \
             WORKLOAD_MODE="$WORKLOAD_MODE" \
             TRACE_OFFLOAD="$TRACE_OFFLOAD" \
