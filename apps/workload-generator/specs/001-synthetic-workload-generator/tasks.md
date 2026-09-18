@@ -1440,12 +1440,39 @@ each is a projection of the emitted schema, so none of them touches the
 simulation. `contracts/trace-interop.md` carries the verified upstream details
 and is normative for all of them. All are [US2]-scoped: no hardware, no server.
 
-- [ ] T062x [US2] Implement the projection module in
+- [x] T062x [US2] Implement the projection module in
   `crates/workload-trace/src/project.rs`: each target is a **function of the
   plan's record stream**, with two entry points calling it — `emit`'s in-stream
   flags and `convert`'s stored-trace pass (FR-075, FR-075a). Equivalence
   between the two is then structural rather than tested. A projection carries
   no manifest and is refused as an input to the determinism check (FR-075b)
+
+  **Satisfied without the module, and the task is revised rather than left
+  open.** This was written before any projection existed, and the shape that
+  emerged achieves what it asks for **per format** instead of in one shared
+  module. Each format owns one private `write_parts` holding the projection
+  itself, and both entry points call it: `write_record(&InvocationRecord)` for
+  `emit`'s in-stream pass, and `convert_jsonl*` for a stored trace
+  (`cachesim.rs:195`, `mooncake.rs:203`, `simulator.rs:168`). So FR-075a's
+  "both entry points MUST use the same projection so that they cannot disagree"
+  holds **structurally**, which is exactly what the task set out to buy.
+
+  A `project.rs` was considered and **not built**. What it would move is the
+  three-way fan-out in `cli.rs`'s emit loop and the dispatch in `convert` — not
+  the projection logic, which is already single-sourced. Weighed against that:
+  a fifth format could be wired into one path and forgotten in the other, which
+  a shared `Projections` type would make impossible. Judged cheap to catch by
+  eye while the flags sit adjacent in one enum, and to be revisited if a fourth
+  target lands.
+
+  The narrow per-format reader is a **decision, not drift** —
+  `simulator.rs:105` records it: four fields out of seventeen, and a reader
+  that cannot be broken by a change to a field it does not use.
+
+  **FR-075b's refusal has no reproducibility-check call site to guard**,
+  because no subcommand ingests a trace and checks one: `plan` takes a
+  *description* and writes the canonical serialisation. That leaves `convert`'s
+  input, and a projection offered there is refused in two shapes — see T062h.
 - [x] T062y [US2] Give every output format its own flag and destination in
   `crates/workload-gen/src/cli.rs` — `--certus-unified-jsonl <dir>`,
   `--certus-unified-parquet <dir>`, `--mooncake <file>`, `--libcachesim
@@ -1596,14 +1623,59 @@ shipped example produced 1 929 451 accesses over 1 072 096 distinct objects,
 and the binary came to 46 306 824 bytes — **exactly 1 929 451 x 24**, which
 independently confirms the record size against real output.
 
-- [ ] T062h [US2] Implement loss declaration for every conversion (FR-077) in
+- [x] T062h [US2] Implement loss declaration for every conversion (FR-077) in
   `crates/workload-trace/src/convert.rs`: each target names what it dropped
   (session grouping, input/output separation, `partial_final_valid`), and a
-  converted file is refused as an input to the determinism check **T062i and
-  T062j are DEFERRED, not scheduled.** Reading a third-party corpus is a
-  different axis from emitting one, and this feature does not need it: 24 real
-  traces are already in the emitted schema. They are kept here with their
-  measurements because the analysis was done and should not be repeated.
+  converted file is refused as an input to the determinism check
+
+  **The hole was on the `emit` path, not the `convert` path.** Every target
+  already declared its losses under `convert`, but only `mooncake` did so from
+  a `declared_losses()` on its stats — cachesim and simulator had the text
+  hand-written in `cli.rs`, so **`emit` declared nothing at all**. That is the
+  wrong way round: FR-075 exists so a projection can be had *without* writing
+  the native trace, which makes `emit --libcachesim` the ordinary way to get
+  one, and a projection-only run has nowhere else the declaration could appear.
+
+  So the lists moved onto `CachesimStats` and `SimulatorStats` beside
+  Mooncake's, and both paths render them through one function. The format owns
+  the list — it alone knows what it dropped — while the rendering and the
+  FR-075b line are shared, for the same reason FR-075a gives about the
+  projections themselves. Printed once per run rather than once per projection:
+  three copies read as three claims about three files rather than one property
+  of all of them.
+
+  **Two losses were missing from the text that existed**, both understatements
+  of the same fact. `cachesim` and `simulator` project `full_input_blocks`
+  only, so it is not that the input/output *distinction* is flattened — the
+  output keys are **not referenced at all**. Mooncake keeps `output_length` as
+  a token count and drops the identities. All three now say so in those terms.
+
+  **The dropped-empty entry appears only when something was dropped.** A
+  declaration that names a loss of zero rows trains a reader to skip the list;
+  both branches are asserted.
+
+  **The refusal (FR-075b) is executable and comes in two shapes**, which the
+  test pins rather than flattening: Mooncake and both libCacheSim containers
+  need block geometry, which only a manifest carries, so a projection offered
+  as input is refused **at the manifest** with exit 2 — FR-075b's own "it has
+  no manifest" as a check. The simulator target needs no manifest, so it
+  reaches the rows and is refused by the schema with exit 1. Sufficient rather
+  than lucky: no projection satisfies any target's row schema.
+
+  The module is `declared_losses()` on each writer's stats rather than a
+  `convert.rs`, because there is no `convert.rs` — see T062x on why the
+  per-format shape stands.
+
+  **Verified by injection**: deleting the simulator projection's losses from
+  the emit path alone fails
+  `both_entry_points_declare_the_same_losses_for_the_same_projection` naming
+  the exact line that went missing. The assertion runs convert→emit, in that
+  direction, because emit being the quieter of the two is the defect that was
+  actually there. **T062i and T062j are DEFERRED, not scheduled.** Reading a
+  third-party corpus is a different axis from emitting one, and this feature
+  does not need it: 24 real traces are already in the emitted schema. They are
+  kept here with their measurements because the analysis was done and should
+  not be repeated.
 
 - [ ] T062i [DEFERRED] Implement the WekaTrace reader in
   `crates/workload-trace/src/weka.rs`, reading one **session** per

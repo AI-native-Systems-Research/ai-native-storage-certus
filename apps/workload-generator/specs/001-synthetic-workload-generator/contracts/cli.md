@@ -62,6 +62,15 @@ workload-gen validate <description.yml>
   size. Such a run leaves **no trace directory at all** — not even an empty
   one, which would look like an interrupted run.
 
+  **Every projection an emit run writes declares what it dropped**, in the
+  rendered report beneath that projection's own line, from the same lists
+  `convert` prints (FR-077). The declaration belongs here and not only on the
+  `convert` path precisely because FR-075 makes this the ordinary way to obtain
+  a projection: a projection-only run has nowhere else the loss could appear.
+  The "a projection is not a trace" line (FR-075b) is printed **once for the
+  run** rather than once per projection — three copies would read as three
+  claims about three files instead of one property of all of them.
+
   `--report <file>` is an additional destination for the structured report,
   which is also written as `report.json` into every native trace directory and
   always rendered to the terminal. On a projection-only run it is the only way
@@ -91,8 +100,18 @@ workload-gen validate <description.yml>
     (FR-078), and reports the losses named in the interop contract.
   - `--to cachesim` — libCacheSim CSV. Prints the `--trace-type-params` string
     to use, since that reader's columns are configurable rather than fixed.
+  - `--to oracle-general` — libCacheSim's binary `oracleGeneral`, the same
+    reference stream carrying `next_access_vtime`. Only an emit run can fill
+    that field, which is what makes Belady baselines available; it buffers the
+    whole stream to do it, and refuses a span past 49.7 days rather than
+    wrapping its 32-bit clock.
   Every conversion MUST name what it dropped (FR-077), and a converted file is
   never accepted in place of the native trace for a reproducibility check.
+  **That refusal is executable, in two shapes**: Mooncake and both libCacheSim
+  containers need block geometry, which only a manifest carries, so a
+  projection offered as input is refused *at the manifest* (exit 2); the
+  simulator target needs no manifest and is refused by the row schema (exit 1),
+  which is sufficient because no projection satisfies any target's schema.
 - **`validate`** performs the load-time checks and the effective-distribution
   report (FR-002, FR-003, FR-004) and exits. Cheap, and the fastest way to find
   a configuration error.

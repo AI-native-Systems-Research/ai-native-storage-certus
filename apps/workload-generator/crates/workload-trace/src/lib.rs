@@ -65,6 +65,17 @@
 //! ```
 #![warn(missing_docs)]
 
+/// What a projection is, said once so that both entry points say it identically (FR-075b).
+///
+/// Printed after a projection's declared losses by `emit` and by `convert` alike. It is a
+/// property of every projection rather than of any one format, so it lives here and not in
+/// a `declared_losses` list — and it is one string rather than two so the two paths cannot
+/// drift into saying it differently, which is the same argument as FR-075a's for the
+/// projections themselves.
+pub const PROJECTION_IS_NOT_A_TRACE: &str =
+    "a projection is not a trace: no manifest, not self-describing, and not accepted in \
+     place of the native trace or the canonical plan for a reproducibility check (FR-075b)";
+
 pub mod cachesim;
 pub mod jsonl;
 pub mod manifest;

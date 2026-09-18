@@ -145,6 +145,9 @@ impl MooncakeStats {
                  must be told this file's is {} tokens",
                 self.block_size
             ),
+            "the generated run: output_length survives as a token count, but the output \
+             keys themselves are not referenced, so a consumer cannot see them cached"
+                .to_string(),
             "think time, TTFT and service time: not modelled by this generator and not \
              representable here"
                 .to_string(),
