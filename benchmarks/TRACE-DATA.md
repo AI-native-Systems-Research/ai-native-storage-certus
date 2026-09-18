@@ -57,6 +57,43 @@ shape (context length, turns, size) of the concrete trace sources staged on
   fully synthetic and reproducible from `(seed, config)` via inference-perf, not
   captured from a live service.
 
+### How a token-count-only trace exercises vLLM
+
+WEKA cc-trace, Mooncake, and the OTel corpus carry **no real prompt text** — only
+token *counts* and (for the two `hash_ids` formats) KV block ids. They do not test
+*what* the model says; they test the **serving system** (scheduler, prefill/decode
+compute, KV-cache, offload tiers), for which only sizes and reuse structure matter.
+The drivers reconstruct a workload of the right shape in three steps:
+
+1. **Token counts → a correctly-sized prompt.** Each request's `input_length` is
+   turned into throwaway text that tokenizes to *exactly* that many tokens, so prefill
+   does identically-sized work. guidellm/Mooncake
+   (`trace_common.generate_token_ids`) generates Faker text, `encode()`s it, and
+   truncates to the exact token count; the OTel generator (`trace_to_otel.gen_text`)
+   decodes random Qwen vocab ids. `output_length` is then passed as `max_tokens` (EOS
+   ignored) so **decode** runs exactly that many steps. Prefill FLOPs, decode steps,
+   and KV footprint match the real request even though the content is meaningless.
+
+2. **`hash_ids` → genuine KV-cache reuse** (the point of these formats for
+   cache/offload work). Each `hash_id` names a `block_size`-token KV block; two
+   requests sharing a `hash_id` are given the **same token block**, so vLLM's prefix
+   cache and the offload manager see the *exact* reuse pattern the original workload
+   had — hits, admissions, evictions — reconstructed without any real text. Scope is
+   why `cc_trace_to_mooncake.py` remaps the cc-trace's **local** ids into disjoint
+   **global** ranges: intra-conversation reuse is preserved, false cross-conversation
+   sharing is not invented, and guidellm's `ceil(input_length/block_size) ==
+   len(hash_ids)` invariant holds.
+
+3. **Timestamps → arrival/inter-turn timing.** `timestamp` (Mooncake, under guidellm
+   `--profile kind=replay`) or span `start/end_time` gaps (OTel, slept per
+   conversation) reproduce *when* requests arrive, so queueing and concurrency match
+   the workload instead of saturating the engine.
+
+**Faithfully measured** (all depend on sizes + block reuse, not content): throughput
+(tok/s, gen/s), TTFT, cache hit rate, offload-tier admission/eviction pressure,
+latency percentiles, tier bandwidth. **Not measured:** output quality/correctness —
+the generated text is random. For answer quality, use a real-text dataset (ShareGPT).
+
 ---
 
 ## 2. Conversion paths
