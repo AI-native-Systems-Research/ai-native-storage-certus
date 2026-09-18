@@ -987,6 +987,13 @@ Consequences, each of which is a thing that would otherwise fail quietly:
     second agent's startup finds the first on that port, takes it for a
     leftover of a crashed run, and shuts it down (FR-052) — so a two-instance
     run would drive one instance and report it as two.
+  - **And its own mailbox.** Two instances on one host given the same mailbox
+    MUST be refused as well. Two agents on one mailbox are two agents on one
+    Certus instance, so the deployment is one cache under two names: the
+    simulation places sessions across what it believes are two independent
+    caches, and a migration between them is served as a hit where FR-048
+    intends a miss. This collision is the quieter of the two — nothing
+    collides, both agents start, and the run reports nothing unusual.
   - **Every "node" in this document is an instance**, not a machine: placement
     (FR-048), migration (FR-049) and loss (FR-064) all range over instances. A
     session migrating between two co-resident instances is a **genuine cache

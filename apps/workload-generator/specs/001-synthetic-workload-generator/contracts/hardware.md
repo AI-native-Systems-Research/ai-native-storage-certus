@@ -1,7 +1,7 @@
 # Contract: The Hardware File
 
 **Version**: 1
-**Status**: Draft — agreed, not yet implemented (FR-081, FR-082)
+**Status**: Implemented (FR-081, FR-082)
 **Read by**: `workload-gen run`
 **Example**: `hardware.example.yml`, which a test keeps parseable
 
@@ -69,6 +69,15 @@ two agents on one port means the second one's startup finds the first, takes it
 for a leftover of a crashed run and shuts it down (FR-052). A run would then
 drive one instance while reporting two. **Duplicate `(host, port)` pairs MUST
 be refused**, naming both entries.
+
+Nor a `mailbox`. **Duplicate `(host, mailbox)` pairs MUST be refused** too, and
+this collision is the quieter of the two: nothing collides, nothing is shut
+down, and both agents start. But two agents on one mailbox are two agents on
+**one Certus instance**, so the deployment is one cache under two names — the
+simulation places sessions across what it believes are two independent caches,
+and a migration between them is served as a hit where FR-048 intends a miss.
+The run measures a deployment other than the one described, and reports nothing
+unusual.
 
 Two co-resident instances are two independent caches. A session migrating
 between them is a genuine cache miss (FR-048, FR-049) and a legitimate
