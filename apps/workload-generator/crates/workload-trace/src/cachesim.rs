@@ -144,7 +144,39 @@ pub struct CachesimStats {
 }
 
 impl CachesimStats {
-    /// The `--trace-type-params` string for the layout this writer produces.
+    /// The losses this projection incurred, for a report to print (FR-077).
+    ///
+    /// One list for both containers, because they project the same reference stream and
+    /// differ only in how they encode it. `oracleGeneral`'s extra `next_access_vtime` is
+    /// not listed: it is something this projection *adds* from knowing the whole future,
+    /// and its 32-bit `clock_time` is a **refusal** rather than a loss — a run past 49.7
+    /// days of virtual time is rejected instead of wrapped.
+    ///
+    /// Stated rather than left to be discovered, because every one of these is invisible
+    /// in the output: a libCacheSim file that has lost session identity and the generated
+    /// run still loads, replays and reports a hit rate.
+    pub fn declared_losses(&self) -> Vec<String> {
+        vec![
+            "session grouping and identity: the format has no session field at all, so \
+             nothing separates two sessions' accesses and the conversation graph cannot be \
+             recovered"
+                .to_string(),
+            "the generated run: only the prompt's blocks are referenced, so output keys \
+             never appear as accesses and a cache holding them is not modelled"
+                .to_string(),
+            format!(
+                "partial_final_valid and block geometry: every object is {} bytes, so a \
+                 trailing partial block occupies a whole one and how full it was is \
+                 unrecoverable",
+                self.object_bytes
+            ),
+            "virtual time: kept only as an integer millisecond clock, and think time, TTFT \
+             and service time are neither modelled by this generator nor representable here"
+                .to_string(),
+        ]
+    }
+
+    /// The `--trace-type-params` string for the layout this container produces.
     ///
     /// Printed with every conversion, because libCacheSim's columns are configurable
     /// and a CSV file cannot say what its own columns mean.
@@ -535,5 +567,38 @@ mod tests {
         let mut streaming_check = OracleGeneralWriter::new(Vec::new(), 4096);
         streaming_check.write_parts(0.0, &[1, 2]).unwrap();
         assert_eq!(streaming_check.buffered(), 2);
+    }
+
+    #[test]
+    fn the_declared_losses_name_what_a_loaded_file_cannot_show() {
+        // Every one of these is invisible in the output: a file that has lost session
+        // identity and the generated run still loads, replays and reports a hit rate,
+        // which is why FR-077 asks for them to be stated rather than discovered.
+        let mut out = Vec::new();
+        let stats = convert_jsonl_csv(row(0.0, &[1, 2]).as_bytes(), &mut out, 4096).unwrap();
+        let losses = stats.declared_losses();
+        for expected in [
+            "session grouping and identity",
+            "the generated run",
+            "partial_final_valid",
+            "virtual time",
+        ] {
+            assert!(
+                losses.iter().any(|l| l.contains(expected)),
+                "no loss names {expected:?}: {losses:?}"
+            );
+        }
+        // The object size is a figure a consumer cannot recover from the file, so it is
+        // named rather than alluded to.
+        assert!(
+            losses.iter().any(|l| l.contains("4096 bytes")),
+            "{losses:?}"
+        );
+
+        // Both containers project the same reference stream, so they declare the same
+        // losses; a divergence here would mean one of them dropped something quietly.
+        let mut binary = Vec::new();
+        let oracle = convert_jsonl_oracle(row(0.0, &[1, 2]).as_bytes(), &mut binary, 4096).unwrap();
+        assert_eq!(oracle.declared_losses(), losses);
     }
 }

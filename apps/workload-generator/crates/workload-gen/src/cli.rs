@@ -583,11 +583,7 @@ fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure
                 stats.example_command(&output.display().to_string())
             ));
         }
-        text.push_str(
-            "  DROPPED: session identity, the input/output distinction, and virtual \
-             time as anything but an integer clock. A projection is not a trace \
-             (FR-075b, FR-077).\n",
-        );
+        text.push_str(&render_losses("  ", &stats.declared_losses()));
         return Ok(text);
     }
 
@@ -610,11 +606,7 @@ fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure
             stats.distinct_ids,
             stats.references,
         );
-        for loss in stats.declared_losses() {
-            text.push_str("  DROPPED: ");
-            text.push_str(&loss);
-            text.push('\n');
-        }
+        text.push_str(&render_losses("  ", &stats.declared_losses()));
         return Ok(text);
     }
 
@@ -624,18 +616,54 @@ fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure
     )
     .map_err(|e| Failure::other(format!("converting {}: {e}", input_path.display())))?;
 
-    Ok(format!(
-        "converted {} to {} for the cache simulator\n           records {}  sessions {}  distinct keys {}  key references {}\n           dropped {} rows with no blocks (the simulator skips them)\n           DROPPED by this projection: virtual time, session identity as such, the \
-         input/output distinction. A projection is not a trace and is not accepted \
-         in place of one for a reproducibility check (FR-077, FR-075b).\n",
+    let mut text = format!(
+        "converted {} to {} for the cache simulator\n  \
+         records {}  sessions {}  distinct keys {}  key references {}\n",
         input_path.display(),
         output.display(),
         stats.records,
         stats.sessions,
         stats.distinct_keys,
         stats.key_references,
-        stats.dropped_empty,
-    ))
+    );
+    text.push_str(&render_losses("  ", &stats.declared_losses()));
+    Ok(text)
+}
+
+/// Render one projection's declared losses (FR-077).
+///
+/// # Why this is shared rather than written per format
+///
+/// FR-077's declaration is only worth anything if it is the *same* declaration wherever a
+/// projection is produced. Each format owns its list — it alone knows what it dropped — but
+/// the rendering is one function called by `convert` and by `emit`, for the reason FR-075a
+/// gives for the projections themselves: two hand-written copies of something that must
+/// agree will eventually not. Until this existed, the `emit` path declared **nothing**,
+/// which is the path FR-075 exists to make the ordinary one.
+fn one_projections_losses(indent: &str, losses: &[String]) -> String {
+    let mut out = String::new();
+    for loss in losses {
+        out.push_str(indent);
+        out.push_str("DROPPED: ");
+        out.push_str(loss);
+        out.push('\n');
+    }
+    out
+}
+
+/// A projection's losses followed by the one thing true of every projection.
+///
+/// The FR-075b line is deliberately not a per-format loss entry: it holds for every
+/// projection, so a format that listed it would be claiming it as its own and a format that
+/// forgot it would be silently exempt. `convert` writes exactly one projection per
+/// invocation, so it prints the line here; `emit` may write three and prints it once for the
+/// run instead.
+fn render_losses(indent: &str, losses: &[String]) -> String {
+    let mut out = one_projections_losses(indent, losses);
+    out.push_str(indent);
+    out.push_str(workload_trace::PROJECTION_IS_NOT_A_TRACE);
+    out.push('\n');
+    out
 }
 
 /// Read `block_bytes` out of a trace's manifest.
@@ -1348,6 +1376,12 @@ fn emit(
 
     let mut out = effective;
     out.push_str(&report.render());
+    // Each projection declares its own losses here, exactly as `convert` does and from the
+    // same lists (FR-077). This path declared nothing until it did, which was the wrong way
+    // round: FR-075 exists so that a projection can be had *without* writing the native
+    // trace, making this the ordinary way to obtain one, and a run that writes only a
+    // projection has no other place the declaration could appear.
+    let mut wrote_a_projection = false;
     if let (Some(path), Some(s)) = (&outputs.mooncake, &mooncake_stats) {
         out.push_str(&format!(
             "  mooncake          {} records to {} ({} distinct identifiers)\n",
@@ -1355,6 +1389,8 @@ fn emit(
             path.display(),
             s.distinct_ids
         ));
+        out.push_str(&one_projections_losses("    ", &s.declared_losses()));
+        wrote_a_projection = true;
     }
     if let (Some(path), Some(s)) = (&outputs.cachesim, &cachesim_stats) {
         out.push_str(&format!(
@@ -1365,6 +1401,8 @@ fn emit(
             s.distinct_objects,
             s.example_command(&path.display().to_string())
         ));
+        out.push_str(&one_projections_losses("    ", &s.declared_losses()));
+        wrote_a_projection = true;
     }
     if let (Some(path), Some(s)) = (&outputs.simulator, &simulator_stats) {
         out.push_str(&format!(
@@ -1374,6 +1412,15 @@ fn emit(
             s.sessions,
             s.distinct_keys
         ));
+        out.push_str(&one_projections_losses("    ", &s.declared_losses()));
+        wrote_a_projection = true;
+    }
+    // Once for the run rather than once per projection: three copies of it would read as
+    // three different claims about three files instead of one property of all of them.
+    if wrote_a_projection {
+        out.push_str("  ");
+        out.push_str(workload_trace::PROJECTION_IS_NOT_A_TRACE);
+        out.push('\n');
     }
     Ok(out)
 }
@@ -2207,6 +2254,152 @@ mod tests {
         assert!(projection_only.trace_dirs().is_empty());
         assert!(!projection_only.is_empty(), "it does have an output");
         assert!(Outputs::default().is_empty());
+    }
+
+    /// A real description rather than a hand-written fragment: a `blocks` missing `tokens`
+    /// exits 2 for a reason that has nothing to do with what is under test.
+    const SMALL: &str = r#"
+version: 1
+blocks: {tokens: 16, bytes: 32768}
+shared_classes:
+  manual:
+    length: {constant: 4}
+    lifetime: {constant: .inf}
+session_classes:
+  chat:
+    pool: {size: {exact: 5}}
+    uses: [{class: manual, count: {constant: 1}}]
+    turns: {constant: 4}
+    input_growth: {constant: 2}
+    output_growth: {constant: 1}
+    think_time: {constant: 10}
+"#;
+
+    #[test]
+    fn both_entry_points_declare_the_same_losses_for_the_same_projection() {
+        // FR-077 on the path that had nothing. `emit --simulator` and `convert --to
+        // simulator` produce the same file from the same records, so a reader who is told
+        // what was dropped on one path and not the other is being told the file is
+        // different depending on how it was obtained.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let description = tmp.path().join("small.yml");
+        fs::write(&description, SMALL).unwrap();
+        let trace = tmp.path().join("trace");
+        let emitted = emit(
+            &description,
+            200.0,
+            7,
+            Outputs {
+                unified_jsonl: Some(trace.clone()),
+                mooncake: Some(tmp.path().join("mc.jsonl")),
+                cachesim: Some(tmp.path().join("cs.csv")),
+                simulator: Some(tmp.path().join("sim.jsonl")),
+                ..Default::default()
+            },
+            None,
+            false,
+        )
+        .expect("the emit must succeed");
+
+        // One line for the run, not one per projection: three copies would read as three
+        // claims about three files rather than one property of all of them.
+        assert_eq!(
+            emitted
+                .matches(workload_trace::PROJECTION_IS_NOT_A_TRACE)
+                .count(),
+            1,
+            "{emitted}"
+        );
+
+        // Every loss the convert path declares for this format is declared by the emit
+        // path too. Asserted in that direction because the failure this catches is emit
+        // being the quieter of the two, which is how it was.
+        let converted = convert(
+            &trace,
+            ConvertTo::Simulator,
+            &tmp.path().join("converted.jsonl"),
+        )
+        .expect("the convert must succeed");
+        let mut compared = 0;
+        for line in converted
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("DROPPED: "))
+        {
+            assert!(
+                emitted.contains(line),
+                "the emit path does not declare {line:?}:\n{emitted}"
+            );
+            compared += 1;
+        }
+        assert!(compared >= 4, "only {compared} losses were compared");
+
+        // And each of the other two formats declares its own, so a run that asks for all
+        // three is told about all three.
+        for expected in ["16 tokens", "32768 bytes", "there is no timestamp field"] {
+            assert!(
+                emitted.contains(expected),
+                "no projection declared {expected:?}:\n{emitted}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_projection_is_not_accepted_where_a_trace_is_expected() {
+        // FR-075b's operative half, pinned rather than argued.
+        //
+        // There is no subcommand that ingests a trace and checks reproducibility — `plan`
+        // takes a *description* and writes the canonical serialisation, so a projection
+        // cannot be offered to it in the first place. That leaves `convert`'s input as the
+        // one place a projection could be mistaken for a trace, and it is refused there.
+        //
+        // The refusal takes two shapes, and both are recorded here rather than flattened
+        // into "it errors":
+        //
+        // * Mooncake and libCacheSim need block geometry, which only a manifest carries, so
+        //   they refuse at the manifest — FR-075b's own words, "it has no manifest", as an
+        //   executable check, and a **configuration** refusal (exit 2).
+        // * The simulator projection needs no manifest, so it gets as far as the rows and is
+        //   refused by the schema (exit 1). That is sufficient rather than lucky: no
+        //   projection satisfies any target's row schema — a simulator row has no
+        //   `request_start`, a Mooncake row has no `session_id`, and a libCacheSim CSV is
+        //   not JSON at all.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let description = tmp.path().join("small.yml");
+        fs::write(&description, SMALL).unwrap();
+        let projection = tmp.path().join("sim.jsonl");
+        emit(
+            &description,
+            200.0,
+            7,
+            Outputs {
+                simulator: Some(projection.clone()),
+                ..Default::default()
+            },
+            None,
+            false,
+        )
+        .expect("the emit must succeed");
+
+        // It is a file with no manifest beside it, because it is not a trace.
+        assert!(projection.is_file());
+        assert!(!tmp.path().join("manifest.json").exists());
+
+        for (target, expected_code) in [
+            (ConvertTo::Simulator, exit::OTHER),
+            (ConvertTo::Mooncake, exit::CONFIG),
+            (ConvertTo::Cachesim, exit::CONFIG),
+            (ConvertTo::OracleGeneral, exit::CONFIG),
+        ] {
+            let err = convert(&projection, target, &tmp.path().join("again.out"))
+                .expect_err("a projection must not be convertible as though it were a trace");
+            assert_eq!(err.code(), expected_code, "{target:?}: {err}");
+            if expected_code == exit::CONFIG {
+                assert!(
+                    err.to_string().contains("manifest"),
+                    "the refusal should name what is missing: {err}"
+                );
+            }
+        }
     }
 
     #[test]

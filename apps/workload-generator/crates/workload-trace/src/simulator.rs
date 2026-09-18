@@ -128,6 +128,38 @@ pub struct SimulatorStats {
     pub key_references: u64,
 }
 
+impl SimulatorStats {
+    /// The losses this projection incurred, for a report to print (FR-077).
+    ///
+    /// The dropped-empty entry appears only when something was dropped: a declaration that
+    /// names a loss of zero rows is noise, and noise is what stops these being read.
+    pub fn declared_losses(&self) -> Vec<String> {
+        let mut losses = vec![
+            "virtual time: there is no timestamp field, so the records carry their order \
+             and nothing else — arrival rate, think time and realised concurrency are gone"
+                .to_string(),
+            "session identity: session_id becomes a chat_id/parent_chat_id chain, so the \
+             grouping survives as that chain but the trace's own session names do not"
+                .to_string(),
+            "the generated run: only the prompt's blocks become hash_ids, so output keys \
+             are never accessed"
+                .to_string(),
+            "partial_final_valid and block geometry: the format carries neither, so a \
+             trailing partial block is indistinguishable from a full one"
+                .to_string(),
+        ];
+        if self.dropped_empty > 0 {
+            losses.push(format!(
+                "{} invocation{} with no blocks: the loader skips them, so they are dropped \
+                 rather than written and the file's row count is short by that many",
+                self.dropped_empty,
+                if self.dropped_empty == 1 { "" } else { "s" }
+            ));
+        }
+        losses
+    }
+}
+
 /// Writes the simulator's projection.
 #[derive(Debug)]
 pub struct SimulatorWriter<W: Write> {
@@ -376,5 +408,46 @@ mod tests {
         assert_eq!(stats.key_references, 7);
         assert_eq!(stats.distinct_keys, 4);
         assert_eq!(stats.sessions, 1);
+    }
+
+    #[test]
+    fn the_declared_losses_name_what_this_shape_cannot_carry() {
+        let mut out = Vec::new();
+        let stats =
+            convert_jsonl(format!("{}\n", row("a", 0, &[1, 2])).as_bytes(), &mut out).unwrap();
+        let losses = stats.declared_losses();
+        for expected in [
+            "virtual time",
+            "session identity",
+            "the generated run",
+            "partial_final_valid",
+        ] {
+            assert!(
+                losses.iter().any(|l| l.contains(expected)),
+                "no loss names {expected:?}: {losses:?}"
+            );
+        }
+        // Nothing was dropped, so nothing claims to have been: a declaration that names a
+        // loss of zero rows trains a reader to skip the list.
+        assert_eq!(stats.dropped_empty, 0);
+        assert!(
+            !losses.iter().any(|l| l.contains("no blocks")),
+            "a clean conversion must not report dropped rows: {losses:?}"
+        );
+
+        // And when rows *are* dropped it says so, with the count — the file's row count
+        // disagreeing with the trace's is otherwise unexplained.
+        let with_empty = format!("{}\n{}\n", row("a", 0, &[]), row("a", 0, &[1]));
+        let mut out2 = Vec::new();
+        let dropped = convert_jsonl(with_empty.as_bytes(), &mut out2).unwrap();
+        assert_eq!(dropped.dropped_empty, 1);
+        assert!(
+            dropped
+                .declared_losses()
+                .iter()
+                .any(|l| l.contains("1 invocation with no blocks")),
+            "{:?}",
+            dropped.declared_losses()
+        );
     }
 }
