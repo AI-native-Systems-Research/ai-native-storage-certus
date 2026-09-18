@@ -1691,10 +1691,37 @@ independently confirms the record size against real output.
   trace order. A fixture whose sessions are prefix extensions of each other
   must import as **nested** chains, matching T028's property from the other
   direction
-- [ ] T062k [US2] Add a `convert` section to `quickstart.md`: emit the shipped
+- [x] T062k [US2] Add a `convert` section to `quickstart.md`: emit the shipped
   example, convert to Mooncake and to cachesim, and check the reuse-preserving
   assertion by hand. Needs only a Rust toolchain, so it belongs with scenarios
   1-3
+
+  Scenario 3d, every number in it **run** rather than illustrated: 1943 records
+  to 411 430 identifiers over 655 104 references, and a 15 722 496-byte
+  `oracleGeneral` file that is exactly `655104 x 24`, confirming the verified
+  record size against real output.
+
+  **The two conversions cross-check each other.** Mooncake's `distinct
+  identifiers` and `references` equal the `oracleGeneral` writer's `distinct
+  objects` and `accesses`, and those writers share nothing but the record
+  stream, so the agreement is a check rather than a restatement.
+
+  **The hand check the task asked for had to change shape, because the obvious
+  form of it is vacuous — measured, not suspected.** Comparing a shared key's
+  identifier at its position in two sessions' rows proves nothing here: on this
+  trace **all 28 149** cross-session shared keys sit at the *same* prompt
+  position in both sessions and **none** at a differing one, because shared
+  objects are prompt prefixes and their position is fixed by the prefix layout.
+  A per-session renumbering restarting at zero therefore reproduces the same
+  number at the same position and passes. This is the same weakness already
+  annotated on `the_prompt_prefix_structure_survives_the_conversion`, now with
+  a figure behind it.
+
+  So the documented check is the **global identifier count** against the native
+  trace's distinct keys: 411 430 on both sides, dense. The two wrong
+  renumberings would give **1970** — the largest session's own key count, which
+  is also the longest prompt — so the defect reads as a **209x** collapse that
+  cannot be mistaken for noise.
 
 ---
 
