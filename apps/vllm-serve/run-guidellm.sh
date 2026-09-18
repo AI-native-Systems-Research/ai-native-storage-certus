@@ -160,7 +160,45 @@ else
   ARGS+=(--constraint "kind=max_duration,seconds=${MAX_SECONDS}")
 fi
 
+# ── KV-offload / prefix-cache metrics probe ─────────────────────────────────────
+# The prefix-cache hit rate you care about for a tiering backend is the SERVER's
+# "External prefix cache hit rate" (blocks served from the CPU/fs offload tiers),
+# NOT the GPU "Prefix cache hit rate" — under the OffloadingConnector the GPU one
+# sits at ~0% by design because reused prefixes live in the offload tier. So we
+# snapshot the server's /metrics counters before and after the run: if the
+# offload STORE counters climb but the external HIT counters stay flat, stores
+# are landing but no lookup ever matches (shared prefixes destroyed upstream) —
+# distinct from the case where stores never happen at all (dropped stores).
+METRICS_URL="${TARGET}/metrics"
+METRICS_OUT="${OUTPUT%.json}.metrics.txt"
+# Broad grep: vLLM's offload/prefix counter names vary across versions, so match
+# any that mention prefix cache, the external/offload path, or the KV connector.
+METRICS_RE='prefix_cache|external|offload|kv_transfer|connector|kv_cache_usage'
+snap_metrics() {  # $1 = label; prints matching counters (or a note if none)
+  local out
+  command -v curl >/dev/null 2>&1 || { echo "### ${1}: curl unavailable"; return; }
+  out="$(curl -fsS --max-time 5 "$METRICS_URL" 2>/dev/null | grep -iE "$METRICS_RE" | grep -v '^#')"
+  echo "### ${1} $(date -Is)"
+  [[ -n "$out" ]] && echo "$out" || echo "# (no matching counters at ${METRICS_URL})"
+}
+
 echo "[guidellm] target=${TARGET}  model=${MODEL}  rate-type=${RATE_TYPE}${RATE:+ rate=${RATE}}"
 echo "[guidellm] data: ${DATA}"
 echo "[guidellm] results -> ${OUTPUT}"
-exec guidellm "${ARGS[@]}"
+echo "[guidellm] metrics -> ${METRICS_OUT}"
+
+snap_metrics "BEFORE" > "$METRICS_OUT" 2>/dev/null || true
+
+# Run guidellm as a child (not exec) so we can capture post-run metrics. Do not
+# let a nonzero guidellm exit abort the metrics capture under `set -e`.
+set +e
+guidellm "${ARGS[@]}"
+rc=$?
+set -e
+
+snap_metrics "AFTER" >> "$METRICS_OUT" 2>/dev/null || true
+
+echo "[guidellm] --- KV-offload / prefix-cache counters after run ---"
+snap_metrics "AFTER" | grep -v '^###'
+echo "[guidellm] full before/after snapshot: ${METRICS_OUT}"
+exit "$rc"

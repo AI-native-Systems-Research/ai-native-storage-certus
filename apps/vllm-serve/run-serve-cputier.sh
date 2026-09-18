@@ -55,7 +55,7 @@ GPU="${GPU:-all}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
 
 # ── cputier offload (vLLM native OffloadingConnector) ────────────────────────────
-CPU_BYTES="${CPU_BYTES:-$((8 * (1 << 30)))}"   # CPU primary tier, pinned host RAM (bytes)
+CPU_BYTES="${CPU_BYTES:-$((30 * (1 << 30)))}"   # CPU primary tier, pinned host RAM (bytes)
 # TieringOffloadingSpec allocates the CPU tier as a /dev/shm mmap and force-
 # populates it; size the container's /dev/shm to the tier plus headroom (the
 # region is padded past cpu_bytes_to_use), mirroring run-docker-cputier.sh.
