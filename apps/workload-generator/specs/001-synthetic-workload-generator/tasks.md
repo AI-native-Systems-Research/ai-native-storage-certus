@@ -2948,47 +2948,47 @@ different mailboxes, both driven in one run; per-instance figures
 distinguishable in the report; and a session migrating between them recorded as
 a real cache miss.
 
-- [ ] T093 [US3] Replace `--node`/`--shm-path`/`--agent-port` with a repeatable
+- [X] T093 [US3] Replace `--node`/`--shm-path`/`--agent-port` with a repeatable
   `--instance <host[:port][:mailbox]>` in `crates/workload-gen/src/cli.rs`. A
   component that parses as a `u16` is the port, one starting with `/` is the
   mailbox, so all four shapes are unambiguous without an empty middle field.
   `--agent-binary` stays global: the handshake requires every instance to run
   the same build (FR-051), so a per-instance binary is a misconfiguration the
   protocol already refuses
-- [ ] T094 [US3] Refuse a duplicate `(host, port)` across instances, naming
+- [X] T094 [US3] Refuse a duplicate `(host, port)` across instances, naming
   both entries. Without it the second agent's startup shuts the first down as a
   leftover (FR-052) and the run reports two instances while driving one — the
   failure this phase exists to prevent, and it is silent
-- [ ] T095 [P] [US3] Make per-instance reporting distinguishable: `NodeLost`
+- [X] T095 [P] [US3] Make per-instance reporting distinguishable: `NodeLost`
   and the report's per-node rows must name the instance, not the host, or two
   rows read identically. Note the counters are already keyed by index rather
   than by hostname — T092 fixed that — so this is the presentation half only
-- [ ] T096 [US3] Read the hardware file (`contracts/hardware.md`):
+- [X] T096 [US3] Read the hardware file (`contracts/hardware.md`):
   `./cluster.yml` by default, `--hardware <file>` to name another, built-in
   defaults when neither exists. Refuse an unknown `version` (FR-006's
   reasoning) and an unknown field, so a typo is not silently a default
-- [ ] T097 [US3] Announce an implicitly picked-up `./cluster.yml` on the error
+- [X] T097 [US3] Announce an implicitly picked-up `./cluster.yml` on the error
   stream, and record the file's path and digest in the report under FR-063.
   Together these are what keep an implicit file from changing a run's meaning
   invisibly; they are required rather than courtesies
-- [ ] T098 [US3] Command line overrides the file **per field**, with
+- [X] T098 [US3] Command line overrides the file **per field**, with
   `--instance` replacing the whole instance list rather than adding to it. The
   case that forces this is a rate sweep, which varies the rate while holding
   the deployment fixed
-- [ ] T099 [US1] Make `--rate` the only pacing knob: accept `inf` (`.inf` in
+- [X] T099 [US1] Make `--rate` the only pacing knob: accept `inf` (`.inf` in
   the file), derive the mode from it, and **delete `--pacing`** along with the
   refusal that policed `--pacing none --rate 10`, which becomes unsayable
-- [ ] T099a [US1] **`inf` must switch the schedule off, not divide by
+- [X] T099a [US1] **`inf` must switch the schedule off, not divide by
   infinity.** Left to the arithmetic, `due = t0 + virtual/inf` gives `due ==
   t0`, so every request is recorded as late by however long the run has been
   going, lateness grows without bound, and every work-conserving run reports
   *itself* invalid. Test that a work-conserving run has an empty lateness
   histogram and is judged on the plan queue instead
-- [ ] T099b [P] [US1] Document that a large finite rate is **not** `inf` —
+- [X] T099b [P] [US1] Document that a large finite rate is **not** `inf` —
   `--rate 1e12` keeps a schedule the machine cannot meet and is correctly
   invalid for lateness. Somebody will type a large number meaning "flat out",
   and the report's existing wording is honest but not obvious
-- [ ] T100 [P] [US3] Tests: `hardware.example.yml` parses (the example cannot
+- [X] T100 [P] [US3] Tests: `hardware.example.yml` parses (the example cannot
   rot); two instances on one host are both driven; a duplicate `(host, port)`
   is refused; `--instance` replaces the file's list and `--rate` overrides its
   rate; and nothing belonging to the description is accepted in the hardware
@@ -2997,8 +2997,28 @@ a real cache miss.
   the cheap version: a second `certus-server-yaml` on its own `--shm-path` and
   its own 16 GiB device file leaves an existing server untouched. Two scratch
   servers on one host is the case this phase is about
-- [ ] T102 [P] Update `scripts/rate-sweep.sh` for `--rate inf` and the hardware
+- [X] T102 [P] Update `scripts/rate-sweep.sh` for `--rate inf` and the hardware
   file, and re-point its `--node` usage at `--instance`
+
+**Two findings from the implementation, both recorded in the contracts.**
+
+First, **T094 was one refusal short.** FR-081 names only a duplicate `(host,
+port)`, and a duplicate `(host, mailbox)` is the same failure with a quieter
+symptom: nothing collides, both agents start, and the run measures one cache
+under two names — so the simulation places sessions across what it believes are
+two independent caches and a migration between them is served as a hit where
+FR-048 intends a miss. Both are now refused, naming the pair.
+
+Second, **the trace path has no home for placement at all.** `with_nodes` is
+called only from the live driver, so an `emit` run uses the default one node
+where migration is inert — so a description with a `migration_interval` emits a
+trace in which migration never happened. The trace is rightly free of
+hostnames, but it is also missing the event. The agreed design (a per-session
+placement epoch on each record, targets resolved at playback, and placement
+derived rather than drawn from a shared stream) is written up as **D10 in
+`research.md`** and is **deferred, not scheduled** — it is a new capability
+whose real value is making the trace corpus driveable, not replaying our own
+output.
 
 **Terminology, settled**: "node" is kept for the concept because Zyre already
 uses it for an instance regardless of machine, and the model's placement is

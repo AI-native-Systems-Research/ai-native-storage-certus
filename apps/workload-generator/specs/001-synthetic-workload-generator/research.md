@@ -306,3 +306,81 @@ than statistical claims about our own machinery, and because the contract
 records the procedure rather than only the conclusion — but if any of these
 formats becomes load-bearing for a *result*, the measurement should be landed
 as a script the way `research/population/` was.
+
+## D10. Replaying a trace against a cluster: where placement lives
+
+**Deferred, not scheduled.** Recorded here because the design was settled while
+FR-081 was being built, and the conclusion is not obvious.
+
+### The gap
+
+The trace record carries no node or instance field, so a trace is already
+independent of the hardware — which is right, and FR-005's rule in the other
+direction. But `Simulation::with_nodes` is called only from the live driver, so
+an `emit` run uses the default one node, where migration is inert (FR-049) and
+takes no draws.
+
+So the loss is sharper than "a trace does not say which instance served a
+turn". **A description with a `migration_interval` emits a trace in which
+migration never happened at all** — not only the target is missing but the
+event, and the event is what makes a session's prefix cold.
+
+### The decomposition
+
+Three layers. The middle one has no home today:
+
+- **Workload**: whether and how often a session migrates. Already in the
+  description.
+- **Trace**: *that* session S migrated before turn k. Missing.
+- **Playback**: *which* instance it moves to. Resolved at replay time from the
+  instance list, so the file stays hardware-free.
+
+### The mechanism: a placement epoch, not a target
+
+Record a per-session `placement_epoch` on each turn, incremented on each
+migration. Preferable to a `moved` flag on three counts:
+
+- **Stateless**: a replayer reading record k knows where to send it without
+  having read k-1, which a parallel or resumable replay needs.
+- **Replayable at any instance count**, one included, where it is inert.
+- **Self-checking**: the summed per-session maximum equals the `migrations`
+  counter the report already prints, so a projection that dropped migrations is
+  caught rather than assumed.
+
+Playback routes by `instance = f(session, epoch, n)`: epoch 0 uniform over `n`,
+later epochs uniform among the others, which is FR-048's rule evaluated late.
+
+### What has to change first, and why it is worth doing anyway
+
+For that `f` to exist, **placement must become a derivation rather than a draw
+from a shared stream.** `place` and `migrate_due` currently draw from the `sim`
+substream interleaved with turn decisions, so a session's node cannot be
+recomputed without replaying the whole simulation. Deriving it as keys already
+are — `splitmix64` over a salt of `(session, epoch)` — buys three things:
+
+1. Placement becomes recomputable at playback from the trace alone.
+2. It would **guarantee** `the_workload_is_the_same_whatever_the_node_count`,
+   which today passes as a property of how the stream happens to be laid out
+   rather than by construction. A later edit could break it, and the test would
+   then be reporting luck.
+3. It settles an asymmetry: `place` draws even at one node "so the sequence
+   does not depend on the deployment", while `migrate_due` returns early
+   without drawing "so a single-node run does not consume randomness a
+   multi-node run would spend elsewhere". Two opposite conventions, each
+   justified by similar-sounding reasoning. A derivation makes it moot.
+
+### The larger prize
+
+There is **no replay path at all** today: the live driver runs from the
+simulation, never from a trace. So this is a new capability rather than a fix,
+and its value is not replaying our own `emit` output — it is that the trace
+corpus becomes driveable against Certus. A captured real trace has no instance
+assignment either, so one derivation serves both.
+
+### Two traps to carry into the work
+
+- **A replay report MUST record the instance count and the derivation salt**,
+  or two replays are incomparable. Same argument as the hardware file's digest.
+- **Placement is a declared loss for the projections.** Neither `cachesim` nor
+  `mooncake` has any notion of it, so `declared_losses()` has to say so rather
+  than let a reader assume it survived (FR-077).

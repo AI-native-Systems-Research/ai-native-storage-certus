@@ -213,6 +213,15 @@ agent, so a shared port means the second agent's startup finds the first, takes
 it for a leftover of a crashed run and shuts it down (FR-052) — a two-instance
 run would then drive one instance and report it as two.
 
+**Two instances on one host given the same mailbox MUST also be refused**, and
+this one is quieter: nothing collides and nothing is shut down. Two agents on
+one mailbox are two agents on **one Certus instance**, so it is one cache under
+two names — the simulation would place sessions across what it believes are two
+independent caches, and a migration between them would be served as a hit where
+FR-048 intends a miss. The run would simply measure a deployment other than the
+one described. Found while implementing the port refusal, which is the same
+failure with a louder symptom.
+
 There is deliberately **no `--shm-path` and no `--agent-port`.** Their only
 remaining job would be to set a uniform *non-default* mailbox or port across
 every instance, which is cheap to say per instance on a command line meant for
