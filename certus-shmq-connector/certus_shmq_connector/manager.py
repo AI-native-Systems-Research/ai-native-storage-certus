@@ -358,13 +358,26 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # returned spec carries LOGICAL keys — each worker folds in its own rank.
         pin_keys = [nk for k in int_keys for nk in self._ns_all(k)]
         # Pin (promote=FALSE) only takes the eviction-protecting read-ref. We must
-        # NOT ask Pin to promote: Pin's promote is async/fire-and-forget, and the
-        # Lookup that immediately follows (in the load handler) already promotes
-        # cold (BlockDevice) entries itself. Two promotes race on the same key —
-        # both do mt.insert() — and the loser hits MemoryTierError::AlreadyExists,
-        # surfaced as ALLOCATION_FAILED, which fails the load and crashes vLLM
-        # (worker asserts transfer success). Lookup is self-sufficient: it serves
-        # MemoryTier hits directly and promotes BlockDevice misses in one path.
+        # NOT ask Pin to promote, because the Lookup that immediately follows (in
+        # the load handler) already promotes cold (BlockDevice) entries itself.
+        # Two promotes race on the same key — both do mt.insert() — and the loser
+        # hits MemoryTierError::AlreadyExists, surfaced as ALLOCATION_FAILED,
+        # which fails the load and crashes vLLM (worker asserts transfer success).
+        # Lookup is self-sufficient: it serves MemoryTier hits directly and
+        # promotes BlockDevice misses in one path.
+        #
+        # This comment used to give "Pin's promote is async/fire-and-forget" as
+        # the reason, and that is NOT true of the server we talk to, whatever
+        # IDispatcher's "fire-and-forget" wording suggests. translate.rs::op_pin
+        # calls promote_to_memory_tier INLINE, and that function joins its
+        # per-drive threads (std::thread::scope) before returning, so the SSD
+        # reads complete before the Pin reply is written. promote=True would
+        # therefore not merely race with Lookup — it would also hold this
+        # request's mailbox reply for the length of those reads. The race is the
+        # reason; the blocking is a second one. (The dispatcher spec's FR-040
+        # describes this as a detached background task, which does not match the
+        # inline call above. Which of the two is meant to change is a dispatcher
+        # question, deliberately not settled here.)
         pin_ok = self._ring.pin(pin_keys, promote=False)
         # Diagnostic: vLLM only reaches here for keys lookup()/Check reported as
         # present, and cannot drop keys from the returned spec (dst block ids are
