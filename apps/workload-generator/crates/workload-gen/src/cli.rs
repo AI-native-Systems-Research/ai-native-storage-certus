@@ -1310,7 +1310,11 @@ fn emit(
             description_path: description_path.display().to_string(),
         },
         projection: ProjectionSummary::from(&projection),
-        warnings: projection.warnings.clone(),
+        warnings: {
+            let mut w = projection.warnings.clone();
+            w.extend(migration_is_not_emitted(&description));
+            w
+        },
     };
 
     // `report.json` goes into every native trace directory, and to `--report` if given.
@@ -1954,6 +1958,48 @@ fn install_stop_handler() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Declare that an emitted trace carries no migrations, when the description asks for them.
+///
+/// # Why this is a loss and not a warning about nothing
+///
+/// A trace is deliberately free of instance identities — it says what the sessions did, not
+/// which cache served them, and that is what makes one file replayable against any deployment.
+/// But `Simulation::with_nodes` is called only by the live driver, so an emit run uses the
+/// default single node, where migration is **inert** by FR-049. A description that declares a
+/// `migration_interval` therefore emits a trace in which no session ever migrates.
+///
+/// So what is missing is not the *target* of a migration, which nothing here should record — it
+/// is the **event**. And the event is the part that matters to a cache: a migrated session's
+/// prefix is cold on arrival, which is the whole reason FR-048 exists. A reader comparing this
+/// trace against a live multi-instance run would find fewer misses and no explanation.
+///
+/// FR-077's rule applied at the emit boundary rather than the projection boundary. It belongs
+/// here and **not** in a projection's `declared_losses`: the projections drop what the trace
+/// carries, and the trace never carried this, so declaring it there would tell a reader the
+/// loss happened one stage later than it did. `research.md`'s D10 records the design that would
+/// close it.
+fn migration_is_not_emitted(description: &WorkloadDescription) -> Option<String> {
+    let asked: Vec<&str> = description
+        .session_classes
+        .iter()
+        .filter(|(_, _, class)| class.migration_interval.is_some())
+        .map(|(_, name, _)| name)
+        .collect();
+    if asked.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "migration is NOT represented in this trace: session class{} {} declare{} a \
+         migration_interval, but an emit run simulates a single node, where migration is inert \
+         (FR-049). No session migrates here, so this trace has fewer cold-prefix misses than the \
+         same description driven across two or more instances. The event is missing, not just \
+         its target",
+        if asked.len() == 1 { "" } else { "es" },
+        asked.join(", "),
+        if asked.len() == 1 { "s" } else { "" }
+    ))
 }
 
 /// Non-cryptographic digest of a description, matching the trace manifest's.

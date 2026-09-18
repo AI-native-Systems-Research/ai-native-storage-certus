@@ -26,8 +26,8 @@
 //!
 //! # What is covered
 //!
-//! Every `.rs` and `Cargo.toml` under `apps/workload-generator/crates/`, excluding `tests/`
-//! and `benches/` — those compile into separate binaries that are never linked into the agent
+//! Every `.rs` and `Cargo.toml` under `apps/workload-generator/crates/`, plus the workspace
+//! `Cargo.lock`, excluding `tests/` and `benches/` — those compile into separate binaries that are never linked into the agent
 //! or the generator, so an edit there cannot change either one's behaviour and including them
 //! only forced a redeploy whenever a test was touched. Paths are sorted so the digest does not
 //! depend on directory order, and each file contributes its path as well as its bytes, so
@@ -37,10 +37,20 @@
 //! them from the code around them. Editing one still invalidates a deployed agent — the
 //! remaining friction, and a small one.
 //!
-//! Workspace dependencies outside this directory are **not** covered. A node running a
-//! different `shmq-dispatcher` would not be caught here; that is a deliberate boundary
-//! rather than an oversight, because hashing the whole repository would make the identity
-//! change on every unrelated edit and the check would be ignored within a week.
+//! Plus the **workspace `Cargo.lock`**, which is the one file outside this directory that is
+//! covered. Without it two nodes that resolved a registry dependency to different versions —
+//! one built either side of a `cargo update` — passed the provenance check while running
+//! different code. It costs one file that changes only when dependencies change, which is
+//! exactly the change that matters, so it does not reopen the churn problem the boundary below
+//! exists to avoid.
+//!
+//! Everything **else** outside this directory is still **not** covered, and that is a
+//! deliberate boundary rather than an oversight: hashing the whole repository would make the
+//! identity change on every unrelated edit and the check would be ignored within a week. The
+//! hole this leaves is specific and worth stating plainly — a node running a different
+//! `shmq-dispatcher` is not caught, because a source edit to a workspace path dependency does
+//! not change its version and so does not change the lockfile. The lockfile closes the
+//! registry-version half of that gap and nothing more.
 //!
 //! # What it costs, measured
 //!
@@ -85,6 +95,24 @@ fn sources(root: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// The workspace lockfile, found by walking up from the crate root.
+///
+/// Discovered rather than reached by a counted `..` chain, so moving this crate in the tree
+/// cannot silently drop it from the identity — which is the failure mode the whole script
+/// exists to prevent, one level up.
+fn lockfile() -> Option<PathBuf> {
+    let mut dir = PathBuf::from("..");
+    // Bounded: a runaway walk would climb out of the checkout and hash a stranger's lockfile.
+    for _ in 0..8 {
+        let candidate = dir.join("Cargo.lock");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        dir = dir.join("..");
+    }
+    None
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=WORKLOAD_SOURCE_ID");
@@ -117,6 +145,29 @@ fn main() {
         fold.write(&content);
         counted += 1;
         bytes += content.len();
+    }
+
+    // The lockfile last, and under a **fixed label** rather than its discovered path: the
+    // number of `..` segments is a fact about the tree layout, not about what was built, and
+    // folding it would make the identity depend on where the crate sits.
+    //
+    // Its absence is folded too, rather than passed over. Two nodes that disagree about whether
+    // there is a lockfile disagree about what determined their dependency versions, and the
+    // check should say so instead of quietly treating the two as equivalent.
+    match lockfile() {
+        Some(path) => {
+            println!("cargo:rerun-if-changed={}", path.display());
+            match fs::read(&path) {
+                Ok(content) => {
+                    fold.write(b"Cargo.lock");
+                    fold.write(&content);
+                    counted += 1;
+                    bytes += content.len();
+                }
+                Err(_) => fold.write(b"Cargo.lock:unreadable"),
+            }
+        }
+        None => fold.write(b"Cargo.lock:absent"),
     }
 
     let id = if counted == 0 {
