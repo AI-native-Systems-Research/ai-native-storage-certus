@@ -526,8 +526,8 @@ fn asking_for_parquet_without_the_feature_is_refused_rather_than_silently_jsonl(
 #[test]
 fn an_emitted_trace_declares_that_it_carries_no_migrations() {
     // FR-077 at the emit boundary. A trace is deliberately free of instance identities — that
-    // is what makes one file replayable against any deployment — but `with_nodes` is only
-    // called by the live driver, so an emit run simulates a single node where migration is
+    // is what makes one file replayable against any deployment — but only the live driver has a
+    // node count to give, so an emit run simulates a single node where migration is
     // inert (FR-049). A description declaring a `migration_interval` therefore emits a trace in
     // which no session migrates, and the missing part is the **event**, not its target: a
     // migrated session's prefix is cold on arrival, which is why FR-048 exists.

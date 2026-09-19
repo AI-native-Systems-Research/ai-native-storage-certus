@@ -487,7 +487,7 @@ session_classes:
         let span = 1_000.0;
 
         let projected = project(&d, span, 5).unwrap();
-        let mut sim = Simulation::new(&d, 5).unwrap();
+        let mut sim = Simulation::new(&d, 5, 1).unwrap();
         let mut plan = OperationPlan::default();
         sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
 
@@ -526,7 +526,7 @@ session_classes:
         let d = simple();
         let span = 1_000.0;
         let projected = project(&d, span, 3).unwrap();
-        let mut sim = Simulation::new(&d, 3).unwrap();
+        let mut sim = Simulation::new(&d, 3, 1).unwrap();
         let mut plan = OperationPlan::default();
         sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
 

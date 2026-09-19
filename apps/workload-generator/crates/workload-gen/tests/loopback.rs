@@ -81,7 +81,7 @@ const SEED: u64 = 31;
 /// FR-079 removed rather than a comparison of two implementations that both still ship.
 fn local_turns() -> Vec<Turn> {
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
-    let mut sim = Simulation::new(&d, SEED).unwrap();
+    let mut sim = Simulation::new(&d, SEED, 1).unwrap();
     let mut plan = OperationPlan::default();
     sim.run_until(SPAN, &mut |s, t| plan.record_turn(s, t));
 
@@ -300,7 +300,7 @@ fn the_comparison_would_notice_a_difference() {
     let a = local_turns();
     let b = {
         let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
-        let mut sim = Simulation::new(&d, SEED + 1).unwrap();
+        let mut sim = Simulation::new(&d, SEED + 1, 1).unwrap();
         let mut plan = OperationPlan::default();
         sim.run_until(SPAN, &mut |s, t| plan.record_turn(s, t));
         plan.operations().len()
@@ -308,7 +308,7 @@ fn the_comparison_would_notice_a_difference() {
     assert!(b > 0);
     let a_keys: Vec<u64> = a.iter().flat_map(|(_, p, _)| p.clone()).collect();
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
-    let mut sim = Simulation::new(&d, SEED + 1).unwrap();
+    let mut sim = Simulation::new(&d, SEED + 1, 1).unwrap();
     let mut other = OperationPlan::default();
     sim.run_until(SPAN, &mut |s, t| other.record_turn(s, t));
     let mut other_path = Vec::new();
@@ -405,7 +405,7 @@ fn the_plan_fingerprint_does_not_depend_on_the_rate() {
     // "this field is not read over there" is exactly the kind of claim that stops being true.
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
     let fingerprint = |seed: u64| {
-        let mut sim = Simulation::new(&d, seed).unwrap();
+        let mut sim = Simulation::new(&d, seed, 1).unwrap();
         let mut plan = OperationPlan::default();
         sim.run_until(SPAN, &mut |s, t| plan.record_turn(s, t));
         plan.fingerprint()

@@ -146,7 +146,7 @@ fn references(yaml: &str) -> Vec<(u64, u64)> {
 /// The same, at a chosen seed, so a verdict can be shown not to rest on one draw.
 fn references_seeded(yaml: &str, seed: u64) -> Vec<(u64, u64)> {
     let d: WorkloadDescription = yaml.parse().unwrap();
-    let mut sim = Simulation::new(&d, seed).unwrap();
+    let mut sim = Simulation::new(&d, seed, 1).unwrap();
     let mut plan = OperationPlan::default();
     sim.run_until(SPAN, &mut |s, t| plan.record_turn(s, t));
     let mut out = Vec::new();

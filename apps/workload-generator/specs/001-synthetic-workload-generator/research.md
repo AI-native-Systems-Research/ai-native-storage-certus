@@ -330,9 +330,8 @@ FR-081 was being built, and the conclusion is not obvious.
 
 The trace record carries no node or instance field, so a trace is already
 independent of the hardware — which is right, and FR-005's rule in the other
-direction. But `Simulation::with_nodes` is called only from the live driver, so
-an `emit` run uses the default one node, where migration is inert (FR-049) and
-takes no draws.
+direction. But only the live driver has a node count to give the simulation, so
+an `emit` run passes one, where migration is inert (FR-049) and takes no draws.
 
 So the loss is sharper than "a trace does not say which instance served a
 turn". **A description with a `migration_interval` emits a trace in which

@@ -94,7 +94,7 @@
 //!     think_time: {constant: 5}
 //! "#;
 //! let description: WorkloadDescription = yaml.parse().unwrap();
-//! let mut sim = Simulation::new(&description, 7).unwrap();
+//! let mut sim = Simulation::new(&description, 7, 1).unwrap();
 //!
 //! let mut plan = OperationPlan::default();
 //! sim.run_until(100.0, &mut |session, turn| plan.record_turn(session, turn));
@@ -518,7 +518,7 @@ session_classes:
     }
 
     fn plan_of(d: &WorkloadDescription, seed: u64, until: f64) -> OperationPlan {
-        let mut sim = Simulation::new(d, seed).unwrap();
+        let mut sim = Simulation::new(d, seed, 1).unwrap();
         let mut plan = OperationPlan::default();
         sim.run_until(until, &mut |s, t| plan.record_turn(s, t));
         plan
@@ -742,11 +742,11 @@ session_classes:
         // The knob exists because the client's cadence is an assumption; changing it
         // must affect only the poll count.
         let d = description(6, 3, 1, 1);
-        let mut sim = Simulation::new(&d, 41).unwrap();
+        let mut sim = Simulation::new(&d, 41, 1).unwrap();
         let mut every_turn = OperationPlan::default();
         sim.run_until(300.0, &mut |s, t| every_turn.record_turn(s, t));
 
-        let mut sim = Simulation::new(&d, 41).unwrap();
+        let mut sim = Simulation::new(&d, 41, 1).unwrap();
         let mut every_third = OperationPlan::with_options(PlanOptions {
             poll_events_every: 3,
         });

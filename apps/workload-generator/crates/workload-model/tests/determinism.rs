@@ -54,7 +54,7 @@ session_classes:
 
 fn plan_bytes(seed: u64, until: f64) -> Vec<u8> {
     let d = description();
-    let mut sim = Simulation::new(&d, seed).unwrap();
+    let mut sim = Simulation::new(&d, seed, 1).unwrap();
     let mut plan = OperationPlan::default();
     sim.run_until(until, &mut |s, t| plan.record_turn(s, t));
     plan.check_ordered().expect("the plan must be ordered");
@@ -102,7 +102,7 @@ fn every_substream_responds_to_the_seed() {
     // and growth from the sim substream.
     let d = description();
     let observe = |seed: u64| {
-        let mut sim = Simulation::new(&d, seed).unwrap();
+        let mut sim = Simulation::new(&d, seed, 1).unwrap();
         let mut shapes = Vec::new();
         sim.run_until(600.0, &mut |s, t| {
             shapes.push((
@@ -144,7 +144,7 @@ fn the_span_determines_the_plan_and_nothing_else_does() {
     // prefix; compare the operations instead.
     let d = description();
     let ops_of = |until: f64| {
-        let mut sim = Simulation::new(&d, 99).unwrap();
+        let mut sim = Simulation::new(&d, 99, 1).unwrap();
         let mut plan = OperationPlan::default();
         sim.run_until(until, &mut |s, t| plan.record_turn(s, t));
         plan.operations()

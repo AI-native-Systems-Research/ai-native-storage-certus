@@ -70,7 +70,7 @@
 //!     think_time: {constant: 10}
 //! "#;
 //! let description: WorkloadDescription = yaml.parse().unwrap();
-//! let mut sim = Simulation::new(&description, 42).unwrap();
+//! let mut sim = Simulation::new(&description, 42, 1).unwrap();
 //!
 //! let mut turns = 0;
 //! let mut blocks_read = 0;
@@ -120,6 +120,17 @@ pub struct Simulation {
     sessions: Vec<SessionClassState>,
     ids: SessionIds,
     rng: rng::Rng,
+    /// Draws for *where* a session runs: its node at birth, its migration targets, and
+    /// the migration intervals scheduling both.
+    ///
+    /// Separate from `rng` because placement's consumption depends on the deployment —
+    /// `gen_range(0..1)` and `gen_range(0..4)` are measurably not the same number of bytes,
+    /// and `migrate_due` draws nothing at all below two nodes. Sharing one stream with
+    /// `bind`, which picks a session's shared instances, therefore made the **keys** a
+    /// function of the node count: the same description and seed produced a different
+    /// workload on one node than on four. Keeping placement here is what makes a run's
+    /// keys independent of where its turns are sent (FR-048).
+    placement_rng: rng::Rng,
     /// Pending turns, earliest first, as `(at bits, session id, class, handle)`.
     ///
     /// Ordered on session id rather than on `(class, handle)` so the delivered
@@ -147,10 +158,30 @@ impl Simulation {
     /// in one place cannot shift the numbers everywhere else and silently
     /// invalidate a recorded seed.
     ///
+    /// # `nodes` is required, not defaulted
+    ///
+    /// It is a constructor parameter rather than a setter because the seeded population is
+    /// placed *here*, in `new`, before any setter could run. A builder that filled it in
+    /// afterwards placed every session alive at `t = 0` on node 0 — a run that looked
+    /// healthy, drove one instance, and only came right once the seeded cohort had died off
+    /// and been replaced, so short runs were badly skewed and long ones were not. Nothing
+    /// enforced the ordering the builder needed, and neither the compiler nor the tests
+    /// could catch its absence.
+    ///
+    /// `1` means a single-node run, where migration is **inert** rather than an error
+    /// (FR-049): refusing a description that declares a `migration_interval` would make
+    /// every multi-node description unusable locally.
+    ///
     /// # Errors
     ///
     /// If the description does not validate, or a distribution cannot be resolved.
-    pub fn new(description: &WorkloadDescription, seed: u64) -> Result<Self> {
+    ///
+    /// # Panics
+    ///
+    /// If `nodes` is zero: there would be nowhere to place a session, and treating it as
+    /// one would hide a caller's arithmetic error behind a working run.
+    pub fn new(description: &WorkloadDescription, seed: u64, nodes: usize) -> Result<Self> {
+        assert!(nodes > 0, "a run needs at least one node");
         let report = description.validate()?;
         if !report.refusals().is_empty() {
             return Err(Error::new(format!(
@@ -242,7 +273,8 @@ impl Simulation {
             sessions,
             ids,
             rng: rng::substream(seed, "sim"),
-            nodes: 1,
+            placement_rng: rng::substream(seed, "placement"),
+            nodes,
             migrations: 0,
             turns: BinaryHeap::new(),
             now: 0.0,
@@ -407,23 +439,6 @@ impl Simulation {
         self.now = self.now.max(until);
     }
 
-    /// Place sessions across `nodes`, and enable migration.
-    ///
-    /// `1` — the default — makes migration **inert** rather than an error (FR-049): a
-    /// single-node run is the ordinary case, and refusing a description that happens to
-    /// declare a `migration_interval` would make every multi-node description unusable
-    /// locally.
-    ///
-    /// # Panics
-    ///
-    /// If `nodes` is zero: there would be nowhere to place a session, and treating it as one
-    /// would hide a caller's arithmetic error behind a working run.
-    pub fn with_nodes(mut self, nodes: usize) -> Self {
-        assert!(nodes > 0, "a run needs at least one node");
-        self.nodes = nodes;
-        self
-    }
-
     /// Nodes sessions are placed across.
     pub fn nodes(&self) -> usize {
         self.nodes
@@ -466,16 +481,17 @@ impl Simulation {
 
     /// Place a newly born session, and schedule its first migration.
     ///
-    /// Uniform over nodes (FR-048). Drawn even when there is only one node, so that the
-    /// sequence of random draws — and therefore every later decision — does not depend on the
-    /// deployment: a description run on one node and on four must produce the same *workload*,
-    /// differing only in where each turn is sent.
+    /// Uniform over nodes (FR-048). A description run on one node and on four must produce
+    /// the same *workload*, differing only in where each turn is sent, and what secures that
+    /// is `placement_rng` being its own substream — not the draw below being taken
+    /// unconditionally. The draw's width varies with `nodes` and its cost in bytes varies
+    /// with it, so on a shared stream it moved every later key.
     fn place(&mut self, class: usize, handle: usize) {
-        let node = self.rng.gen_range(0..self.nodes);
+        let node = self.placement_rng.gen_range(0..self.nodes);
         let interval = self.sessions[class]
             .migration_interval
             .as_ref()
-            .map(|i| i.sample(&mut self.rng));
+            .map(|i| i.sample(&mut self.placement_rng));
         let session = self.sessions[class].pool.session_mut(handle);
         session.place(node);
         let born = session.born_at();
@@ -496,8 +512,9 @@ impl Simulation {
     /// others" excludes a different node each time.
     fn migrate_due(&mut self, class: usize, handle: usize, at: f64) {
         if self.nodes < 2 {
-            // Inert, and not merely a no-op: no draw is taken, so a single-node run does not
-            // consume randomness a multi-node run would spend elsewhere.
+            // Inert. Taking no draw is safe now that placement has its own substream: it
+            // costs a single-node run nothing that a multi-node run spends, and neither can
+            // reach the stream `bind` draws keys from.
             return;
         }
         loop {
@@ -511,12 +528,12 @@ impl Simulation {
             let from = session.node();
             // Uniform among the *others* (FR-048): drawing over all nodes would leave a
             // session where it was with probability 1/nodes, which is not a migration.
-            let step = 1 + self.rng.gen_range(0..self.nodes - 1);
+            let step = 1 + self.placement_rng.gen_range(0..self.nodes - 1);
             let to = (from + step) % self.nodes;
             let interval = self.sessions[class]
                 .migration_interval
                 .as_ref()
-                .map(|i| i.sample(&mut self.rng));
+                .map(|i| i.sample(&mut self.placement_rng));
             let session = self.sessions[class].pool.session_mut(handle);
             session.migrate_to(to);
             // From the due time, not from `at`: pacing the next migration off when we happened
@@ -651,7 +668,7 @@ session_classes:
         // FR-072 in its simplest form: same description and seed, same turns.
         let d = description(4, 6);
         let snapshot = |seed: u64| {
-            let mut sim = Simulation::new(&d, seed).unwrap();
+            let mut sim = Simulation::new(&d, seed, 1).unwrap();
             let mut out = Vec::new();
             sim.run_until(500.0, &mut |s, t| {
                 out.push((s.id(), t.index(), t.at().to_bits(), t.reads_len()));
@@ -667,7 +684,7 @@ session_classes:
         // The whole point of the loop. Out-of-order delivery would mean a turn
         // reading a prefix that did not exist yet, and no aggregate would show it.
         let d = description(5, 12);
-        let mut sim = Simulation::new(&d, 3).unwrap();
+        let mut sim = Simulation::new(&d, 3, 1).unwrap();
         let mut times = Vec::new();
         sim.run_until(1_000.0, &mut |_, t| times.push(t.at()));
         assert!(times.len() > 12);
@@ -680,7 +697,7 @@ session_classes:
     #[test]
     fn each_session_takes_its_turns_in_order_from_zero() {
         let d = description(4, 8);
-        let mut sim = Simulation::new(&d, 4).unwrap();
+        let mut sim = Simulation::new(&d, 4, 1).unwrap();
         let mut by_session: std::collections::BTreeMap<u64, Vec<usize>> = Default::default();
         sim.run_until(2_000.0, &mut |s, t| {
             by_session.entry(s.id()).or_default().push(t.index());
@@ -697,7 +714,7 @@ session_classes:
         // Binding happens before the first turn, so even turn 0 reads the shared
         // run. A missing bind would show up here as a zero-length first read.
         let d = description(3, 5);
-        let mut sim = Simulation::new(&d, 5).unwrap();
+        let mut sim = Simulation::new(&d, 5, 1).unwrap();
         let mut first_reads = Vec::new();
         sim.run_until(400.0, &mut |s, t| {
             if t.index() == 0 {
@@ -719,7 +736,7 @@ session_classes:
         // FR-025 end to end: each turn reads exactly what the previous one read
         // plus what it minted.
         let d = description(6, 3);
-        let mut sim = Simulation::new(&d, 6).unwrap();
+        let mut sim = Simulation::new(&d, 6, 1).unwrap();
         let mut last: std::collections::BTreeMap<u64, usize> = Default::default();
         sim.run_until(2_000.0, &mut |s, t| {
             if let Some(previous) = last.get(&s.id()) {
@@ -741,7 +758,7 @@ session_classes:
     #[test]
     fn an_exact_session_class_holds_its_concurrency_through_the_loop() {
         let d = description(3, 10);
-        let mut sim = Simulation::new(&d, 7).unwrap();
+        let mut sim = Simulation::new(&d, 7, 1).unwrap();
         assert_eq!(sim.live_sessions(), 10);
         for step in 1..=40 {
             sim.run_until(step as f64 * 50.0, &mut |_, _| {});
@@ -757,7 +774,7 @@ session_classes:
         // The leak that would otherwise be invisible: a retired instance whose
         // bookkeeping is never freed because a finished session kept its hold.
         let d = description(2, 8);
-        let mut sim = Simulation::new(&d, 8).unwrap();
+        let mut sim = Simulation::new(&d, 8, 1).unwrap();
         sim.run_until(3_000.0, &mut |_, _| {});
         let (_, completed) = sim.session_counts(0).unwrap();
         assert!(completed > 8, "no turnover, so nothing was tested");
@@ -778,7 +795,7 @@ session_classes:
         // span is still what was requested, because an emit run's reported span is
         // the question asked, not the busiest part of the answer.
         let d = description(1, 2);
-        let mut sim = Simulation::new(&d, 9).unwrap();
+        let mut sim = Simulation::new(&d, 9, 1).unwrap();
         sim.run_until(50.0, &mut |_, _| {});
         assert_eq!(sim.now(), 50.0);
     }
@@ -805,7 +822,7 @@ session_classes:
     think_time: {constant: 0}
 "#;
         let d: WorkloadDescription = yaml.parse().unwrap();
-        let err = Simulation::new(&d, 1).unwrap_err().to_string();
+        let err = Simulation::new(&d, 1, 1).unwrap_err().to_string();
         assert!(
             err.contains("think_time"),
             "expected a think_time refusal, got: {err}"
@@ -845,7 +862,7 @@ session_classes:
     think_time: {empirical: {samples: [0, 0, 0, 12], interpolate: false}}
 "#;
         let d: WorkloadDescription = yaml.parse().unwrap();
-        let mut sim = Simulation::new(&d, 12).unwrap();
+        let mut sim = Simulation::new(&d, 12, 1).unwrap();
         let mut seen: Vec<(u64, usize, u64)> = Vec::new();
         sim.run_until(600.0, &mut |s, t| {
             seen.push((s.id(), t.index(), t.at().to_bits()))
@@ -888,7 +905,7 @@ session_classes:
     think_time: {exponential: {mean: 8}}
 "#;
         let d: WorkloadDescription = yaml.parse().unwrap();
-        let mut sim = Simulation::new(&d, 11).unwrap();
+        let mut sim = Simulation::new(&d, 11, 1).unwrap();
         let mut turns = 0u64;
         sim.run_until(5_000.0, &mut |_, _| turns += 1);
         assert!(turns > 100, "only {turns} turns in 5000 virtual seconds");
@@ -921,7 +938,7 @@ session_classes:
     think_time: {constant: 1}
 "#;
         let d: WorkloadDescription = yaml.parse().unwrap();
-        let err = Simulation::new(&d, 1).unwrap_err().to_string();
+        let err = Simulation::new(&d, 1, 1).unwrap_err().to_string();
         assert!(err.contains("not declared"), "unexpected error: {err}");
     }
 
@@ -932,7 +949,7 @@ session_classes:
             "../../../specs/001-synthetic-workload-generator/contracts/workload-input.example.yml"
         );
         let d: WorkloadDescription = yaml.parse().unwrap();
-        let mut sim = Simulation::new(&d, 1).unwrap();
+        let mut sim = Simulation::new(&d, 1, 1).unwrap();
         let mut turns = 0u64;
         sim.run_until(200.0, &mut |_, _| turns += 1);
         assert!(turns > 0, "the shipped example produced no turns");

@@ -3198,8 +3198,8 @@ under two names — so the simulation places sessions across what it believes ar
 two independent caches and a migration between them is served as a hit where
 FR-048 intends a miss. Both are now refused, naming the pair.
 
-Second, **the trace path has no home for placement at all.** `with_nodes` is
-called only from the live driver, so an `emit` run uses the default one node
+Second, **the trace path has no home for placement at all.** Only the live
+driver has a node count to give the simulation, so an `emit` run passes one,
 where migration is inert — so a description with a `migration_interval` emits a
 trace in which migration never happened. The trace is rightly free of
 hostnames, but it is also missing the event. The agreed design (a per-session

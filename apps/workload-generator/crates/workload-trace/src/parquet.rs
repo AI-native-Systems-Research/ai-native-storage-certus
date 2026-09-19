@@ -55,7 +55,7 @@
 //! .unwrap();
 //!
 //! let mut bytes = Vec::new();
-//! let mut sim = Simulation::new(&description, 7).unwrap();
+//! let mut sim = Simulation::new(&description, 7, 1).unwrap();
 //! let mut writer = ParquetWriter::new(&mut bytes, "demo", description.blocks.tokens).unwrap();
 //! sim.run_until(60.0, &mut |s, t| writer.write(s, t).unwrap());
 //! let stats = writer.finish().unwrap();

@@ -61,7 +61,7 @@ fn convert(
     let d = description();
 
     let jsonl_path = dir.join("trace.jsonl");
-    let mut sim = Simulation::new(&d, seed).unwrap();
+    let mut sim = Simulation::new(&d, seed, 1).unwrap();
     let file = std::fs::File::create(&jsonl_path).unwrap();
     let mut writer = JsonlWriter::new(BufWriter::new(file), "mc", BLOCK_SIZE);
     let mut records = Vec::new();
@@ -243,7 +243,7 @@ fn both_entry_points_produce_the_same_bytes() {
     let span = 300.0;
 
     let mut direct: Vec<u8> = Vec::new();
-    let mut sim = Simulation::new(&d, 36).unwrap();
+    let mut sim = Simulation::new(&d, 36, 1).unwrap();
     let mut w = MooncakeWriter::new(&mut direct, BLOCK_SIZE);
     sim.run_until(span, &mut |s, t| {
         let record = InvocationRecord::from_turn("mc", s, t, BLOCK_SIZE);
@@ -252,7 +252,7 @@ fn both_entry_points_produce_the_same_bytes() {
     let direct_stats = w.finish().unwrap();
 
     let jsonl_path = tmp.path().join("trace.jsonl");
-    let mut sim = Simulation::new(&d, 36).unwrap();
+    let mut sim = Simulation::new(&d, 36, 1).unwrap();
     let file = std::fs::File::create(&jsonl_path).unwrap();
     let mut writer = JsonlWriter::new(BufWriter::new(file), "mc", BLOCK_SIZE);
     sim.run_until(span, &mut |s, t| writer.write(s, t).unwrap());

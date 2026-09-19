@@ -529,7 +529,7 @@ session_classes:
     think_time: {constant: 5}
 "#;
         let d: WorkloadDescription = yaml.parse().unwrap();
-        let mut sim = Simulation::new(&d, seed).unwrap();
+        let mut sim = Simulation::new(&d, seed, 1).unwrap();
         let mut plan = OperationPlan::default();
         sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
         plan

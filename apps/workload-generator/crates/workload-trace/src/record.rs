@@ -109,7 +109,7 @@ impl InvocationRecord {
     ///     think_time: {constant: 1}
     /// "#;
     /// let d: WorkloadDescription = yaml.parse().unwrap();
-    /// let mut sim = Simulation::new(&d, 1).unwrap();
+    /// let mut sim = Simulation::new(&d, 1, 1).unwrap();
     /// let mut rows = Vec::new();
     /// sim.run_until(50.0, &mut |s, t| {
     ///     rows.push(InvocationRecord::from_turn("demo", s, t, 16));

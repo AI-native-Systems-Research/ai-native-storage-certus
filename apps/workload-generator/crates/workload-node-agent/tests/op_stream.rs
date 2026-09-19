@@ -79,7 +79,7 @@ const BLOCK_BYTES: u32 = 32768;
 
 fn plan_of(seed: u64, span: f64) -> OperationPlan {
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
-    let mut sim = Simulation::new(&d, seed).unwrap();
+    let mut sim = Simulation::new(&d, seed, 1).unwrap();
     let mut plan = OperationPlan::default();
     sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
     plan
@@ -841,7 +841,7 @@ session_classes:
 
 fn live_plan(seed: u64, span: f64) -> OperationPlan {
     let d: WorkloadDescription = LIVE_DESCRIPTION.parse().unwrap();
-    let mut sim = Simulation::new(&d, seed).unwrap();
+    let mut sim = Simulation::new(&d, seed, 1).unwrap();
     let mut plan = OperationPlan::default();
     sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
     plan

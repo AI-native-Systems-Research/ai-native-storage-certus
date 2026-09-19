@@ -51,7 +51,7 @@ session_classes:
 /// Run and record, per turn, `(session id, node, first key of the path, turn index)`.
 fn run(yaml: &str, seed: u64, nodes: usize, span: f64) -> (Vec<(u64, usize, u64, usize)>, u64) {
     let d: WorkloadDescription = yaml.parse().unwrap();
-    let mut sim = Simulation::new(&d, seed).unwrap().with_nodes(nodes);
+    let mut sim = Simulation::new(&d, seed, nodes).unwrap();
     let mut seen = Vec::new();
     sim.run_until(span, &mut |s, t| {
         let first = s.reads_of(t).first().copied().unwrap_or(0);
@@ -78,6 +78,60 @@ fn new_sessions_are_spread_across_the_configured_nodes() {
     }
     // Every node in range, and no node outside it.
     assert!(by_node.keys().all(|n| *n < 4));
+}
+
+#[test]
+fn the_population_seeded_at_t0_is_spread_too_and_not_all_on_node_zero() {
+    // FR-048's first half for the cohort that exists *before* the run starts, which
+    // `new_sessions_are_spread_across_the_configured_nodes` cannot see: its 400-second span is
+    // ten session lifetimes, so the seeded twelve are long dead and replaced by sessions born
+    // during the run. Placement went wrong for exactly the sessions that span hides.
+    //
+    // The span here is 10 against a lifetime of 8 turns x 5 = 40, so nothing has been
+    // replaced and every session observed is a seeded one. STATIC, so a session's node is
+    // still the one it was placed on at birth.
+    //
+    // What this pins: the node count must be known when the seeded population is placed. When
+    // it was supplied by a setter *after* construction, all twelve landed on node 0 and a
+    // four-instance run drove one instance with ~6x the load of the others — while every
+    // longer-running test stayed green.
+    let (turns, migrations) = run(STATIC, 11, 4, 10.0);
+    assert_eq!(migrations, 0, "STATIC declares no interval");
+
+    // `pool: {size: {exact: 12}}` and ids are handed out from 0 in seeding order, so the
+    // seeded cohort is ids 0..12 — asserted rather than assumed, since the whole point is
+    // that these are the sessions placed inside the constructor.
+    let mut node_of: BTreeMap<u64, usize> = BTreeMap::new();
+    for (id, node, _, _) in &turns {
+        node_of.insert(*id, *node);
+    }
+    let seeded: BTreeMap<u64, usize> = node_of
+        .iter()
+        .filter(|(id, _)| **id < 12)
+        .map(|(i, n)| (*i, *n))
+        .collect();
+    assert_eq!(
+        seeded.len(),
+        12,
+        "expected all twelve seeded sessions to take a turn within the span, saw {:?}",
+        seeded.keys()
+    );
+
+    let mut by_node: BTreeMap<usize, BTreeSet<u64>> = BTreeMap::new();
+    for (id, node) in &seeded {
+        by_node.entry(*node).or_default().insert(*id);
+    }
+    assert!(
+        by_node.len() >= 3,
+        "the seeded cohort landed on {:?} of 4 nodes: {by_node:?}",
+        by_node.keys()
+    );
+    let biggest = by_node.values().map(|s| s.len()).max().unwrap_or(0);
+    assert!(
+        biggest < 12,
+        "every seeded session landed on one node: {by_node:?}"
+    );
+    assert!(by_node.keys().all(|n| *n < 4), "a node outside the range");
 }
 
 #[test]

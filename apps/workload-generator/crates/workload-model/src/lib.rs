@@ -46,7 +46,7 @@
 //! .parse()
 //! .unwrap();
 //!
-//! let mut sim = Simulation::new(&description, 42).unwrap();
+//! let mut sim = Simulation::new(&description, 42, 1).unwrap();
 //! let mut plan = OperationPlan::default();
 //! sim.run_until(120.0, &mut |session, turn| plan.record_turn(session, turn));
 //!
@@ -80,7 +80,7 @@
 //! "#
 //!     .parse()
 //!     .unwrap();
-//!     let mut sim = Simulation::new(&description, seed).unwrap();
+//!     let mut sim = Simulation::new(&description, seed, 1).unwrap();
 //!     let mut plan = OperationPlan::default();
 //!     sim.run_until(120.0, &mut |s, t| plan.record_turn(s, t));
 //!     plan

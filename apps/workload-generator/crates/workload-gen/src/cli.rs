@@ -1131,7 +1131,7 @@ fn emit(
         Ok(d)
     };
 
-    let mut sim = Simulation::new(&description, seed)
+    let mut sim = Simulation::new(&description, seed, 1)
         .map_err(|e| Failure::config(format!("cannot start the simulation: {e}")))?;
 
     let started = Instant::now();
@@ -1473,7 +1473,7 @@ fn validate(
 /// The `plan` subcommand.
 fn plan(description_path: &Path, until: f64, output: &Path, seed: u64) -> Result<String, Failure> {
     let (description, _, effective) = load(description_path)?;
-    let mut sim = Simulation::new(&description, seed)
+    let mut sim = Simulation::new(&description, seed, 1)
         .map_err(|e| Failure::config(format!("cannot start the simulation: {e}")))?;
     let mut plan = OperationPlan::default();
     sim.run_until(until, &mut |s, t| plan.record_turn(s, t));
@@ -2044,9 +2044,9 @@ fn install_stop_handler() -> Result<(), String> {
 ///
 /// A trace is deliberately free of instance identities — it says what the sessions did, not
 /// which cache served them, and that is what makes one file replayable against any deployment.
-/// But `Simulation::with_nodes` is called only by the live driver, so an emit run uses the
-/// default single node, where migration is **inert** by FR-049. A description that declares a
-/// `migration_interval` therefore emits a trace in which no session ever migrates.
+/// But only the live driver has a node count to give the simulation, so an emit run passes one,
+/// where migration is **inert** by FR-049. A description that declares a `migration_interval`
+/// therefore emits a trace in which no session ever migrates.
 ///
 /// So what is missing is not the *target* of a migration, which nothing here should record — it
 /// is the **event**. And the event is the part that matters to a cache: a migrated session's

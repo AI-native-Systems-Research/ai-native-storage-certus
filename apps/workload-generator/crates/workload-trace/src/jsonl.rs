@@ -46,7 +46,7 @@
 //! .parse()
 //! .unwrap();
 //!
-//! let mut sim = Simulation::new(&description, 7).unwrap();
+//! let mut sim = Simulation::new(&description, 7, 1).unwrap();
 //! let mut writer = JsonlWriter::new(Vec::new(), "demo", description.blocks.tokens);
 //! sim.run_until(60.0, &mut |session, turn| writer.write(session, turn).unwrap());
 //! let stats = writer.finish().unwrap();
@@ -208,7 +208,7 @@ session_classes:
     /// Emit a run into a byte buffer and return (lines, stats).
     fn emit(seed: u64, span: f64) -> (Vec<String>, BlockStats) {
         let d = description();
-        let mut sim = Simulation::new(&d, seed).unwrap();
+        let mut sim = Simulation::new(&d, seed, 1).unwrap();
         let mut buf: Vec<u8> = Vec::new();
         let mut writer = JsonlWriter::new(&mut buf, "test", 16);
         sim.run_until(span, &mut |s, t| {
@@ -309,7 +309,7 @@ session_classes:
         // The check must be able to fail, or turning it on proves nothing. Built by
         // hand, because the simulation cannot produce a broken chain.
         let d = description();
-        let mut sim = Simulation::new(&d, 6).unwrap();
+        let mut sim = Simulation::new(&d, 6, 1).unwrap();
         let mut rows: Vec<InvocationRecord> = Vec::new();
         sim.run_until(100.0, &mut |s, t| {
             rows.push(InvocationRecord::from_turn("t", s, t, 16))
@@ -339,7 +339,7 @@ session_classes:
     #[test]
     fn verification_rejects_a_length_that_does_not_match_its_blocks() {
         let d = description();
-        let mut sim = Simulation::new(&d, 9).unwrap();
+        let mut sim = Simulation::new(&d, 9, 1).unwrap();
         let mut rows: Vec<InvocationRecord> = Vec::new();
         sim.run_until(30.0, &mut |s, t| {
             rows.push(InvocationRecord::from_turn("t", s, t, 16))

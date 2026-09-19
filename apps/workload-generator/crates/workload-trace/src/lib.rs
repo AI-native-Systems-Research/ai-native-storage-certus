@@ -49,7 +49,7 @@
 //!
 //! // The container.
 //! let mut trace = Vec::new();
-//! let mut sim = Simulation::new(&description, 7).unwrap();
+//! let mut sim = Simulation::new(&description, 7, 1).unwrap();
 //! let mut writer = JsonlWriter::new(&mut trace, "demo", description.blocks.tokens);
 //! sim.run_until(60.0, &mut |s, t| writer.write(s, t).unwrap());
 //! let stats = writer.finish().unwrap(); // releases the borrow on `trace`

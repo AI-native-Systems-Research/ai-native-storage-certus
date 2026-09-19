@@ -659,12 +659,12 @@ where
     R: Fn(&workload_model::session::Session, usize) -> usize,
 {
     // The node count belongs to the simulation, not to the routing: placement and migration are
-    // decisions it makes (FR-048), and the router only reads the answer. Omitting this left every
-    // session on node 0 and a three-node run driving one node — caught by a routing test, and
-    // invisible in any single-node one.
-    let mut sim = Simulation::new(description, seed)
-        .map_err(|e| format!("cannot start the simulation: {e}"))?
-        .with_nodes(nodes);
+    // decisions it makes (FR-048), and the router only reads the answer. It is passed to the
+    // constructor because the population seeded at t=0 is placed there; supplying it afterwards
+    // put every session alive at t=0 on node 0, which drove one instance hard and the rest barely
+    // at all.
+    let mut sim = Simulation::new(description, seed, nodes)
+        .map_err(|e| format!("cannot start the simulation: {e}"))?;
     let n = lanes.len();
     let mut batches = 0u64;
     let mut blocked = 0u64;

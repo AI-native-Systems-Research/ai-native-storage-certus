@@ -82,7 +82,7 @@ fn emit_both(
     // JSONL. Records are rebuilt from the serialised lines rather than kept from the
     // writer, so a serialisation bug is inside the comparison rather than outside it.
     let mut json_bytes: Vec<u8> = Vec::new();
-    let mut sim = Simulation::new(&d, seed).unwrap();
+    let mut sim = Simulation::new(&d, seed, 1).unwrap();
     let mut jw = JsonlWriter::new(&mut json_bytes, "equiv", BLOCK_SIZE);
     sim.run_until(span, &mut |s, t| jw.write(s, t).expect("valid row"));
     let json_stats = jw.finish().unwrap();
@@ -94,7 +94,7 @@ fn emit_both(
 
     // Parquet, from a fresh simulation at the same seed.
     let mut pq_bytes: Vec<u8> = Vec::new();
-    let mut sim = Simulation::new(&d, seed).unwrap();
+    let mut sim = Simulation::new(&d, seed, 1).unwrap();
     let mut pw = ParquetWriter::new(&mut pq_bytes, "equiv", BLOCK_SIZE).unwrap();
     sim.run_until(span, &mut |s, t| pw.write(s, t).expect("valid row"));
     let pq_stats = pw.finish().unwrap();
@@ -309,13 +309,13 @@ fn parquet_is_smaller_than_jsonl_for_the_same_records() {
     let span = 1_500.0;
 
     let mut json_bytes: Vec<u8> = Vec::new();
-    let mut sim = Simulation::new(&d, 14).unwrap();
+    let mut sim = Simulation::new(&d, 14, 1).unwrap();
     let mut jw = JsonlWriter::new(&mut json_bytes, "equiv", BLOCK_SIZE);
     sim.run_until(span, &mut |s, t| jw.write(s, t).unwrap());
     jw.finish().unwrap();
 
     let mut pq_bytes: Vec<u8> = Vec::new();
-    let mut sim = Simulation::new(&d, 14).unwrap();
+    let mut sim = Simulation::new(&d, 14, 1).unwrap();
     let mut pw = ParquetWriter::new(&mut pq_bytes, "equiv", BLOCK_SIZE).unwrap();
     sim.run_until(span, &mut |s, t| pw.write(s, t).unwrap());
     pw.finish().unwrap();
@@ -336,7 +336,7 @@ fn a_parquet_trace_is_byte_identical_at_a_fixed_seed() {
     let write = |seed: u64| {
         let (d, _) = description();
         let mut bytes: Vec<u8> = Vec::new();
-        let mut sim = Simulation::new(&d, seed).unwrap();
+        let mut sim = Simulation::new(&d, seed, 1).unwrap();
         let mut w = ParquetWriter::new(&mut bytes, "equiv", BLOCK_SIZE).unwrap();
         sim.run_until(400.0, &mut |s, t| w.write(s, t).unwrap());
         w.finish().unwrap();

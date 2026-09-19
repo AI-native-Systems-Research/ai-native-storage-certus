@@ -73,7 +73,7 @@ fn run(seed: u64, span: f64, dir: &std::path::Path) -> Converted {
 
     // Emit, straight through the real writer.
     let jsonl_path = dir.join("trace.jsonl");
-    let mut sim = Simulation::new(&d, seed).unwrap();
+    let mut sim = Simulation::new(&d, seed, 1).unwrap();
     let file = std::fs::File::create(&jsonl_path).unwrap();
     let mut writer = JsonlWriter::new(BufWriter::new(file), "sim", BLOCK_SIZE);
     sim.run_until(span, &mut |s, t| writer.write(s, t).unwrap());
@@ -175,7 +175,7 @@ fn the_projection_is_the_same_whichever_entry_point_produced_it() {
     let span = 400.0;
 
     // In-stream: build records as turns happen and project them directly.
-    let mut sim = Simulation::new(&d, 25).unwrap();
+    let mut sim = Simulation::new(&d, 25, 1).unwrap();
     let mut direct: Vec<u8> = Vec::new();
     let mut w = QwenWriter::new(&mut direct);
     sim.run_until(span, &mut |s, t| {
@@ -186,7 +186,7 @@ fn the_projection_is_the_same_whichever_entry_point_produced_it() {
 
     // Via a stored trace.
     let jsonl_path = tmp.path().join("trace.jsonl");
-    let mut sim = Simulation::new(&d, 25).unwrap();
+    let mut sim = Simulation::new(&d, 25, 1).unwrap();
     let file = std::fs::File::create(&jsonl_path).unwrap();
     let mut writer = JsonlWriter::new(BufWriter::new(file), "sim", BLOCK_SIZE);
     sim.run_until(span, &mut |s, t| writer.write(s, t).unwrap());

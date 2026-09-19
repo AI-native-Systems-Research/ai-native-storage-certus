@@ -101,7 +101,7 @@ session_classes:
 /// Run one plan build and return it, so the benchmark measures the whole path:
 /// population events, selection, binding, key chaining, and plan recording.
 fn build(description: &WorkloadDescription, span: f64) -> OperationPlan {
-    let mut sim = Simulation::new(description, 1).expect("valid description");
+    let mut sim = Simulation::new(description, 1, 1).expect("valid description");
     let mut plan = OperationPlan::default();
     sim.run_until(span, &mut |s, t| plan.record_turn(s, t));
     plan
