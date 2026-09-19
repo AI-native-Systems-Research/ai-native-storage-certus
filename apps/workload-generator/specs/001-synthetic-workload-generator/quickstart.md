@@ -198,7 +198,8 @@ Measured at a 30-second span, so the trade is concrete:
 | Output | Bytes | Carries |
 | --- | --- | --- |
 | `--mooncake` | 12.5 MB | 4 fields: timestamp, two lengths, prompt block ids |
-| `--libcachesim` | 62.9 MB | `(time, id, size)` triples, one row **per block reference** |
+| `--libcachesim` | 63.4 MB | `(time, id, size)` triples, one row **per block reference** |
+| `--simulator` | 40.8 MB | `{chat_id, parent_chat_id, hash_ids, type}` per request |
 | `--certus-unified-parquet` | 12.2 MB | the full 17-field schema |
 | `--certus-unified-jsonl` | 44.1 MB | the same, as text |
 
@@ -231,8 +232,8 @@ prints `requests / working-set / accesses(block-refs)`; the three that overlap
 must match:
 
 ```text
-convert:    records 6109  sessions 4238  distinct keys 1106136  key references 1962304
-simulator:  requests=6109  accesses(block-refs)=1962304  working-set(distinct blocks)=1106136
+convert:    records 6109  sessions 4238  distinct keys 1119473  key references 1979669
+simulator:  requests=6109  accesses(block-refs)=1979669  working-set(distinct blocks)=1119473
 ```
 
 Its default cache sizes are 256–4096 **blocks** against a working set of over a
@@ -249,22 +250,30 @@ generated one go through an identical transformation:
 $G emit $E --seed 42 --until 10 --certus-unified-jsonl /tmp/qs-trace
 $G convert /tmp/qs-trace --to mooncake       --output /tmp/qs-mc.jsonl
 $G convert /tmp/qs-trace --to oracle-general --output /tmp/qs-og.bin
+$G convert /tmp/qs-trace --to simulator      --output /tmp/qs-sim.jsonl
 ```
 
-**Expect** both conversions to declare what they dropped and to end with the
-FR-075b line, and their counts to agree:
+**Expect** every conversion to declare what it dropped and to end with the
+FR-075b line, and these counts:
 
 ```text
 mooncake:       records 1943  distinct identifiers 411430  references 655104
-oracleGeneral:  accesses 655104  distinct objects 411430  object size 65536 bytes
+oracleGeneral:  accesses 660805  distinct objects 416462  object size 65536 bytes
+simulator:      records 1943  sessions 1627  distinct keys 416462  key refs 660805
 ```
 
-Those two writers share nothing but the record stream, so the agreement is
-worth reading as a check rather than a formality: `distinct identifiers ==
-distinct objects` and `references == accesses`. The binary is **15 722 496
-bytes**, which is exactly `655104 × 24` — the verified `oracleGeneral` record
-size, confirmed against real output rather than against the prose that
-documents it.
+**They do not all match, and how they differ is the check.** The two cache
+targets agree exactly — 416 462 objects over 660 805 accesses, from writers
+that share nothing but the record stream. Mooncake is lower by exactly the
+generated run: **655 104 + 5 701 = 660 805**, where 5 701 is the total length
+of every `full_output_blocks` in the trace. libCacheSim and the simulator carry
+a turn's generated blocks as stores at that turn; Mooncake cannot, because
+`len(hash_ids) == ceil(input_length / block_size)` is a conformance invariant
+there. So expect that gap when comparing the two, rather than a bug.
+
+The binary is **15 859 320 bytes**, exactly `660805 × 24` — the verified
+`oracleGeneral` record size, confirmed against real output rather than against
+the prose that documents it.
 
 `convert` reads block geometry from the trace's `manifest.json`, because
 neither format carries it. That is also why a **projection** cannot be fed
@@ -291,7 +300,12 @@ PY
 ```
 
 **Expect** `411430` from both lines, and `dense: True`. That equality is what
-global scope means. Measured on this trace, the two wrong renumberings would
+global scope means. The snippet compares **prompt** keys only, deliberately:
+Mooncake carries the prompt alone, so folding in `full_output_blocks` would
+make the two sides differ for a reason unrelated to renumbering. For the two
+cache targets the same count is `416462`.
+
+Measured on this trace, the two wrong renumberings would
 give **1970** instead — the largest session's own key count, which is also the
 longest prompt — so the defect shows up as a **209×** collapse and cannot be
 mistaken for noise.

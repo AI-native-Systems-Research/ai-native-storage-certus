@@ -82,9 +82,22 @@ recommended target.
 - **Session grouping.** There is no `session_id`, so sessions survive only as
   the prefix structure of `hash_ids`. Recoverable by a consumer only up to
   ambiguity, and not recoverable at all where two sessions share a prefix.
-- **Input/output separation.** One list covers the whole prompt, so a turn's
-  output blocks reappear folded into the next turn's prefix, as they do
-  upstream.
+- **The generated run.** `hash_ids` is the prompt alone, because
+  `len(hash_ids) == ceil(input_length / block_size)` holds on 2 328 of 2 328
+  upstream rows and is therefore a conformance invariant: appending generated
+  ids would produce a file that any reader deriving prompt length from
+  `hash_ids` reads wrongly. `output_length` survives as a token count; the
+  block identities do not. A turn's output does reappear folded into the next
+  turn's prefix, as it does upstream — but one turn later than a real cache
+  stored it, and never at all for the last turn of a session.
+
+  **This is the one target where that holds.** The libCacheSim containers and
+  the simulator shape have no prompt-length invariant to violate and no notion
+  of input versus output, so both carry the generated blocks as accesses at the
+  turn that produced them — see § libCacheSim. A Mooncake file therefore
+  reports fewer references than a libCacheSim file built from the same trace,
+  by exactly the total generated-block count, and that gap is expected rather
+  than a defect.
 - **`partial_final_valid`.** Their convention is ceil, which gives the partial
   block an identifier and records nothing about how full it is. **Unrecoverable
   on import**, so a round trip through this format is lossy and must not be
@@ -125,6 +138,22 @@ use. Two verified traps:
 
 Lossy by design: session identity and turn structure are gone. For eviction
 studies that is the right projection, not a compromise.
+
+**Both the prompt and the generated run are written**, prompt first, at the
+turn's own timestamp. The format has no notion of input versus output — to a
+cache a reference is a reference — so nothing needs tagging, and nothing may
+be. The store belongs at the generating turn because that is when a deployment
+inserts it: vLLM's offloading connector calls `prepare_store` **after each
+forward pass** (`knowledge/kv_IO_pattern.md`), offloading newly-computed
+blocks rather than waiting for a reader. Writing the prompt alone — which this
+projection originally did — put every generated block's arrival one turn late
+and omitted the last turn of every session, whose output is stored and never
+read again. Both understate capacity pressure and eviction opportunity, which
+is the whole quantity an eviction study measures.
+
+The same applies to `oracleGeneral` below and to the simulator shape. It does
+**not** apply to Mooncake, which has a prompt-length invariant to keep; see
+that section's loss list.
 
 ### `oracleGeneral`, and the baseline it unlocks
 

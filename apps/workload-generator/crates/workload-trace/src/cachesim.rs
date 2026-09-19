@@ -53,6 +53,22 @@
 //! normalises. And `clock_time` being 32 bits caps millisecond timestamps at **49.7
 //! days** of virtual time, which the writer refuses rather than wrapping.
 //!
+//! # Both the prompt and the generated run are accesses
+//!
+//! A turn's prompt blocks are **reads** and the blocks it generates are **stores**, and
+//! both are accesses this projection writes, at that turn's own timestamp, prompt first.
+//!
+//! The store belongs at the generating turn because that is when a real deployment
+//! inserts it: vLLM's offloading connector calls `prepare_store` **after each forward
+//! pass** (`knowledge/kv_IO_pattern.md`), offloading newly-computed blocks rather than
+//! waiting for something to read them. Projecting the prompt alone would move every
+//! generated block's arrival one turn later than it happens, and would omit the last
+//! turn of every session entirely — that output is stored and never read again, so it
+//! would appear nowhere while still occupying the cache it was measured against.
+//!
+//! libCacheSim has no notion of input versus output, which is the point: to a cache a
+//! reference is a reference. Nothing is tagged, and nothing needs to be.
+//!
 //! # Examples
 //!
 //! CSV, one line per block reference — and the parameter string that makes the file
@@ -62,18 +78,21 @@
 //! use workload_trace::cachesim::convert_jsonl_csv;
 //!
 //! let trace = concat!(
-//!     r#"{"request_start":0.0,"full_input_blocks":[91,92]}"#, "\n",
-//!     r#"{"request_start":1.5,"full_input_blocks":[91,92,93]}"#, "\n",
+//!     r#"{"request_start":0.0,"full_input_blocks":[91,92],"full_output_blocks":[93]}"#, "\n",
+//!     r#"{"request_start":1.5,"full_input_blocks":[91,92,93],"full_output_blocks":[94]}"#, "\n",
 //! );
 //!
 //! let mut out = Vec::new();
 //! let stats = convert_jsonl_csv(trace.as_bytes(), &mut out, 32768).unwrap();
-//! assert_eq!(stats.accesses, 5); // references, not requests
-//! assert_eq!(stats.distinct_objects, 3);
+//! // References, not requests: 2 prompt + 1 generated, then 3 prompt + 1 generated.
+//! assert_eq!(stats.accesses, 7);
+//! assert_eq!(stats.distinct_objects, 4);
 //!
 //! let text = String::from_utf8(out).unwrap();
 //! assert_eq!(text.lines().next(), Some("0,91,32768"));
-//! assert_eq!(text.lines().count(), 5);
+//! // Key 93 is stored at turn 0 and read at turn 1, in that order.
+//! assert_eq!(text.lines().nth(2), Some("0,93,32768"));
+//! assert_eq!(text.lines().count(), 7);
 //!
 //! // A CSV file cannot say what its own columns mean, so the layout travels with it.
 //! assert_eq!(stats.params(), "time-col=1, obj-id-col=2, obj-size-col=3, obj-id-is-num=1");
@@ -87,23 +106,26 @@
 //! use workload_trace::cachesim::{convert_jsonl_oracle, NEVER_AGAIN, ORACLE_RECORD_BYTES};
 //!
 //! let trace = concat!(
-//!     r#"{"request_start":0.0,"full_input_blocks":[91,92]}"#, "\n",
-//!     r#"{"request_start":1.5,"full_input_blocks":[91]}"#, "\n",
+//!     r#"{"request_start":0.0,"full_input_blocks":[91,92],"full_output_blocks":[93]}"#, "\n",
+//!     r#"{"request_start":1.5,"full_input_blocks":[91],"full_output_blocks":[]}"#, "\n",
 //! );
 //!
 //! let mut out = Vec::new();
 //! let stats = convert_jsonl_oracle(trace.as_bytes(), &mut out, 32768).unwrap();
-//! assert_eq!(stats.accesses, 3);
-//! assert_eq!(out.len(), 3 * ORACLE_RECORD_BYTES);
+//! assert_eq!(stats.accesses, 4); // 91, 92, then the generated 93, then 91 again
+//! assert_eq!(out.len(), 4 * ORACLE_RECORD_BYTES);
 //!
 //! // Read `next_access_vtime` back out of each packed record: an ordinal, not a time.
 //! let next_access = |i: usize| -> i64 {
 //!     let base = i * ORACLE_RECORD_BYTES + 16;
 //!     i64::from_ne_bytes(out[base..base + 8].try_into().unwrap())
 //! };
-//! assert_eq!(next_access(0), 2);          // key 91 is touched again at ordinal 2
+//! assert_eq!(next_access(0), 3);          // key 91 is touched again at ordinal 3
 //! assert_eq!(next_access(1), NEVER_AGAIN); // key 92 never is
+//! // The generated block: stored here, never read again. Invisible before this
+//! // projection carried the generated run at all.
 //! assert_eq!(next_access(2), NEVER_AGAIN);
+//! assert_eq!(next_access(3), NEVER_AGAIN);
 //! ```
 
 use std::collections::HashMap;
@@ -130,6 +152,7 @@ pub const MAX_ORACLE_TIMESTAMP_MS: u64 = u32::MAX as u64;
 struct Row {
     request_start: f64,
     full_input_blocks: Vec<u64>,
+    full_output_blocks: Vec<u64>,
 }
 
 /// What a conversion produced.
@@ -153,21 +176,27 @@ impl CachesimStats {
     /// days of virtual time is rejected instead of wrapped.
     ///
     /// Stated rather than left to be discovered, because every one of these is invisible
-    /// in the output: a libCacheSim file that has lost session identity and the generated
-    /// run still loads, replays and reports a hit rate.
+    /// in the output: a libCacheSim file that has lost session identity still loads,
+    /// replays and reports a hit rate.
+    ///
+    /// The generated run is **not** listed: it is carried, as stores at the turn that
+    /// produced it. The input/output *distinction* is dropped, which is not a loss a cache
+    /// can observe — a reference is a reference.
     pub fn declared_losses(&self) -> Vec<String> {
         vec![
             "session grouping and identity: the format has no session field at all, so \
              nothing separates two sessions' accesses and the conversation graph cannot be \
              recovered"
                 .to_string(),
-            "the generated run: only the prompt's blocks are referenced, so output keys \
-             never appear as accesses and a cache holding them is not modelled"
+            "the input/output distinction: prompt reads and generated stores are both \
+             present as accesses, in that order within a turn, but nothing marks which is \
+             which. A cache does not distinguish them; a reader wanting to would need the \
+             native trace"
                 .to_string(),
             format!(
-                "partial_final_valid and block geometry: every object is {} bytes, so a \
-                 trailing partial block occupies a whole one and how full it was is \
-                 unrecoverable",
+                "how full a trailing partial block was: its key is kept and cached like \
+                 any other, but every object is charged {} bytes, so partial_final_valid \
+                 is unrecoverable and byte-capacity accounting rounds it up",
                 self.object_bytes
             ),
             "virtual time: kept only as an integer millisecond clock, and think time, TTFT \
@@ -221,15 +250,22 @@ impl<W: Write> CsvWriter<W> {
     ///
     /// If the sink fails.
     pub fn write_record(&mut self, record: &InvocationRecord) -> io::Result<()> {
-        self.write_parts(record.request_start, &record.full_input_blocks)
+        self.write_parts(
+            record.request_start,
+            &record.full_input_blocks,
+            &record.full_output_blocks,
+        )
     }
 
-    fn write_parts(&mut self, at: f64, blocks: &[u64]) -> io::Result<()> {
+    fn write_parts(&mut self, at: f64, input: &[u64], output: &[u64]) -> io::Result<()> {
         // Integer milliseconds: libCacheSim's CSV `clock_time` is int64, and a decimal
         // point in a numeric column is a needless risk in a reader that also has to
         // parse object ids as numbers.
         let ms = (at * 1000.0).round() as i64;
-        for key in blocks {
+        // Prompt reads first, then the generated blocks this turn stored. Both are
+        // accesses at this turn's time; see the module docs on why the generated run
+        // belongs here rather than at the next turn that reads it.
+        for key in input.iter().chain(output) {
             self.distinct.insert(*key);
             self.accesses += 1;
             writeln!(self.sink, "{ms},{key},{}", self.object_bytes)?;
@@ -288,10 +324,14 @@ impl<W: Write> OracleGeneralWriter<W> {
     /// virtual time in milliseconds. Refused rather than wrapped: a wrapped timestamp
     /// would make the trace appear to jump backwards, and the reader would accept it.
     pub fn write_record(&mut self, record: &InvocationRecord) -> io::Result<()> {
-        self.write_parts(record.request_start, &record.full_input_blocks)
+        self.write_parts(
+            record.request_start,
+            &record.full_input_blocks,
+            &record.full_output_blocks,
+        )
     }
 
-    fn write_parts(&mut self, at: f64, blocks: &[u64]) -> io::Result<()> {
+    fn write_parts(&mut self, at: f64, input: &[u64], output: &[u64]) -> io::Result<()> {
         let ms = (at * 1000.0).round() as i64;
         if ms < 0 || ms as u64 > MAX_ORACLE_TIMESTAMP_MS {
             return Err(io::Error::new(
@@ -305,7 +345,10 @@ impl<W: Write> OracleGeneralWriter<W> {
             ));
         }
         let clock_time_ms = ms as u32;
-        for key in blocks {
+        // Prompt reads then the generated blocks, in that order within the turn, so a
+        // generated block's own store is the access its next-access ordinal is measured
+        // from.
+        for key in input.iter().chain(output) {
             self.pending.push(PendingAccess {
                 clock_time_ms,
                 obj_id: *key,
@@ -372,7 +415,9 @@ pub fn convert_jsonl_csv<R: BufRead, W: Write>(
     object_bytes: u32,
 ) -> io::Result<CachesimStats> {
     let mut writer = CsvWriter::new(output, object_bytes);
-    for_each_row(input, |at, blocks| writer.write_parts(at, blocks))?;
+    for_each_row(input, |at, input_blocks, output_blocks| {
+        writer.write_parts(at, input_blocks, output_blocks)
+    })?;
     writer.finish()
 }
 
@@ -387,11 +432,13 @@ pub fn convert_jsonl_oracle<R: BufRead, W: Write>(
     object_bytes: u32,
 ) -> io::Result<CachesimStats> {
     let mut writer = OracleGeneralWriter::new(output, object_bytes);
-    for_each_row(input, |at, blocks| writer.write_parts(at, blocks))?;
+    for_each_row(input, |at, input_blocks, output_blocks| {
+        writer.write_parts(at, input_blocks, output_blocks)
+    })?;
     writer.finish()
 }
 
-fn for_each_row<R: BufRead, F: FnMut(f64, &[u64]) -> io::Result<()>>(
+fn for_each_row<R: BufRead, F: FnMut(f64, &[u64], &[u64]) -> io::Result<()>>(
     input: R,
     mut f: F,
 ) -> io::Result<()> {
@@ -407,7 +454,11 @@ fn for_each_row<R: BufRead, F: FnMut(f64, &[u64]) -> io::Result<()>>(
                 format!("line {}: not a trace row: {e}", lineno + 1),
             )
         })?;
-        f(row.request_start, &row.full_input_blocks)?;
+        f(
+            row.request_start,
+            &row.full_input_blocks,
+            &row.full_output_blocks,
+        )?;
     }
     Ok(())
 }
@@ -416,8 +467,18 @@ fn for_each_row<R: BufRead, F: FnMut(f64, &[u64]) -> io::Result<()>>(
 mod tests {
     use super::*;
 
+    /// A row with no generated blocks, so the counts in these tests stay about the
+    /// prompt. `row_with_output` covers the generated run.
     fn row(at: f64, blocks: &[u64]) -> String {
-        format!(r#"{{"request_start":{at},"full_input_blocks":{blocks:?}}}"#)
+        format!(
+            r#"{{"request_start":{at},"full_input_blocks":{blocks:?},"full_output_blocks":[]}}"#
+        )
+    }
+
+    fn row_with_output(at: f64, input: &[u64], output: &[u64]) -> String {
+        format!(
+            r#"{{"request_start":{at},"full_input_blocks":{input:?},"full_output_blocks":{output:?}}}"#
+        )
     }
 
     fn decode(bytes: &[u8]) -> Vec<(u32, u64, u32, i64)> {
@@ -556,30 +617,59 @@ mod tests {
         // property cannot be quietly lost — or quietly introduced into the CSV writer.
         let mut w = OracleGeneralWriter::new(Vec::new(), 4096);
         assert_eq!(w.buffered(), 0);
-        w.write_parts(0.0, &[1, 2, 3]).unwrap();
+        w.write_parts(0.0, &[1, 2], &[3]).unwrap();
         assert_eq!(w.buffered(), 3, "the oracle writer must buffer");
-        w.write_parts(1.0, &[4]).unwrap();
+        w.write_parts(1.0, &[4], &[]).unwrap();
         assert_eq!(w.buffered(), 4);
         let stats = w.finish().unwrap();
         assert_eq!(stats.accesses, 4);
         // Nothing was written until `finish`, which is the buffering property: a
         // streaming writer would have produced bytes before the backward pass.
         let mut streaming_check = OracleGeneralWriter::new(Vec::new(), 4096);
-        streaming_check.write_parts(0.0, &[1, 2]).unwrap();
+        streaming_check.write_parts(0.0, &[1], &[2]).unwrap();
         assert_eq!(streaming_check.buffered(), 2);
+    }
+
+    #[test]
+    fn a_turns_generated_blocks_are_accesses_at_that_turns_own_time() {
+        // The defect this replaced: projecting the prompt alone put a generated block's
+        // arrival one turn late, and dropped the last turn's output of every session
+        // entirely — output that a real cache holds, because vLLM stores after each
+        // forward pass rather than when something reads it.
+        let trace = format!(
+            "{}\n{}\n",
+            row_with_output(0.0, &[1, 2], &[3]),
+            row_with_output(1.0, &[1, 2, 3], &[4]),
+        );
+        let mut out = Vec::new();
+        let stats = convert_jsonl_csv(trace.as_bytes(), &mut out, 4096).unwrap();
+
+        // 2 prompt + 1 generated, then 3 prompt + 1 generated.
+        assert_eq!(stats.accesses, 7);
+        assert_eq!(stats.distinct_objects, 4);
+
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        // Key 3 is stored at turn 0's timestamp, before it is read at turn 1's.
+        assert_eq!(lines[2], "0,3,4096");
+        assert_eq!(lines[5], "1000,3,4096");
+        // Key 4 is the final turn's output: referenced exactly once, and present. Under
+        // the prompt-only projection it appeared nowhere at all.
+        assert_eq!(lines.iter().filter(|l| l.contains(",4,")).count(), 1);
+        assert_eq!(lines[6], "1000,4,4096");
     }
 
     #[test]
     fn the_declared_losses_name_what_a_loaded_file_cannot_show() {
         // Every one of these is invisible in the output: a file that has lost session
-        // identity and the generated run still loads, replays and reports a hit rate,
-        // which is why FR-077 asks for them to be stated rather than discovered.
+        // identity still loads, replays and reports a hit rate, which is why FR-077 asks
+        // for them to be stated rather than discovered.
         let mut out = Vec::new();
         let stats = convert_jsonl_csv(row(0.0, &[1, 2]).as_bytes(), &mut out, 4096).unwrap();
         let losses = stats.declared_losses();
         for expected in [
             "session grouping and identity",
-            "the generated run",
+            "the input/output distinction",
             "partial_final_valid",
             "virtual time",
         ] {
@@ -588,6 +678,15 @@ mod tests {
                 "no loss names {expected:?}: {losses:?}"
             );
         }
+        // And the generated run must NOT be declared lost, because it is carried. A
+        // stale entry here would be worse than none: it would tell a reader to go to the
+        // native trace for references this file already has.
+        assert!(
+            !losses
+                .iter()
+                .any(|l| l.contains("never appear as accesses")),
+            "the generated run is projected now: {losses:?}"
+        );
         // The object size is a figure a consumer cannot recover from the file, so it is
         // named rather than alluded to.
         assert!(
