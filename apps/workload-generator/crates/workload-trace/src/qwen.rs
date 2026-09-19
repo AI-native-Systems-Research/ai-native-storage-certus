@@ -7,7 +7,10 @@
 //!
 //! # The shape, and the two things about it that matter
 //!
-//! Four fields: `{chat_id, parent_chat_id, hash_ids, type}`.
+//! `{chat_id, parent_chat_id, timestamp, turn, type, input_length, output_length,
+//! hash_ids}` — the format's full documented shape. `apps/eviction-replay-benchmark`
+//! reads four of those and ignores the rest, which is a fact about that consumer, not
+//! about the format.
 //!
 //! **`chat_id` must be unique across the whole file, not per session.** The loader
 //! keeps a single `chat_id -> root` map, so two sessions both numbering their turns
@@ -31,18 +34,23 @@
 //!
 //! # What the projection deliberately drops
 //!
-//! Virtual time, session identity as such, which references are reads versus stores, and
-//! how full a trailing partial block was. The simulator models a cache-access sequence,
-//! not a workload; those fields have no reader there. Recorded because FR-077 requires
-//! a conversion to say what it drops, and because a converted file must never be
-//! mistaken for the trace it came from.
+//! Session identity as such, which references are reads versus stores, and how full a
+//! trailing partial block was. Recorded because FR-077 requires a conversion to say what
+//! it drops, and because a converted file must never be mistaken for the trace it came
+//! from.
+//!
+//! **Virtual time is NOT dropped**, though it used to be. The format carries
+//! `timestamp`, `turn`, `input_length` and `output_length` alongside the four fields
+//! `apps/eviction-replay-benchmark` reads, and that consumer ignoring them is no reason
+//! for us not to write them: another reader of the same format can use them, and a file
+//! that omits them is a subset of one consumer's needs rather than a Qwen-Bailian trace.
 //!
 //! # The failure mode this projection has to avoid
 //!
 //! The loader derives a session by walking `parent_chat_id` to a root, so a wrong
 //! chain **still loads**. It does not error — it silently collapses every session
 //! into one, or splits one into many, and a lineage-aware eviction policy then scores
-//! against a workload nobody described. That is what `tests/simulator.rs` checks, and
+//! against a workload nobody described. That is what `tests/qwen.rs` checks, and
 //! it is why the parent link is asserted here rather than assumed.
 //!
 //! # Examples
@@ -52,12 +60,12 @@
 //! rooted at −1:
 //!
 //! ```
-//! use workload_trace::simulator::convert_jsonl;
+//! use workload_trace::qwen::convert_jsonl;
 //!
 //! let trace = concat!(
-//!     r#"{"session_id":"a","invocation_index":0,"parent_invocation":-1,"full_input_blocks":[1,2],"full_output_blocks":[3]}"#, "\n",
-//!     r#"{"session_id":"b","invocation_index":0,"parent_invocation":-1,"full_input_blocks":[4,5],"full_output_blocks":[6]}"#, "\n",
-//!     r#"{"session_id":"a","invocation_index":1,"parent_invocation":0,"full_input_blocks":[1,2,3],"full_output_blocks":[7]}"#, "\n",
+//!     r#"{"session_id":"a","invocation_index":0,"parent_invocation":-1,"request_start":0.0,"input_length":32,"output_length":16,"full_input_blocks":[1,2],"full_output_blocks":[3]}"#, "\n",
+//!     r#"{"session_id":"b","invocation_index":0,"parent_invocation":-1,"request_start":0.5,"input_length":32,"output_length":16,"full_input_blocks":[4,5],"full_output_blocks":[6]}"#, "\n",
+//!     r#"{"session_id":"a","invocation_index":1,"parent_invocation":0,"request_start":1.5,"input_length":48,"output_length":16,"full_input_blocks":[1,2,3],"full_output_blocks":[7]}"#, "\n",
 //! );
 //!
 //! let mut out = Vec::new();
@@ -69,20 +77,20 @@
 //! let text = String::from_utf8(out).unwrap();
 //! let lines: Vec<&str> = text.lines().collect();
 //! // Prompt blocks then the block this turn generated: key 3 is stored here...
-//! assert_eq!(lines[0], r#"{"chat_id":0,"parent_chat_id":-1,"hash_ids":[1,2,3],"type":"request"}"#);
-//! assert_eq!(lines[1], r#"{"chat_id":1,"parent_chat_id":-1,"hash_ids":[4,5,6],"type":"request"}"#);
+//! assert_eq!(lines[0], r#"{"chat_id":0,"parent_chat_id":-1,"timestamp":0.0,"turn":0,"type":"request","input_length":32,"output_length":16,"hash_ids":[1,2,3]}"#);
+//! assert_eq!(lines[1], r#"{"chat_id":1,"parent_chat_id":-1,"timestamp":0.5,"turn":0,"type":"request","input_length":32,"output_length":16,"hash_ids":[4,5,6]}"#);
 //! // ...and read back as part of a's next prompt, which also stores key 7. Session a's
 //! // second turn points at chat_id 0, not at the row before it.
-//! assert_eq!(lines[2], r#"{"chat_id":2,"parent_chat_id":0,"hash_ids":[1,2,3,7],"type":"request"}"#);
+//! assert_eq!(lines[2], r#"{"chat_id":2,"parent_chat_id":0,"timestamp":1.5,"turn":1,"type":"request","input_length":48,"output_length":16,"hash_ids":[1,2,3,7]}"#);
 //! ```
 //!
 //! A chain that does not hold together is refused rather than silently reshaped:
 //!
 //! ```
-//! use workload_trace::simulator::convert_jsonl;
+//! use workload_trace::qwen::convert_jsonl;
 //!
 //! // Claims a parent, but the converter has no earlier turn for this session.
-//! let orphan = r#"{"session_id":"a","invocation_index":3,"parent_invocation":2,"full_input_blocks":[1],"full_output_blocks":[]}"#;
+//! let orphan = r#"{"session_id":"a","invocation_index":3,"parent_invocation":2,"request_start":1.0,"input_length":16,"output_length":0,"full_input_blocks":[1],"full_output_blocks":[]}"#;
 //! let mut out = Vec::new();
 //! let err = convert_jsonl(orphan.as_bytes(), &mut out).unwrap_err();
 //! assert!(err.to_string().contains("silently reshaped"));
@@ -95,38 +103,79 @@ use serde::{Deserialize, Serialize};
 
 use crate::record::InvocationRecord;
 
-/// One record in the simulator's format.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SimulatorRecord {
+/// One record in the Qwen-Bailian format.
+///
+/// Field order follows the format's own documented example, so a reader that has seen
+/// the real corpus sees ours the same way — and two runs of ours stay byte-comparable.
+///
+/// `PartialEq` without `Eq`, because `timestamp` is an `f64`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct QwenRecord {
     /// Turn identity, unique across the whole file.
+    ///
+    /// **Not a session id**, despite the name: one `chat_id` is one *request*. A
+    /// conversation is the chain reached by following [`Self::parent_chat_id`], and its
+    /// root's `chat_id` is what the loader uses as the session identity.
     pub chat_id: i64,
     /// The previous turn of the same session, or −1 at a session root.
+    ///
+    /// A parent *turn*, never a parent session. The format can express a tree — a real
+    /// corpus records a regenerated answer as a branch — but this generator's sessions
+    /// are append-only (`record.rs` sets `parent_invocation = index - 1`), so every
+    /// chain we write is strictly linear.
     pub parent_chat_id: i64,
-    /// The turn's prompt blocks in prefix order, then the blocks it generated. Each is
-    /// one cache access; the format does not distinguish reads from stores.
-    pub hash_ids: Vec<u64>,
+    /// Virtual seconds on the run-global clock, as the corpus writes it (e.g. `61.1`).
+    pub timestamp: f64,
+    /// 0-based turn index within the conversation, which is `invocation_index`.
+    pub turn: i64,
     /// Request type, retained by the loader for reporting only.
     #[serde(rename = "type")]
     pub request_type: &'static str,
+    /// Prompt length in tokens.
+    pub input_length: i64,
+    /// Generated length in tokens.
+    pub output_length: i64,
+    /// The turn's prompt blocks in prefix order, then the blocks it generated. Each is
+    /// one cache access; the format does not distinguish reads from stores.
+    pub hash_ids: Vec<u64>,
 }
 
 /// The fields the projection needs from a trace row.
 ///
 /// A reader of its own rather than deserialising [`InvocationRecord`]: the projection
-/// needs four fields out of seventeen, and a narrow reader cannot be broken by a
+/// needs seven fields out of seventeen, and a narrow reader cannot be broken by a
 /// change to a field it does not use.
 #[derive(Debug, Clone, Deserialize)]
 struct Row {
     session_id: String,
     invocation_index: i64,
     parent_invocation: i64,
+    request_start: f64,
+    input_length: i64,
+    output_length: i64,
     full_input_blocks: Vec<u64>,
     full_output_blocks: Vec<u64>,
 }
 
+/// One turn's inputs to the projection.
+///
+/// A struct rather than eight positional arguments, which is both over clippy's limit
+/// and the shape in which a `parent_invocation` ends up where an `invocation_index` was
+/// meant.
+struct Parts<'a> {
+    session_id: &'a str,
+    invocation_index: i64,
+    parent_invocation: i64,
+    request_start: f64,
+    input_length: i64,
+    output_length: i64,
+    input: &'a [u64],
+    output: &'a [u64],
+}
+
 /// Statistics that let a conversion be checked against the run that produced it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SimulatorStats {
+pub struct QwenStats {
     /// Rows written.
     pub records: u64,
     /// Rows dropped for having no blocks, which the loader would skip anyway.
@@ -139,16 +188,13 @@ pub struct SimulatorStats {
     pub key_references: u64,
 }
 
-impl SimulatorStats {
+impl QwenStats {
     /// The losses this projection incurred, for a report to print (FR-077).
     ///
     /// The dropped-empty entry appears only when something was dropped: a declaration that
     /// names a loss of zero rows is noise, and noise is what stops these being read.
     pub fn declared_losses(&self) -> Vec<String> {
         let mut losses = vec![
-            "virtual time: there is no timestamp field, so the records carry their order \
-             and nothing else — arrival rate, think time and realised concurrency are gone"
-                .to_string(),
             "session identity: session_id becomes a chat_id/parent_chat_id chain, so the \
              grouping survives as that chain but the trace's own session names do not"
                 .to_string(),
@@ -175,16 +221,16 @@ impl SimulatorStats {
 
 /// Writes the simulator's projection.
 #[derive(Debug)]
-pub struct SimulatorWriter<W: Write> {
+pub struct QwenWriter<W: Write> {
     sink: W,
     next_chat_id: i64,
     /// Last chat id per session, which is the next turn's parent.
     last: HashMap<String, i64>,
     distinct: std::collections::BTreeSet<u64>,
-    stats: SimulatorStats,
+    stats: QwenStats,
 }
 
-impl<W: Write> SimulatorWriter<W> {
+impl<W: Write> QwenWriter<W> {
     /// A writer for one simulator file.
     pub fn new(sink: W) -> Self {
         Self {
@@ -192,7 +238,7 @@ impl<W: Write> SimulatorWriter<W> {
             next_chat_id: 0,
             last: HashMap::new(),
             distinct: Default::default(),
-            stats: SimulatorStats::default(),
+            stats: QwenStats::default(),
         }
     }
 
@@ -202,23 +248,29 @@ impl<W: Write> SimulatorWriter<W> {
     ///
     /// If serialisation or the sink fails.
     pub fn write_record(&mut self, record: &InvocationRecord) -> io::Result<()> {
-        self.write_parts(
-            &record.session_id,
-            record.invocation_index,
-            record.parent_invocation,
-            &record.full_input_blocks,
-            &record.full_output_blocks,
-        )
+        self.write_parts(Parts {
+            session_id: &record.session_id,
+            invocation_index: record.invocation_index,
+            parent_invocation: record.parent_invocation,
+            request_start: record.request_start,
+            input_length: record.input_length,
+            output_length: record.output_length,
+            input: &record.full_input_blocks,
+            output: &record.full_output_blocks,
+        })
     }
 
-    fn write_parts(
-        &mut self,
-        session_id: &str,
-        invocation_index: i64,
-        parent_invocation: i64,
-        input: &[u64],
-        output: &[u64],
-    ) -> io::Result<()> {
+    fn write_parts(&mut self, parts: Parts<'_>) -> io::Result<()> {
+        let Parts {
+            session_id,
+            invocation_index,
+            parent_invocation,
+            request_start,
+            input_length,
+            output_length,
+            input,
+            output,
+        } = parts;
         // Prompt reads then the blocks this turn generated: both are accesses, and the
         // store belongs at the turn that produced it. See the module docs.
         let blocks: Vec<u64> = input.iter().chain(output).copied().collect();
@@ -259,11 +311,15 @@ impl<W: Write> SimulatorWriter<W> {
         self.stats.records += 1;
         self.stats.key_references += blocks.len() as u64;
 
-        let out = SimulatorRecord {
+        let out = QwenRecord {
             chat_id,
             parent_chat_id,
-            hash_ids: blocks.to_vec(),
+            timestamp: request_start,
+            turn: invocation_index,
             request_type: "request",
+            input_length,
+            output_length,
+            hash_ids: blocks.to_vec(),
         };
         let line = serde_json::to_string(&out)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -277,7 +333,7 @@ impl<W: Write> SimulatorWriter<W> {
     /// # Errors
     ///
     /// If the flush fails.
-    pub fn finish(mut self) -> io::Result<SimulatorStats> {
+    pub fn finish(mut self) -> io::Result<QwenStats> {
         self.sink.flush()?;
         self.stats.sessions = self.last.len() as u64;
         self.stats.distinct_keys = self.distinct.len() as u64;
@@ -294,8 +350,8 @@ impl<W: Write> SimulatorWriter<W> {
 /// # Errors
 ///
 /// If a line is not a trace row, or the parent chain does not hold together.
-pub fn convert_jsonl<R: BufRead, W: Write>(input: R, output: W) -> io::Result<SimulatorStats> {
-    let mut writer = SimulatorWriter::new(output);
+pub fn convert_jsonl<R: BufRead, W: Write>(input: R, output: W) -> io::Result<QwenStats> {
+    let mut writer = QwenWriter::new(output);
     for (lineno, line) in input.lines().enumerate() {
         let line = line?;
         let line = line.trim();
@@ -308,13 +364,16 @@ pub fn convert_jsonl<R: BufRead, W: Write>(input: R, output: W) -> io::Result<Si
                 format!("line {}: not a trace row: {e}", lineno + 1),
             )
         })?;
-        writer.write_parts(
-            &row.session_id,
-            row.invocation_index,
-            row.parent_invocation,
-            &row.full_input_blocks,
-            &row.full_output_blocks,
-        )?;
+        writer.write_parts(Parts {
+            session_id: &row.session_id,
+            invocation_index: row.invocation_index,
+            parent_invocation: row.parent_invocation,
+            request_start: row.request_start,
+            input_length: row.input_length,
+            output_length: row.output_length,
+            input: &row.full_input_blocks,
+            output: &row.full_output_blocks,
+        })?;
     }
     writer.finish()
 }
@@ -331,8 +390,12 @@ mod tests {
 
     fn row_with_output(session: &str, index: i64, input: &[u64], output: &[u64]) -> String {
         let parent = index - 1;
+        // Lengths in tokens at the shipped 16-token geometry, and one virtual second per
+        // turn: the projection now carries all four, so a test row must supply them.
+        let (il, ol) = (input.len() as i64 * 16, output.len() as i64 * 16);
+        let at = index as f64;
         format!(
-            r#"{{"session_id":"{session}","invocation_index":{index},"parent_invocation":{parent},"full_input_blocks":{input:?},"full_output_blocks":{output:?}}}"#
+            r#"{{"session_id":"{session}","invocation_index":{index},"parent_invocation":{parent},"request_start":{at},"input_length":{il},"output_length":{ol},"full_input_blocks":{input:?},"full_output_blocks":{output:?}}}"#
         )
     }
 
@@ -486,7 +549,6 @@ mod tests {
             convert_jsonl(format!("{}\n", row("a", 0, &[1, 2])).as_bytes(), &mut out).unwrap();
         let losses = stats.declared_losses();
         for expected in [
-            "virtual time",
             "session identity",
             "the read/store distinction",
             "partial_final_valid",
@@ -496,6 +558,14 @@ mod tests {
                 "no loss names {expected:?}: {losses:?}"
             );
         }
+        // Virtual time must NOT be declared lost: the format has a `timestamp` field and
+        // we fill it. A stale entry here would send a reader to the native trace for
+        // something this file carries.
+        assert!(
+            !losses.iter().any(|l| l.contains("virtual time")),
+            "timestamp is carried now: {losses:?}"
+        );
+
         // Nothing was dropped, so nothing claims to have been: a declaration that names a
         // loss of zero rows trains a reader to skip the list.
         assert_eq!(stats.dropped_empty, 0);

@@ -172,6 +172,46 @@ struct layout, field widths and endianness have **not** been read from the
 reader source. That check is a task and must happen before any bytes are
 written.
 
+## Qwen-Bailian — `convert --to qwen-bailian`
+
+`github.com/alibaba-edu/qwen-bailian-usagetraces-anon`, read in this
+repository by `apps/eviction-replay-benchmark` (`src/replay.rs`). JSONL, one
+document per line, one line per request:
+
+```json
+{"chat_id": 159, "parent_chat_id": 55, "timestamp": 61.1, "turn": 2,
+ "type": "text", "hash_ids": [1089, 1090, 6326]}
+```
+
+**Named for the format, not for that one consumer.** The flag was
+`--simulator` until it was renamed, which said nothing about what the bytes
+are, and invited the reader to think the shape was ours. Several corpus traces
+are in this format, so a generated file and a captured one go through identical
+readers — the same argument FR-075a makes for `convert` existing at all.
+
+**`chat_id` is a turn, not a session**, despite the name, and it is scoped
+**globally to the file**. The reader keeps one `chat_id -> root` map and
+derives a session by following `parent_chat_id` transitively to a root (`-1`
+marks one), so per-session numbering would collide and silently merge every
+conversation into one. `parent_chat_id` is a parent *turn*; the format can
+express a tree, while this generator's append-only sessions always yield a
+linear chain.
+
+**We write all eight fields**, including the four this repository's reader
+ignores (`timestamp`, `turn`, `input_length`, `output_length`). A file carrying
+only what one consumer reads is a subset of that consumer's needs rather than a
+Qwen-Bailian trace, and another reader of the same format can use them.
+`timestamp` is written at full `f64` precision rather than the corpus's
+one-decimal style, for the same reason we do not reproduce Mooncake's 3 s tick:
+the precision of a captured file is a property of that capture, not of the
+format.
+
+**What the conversion loses:** session identity as such (the `session_id`
+string becomes a number chain), which references are reads versus stores, and
+how full a trailing partial block was. `hash_ids` stays chained u64 rather than
+dense — the reader takes u64 keys directly, so no renumbering is needed or
+wanted here.
+
 ## WekaTrace — never an output; reading it is DEFERRED
 
 `huggingface.co/datasets/semianalysisai/cc-traces-weka-062126`: one 1.85 GB

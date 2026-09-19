@@ -40,8 +40,8 @@ use workload_trace::manifest::{BlockStats, Manifest};
 use workload_trace::mooncake::MooncakeWriter;
 #[cfg(feature = "parquet")]
 use workload_trace::parquet::ParquetWriter;
+use workload_trace::qwen::QwenWriter;
 use workload_trace::record::InvocationRecord;
-use workload_trace::simulator::SimulatorWriter;
 
 use crate::report::{ContainerRecords, EmitReport, ProjectionSummary, Reproduction};
 
@@ -75,8 +75,8 @@ pub mod exit {
 /// What `convert` projects a stored trace into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ConvertTo {
-    /// The shape `apps/eviction-replay-benchmark` reads.
-    Simulator,
+    /// Qwen-Bailian usage-trace JSONL, which `apps/eviction-replay-benchmark` reads.
+    QwenBailian,
     /// The Mooncake FAST'25 trace format — the standard-format export.
     Mooncake,
     /// libCacheSim CSV.
@@ -272,14 +272,19 @@ pub enum Command {
         /// libCacheSim CSV projection. A single **file**.
         #[arg(long = "libcachesim", alias = "cachesim")]
         cachesim: Option<PathBuf>,
-        /// Cache-simulator projection, the shape `apps/eviction-replay-benchmark`
+        /// Qwen-Bailian usage-trace JSONL, which `apps/eviction-replay-benchmark`
         /// reads. A single **file**.
+        ///
+        /// Named for the format rather than for that one consumer: the shape is
+        /// Alibaba's anonymized Bailian usage trace (`qwen-bailian-usagetraces-anon`),
+        /// which is also what several of the corpus traces are in, so a generated file
+        /// and a captured one go through the same readers.
         ///
         /// A projection is a file rather than a directory because it is not a trace
         /// (FR-075b): no manifest, and never accepted in place of the native trace for
         /// a reproducibility check.
-        #[arg(long)]
-        simulator: Option<PathBuf>,
+        #[arg(long = "qwen-bailian")]
+        qwen_bailian: Option<PathBuf>,
         /// Structured report destination.
         ///
         /// Always rendered to the terminal. Written as `report.json` inside each native
@@ -399,7 +404,7 @@ pub fn run(cli: Cli) -> i32 {
             unified_parquet,
             mooncake,
             cachesim,
-            simulator,
+            qwen_bailian,
             report,
             force,
         } => match emit(
@@ -411,7 +416,7 @@ pub fn run(cli: Cli) -> i32 {
                 unified_parquet,
                 mooncake,
                 cachesim,
-                simulator,
+                qwen_bailian,
             },
             report,
             force,
@@ -493,8 +498,8 @@ pub struct Outputs {
     pub mooncake: Option<PathBuf>,
     /// libCacheSim CSV projection file.
     pub cachesim: Option<PathBuf>,
-    /// Cache-simulator projection file.
-    pub simulator: Option<PathBuf>,
+    /// Qwen-Bailian usage-trace JSONL projection file.
+    pub qwen_bailian: Option<PathBuf>,
 }
 
 impl Outputs {
@@ -504,7 +509,7 @@ impl Outputs {
             && self.unified_parquet.is_none()
             && self.mooncake.is_none()
             && self.cachesim.is_none()
-            && self.simulator.is_none()
+            && self.qwen_bailian.is_none()
     }
 
     /// The distinct native trace directories, in flag order.
@@ -610,14 +615,12 @@ fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure
         return Ok(text);
     }
 
-    let stats = workload_trace::simulator::convert_jsonl(
-        std::io::BufReader::new(input),
-        BufWriter::new(out),
-    )
-    .map_err(|e| Failure::other(format!("converting {}: {e}", input_path.display())))?;
+    let stats =
+        workload_trace::qwen::convert_jsonl(std::io::BufReader::new(input), BufWriter::new(out))
+            .map_err(|e| Failure::other(format!("converting {}: {e}", input_path.display())))?;
 
     let mut text = format!(
-        "converted {} to {} for the cache simulator\n  \
+        "converted {} to {} as a Qwen-Bailian usage trace\n  \
          records {}  sessions {}  distinct keys {}  key references {}\n",
         input_path.display(),
         output.display(),
@@ -835,7 +838,7 @@ fn free_bytes(dir: &Path) -> Result<u64, Failure> {
 /// | native parquet | 12 181 962 | 6.2 |
 /// | Mooncake JSONL | 12 485 126 | 6.4 |
 /// | libCacheSim CSV | 62 863 382 | 32.0 |
-/// | simulator JSONL | 40 451 114 | 20.6 |
+/// | qwen-bailian JSONL | 40 451 114 | 20.6 |
 ///
 /// Rounded **up** in every case, because the check exists to refuse a run that would
 /// fill a filesystem and an estimator that reads low fails at exactly the job it has.
@@ -852,7 +855,7 @@ mod bytes_per_reference {
     pub const MOONCAKE: u64 = 7;
     /// libCacheSim CSV: one whole row per reference, so the largest of all.
     pub const CACHESIM: u64 = 32;
-    /// The simulator projection.
+    /// The Qwen-Bailian projection.
     pub const SIMULATOR: u64 = 21;
 }
 
@@ -905,8 +908,8 @@ fn planned_outputs(projection: &Projection, outputs: &Outputs) -> Vec<PlannedOut
         bytes_per_reference::CACHESIM,
     );
     add(
-        "--simulator",
-        &outputs.simulator,
+        "--qwen-bailian",
+        &outputs.qwen_bailian,
         bytes_per_reference::SIMULATOR,
     );
     planned
@@ -1068,7 +1071,7 @@ fn emit(
         return Err(Failure::config(
             "nothing to write: pass at least one of --certus-unified-jsonl <dir>, \
              --certus-unified-parquet <dir>, --mooncake <file>, --libcachesim <file>, \
-             --simulator <file>"
+             --qwen-bailian <file>"
                 .to_string(),
         ));
     }
@@ -1177,10 +1180,10 @@ fn emit(
         }
         None => None,
     };
-    let mut simulator_writer = match &outputs.simulator {
-        Some(path) => Some(SimulatorWriter::new(BufWriter::new(
-            create_projection_file(path)?,
-        ))),
+    let mut qwen_writer = match &outputs.qwen_bailian {
+        Some(path) => Some(QwenWriter::new(BufWriter::new(create_projection_file(
+            path,
+        )?))),
         None => None,
     };
 
@@ -1202,8 +1205,7 @@ fn emit(
                     return;
                 }
             }
-            if mooncake_writer.is_some() || cachesim_writer.is_some() || simulator_writer.is_some()
-            {
+            if mooncake_writer.is_some() || cachesim_writer.is_some() || qwen_writer.is_some() {
                 let record = InvocationRecord::from_turn(&trace_id, s, t, block_size);
                 if let Some(w) = mooncake_writer.as_mut() {
                     if let Err(e) = w.write_record(&record) {
@@ -1217,9 +1219,9 @@ fn emit(
                         return;
                     }
                 }
-                if let Some(w) = simulator_writer.as_mut() {
+                if let Some(w) = qwen_writer.as_mut() {
                     if let Err(e) = w.write_record(&record) {
-                        write_error = Some(format!("writing the simulator projection: {e}"));
+                        write_error = Some(format!("writing the qwen-bailian projection: {e}"));
                     }
                 }
             }
@@ -1242,10 +1244,10 @@ fn emit(
         ),
         None => None,
     };
-    let simulator_stats = match simulator_writer {
+    let qwen_stats = match qwen_writer {
         Some(w) => Some(
             w.finish()
-                .map_err(|e| Failure::other(format!("closing the simulator file: {e}")))?,
+                .map_err(|e| Failure::other(format!("closing the qwen-bailian file: {e}")))?,
         ),
         None => None,
     };
@@ -1404,9 +1406,9 @@ fn emit(
         out.push_str(&one_projections_losses("    ", &s.declared_losses()));
         wrote_a_projection = true;
     }
-    if let (Some(path), Some(s)) = (&outputs.simulator, &simulator_stats) {
+    if let (Some(path), Some(s)) = (&outputs.qwen_bailian, &qwen_stats) {
         out.push_str(&format!(
-            "  simulator         {} records to {} ({} sessions, {} distinct keys)\n",
+            "  qwen-bailian      {} records to {} ({} sessions, {} distinct keys)\n",
             s.records,
             path.display(),
             s.sessions,
@@ -2277,8 +2279,8 @@ session_classes:
 
     #[test]
     fn both_entry_points_declare_the_same_losses_for_the_same_projection() {
-        // FR-077 on the path that had nothing. `emit --simulator` and `convert --to
-        // simulator` produce the same file from the same records, so a reader who is told
+        // FR-077 on the path that had nothing. `emit --qwen-bailian` and `convert --to
+        // qwen-bailian` produce the same file from the same records, so a reader who is told
         // what was dropped on one path and not the other is being told the file is
         // different depending on how it was obtained.
         let tmp = tempfile::TempDir::new().unwrap();
@@ -2293,7 +2295,7 @@ session_classes:
                 unified_jsonl: Some(trace.clone()),
                 mooncake: Some(tmp.path().join("mc.jsonl")),
                 cachesim: Some(tmp.path().join("cs.csv")),
-                simulator: Some(tmp.path().join("sim.jsonl")),
+                qwen_bailian: Some(tmp.path().join("qwen.jsonl")),
                 ..Default::default()
             },
             None,
@@ -2316,7 +2318,7 @@ session_classes:
         // being the quieter of the two, which is how it was.
         let converted = convert(
             &trace,
-            ConvertTo::Simulator,
+            ConvertTo::QwenBailian,
             &tmp.path().join("converted.jsonl"),
         )
         .expect("the convert must succeed");
@@ -2331,11 +2333,14 @@ session_classes:
             );
             compared += 1;
         }
-        assert!(compared >= 4, "only {compared} losses were compared");
+        // Three, since this projection stopped declaring virtual time lost once it began
+        // writing `timestamp`. The floor is here so a projection that silently declared
+        // nothing would fail rather than pass vacuously.
+        assert!(compared >= 3, "only {compared} losses were compared");
 
         // And each of the other two formats declares its own, so a run that asks for all
         // three is told about all three.
-        for expected in ["16 tokens", "32768 bytes", "there is no timestamp field"] {
+        for expected in ["16 tokens", "32768 bytes", "chat_id/parent_chat_id chain"] {
             assert!(
                 emitted.contains(expected),
                 "no projection declared {expected:?}:\n{emitted}"
@@ -2358,9 +2363,9 @@ session_classes:
         // * Mooncake and libCacheSim need block geometry, which only a manifest carries, so
         //   they refuse at the manifest — FR-075b's own words, "it has no manifest", as an
         //   executable check, and a **configuration** refusal (exit 2).
-        // * The simulator projection needs no manifest, so it gets as far as the rows and is
+        // * The qwen-bailian projection needs no manifest, so it gets as far as the rows and is
         //   refused by the schema (exit 1). That is sufficient rather than lucky: no
-        //   projection satisfies any target's row schema — a simulator row has no
+        //   projection satisfies any target's row schema — a qwen-bailian row has no
         //   `request_start`, a Mooncake row has no `session_id`, and a libCacheSim CSV is
         //   not JSON at all.
         let tmp = tempfile::TempDir::new().unwrap();
@@ -2372,7 +2377,7 @@ session_classes:
             200.0,
             7,
             Outputs {
-                simulator: Some(projection.clone()),
+                qwen_bailian: Some(projection.clone()),
                 ..Default::default()
             },
             None,
@@ -2385,7 +2390,7 @@ session_classes:
         assert!(!tmp.path().join("manifest.json").exists());
 
         for (target, expected_code) in [
-            (ConvertTo::Simulator, exit::OTHER),
+            (ConvertTo::QwenBailian, exit::OTHER),
             (ConvertTo::Mooncake, exit::CONFIG),
             (ConvertTo::Cachesim, exit::CONFIG),
             (ConvertTo::OracleGeneral, exit::CONFIG),
