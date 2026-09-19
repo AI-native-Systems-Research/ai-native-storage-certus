@@ -80,4 +80,5 @@
 pub mod client;
 pub mod frame;
 pub mod handshake;
+pub mod probe;
 pub mod server;

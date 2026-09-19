@@ -412,6 +412,7 @@ invalidity is in the exit status and not only in the report.
 ```text
 workload-node-agent --shm-path <path> --port <n> [--bind <addr>]
                     --lanes <n> --block-bytes <n> --batch-keys <n>
+                    [--probe check|lookup]
                     [--gpu-device <n> | --no-payload]
                     [--stamp-keys] [--verify-payload]
 ```
@@ -430,3 +431,34 @@ run, including local ones, which turns a leak of one claim into a leak per run.
 The generator normally launches this itself — as a child process locally, over
 ssh remotely — and `--no-launch` is for an operator who would rather run it
 themselves.
+
+### `--probe check|lookup`: which operation answers residency
+
+`check` is the default and is what the production client does: `CHECK` the
+path, `TOUCH` then `LOOKUP` what came back resident, store what did not.
+
+**`lookup` is the mode that exercises remote lookup at all.** `CHECK` is
+answered from the local dispatch-map alone, so a key a peer holds reads as
+absent and the client stores it rather than asking for it — which is why the
+production connector's remote path is unreachable in practice. Only `LOOKUP`
+reaches `batch_lookup`, the one dispatcher entry point that forwards a local
+miss to `remote_lookup`. In `lookup` mode the load is the probe: a zero `ok`
+byte is the miss, those keys take the store path, and every local miss becomes
+a remote-lookup attempt. It is also one fewer round trip per turn.
+
+**`TOUCH` moves to after the load in this mode**, and only over the served
+keys. `dispatcher.touch` also consults the dispatch-map alone and never
+remote-fetches, so touching first fails for exactly the keys a peer holds and
+the remotely-fetched block's reference would be lost. `batch_lookup`'s own
+`mt.batch_touch` does not make the touch redundant: that is the memory tier's
+recency for warm hits, not the dispatch-map reference FR-041 asks for, and it
+does not cover a hit served from the block device.
+
+The generator's `--probe` takes the same two values and passes the mode to
+every agent it launches, so the two cannot disagree. It selects a **client
+rule, not a workload**: plan `OpKind`s never reach the wire, so the plan is
+byte-identical in both modes and FR-072 is untouched. The run report names the
+mode, because two runs differing only in this are different experiments and
+nothing else in the counters would distinguish them.
+
+`lookup` is a deliberate deviation from FR-039's production-faithful stream.

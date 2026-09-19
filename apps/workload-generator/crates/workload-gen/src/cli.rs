@@ -156,6 +156,25 @@ pub struct RunArgs {
     /// (FR-070), so it is opt-in.
     #[arg(long)]
     pub stamp_keys: bool,
+    /// How a turn discovers residency: `check` (default, what the production client does)
+    /// or `lookup`.
+    ///
+    /// **This is the switch that decides whether a run exercises remote lookup at all.**
+    /// `CHECK` answers from the local dispatch-map only, so a key a peer holds reads as
+    /// absent and the client stores it instead of asking for it; only `LOOKUP` reaches
+    /// `batch_lookup`, which forwards a local miss to `remote_lookup`. `lookup` mode
+    /// therefore turns every local miss into a remote-lookup attempt, and is one fewer
+    /// round trip per turn.
+    ///
+    /// It selects a **client rule, not a workload**: plan `OpKind`s never reach the wire,
+    /// so the plan is byte-identical either way and FR-072 is untouched. The run report
+    /// names the mode, because two runs that differ only in this are different experiments.
+    ///
+    /// `check` is what FR-039 requires of the production-faithful stream; `lookup` is a
+    /// documented deviation, taken deliberately to reach a path the production client
+    /// cannot.
+    #[arg(long, default_value = "check")]
+    pub probe: String,
     /// A Certus instance to drive, as `host[:port][:mailbox]`, repeatable.
     ///
     /// **An instance, not a machine** (FR-081): a host routinely runs several — one per NUMA
@@ -1622,6 +1641,13 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
     // and under FR-079 the generator has none. Passing them on the command line is what keeps
     // `--no-payload` and `--verify-payload` meaning the same thing they always did.
     let mut extra_args = Vec::new();
+    // Refused here as well as in the agent: the generator must not launch four agents and
+    // then learn from the first one's exit that the mode was misspelled.
+    let probe = workload_wire::probe::Probe::parse(&args.probe).map_err(Failure::config)?;
+    if probe != workload_wire::probe::Probe::default() {
+        extra_args.push("--probe".to_string());
+        extra_args.push(probe.as_str().to_string());
+    }
     if args.no_payload {
         extra_args.push("--no-payload".to_string());
     } else {
@@ -1717,6 +1743,7 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
         lanes,
         args.batch_keys,
         args.seed,
+        probe,
         &args.description,
         args.report.clone(),
     )?);
@@ -1818,6 +1845,7 @@ fn live_report(
     lanes: usize,
     batch_keys: usize,
     seed: u64,
+    probe: workload_wire::probe::Probe,
     description_path: &Path,
     report_path: Option<PathBuf>,
 ) -> Result<String, Failure> {
@@ -1862,6 +1890,7 @@ fn live_report(
             }
         }),
         mode: stats.pacing.name(),
+        probe: probe.as_str(),
         schedule: (stats.pacing == Pacing::Real).then(|| crate::report::Schedule {
             rate: stats.rate,
             rate_shortfall: stats.rate_shortfall().unwrap_or(0.0),

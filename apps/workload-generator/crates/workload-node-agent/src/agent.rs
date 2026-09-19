@@ -43,7 +43,7 @@ use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::exec::TurnExecutor;
+use crate::exec::{Probe, TurnExecutor};
 use crate::payload::PayloadBuffer;
 use hdrhistogram::serialization::{Serializer, V2Serializer};
 use shm_queue::Client;
@@ -73,6 +73,7 @@ pub struct AgentFactory {
     pool: Arc<Mutex<Pool>>,
     block_bytes: u32,
     batch_keys: usize,
+    probe: Probe,
     channels: u32,
     /// Requests issued to the mailbox across every connection, for `Shutdown`'s tally.
     submitted: Arc<AtomicU64>,
@@ -104,6 +105,7 @@ impl AgentFactory {
         payload: Option<Arc<PayloadBuffer>>,
         block_bytes: u32,
         batch_keys: usize,
+        probe: Probe,
     ) -> Self {
         let total = client.channel_count() as u32;
         let slots = (0..channels.len()).collect();
@@ -113,6 +115,7 @@ impl AgentFactory {
             pool: Arc::new(Mutex::new(Pool { channels, slots })),
             block_bytes,
             batch_keys,
+            probe,
             channels: total,
             submitted: Arc::new(AtomicU64::new(0)),
             failed: Arc::new(AtomicU64::new(0)),
@@ -136,7 +139,9 @@ impl ServiceFactory for AgentFactory {
             let slot = pool.slots.pop().unwrap_or(0);
             (channel, slot)
         };
-        let mut exec = match TurnExecutor::new(self.block_bytes, self.batch_keys) {
+        let mut exec = match TurnExecutor::new(self.block_bytes, self.batch_keys)
+            .map(|e| e.with_probe(self.probe))
+        {
             Ok(e) => e,
             Err(e) => {
                 // Give the borrowed resources back before failing, or a refused connection

@@ -185,6 +185,29 @@ impl TurnSplit {
         }
     }
 
+    /// Divide `path` by a `LOOKUP` response's `ok` bytes, reusing the buffers.
+    ///
+    /// One byte per key, `1` for a served key and `0` for anything else — `op_lookup` sets
+    /// the flag only on success and counts `KeyNotFound` as a miss, so a zero is "not
+    /// served, store it". There is no `PENDING` equivalent here: a key another lane is
+    /// storing reads as a plain miss, so this mode can re-reserve it and have the reserve
+    /// declined, which the granted-keys filter already handles.
+    ///
+    /// A short `ok` list leaves the remaining keys untouched, for the same reason
+    /// [`Self::split`] does: guessing would either invent a hit or invent a store.
+    pub fn split_by_lookup(&mut self, path: &[u64], ok: &[u8]) {
+        self.resident.clear();
+        self.missing.clear();
+        self.pending = 0;
+        for (key, served) in path.iter().zip(ok.iter()) {
+            if *served == 1 {
+                self.resident.push(*key);
+            } else {
+                self.missing.push(*key);
+            }
+        }
+    }
+
     /// Keys to touch and load.
     pub fn resident(&self) -> &[u64] {
         &self.resident
@@ -421,6 +444,32 @@ fn write_reserve(out: &mut Vec<u8>, keys: &[u64], size: u32, session: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lookup_split_has_no_pending_class_and_stores_every_zero() {
+        // `op_lookup`'s answer is binary: 1 is served, anything else is "store it". There is
+        // deliberately no PENDING equivalent — a key another lane is storing reads as a plain
+        // miss here, gets re-reserved, and the reserve declines it, which the granted-keys
+        // filter already handles. Treating a zero as anything but a store would silently drop
+        // the block.
+        let mut split = TurnSplit::default();
+        split.split_by_lookup(&[10, 11, 12, 13], &[1, 0, 1, 0]);
+        assert_eq!(split.resident(), &[10, 12]);
+        assert_eq!(split.missing(), &[11, 13]);
+        assert_eq!(split.pending(), 0);
+
+        // Only 1 means served: a byte that is neither 0 nor 1 must not be read as a hit, or a
+        // key that was never delivered would go unstored and unloaded.
+        split.split_by_lookup(&[20, 21], &[2, 1]);
+        assert_eq!(split.resident(), &[21]);
+        assert_eq!(split.missing(), &[20]);
+
+        // A short answer leaves the rest alone, exactly as `split` does: guessing would
+        // either invent a hit or invent a store.
+        split.split_by_lookup(&[30, 31, 32], &[1]);
+        assert_eq!(split.resident(), &[30]);
+        assert!(split.missing().is_empty());
+    }
     use shmq_dispatcher::wire;
     use workload_model::description::WorkloadDescription;
     use workload_model::plan::{Operation, OperationPlan};

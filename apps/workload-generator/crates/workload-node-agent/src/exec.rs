@@ -31,6 +31,23 @@
 //! A `PENDING` key is neither loaded nor stored: another lane's store is in flight, and
 //! `translate.rs` is explicit that the client only reserves what the check reported absent.
 //!
+//! # `--probe lookup` inverts the first two steps, deliberately
+//!
+//! With [`Probe::Lookup`] there is no `CHECK`: the `LOOKUP` is the probe, a zero `ok` byte
+//! is the miss, and those keys take the store path. Two consequences worth stating, because
+//! both are easy to get backwards:
+//!
+//! - **Every local miss becomes a remote-lookup attempt.** `CHECK` answers from the local
+//!   dispatch-map alone, so a `check`-first run never asks a peer for anything — only
+//!   `LOOKUP` reaches `batch_lookup`, which forwards a miss to `remote_lookup`. That is why
+//!   this mode exists.
+//! - **`TOUCH` moves to after the load.** `dispatcher.touch` also consults the dispatch-map
+//!   alone and never remote-fetches, so touching first fails for precisely the keys a peer
+//!   holds, and the remotely-fetched block's reference would be lost. Touching the served
+//!   keys afterwards records it. `batch_lookup`'s own `mt.batch_touch` does not make this
+//!   redundant: that is the memory tier's recency for warm hits, not the dispatch-map
+//!   reference FR-041 asks for, and it misses a hit served from the block device.
+//!
 //! # This is the only place latency and bandwidth are measured
 //!
 //! Whatever talks to the mailbox is the only thing that can time a `LOOKUP` or count a block
@@ -52,6 +69,7 @@ use shm_queue::Client;
 use shmq_dispatcher::wire::{self, op};
 use workload_model::plan::OpKind;
 use workload_wire::frame::Counters;
+pub use workload_wire::probe::Probe;
 
 use crate::opstream::{forbidden_opcode, Encoding, OpStream, TurnSplit};
 use crate::payload::{HandleBatchTemplate, PayloadBuffer};
@@ -107,6 +125,7 @@ pub struct TurnExecutor {
     stored: Vec<u64>,
     skipped_needing_gpu: u64,
     skipped_keys: u64,
+    probe: Probe,
 }
 
 impl TurnExecutor {
@@ -130,7 +149,14 @@ impl TurnExecutor {
             stored: Vec::new(),
             skipped_needing_gpu: 0,
             skipped_keys: 0,
+            probe: Probe::default(),
         })
+    }
+
+    /// Select how residency is discovered. See [`Probe`].
+    pub fn with_probe(mut self, probe: Probe) -> Self {
+        self.probe = probe;
+        self
     }
 
     /// Attach the GPU payload buffer, making the data-moving operations issuable.
@@ -191,23 +217,61 @@ impl TurnExecutor {
         let before = self.counters;
         let skipped_before = (self.skipped_needing_gpu, self.skipped_keys);
 
-        self.states.clear();
-        let mut states = std::mem::take(&mut self.states);
-        let check = self.issue(client, channel, op::CHECK, path, 0, Some(&mut states));
-        self.states = states;
-        check?;
-        // Taken apart so the split does not borrow `self` while `issue` needs it mutably.
         let mut split = std::mem::take(&mut self.split);
-        split.split(path, &self.states);
+        match self.probe {
+            Probe::Check => {
+                self.states.clear();
+                let mut states = std::mem::take(&mut self.states);
+                let check = self.issue(client, channel, op::CHECK, path, 0, Some(&mut states));
+                self.states = states;
+                if let Err(e) = check {
+                    self.split = split;
+                    return Err(e);
+                }
+                split.split(path, &self.states);
 
-        for opcode in [op::TOUCH, op::LOOKUP] {
-            let resident = split.resident().to_vec();
-            self.issue(client, channel, opcode, &resident, 0, None)?;
-            // After a load, check that what arrived is what was asked for. A stamp nobody
-            // reads proves nothing: the pre-fill is one repeated byte, so without this a cache
-            // returning the wrong block produces a run indistinguishable from a correct one.
-            if opcode == op::LOOKUP {
-                self.verify_loaded(&resident)?;
+                for opcode in [op::TOUCH, op::LOOKUP] {
+                    let resident = split.resident().to_vec();
+                    self.issue(client, channel, opcode, &resident, 0, None)?;
+                    // After a load, check that what arrived is what was asked for. A stamp
+                    // nobody reads proves nothing: the pre-fill is one repeated byte, so
+                    // without this a cache returning the wrong block produces a run
+                    // indistinguishable from a correct one.
+                    if opcode == op::LOOKUP {
+                        self.verify_loaded(&resident)?;
+                    }
+                }
+            }
+            Probe::Lookup => {
+                // The load IS the probe, and it comes **first**. `op_lookup` answers one
+                // `ok` byte per key, set only on success and counting `KeyNotFound` as a
+                // miss, so a zero is the miss and the request still returns `STATUS_OK`.
+                self.states.clear();
+                let mut states = std::mem::take(&mut self.states);
+                let lookup = self.issue(client, channel, op::LOOKUP, path, 0, Some(&mut states));
+                self.states = states;
+                if let Err(e) = lookup {
+                    self.split = split;
+                    return Err(e);
+                }
+                split.split_by_lookup(path, &self.states);
+                let served = split.resident().to_vec();
+
+                // `TOUCH` **after** the load, and only what the load served. This is the
+                // opposite order from `Probe::Check`, and the reason is the whole point of
+                // this mode: `dispatcher.touch` consults the dispatch-map alone and never
+                // remote-fetches, so touching before the lookup fails for exactly the keys a
+                // peer holds — the remote-hit set — and the block that then arrives by
+                // remote fetch would never have its reference recorded. Ignoring the return
+                // code would not help; the touch did not happen. After the lookup those keys
+                // are locally resident, so the reference lands.
+                //
+                // It is still needed despite `batch_lookup` touching: that touches the
+                // **memory tier** (`mt.batch_touch`) for the warm hits it served, while this
+                // is the dispatch-map-side reference FR-041 asks for, and it also covers a
+                // hit that came from the block device rather than from DRAM.
+                self.issue(client, channel, op::TOUCH, &served, 0, None)?;
+                self.verify_loaded(&served)?;
             }
         }
 

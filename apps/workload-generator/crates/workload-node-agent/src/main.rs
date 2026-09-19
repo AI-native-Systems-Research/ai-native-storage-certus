@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use workload_node_agent::agent::AgentFactory;
+use workload_node_agent::exec::Probe;
 use workload_node_agent::mailbox;
 use workload_node_agent::payload::PayloadBuffer;
 use workload_wire::handshake;
@@ -66,6 +67,16 @@ struct Cli {
     /// Keys per request (FR-069). Must be at least what the generator uses.
     #[arg(long, default_value_t = 64)]
     batch_keys: usize,
+
+    /// How a turn discovers residency: `check` (what the production client does) or
+    /// `lookup` (skip `CHECK`; a zero `ok` byte from `LOOKUP` is the miss).
+    ///
+    /// `lookup` is the mode that exercises **remote lookup**: only `LOOKUP` reaches
+    /// `batch_lookup`, the one dispatcher entry point that forwards a local miss to a peer,
+    /// so a `check`-first run never asks the fabric for anything. Must match the
+    /// generator's `--probe`, which passes this through.
+    #[arg(long, default_value = "check")]
+    probe: String,
 
     /// GPU device for the payload buffer.
     #[arg(long, default_value_t = 0)]
@@ -173,12 +184,17 @@ fn run(cli: &Cli) -> Result<(), String> {
         )?))
     };
 
+    // Parsed here rather than per connection: a misspelled mode must refuse the agent at
+    // startup, not produce a run that silently used the default rule.
+    let probe = Probe::parse(&cli.probe)?;
+
     let factory = AgentFactory::new(
         Arc::clone(&client),
         channels,
         payload,
         cli.block_bytes,
         cli.batch_keys,
+        probe,
     );
     let addr = format!("{}:{}", cli.bind, cli.port);
     let server = Server::bind(&addr, factory)

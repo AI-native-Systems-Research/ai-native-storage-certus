@@ -366,6 +366,14 @@ pub struct LiveReport {
     /// work-conserving one is a ceiling. Two reports side by side with no mode on them is how
     /// they get quoted as though they measured the same thing.
     pub mode: &'static str,
+    /// Which operation answered residency: `check` or `lookup` (the `--probe` mode).
+    ///
+    /// Named here for the same reason `mode` is, and with more at stake: the two are **not
+    /// comparable**, because `check` never asks a peer for anything while `lookup` turns
+    /// every local miss into a remote-lookup attempt. Two reports that differ only in this
+    /// describe different systems, and nothing else on the wire or in the counters would
+    /// tell them apart.
+    pub probe: &'static str,
     /// The schedule the run set itself, and how well it kept it. `None` when unpaced.
     pub schedule: Option<Schedule>,
     /// Requests issued.
