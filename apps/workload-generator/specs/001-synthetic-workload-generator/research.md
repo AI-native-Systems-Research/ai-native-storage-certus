@@ -26,7 +26,21 @@ trace lacks:
   have been the obvious objection to that decision.
 - Our per-turn records carry the full ordered prefix and the session lineage,
   so `chat_id` = turn identity, `parent_chat_id` = previous turn (or −1 at a
-  session root), `hash_ids` = the turn's full input block list.
+  session root), `hash_ids` = the turn's full input block list **followed by
+  the blocks it generated**.
+
+  **Amended.** This originally mapped `hash_ids` to the input list alone, on
+  the argument that a turn's output reappears in the next turn's prefix, so no
+  key is lost. Two things defeat that argument. A real deployment stores a
+  generated block **when it is generated** — vLLM's offloading connector calls
+  `prepare_store` after each forward pass (`knowledge/kv_IO_pattern.md`) — so
+  input-only put every store one turn later than it happens. And the **final
+  turn of every session** generates output nothing reads again, so input-only
+  omitted it entirely while a real cache still held it. Both understate
+  capacity pressure, which is the quantity this consumer exists to measure.
+  The same correction applies to the libCacheSim projection. Mooncake keeps
+  the prompt alone, because `len(hash_ids) == ceil(input_length / block_size)`
+  is a conformance invariant there.
 
 **Alternatives rejected**:
 

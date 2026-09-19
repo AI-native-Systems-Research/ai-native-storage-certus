@@ -1677,6 +1677,55 @@ independently confirms the record size against real output.
   kept here with their measurements because the analysis was done and should
   not be repeated.
 
+- [x] T062m [US2] Project the **generated run**, not the prompt alone, in the
+  two cache-simulator targets: `--libcachesim` / `--to cachesim` / `--to
+  oracle-general` and `--simulator` / `--to simulator` reference a turn's
+  `full_output_blocks` after its `full_input_blocks`, at that turn's own time.
+  Mooncake stays prompt-only
+
+  **Raised by the user, and the deciding question was "what does a real
+  deployment do".** Answer, from our own notes: vLLM's offloading connector
+  calls `prepare_store` **after each forward pass**
+  (`knowledge/kv_IO_pattern.md`), offloading newly-computed blocks rather than
+  waiting for a reader. So a generated block is inserted at the turn that
+  generated it.
+
+  That makes the previous projection wrong rather than lossy. The old argument
+  — recorded in `research.md` D1 and `simulator.rs` — was that a turn's output
+  reappears in the next turn's prompt, so no key is lost. Two things defeat it:
+  every store landed **one turn late**, and the **last turn of every session**
+  generates output nothing reads again, so it appeared **nowhere** while a real
+  cache still held it. Both understate capacity pressure and eviction
+  opportunity, which is exactly what these two targets exist to measure.
+
+  **Mooncake is the exception, on conformance grounds**: `len(hash_ids) ==
+  ceil(input_length / block_size)` holds on 2 328 of 2 328 upstream rows, so
+  appending generated ids yields a file any reader deriving prompt length from
+  `hash_ids` reads wrongly. It keeps `output_length` as a token count and drops
+  the identities, and that stays a declared loss.
+
+  **Measured consequence on the shipped example at `--until 10`**: references
+  655 104 -> 660 805 and distinct keys 411 430 -> 416 462, the difference being
+  exactly the 5 701 generated-block references the trace contains. The two
+  cache targets now agree with each other exactly (independent writers, same
+  stream) while Mooncake sits below both by that gap — so `quickstart.md`'s
+  cross-check changed shape rather than disappearing.
+
+  **Two declared losses were reworded because they were misleading**, both
+  prompted by the user. "The generated run" is no longer a loss for these two
+  targets — it is carried — and what remains is the *read/store distinction*,
+  which no cache can observe. And a trailing partial block was never unusable:
+  its **key is kept and cached like any other**, and only how full it was is
+  lost, which costs byte-capacity rounding in libCacheSim and a lossy round
+  trip.
+
+  Tests: a generated block is an access at its own turn and again as the next
+  turn's prompt read; a final-turn output is referenced exactly once where it
+  previously appeared not at all; a turn whose only blocks are generated is
+  written rather than dropped-empty. Every affected figure in `quickstart.md`
+  was re-measured, including the simulator's own agreement (`requests=1943
+  accesses=660805 working-set=416462`).
+
 - [ ] T062i [DEFERRED] Implement the WekaTrace reader in
   `crates/workload-trace/src/weka.rs`, reading one **session** per
   line into emitted-schema invocation records. Read-only by decision. Must

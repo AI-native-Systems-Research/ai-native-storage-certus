@@ -15,17 +15,24 @@
 //! therefore a running counter over emitted rows, with each session remembering the
 //! counter of its previous turn.
 //!
-//! **`hash_ids` is the turn's prompt, not its whole chain.** The simulator counts
-//! every listed key as one cache access, and a turn *reads* its prompt while it
-//! *stores* its output. No key is lost by leaving output out: a turn's output is part
-//! of the next turn's prompt, so it appears then. The exception is the final turn's
-//! output, which is stored and never read again — correctly absent from a trace of
-//! accesses.
+//! **`hash_ids` is the turn's prompt followed by the blocks it generated.** The
+//! simulator counts every listed key as one cache access, and both are accesses: a turn
+//! *reads* its prompt and *stores* its output.
+//!
+//! This corrects an earlier version that wrote the prompt alone, on the argument that a
+//! turn's output reappears in the next turn's prompt so no key is lost. Two things
+//! survive that argument. A real deployment inserts a generated block **when it is
+//! generated** — vLLM's offloading connector calls `prepare_store` after each forward
+//! pass (`knowledge/kv_IO_pattern.md`) — so prompt-only moved every store one turn
+//! later than it happens. And the **final turn of every session** generates output that
+//! is never read again, so prompt-only omitted it entirely while the real cache still
+//! held it. The result understated capacity pressure and eviction opportunity, which is
+//! precisely what this file exists to measure.
 //!
 //! # What the projection deliberately drops
 //!
-//! Virtual time, session identity as such, the input/output distinction, and the
-//! trailing-partial-block convention. The simulator models a cache-access sequence,
+//! Virtual time, session identity as such, which references are reads versus stores, and
+//! how full a trailing partial block was. The simulator models a cache-access sequence,
 //! not a workload; those fields have no reader there. Recorded because FR-077 requires
 //! a conversion to say what it drops, and because a converted file must never be
 //! mistaken for the trace it came from.
@@ -48,23 +55,25 @@
 //! use workload_trace::simulator::convert_jsonl;
 //!
 //! let trace = concat!(
-//!     r#"{"session_id":"a","invocation_index":0,"parent_invocation":-1,"full_input_blocks":[1,2]}"#, "\n",
-//!     r#"{"session_id":"b","invocation_index":0,"parent_invocation":-1,"full_input_blocks":[3,4]}"#, "\n",
-//!     r#"{"session_id":"a","invocation_index":1,"parent_invocation":0,"full_input_blocks":[1,2,5]}"#, "\n",
+//!     r#"{"session_id":"a","invocation_index":0,"parent_invocation":-1,"full_input_blocks":[1,2],"full_output_blocks":[3]}"#, "\n",
+//!     r#"{"session_id":"b","invocation_index":0,"parent_invocation":-1,"full_input_blocks":[4,5],"full_output_blocks":[6]}"#, "\n",
+//!     r#"{"session_id":"a","invocation_index":1,"parent_invocation":0,"full_input_blocks":[1,2,3],"full_output_blocks":[7]}"#, "\n",
 //! );
 //!
 //! let mut out = Vec::new();
 //! let stats = convert_jsonl(trace.as_bytes(), &mut out).unwrap();
 //! assert_eq!(stats.records, 3);
 //! assert_eq!(stats.sessions, 2);
-//! assert_eq!(stats.distinct_keys, 5);
+//! assert_eq!(stats.distinct_keys, 7);
 //!
 //! let text = String::from_utf8(out).unwrap();
 //! let lines: Vec<&str> = text.lines().collect();
-//! assert_eq!(lines[0], r#"{"chat_id":0,"parent_chat_id":-1,"hash_ids":[1,2],"type":"request"}"#);
-//! assert_eq!(lines[1], r#"{"chat_id":1,"parent_chat_id":-1,"hash_ids":[3,4],"type":"request"}"#);
-//! // Session a's second turn points at chat_id 0, not at the row before it.
-//! assert_eq!(lines[2], r#"{"chat_id":2,"parent_chat_id":0,"hash_ids":[1,2,5],"type":"request"}"#);
+//! // Prompt blocks then the block this turn generated: key 3 is stored here...
+//! assert_eq!(lines[0], r#"{"chat_id":0,"parent_chat_id":-1,"hash_ids":[1,2,3],"type":"request"}"#);
+//! assert_eq!(lines[1], r#"{"chat_id":1,"parent_chat_id":-1,"hash_ids":[4,5,6],"type":"request"}"#);
+//! // ...and read back as part of a's next prompt, which also stores key 7. Session a's
+//! // second turn points at chat_id 0, not at the row before it.
+//! assert_eq!(lines[2], r#"{"chat_id":2,"parent_chat_id":0,"hash_ids":[1,2,3,7],"type":"request"}"#);
 //! ```
 //!
 //! A chain that does not hold together is refused rather than silently reshaped:
@@ -73,7 +82,7 @@
 //! use workload_trace::simulator::convert_jsonl;
 //!
 //! // Claims a parent, but the converter has no earlier turn for this session.
-//! let orphan = r#"{"session_id":"a","invocation_index":3,"parent_invocation":2,"full_input_blocks":[1]}"#;
+//! let orphan = r#"{"session_id":"a","invocation_index":3,"parent_invocation":2,"full_input_blocks":[1],"full_output_blocks":[]}"#;
 //! let mut out = Vec::new();
 //! let err = convert_jsonl(orphan.as_bytes(), &mut out).unwrap_err();
 //! assert!(err.to_string().contains("silently reshaped"));
@@ -93,7 +102,8 @@ pub struct SimulatorRecord {
     pub chat_id: i64,
     /// The previous turn of the same session, or −1 at a session root.
     pub parent_chat_id: i64,
-    /// The prompt's blocks, in prefix order. Each is one cache access.
+    /// The turn's prompt blocks in prefix order, then the blocks it generated. Each is
+    /// one cache access; the format does not distinguish reads from stores.
     pub hash_ids: Vec<u64>,
     /// Request type, retained by the loader for reporting only.
     #[serde(rename = "type")]
@@ -111,6 +121,7 @@ struct Row {
     invocation_index: i64,
     parent_invocation: i64,
     full_input_blocks: Vec<u64>,
+    full_output_blocks: Vec<u64>,
 }
 
 /// Statistics that let a conversion be checked against the run that produced it.
@@ -141,11 +152,13 @@ impl SimulatorStats {
             "session identity: session_id becomes a chat_id/parent_chat_id chain, so the \
              grouping survives as that chain but the trace's own session names do not"
                 .to_string(),
-            "the generated run: only the prompt's blocks become hash_ids, so output keys \
-             are never accessed"
+            "the read/store distinction: a turn's prompt blocks and the blocks it \
+             generated are both hash_ids, prompt first, with nothing marking which is \
+             which. The simulator counts each as one access, which is what a cache sees"
                 .to_string(),
-            "partial_final_valid and block geometry: the format carries neither, so a \
-             trailing partial block is indistinguishable from a full one"
+            "how full a trailing partial block was: its key is present and accessed like \
+             any other, but the format carries no block geometry, so partial_final_valid \
+             cannot be recovered"
                 .to_string(),
         ];
         if self.dropped_empty > 0 {
@@ -194,6 +207,7 @@ impl<W: Write> SimulatorWriter<W> {
             record.invocation_index,
             record.parent_invocation,
             &record.full_input_blocks,
+            &record.full_output_blocks,
         )
     }
 
@@ -202,8 +216,13 @@ impl<W: Write> SimulatorWriter<W> {
         session_id: &str,
         invocation_index: i64,
         parent_invocation: i64,
-        blocks: &[u64],
+        input: &[u64],
+        output: &[u64],
     ) -> io::Result<()> {
+        // Prompt reads then the blocks this turn generated: both are accesses, and the
+        // store belongs at the turn that produced it. See the module docs.
+        let blocks: Vec<u64> = input.iter().chain(output).copied().collect();
+        let blocks = blocks.as_slice();
         if blocks.is_empty() {
             // The loader skips these, so writing them would make the file's row count
             // disagree with what the simulator sees.
@@ -294,6 +313,7 @@ pub fn convert_jsonl<R: BufRead, W: Write>(input: R, output: W) -> io::Result<Si
             row.invocation_index,
             row.parent_invocation,
             &row.full_input_blocks,
+            &row.full_output_blocks,
         )?;
     }
     writer.finish()
@@ -303,10 +323,16 @@ pub fn convert_jsonl<R: BufRead, W: Write>(input: R, output: W) -> io::Result<Si
 mod tests {
     use super::*;
 
+    /// A row with no generated blocks, so these tests' counts stay about the prompt.
+    /// `row_with_output` covers the generated run.
     fn row(session: &str, index: i64, blocks: &[u64]) -> String {
+        row_with_output(session, index, blocks, &[])
+    }
+
+    fn row_with_output(session: &str, index: i64, input: &[u64], output: &[u64]) -> String {
         let parent = index - 1;
         format!(
-            r#"{{"session_id":"{session}","invocation_index":{index},"parent_invocation":{parent},"full_input_blocks":{blocks:?}}}"#
+            r#"{{"session_id":"{session}","invocation_index":{index},"parent_invocation":{parent},"full_input_blocks":{input:?},"full_output_blocks":{output:?}}}"#
         )
     }
 
@@ -376,7 +402,7 @@ mod tests {
         // The whole reason the link is checked: a wrong chain still LOADS. The loader
         // would collapse or split conversations and a lineage-aware policy would score
         // against a workload nobody described.
-        let orphan = r#"{"session_id":"a","invocation_index":3,"parent_invocation":2,"full_input_blocks":[1]}"#;
+        let orphan = &row_with_output("a", 3, &[1], &[]);
         let mut out = Vec::new();
         let err = convert_jsonl(orphan.as_bytes(), &mut out).unwrap_err();
         assert!(
@@ -411,6 +437,49 @@ mod tests {
     }
 
     #[test]
+    fn a_turns_generated_blocks_join_its_hash_ids_after_the_prompt() {
+        // Both are accesses, and the store belongs at the turn that produced it. The
+        // last turn's output is the case prompt-only lost completely: nothing reads it,
+        // so it appeared nowhere while the real cache still held it.
+        let trace = format!(
+            "{}\n{}\n",
+            row_with_output("a", 0, &[1, 2], &[3]),
+            row_with_output("a", 1, &[1, 2, 3], &[4]),
+        );
+        let mut out = Vec::new();
+        let stats = convert_jsonl(trace.as_bytes(), &mut out).unwrap();
+
+        assert_eq!(stats.records, 2);
+        assert_eq!(stats.key_references, 3 + 4);
+        assert_eq!(stats.distinct_keys, 4, "key 4 is generated and never read");
+
+        let rows: Vec<serde_json::Value> = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(rows[0]["hash_ids"], serde_json::json!([1, 2, 3]));
+        assert_eq!(rows[1]["hash_ids"], serde_json::json!([1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn a_row_whose_only_blocks_are_generated_is_still_written() {
+        // A turn with an empty prompt still stores what it generated, so it is a record
+        // rather than a dropped-empty. Only a turn that touches no blocks at all is
+        // dropped, because the loader skips those.
+        let trace = format!(
+            "{}\n{}\n",
+            row_with_output("a", 0, &[], &[9]),
+            row_with_output("b", 0, &[], &[]),
+        );
+        let mut out = Vec::new();
+        let stats = convert_jsonl(trace.as_bytes(), &mut out).unwrap();
+        assert_eq!(stats.records, 1);
+        assert_eq!(stats.dropped_empty, 1);
+        assert_eq!(stats.key_references, 1);
+    }
+
+    #[test]
     fn the_declared_losses_name_what_this_shape_cannot_carry() {
         let mut out = Vec::new();
         let stats =
@@ -419,7 +488,7 @@ mod tests {
         for expected in [
             "virtual time",
             "session identity",
-            "the generated run",
+            "the read/store distinction",
             "partial_final_valid",
         ] {
             assert!(
