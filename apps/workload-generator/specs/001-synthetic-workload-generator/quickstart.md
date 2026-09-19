@@ -199,28 +199,29 @@ Measured at a 30-second span, so the trade is concrete:
 | --- | --- | --- |
 | `--mooncake` | 12.5 MB | 4 fields: timestamp, two lengths, prompt block ids |
 | `--libcachesim` | 63.4 MB | `(time, id, size)` triples, one row **per block reference** |
-| `--simulator` | 40.8 MB | `{chat_id, parent_chat_id, hash_ids, type}` per request |
+| `--qwen-bailian` | 41.3 MB | the Qwen-Bailian eight-field request shape |
 | `--certus-unified-parquet` | 12.2 MB | the full 17-field schema |
 | `--certus-unified-jsonl` | 44.1 MB | the same, as text |
 
 Two things worth reading off that table. libCacheSim CSV is the **largest** of the
-four while carrying the least, because it writes a row per reference rather than
-per request — an existing standard format is not automatically the lean choice. And
-the full schema in parquet is *smaller* than raw Mooncake JSONL, so the extra
-fifteen fields cost nothing once the container stops being text.
+five while carrying the least per row, because it writes a row per reference
+rather than per request — an existing standard format is not automatically the
+lean choice. And the full schema in parquet is *smaller* than raw Mooncake
+JSONL, so the extra fifteen fields cost nothing once the container stops being
+text.
 
-Both projections declare what they dropped (FR-077), and `--libcachesim` prints the
-`--trace-type-params` string its reader needs, since libCacheSim's columns are
-configurable and a CSV file cannot say what its own columns mean.
+Every projection declares what it dropped (FR-077), and `--libcachesim` prints
+the `--trace-type-params` string its reader needs, since libCacheSim's columns
+are configurable and a CSV file cannot say what its own columns mean.
 
 ## Scenario 3c — Converting a stored trace
 
 Then the deferred integration question, now settled (`research.md` D1):
 
 ```bash
-$G convert /tmp/trace --to simulator --output /tmp/trace-sim.jsonl
+$G convert /tmp/trace --to qwen-bailian --output /tmp/trace-qwen.jsonl
 cargo run --release -p eviction-replay-benchmark -- \
-  --file /tmp/trace-sim.jsonl --policy lru --cache-size 4096
+  --file /tmp/trace-qwen.jsonl --policy lru --cache-size 4096
 ```
 
 **Expect**: the simulator loads it and reports a hit rate. Its loader derives
@@ -250,7 +251,7 @@ generated one go through an identical transformation:
 $G emit $E --seed 42 --until 10 --certus-unified-jsonl /tmp/qs-trace
 $G convert /tmp/qs-trace --to mooncake       --output /tmp/qs-mc.jsonl
 $G convert /tmp/qs-trace --to oracle-general --output /tmp/qs-og.bin
-$G convert /tmp/qs-trace --to simulator      --output /tmp/qs-sim.jsonl
+$G convert /tmp/qs-trace --to qwen-bailian   --output /tmp/qs-qwen.jsonl
 ```
 
 **Expect** every conversion to declare what it dropped and to end with the
@@ -259,7 +260,7 @@ FR-075b line, and these counts:
 ```text
 mooncake:       records 1943  distinct identifiers 411430  references 655104
 oracleGeneral:  accesses 660805  distinct objects 416462  object size 65536 bytes
-simulator:      records 1943  sessions 1627  distinct keys 416462  key refs 660805
+qwen-bailian:   records 1943  sessions 1627  distinct keys 416462  key refs 660805
 ```
 
 **They do not all match, and how they differ is the check.** The two cache

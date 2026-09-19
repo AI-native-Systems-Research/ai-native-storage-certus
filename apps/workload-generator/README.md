@@ -44,7 +44,7 @@ cannot see a mailbox, a device or an output container.
 | crate | default member | what it owns |
 | --- | --- | --- |
 | `workload-model` | yes | the simulation core: YAML schema and validation, the five distribution kinds, populations and residual seeding, selection over rank, the key chain, sessions and turns, the virtual-time loop, and the canonical `OperationPlan` |
-| `workload-trace` | yes | output containers (JSONL, parquet behind a non-default feature), the self-describing manifest, and the Mooncake / libCacheSim / cache-simulator projections |
+| `workload-trace` | yes | output containers (JSONL, parquet behind a non-default feature), the self-describing manifest, and the Mooncake / libCacheSim / Qwen-Bailian projections |
 | `workload-wire` | yes | the generator↔agent TCP protocol: framing, the `Hello` handshake, and its conformance cases |
 | `workload-gen` | yes | the `workload-gen` binary — CLI, the plan queue, the driver, pacing, and the structured report. Links no CUDA and attaches to no mailbox |
 | `workload-node-agent` | **no** | the per-node daemon, and **everything that touches the mailbox or the GPU**: the turn executor, the opcode mapping, the payload buffer. It holds no simulation state |
@@ -96,7 +96,7 @@ default output and no format a run is obliged to produce:
 | `--certus-unified-parquet` | native trace, parquet container | a directory |
 | `--mooncake` | Mooncake FAST'25 projection | a file |
 | `--libcachesim` | libCacheSim CSV projection | a file |
-| `--simulator` | the shape `apps/eviction-replay-benchmark` reads | a file |
+| `--qwen-bailian` | Qwen-Bailian usage-trace JSONL, which `apps/eviction-replay-benchmark` reads | a file |
 
 The native destinations are directories because a native trace is
 self-describing — a `manifest.json` beside its records. A projection has no

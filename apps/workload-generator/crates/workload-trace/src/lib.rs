@@ -10,7 +10,7 @@
 //!
 //! A **container** ([`jsonl`], and `parquet` behind its feature) is a trace: it carries the full
 //! [`record`] schema and a [`manifest`] describing itself. A **projection**
-//! ([`mooncake`], [`cachesim`], [`simulator`]) is another tool's shape, written
+//! ([`mooncake`], [`cachesim`], [`qwen`]) is another tool's shape, written
 //! from that schema and lossy on purpose — no manifest, and never accepted in
 //! place of a trace for a reproducibility check (FR-075b). Every projection
 //! declares what it dropped rather than leaving it to be discovered (FR-077).
@@ -21,14 +21,15 @@
 //!
 //! # Examples
 //!
-//! Write a trace, then project it onto what `apps/eviction-replay-benchmark` reads:
+//! Write a trace, then project it onto the Qwen-Bailian shape
+//! `apps/eviction-replay-benchmark` reads:
 //!
 //! ```
 //! use workload_model::description::WorkloadDescription;
 //! use workload_model::sim::Simulation;
 //! use workload_trace::jsonl::JsonlWriter;
 //! use workload_trace::manifest::Manifest;
-//! use workload_trace::simulator;
+//! use workload_trace::qwen;
 //!
 //! let yaml = r#"
 //! version: 1
@@ -59,7 +60,7 @@
 //!
 //! // The projection, driven by the schema rather than by the simulation.
 //! let mut projected = Vec::new();
-//! let p = simulator::convert_jsonl(trace.as_slice(), &mut projected).unwrap();
+//! let p = qwen::convert_jsonl(trace.as_slice(), &mut projected).unwrap();
 //! assert_eq!(p.records, stats.invocations);
 //! assert_eq!(p.sessions, stats.sessions);
 //! ```
@@ -82,5 +83,5 @@ pub mod manifest;
 pub mod mooncake;
 #[cfg(feature = "parquet")]
 pub mod parquet;
+pub mod qwen;
 pub mod record;
-pub mod simulator;

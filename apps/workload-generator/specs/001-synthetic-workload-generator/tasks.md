@@ -1726,6 +1726,47 @@ independently confirms the record size against real output.
   was re-measured, including the simulator's own agreement (`requests=1943
   accesses=660805 working-set=416462`).
 
+- [x] T062n [US2] Rename the `--simulator` projection to `--qwen-bailian` and
+  write the format's **full** eight-field record, not the four
+  `apps/eviction-replay-benchmark` happens to read
+
+  **Both halves were the user's calls**, taken after I reported the situation:
+  the name, and completing the record.
+
+  **The name was the worst in the set.** `--mooncake` and `--libcachesim` name
+  formats; `--simulator` named one consumer of ours, vaguely, and the user's
+  reaction was "I had no idea what that was". The shape is not ours at all — it
+  is Alibaba's anonymized Bailian usage trace
+  (`qwen-bailian-usagetraces-anon`), which the benchmark's own loader says in
+  its first line and prints as `qwen-file`. Renamed throughout: flag, `--to`
+  value, module `qwen.rs`, `QwenWriter`/`QwenStats`/`QwenRecord`,
+  `tests/qwen.rs`, and the docs. No back-compat alias: nothing outside this
+  repository had used the flag.
+
+  **The record was a subset of one reader's needs.** The format carries
+  `timestamp`, `turn`, `input_length` and `output_length` beside the four
+  fields the benchmark reads, and that reader **ignores** them
+  (`apps/eviction-replay-benchmark/src/replay.rs:18`) — a fact about the
+  consumer, not the format. We dropped four fields we had. All eight are now
+  written, in the format's own documented field order. `timestamp` carries full
+  `f64` precision rather than the corpus's one-decimal style, on the same
+  reasoning already recorded for Mooncake's 3 s tick: a captured file's
+  precision is a property of that capture.
+
+  **Consequences, measured rather than assumed.** The loader reads the fuller
+  file unchanged — `requests=6109 accesses=1979669 working-set=1119473`,
+  identical to before — which is the check that the extra fields are ignored
+  rather than mis-parsed. The file grows from 40.8 MB to **41.3 MB** at
+  `--until 30` (I had guessed 47.8 and had to correct it; the guess was in a
+  document whose header promises measured figures). And **virtual time stopped
+  being a declared loss**, because it is now carried — one fewer entry in this
+  projection's `declared_losses`, asserted in both directions so a stale entry
+  cannot survive.
+
+  `contracts/trace-interop.md` gains a Qwen-Bailian section, which it lacked
+  while the target existed: the contract is normative for `convert`'s targets,
+  so its absence was already a gap rather than something this task invented.
+
 - [ ] T062i [DEFERRED] Implement the WekaTrace reader in
   `crates/workload-trace/src/weka.rs`, reading one **session** per
   line into emitted-schema invocation records. Read-only by decision. Must

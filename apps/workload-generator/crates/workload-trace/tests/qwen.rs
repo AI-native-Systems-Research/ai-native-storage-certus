@@ -25,8 +25,8 @@ use tempfile::TempDir;
 use workload_model::description::WorkloadDescription;
 use workload_model::sim::Simulation;
 use workload_trace::jsonl::JsonlWriter;
+use workload_trace::qwen::{convert_jsonl, QwenWriter};
 use workload_trace::record::InvocationRecord;
-use workload_trace::simulator::{convert_jsonl, SimulatorWriter};
 
 const BLOCK_SIZE: u64 = 16;
 
@@ -177,7 +177,7 @@ fn the_projection_is_the_same_whichever_entry_point_produced_it() {
     // In-stream: build records as turns happen and project them directly.
     let mut sim = Simulation::new(&d, 25).unwrap();
     let mut direct: Vec<u8> = Vec::new();
-    let mut w = SimulatorWriter::new(&mut direct);
+    let mut w = QwenWriter::new(&mut direct);
     sim.run_until(span, &mut |s, t| {
         let record = InvocationRecord::from_turn("sim", s, t, BLOCK_SIZE);
         w.write_record(&record).unwrap();

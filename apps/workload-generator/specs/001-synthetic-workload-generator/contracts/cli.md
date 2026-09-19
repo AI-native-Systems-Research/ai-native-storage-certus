@@ -17,10 +17,10 @@ workload-gen emit    <description.yml> --until <virtual-seconds> --seed <n>
                      [--certus-unified-parquet <dir>]
                      [--mooncake <file>]
                      [--libcachesim <file>]
-                     [--simulator <file>]
+                     [--qwen-bailian <file>]
                      [--report <file>] [--force]
 workload-gen plan    <description.yml> --output <file>
-workload-gen convert <trace-dir> --to simulator|mooncake|cachesim
+workload-gen convert <trace-dir> --to qwen-bailian|mooncake|cachesim|oracle-general
                                  --output <file>
 workload-gen validate <description.yml>
 ```
@@ -42,7 +42,7 @@ workload-gen validate <description.yml>
   | `--certus-unified-parquet` | native trace, parquet container | a **directory** |
   | `--mooncake` | Mooncake projection | a **file** |
   | `--libcachesim` | libCacheSim CSV projection | a **file** |
-  | `--simulator` | cache-simulator projection | a **file** |
+  | `--qwen-bailian` | Qwen-Bailian usage-trace JSONL | a **file** |
 
   The native destinations are directories and the projections are files because
   that is what they are, not by convention: a native trace is
@@ -91,7 +91,8 @@ workload-gen validate <description.yml>
   transformation. Use it also for a trace whose description is no longer to
   hand. `contracts/trace-interop.md` specifies each target, what it drops, and
   which candidates were rejected.
-  - `--to simulator` — the shape `apps/eviction-replay-benchmark` reads. See
+  - `--to qwen-bailian` — Qwen-Bailian usage-trace JSONL, which
+    `apps/eviction-replay-benchmark` reads. See
     `research.md` D1: the simulator reads `{chat_id, parent_chat_id, hash_ids,
     type}`, not the emitted schema, and the projection needs no information the
     trace lacks.
