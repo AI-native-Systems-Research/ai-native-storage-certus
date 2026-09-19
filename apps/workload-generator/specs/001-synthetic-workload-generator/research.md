@@ -404,3 +404,75 @@ assignment either, so one derivation serves both.
   now declares that — FR-077 applied where the loss occurs. If the placement
   epoch above is ever built the projections *will* then drop it and a
   `declared_losses()` entry becomes correct, but not before.
+
+## D11. Dense block identifiers instead of chained hashes: DEFERRED
+
+**Decision**: keep chained `u64` keys for now. The design below is viable and
+is deferred on **priority**, not because it was refuted — the user's words:
+"I don't think redesigning the key space is our highest priority, so I'm fine
+with deferring it. But I wanted to have the discussion and record the
+outcomes."
+
+**What was proposed.** Dense identifiers allocated as **ranges** rather than
+tracked per block: one contiguous range per shared object, one per live
+session chain, released when the session ends. The allocator is a bump
+pointer — take the current value, add the range length. Cross-run
+disjointness comes from a per-run **offset**.
+
+### Four objections raised against it, and what became of them
+
+1. *"It needs a global trie, which is what chaining exists to avoid"*
+   (`trace-io.md` § Keys are chained u64). **Answered by the ranges**: the
+   state is O(shared objects + live sessions), not O(blocks).
+2. *"A global allocator reintroduces an ordering dependency, so FR-072
+   breaks."* **Wrong, and withdrawn.** Allocation happens on the generation
+   side, which is single-threaded — there is no `thread`, `rayon`, `Mutex` or
+   atomic anywhere in `workload-model` — and `--lanes` / `--batch-keys` act
+   only on the *consumption* of a finished plan. The allocator is a plain
+   `&mut self` field, not even an atomic.
+3. *"A growing session chain cannot stay contiguous."* True only if the space
+   must have no gaps. A range per session, over-reserved and abandoned at
+   session end, still yields small integers, and the range representation
+   stays compact either way.
+4. *"Identifiers would alias across runs, so a warm server would serve false
+   hits."* Real — and **answered by the per-run offset**.
+
+### What dense identifiers would buy
+
+- **The birthday collision disappears.** It is a documented,
+  deliberately-unhandled risk today (`crates/workload-model/src/keys.rs:216`
+  quotes 10^-6 per run) with **no detection**: a collision silently merges two
+  blocks into one false cache hit. That quoted rate corresponds to about
+  6x10^6 distinct blocks and scales as n^2/2^65 — roughly 3x10^-4 at 10^8
+  blocks and **2.7% at 10^9**.
+- **Identifiers fit `i64`**, which is what the Qwen-Bailian `chat_id` field
+  requires and what any index-based reader wants. The Mooncake projection's
+  dense renumbering (FR-078) would become unnecessary rather than
+  load-bearing.
+- **FR-072's semantics and its test would coincide.** Keys are arbitrary
+  labels, so the honest requirement is that two plans be **isomorphic** —
+  equal up to renaming — while the requirement as written asks for
+  byte-identity, which is strictly stronger. Under a deterministic allocator
+  the allocation order *is* a canonical labelling, so the two collapse into
+  one property. The relabeling freedom that makes byte-identity too strong
+  exists only because keys are hashes.
+
+### What the present scheme buys, and what a replacement must preserve
+
+- **A key is a pure function of coordinates, not of allocation history.**
+  `shared_salt` packs `class_id` (12 bits), `instance_index` (26) and
+  `block_ordinal` (24) and hashes the result, so the same logical block has
+  the same key in every run of a description, and a different description
+  yields different keys. That is what makes a **warm server** safe: a hit
+  against a previous run's cache is a true hit, not an alias. Note the
+  coordinates are *already* an ordinal range per shared object — the present
+  scheme hashes a range rather than using it directly.
+- **The offset must come from somewhere that outlives a run**: a persisted
+  counter, an operator-supplied flag, or a digest-derived base with a generous
+  per-run reservation. The last trades a block-level collision probability for
+  a much smaller run-level one, and unlike the birthday case it is checkable.
+
+**Open if this is picked up**: whether FR-072 should be reworded to require
+isomorphism, with byte-identity named as the sufficient check it is tested by.
+Recommended, and deliberately not done here — it is a spec change, and the
+current wording is sound as a test even where it overstates the semantics.
