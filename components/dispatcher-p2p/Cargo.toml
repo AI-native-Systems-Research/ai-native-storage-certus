@@ -9,6 +9,7 @@ publish = false
 component-framework.workspace = true
 component-core.workspace = true
 component-macros.workspace = true
+dispatcher = { workspace = true, default-features = false }
 interfaces = { workspace = true, features = ["spdk"] }
 gpu-services = { workspace = true, features = ["spdk", "gpu", "p2p"] }
 spdk-env.workspace = true
