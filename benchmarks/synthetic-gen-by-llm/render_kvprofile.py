@@ -188,24 +188,33 @@ SMALLMULT_TIER = [
 ]
 
 # Bars annotated with a hit rate (numerator / denominator) atop the raw count, so
-# each count reads alongside the ratio that matters for cache effectiveness:
-#   prefix_cache_hits / prefix_cache_queries — GPU-local rate. All four counters
-#     are in TOKENS (vLLM PrefixCacheStats: "queries = the number of tokens that
-#     were queried"; record() sums num_tokens). But the GPU query counter adds
-#     request.num_tokens — the request's FULL current length, i.e. the whole
-#     accumulated multiturn context — every time get_computed_blocks runs for it
-#     (each (re)schedule / prefill), so a long request re-counts its entire context
-#     repeatedly and the total runs far above the prompt-token volume (e.g. 315M vs
-#     8.5M prompt tokens on an 80-session, 12-turn run). Its ratio reads near-zero
-#     under cache pressure and is NOT a token-conservation figure.
+# each count reads alongside the ratio that matters for cache effectiveness.
+#
+# NOTE: prefix_cache_hits / prefix_cache_queries (the GPU-local pair) is
+# DELIBERATELY not annotated. All four counters are in TOKENS (vLLM
+# PrefixCacheStats: "queries = the number of tokens that were queried"), but the
+# GPU pair is recorded in get_computed_blocks(), which the scheduler calls on
+# every scheduling *attempt* of a waiting request. Under a closed loop with more
+# sessions than sequence slots the waiting queue is never empty, so each request
+# is re-evaluated — and re-counts request.num_tokens (its full accumulated
+# context) — many steps before it is admitted. On the 80-session / 64-slot run
+# that inflated queries to 315M against 8.5M prompt tokens (37x), across 564 of
+# 570 rounds. Worse, queries and hits do NOT inflate by the same factor (a cold
+# re-try logs a query with no hit), so the ratio is distorted, not merely scaled
+# — it is not a fair rate and must not be shown as one. The un-inflated
+# equivalents are already emitted and ARE annotated below:
 #   external_prefix_cache_hits / external_prefix_cache_queries — offload-tier rate.
+#     The external pair is recorded once per admission (update_state_after_alloc),
+#     so it is re-count-free.
 #   prompt_tokens_cached / prompt_tokens — the end-to-end EFFECTIVE cache-hit rate:
 #     of all prompt tokens presented at admission, the fraction served from any
-#     tier instead of recomputed. Both are token counts at the same stage, so this
-#     one respects conservation (cached <= prompt) and is the headline "did caching
-#     help" number — ~95% where the GPU-local ratio alone reads ~0%.
+#     tier instead of recomputed. prompt_tokens is the un-inflated query volume
+#     (counted once per processed token, never on a waiting re-try), so this pair
+#     respects conservation (cached <= prompt) and is the headline "did caching
+#     help" number (~95%). The GPU-HBM-only contribution is the un-inflated
+#     derivation prompt_tokens_cached - external_prefix_cache_hits (~0.8% here) —
+#     small, but this is the honest figure, not the inflated-denominator ~0%.
 HIT_DENOM = {
-    "prefix_cache_hits":          "prefix_cache_queries",
     "external_prefix_cache_hits": "external_prefix_cache_queries",
     "prompt_tokens_cached":       "prompt_tokens",
 }
