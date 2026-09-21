@@ -43,8 +43,11 @@
 //!
 //! - Control-plane requests arrive from the shmq serve layer on blocking worker threads
 //! - Hot path: runs on the blocking thread, multi-stream GPU DMA
-//! - Cold path: `std::thread::scope` spawns per-drive queue threads
-//!   (up to 2 per NVMe drive) for parallel SSD reads
+//! - Cold batch path (`batch_lookup`): a single multiplexed scatter-gather
+//!   poll loop on the calling thread (`scatter_gather_multi_drive_zero_copy`)
+//!   fans NVMe reads across all drives at once — no per-drive worker threads.
+//!   The DRAM-only prefetch path (`promote_to_memory_tier`) still uses
+//!   `std::thread::scope` to read per drive in parallel
 //! - Background writer: separate thread pool for staging → SSD flush
 //!
 //! # Key design decisions
@@ -60,7 +63,6 @@
 #![allow(clippy::too_many_arguments)]
 
 mod background;
-pub mod cold_pool;
 pub mod io_segmenter;
 pub mod metrics;
 mod pins;
@@ -332,7 +334,6 @@ define_component! {
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             bg_mt_evictor: Mutex<Option<MemoryTierEvictor>>,
-            cold_pool: Mutex<Option<cold_pool::ColdReadPool>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
@@ -1915,32 +1916,6 @@ impl IDispatcher for DispatcherComponent {
 
         *self.bg_writer.lock().unwrap() = Some(writer);
 
-        // Start persistent cold-path worker pool (pre-connected NVMe channels + CUDA streams).
-        if let Ok(gpu) = self.gpu_services.get() {
-            let pool_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = {
-                let dd = self.data_drives.read();
-                dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
-            };
-            if !pool_drives.is_empty() {
-                const COLD_POOL_QUEUES_PER_DRIVE: usize = 1;
-                match cold_pool::ColdReadPool::new(&pool_drives, &gpu, COLD_POOL_QUEUES_PER_DRIVE) {
-                    Ok(pool) => {
-                        self.log_info(&format!(
-                            "dispatcher: cold pool started ({} drives × {} queues)",
-                            pool_drives.len(),
-                            COLD_POOL_QUEUES_PER_DRIVE,
-                        ));
-                        *self.cold_pool.lock().unwrap() = Some(pool);
-                    }
-                    Err(e) => {
-                        self.log_info(&format!(
-                            "cold pool creation failed (non-fatal, will use scoped threads): {e:?}"
-                        ));
-                    }
-                }
-            }
-        }
-
         // Start background SSD evictor if drives exist and threshold is configured.
         if config.ssd_eviction_threshold > 0.0 {
             let dm_for_evictor = self
@@ -2029,11 +2004,6 @@ impl IDispatcher for DispatcherComponent {
 
         if let Some(mut writer) = self.bg_writer.lock().unwrap().take() {
             writer.shutdown();
-        }
-
-        // Shut down cold pool before block device teardown (workers hold ClientChannels).
-        if let Some(pool) = self.cold_pool.lock().unwrap().take() {
-            pool.shutdown();
         }
 
         // Checkpoint all extent managers to persist metadata before teardown.
@@ -2318,9 +2288,10 @@ impl IDispatcher for DispatcherComponent {
             drop(warm_pins);
         }
 
-        // Promote cold entries in parallel — multiple queue threads per drive.
-        // Each thread gets its own NVMe queue pair and CUDA streams, enabling
-        // concurrent reads on the same physical drive.
+        // Promote cold entries in parallel via a single multiplexed
+        // scatter-gather loop on this thread: one channel is checked out per
+        // active drive and `scatter_gather_multi_drive_zero_copy` fans NVMe
+        // reads across all drives at once (no per-drive worker threads).
         //
         // All cold entries — including a lone single-key load — go through the
         // pooled path. It defers tier-saturation (`AllocationFailed`) to the
@@ -2578,7 +2549,7 @@ impl IDispatcher for DispatcherComponent {
                     }
                 }
 
-                // Staging post-pass (pool_guard released): serve tier-saturated
+                // Staging post-pass (channel leases released): serve tier-saturated
                 // cold entries one buffer at a time. Each serve checks out a
                 // single staging buffer, does SSD→staging→GPU, and releases it —
                 // so at most one lease is held per call and never while holding a
@@ -4491,7 +4462,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4652,7 +4622,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4701,7 +4670,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4720,7 +4688,6 @@ mod tests {
     fn query_idispatcher() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4744,7 +4711,6 @@ mod tests {
     fn initialize_without_receptacles_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4773,7 +4739,6 @@ mod tests {
     fn initialize_with_empty_pci_addrs_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4806,7 +4771,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4836,7 +4800,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4861,7 +4824,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4883,7 +4845,6 @@ mod tests {
     fn populate_before_initialize_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4913,7 +4874,6 @@ mod tests {
     fn populate_with_zero_size_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4949,7 +4909,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4970,7 +4929,6 @@ mod tests {
     fn double_shutdown_succeeds() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4995,7 +4953,6 @@ mod tests {
     fn concurrent_pre_init_calls_from_multiple_threads() {
         let c = Arc::new(DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5054,7 +5011,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5086,7 +5042,6 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5165,7 +5120,6 @@ mod tests {
             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5731,7 +5685,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5765,7 +5718,6 @@ mod tests {
 
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5840,7 +5792,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5911,7 +5862,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5965,7 +5915,6 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -6035,7 +5984,6 @@ mod tests {
         let mt_probe = Arc::clone(&mt);
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
