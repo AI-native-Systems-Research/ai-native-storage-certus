@@ -68,8 +68,18 @@ COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/benchmarks/k
 # driver's runtime sys.path insert, so the module dir is put on PYTHONPATH below.
 COPY benchmarks/kv-offload-replay/tracing_connector.py /workspace/benchmarks/kv-offload-replay/
 COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
+# synth-multiturn workload dataset (Claude-authored, gzip-compressed ~24MB; the
+# WORKLOADS registry in run_multiturn_common resolves WORKLOAD_NAME=synth-multiturn
+# to this path and load_convs decompresses it). Baked so the workload is
+# self-contained — no per-run mount or DATASET_HOST needed.
+COPY data/synth_multiturn.json.gz /workspace/data/synth_multiturn.json.gz
 
-RUN pip install --no-cache-dir -e /workspace/certus-shmq-connector
+# Editable install of the pure-Python connector. --no-index + --no-build-isolation
+# keep this offline-safe: the disconnected node has no PyPI, and the base image
+# already ships pip/setuptools/wheel, so build isolation (which would fetch build
+# deps from the index and hang) is neither needed nor possible here. The package
+# has no runtime deps beyond what the vLLM base already provides.
+RUN pip install --no-build-isolation --no-index --no-cache-dir -e /workspace/certus-shmq-connector
 
 COPY certus-shmq-connector/docker-entrypoint.sh /usr/local/bin/certus-entrypoint
 RUN chmod +x /usr/local/bin/certus-entrypoint

@@ -67,6 +67,29 @@ STORE_FLAGS=(--root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT")
 # small and fills up mid-download).
 HF_CACHE="${HF_CACHE:-/mnt/certus1/hf-cache}"
 
+# ── fix#3: _build_store_jobs length-clamp patch ─────────────────────────────────
+# The stock image's OffloadingConnector scheduler crashes the engine under load
+# on `assert len(offload_keys) == len(offload_block_ids)` in _build_store_jobs
+# (offload_keys advances every step; block_ids only grows on new allocations, so
+# a finishing request can cross an unbacked chunk boundary). This bind-mounts a
+# scheduler.py that clamps num_chunks to the chunks that have both a key and
+# backing GPU blocks. shmq-only variant — it deliberately does NOT carry fix#2's
+# mark_stores_submitted handshake (CertusShmqOffloadingSpec's manager lacks it).
+# Set VLLM_FIX3=0 to run the stock (crash-prone) scheduler.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VLLM_FIX3="${VLLM_FIX3:-1}"
+FIX3_SCHEDULER="${FIX3_SCHEDULER:-${SCRIPT_DIR}/patches/scheduler.fix3.py}"
+FIX3_TARGET=/usr/local/lib/python3.12/dist-packages/vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py
+FIX3_MOUNT=()
+if [[ "$VLLM_FIX3" == "1" ]]; then
+  if [[ -f "$FIX3_SCHEDULER" ]]; then
+    FIX3_MOUNT=(-v "${FIX3_SCHEDULER}:${FIX3_TARGET}:ro,z")
+    echo "[serve] fix#3 scheduler patch: ${FIX3_SCHEDULER} -> in-container scheduler.py"
+  else
+    echo "warning: VLLM_FIX3=1 but patch not found at ${FIX3_SCHEDULER}; running STOCK scheduler (crash-prone under load)" >&2
+  fi
+fi
+
 # ── Preflight ──────────────────────────────────────────────────────────────────
 if ! command podman "${STORE_FLAGS[@]}" image exists "$IMAGE"; then
   echo "error: image '$IMAGE' not found in store ${PODMAN_STORE}." >&2
@@ -131,6 +154,7 @@ exec command podman "${STORE_FLAGS[@]}" run --rm --pull=never \
   -p "${PORT}:${PORT}" \
   -e "HF_HUB_OFFLINE=0" \
   -v "${HF_CACHE}:/root/.cache/huggingface:z" \
+  "${FIX3_MOUNT[@]}" \
   --entrypoint vllm \
   "$IMAGE" \
   serve "${SERVE_ARGS[@]}"

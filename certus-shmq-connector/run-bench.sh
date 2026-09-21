@@ -141,6 +141,8 @@ ACTIVE_SESSIONS="${ACTIVE_SESSIONS:-0}"
 if [[ -z "${NUM_CONVS}" ]]; then
     if [[ "${WORKLOAD_NAME}" == "long-doc-qa" ]]; then
         NUM_CONVS="${LONGDOC_NUM_DOCS:-1000}"   # whole generated corpus; load_convs caps here
+    elif [[ "${WORKLOAD_NAME}" == "synth-multiturn" ]]; then
+        NUM_CONVS=1000    # synthetic multi-turn corpus is exactly 1000 convs; draw all
     elif [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
         NUM_CONVS=450     # exactly-12/12 subset
     else
@@ -206,6 +208,15 @@ IMAGE_ID="$(podman image inspect "${IMAGE}" --format '{{.Id}}' 2>/dev/null)"
 # ── HF token passthrough (only if set) ──
 hf_env=()
 [[ -n "${HF_TOKEN:-}" ]] && hf_env+=(-e "HF_TOKEN=${HF_TOKEN}")
+
+# ── HF offline (disconnected node) ──
+# The benchmark hosts have no route to huggingface.co. Without this, vLLM/HF
+# hits the Hub on every file lookup (config, tokenizer, weight index, …) and
+# each attempt burns a ~9-min connect timeout before falling back to the
+# mounted cache — minutes of dead air per lookup. Force offline so it loads
+# straight from ${HF_CACHE}. A connected host can override with HF_HUB_OFFLINE=0.
+hf_env+=(-e "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}" \
+         -e "TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}")
 
 # ── HF cache mount (only if the dir exists) ──
 cache_mount=()
@@ -377,4 +388,6 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "LONGDOC_NUM_DOCS=${LONGDOC_NUM_DOCS}" \
     -e "LONGDOC_SEED=${LONGDOC_SEED}" \
     -e "DTYPE=${DTYPE:-float16}" \
+    -e "GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.90}" \
+    -e "GPU_KV_GB=${GPU_KV_GB:-}" \
     "${IMAGE}"
