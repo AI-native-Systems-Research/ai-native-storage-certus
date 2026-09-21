@@ -175,6 +175,8 @@ the baked copies so driver edits take effect without a rebuild.
 | `MODEL` | `Qwen/Qwen2.5-7B-Instruct` | Corpus tokenizer. |
 | `MAX_MODEL_LEN` / `CONTEXT_CAP` | `131072` / `120000` | Window / sliding-context cap. |
 | `ACTIVE_SESSIONS` | `0` | `0` = open loop; `N` = closed loop (N active convs). |
+| `ADMIT_ORDER` | `sequential` | Closed-loop admission order (needs `ACTIVE_SESSIONS>0`): `sequential` = ascending-index admit-on-finish; `random` = uniform pick from the **arrival-gated** ready set (convs whose recorded arrival `× TIME_SCALE` has elapsed; `TIME_SCALE=0` disables the gate → random over all unstarted). |
+| `ADMIT_SEED` | *(unset = nondeterministic)* | Integer seed for `ADMIT_ORDER=random`. Seeds the RNG draw sequence; the exact admission sequence still varies run-to-run because worker slots free at inference-latency-driven times. |
 | `MAX_NUM_SEQS`, `GPU_MEM_UTIL`, `GPU`, `TENSOR_PARALLEL_SIZE`, `ENFORCE_EAGER`, `DP_RANK`/`DP_SIZE`, `HF_CACHE` | — | As in `../kv-offload-replay/run-docker-common.sh`. |
 
 Offload-only: `OFFLOAD_MODE=none`, `SECONDARY_TIER=fs`, `CPU_BYTES`, `DISK_DIR_HOST`.
