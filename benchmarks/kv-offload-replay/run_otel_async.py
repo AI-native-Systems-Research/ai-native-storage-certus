@@ -59,7 +59,8 @@ def _assemble(history, human):
 async def run_otel(engine, convs, base_sp, *, prompt_budget, context_cap,
                    n_tokens, time_scale=1.0, max_output_tokens=None,
                    sampler=None, sample_hz=1.0, progress_interval=0.0,
-                   active_sessions=0, session_id_fn=None):
+                   active_sessions=0, session_id_fn=None,
+                   admit_order="sequential", admit_rng=None, arrivals=None):
     """Replay the OTel corpus as one coroutine per conversation, honoring the
     recorded inter-turn delays.
 
@@ -82,6 +83,23 @@ async def run_otel(engine, convs, base_sp, *, prompt_budget, context_cap,
     launches every conversation at once (open loop, ``max_num_seqs`` bounds the
     running batch); ``active_sessions=N>0`` keeps N conversations active
     (closed loop, admit-on-finish). Returns the same result dict shape.
+
+    Closed-loop admission order is selected by ``admit_order``:
+
+    * ``"sequential"`` (default) — when a worker slot frees it takes the next
+      not-yet-started conversation by ascending index; timing-independent
+      admit-on-finish, unchanged from prior behavior.
+    * ``"random"`` — when a slot frees it picks uniformly at random (using the
+      seeded ``admit_rng``) from the set of conversations that are both
+      not-yet-started AND whose recorded arrival has elapsed. ``arrivals[i]`` is
+      conversation ``i``'s arrival offset in seconds (see
+      ``otel_corpus.load_otel_convs(with_arrivals=True)``); the gate is
+      ``arrivals[i] * time_scale <= now`` (``time_scale<=0`` disables the gate,
+      making every unstarted conversation ready — pure random admission). If no
+      conversation is ready yet the worker sleeps until the next arrival. With a
+      real engine the RNG *draw sequence* is reproducible from the seed, but the
+      exact admission sequence still depends on inference-latency-driven slot
+      free times, so runs are not bit-identical.
     """
     import asyncio
 
@@ -180,7 +198,55 @@ async def run_otel(engine, convs, base_sp, *, prompt_budget, context_cap,
     try:
         if active_sessions < 0:
             raise ValueError(f"active_sessions must be >= 0, got {active_sessions}")
-        if active_sessions > 0:
+        if admit_order not in ("sequential", "random"):
+            raise ValueError(f"admit_order must be 'sequential' or 'random', "
+                             f"got {admit_order!r}")
+        if active_sessions > 0 and admit_order == "random":
+            # Closed loop, random admission from the timing-gated ready set. A
+            # slot that frees picks uniformly at random (seeded) among unstarted
+            # conversations whose recorded arrival has elapsed; if none are ready
+            # it sleeps until the next arrival. Selection (choice + pop) is
+            # synchronous — no await between them — so two workers never grab the
+            # same conversation despite the shared `remaining` list.
+            import random as _random
+            rng = admit_rng if admit_rng is not None else _random.Random()
+            arr = arrivals if arrivals is not None else [0.0] * n_convs
+            if len(arr) != n_convs:
+                raise ValueError(f"arrivals length {len(arr)} != {n_convs} convs")
+            remaining = list(range(n_convs))  # indices not yet admitted
+            n_workers = min(active_sessions, n_convs)
+
+            async def acquire():
+                while remaining:
+                    now = time.perf_counter() - t_start
+                    if time_scale > 0:
+                        ready = [pos for pos, i in enumerate(remaining)
+                                 if arr[i] * time_scale <= now]
+                    else:
+                        ready = list(range(len(remaining)))
+                    if ready:
+                        i = remaining.pop(rng.choice(ready))
+                        return i, convs[i]
+                    # Nothing ready yet — wait until the earliest future arrival.
+                    nxt_arr = min(arr[i] for i in remaining)
+                    await asyncio.sleep(max(nxt_arr * time_scale - now, 0.001))
+                return None
+
+            async def rand_worker():
+                while True:
+                    item = await acquire()
+                    if item is None:
+                        return
+                    i, conv = item
+                    await run_conv(i, conv)
+
+            gate = ("no timing gate (TIME_SCALE=0)" if time_scale <= 0
+                    else f"arrival-gated x{time_scale:g}")
+            print(f"[run] otel closed loop: {n_workers} active sessions over "
+                  f"{n_convs} conversations (random admission, {gate})",
+                  file=sys.stderr, flush=True)
+            await asyncio.gather(*(rand_worker() for _ in range(n_workers)))
+        elif active_sessions > 0:
             nxt = 0
             n_workers = min(active_sessions, len(convs))
 
@@ -225,6 +291,7 @@ def run_otel_driver(engine_kwargs, convs, base_sp, *, prompt_budget, context_cap
                     time_scale=1.0, max_output_tokens=None, capture_metrics=True,
                     disk_rw_bytes=None, session_id_fn=None,
                     n_tokens_flavor="input_ids", active_sessions=0,
+                    admit_order="sequential", admit_seed=None, arrivals=None,
                     summary_base=None):
     """Run the timestamp-scheduled OTel replay end-to-end and return a summary.
 
@@ -250,9 +317,15 @@ def run_otel_driver(engine_kwargs, convs, base_sp, *, prompt_budget, context_cap
     _sched = ("timestamps DISABLED (TIME_SCALE=0, saturating)" if time_scale == 0
               else f"timestamps scaled x{time_scale:g}" if time_scale != 1.0
               else "real recorded timing")
+    admit_rng = None
+    if active_sessions and active_sessions > 0 and admit_order == "random":
+        import random as _random
+        admit_rng = _random.Random(admit_seed)
     if active_sessions and active_sessions > 0:
+        _adm = (f"random admission (seed={admit_seed})" if admit_order == "random"
+                else "sequential admission")
         print(f"[run] OTel replay — closed loop, {active_sessions} active "
-              f"sessions; {len(convs)} conversations; {_sched}{_cadence}",
+              f"sessions; {len(convs)} conversations; {_adm}; {_sched}{_cadence}",
               file=sys.stderr, flush=True)
     else:
         print(f"[run] OTel replay — one coroutine per conversation "
@@ -281,6 +354,9 @@ def run_otel_driver(engine_kwargs, convs, base_sp, *, prompt_budget, context_cap
             progress_interval=progress_interval,
             active_sessions=active_sessions,
             session_id_fn=session_id_fn,
+            admit_order=admit_order,
+            admit_rng=admit_rng,
+            arrivals=arrivals,
         )
 
     result = asyncio.run(_amain())
@@ -353,6 +429,8 @@ def run_otel_driver(engine_kwargs, convs, base_sp, *, prompt_budget, context_cap
         "time_scale": time_scale,
         "recorded_delay_applied": result.get("recorded_delay_applied"),
         "active_sessions": result.get("active_sessions"),
+        "admit_order": admit_order,
+        "admit_seed": admit_seed if admit_order == "random" else None,
         "turn_latency_p50": _pct(lat, 0.50),
         "turn_latency_p90": _pct(lat, 0.90),
         "turn_latency_p99": _pct(lat, 0.99),
