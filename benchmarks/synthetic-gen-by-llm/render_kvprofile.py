@@ -184,12 +184,15 @@ SMALLMULT_TIER = [
 
 # Bars annotated with a hit rate (numerator / denominator) atop the raw count, so
 # each count reads alongside the ratio that matters for cache effectiveness:
-#   prefix_cache_hits / prefix_cache_queries — GPU-local rate. NOTE the GPU query
-#     counter is bumped per prefix-block lookup on EVERY scheduler step, so it
-#     re-counts resident prefixes and runs far above the prompt-token volume (e.g.
-#     315M queries vs 8.5M prompt tokens on an 80-session run). Its ratio reads
-#     near-zero under cache pressure and is NOT a token-conservation figure — it
-#     is only "of all GPU lookups, how many landed in HBM this step".
+#   prefix_cache_hits / prefix_cache_queries — GPU-local rate. All four counters
+#     are in TOKENS (vLLM PrefixCacheStats: "queries = the number of tokens that
+#     were queried"; record() sums num_tokens). But the GPU query counter adds
+#     request.num_tokens — the request's FULL current length, i.e. the whole
+#     accumulated multiturn context — every time get_computed_blocks runs for it
+#     (each (re)schedule / prefill), so a long request re-counts its entire context
+#     repeatedly and the total runs far above the prompt-token volume (e.g. 315M vs
+#     8.5M prompt tokens on an 80-session, 12-turn run). Its ratio reads near-zero
+#     under cache pressure and is NOT a token-conservation figure.
 #   external_prefix_cache_hits / external_prefix_cache_queries — offload-tier rate.
 #   prompt_tokens_cached / prompt_tokens — the end-to-end EFFECTIVE cache-hit rate:
 #     of all prompt tokens presented at admission, the fraction served from any
