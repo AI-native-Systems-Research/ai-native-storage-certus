@@ -5,9 +5,10 @@
 //!
 //! ```text
 //! cargo run -p eviction-replay-benchmark -- \
-//!     --dataset chat --cache-size 64,256,1024 --policy both
+//!     --dataset chat --cache-size-nelements 256K,1M,4M --policy both
 //! ```
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -22,11 +23,16 @@ use eviction_replay_benchmark::sim::{simulate, SimStats};
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum PolicyArg {
     /// Recency-only LRU (`eviction-policy-lru`).
+    #[value(name = "eviction-policy-lru", alias = "lru")]
     Lru,
     /// Session-lineage policy (`eviction-policy-session-lists`).
+    #[value(name = "eviction-policy-session-lists", alias = "session-lists")]
     SessionLists,
-    /// Run both and print them side by side (default).
-    Both,
+    /// Run all policies and print them side by side.
+    #[value(alias = "both")]
+    All,
+    /// Run all policies, print only the best hit rate per cache size.
+    Best,
 }
 
 /// Which Qwen-Bailian trace to replay. Downloaded to `/tmp` on first use.
@@ -99,67 +105,123 @@ struct Cli {
     dataset: Dataset,
 
     /// Use a local Qwen-format JSONL file instead of downloading a dataset.
-    #[arg(long)]
-    file: Option<PathBuf>,
+    #[arg(long, alias = "file")]
+    qwen_file: Option<PathBuf>,
 
-    /// Cache size(s) in blocks to evaluate (comma-separated or repeated).
+    /// Use a local ShareGPT-format JSON file (array of {id, conversations}).
+    #[arg(long)]
+    sharegpt: Option<PathBuf>,
+
+    /// Use a local Weka JSONL trace file (one conversation per line, with
+    /// hash_ids and hash_id_scope).
+    #[arg(long)]
+    weka_file: Option<PathBuf>,
+
+    /// Characters per cache block when converting ShareGPT text to block keys
+    /// (approximately 16 tokens at ~4 chars/token).
+    #[arg(long, default_value_t = 64)]
+    block_chars: usize,
+
+    /// Cache size(s) in elements to evaluate (comma-separated). Accepts
+    /// suffixes: K = ×1024, M = ×1024², G = ×1024³. Examples: 256K, 2M, 4096.
     #[arg(
-        long = "cache-size",
+        long = "cache-size-nelements",
+        alias = "cache-size",
         value_delimiter = ',',
-        default_value = "256,1024,4096"
+        default_value = "10000",
+        value_parser = parse_cache_size,
     )]
     cache_sizes: Vec<usize>,
 
+    /// Maximum number of conversations to replay from the trace file.
+    /// When set, only the first N conversations are loaded.
+    #[arg(long)]
+    max_conversations: Option<usize>,
+
     /// Which policy to run.
-    #[arg(long, value_enum, default_value_t = PolicyArg::Both)]
+    #[arg(long, value_enum, default_value_t = PolicyArg::All)]
     policy: PolicyArg,
+
+    /// Write a hit-rate-vs-cache-size plot to this PDF path.
+    #[arg(long)]
+    output_pdf: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // Resolve the trace file: an explicit --file, else download-on-demand.
-    let (path, source) = match &cli.file {
-        Some(p) => (p.clone(), format!("file {}", p.display())),
-        None => match dataset::ensure(cli.dataset.id()) {
-            Ok(p) => (
-                p,
-                format!(
-                    "dataset {} ({})",
-                    cli.dataset.id(),
-                    dataset::describe(cli.dataset.id()).unwrap_or("")
-                ),
+    // Resolve the trace: --sharegpt, --weka-file, --qwen-file, or --dataset (download-on-demand).
+    let (trace, source, trace_name) = if let Some(ref p) = cli.sharegpt {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
+        match eviction_replay_benchmark::sharegpt::load(p, Some(cli.block_chars), cli.max_conversations) {
+            Ok(t) => (
+                t,
+                format!("sharegpt {} (block_chars={})", p.display(), cli.block_chars),
+                name,
             ),
             Err(e) => {
-                eprintln!("error: could not obtain dataset: {e}");
+                eprintln!("error: failed to load ShareGPT file {}: {e}", p.display());
                 return ExitCode::FAILURE;
             }
-        },
-    };
-
-    let trace = match replay::load(&path) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("error: failed to load trace {}: {e}", path.display());
-            return ExitCode::FAILURE;
+        }
+    } else if let Some(ref p) = cli.weka_file {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
+        match eviction_replay_benchmark::weka::load(p, cli.max_conversations) {
+            Ok(t) => (t, format!("weka {}", p.display()), name),
+            Err(e) => {
+                eprintln!("error: failed to load Weka trace {}: {e}", p.display());
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        let (path, src, name) = match &cli.qwen_file {
+            Some(p) => {
+                let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
+                (p.clone(), format!("qwen-file {}", p.display()), name)
+            }
+            None => match dataset::ensure(cli.dataset.id()) {
+                Ok(p) => {
+                    let name = cli.dataset.id().to_string();
+                    (
+                        p,
+                        format!(
+                            "dataset {} ({})",
+                            cli.dataset.id(),
+                            dataset::describe(cli.dataset.id()).unwrap_or("")
+                        ),
+                        name,
+                    )
+                }
+                Err(e) => {
+                    eprintln!("error: could not obtain dataset: {e}");
+                    return ExitCode::FAILURE;
+                }
+            },
+        };
+        let src = format!("{src}\n  file: {}", path.display());
+        match replay::load(&path, cli.max_conversations) {
+            Ok(t) => (t, src, name),
+            Err(e) => {
+                eprintln!("error: failed to load trace {}: {e}", path.display());
+                return ExitCode::FAILURE;
+            }
         }
     };
+
     if trace.ops.is_empty() {
-        eprintln!(
-            "error: trace {} has no key-bearing operations",
-            path.display()
-        );
+        eprintln!("error: trace has no key-bearing operations");
         return ExitCode::FAILURE;
     }
 
+    let all_kinds: &[PolicyKind] = &[PolicyKind::Lru, PolicyKind::SessionLists];
     let kinds: &[PolicyKind] = match cli.policy {
         PolicyArg::Lru => &[PolicyKind::Lru],
         PolicyArg::SessionLists => &[PolicyKind::SessionLists],
-        PolicyArg::Both => &[PolicyKind::Lru, PolicyKind::SessionLists],
+        PolicyArg::All | PolicyArg::Best => all_kinds,
     };
+    let best_only = cli.policy == PolicyArg::Best;
 
     println!("{source}");
-    println!("  file: {}", path.display());
     println!(
         "  requests={}  accesses(block-refs)={}  working-set(distinct blocks)={}",
         trace.ops.len(),
@@ -178,13 +240,24 @@ fn main() -> ExitCode {
     );
     println!("{}", "-".repeat(100));
 
+    let mut all_results: Vec<(usize, PolicyKind, SimStats)> = Vec::new();
+
     for &size in &cli.cache_sizes {
-        for &kind in kinds {
-            let s = kind.run(&trace, size);
+        let mut results: Vec<(PolicyKind, SimStats)> = kinds
+            .iter()
+            .map(|&kind| (kind, kind.run(&trace, size)))
+            .collect();
+
+        if best_only {
+            results.sort_by(|a, b| b.1.hit_rate().partial_cmp(&a.1.hit_rate()).unwrap());
+            results.truncate(1);
+        }
+
+        for (kind, s) in &results {
             println!(
                 "{:<14} {:>7} {:>9} {:>6.1}% {:>9} {:>12.1} {:>12.1} {:>12.1} {:>12}",
                 kind.label(),
-                size,
+                format_size(size),
                 s.hits,
                 s.hit_rate() * 100.0,
                 s.evictions,
@@ -193,14 +266,171 @@ fn main() -> ExitCode {
                 s.mean_track_ns(),
                 format_thousands(s.ops_per_sec() as u64),
             );
+            all_results.push((size, *kind, s.clone()));
         }
         if cli.cache_sizes.len() > 1 {
             println!();
         }
     }
 
+    if let Some(ref pdf_path) = cli.output_pdf {
+        let n_convs: usize = {
+            let mut sessions = std::collections::HashSet::new();
+            for op in &trace.ops {
+                sessions.insert(op.session_id);
+            }
+            sessions.len()
+        };
+        let plot_title = format!("{trace_name} ({n_convs} conversations)");
+        if let Err(e) = generate_pdf(&all_results, pdf_path, &plot_title) {
+            eprintln!("error: failed to generate PDF: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
+
     ExitCode::SUCCESS
 }
+
+fn parse_cache_size(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    let (num_part, multiplier) = if let Some(n) = s.strip_suffix('G') {
+        (n, 1024 * 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('M') {
+        (n, 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('K') {
+        (n, 1024)
+    } else {
+        (s, 1)
+    };
+    let num: f64 = num_part
+        .trim()
+        .parse()
+        .map_err(|e| format!("invalid cache size '{s}': {e}"))?;
+    let result = (num * multiplier as f64) as usize;
+    if result == 0 {
+        return Err(format!("cache size must be > 0, got '{s}'"));
+    }
+    Ok(result)
+}
+
+fn format_size(n: usize) -> String {
+    if n >= 1024 * 1024 * 1024 && n % (1024 * 1024 * 1024) == 0 {
+        format!("{}G", n / (1024 * 1024 * 1024))
+    } else if n >= 1024 * 1024 && n % (1024 * 1024) == 0 {
+        format!("{}M", n / (1024 * 1024))
+    } else if n >= 1024 && n % 1024 == 0 {
+        format!("{}K", n / 1024)
+    } else {
+        n.to_string()
+    }
+}
+
+fn generate_pdf(
+    results: &[(usize, PolicyKind, SimStats)],
+    pdf_path: &std::path::Path,
+    title: &str,
+) -> Result<(), String> {
+    let mut policies: std::collections::BTreeMap<&str, Vec<(usize, f64)>> =
+        std::collections::BTreeMap::new();
+    for (size, kind, stats) in results {
+        policies
+            .entry(kind.label())
+            .or_default()
+            .push((*size, stats.hit_rate() * 100.0));
+    }
+
+    let mut json_series = String::from("[");
+    for (i, (label, points)) in policies.iter().enumerate() {
+        if i > 0 {
+            json_series.push(',');
+        }
+        let xs: Vec<String> = points.iter().map(|(s, _)| s.to_string()).collect();
+        let ys: Vec<String> = points.iter().map(|(_, h)| format!("{h:.2}")).collect();
+        json_series.push_str(&format!(
+            "{{\"label\":\"{label}\",\"x\":[{}],\"y\":[{}]}}",
+            xs.join(","),
+            ys.join(",")
+        ));
+    }
+    json_series.push(']');
+
+    let title_line = title.lines().next().unwrap_or(title);
+    let pdf_str = pdf_path.display().to_string();
+
+    let mut script_file = tempfile::NamedTempFile::new()
+        .map_err(|e| format!("failed to create temp script: {e}"))?;
+    script_file
+        .write_all(PLOT_SCRIPT.as_bytes())
+        .map_err(|e| format!("failed to write temp script: {e}"))?;
+
+    let output = std::process::Command::new("python3")
+        .args([
+            script_file.path().as_os_str(),
+            std::ffi::OsStr::new(&json_series),
+            std::ffi::OsStr::new(&pdf_str),
+            std::ffi::OsStr::new(title_line),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| format!("failed to run python3: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "python3 exited {}: {}",
+            output.status,
+            stderr.trim_end()
+        ));
+    }
+
+    eprintln!("wrote {pdf_str}");
+    Ok(())
+}
+
+const PLOT_SCRIPT: &str = r##"
+import json, sys
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+series = json.loads(sys.argv[1])
+pdf_path = sys.argv[2]
+title = sys.argv[3]
+
+colors = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c"]
+markers = ["o", "s", "^", "D", "v"]
+fig, ax = plt.subplots(figsize=(8, 5))
+for i, s in enumerate(series):
+    c = colors[i % len(colors)]
+    m = markers[i % len(markers)]
+    ax.plot(s["x"], s["y"], f"{m}-", color=c, linewidth=2, markersize=7, label=s["label"])
+    for x, y in zip(s["x"], s["y"]):
+        ax.annotate(f"{y:.1f}%", (x, y), textcoords="offset points",
+                    xytext=(0, 10 if i == 0 else -15), ha="center", fontsize=8, color=c)
+ax.set_xlabel("Cache Size (elements)", fontsize=12)
+ax.set_ylabel("Hit Rate (%)", fontsize=12)
+ax.set_title(title, fontsize=13)
+ax.legend(fontsize=11)
+ax.grid(True, alpha=0.3)
+if series:
+    all_x = sorted(set(x for s in series for x in s["x"]))
+    ax.set_xticks(all_x)
+    labels = []
+    for v in all_x:
+        if v >= 1024*1024*1024 and v % (1024*1024*1024) == 0:
+            labels.append(f"{v//(1024*1024*1024)}G")
+        elif v >= 1024*1024 and v % (1024*1024) == 0:
+            labels.append(f"{v//(1024*1024)}M")
+        elif v >= 1024 and v % 1024 == 0:
+            labels.append(f"{v//1024}K")
+        else:
+            labels.append(str(v))
+    ax.set_xticklabels(labels)
+fig.tight_layout()
+fig.savefig(pdf_path, dpi=150)
+"##;
 
 /// Format an integer with `_` thousands separators for readability.
 fn format_thousands(n: u64) -> String {

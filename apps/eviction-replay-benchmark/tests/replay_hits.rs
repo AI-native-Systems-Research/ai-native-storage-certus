@@ -50,7 +50,7 @@ fn loads_qwen_schema_and_resolves_conversation_root() {
         "\n",
     );
     let path = write_tmp("root", jsonl);
-    let t = replay::load(&path).expect("load synthetic qwen trace");
+    let t = replay::load(&path, None).expect("load synthetic qwen trace");
     let _ = fs::remove_file(&path);
 
     assert_eq!(t.ops.len(), 3, "empty-hash_ids record is dropped");

@@ -12,5 +12,8 @@ component-macros.workspace = true
 interfaces.workspace = true
 libc = "0.2"
 
+[features]
+integration-tests = []
+
 [build-dependencies]
 bindgen = "0.71"

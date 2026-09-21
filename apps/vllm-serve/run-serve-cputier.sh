@@ -24,7 +24,7 @@
 #   ./run-serve-cputier.sh                                   # Qwen2.5-7B, :8000, 8G CPU tier + fs disk tier
 #   PORT=9000 ./run-serve-cputier.sh                         # publish on another port
 #   CPU_BYTES=$((16*(1<<30))) ./run-serve-cputier.sh         # larger CPU primary tier (shm auto-sized)
-#   MAX_MODEL_LEN=131072 ./run-serve-cputier.sh              # long context (auto-enables YaRN)
+#   MAX_MODEL_LEN=32768 ./run-serve-cputier.sh               # native 32K window (no YaRN); default is 128K
 #   FS_TIER=0 ./run-serve-cputier.sh                         # CPU-only offload (CPUOffloadingSpec, no disk tier)
 #   MODEL=Qwen/Qwen2.5-14B-Instruct GPU_MEM_UTIL=0.92 ./run-serve-cputier.sh
 #
@@ -43,16 +43,19 @@ PORT="${PORT:-8000}"
 MODEL="${MODEL:-Qwen/Qwen2.5-7B-Instruct}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen2.5-7b}"   # the name clients pass as "model"
 DTYPE="${DTYPE:-float16}"
-# Qwen2.5-7B native window is 32768. Default to it so no YaRN rope-scaling is
-# needed (a larger MAX_MODEL_LEN triggers a ModelConfig validation error unless
-# rope_scaling is supplied — handled below when it exceeds the native window).
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
+# Qwen2.5-7B's native window is 32768; default to a 131072 (128K) window so the
+# long-context cc/mooncake replay traces fit without 400s. Because this exceeds the
+# native window it auto-enables Qwen's static YaRN rope-scaling below (factor =
+# 131072/32768 = 4). YaRN degrades quality at long context — fine for a KV-offload
+# throughput/latency benchmark. Override MAX_MODEL_LEN=32768 (or ROPE_YARN=0) to
+# serve the native 32K window with no rope-scaling.
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
 QWEN_NATIVE_CTX="${QWEN_NATIVE_CTX:-32768}"
 GPU="${GPU:-all}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
 
 # ── cputier offload (vLLM native OffloadingConnector) ────────────────────────────
-CPU_BYTES="${CPU_BYTES:-$((8 * (1 << 30)))}"   # CPU primary tier, pinned host RAM (bytes)
+CPU_BYTES="${CPU_BYTES:-$((30 * (1 << 30)))}"   # CPU primary tier, pinned host RAM (bytes)
 # TieringOffloadingSpec allocates the CPU tier as a /dev/shm mmap and force-
 # populates it; size the container's /dev/shm to the tier plus headroom (the
 # region is padded past cpu_bytes_to_use), mirroring run-docker-cputier.sh.
@@ -67,7 +70,14 @@ FS_WRITE_THREADS="${FS_WRITE_THREADS:-16}"
 # ── Container / store ────────────────────────────────────────────────────────────
 # The unified offload image (vLLM 0.26 + the native tiering framework) lives in
 # the DEFAULT podman store (unlike the shmq image), so no --root/--runroot flags.
-IMAGE="${IMAGE:-certus-offload-bench}"
+# Default to the -fix026 image: it bakes the vllm-fix2 overlay (the deferred
+# finished-request finalize handshake) that stops the TieringOffloadingManager
+# _req_state KeyError under load. The bare `certus-offload-bench` is the
+# deliberate STOCK/crashing baseline (built --build-arg VLLM_FIX_TIERING=0) and
+# is only useful for reproducing that upstream crash; override IMAGE= to get it.
+# NB: fix026 does NOT touch the separate `len(offload_keys) == len(offload_block_ids)`
+# assertion in _build_store_jobs — that path is identical in both images.
+IMAGE="${IMAGE:-certus-offload-bench-fix026}"
 
 # HF cache on the large filesystem — NOT $HOME/.cache (the /home partition is
 # small and fills up mid-download).

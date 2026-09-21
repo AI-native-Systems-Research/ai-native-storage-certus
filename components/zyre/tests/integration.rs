@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 //! Integration tests for zyre node discovery and messaging.
 //!
 //! These tests require the zyre C libraries to be pre-built at
