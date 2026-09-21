@@ -26,6 +26,7 @@
 #   CPU_BYTES=$((16*(1<<30))) ./run-serve-cputier.sh         # larger CPU primary tier (shm auto-sized)
 #   MAX_MODEL_LEN=32768 ./run-serve-cputier.sh               # native 32K window (no YaRN); default is 128K
 #   FS_TIER=0 ./run-serve-cputier.sh                         # CPU-only offload (CPUOffloadingSpec, no disk tier)
+#   KV_CACHE_BYTES=4G ./run-serve-cputier.sh                 # cap GPU KV cache; spill reuse to the offload tier
 #   MODEL=Qwen/Qwen2.5-14B-Instruct GPU_MEM_UTIL=0.92 ./run-serve-cputier.sh
 #
 # Clients then use:
@@ -53,6 +54,12 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
 QWEN_NATIVE_CTX="${QWEN_NATIVE_CTX:-32768}"
 GPU="${GPU:-all}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
+# Directly cap the GPU-resident KV cache (per GPU). When set, vLLM IGNORES
+# gpu-memory-utilization and pins the KV pool to this size — accepts human-
+# readable sizes (4G, 512M). Shrinking it forces reused prefixes to spill from
+# GPU HBM into the offload tier, which is what raises the external prefix cache
+# hit rate. Unset (default) = derive KV size from GPU_MEM_UTIL (stock behavior).
+KV_CACHE_BYTES="${KV_CACHE_BYTES:-}"
 
 # ── cputier offload (vLLM native OffloadingConnector) ────────────────────────────
 CPU_BYTES="${CPU_BYTES:-$((30 * (1 << 30)))}"   # CPU primary tier, pinned host RAM (bytes)
@@ -136,6 +143,12 @@ SERVE_ARGS=(
   --no-async-scheduling
   --kv-transfer-config "$KV_CONFIG"
 )
+
+# Optional hard cap on the GPU KV cache (overrides gpu-memory-utilization).
+if [[ -n "$KV_CACHE_BYTES" ]]; then
+  SERVE_ARGS+=(--kv-cache-memory-bytes "$KV_CACHE_BYTES")
+  echo "[serve] GPU KV cache capped at ${KV_CACHE_BYTES} (ignores GPU_MEM_UTIL)"
+fi
 
 # YaRN rope-scaling: only when the requested window exceeds Qwen2.x's native
 # 32768 (Qwen ships no rope_scaling, so vLLM rejects a larger window otherwise).
