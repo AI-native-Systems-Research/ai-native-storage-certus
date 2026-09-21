@@ -25,6 +25,7 @@
 #   PORT=9000 ./run-serve-certus-shmq.sh                        # publish on another port
 #   MAX_MODEL_LEN=32768 ./run-serve-certus-shmq.sh             # native 32K window (no YaRN); default is 128K
 #   MODEL=Qwen/Qwen2.5-14B-Instruct GPU_MEM_UTIL=0.92 ./run-serve-certus-shmq.sh
+#   KV_CACHE_BYTES=4G ./run-serve-certus-shmq.sh              # cap GPU KV cache; spill reuse to the offload tier
 #
 # Clients then use:
 #   Base URL:  http://127.0.0.1:${PORT}/v1     (127.0.0.1 — podman publishes IPv4 only)
@@ -50,6 +51,12 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
 QWEN_NATIVE_CTX="${QWEN_NATIVE_CTX:-32768}"
 GPU="${GPU:-all}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
+# Directly cap the GPU-resident KV cache (per GPU). When set, vLLM IGNORES
+# gpu-memory-utilization and pins the KV pool to this size — accepts human-
+# readable sizes (4G, 512M). Shrinking it forces reused prefixes to spill from
+# GPU HBM into the offload tier, which is what raises the external prefix cache
+# hit rate. Unset (default) = derive KV size from GPU_MEM_UTIL (stock behavior).
+KV_CACHE_BYTES="${KV_CACHE_BYTES:-}"
 
 # ── Certus-SHMQ connector ───────────────────────────────────────────────────────
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # mailbox file (shared into container)
@@ -127,6 +134,12 @@ SERVE_ARGS=(
   --no-async-scheduling
   --kv-transfer-config "$KV_CONFIG"
 )
+
+# Optional hard cap on the GPU KV cache (overrides gpu-memory-utilization).
+if [[ -n "$KV_CACHE_BYTES" ]]; then
+  SERVE_ARGS+=(--kv-cache-memory-bytes "$KV_CACHE_BYTES")
+  echo "[serve] GPU KV cache capped at ${KV_CACHE_BYTES} (ignores GPU_MEM_UTIL)"
+fi
 
 # YaRN rope-scaling: only when the requested window exceeds Qwen2.x's native
 # 32768 (Qwen ships no rope_scaling, so vLLM rejects a larger window otherwise).
