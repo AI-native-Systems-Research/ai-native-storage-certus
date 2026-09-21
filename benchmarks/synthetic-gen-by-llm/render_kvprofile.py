@@ -82,13 +82,24 @@ except Exception:  # noqa: BLE001 - GPU band is optional
 # kv_offload_total_bytes) are skipped. A counter absent from every series is
 # dropped from the grid automatically.
 COUNTERS = [
-    ("prompt_tokens",                 "Prompt tokens processed",    "int"),
-    ("prompt_tokens_cached",          "Cached prompt tokens",       "int"),
-    ("generation_tokens",             "Generation tokens produced", "int"),
-    ("prefix_cache_queries",          "GPU prefix-cache queries",   "int"),
-    ("prefix_cache_hits",             "GPU prefix-cache hits",      "int"),
-    ("external_prefix_cache_queries", "Offload-tier queries",       "int"),
-    ("external_prefix_cache_hits",    "Offload-tier hits",          "int"),
+    # Unit tags drive both the value formatter (bytes vs compact count) and the
+    # per-panel axis label (see UNIT_LABEL). "tokens" is not cosmetic: every vLLM
+    # prefix-cache/token counter is measured in TOKENS (PrefixCacheStats docstring:
+    # "queries = the number of tokens that were queried") — NOT blocks or requests
+    # — so the axis says so and the block/token confusion can't recur.
+    ("prompt_tokens",                 "Prompt tokens processed",    "tokens"),
+    ("prompt_tokens_cached",          "Cached prompt tokens",       "tokens"),
+    ("generation_tokens",             "Generation tokens produced", "tokens"),
+    # GPU-HBM prefix-cache hits, DERIVED (see _derive): prompt_tokens_cached −
+    # external_prefix_cache_hits. vLLM's raw prefix_cache_queries/prefix_cache_hits
+    # are NOT plotted — they are recorded in get_computed_blocks(), which fires on
+    # every scheduling ATTEMPT of a waiting request, so under queue pressure they
+    # re-count a request's full context many times over (315M vs 8.5M prompt tokens
+    # on the 80-session run) and are not a usable token volume. This derivation uses
+    # only once-per-token counters, so it is re-count-free and conserves.
+    ("prefix_cache_hits_hbm",         "GPU-HBM prefix-cache hits",  "tokens"),
+    ("external_prefix_cache_queries", "Offload-tier queries",       "tokens"),
+    ("external_prefix_cache_hits",    "Offload-tier hits",          "tokens"),
     ("kv_offload_store_bytes",        "Bytes stored to tier",       "bytes"),
     ("kv_offload_load_bytes",         "Bytes loaded from tier",     "bytes"),
     # Certus-SPDK only: real NVMe device bytes per round, from the server's
@@ -97,7 +108,7 @@ COUNTERS = [
     # backends whose driver does not emit them.
     ("ssd_read_bytes",                "SSD bytes read (device)",    "bytes"),
     ("ssd_write_bytes",               "SSD bytes written (device)", "bytes"),
-    ("num_preemptions",               "Engine preemptions",         "int"),
+    ("num_preemptions",               "Engine preemptions",         "events"),
 ]
 COUNTER_KEYS = [c[0] for c in COUNTERS]
 
@@ -106,10 +117,10 @@ COUNTER_KEYS = [c[0] for c in COUNTERS]
 # the run's growth curve, with the final total in the panel subtitle. Only the
 # Certus-SPDK variant has a certus-server, so these appear for that series alone.
 TIER_COUNTERS = [
-    ("tier_promotions_to_memory", "KV promotions SSD→DRAM (cumulative)",  "int"),
-    ("tier_promotions_to_gpu",    "KV promotions →GPU (cumulative)",      "int"),
-    ("tier_evictions_from_memory","KV evictions from DRAM (cumulative)",       "int"),
-    ("tier_evictions_from_ssd",   "KV evictions from SSD (cumulative)",        "int"),
+    ("tier_promotions_to_memory", "KV promotions SSD→DRAM (cumulative)",  "events"),
+    ("tier_promotions_to_gpu",    "KV promotions →GPU (cumulative)",      "events"),
+    ("tier_evictions_from_memory","KV evictions from DRAM (cumulative)",       "events"),
+    ("tier_evictions_from_ssd",   "KV evictions from SSD (cumulative)",        "events"),
 ]
 TIER_KEYS = [c[0] for c in TIER_COUNTERS]
 # Matches both the periodic "tier-events …" line and the "FINAL tier-events …"
@@ -127,14 +138,13 @@ TIER_RE = re.compile(
 # nonzero total across all series is dropped; a zero counter inside a shown
 # family stays as a labelled 0 bar (a measured zero, like store-only vs load).
 FAMILIES = [
-    ("Tokens — run total", "int", [
+    ("Tokens — run total", "tokens", [
         ("prompt_tokens",        "prompt"),
         ("prompt_tokens_cached", "cached"),
         ("generation_tokens",    "generation"),
     ]),
-    ("Prefix-cache queries & hits — run total", "int", [
-        ("prefix_cache_queries",          "GPU q"),
-        ("prefix_cache_hits",             "GPU hit"),
+    ("Prefix-cache hits by tier — run total", "tokens", [
+        ("prefix_cache_hits_hbm",         "GPU HBM hit"),
         ("external_prefix_cache_queries", "offload q"),
         ("external_prefix_cache_hits",    "offload hit"),
     ]),
@@ -144,7 +154,7 @@ FAMILIES = [
         ("ssd_read_bytes",         "SSD read"),
         ("ssd_write_bytes",        "SSD write"),
     ]),
-    ("KV tier movements — run total", "int", [
+    ("KV tier movements — run total", "events", [
         ("tier_promotions_to_memory",  "→DRAM"),
         ("tier_promotions_to_gpu",     "→GPU"),
         ("tier_evictions_from_memory", "evict DRAM"),
@@ -167,8 +177,9 @@ FAMILIES = [
 SMALLMULT_COLS = [
     ["prompt_tokens", "prompt_tokens_cached", "generation_tokens",
      "num_preemptions"],
-    ["prefix_cache_queries", "prefix_cache_hits",
-     "external_prefix_cache_queries", "external_prefix_cache_hits"],
+    # prefix_cache_hits_hbm is intentionally absent: it is a derived LIFETIME total
+    # (run-total FAMILIES bar only), not a per-round series — see derive_counters.
+    ["external_prefix_cache_queries", "external_prefix_cache_hits"],
     ["kv_offload_store_bytes", "kv_offload_load_bytes",
      "ssd_read_bytes", "ssd_write_bytes"],
 ]
@@ -182,12 +193,27 @@ SMALLMULT_TIER = [
     "tier_evictions_from_memory", "tier_evictions_from_ssd",
 ]
 
-# Hit counters that have a matching query counter: on the run-total bars the hit
-# bar is annotated with its hit rate (hits / queries) so the raw count reads
-# alongside the ratio that actually matters for cache effectiveness.
+# Bars annotated with a hit rate (numerator / denominator) atop the raw count, so
+# each count reads alongside the ratio that matters for cache effectiveness. Every
+# numerator here is a once-per-token counter (or the _derive'd HBM hits), so no
+# annotation is computed from the re-count-inflated raw prefix_cache_* pair (which
+# is not plotted at all — see COUNTERS / _derive).
+#   prefix_cache_hits_hbm / prompt_tokens — GPU-HBM-local hit rate: of all prompt
+#     tokens queried, the fraction still resident in HBM at admission (~0.8% on the
+#     churny 80-session run; the loop evicts blocks to the offload tier before a
+#     session's turn comes back around, so offload — not HBM — serves the reuse).
+#   external_prefix_cache_hits / external_prefix_cache_queries — offload-tier rate.
+#     The external pair is recorded once per admission (update_state_after_alloc),
+#     so it is re-count-free (~95%).
+#   prompt_tokens_cached / prompt_tokens — the end-to-end EFFECTIVE cache-hit rate:
+#     of all prompt tokens presented at admission, the fraction served from ANY
+#     tier instead of recomputed. Respects conservation (cached <= prompt) and is
+#     the headline "did caching help" number (~95%). By construction
+#     prefix_cache_hits_hbm + external_prefix_cache_hits == prompt_tokens_cached.
 HIT_DENOM = {
-    "prefix_cache_hits":          "prefix_cache_queries",
+    "prefix_cache_hits_hbm":      "prompt_tokens",
     "external_prefix_cache_hits": "external_prefix_cache_queries",
+    "prompt_tokens_cached":       "prompt_tokens",
 }
 
 # Counters that also get a per-second average (total / active seconds) atop their
@@ -200,7 +226,7 @@ HIT_DENOM = {
 # eviction/promotion — so counting from t=0 would understate the sustained rate
 # (see _active_seconds).
 RATE_KEYS = {"prompt_tokens", "prompt_tokens_cached", "generation_tokens",
-             "prefix_cache_queries", "prefix_cache_hits",
+             "prefix_cache_hits_hbm",
              "external_prefix_cache_queries", "external_prefix_cache_hits",
              "kv_offload_store_bytes", "kv_offload_load_bytes",
              "ssd_read_bytes", "ssd_write_bytes",
@@ -264,6 +290,39 @@ def rounds_to_series(rounds: "OrderedDict[int, dict]") -> dict:
         return {}
     order = sorted(rounds)
     return {k: [rounds[r].get(k, 0.0) for r in order] for k in COUNTER_KEYS}
+
+
+def derive_counters(data: dict) -> None:
+    """Fill in-place the DERIVED counters that vLLM does not emit.
+
+    prefix_cache_hits_hbm — GPU-HBM-resident prefix hits, computed as
+    prompt_tokens_cached − external_prefix_cache_hits. vLLM DOES emit raw
+    prefix_cache_hits / prefix_cache_queries, but both are recorded in
+    get_computed_blocks() on every scheduling *attempt* of a waiting request, so
+    under a closed loop with more sessions than sequence slots they re-count a
+    request's whole accumulated context many times before it is admitted (315M vs
+    8.5M prompt tokens on the 80-session run) — not a usable token count. This
+    derivation uses only once-per-token counters (stats.py sets num_cached_tokens
+    = num_local_cached_tokens + num_external_cached_tokens, and the external part
+    is exactly external_prefix_cache_hits), so at the whole-run level it conserves:
+    Σ prefix_cache_hits_hbm + Σ external_prefix_cache_hits == Σ prompt_tokens_cached.
+
+    IMPORTANT: this is a LIFETIME-total quantity only, which is why the key is kept
+    out of SMALLMULT_COLS (no per-round panel). Per round the two source counters
+    are NOT attributed to the same round — the KV connector's async loads record
+    external hits in a different round than when those tokens are counted as
+    cached — so a single round's (cached − external) is frequently negative and is
+    not the round's HBM hits. The signed per-round deltas are kept (not clamped) so
+    they telescope to the correct run total; clamping each round at 0 would drop the
+    negatives and inflate the total (~1.07M instead of the true ~65k)."""
+    cached = data.get("prompt_tokens_cached")
+    if not cached:
+        return
+    ext = data.get("external_prefix_cache_hits") or []
+    n = len(cached)
+    data["prefix_cache_hits_hbm"] = [
+        cached[i] - (ext[i] if i < len(ext) else 0.0) for i in range(n)
+    ]
 
 
 def parse_tier_log(path: str) -> dict:
@@ -350,7 +409,11 @@ def load_gpu_windows(run_dir: str) -> dict:
     if not os.path.isfile(tl):
         return {}
     try:
-        ticks = _gpu_report.read_timeline(tl)
+        # read_timeline returns (ticks, active_gpus); the active-GPU list (idle
+        # cards excluded from aggregation) is used for gpu_report's own header —
+        # here we only need the per-tick series, already aggregated over the
+        # active GPUs so the band shows true util, not the ÷8-diluted average.
+        ticks, _active_gpus = _gpu_report.read_timeline(tl)
         if not ticks:
             return {}
         windows = _gpu_report.read_windows(mk) if os.path.isfile(mk) else []
@@ -494,11 +557,20 @@ def fmt_rate(rate, funit, stacked=False):
     return f"{val}{sep}{unit}"
 
 
+# Human-readable axis unit for each unit tag (COUNTERS/FAMILIES/TIER_COUNTERS).
+# Shown on every panel's y-axis so a count is never ambiguous — in particular the
+# vLLM prefix-cache counters read "tokens", not blocks/requests. "int" is only a
+# defensive fallback for any untagged counter.
+UNIT_LABEL = {"tokens": "tokens", "bytes": "bytes", "events": "events",
+              "int": "count"}
+
+
 def build_series(run_args):
     """Parse all runs; assign colour (by variant) and linestyle (by repeat)."""
     series = []
     for tag, d in run_args:
         for s in load_run(d, tag):
+            derive_counters(s["data"])
             series.append(s)
     # linestyle per repeat of the same variant (kept as a secondary cue), and
     # freeze input order for the stable sort below.
@@ -601,12 +673,21 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         return captured
 
     zeroed = [c for c in COUNTERS + TIER_COUNTERS if c not in active and _measured(c)]
-    zero_note = ""
+    note_lines = []
+    # Methodology note for the derived HBM counter — shown whenever it's plotted, so
+    # the chart never silently presents a derived bar as a raw vLLM counter.
+    if "prefix_cache_hits_hbm" in active_keys:
+        note_lines += textwrap.wrap(
+            "GPU-HBM prefix-cache hits are DERIVED (prompt_tokens_cached − "
+            "offload-tier hits). vLLM's raw prefix_cache_queries/hits are recorded "
+            "per scheduling attempt and re-count a waiting request's full context "
+            "many times under queue pressure (37× here), so they are not "
+            "plotted; the derivation uses only once-per-token counters.", width=150)
     if zeroed:
         names = ", ".join(c[1] for c in zeroed)
-        zero_note = ("Measured but zero across all runs (shown for completeness, "
-                     f"not omitted): {names}.")
-    note_lines = textwrap.wrap(zero_note, width=150) if zero_note else []
+        note_lines += textwrap.wrap(
+            "Measured but zero across all runs (shown for completeness, "
+            f"not omitted): {names}.", width=150)
 
     # ── run-total families: roll each counter up to one whole-run number ──────
     def _total(s, key):
@@ -868,7 +949,7 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
                          fontsize=8, color=mut)
             secs = _active_seconds(s, "num_preemptions")
             if tot and secs:
-                ax.annotate(fmt_rate(tot / secs, "int", stacked=True),
+                ax.annotate(fmt_rate(tot / secs, "events", stacked=True),
                             xy=(x, tot), xytext=(0, 15),
                             textcoords="offset points", ha="center",
                             va="bottom", fontsize=7.5, fontweight="bold",
@@ -877,6 +958,7 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         ax.set_xticklabels([])
         ax.set_title("Engine preemptions — run total", loc="left",
                      fontsize=10, fontweight="bold", color=fg, pad=6)
+        ax.set_ylabel("events", color=mut, fontsize=8)
         ax.yaxis.set_major_formatter(FuncFormatter(fmt_compact))
         ax.set_ylim(0, (vmax * 1.5) or 1)   # headroom for the count + rate stack
         ax.margins(x=0.12)
@@ -918,7 +1000,10 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
                 if k in HIT_DENOM:
                     q = _total(s, HIT_DENOM[k])
                     if q:
-                        parts.append(f"{hv / q * 100:.0f}%")
+                        # Small rates (e.g. the ~0.8% GPU-HBM hit rate) round to a
+                        # misleading "1%" at 0 decimals — keep a decimal below 10%.
+                        pct = hv / q * 100
+                        parts.append(f"{pct:.1f}%" if 0 < pct < 10 else f"{pct:.0f}%")
                 if not parts:
                     continue
                 # Clear the rotated count label first — its height grows with the
@@ -940,6 +1025,7 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         # of letting them run into the neighbour.
         ax.set_title(textwrap.fill(ftitle, width=26), loc="left", fontsize=10,
                      fontweight="bold", color=fg, pad=6)
+        ax.set_ylabel(UNIT_LABEL.get(funit, funit), color=mut, fontsize=8)
         ax.yaxis.set_major_formatter(FuncFormatter(fmt))
         # The derived label sits above the rotated count label; a two-line rate
         # (value + unit) or a two-line hit block needs a little more headroom
@@ -1010,13 +1096,16 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
                          va="bottom", ha="left", color=mut, family="monospace")
                 cax.yaxis.set_major_formatter(
                     FuncFormatter(fmt_bytes if unit == "bytes" else fmt_compact))
+                ul = UNIT_LABEL.get(unit, unit)
                 if is_tier:
                     cax.set_xlabel("telemetry tick", color=mut, fontsize=8)
+                    cax.set_ylabel(f"{ul} (cumulative)", color=mut, fontsize=8)
                 elif x_is_seconds:
                     cax.set_xlabel("elapsed (s)", color=mut, fontsize=8)
-                    cax.set_ylabel("per second", color=mut, fontsize=8)
+                    cax.set_ylabel(f"{ul}/s", color=mut, fontsize=8)
                 else:
                     cax.set_xlabel("round", color=mut, fontsize=8)
+                    cax.set_ylabel(f"{ul}/round", color=mut, fontsize=8)
                 cax.margins(x=0.02)
                 cax.set_ylim(bottom=0)
                 for sp in ("top", "right"):
