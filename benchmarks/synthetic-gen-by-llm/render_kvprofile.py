@@ -350,7 +350,11 @@ def load_gpu_windows(run_dir: str) -> dict:
     if not os.path.isfile(tl):
         return {}
     try:
-        ticks = _gpu_report.read_timeline(tl)
+        # read_timeline returns (ticks, active_gpus); the active-GPU list (idle
+        # cards excluded from aggregation) is used for gpu_report's own header —
+        # here we only need the per-tick series, already aggregated over the
+        # active GPUs so the band shows true util, not the ÷8-diluted average.
+        ticks, _active_gpus = _gpu_report.read_timeline(tl)
         if not ticks:
             return {}
         windows = _gpu_report.read_windows(mk) if os.path.isfile(mk) else []
