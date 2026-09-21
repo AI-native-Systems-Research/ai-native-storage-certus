@@ -182,12 +182,24 @@ SMALLMULT_TIER = [
     "tier_evictions_from_memory", "tier_evictions_from_ssd",
 ]
 
-# Hit counters that have a matching query counter: on the run-total bars the hit
-# bar is annotated with its hit rate (hits / queries) so the raw count reads
-# alongside the ratio that actually matters for cache effectiveness.
+# Bars annotated with a hit rate (numerator / denominator) atop the raw count, so
+# each count reads alongside the ratio that matters for cache effectiveness:
+#   prefix_cache_hits / prefix_cache_queries — GPU-local rate. NOTE the GPU query
+#     counter is bumped per prefix-block lookup on EVERY scheduler step, so it
+#     re-counts resident prefixes and runs far above the prompt-token volume (e.g.
+#     315M queries vs 8.5M prompt tokens on an 80-session run). Its ratio reads
+#     near-zero under cache pressure and is NOT a token-conservation figure — it
+#     is only "of all GPU lookups, how many landed in HBM this step".
+#   external_prefix_cache_hits / external_prefix_cache_queries — offload-tier rate.
+#   prompt_tokens_cached / prompt_tokens — the end-to-end EFFECTIVE cache-hit rate:
+#     of all prompt tokens presented at admission, the fraction served from any
+#     tier instead of recomputed. Both are token counts at the same stage, so this
+#     one respects conservation (cached <= prompt) and is the headline "did caching
+#     help" number — ~95% where the GPU-local ratio alone reads ~0%.
 HIT_DENOM = {
     "prefix_cache_hits":          "prefix_cache_queries",
     "external_prefix_cache_hits": "external_prefix_cache_queries",
+    "prompt_tokens_cached":       "prompt_tokens",
 }
 
 # Counters that also get a per-second average (total / active seconds) atop their
