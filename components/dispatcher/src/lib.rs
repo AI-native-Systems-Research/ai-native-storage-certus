@@ -2365,8 +2365,6 @@ impl IDispatcher for DispatcherComponent {
         // LOAD FAILURE (which crashes vLLM) — a regression vs unstable. The
         // scheduling win is not worth reintroducing that failure mode.
         if !cold_entries.is_empty() {
-            const MAX_QUEUES_PER_DRIVE: usize = 1;
-
             let chunk_size = {
                 let ring_guard = self.pipeline_ring.read();
                 ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
@@ -2383,7 +2381,6 @@ impl IDispatcher for DispatcherComponent {
                     let res = mt
                         .insert(entry.key, entry.total_size)
                         .map(|mem_ptr| {
-                            // In-place, pin-safe promote (no remove/recreate).
                             if dm
                                 .promote_block_to_memory_tier(entry.key, mem_ptr, entry.total_size)
                                 .is_ok()
@@ -2392,8 +2389,6 @@ impl IDispatcher for DispatcherComponent {
                             }
                         })
                         .map_err(|e| match e {
-                            // Preserve AlreadyExists so the recovery pass below
-                            // can re-serve the block warm (concurrent promotion).
                             interfaces::MemoryTierError::AlreadyExists(k) => {
                                 DispatcherError::AlreadyExists(k)
                             }
@@ -2411,24 +2406,12 @@ impl IDispatcher for DispatcherComponent {
                     per_drive[drive_idx].push(ci);
                 }
 
-                let pool_guard = self.cold_pool.lock().unwrap();
-                let pool = pool_guard.as_ref();
-                let queues_per_drive = pool.map_or(MAX_QUEUES_PER_DRIVE, |p| p.queues_per_drive());
-
                 let queue_depth = 128;
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 let pm = self.pipeline_metrics.read();
                 let pm_arc: Option<Arc<dyn PipelineMetrics>> = pm.as_ref().map(Arc::clone);
                 drop(pm);
 
-                // Cold-load staging: when the tier is saturated (all slots pinned
-                // by in-flight loads) a cold load can't get a tier slot. Rather
-                // than fail it (which crashes vLLM), such entries are deferred to
-                // `staged` and served after the pooled tier jobs, one staging
-                // buffer at a time — see the post-pass below. We do NOT check out
-                // buffers here: blocking on a checkout while holding `pool_guard`
-                // (and accumulating leases that only release at batch end)
-                // deadlocks the server.
                 let staging_available = self
                     .pipeline_ring
                     .read()
@@ -2436,13 +2419,15 @@ impl IDispatcher for DispatcherComponent {
                     .is_some_and(|r| r.staging.is_some());
                 let mut staged: Vec<usize> = Vec::new();
 
-                // For each drive, prepare ColdReadJobs and submit to pool (or fallback).
-                #[allow(clippy::type_complexity)]
-                let mut pending_results: Vec<(
-                    Vec<usize>,   // job_ci mapping
-                    Vec<*mut u8>, // mem_ptrs
-                    crossbeam_channel::Receiver<Vec<Result<(), DispatcherError>>>,
-                )> = Vec::new();
+                // Per-drive cold_prep with free-slot reserve: claim pre-evicted
+                // slots when available, fall back to synchronous evict_and_insert.
+                struct DriveJobSet {
+                    drive_idx: usize,
+                    jobs: Vec<pipeline::ColdReadJob>,
+                    job_ci: Vec<usize>,
+                    mem_ptrs: Vec<*mut u8>,
+                }
+                let mut drive_job_sets: Vec<DriveJobSet> = Vec::new();
                 let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
 
                 for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
@@ -2453,222 +2438,199 @@ impl IDispatcher for DispatcherComponent {
                     let drive = &drives[drive_idx];
                     let block_size = drive.block_dev_iface.block_size();
 
-                    // Split this drive's entries across queue slots.
-                    let num_queues = queues_per_drive.min(entry_indices.len());
-                    let chunks: Vec<&[usize]> = entry_indices
-                        .chunks(entry_indices.len().div_ceil(num_queues))
-                        .collect();
+                    let mut jobs: Vec<pipeline::ColdReadJob> =
+                        Vec::with_capacity(entry_indices.len());
+                    let mut job_ci: Vec<usize> = Vec::with_capacity(entry_indices.len());
+                    let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(entry_indices.len());
 
-                    for (slot, chunk) in chunks.into_iter().enumerate() {
-                        let mut jobs: Vec<pipeline::ColdReadJob> = Vec::with_capacity(chunk.len());
-                        let mut job_ci: Vec<usize> = Vec::with_capacity(chunk.len());
-                        let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(chunk.len());
+                    for &ci in entry_indices {
+                        let entry = &cold_entries[ci];
+                        let ipc_size = entry.total_size;
 
-                        for &ci in chunk {
-                            let entry = &cold_entries[ci];
-                            let ipc_size = entry.total_size;
-
-                            let claimed = self
-                                .free_slot_reserve
-                                .lock()
-                                .unwrap()
-                                .as_ref()
-                                .map_or(false, |r| r.try_claim(1) > 0);
-                            let prep = if claimed {
-                                mt.insert(entry.key, ipc_size)
-                                    .map_err(|e| match e {
-                                        interfaces::MemoryTierError::AlreadyExists(k) => {
-                                            DispatcherError::AlreadyExists(k)
-                                        }
-                                        _ => DispatcherError::AllocationFailed(e.to_string()),
-                                    })
-                                    .or_else(|e| {
-                                        if matches!(e, DispatcherError::AllocationFailed(_)) {
-                                            self.evict_and_insert(
-                                                &dm,
-                                                &mt,
-                                                entry.key,
-                                                ipc_size,
-                                                max_attempts,
-                                            )
-                                        } else {
-                                            Err(e)
-                                        }
-                                    })
-                            } else {
-                                self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts)
-                            };
-
-                            match prep {
-                                Ok(mem_ptr) => {
-                                    // Single-region (N==1): fuse SSD->GPU as before
-                                    // (gpu_dst = the one region). Multi-region (N>1):
-                                    // read SSD->DRAM slot only (gpu_dst null), then
-                                    // scatter the slot to the N GPU allocations after
-                                    // the promote below.
-                                    let gpu_dst = if entry.regions.len() == 1 {
-                                        entry.regions[0].address as *mut std::ffi::c_void
+                        let claimed = self
+                            .free_slot_reserve
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .map_or(false, |r| r.try_claim(1) > 0);
+                        let prep = if claimed {
+                            mt.insert(entry.key, ipc_size)
+                                .map_err(|e| match e {
+                                    interfaces::MemoryTierError::AlreadyExists(k) => {
+                                        DispatcherError::AlreadyExists(k)
+                                    }
+                                    _ => DispatcherError::AllocationFailed(e.to_string()),
+                                })
+                                .or_else(|e| {
+                                    if matches!(e, DispatcherError::AllocationFailed(_)) {
+                                        self.evict_and_insert(
+                                            &dm,
+                                            &mt,
+                                            entry.key,
+                                            ipc_size,
+                                            max_attempts,
+                                        )
                                     } else {
-                                        std::ptr::null_mut()
-                                    };
-                                    jobs.push(pipeline::ColdReadJob {
-                                        mem_ptr,
-                                        gpu_dst,
-                                        start_lba: entry.offset / block_size as u64,
-                                        total_bytes: ipc_size as usize,
-                                    });
-                                    job_ci.push(ci);
-                                    mem_ptrs.push(mem_ptr);
-                                }
-                                // Tier saturated: defer to the staging post-pass
-                                // (served uncached, one buffer at a time) so the
-                                // load still succeeds. Only for AllocationFailed —
-                                // AlreadyExists is a concurrent promotion handled
-                                // by the recovery pass. Do NOT check out a buffer
-                                // here (would block under pool_guard → deadlock).
-                                Err(DispatcherError::AllocationFailed(_)) if staging_available => {
-                                    staged.push(ci);
-                                }
-                                Err(e) => {
-                                    prep_failures.push((ci, Err(e)));
-                                }
-                            }
-                        }
-
-                        if jobs.is_empty() {
-                            continue;
-                        }
-
-                        let (result_tx, result_rx) = crossbeam_channel::bounded(1);
-
-                        let request = cold_pool::ColdReadRequest {
-                            jobs,
-                            chunk_size,
-                            queue_depth,
-                            metrics: pm_arc.clone(),
-                            result_tx,
-                            gpu_device: batch_device,
+                                        Err(e)
+                                    }
+                                })
+                        } else {
+                            self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts)
                         };
 
-                        if let Some(p) = pool {
-                            if let Err(e) = p.submit(drive_idx, slot, request) {
-                                for &ci in &job_ci {
-                                    prep_failures.push((ci, Err(e.clone())));
-                                }
-                                continue;
+                        match prep {
+                            Ok(mem_ptr) => {
+                                let gpu_dst = if entry.regions.len() == 1 {
+                                    entry.regions[0].address as *mut std::ffi::c_void
+                                } else {
+                                    std::ptr::null_mut()
+                                };
+                                jobs.push(pipeline::ColdReadJob {
+                                    mem_ptr,
+                                    gpu_dst,
+                                    start_lba: entry.offset / block_size as u64,
+                                    total_bytes: ipc_size as usize,
+                                });
+                                job_ci.push(ci);
+                                mem_ptrs.push(mem_ptr);
                             }
-                        } else {
-                            // Fallback: no pool available, run inline on current thread.
-                            let drive_iface = &*drive.block_dev_iface;
-                            let gpu_ref = &*gpu;
-                            let channels = drive_iface.connect_client();
-                            let streams_result = gpu_ref.create_stream().and_then(|a| {
-                                gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
-                                    let _ = gpu_ref.destroy_stream(a);
-                                    e
-                                })
-                            });
-                            match (channels, streams_result) {
-                                (Ok(ch), Ok(st)) => {
-                                    let pipeline_results = unsafe {
-                                        pipeline::pipelined_multi_object_zero_copy(
-                                            drive_iface,
-                                            gpu_ref,
-                                            &st,
-                                            &ch,
-                                            &request.jobs,
-                                            request.chunk_size,
-                                            request.queue_depth,
-                                            request.metrics.as_deref(),
-                                        )
-                                    };
-                                    let _ = gpu_ref.destroy_stream(st[0]);
-                                    let _ = gpu_ref.destroy_stream(st[1]);
-                                    let _ = request.result_tx.send(pipeline_results);
-                                }
-                                (Err(e), _) => {
-                                    let err = DispatcherError::IoError(format!(
-                                        "connect_client failed: {e}"
-                                    ));
-                                    let _ = request.result_tx.send(
-                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect(),
-                                    );
-                                }
-                                (_, Err(e)) => {
-                                    let err = DispatcherError::IoError(format!(
-                                        "create_stream failed: {e}"
-                                    ));
-                                    let _ = request.result_tx.send(
-                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect(),
-                                    );
-                                }
+                            Err(DispatcherError::AllocationFailed(_)) if staging_available => {
+                                staged.push(ci);
+                            }
+                            Err(e) => {
+                                prep_failures.push((ci, Err(e)));
                             }
                         }
+                    }
 
-                        pending_results.push((job_ci, mem_ptrs, result_rx));
+                    if !jobs.is_empty() {
+                        drive_job_sets.push(DriveJobSet {
+                            drive_idx,
+                            jobs,
+                            job_ci,
+                            mem_ptrs,
+                        });
                     }
                 }
-
-                drop(pool_guard);
 
                 // Record prep failures.
                 for (ci, res) in prep_failures {
                     results[cold_entries[ci].idx] = Some(res);
                 }
 
-                // Collect pipeline results and finalize dispatch-map state.
-                for (job_ci, mem_ptrs, result_rx) in pending_results {
-                    let pipeline_results = result_rx.recv().unwrap_or_else(|_| {
-                        (0..job_ci.len())
-                            .map(|_| {
-                                Err(DispatcherError::IoError("pool worker disconnected".into()))
-                            })
-                            .collect()
-                    });
-
-                    for (job_idx, result) in pipeline_results.into_iter().enumerate() {
-                        let ci = job_ci[job_idx];
-                        let entry = &cold_entries[ci];
-                        let res = match result {
-                            Ok(()) => {
-                                // In-place BlockDevice->MemoryTier: preserves the
-                                // load's pin (read_ref) and keeps the SSD offset,
-                                // so it works on a pinned entry (unlike the old
-                                // remove+recreate, whose remove failed on a pin).
-                                dm.promote_block_to_memory_tier(
-                                    entry.key,
-                                    mem_ptrs[job_idx],
-                                    entry.total_size,
-                                )
-                                .map_err(|e| {
-                                    DispatcherError::IoError(format!(
-                                        "promote transition failed: {e}"
-                                    ))
-                                })
-                                .and_then(|()| {
-                                    self.tier_counters.record_promotion_to_memory();
-                                    // Multi-region (N>1): the pipeline only filled
-                                    // the DRAM slot (gpu_dst was null). Scatter the
-                                    // now-resident slot to the N GPU allocations.
-                                    // N==1 already landed on the GPU via the fused
-                                    // SSD->GPU path, so skip it there.
-                                    if entry.regions.len() > 1 {
-                                        self.serve_memory_tier_to_gpu(
-                                            &gpu,
-                                            mem_ptrs[job_idx],
-                                            entry.total_size,
-                                            &entry.regions,
-                                            warm_raw,
-                                            true,
-                                        )
-                                    } else {
-                                        Ok(())
+                // Scatter-gather: check out one channel per active drive,
+                // run all drives' NVMe I/O in a single multiplexed loop.
+                if !drive_job_sets.is_empty() {
+                    let pipe_streams: [GpuStream; 2] = match &dev_streams {
+                        Some(s) => [
+                            GpuStream(s.pipe[0] as *mut std::ffi::c_void),
+                            GpuStream(s.pipe[1] as *mut std::ffi::c_void),
+                        ],
+                        None => {
+                            let a = gpu.create_stream();
+                            let b = a.as_ref().ok().and_then(|&sa| {
+                                gpu.create_stream().map(|sb| [sa, sb]).ok()
+                            });
+                            match b {
+                                Some(st) => st,
+                                None => {
+                                    for djs in &drive_job_sets {
+                                        for &ci in &djs.job_ci {
+                                            results[cold_entries[ci].idx] = Some(Err(
+                                                DispatcherError::IoError(
+                                                    "create_stream failed for scatter-gather"
+                                                        .into(),
+                                                ),
+                                            ));
+                                        }
                                     }
-                                })
+                                    drive_job_sets.clear();
+                                    [GpuStream(std::ptr::null_mut()); 2]
+                                }
                             }
-                            Err(e) => Err(e),
-                        };
-                        results[cold_entries[ci].idx] = Some(res);
+                        }
+                    };
+
+                    if !drive_job_sets.is_empty() {
+                        let mut channel_leases: Vec<ChannelLease<'_>> = Vec::new();
+                        let mut drive_works: Vec<pipeline::DriveWork<'_>> = Vec::new();
+                        let mut checkout_ok = true;
+
+                        for djs in &drive_job_sets {
+                            match drives[djs.drive_idx].channel_pool.checkout() {
+                                Ok(lease) => {
+                                    channel_leases.push(lease);
+                                }
+                                Err(e) => {
+                                    for &ci in &djs.job_ci {
+                                        results[cold_entries[ci].idx] = Some(Err(e.clone()));
+                                    }
+                                    checkout_ok = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if checkout_ok {
+                            for (i, djs) in drive_job_sets.iter().enumerate() {
+                                drive_works.push(pipeline::DriveWork {
+                                    channels: channel_leases[i].channels(),
+                                    drive: &*drives[djs.drive_idx].block_dev_iface,
+                                    jobs: &djs.jobs,
+                                });
+                            }
+
+                            let scatter_results = unsafe {
+                                pipeline::scatter_gather_multi_drive_zero_copy(
+                                    &*gpu,
+                                    &pipe_streams,
+                                    &drive_works,
+                                    chunk_size,
+                                    queue_depth,
+                                    pm_arc.as_deref(),
+                                )
+                            };
+
+                            for (di, djs) in drive_job_sets.iter().enumerate() {
+                                for (job_idx, result) in
+                                    scatter_results[di].iter().enumerate()
+                                {
+                                    let ci = djs.job_ci[job_idx];
+                                    let entry = &cold_entries[ci];
+                                    let res = match result {
+                                        Ok(()) => dm
+                                            .promote_block_to_memory_tier(
+                                                entry.key,
+                                                djs.mem_ptrs[job_idx],
+                                                entry.total_size,
+                                            )
+                                            .map_err(|e| {
+                                                DispatcherError::IoError(format!(
+                                                    "promote transition failed: {e}"
+                                                ))
+                                            })
+                                            .and_then(|()| {
+                                                self.tier_counters
+                                                    .record_promotion_to_memory();
+                                                if entry.regions.len() > 1 {
+                                                    self.serve_memory_tier_to_gpu(
+                                                        &gpu,
+                                                        djs.mem_ptrs[job_idx],
+                                                        entry.total_size,
+                                                        &entry.regions,
+                                                        warm_raw,
+                                                        true,
+                                                    )
+                                                } else {
+                                                    Ok(())
+                                                }
+                                            }),
+                                        Err(e) => Err(e.clone()),
+                                    };
+                                    results[cold_entries[ci].idx] = Some(res);
+                                }
+                            }
+                        }
                     }
                 }
 
