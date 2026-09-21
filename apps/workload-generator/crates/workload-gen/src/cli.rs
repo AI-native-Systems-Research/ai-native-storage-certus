@@ -1880,12 +1880,17 @@ fn live_report(
                 )
             } else {
                 format!(
-                    "the plan queue underran {} times out of {} pops ({:.3}%), so the \
-                     generator and not Certus set the pace at those instants and the \
-                     throughput describes the instrument (FR-062)",
+                    "lanes spent {:.3}% of their time waiting for the generator, above the \
+                     {:.3}% a work-conserving run tolerates, so the generator and not Certus \
+                     set the pace and the throughput describes the instrument (FR-062). \
+                     Worst lane waited {:.3}s of {:.3}s; the queue was found empty {} times \
+                     out of {} pops",
+                    stats.producer_wait_fraction() * 100.0,
+                    crate::live::DEFAULT_PRODUCER_WAIT_TOLERANCE * 100.0,
+                    stats.worst_lane_producer_wait_us() as f64 / 1e6,
+                    stats.elapsed,
                     stats.underruns(),
-                    stats.pops(),
-                    stats.fraction_underrun() * 100.0
+                    stats.pops()
                 )
             }
         }),
@@ -1916,6 +1921,9 @@ fn live_report(
             pops: stats.pops(),
             underruns: stats.underruns(),
             fraction_underrun: stats.fraction_underrun(),
+            producer_wait_us: stats.producer_wait_us(),
+            worst_lane_producer_wait_us: stats.worst_lane_producer_wait_us(),
+            producer_wait_fraction: stats.producer_wait_fraction(),
             min_depth: stats.min_depth(),
             capacity_per_lane: crate::live::QUEUE_CAPACITY,
             per_lane_underruns: stats.lanes.iter().map(|l| l.underruns).collect(),

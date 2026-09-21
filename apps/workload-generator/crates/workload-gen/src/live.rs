@@ -29,7 +29,7 @@
 //! recency policy of `Touch`" for the plain-English sense of depriving something of what
 //! it needs, and keeping the queue condition's own name distinct avoids that collision.
 //!
-//! # The underrun is counted, never sampled
+//! # The underrun is counted, never sampled — but it is not what validity rests on
 //!
 //! Sampling depth as a gauge can miss a brief exhaustion between samples — the same
 //! failure as reporting an average, one level down. So a consumer that finds its queue
@@ -37,13 +37,26 @@
 //! recorded at pop time beside it, because a consumer's view of the queue is the one that
 //! matters.
 //!
-//! ## The initial fill is excluded, and that is necessary rather than convenient
+//! ## Why the count cannot be the test: it weighs a microsecond like a minute
 //!
-//! At the instant a run starts, every queue is empty because nothing has been produced
-//! yet, so a consumer's first look always finds it so. Counting that made the first
-//! streaming implementation report **every** lane underrunning exactly once — `[1, 1, 1, 1]`
-//! — and every run invalid, which is as useless as a check that never fires. One vacuous
-//! metric traded for another.
+//! At the instant a run starts every queue is empty, because nothing has been produced yet,
+//! so a consumer's first looks always find it so. A **count** cannot tell those from a
+//! mid-run stall, and validity required the count to be *zero*, so no work-conserving run
+//! could ever be valid. That is not hypothetical: on the four-instance stress run the
+//! producer finished the entire 10-second span in **0.32s of a 180s run** and never once
+//! blocked on a full queue — it was demonstrably never the constraint — and the run was
+//! still disqualified by 88 empty pops, each of them microseconds long.
+//!
+//! A `primed` flag used to suppress each lane's *first* look. It could not work: the fill
+//! takes several looks, not one, so runs stayed invalid; and it left the reported count
+//! neither the raw truth nor the thing being adjudicated. It is gone.
+//!
+//! What replaces it is [`LaneStats::producer_wait_us`] — the **time** a lane spent blocked
+//! waiting for the producer — against the lane-time available, bounded by
+//! [`DEFAULT_PRODUCER_WAIT_TOLERANCE`]. That reads directly as the share by which the
+//! reported throughput understates Certus, which is the claim FR-062 has to settle, and it
+//! separates the unavoidable from the disqualifying by six orders of magnitude rather than
+//! by a flag. The empty-pop count is still reported; it is a symptom, not the verdict.
 //!
 //! ## A blocked producer is the healthy state, and is counted too
 //!
@@ -55,11 +68,9 @@
 //! A run with zero underruns **and** a producer that blocked is one where the queue
 //! demonstrably did its job.
 //!
-//! So a lane's first batch is **primed**: it blocks for it without counting, and only
-//! afterwards does an empty queue mean the producer fell behind. Starvation is therefore
-//! "this lane had work and then ran out", which is the condition FR-062 is about. It is
-//! the same principle as FR-046 excluding the startup cache clear from the timed window —
-//! a run properly begins once its pipeline is full.
+//! A run with little waiting **and** a producer that blocked is one where the queue
+//! demonstrably did its job: the first says the lanes were never held up, the second says the
+//! generator was ahead rather than merely keeping pace.
 //!
 //! # What is here, and what moved
 //!
@@ -82,11 +93,13 @@
 //! the report gives **per-lane** figures so the pattern is visible rather than averaged
 //! away.
 //!
-//! # Underrun means something different under pacing (FR-080)
+//! # Waiting means something different under pacing (FR-080)
 //!
 //! Everything above describes a **work-conserving** run, which issues as fast as the mailbox
 //! allows and measures the ceiling. Under [`Pacing::Real`] an empty queue is the normal, intended
-//! state — nothing is due yet — so an underrun stops meaning "the generator was the constraint"
+//! state — nothing is due yet, and a paced producer emits only what is due, so its lanes idle by
+//! design and measurably so: around **6% of lane-time** in `pacing.rs`'s slow-node run. Waiting
+//! therefore stops meaning "the generator was the constraint"
 //! and validity becomes **lateness** instead: how far past its due time each turn was submitted.
 //! Adopting pacing therefore *replaced* a metric rather than adding a delay, which is why
 //! [`LiveStats::is_valid`] asks which mode the run was in.
@@ -159,14 +172,36 @@ impl Pacing {
 /// those by three orders of magnitude at each end.
 pub const DEFAULT_LATENESS_TOLERANCE_US: u64 = 100_000;
 
+/// The share of lane-time a work-conserving run may spend waiting for the producer before its
+/// throughput stops describing Certus (FR-062).
+///
+/// Not zero, and that is the point. Every lane's queue is empty at `t = 0`, so a consumer
+/// cannot help waiting while the producer gets ahead; requiring zero made **every**
+/// work-conserving run invalid, which is how this tolerance came to exist. Measured on the
+/// four-instance stress run, that startup wait is microseconds against a 180-second window —
+/// six orders of magnitude below this bound — while a producer that genuinely could not keep
+/// up would spend seconds per lane and exceed it by a wide margin. 1% therefore separates the
+/// unavoidable from the disqualifying without sitting near either.
+pub const DEFAULT_PRODUCER_WAIT_TOLERANCE: f64 = 0.01;
+
 /// One lane's view of its own queue and its own traffic.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LaneStats {
     /// Batches taken.
     pub pops: u64,
-    /// Pops that found the queue **empty** — each one an underrun, meaning the
-    /// generator was the constraint at that instant (FR-062).
+    /// Pops that found the queue **empty**.
+    ///
+    /// Reported, but **not** what validity rests on: a count weighs a startup wait of a few
+    /// microseconds exactly as heavily as a mid-run stall of ten seconds. See
+    /// [`LaneStats::producer_wait_us`], which is the figure FR-062 is actually about.
     pub underruns: u64,
+    /// Microseconds this lane spent blocked waiting for the producer.
+    ///
+    /// The quantity FR-062 means by "the generator set the pace": time the lane could have
+    /// spent driving Certus and could not, because the next turn did not exist yet. Summed
+    /// across lanes and divided by the lane-time available, it *is* the fraction by which the
+    /// reported throughput understates the system.
+    pub producer_wait_us: u64,
     /// Smallest depth seen at pop time.
     pub min_depth: usize,
     /// Operations skipped for want of a GPU payload buffer.
@@ -251,6 +286,38 @@ impl LiveStats {
             0.0
         } else {
             self.underruns() as f64 / pops as f64
+        }
+    }
+
+    /// Microseconds lanes spent waiting for the producer, summed across lanes.
+    pub fn producer_wait_us(&self) -> u64 {
+        self.lanes.iter().map(|l| l.producer_wait_us).sum()
+    }
+
+    /// The worst single lane's wait, in microseconds.
+    ///
+    /// Reported beside the aggregate because one starved lane among sixteen is invisible in a
+    /// mean — the aggregate would read 1/16th of its true severity.
+    pub fn worst_lane_producer_wait_us(&self) -> u64 {
+        self.lanes
+            .iter()
+            .map(|l| l.producer_wait_us)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Fraction of the available **lane-time** spent waiting for the producer.
+    ///
+    /// The denominator is `lanes x elapsed`, not `elapsed`: with sixteen lanes the run has
+    /// sixteen lane-seconds per wallclock second to spend, and this is the share of them lost
+    /// to an empty queue. That makes it read directly as the amount by which the reported
+    /// throughput understates Certus — which is exactly the claim FR-062 has to adjudicate.
+    pub fn producer_wait_fraction(&self) -> f64 {
+        let lane_time_us = self.elapsed * 1e6 * self.lanes.len() as f64;
+        if lane_time_us <= 0.0 {
+            0.0
+        } else {
+            self.producer_wait_us() as f64 / lane_time_us
         }
     }
 
@@ -437,9 +504,12 @@ impl LiveStats {
 
     /// Whether the run is valid — and **which test that is depends on the mode**.
     ///
-    /// Work-conserving: **no lane ever underran** (FR-062). An underrun means the generator, not
-    /// Certus, set the pace at that instant, so the throughput would describe the instrument
-    /// rather than the system under test.
+    /// Work-conserving: **lanes spent almost none of their time waiting for the producer**
+    /// (FR-062), the bound being [`DEFAULT_PRODUCER_WAIT_TOLERANCE`] of lane-time. Time, not a
+    /// count of empty pops: the count cannot tell a startup wait from a stall, and since every
+    /// queue starts empty it can never reach zero, so requiring zero of it disqualified every
+    /// work-conserving run — measured, on runs whose producer had in fact finished the entire
+    /// span in 0.32s of 180s and never once blocked on a full queue.
     ///
     /// Paced: **the schedule was kept** (FR-080). An empty queue is the normal, intended state
     /// there — nothing is due yet — so the underrun count carries no information at all and
@@ -456,7 +526,7 @@ impl LiveStats {
         }
         match self.pacing {
             Pacing::Real => self.kept_the_schedule(),
-            Pacing::None => self.underruns() == 0,
+            Pacing::None => self.producer_wait_fraction() <= DEFAULT_PRODUCER_WAIT_TOLERANCE,
         }
     }
 
@@ -791,34 +861,80 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_single_underrun_anywhere_invalidates_the_run() {
-        // FR-062, and the property the old implementation could not express: validity now
-        // depends on something the system does, not on a loop index.
-        let healthy = stats(vec![lane(100, 0, 4), lane(100, 0, 9)], 1.0);
-        assert!(healthy.is_valid());
-        assert_eq!(healthy.min_depth(), 4);
-        assert_eq!(healthy.fraction_underrun(), 0.0);
+    /// A lane that found the queue empty `empty` times and spent `wait_us` doing it.
+    ///
+    /// The two are independent on purpose: the whole point of the time-based test is that a
+    /// count says nothing about severity.
+    fn lane_waiting(pops: u64, empty: u64, min_depth: usize, wait_us: u64) -> LaneStats {
+        LaneStats {
+            pops,
+            underruns: empty,
+            min_depth,
+            producer_wait_us: wait_us,
+            ..Default::default()
+        }
+    }
 
-        let underran = stats(vec![lane(100, 0, 4), lane(100, 1, 0)], 1.0);
-        assert!(
-            !underran.is_valid(),
-            "one underrun on one lane must invalidate the run"
+    #[test]
+    fn time_waiting_for_the_generator_decides_validity_not_the_count_of_empty_pops() {
+        // FR-062. The count cannot express severity: every lane's queue is empty at t=0, so a
+        // consumer always finds it empty a few times while the producer gets ahead, and
+        // requiring zero of those made every work-conserving run invalid. Measured on the
+        // stress run: the producer had finished the whole span in 0.32s of 180s and never
+        // blocked on a full queue, yet 88 empty pops disqualified it.
+        //
+        // Two lanes, one wallclock second each, so lane-time is 2s.
+        let brief = stats(
+            vec![lane_waiting(100, 6, 0, 40), lane_waiting(100, 5, 0, 30)],
+            1.0,
         );
-        assert_eq!(underran.underruns(), 1);
-        assert_eq!(underran.min_depth(), 0);
+        assert!(
+            brief.is_valid(),
+            "70us of waiting across 2s of lane-time is the startup fill, not the generator \
+             setting the pace"
+        );
+        // ... and the empty pops are still counted and reported, just not adjudicated on.
+        assert_eq!(brief.underruns(), 11);
+        assert!(brief.producer_wait_fraction() < DEFAULT_PRODUCER_WAIT_TOLERANCE);
+
+        // Fewer empty pops, but half a second of real starvation on one of them.
+        let starved = stats(
+            vec![lane_waiting(100, 2, 0, 500_000), lane_waiting(100, 0, 9, 0)],
+            1.0,
+        );
+        assert!(
+            !starved.is_valid(),
+            "a lane idle for 0.5s of 2s lane-time was waiting on the generator, whatever the \
+             count says"
+        );
+        assert!(
+            starved.underruns() < brief.underruns(),
+            "fewer events, worse run"
+        );
     }
 
     #[test]
     fn per_lane_figures_are_kept_rather_than_averaged() {
-        // Session sharding creates imbalance, and an aggregate would hide a lane that
-        // underran on every pop behind another that never did.
-        let s = stats(vec![lane(10, 10, 0), lane(1_000, 0, 12)], 1.0);
+        // Session sharding creates imbalance, and an aggregate would hide one starved lane
+        // behind fifteen healthy ones — divided by sixteen, a lane idle for the whole run
+        // reads as 6%.
+        let mut lanes = vec![lane_waiting(10, 10, 0, 900_000)];
+        lanes.extend(vec![lane_waiting(1_000, 0, 12, 0); 15]);
+        let s = stats(lanes, 1.0);
         assert_eq!(s.lanes[0].underruns, 10);
         assert_eq!(s.lanes[1].underruns, 0);
-        assert!(!s.is_valid());
-        // The overall fraction is under 1%, which is exactly why the per-lane figure is
-        // reported beside it rather than instead of it.
+        assert!(
+            !s.is_valid(),
+            "one lane idle for 90% of the run is not a valid run"
+        );
+        // The worst lane is reported precisely so this is visible: it spent 90% of the run
+        // waiting, while the aggregate over sixteen lanes reads under 6%. The dilution is real
+        // — spread thin enough (hundreds of lanes) one starved lane would fall under the
+        // tolerance, and the worst-lane figure is what keeps it from being silent.
+        assert_eq!(s.worst_lane_producer_wait_us(), 900_000);
+        assert!(s.producer_wait_fraction() < 0.06);
+        // The overall fraction of pops is likewise under 1%, which is why the per-lane
+        // figures are reported beside the aggregates rather than instead of them.
         assert!(s.fraction_underrun() < 0.01);
     }
 
@@ -928,15 +1044,21 @@ mod tests {
         // so applying FR-062 there would invalidate every paced run for the thing it was designed
         // to do. The replacement fails for the same underlying reason: the pace came from
         // somewhere other than the workload's own timing.
-        let underran_but_on_time = paced(vec![lane(100, 90, 0)], 1.0, &[0, 1_000, 2_000]);
+        // A paced lane idle most of the run is doing exactly what pacing asks of it.
+        let underran_but_on_time = paced(
+            vec![lane_waiting(100, 90, 0, 900_000)],
+            1.0,
+            &[0, 1_000, 2_000],
+        );
         assert!(
             underran_but_on_time.is_valid(),
-            "90 underruns out of 100 pops must not invalidate a paced run"
+            "0.9s of an idle queue out of 1s must not invalidate a paced run"
         );
         assert!(underran_but_on_time.kept_the_schedule());
 
-        // The same queue statistics *do* invalidate a work-conserving run.
-        let same_run_unpaced = stats(vec![lane(100, 90, 0)], 1.0);
+        // The same queue statistics *do* invalidate a work-conserving run, where an idle lane
+        // is work the run could have done and did not.
+        let same_run_unpaced = stats(vec![lane_waiting(100, 90, 0, 900_000)], 1.0);
         assert!(!same_run_unpaced.is_valid());
 
         // And lateness beyond tolerance invalidates the paced one, where the queue could not.

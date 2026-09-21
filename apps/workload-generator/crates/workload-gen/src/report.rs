@@ -504,11 +504,22 @@ pub struct QueueStats {
     pub batches_produced: u64,
     /// Batches taken by lanes.
     pub pops: u64,
-    /// Pops that found an empty queue — a buffer underrun. **Non-zero invalidates the
-    /// run.**
+    /// Pops that found an empty queue — a buffer underrun.
+    ///
+    /// Informational. It used to invalidate the run when non-zero, which no work-conserving
+    /// run could satisfy: every lane's queue is empty at `t = 0`. What decides validity is
+    /// [`QueueStats::producer_wait_fraction`], because the claim FR-062 makes is about *time*.
     pub underruns: u64,
     /// Fraction of pops that underran.
     pub fraction_underrun: f64,
+    /// Microseconds lanes spent waiting for the producer, summed across lanes.
+    pub producer_wait_us: u64,
+    /// The worst single lane's wait, in microseconds — a lone starved lane that the
+    /// aggregate would divide away.
+    pub worst_lane_producer_wait_us: u64,
+    /// Share of lane-time (`lanes x elapsed`) spent waiting for the producer. **Above the
+    /// tolerance this invalidates a work-conserving run.**
+    pub producer_wait_fraction: f64,
     /// Smallest depth any lane saw at pop time.
     pub min_depth: usize,
     /// Queue capacity per lane, in turn batches — what bounds memory instead of the span.
@@ -811,9 +822,11 @@ impl LiveReport {
             self.latency_us.p50, self.latency_us.p90, self.latency_us.p99, self.latency_us.max
         ));
         out.push_str(&format!(
-            "  plan queue        {} batches produced, {} pops, {} underran ({:.3}%), \
+            "  plan queue        {} batches produced, {} pops, {} found it empty ({:.3}%), \
              min depth {} of {} per lane\n    \
-             per lane underran {:?}, min depth {:?}\n    \
+             waiting on the generator {:.4}% of lane-time (worst lane {:.3}s of {:.3}s) \
+             <- this is what validity rests on\n    \
+             per lane found-empty {:?}, min depth {:?}\n    \
              producer blocked on a full queue {} times{}\n",
             self.queue.batches_produced,
             self.queue.pops,
@@ -821,13 +834,25 @@ impl LiveReport {
             self.queue.fraction_underrun * 100.0,
             self.queue.min_depth,
             self.queue.capacity_per_lane,
+            self.queue.producer_wait_fraction * 100.0,
+            self.queue.worst_lane_producer_wait_us as f64 / 1e6,
+            self.elapsed_seconds,
             self.queue.per_lane_underruns,
             self.queue.per_lane_min_depth,
             self.queue.producer_blocked,
+            // "Never blocked" is not "never got ahead", and saying so was misleading: a
+            // producer that finishes the whole span before the lanes have drained their first
+            // turns never blocks either, because a queue deep enough to hold the run cannot
+            // fill. The wait figure tells the two apart, so it decides the wording.
             if self.queue.producer_blocked > 0 {
-                " (backpressure working: the generator was ahead)"
+                " (backpressure working: the queue filled, so the generator was ahead)"
+            } else if self.queue.producer_wait_fraction
+                <= crate::live::DEFAULT_PRODUCER_WAIT_TOLERANCE
+            {
+                " (the queue never filled, and the lanes never waited: the generator was ahead \
+                 of them throughout)"
             } else {
-                " (the generator never got ahead of the lanes)"
+                " (the queue never filled and the lanes waited: the generator was the constraint)"
             },
         ));
         if !self.producer_completed {

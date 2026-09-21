@@ -419,29 +419,39 @@ fn consume(
         reason: e,
     })?;
     let mut path: Vec<u64> = Vec::new();
-    // Prime: every queue is empty before the producer has pushed anything, so counting a
-    // consumer's first look would invalidate every run — see `live`'s module docs.
-    let mut primed = false;
 
     loop {
         let batch = match rx.try_recv() {
             Ok(b) => b,
             Err(std::sync::mpsc::TryRecvError::Empty) => {
-                if primed {
-                    mine.underruns += 1;
-                    mine.min_depth = 0;
-                }
+                // Counted unconditionally, including a lane's very first look. There used to be
+                // a `primed` flag suppressing that one, because validity required *zero*
+                // underruns and every queue is empty at t=0 — so without it no work-conserving
+                // run could ever be valid. It suppressed exactly one look while the fill takes
+                // several, so it did not achieve that either, and it left the reported count
+                // neither the raw truth nor the validity signal. Validity is now
+                // `producer_wait_us` against lane-time, which needs no such exemption: a
+                // startup wait is microseconds and the bound is 1% of the window.
+                mine.underruns += 1;
+                mine.min_depth = 0;
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
-                match rx.recv() {
+                // Time the wait, because that is what FR-062 is about: how much of this
+                // lane's time went on the generator rather than on Certus. The count above
+                // cannot say — a queue that is empty for 8 microseconds while the producer
+                // gets ahead at startup, and one empty for 8 seconds mid-run, increment it
+                // identically, and the first is unavoidable since every queue starts empty.
+                let waited_from = Instant::now();
+                let got = rx.recv();
+                mine.producer_wait_us += waited_from.elapsed().as_micros() as u64;
+                match got {
                     Ok(b) => b,
                     Err(_) => break,
                 }
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
         };
-        primed = true;
         let observed = depth.fetch_sub(1, Ordering::Relaxed).saturating_sub(1);
         mine.pops += 1;
         mine.min_depth = mine.min_depth.min(observed);

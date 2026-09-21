@@ -301,10 +301,18 @@ fn a_slow_node_makes_the_run_late_and_that_invalidates_it() {
     // it rather than adding one. The node here is slower than the schedule, so the producer stays
     // comfortably ahead and no lane ever runs dry: FR-062's test sees a healthy queue while the run
     // is failing to keep the very schedule it set itself.
-    assert_eq!(
-        out.stats.underruns(),
-        0,
-        "the queue underran, so this run does not demonstrate what it is here to demonstrate"
+    // The time-based metric deliberately does **not** reproduce that claim under pacing, and
+    // measuring it here is what shows why: a paced producer emits only what is due, so its
+    // lanes idle on purpose — 6% of lane-time in this run. Under pacing that is the intended
+    // state rather than a fault, which is precisely why FR-080's lateness and not FR-062's
+    // queue is the test. Asserting the queue looked healthy here would be asserting something
+    // false about a mode where an idle queue is correct.
+    assert!(
+        out.stats.producer_wait_fraction() > workload_gen::live::DEFAULT_PRODUCER_WAIT_TOLERANCE,
+        "a paced run is expected to idle its lanes waiting for the next due turn; at {:.4}% it \
+         did not, so this test no longer demonstrates why lateness must replace the queue test \
+         under pacing",
+        out.stats.producer_wait_fraction() * 100.0
     );
 
     // The second route to the same fact: the achieved rate falls short of the requested one.
