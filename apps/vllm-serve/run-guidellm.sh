@@ -51,6 +51,7 @@ PROCESSOR="${PROCESSOR:-Qwen/Qwen2.5-7B-Instruct}"  # tokenizer for token accoun
 RATE_TYPE="${RATE_TYPE:-sweep}"
 RATE="${RATE:-}"                       # req/s — only used by constant/poisson
 MAX_CONCURRENCY="${MAX_CONCURRENCY:-256}"  # concurrency cap — REQUIRED by the throughput profile (guidellm >= 0.7)
+SWEEP_SIZE="${SWEEP_SIZE:-}"           # sweep profile: number of rate stages (guidellm default 10); e.g. SWEEP_SIZE=2
 TIME_SCALE="${TIME_SCALE:-1.0}"        # replay profile: multiply trace timestamps (2.0 = 2x slower arrivals)
 MAX_SECONDS="${MAX_SECONDS:-120}"      # per-stage wall-clock budget
 MAX_REQUESTS="${MAX_REQUESTS:-}"       # alternative bound; if set, overrides MAX_SECONDS
@@ -150,6 +151,9 @@ elif [[ "$RATE_TYPE" == "replay" ]]; then
   # Reproduce the trace's inter-arrival timing from each row's relative_timestamp
   # (arrival = start + time_scale * relative_timestamp). Needs a trace DATA source.
   ARGS+=(--profile "kind=replay,time_scale=${TIME_SCALE}")
+elif [[ "$RATE_TYPE" == "sweep" && -n "$SWEEP_SIZE" ]]; then
+  # sweep_size = number of rate stages the sweep runs (guidellm default 10).
+  ARGS+=(--profile "kind=sweep,sweep_size=${SWEEP_SIZE}")
 else
   ARGS+=(--profile "kind=${RATE_TYPE}")
 fi
