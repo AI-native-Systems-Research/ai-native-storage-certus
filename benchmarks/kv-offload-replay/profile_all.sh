@@ -1398,6 +1398,8 @@ if want certus-spdk; then
             DATASET_HOST="$DATASET_OVERRIDE" \
             MAX_ROUNDS="$MAX_ROUNDS" \
             OUTPUT_TOKENS="$OUTPUT_TOKENS" \
+            MAX_MODEL_LEN="$MAX_MODEL_LEN" \
+            MAX_NUM_SEQS="$MAX_NUM_SEQS" \
             MODEL="$MODEL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \

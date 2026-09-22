@@ -376,6 +376,8 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "NUM_CONVS=${NUM_CONVS}" \
     -e "MAX_ROUNDS=${MAX_ROUNDS}" \
     -e "OUTPUT_TOKENS=${OUTPUT_TOKENS:-150}" \
+    -e "MAX_MODEL_LEN=${MAX_MODEL_LEN:-8192}" \
+    -e "MAX_NUM_SEQS=${MAX_NUM_SEQS:-64}" \
     -e "ACTIVE_SESSIONS=${ACTIVE_SESSIONS}" \
     -e "MODEL=${MODEL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
