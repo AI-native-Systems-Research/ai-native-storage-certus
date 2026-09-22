@@ -1397,6 +1397,7 @@ if want certus-spdk; then
             NUM_CONVS="$NUM_CONVS" \
             DATASET_HOST="$DATASET_OVERRIDE" \
             MAX_ROUNDS="$MAX_ROUNDS" \
+            OUTPUT_TOKENS="$OUTPUT_TOKENS" \
             MODEL="$MODEL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \

@@ -375,6 +375,7 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "SHM_PATH=${SHM_PATH}" \
     -e "NUM_CONVS=${NUM_CONVS}" \
     -e "MAX_ROUNDS=${MAX_ROUNDS}" \
+    -e "OUTPUT_TOKENS=${OUTPUT_TOKENS:-150}" \
     -e "ACTIVE_SESSIONS=${ACTIVE_SESSIONS}" \
     -e "MODEL=${MODEL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
