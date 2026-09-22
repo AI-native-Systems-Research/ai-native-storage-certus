@@ -43,8 +43,11 @@
 //!
 //! - Control-plane requests arrive from the shmq serve layer on blocking worker threads
 //! - Hot path: runs on the blocking thread, multi-stream GPU DMA
-//! - Cold path: `std::thread::scope` spawns per-drive queue threads
-//!   (up to 2 per NVMe drive) for parallel SSD reads
+//! - Cold batch path (`batch_lookup`): a single multiplexed scatter-gather
+//!   poll loop on the calling thread (`scatter_gather_multi_drive_zero_copy`)
+//!   fans NVMe reads across all drives at once — no per-drive worker threads.
+//!   The DRAM-only prefetch path (`promote_to_memory_tier`) still uses
+//!   `std::thread::scope` to read per drive in parallel
 //! - Background writer: separate thread pool for staging → SSD flush
 //!
 //! # Key design decisions
@@ -60,7 +63,6 @@
 #![allow(clippy::too_many_arguments)]
 
 mod background;
-pub mod cold_pool;
 pub mod io_segmenter;
 pub mod metrics;
 mod pins;
@@ -332,7 +334,6 @@ define_component! {
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             bg_mt_evictor: Mutex<Option<MemoryTierEvictor>>,
-            cold_pool: Mutex<Option<cold_pool::ColdReadPool>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
@@ -1915,32 +1916,6 @@ impl IDispatcher for DispatcherComponent {
 
         *self.bg_writer.lock().unwrap() = Some(writer);
 
-        // Start persistent cold-path worker pool (pre-connected NVMe channels + CUDA streams).
-        if let Ok(gpu) = self.gpu_services.get() {
-            let pool_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = {
-                let dd = self.data_drives.read();
-                dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
-            };
-            if !pool_drives.is_empty() {
-                const COLD_POOL_QUEUES_PER_DRIVE: usize = 1;
-                match cold_pool::ColdReadPool::new(&pool_drives, &gpu, COLD_POOL_QUEUES_PER_DRIVE) {
-                    Ok(pool) => {
-                        self.log_info(&format!(
-                            "dispatcher: cold pool started ({} drives × {} queues)",
-                            pool_drives.len(),
-                            COLD_POOL_QUEUES_PER_DRIVE,
-                        ));
-                        *self.cold_pool.lock().unwrap() = Some(pool);
-                    }
-                    Err(e) => {
-                        self.log_info(&format!(
-                            "cold pool creation failed (non-fatal, will use scoped threads): {e:?}"
-                        ));
-                    }
-                }
-            }
-        }
-
         // Start background SSD evictor if drives exist and threshold is configured.
         if config.ssd_eviction_threshold > 0.0 {
             let dm_for_evictor = self
@@ -2029,11 +2004,6 @@ impl IDispatcher for DispatcherComponent {
 
         if let Some(mut writer) = self.bg_writer.lock().unwrap().take() {
             writer.shutdown();
-        }
-
-        // Shut down cold pool before block device teardown (workers hold ClientChannels).
-        if let Some(pool) = self.cold_pool.lock().unwrap().take() {
-            pool.shutdown();
         }
 
         // Checkpoint all extent managers to persist metadata before teardown.
@@ -2318,9 +2288,10 @@ impl IDispatcher for DispatcherComponent {
             drop(warm_pins);
         }
 
-        // Promote cold entries in parallel — multiple queue threads per drive.
-        // Each thread gets its own NVMe queue pair and CUDA streams, enabling
-        // concurrent reads on the same physical drive.
+        // Promote cold entries in parallel via a single multiplexed
+        // scatter-gather loop on this thread: one channel is checked out per
+        // active drive and `scatter_gather_multi_drive_zero_copy` fans NVMe
+        // reads across all drives at once (no per-drive worker threads).
         //
         // All cold entries — including a lone single-key load — go through the
         // pooled path. It defers tier-saturation (`AllocationFailed`) to the
@@ -2331,8 +2302,6 @@ impl IDispatcher for DispatcherComponent {
         // LOAD FAILURE (which crashes vLLM) — a regression vs unstable. The
         // scheduling win is not worth reintroducing that failure mode.
         if !cold_entries.is_empty() {
-            const MAX_QUEUES_PER_DRIVE: usize = 1;
-
             let chunk_size = {
                 let ring_guard = self.pipeline_ring.read();
                 ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
@@ -2377,24 +2346,12 @@ impl IDispatcher for DispatcherComponent {
                     per_drive[drive_idx].push(ci);
                 }
 
-                let pool_guard = self.cold_pool.lock().unwrap();
-                let pool = pool_guard.as_ref();
-                let queues_per_drive = pool.map_or(MAX_QUEUES_PER_DRIVE, |p| p.queues_per_drive());
-
                 let queue_depth = 128;
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 let pm = self.pipeline_metrics.read();
                 let pm_arc: Option<Arc<dyn PipelineMetrics>> = pm.as_ref().map(Arc::clone);
                 drop(pm);
 
-                // Cold-load staging: when the tier is saturated (all slots pinned
-                // by in-flight loads) a cold load can't get a tier slot. Rather
-                // than fail it (which crashes vLLM), such entries are deferred to
-                // `staged` and served after the pooled tier jobs, one staging
-                // buffer at a time — see the post-pass below. We do NOT check out
-                // buffers here: blocking on a checkout while holding `pool_guard`
-                // (and accumulating leases that only release at batch end)
-                // deadlocks the server.
                 let staging_available = self
                     .pipeline_ring
                     .read()
@@ -2402,13 +2359,14 @@ impl IDispatcher for DispatcherComponent {
                     .is_some_and(|r| r.staging.is_some());
                 let mut staged: Vec<usize> = Vec::new();
 
-                // For each drive, prepare ColdReadJobs and submit to pool (or fallback).
-                #[allow(clippy::type_complexity)]
-                let mut pending_results: Vec<(
-                    Vec<usize>,   // job_ci mapping
-                    Vec<*mut u8>, // mem_ptrs
-                    crossbeam_channel::Receiver<Vec<Result<(), DispatcherError>>>,
-                )> = Vec::new();
+                // Per-drive cold_prep: evict_and_insert per entry, build ColdReadJobs.
+                struct DriveJobSet {
+                    drive_idx: usize,
+                    jobs: Vec<pipeline::ColdReadJob>,
+                    job_ci: Vec<usize>,
+                    mem_ptrs: Vec<*mut u8>,
+                }
+                let mut drive_job_sets: Vec<DriveJobSet> = Vec::new();
                 let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
 
                 for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
@@ -2419,198 +2377,179 @@ impl IDispatcher for DispatcherComponent {
                     let drive = &drives[drive_idx];
                     let block_size = drive.block_dev_iface.block_size();
 
-                    // Split this drive's entries across queue slots.
-                    let num_queues = queues_per_drive.min(entry_indices.len());
-                    let chunks: Vec<&[usize]> = entry_indices
-                        .chunks(entry_indices.len().div_ceil(num_queues))
-                        .collect();
+                    let mut jobs: Vec<pipeline::ColdReadJob> =
+                        Vec::with_capacity(entry_indices.len());
+                    let mut job_ci: Vec<usize> = Vec::with_capacity(entry_indices.len());
+                    let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(entry_indices.len());
 
-                    for (slot, chunk) in chunks.into_iter().enumerate() {
-                        let mut jobs: Vec<pipeline::ColdReadJob> = Vec::with_capacity(chunk.len());
-                        let mut job_ci: Vec<usize> = Vec::with_capacity(chunk.len());
-                        let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(chunk.len());
+                    for &ci in entry_indices {
+                        let entry = &cold_entries[ci];
+                        let ipc_size = entry.total_size;
 
-                        for &ci in chunk {
-                            let entry = &cold_entries[ci];
-                            let ipc_size = entry.total_size;
+                        let prep =
+                            self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts);
 
-                            let prep =
-                                self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts);
-
-                            match prep {
-                                Ok(mem_ptr) => {
-                                    // Single-region (N==1): fuse SSD->GPU as before
-                                    // (gpu_dst = the one region). Multi-region (N>1):
-                                    // read SSD->DRAM slot only (gpu_dst null), then
-                                    // scatter the slot to the N GPU allocations after
-                                    // the promote below.
-                                    let gpu_dst = if entry.regions.len() == 1 {
-                                        entry.regions[0].address as *mut std::ffi::c_void
-                                    } else {
-                                        std::ptr::null_mut()
-                                    };
-                                    jobs.push(pipeline::ColdReadJob {
-                                        mem_ptr,
-                                        gpu_dst,
-                                        start_lba: entry.offset / block_size as u64,
-                                        total_bytes: ipc_size as usize,
-                                    });
-                                    job_ci.push(ci);
-                                    mem_ptrs.push(mem_ptr);
-                                }
-                                // Tier saturated: defer to the staging post-pass
-                                // (served uncached, one buffer at a time) so the
-                                // load still succeeds. Only for AllocationFailed —
-                                // AlreadyExists is a concurrent promotion handled
-                                // by the recovery pass. Do NOT check out a buffer
-                                // here (would block under pool_guard → deadlock).
-                                Err(DispatcherError::AllocationFailed(_)) if staging_available => {
-                                    staged.push(ci);
-                                }
-                                Err(e) => {
-                                    prep_failures.push((ci, Err(e)));
-                                }
+                        match prep {
+                            Ok(mem_ptr) => {
+                                let gpu_dst = if entry.regions.len() == 1 {
+                                    entry.regions[0].address as *mut std::ffi::c_void
+                                } else {
+                                    std::ptr::null_mut()
+                                };
+                                jobs.push(pipeline::ColdReadJob {
+                                    mem_ptr,
+                                    gpu_dst,
+                                    start_lba: entry.offset / block_size as u64,
+                                    total_bytes: ipc_size as usize,
+                                });
+                                job_ci.push(ci);
+                                mem_ptrs.push(mem_ptr);
+                            }
+                            Err(DispatcherError::AllocationFailed(_)) if staging_available => {
+                                staged.push(ci);
+                            }
+                            Err(e) => {
+                                prep_failures.push((ci, Err(e)));
                             }
                         }
+                    }
 
-                        if jobs.is_empty() {
-                            continue;
-                        }
-
-                        let (result_tx, result_rx) = crossbeam_channel::bounded(1);
-
-                        let request = cold_pool::ColdReadRequest {
+                    if !jobs.is_empty() {
+                        drive_job_sets.push(DriveJobSet {
+                            drive_idx,
                             jobs,
-                            chunk_size,
-                            queue_depth,
-                            metrics: pm_arc.clone(),
-                            result_tx,
-                            gpu_device: batch_device,
-                        };
-
-                        if let Some(p) = pool {
-                            if let Err(e) = p.submit(drive_idx, slot, request) {
-                                for &ci in &job_ci {
-                                    prep_failures.push((ci, Err(e.clone())));
-                                }
-                                continue;
-                            }
-                        } else {
-                            // Fallback: no pool available, run inline on current thread.
-                            let drive_iface = &*drive.block_dev_iface;
-                            let gpu_ref = &*gpu;
-                            let channels = drive_iface.connect_client();
-                            let streams_result = gpu_ref.create_stream().and_then(|a| {
-                                gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
-                                    let _ = gpu_ref.destroy_stream(a);
-                                    e
-                                })
-                            });
-                            match (channels, streams_result) {
-                                (Ok(ch), Ok(st)) => {
-                                    let pipeline_results = unsafe {
-                                        pipeline::pipelined_multi_object_zero_copy(
-                                            drive_iface,
-                                            gpu_ref,
-                                            &st,
-                                            &ch,
-                                            &request.jobs,
-                                            request.chunk_size,
-                                            request.queue_depth,
-                                            request.metrics.as_deref(),
-                                        )
-                                    };
-                                    let _ = gpu_ref.destroy_stream(st[0]);
-                                    let _ = gpu_ref.destroy_stream(st[1]);
-                                    let _ = request.result_tx.send(pipeline_results);
-                                }
-                                (Err(e), _) => {
-                                    let err = DispatcherError::IoError(format!(
-                                        "connect_client failed: {e}"
-                                    ));
-                                    let _ = request.result_tx.send(
-                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect(),
-                                    );
-                                }
-                                (_, Err(e)) => {
-                                    let err = DispatcherError::IoError(format!(
-                                        "create_stream failed: {e}"
-                                    ));
-                                    let _ = request.result_tx.send(
-                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect(),
-                                    );
-                                }
-                            }
-                        }
-
-                        pending_results.push((job_ci, mem_ptrs, result_rx));
+                            job_ci,
+                            mem_ptrs,
+                        });
                     }
                 }
-
-                drop(pool_guard);
 
                 // Record prep failures.
                 for (ci, res) in prep_failures {
                     results[cold_entries[ci].idx] = Some(res);
                 }
 
-                // Collect pipeline results and finalize dispatch-map state.
-                for (job_ci, mem_ptrs, result_rx) in pending_results {
-                    let pipeline_results = result_rx.recv().unwrap_or_else(|_| {
-                        (0..job_ci.len())
-                            .map(|_| {
-                                Err(DispatcherError::IoError("pool worker disconnected".into()))
-                            })
-                            .collect()
-                    });
-
-                    for (job_idx, result) in pipeline_results.into_iter().enumerate() {
-                        let ci = job_ci[job_idx];
-                        let entry = &cold_entries[ci];
-                        let res = match result {
-                            Ok(()) => {
-                                // In-place BlockDevice->MemoryTier: preserves the
-                                // load's pin (read_ref) and keeps the SSD offset,
-                                // so it works on a pinned entry (unlike the old
-                                // remove+recreate, whose remove failed on a pin).
-                                dm.promote_block_to_memory_tier(
-                                    entry.key,
-                                    mem_ptrs[job_idx],
-                                    entry.total_size,
-                                )
-                                .map_err(|e| {
-                                    DispatcherError::IoError(format!(
-                                        "promote transition failed: {e}"
-                                    ))
-                                })
-                                .and_then(|()| {
-                                    self.tier_counters.record_promotion_to_memory();
-                                    // Multi-region (N>1): the pipeline only filled
-                                    // the DRAM slot (gpu_dst was null). Scatter the
-                                    // now-resident slot to the N GPU allocations.
-                                    // N==1 already landed on the GPU via the fused
-                                    // SSD->GPU path, so skip it there.
-                                    if entry.regions.len() > 1 {
-                                        self.serve_memory_tier_to_gpu(
-                                            &gpu,
-                                            mem_ptrs[job_idx],
-                                            entry.total_size,
-                                            &entry.regions,
-                                            warm_raw,
-                                            true,
-                                        )
-                                    } else {
-                                        Ok(())
+                // Scatter-gather: check out one channel per active drive,
+                // run all drives' NVMe I/O in a single multiplexed loop.
+                if !drive_job_sets.is_empty() {
+                    let pipe_streams: [GpuStream; 2] = match &dev_streams {
+                        Some(s) => [
+                            GpuStream(s.pipe[0] as *mut std::ffi::c_void),
+                            GpuStream(s.pipe[1] as *mut std::ffi::c_void),
+                        ],
+                        None => {
+                            // Fallback: create temporary streams.
+                            let a = gpu.create_stream();
+                            let b = a.as_ref().ok().and_then(|&sa| {
+                                gpu.create_stream().map(|sb| [sa, sb]).ok()
+                            });
+                            match b {
+                                Some(st) => st,
+                                None => {
+                                    // Cannot get streams — fail all jobs.
+                                    for djs in &drive_job_sets {
+                                        for &ci in &djs.job_ci {
+                                            results[cold_entries[ci].idx] = Some(Err(
+                                                DispatcherError::IoError(
+                                                    "create_stream failed for scatter-gather"
+                                                        .into(),
+                                                ),
+                                            ));
+                                        }
                                     }
-                                })
+                                    drive_job_sets.clear();
+                                    [GpuStream(std::ptr::null_mut()); 2]
+                                }
                             }
-                            Err(e) => Err(e),
-                        };
-                        results[cold_entries[ci].idx] = Some(res);
+                        }
+                    };
+
+                    if !drive_job_sets.is_empty() {
+                        let mut channel_leases: Vec<ChannelLease<'_>> = Vec::new();
+                        let mut drive_works: Vec<pipeline::DriveWork<'_>> = Vec::new();
+                        let mut checkout_ok = true;
+
+                        for djs in &drive_job_sets {
+                            match drives[djs.drive_idx].channel_pool.checkout() {
+                                Ok(lease) => {
+                                    channel_leases.push(lease);
+                                }
+                                Err(e) => {
+                                    for &ci in &djs.job_ci {
+                                        results[cold_entries[ci].idx] = Some(Err(e.clone()));
+                                    }
+                                    checkout_ok = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if checkout_ok {
+                            for (i, djs) in drive_job_sets.iter().enumerate() {
+                                drive_works.push(pipeline::DriveWork {
+                                    channels: channel_leases[i].channels(),
+                                    drive: &*drives[djs.drive_idx].block_dev_iface,
+                                    jobs: &djs.jobs,
+                                });
+                            }
+
+                            let scatter_results = unsafe {
+                                pipeline::scatter_gather_multi_drive_zero_copy(
+                                    &*gpu,
+                                    &pipe_streams,
+                                    &drive_works,
+                                    chunk_size,
+                                    queue_depth,
+                                    pm_arc.as_deref(),
+                                )
+                            };
+
+                            // Process results: promote and scatter.
+                            for (di, djs) in drive_job_sets.iter().enumerate() {
+                                for (job_idx, result) in
+                                    scatter_results[di].iter().enumerate()
+                                {
+                                    let ci = djs.job_ci[job_idx];
+                                    let entry = &cold_entries[ci];
+                                    let res = match result {
+                                        Ok(()) => dm
+                                            .promote_block_to_memory_tier(
+                                                entry.key,
+                                                djs.mem_ptrs[job_idx],
+                                                entry.total_size,
+                                            )
+                                            .map_err(|e| {
+                                                DispatcherError::IoError(format!(
+                                                    "promote transition failed: {e}"
+                                                ))
+                                            })
+                                            .and_then(|()| {
+                                                self.tier_counters
+                                                    .record_promotion_to_memory();
+                                                if entry.regions.len() > 1 {
+                                                    self.serve_memory_tier_to_gpu(
+                                                        &gpu,
+                                                        djs.mem_ptrs[job_idx],
+                                                        entry.total_size,
+                                                        &entry.regions,
+                                                        warm_raw,
+                                                        true,
+                                                    )
+                                                } else {
+                                                    Ok(())
+                                                }
+                                            }),
+                                        Err(e) => Err(e.clone()),
+                                    };
+                                    results[cold_entries[ci].idx] = Some(res);
+                                }
+                            }
+                        }
+                        // channel_leases drop here, returning channels to pools.
                     }
                 }
 
-                // Staging post-pass (pool_guard released): serve tier-saturated
+                // Staging post-pass (channel leases released): serve tier-saturated
                 // cold entries one buffer at a time. Each serve checks out a
                 // single staging buffer, does SSD→staging→GPU, and releases it —
                 // so at most one lease is held per call and never while holding a
@@ -4523,7 +4462,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4684,7 +4622,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4733,7 +4670,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4752,7 +4688,6 @@ mod tests {
     fn query_idispatcher() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4776,7 +4711,6 @@ mod tests {
     fn initialize_without_receptacles_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4805,7 +4739,6 @@ mod tests {
     fn initialize_with_empty_pci_addrs_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4838,7 +4771,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4868,7 +4800,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4893,7 +4824,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -4915,7 +4845,6 @@ mod tests {
     fn populate_before_initialize_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4945,7 +4874,6 @@ mod tests {
     fn populate_with_zero_size_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -4981,7 +4909,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5002,7 +4929,6 @@ mod tests {
     fn double_shutdown_succeeds() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5027,7 +4953,6 @@ mod tests {
     fn concurrent_pre_init_calls_from_multiple_threads() {
         let c = Arc::new(DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5086,7 +5011,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5118,7 +5042,6 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5197,7 +5120,6 @@ mod tests {
             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5763,7 +5685,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5797,7 +5718,6 @@ mod tests {
 
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -5872,7 +5792,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5943,7 +5862,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -5997,7 +5915,6 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -6067,7 +5984,6 @@ mod tests {
         let mt_probe = Arc::clone(&mt);
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
-            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),

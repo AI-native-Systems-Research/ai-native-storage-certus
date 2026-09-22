@@ -1,15 +1,16 @@
 {
-  "generated": "2026-09-09T21:33:18Z",
+  "generated": "2026-09-21T23:54:58Z",
   "project": "dispatcher",
   "spec": "specs/001-dispatcher-cache-interface/spec.md",
-  "branch": "fix-dispatcher-store-backpressure",
-  "git_commit": "5bb71702",
+  "branch": "evolve-throughput",
+  "git_commit": "e4b97a0b",
   "drift_status": "clean",
-  "inputs_sha256": "af0388391aea2f22dc103ed59e028b2b2dd20eff09db928bdd0867811d96ac0e",
+  "inputs_sha256": "439b2a8dd89946423e1fb3d38d34bed1e0c34c84701afa5da189e7700900e937",
   "summary": {
     "specs_analyzed": 1,
-    "drift_findings": 1,
+    "drift_findings": 2,
     "drifted_resolved_by_backfill": 1,
+    "dead_code_resolved_by_deletion": 1,
     "not_implemented": 0,
     "unspecced_features": 0
   },
@@ -19,15 +20,26 @@
       "title": "Dispatcher Cache Interface",
       "drifted": [
         {
-          "requirement": "FR-060,FR-003,FR-033,FR-056,FR-058,FR-059",
-          "spec_text": "store path had no backpressure or drop semantics; populate/batch_populate surface AllocationFailed on a full tier; TierEventStats has four u64 fields",
-          "actual": "reserve_memory applies bounded store backpressure (retry evict_and_insert on 20ms poll until store_backpressure_ms budget, default 5000ms); populate/batch_populate unconditionally best-effort drop on full (return Ok(()) without caching, bump store_drops_on_full) to avoid fatal vLLM assert transfer_result.success; DispatcherConfig gained store_backpressure_ms; TierEventStats gained store_backpressure_events + store_drops_on_full (six u64 fields)",
-          "location": "components/dispatcher/src/lib.rs:3115 (reserve_memory), :2950 (populate), :3017 (batch_populate); components/interfaces/src/idispatcher.rs",
+          "requirement": "FR-061,FR-039,FR-019,FR-052",
+          "spec_text": "batch_lookup cold path spawns up to MAX_QUEUES_PER_DRIVE threads per drive, each running pipelined_multi_object_zero_copy with max_queue_depth=128 per thread; drives grouped by key % num_drives; cold_pool::ColdReadRequest carries gpu_device",
+          "actual": "batch_lookup cold path checks out one channel per active drive and runs a single multiplexed scatter_gather_multi_drive_zero_copy on the caller thread (no spawned threads, no MAX_QUEUES_PER_DRIVE); total max_queue_depth=128 distributed proportionally per drive by segment count; per-device pipe stream pair; drive_index is a splitmix64 hash of the key mod num_drives",
+          "location": "components/dispatcher/src/pipeline.rs:746 (DriveWork), :766 (scatter_gather_multi_drive_zero_copy); components/dispatcher/src/lib.rs:2337-2567 (batch_lookup cold path), :494-503 (drive_index)",
           "severity": "major",
-          "commit": "39ffee9b,c400ced8",
+          "commit": "6f35b13a",
           "resolution": "backfill",
           "outcome": "fixed",
-          "notes": "drop-on-full is unconditional; store_backpressure_ms=0 disables only the reserve_memory retry, not the caller-side drop. Verified against src/lib.rs:3150-3202."
+          "notes": "Code authoritative (shipped throughput optimization on evolve-throughput). New FR-061 specifies scatter_gather_multi_drive_zero_copy + DriveWork; FR-039(4)/(5), FR-019, FR-052, User Story 11 (narrative + scenarios 1 & 3), Key Entities, Session Q&A updated. promote_and_serve (single-entry cold) still uses pipelined_multi_object_zero_copy."
+        },
+        {
+          "requirement": "FR-044",
+          "spec_text": "The dispatcher MUST provide a ColdReadPool (persistent per-drive/per-queue worker pool); batch_lookup dispatches cold entries to the pool",
+          "actual": "ColdReadPool was constructed at initialize() and torn down at shutdown() but never submitted to after 6f35b13a routed the cold path through scatter-gather; dead code",
+          "location": "components/dispatcher/src/cold_pool.rs (deleted); components/dispatcher/src/lib.rs (mod decl, field, init/shutdown wiring removed)",
+          "severity": "moderate",
+          "commit": "6f35b13a",
+          "resolution": "code_deletion",
+          "outcome": "fixed",
+          "notes": "User-directed ('Remove ColdRealPool redundant code.'). Deleted src/cold_pool.rs and all wiring; FR-044 marked REMOVED, pointing to FR-034 (ChannelPool) + FR-061 (scatter-gather). Positional constructor arity fixed across 23 test call sites. dispatcher-p2p's separate P2pColdReadPool is still used and was NOT touched. cargo check -p dispatcher --tests clean."
         }
       ],
       "not_implemented": []
