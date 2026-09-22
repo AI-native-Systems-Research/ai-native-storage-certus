@@ -944,7 +944,8 @@ run_container_bench() {  # variant image extra-args...
         -e "LONGDOC_QUESTIONS=${LONGDOC_QUESTIONS}" \
         -e "LONGDOC_NUM_DOCS=${LONGDOC_NUM_DOCS}" \
         -e "LONGDOC_SEED=${LONGDOC_SEED}" \
-        -e "HF_HUB_OFFLINE=0" \
+        -e "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}" \
+        -e "TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${wl[@]}" \
         "${extra[@]}" \
