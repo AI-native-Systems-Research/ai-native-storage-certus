@@ -328,6 +328,20 @@ show_status() {
         fail_certus "hugepages misconfigured ($hp_total total, $hp_node on node $RESOURCE_NUMA; need $CERTUS_HUGEPAGES on node $RESOURCE_NUMA)"
         [[ $hp_total -ne $SS_HUGEPAGES ]] && fail_ss "hugepages present ($hp_total × 1G; sharedstorage needs 0)"
     fi
+
+    # A reserved 1G pool is useless to DPDK/EAL without a pagesize=1G hugetlbfs
+    # mount to back the segment files. A fresh boot only mounts the default 2M
+    # /dev/hugepages, so flag a missing 1G mount here — certus setup creates it.
+    if [[ $CERTUS_HUGEPAGES -gt 0 ]]; then
+        local hp1g_mnt
+        hp1g_mnt=$(awk '$3=="hugetlbfs" && $4 ~ /pagesize=1024M/ {print $2; exit}' /proc/mounts)
+        if [[ -n "$hp1g_mnt" ]]; then
+            echo -e "  ${tag_certus} 1G hugetlbfs mounted at $hp1g_mnt"
+        else
+            echo -e "  ${tag_empty} no pagesize=1G hugetlbfs mount (EAL cannot use the 1G pool)"
+            fail_certus "no 1G hugetlbfs mount — run certus setup to create /dev/hugepages1G"
+        fi
+    fi
     echo
 
     header "Kernel (running)"
@@ -770,6 +784,28 @@ allocate_hugepages_node() {
         fi
     fi
 
+    # DPDK/EAL backs every 1G segment with a file under a hugetlbfs mounted at
+    # pagesize=1G. A fresh boot only auto-mounts the default /dev/hugepages at the
+    # system default page size (2M on this host), so the reserved 1G pool has NO
+    # mount and EAL cannot use it — the certus-server dies with "EAL: No free
+    # 1048576 kB hugepages reported ...". Reserving the pages (above) is not enough;
+    # the mount must exist too, and it does NOT survive a reboot. Create and mount a
+    # dedicated 1G hugetlbfs if one is not already present. Idempotent.
+    local hp_mnt
+    hp_mnt=$(awk '$3=="hugetlbfs" && $4 ~ /pagesize=1024M/ {print $2; exit}' /proc/mounts)
+    if [[ -z "$hp_mnt" ]]; then
+        hp_mnt=/dev/hugepages1G
+        mkdir -p "$hp_mnt"
+        if mount -t hugetlbfs -o pagesize=1G none "$hp_mnt"; then
+            echo -e "  ${GREEN}Mounted 1G hugetlbfs at $hp_mnt${NC}"
+        else
+            echo -e "  ${YELLOW}Failed to mount 1G hugetlbfs at $hp_mnt — SPDK/DPDK will not find the 1G pool${NC}"
+            hp_mnt=""
+        fi
+    else
+        echo "  1G hugetlbfs already mounted at $hp_mnt"
+    fi
+
     # The certus-server (SPDK/DPDK) runs as the invoking user, NOT root — its uid
     # must match the rootless container's vLLM process for CUDA IPC. DPDK creates a
     # per-segment file under the hugetlbfs mount, so that mount has to be writable
@@ -779,11 +815,8 @@ allocate_hugepages_node() {
     # note above about not returning early when the page count already matches.
     local hp_owner="${SUDO_USER:-}"
     if [[ -n "$hp_owner" && "$hp_owner" != "root" ]]; then
-        local hp_mnt
-        hp_mnt=$(awk '$3=="hugetlbfs" && $4 ~ /pagesize=1024M/ {print $2; exit}' /proc/mounts)
-        [[ -z "$hp_mnt" ]] && hp_mnt=$(awk '$3=="hugetlbfs" {print $2; exit}' /proc/mounts)
         if [[ -z "$hp_mnt" ]]; then
-            echo -e "  ${YELLOW}No hugetlbfs mount found — cannot chown for $hp_owner${NC}"
+            echo -e "  ${YELLOW}No 1G hugetlbfs mount — cannot chown for $hp_owner${NC}"
         elif chown "$hp_owner" "$hp_mnt"; then
             echo "  Owner of $hp_mnt: $hp_owner (SPDK runs as this user)"
         else
