@@ -102,6 +102,13 @@ None after this sweep. `scatter_gather_multi_drive_zero_copy` and `DriveWork` ar
 1. Commit this `drift-report.md` (with the freshness stamp above) together with the
    `spec.md` backfill, the `src/lib.rs` edits, and the `src/cold_pool.rs` deletion it
    certifies, so the CI Spec-Sync Gate sees a fresh, matching report.
-2. Follow-up (carried over, out of this sweep's scope): two "gRPC handler" source
-   comments noted in earlier sweeps — confirm whether any remain after the shm-queue
-   migration and clean up in a dedicated doc-comment pass.
+2. Follow-up (carried over from earlier sweeps) — ✅ **RESOLVED**: the two stale
+   transport-example source comments in `copy_gpu_to_memory_async` were removed in
+   commit `6d7ba234` ("revert dispatcher GPU experiments to specified stream
+   model"). Verified this sweep: `grep -rin grpc components/dispatcher/src` returns
+   nothing, and the canonical spec's FR-040 / FR-042 already describe the shm-queue
+   control transport (`2026-08-31` sweep). `align-tasks.md` T1 is closed. No
+   dispatcher source or spec references to the removed control transport remain;
+   residual mentions live only in dated `.specify/sync/` changelog/backup records
+   and unrelated `certus-server` gRPC-server specs, which are left intact as
+   historical / legitimate.
