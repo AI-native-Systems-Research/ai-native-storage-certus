@@ -128,10 +128,12 @@ impl IEvictionPolicy for EvictionPolicyOptimizedComponent {
         }
 
         let index = if let Some(head_key) = pool_guard.lru.peek_front_key() {
-            if pool_guard.sketch.estimate(key) <= pool_guard.sketch.estimate(head_key) {
-                pool_guard.lru.push_front(key)
-            } else {
+            let new_est = pool_guard.sketch.estimate(key);
+            let victim_est = pool_guard.sketch.estimate(head_key);
+            if new_est >= 3 && new_est > victim_est {
                 pool_guard.lru.push_back(key)
+            } else {
+                pool_guard.lru.push_front(key)
             }
         } else {
             pool_guard.lru.push_back(key)
