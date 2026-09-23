@@ -36,16 +36,16 @@ impl CountMinSketch {
     }
 
     fn increment(&mut self, key: CacheKey) {
-        for row in 0..CMS_ROWS {
-            let col = (key.wrapping_mul(CMS_PRIMES[row]) >> 54) as usize;
+        for (row, &prime) in CMS_PRIMES.iter().enumerate() {
+            let col = (key.wrapping_mul(prime) >> 54) as usize;
             self.counters[row][col] = self.counters[row][col].saturating_add(1);
         }
     }
 
     fn estimate(&self, key: CacheKey) -> u8 {
         let mut min = u8::MAX;
-        for row in 0..CMS_ROWS {
-            let col = (key.wrapping_mul(CMS_PRIMES[row]) >> 54) as usize;
+        for (row, &prime) in CMS_PRIMES.iter().enumerate() {
+            let col = (key.wrapping_mul(prime) >> 54) as usize;
             min = min.min(self.counters[row][col]);
         }
         min
@@ -121,8 +121,7 @@ impl IEvictionPolicy for EvictionPolicyOptimizedComponent {
         pool_guard.sketch.increment(key);
         pool_guard.max_len = pool_guard.max_len.max(pool_guard.lru.len());
         pool_guard.access_count += 1;
-        if pool_guard.max_len > 0
-            && pool_guard.access_count % (pool_guard.max_len as u64 * 10) == 0
+        if pool_guard.max_len > 0 && pool_guard.access_count % (pool_guard.max_len as u64 * 10) == 0
         {
             pool_guard.sketch.halve();
         }
