@@ -122,7 +122,7 @@ impl IEvictionPolicy for EvictionPolicyOptimizedComponent {
         pool_guard.max_len = pool_guard.max_len.max(pool_guard.lru.len());
         pool_guard.access_count += 1;
         if pool_guard.max_len > 0
-            && pool_guard.access_count % (pool_guard.max_len as u64 * 10) == 0
+            && pool_guard.access_count % (pool_guard.max_len as u64 * 5) == 0
         {
             pool_guard.sketch.halve();
         }
