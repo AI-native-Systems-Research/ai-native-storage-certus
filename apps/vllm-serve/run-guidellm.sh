@@ -146,6 +146,11 @@ elif [[ "$RATE_TYPE" == "throughput" ]]; then
   # guidellm >= 0.7's throughput profile rejects a bare kind=throughput with
   # "Field required (at 'profile.throughput.max_concurrency')"; supply the cap.
   ARGS+=(--profile "kind=throughput,max_concurrency=${MAX_CONCURRENCY}")
+elif [[ "$RATE_TYPE" == "concurrent" ]]; then
+  # guidellm >= 0.7's concurrent profile rejects a bare kind=concurrent with
+  # "Field required (at 'profile.concurrent.streams')"; supply the stream count.
+  [[ -n "$CONCURRENT_STREAMS" ]] || { echo "error: RATE_TYPE=concurrent needs CONCURRENT_STREAMS=<n>" >&2; exit 1; }
+  ARGS+=(--profile "kind=concurrent,streams=${CONCURRENT_STREAMS}")
 elif [[ "$RATE_TYPE" == "replay" ]]; then
   # Reproduce the trace's inter-arrival timing from each row's relative_timestamp
   # (arrival = start + time_scale * relative_timestamp). Needs a trace DATA source.
