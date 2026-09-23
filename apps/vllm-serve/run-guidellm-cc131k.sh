@@ -30,5 +30,6 @@ PORT="${PORT:-8000}" \
 DATA="$DATA" \
 RATE_TYPE="${RATE_TYPE:-throughput}" \
 MAX_CONCURRENCY="${MAX_CONCURRENCY:-256}" \
+TIME_SCALE=0 \
 MAX_SECONDS="${MAX_SECONDS:-600}" \
   exec "${SCRIPT_DIR}/run-guidellm.sh"
