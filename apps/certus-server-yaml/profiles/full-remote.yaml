@@ -25,6 +25,7 @@ components:
     crate: eviction-policy-lru
     factory: "EvictionPolicyLruComponent::new_default"
     provides: [IEvictionPolicy]
+    algorithm: "O(1) index-linked LRU (least-recently-used)"
 
   dispatch_map:
     crate: dispatch-map

@@ -1,6 +1,6 @@
 profile:
-  name: full-p2p
-  description: "Production profile with SPDK NVMe + GPU acceleration + P2P BAR1 cold path"
+  name: full-optimized
+  description: "Same as full, but uses the optimized eviction policy (O(1) LRU + TinyLFU admission)"
 
 components:
   logger:
@@ -22,10 +22,10 @@ components:
     init_hook: init_gpu
 
   eviction_policy:
-    crate: eviction-policy-lru
-    factory: "EvictionPolicyLruComponent::new_default"
+    crate: eviction-policy-optimized
+    factory: "EvictionPolicyOptimizedComponent::new_default"
     provides: [IEvictionPolicy]
-    algorithm: "O(1) index-linked LRU (least-recently-used)"
+    algorithm: "O(1) index-linked LRU with TinyLFU (Count-Min Sketch) admission gate"
 
   dispatch_map:
     crate: dispatch-map
@@ -58,8 +58,8 @@ components:
     provides: [IRemoteLookup]
 
   dispatcher:
-    crate: dispatcher-p2p
-    factory: "DispatcherP2pComponent::new_default"
+    crate: dispatcher
+    factory: "DispatcherComponent::new_default"
     provides: [IDispatcher]
     init_hook: init_dispatcher
 
