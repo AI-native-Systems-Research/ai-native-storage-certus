@@ -33,6 +33,44 @@ impl LruList {
         }
     }
 
+    /// Insert a key at the front (least recently used). Returns the node index.
+    pub fn push_front(&mut self, key: CacheKey) -> u32 {
+        let idx = if let Some(free_idx) = self.free.pop() {
+            self.nodes[free_idx as usize] = Node {
+                key,
+                prev: None,
+                next: self.head,
+                active: true,
+            };
+            free_idx
+        } else {
+            let idx = self.nodes.len() as u32;
+            self.nodes.push(Node {
+                key,
+                prev: None,
+                next: self.head,
+                active: true,
+            });
+            idx
+        };
+
+        if let Some(old_head) = self.head {
+            self.nodes[old_head as usize].prev = Some(idx);
+        }
+        self.head = Some(idx);
+        if self.tail.is_none() {
+            self.tail = Some(idx);
+        }
+
+        self.len += 1;
+        idx
+    }
+
+    /// Return the key of the front (LRU head) node without removing it.
+    pub fn peek_front_key(&self) -> Option<CacheKey> {
+        self.head.map(|idx| self.nodes[idx as usize].key)
+    }
+
     /// Insert a key at the back (most recently used). Returns the node index.
     pub fn push_back(&mut self, key: CacheKey) -> u32 {
         let idx = if let Some(free_idx) = self.free.pop() {
@@ -294,6 +332,59 @@ mod tests {
         lru.remove(a);
         lru.move_to_back(a); // no panic, no effect
         assert_eq!(lru.pop_front(), Some(2));
+    }
+
+    #[test]
+    fn push_front_single_element() {
+        let mut lru = LruList::new();
+        lru.push_front(42);
+        assert_eq!(lru.len(), 1);
+        assert_eq!(lru.pop_front(), Some(42));
+        assert_eq!(lru.pop_front(), None);
+    }
+
+    #[test]
+    fn push_front_inserts_at_head() {
+        let mut lru = LruList::new();
+        lru.push_back(1);
+        lru.push_front(2);
+        lru.push_front(3);
+        assert_eq!(lru.pop_front(), Some(3));
+        assert_eq!(lru.pop_front(), Some(2));
+        assert_eq!(lru.pop_front(), Some(1));
+    }
+
+    #[test]
+    fn push_front_empty_matches_push_back() {
+        let mut a = LruList::new();
+        a.push_front(10);
+        let mut b = LruList::new();
+        b.push_back(10);
+        assert_eq!(a.len(), b.len());
+        assert_eq!(a.pop_front(), b.pop_front());
+    }
+
+    #[test]
+    fn push_front_reuses_free_list() {
+        let mut lru = LruList::new();
+        let a = lru.push_back(1);
+        lru.push_back(2);
+        lru.remove(a);
+        let c = lru.push_front(3);
+        assert_eq!(c, 0);
+        assert_eq!(lru.pop_front(), Some(3));
+        assert_eq!(lru.pop_front(), Some(2));
+    }
+
+    #[test]
+    fn peek_front_key_returns_head() {
+        let mut lru = LruList::new();
+        assert_eq!(lru.peek_front_key(), None);
+        lru.push_back(10);
+        assert_eq!(lru.peek_front_key(), Some(10));
+        lru.push_front(20);
+        assert_eq!(lru.peek_front_key(), Some(20));
+        assert_eq!(lru.len(), 2);
     }
 
     #[test]

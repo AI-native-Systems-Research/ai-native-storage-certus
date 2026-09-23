@@ -15,8 +15,56 @@ use interfaces::{
 
 use crate::lru_list::LruList;
 
+const CMS_ROWS: usize = 4;
+const CMS_COLS: usize = 1024;
+const CMS_PRIMES: [u64; CMS_ROWS] = [
+    0x9E3779B97F4A7C15,
+    0x517CC1B727220A95,
+    0x6C62272E07BB0143,
+    0xD45D0D6AB7E0F981,
+];
+
+struct CountMinSketch {
+    counters: [[u8; CMS_COLS]; CMS_ROWS],
+}
+
+impl CountMinSketch {
+    fn new() -> Self {
+        Self {
+            counters: [[0u8; CMS_COLS]; CMS_ROWS],
+        }
+    }
+
+    fn increment(&mut self, key: CacheKey) {
+        for row in 0..CMS_ROWS {
+            let col = (key.wrapping_mul(CMS_PRIMES[row]) >> 54) as usize;
+            self.counters[row][col] = self.counters[row][col].saturating_add(1);
+        }
+    }
+
+    fn estimate(&self, key: CacheKey) -> u8 {
+        let mut min = u8::MAX;
+        for row in 0..CMS_ROWS {
+            let col = (key.wrapping_mul(CMS_PRIMES[row]) >> 54) as usize;
+            min = min.min(self.counters[row][col]);
+        }
+        min
+    }
+
+    fn halve(&mut self) {
+        for row in &mut self.counters {
+            for counter in row.iter_mut() {
+                *counter >>= 1;
+            }
+        }
+    }
+}
+
 struct Pool {
     lru: LruList,
+    sketch: CountMinSketch,
+    access_count: u64,
+    max_len: usize,
 }
 
 #[derive(Default)]
@@ -43,6 +91,9 @@ impl IEvictionPolicy for EvictionPolicyOptimizedComponent {
         let id = state.pools.len() as u32;
         state.pools.push(Mutex::new(Pool {
             lru: LruList::new(),
+            sketch: CountMinSketch::new(),
+            access_count: 0,
+            max_len: 0,
         }));
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("eviction-policy-optimized: created pool {id}"));
@@ -66,7 +117,26 @@ impl IEvictionPolicy for EvictionPolicyOptimizedComponent {
             EvictionPolicyError::InvalidPool(pool)
         })?;
         let mut pool_guard = pool_mutex.lock().unwrap();
-        let index = pool_guard.lru.push_back(key);
+
+        pool_guard.sketch.increment(key);
+        pool_guard.max_len = pool_guard.max_len.max(pool_guard.lru.len());
+        pool_guard.access_count += 1;
+        if pool_guard.max_len > 0
+            && pool_guard.access_count % (pool_guard.max_len as u64 * 10) == 0
+        {
+            pool_guard.sketch.halve();
+        }
+
+        let index = if let Some(head_key) = pool_guard.lru.peek_front_key() {
+            if pool_guard.sketch.estimate(key) <= pool_guard.sketch.estimate(head_key) {
+                pool_guard.lru.push_front(key)
+            } else {
+                pool_guard.lru.push_back(key)
+            }
+        } else {
+            pool_guard.lru.push_back(key)
+        };
+
         Ok(EvictionHandle::new(pool, index))
     }
 
@@ -188,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn track_and_evict_fifo_order() {
+    fn track_and_evict_order() {
         let comp = setup();
         let ep: std::sync::Arc<dyn IEvictionPolicy + Send + Sync> =
             query_interface!(comp, IEvictionPolicy).unwrap();
@@ -198,9 +268,11 @@ mod tests {
         ep.track(pool, 200, BlockSemantics::default()).unwrap();
         ep.track(pool, 300, BlockSemantics::default()).unwrap();
 
-        assert_eq!(ep.identify_next_to_evict(pool), Some(100));
-        assert_eq!(ep.identify_next_to_evict(pool), Some(200));
+        // First-time entries (CMS=1) are admitted at the LRU head (push_front),
+        // so most-recent track is evicted first.
         assert_eq!(ep.identify_next_to_evict(pool), Some(300));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(200));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(100));
         assert_eq!(ep.identify_next_to_evict(pool), None);
     }
 
@@ -211,15 +283,16 @@ mod tests {
             query_interface!(comp, IEvictionPolicy).unwrap();
         let pool = ep.create_pool();
 
-        let h1 = ep.track(pool, 100, BlockSemantics::default()).unwrap();
+        ep.track(pool, 100, BlockSemantics::default()).unwrap();
         ep.track(pool, 200, BlockSemantics::default()).unwrap();
-        ep.track(pool, 300, BlockSemantics::default()).unwrap();
+        let h3 = ep.track(pool, 300, BlockSemantics::default()).unwrap();
 
-        ep.touch(h1).unwrap();
+        // List after tracks: [300, 200, 100]. Touch 300 (head) to move to back.
+        ep.touch(h3).unwrap();
 
         assert_eq!(ep.identify_next_to_evict(pool), Some(200));
-        assert_eq!(ep.identify_next_to_evict(pool), Some(300));
         assert_eq!(ep.identify_next_to_evict(pool), Some(100));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(300));
     }
 
     #[test]
@@ -233,10 +306,11 @@ mod tests {
         let h2 = ep.track(pool, 200, BlockSemantics::default()).unwrap();
         ep.track(pool, 300, BlockSemantics::default()).unwrap();
 
+        // List: [300, 200, 100]. Remove 200 (middle).
         ep.remove(h2).unwrap();
 
-        assert_eq!(ep.identify_next_to_evict(pool), Some(100));
         assert_eq!(ep.identify_next_to_evict(pool), Some(300));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(100));
         assert_eq!(ep.identify_next_to_evict(pool), None);
     }
 
@@ -251,7 +325,7 @@ mod tests {
         ep.track(pool, 20, BlockSemantics::default()).unwrap();
         ep.track(pool, 30, BlockSemantics::default()).unwrap();
 
-        assert_eq!(ep.get_eviction_candidates(pool, 2), vec![10, 20]);
+        assert_eq!(ep.get_eviction_candidates(pool, 2), vec![30, 20]);
         assert_eq!(ep.len(pool), 3);
     }
 
