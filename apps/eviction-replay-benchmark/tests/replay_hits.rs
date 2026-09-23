@@ -154,23 +154,59 @@ fn lru_hit_count_is_monotonic_in_cache_size() {
     }
 }
 
-/// `eviction-policy-optimized` currently ports the LRU implementation verbatim,
-/// so it must reproduce LRU's hit/eviction counts exactly across cache sizes.
+/// `eviction-policy-optimized` layers a TinyLFU admission gate (a per-pool
+/// Count-Min Sketch) on top of the shared LRU list, so it deliberately no longer
+/// reproduces plain LRU's hit counts (commit "TinyLFU Admission Gate via
+/// Count-Min Sketch"; see FR-011 in the component spec).
+///
+/// Under this 5-way interleaved pressure trace the divergence is *beneficial*:
+/// plain LRU thrashes to zero hits at every sub-working-set size (each key is
+/// evicted before its next reference), while the admission gate protects the
+/// recurring keys and retains an ever-larger protected set as the cache grows.
+/// The gate must therefore never do worse than LRU, and must strictly beat it
+/// once the cache is large enough to hold a protected set — a future accidental
+/// revert to a verbatim LRU port would fail here.
 #[test]
-fn optimized_matches_lru() {
+fn optimized_beats_lru_under_pressure() {
     let t = synth_pressure_trace();
+
     for w in [4usize, 8, 16, 32] {
         let lru = run_lru(&t, w);
         let opt = run_optimized(&t, w);
-        assert_eq!(opt.hits, lru.hits, "hits differ at cache size {w}");
-        assert_eq!(opt.misses, lru.misses, "misses differ at cache size {w}");
+
+        // Both policies obey the same simulator contract (see sim.rs).
+        assert_eq!(opt.accesses, lru.accesses, "accesses differ at size {w}");
         assert_eq!(
-            opt.evictions, lru.evictions,
-            "evictions differ at cache size {w}"
+            opt.misses, opt.insertions,
+            "every miss inserts exactly once at size {w}"
         );
         assert_eq!(
-            opt.resident, lru.resident,
-            "resident set differs at cache size {w}"
+            opt.insertions - opt.evictions,
+            opt.resident as u64,
+            "insertions - evictions == resident at size {w}"
+        );
+        assert!(
+            opt.resident <= w,
+            "resident set never exceeds capacity at size {w}"
+        );
+
+        // The admission gate is never worse than plain LRU on this trace.
+        assert!(
+            opt.hits >= lru.hits,
+            "optimized must not underperform LRU at size {w}: opt {} < lru {}",
+            opt.hits,
+            lru.hits
+        );
+    }
+
+    // Once the cache can hold a protected set the gate strictly outperforms LRU,
+    // proving the divergence is a real frequency-admission effect and not noise.
+    for w in [8usize, 16, 32] {
+        let lru_hits = run_lru(&t, w).hits;
+        let opt_hits = run_optimized(&t, w).hits;
+        assert!(
+            opt_hits > lru_hits,
+            "TinyLFU gate must strictly beat LRU at size {w}: opt {opt_hits} <= lru {lru_hits}"
         );
     }
 }
