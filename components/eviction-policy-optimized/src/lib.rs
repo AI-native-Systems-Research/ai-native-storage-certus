@@ -6,7 +6,7 @@
 
 mod lru_list;
 
-use std::sync::{Mutex, RwLock};
+use std::sync::{Mutex, Once, RwLock};
 
 use component_framework::define_component;
 use interfaces::{
@@ -60,6 +60,11 @@ impl CountMinSketch {
     }
 }
 
+/// Guards the one-time startup banner so it is emitted on the first
+/// `create_pool` call (the earliest point at which the `logger` receptacle
+/// is bound), not once per pool.
+static STARTUP_BANNER: Once = Once::new();
+
 struct Pool {
     lru: LruList,
     sketch: CountMinSketch,
@@ -87,6 +92,15 @@ define_component! {
 
 impl IEvictionPolicy for EvictionPolicyOptimizedComponent {
     fn create_pool(&self) -> PoolId {
+        if let Ok(logger) = self.logger.get() {
+            STARTUP_BANNER.call_once(|| {
+                logger.info(&format!(
+                    "eviction-policy-optimized: O(1) LRU with TinyLFU admission — \
+                     Count-Min Sketch ({CMS_ROWS}×{CMS_COLS} counters) gates new \
+                     entries by estimated frequency, with periodic aging by halving"
+                ));
+            });
+        }
         let mut state = self.state.write().unwrap();
         let id = state.pools.len() as u32;
         state.pools.push(Mutex::new(Pool {
