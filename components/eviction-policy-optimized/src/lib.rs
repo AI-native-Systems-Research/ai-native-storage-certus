@@ -16,7 +16,7 @@ use interfaces::{
 use crate::lru_list::LruList;
 
 const CMS_ROWS: usize = 4;
-const CMS_COLS: usize = 1024;
+const CMS_COLS: usize = 8192;
 const CMS_PRIMES: [u64; CMS_ROWS] = [
     0x9E3779B97F4A7C15,
     0x517CC1B727220A95,
@@ -37,7 +37,7 @@ impl CountMinSketch {
 
     fn increment(&mut self, key: CacheKey) {
         for row in 0..CMS_ROWS {
-            let col = (key.wrapping_mul(CMS_PRIMES[row]) >> 54) as usize;
+            let col = (key.wrapping_mul(CMS_PRIMES[row]) >> 51) as usize;
             self.counters[row][col] = self.counters[row][col].saturating_add(1);
         }
     }
@@ -45,7 +45,7 @@ impl CountMinSketch {
     fn estimate(&self, key: CacheKey) -> u8 {
         let mut min = u8::MAX;
         for row in 0..CMS_ROWS {
-            let col = (key.wrapping_mul(CMS_PRIMES[row]) >> 54) as usize;
+            let col = (key.wrapping_mul(CMS_PRIMES[row]) >> 51) as usize;
             min = min.min(self.counters[row][col]);
         }
         min
