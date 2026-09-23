@@ -51,6 +51,11 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
 QWEN_NATIVE_CTX="${QWEN_NATIVE_CTX:-32768}"
 GPU="${GPU:-all}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
+# Shard the model across this many GPUs. TP>1 is REQUIRED for large windows on
+# 40G A100s: a 131K sequence's KV (~24G) plus the 14B weights (~29G) does not fit
+# one GPU and vLLM aborts at the startup KV-cache sizing check. GPU=all only makes
+# both devices visible — it does NOT enable sharding; that needs this flag.
+TENSOR_PARALLEL="${TENSOR_PARALLEL:-1}"
 # Directly cap the GPU-resident KV cache (per GPU). When set, vLLM IGNORES
 # gpu-memory-utilization and pins the KV pool to this size — accepts human-
 # readable sizes (4G, 512M). Shrinking it forces reused prefixes to spill from
@@ -129,6 +134,7 @@ SERVE_ARGS=(
   --served-model-name "$SERVED_MODEL_NAME"
   --dtype "$DTYPE"
   --max-model-len "$MAX_MODEL_LEN"
+  --tensor-parallel-size "$TENSOR_PARALLEL"
   --gpu-memory-utilization "$GPU_MEM_UTIL"
   --enable-prefix-caching
   --no-async-scheduling
