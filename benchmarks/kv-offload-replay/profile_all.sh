@@ -946,6 +946,7 @@ run_container_bench() {  # variant image extra-args...
         -e "LONGDOC_SEED=${LONGDOC_SEED}" \
         -e "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}" \
         -e "TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}" \
+        -e "GPU_KV_GB=${GPU_KV_GB}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${wl[@]}" \
         "${extra[@]}" \
