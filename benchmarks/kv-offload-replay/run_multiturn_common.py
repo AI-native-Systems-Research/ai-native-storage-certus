@@ -26,6 +26,7 @@ the (heavy) engine import happens.
 """
 
 import glob
+import gzip
 import json
 import os
 import random
@@ -283,6 +284,19 @@ WORKLOADS = {
                 "token prefix + LONGDOC_QUESTIONS follow-ups × LONGDOC_NUM_DOCS "
                 "docs (KV-cache stress; all env-tunable)",
     },
+    "synth-multiturn": {
+        # Synthetic multi-turn ShareGPT set authored via the Claude API by
+        # tools/gen_synthetic_sharegpt.py (1000 convs, Poisson mean-50 human
+        # turns). Unlike long-doc-qa it is LLM-authored, so it can't be
+        # regenerated offline/deterministically — the file IS the artifact and
+        # is baked into the image gzip-compressed (load_convs decompresses it).
+        # A heavy multi-turn working set for GPU-KV + offload-tier stress.
+        "dataset": os.path.join(_DATA_DIR, "synth_multiturn.json.gz"),
+        "num_convs": 1000,
+        "desc": "Synthetic multi-turn ShareGPT (Claude-authored via "
+                "tools/gen_synthetic_sharegpt.py; ~1000 convs, mean-50 human "
+                "turns) — heavy multi-turn KV working set for offload stress",
+    },
 }
 
 
@@ -352,6 +366,34 @@ def resolve_workload(default_dataset, default_num_convs):
 
 
 # ── Workload input ────────────────────────────────────────────────────────
+def _read_dataset_json(path):
+    """Parse a ShareGPT-format dataset file, transparently decompressing it.
+
+    Supports plain ``.json``, gzip ``.json.gz`` (stdlib, always available), and
+    zstd ``.json.zst`` (only if the ``zstandard`` package is installed — it is
+    not a hard dependency, so a ``.zst`` dataset on an image without it fails
+    with a clear message rather than an opaque ImportError). Committing datasets
+    compressed keeps large sets (e.g. the synth-multiturn workload) small in-repo
+    and in the baked image."""
+    if path.endswith(".gz"):
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            return json.load(f)
+    if path.endswith(".zst"):
+        try:
+            import zstandard
+        except ImportError as e:
+            raise SystemExit(
+                f"[run] {path} is zstd-compressed but the `zstandard` package "
+                "is not installed in this image; provide a .json or .json.gz "
+                "dataset, or add zstandard to the image"
+            ) from e
+        with open(path, "rb") as fh:
+            data = zstandard.ZstdDecompressor().stream_reader(fh).read()
+        return json.loads(data.decode("utf-8"))
+    with open(path) as f:
+        return json.load(f)
+
+
 def load_convs(dataset_path, num_convs, conv_multiplier=1):
     """Load ShareGPT-format json and return a list of human-turn streams.
 
@@ -380,8 +422,7 @@ def load_convs(dataset_path, num_convs, conv_multiplier=1):
     for path in paths:
         if len(convs) >= num_convs:
             break
-        with open(path) as f:
-            all_data = json.load(f)
+        all_data = _read_dataset_json(path)
         for entry in all_data:
             if len(convs) >= num_convs:
                 break

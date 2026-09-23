@@ -219,6 +219,27 @@ if __name__ == "__main__":
     _log_stats_on = os.environ.get("LOG_STATS", "0") != "0"
     CAPTURE_METRICS = os.environ.get("CAPTURE_METRICS", "1") != "0" or _log_stats_on
 
+    # GPU_KV_GB pins the GPU-resident KV cache to an ABSOLUTE size (GiB),
+    # independent of model weights. Unlike GPU_MEM_UTIL (a fraction of total HBM
+    # that must also cover weights+activations, so on a 140 GB H200 even 0.15
+    # leaves ~5 GB of KV), this sets kv_cache_memory_bytes directly. Pinning KV
+    # small forces eviction to the Certus DRAM->SSD tiers (exercises the offload
+    # read path). Gated on EngineArgs support (vLLM 0.26 exposes it).
+    GPU_KV_GB = os.environ.get("GPU_KV_GB", "").strip()
+    if GPU_KV_GB:
+        import dataclasses as _dc
+        from vllm.engine.arg_utils import EngineArgs as _EA
+        if any(f.name == "kv_cache_memory_bytes" for f in _dc.fields(_EA)):
+            _kv_bytes = int(float(GPU_KV_GB) * (1024 ** 3))
+            _engine_kwargs["kv_cache_memory_bytes"] = _kv_bytes
+            print(f"[run] GPU_KV_GB={GPU_KV_GB}: kv_cache_memory_bytes={_kv_bytes} "
+                  f"(GPU KV cache pinned to {GPU_KV_GB} GiB; overflow -> Certus tiers)",
+                  file=sys.stderr)
+        else:
+            print("[run] GPU_KV_GB set but this vLLM's EngineArgs lacks "
+                  "kv_cache_memory_bytes -- ignoring (fall back to GPU_MEM_UTIL)",
+                  file=sys.stderr)
+
     engine_kwargs = dict(
         model=MODEL,
         max_model_len=MAX_MODEL_LEN,

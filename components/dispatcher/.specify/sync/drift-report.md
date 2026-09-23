@@ -1,137 +1,114 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-15T22:04:08Z
-spec_sync_git_commit: f9bcd965
-spec_sync_inputs_sha256: dc05c51fa11d2deaf80a3dd086d07fc248292e2716211947be4b6a757741122b
+spec_sync_synced_at: 2026-09-21T23:54:58Z
+spec_sync_git_commit: e4b97a0b
+spec_sync_inputs_sha256: 439b2a8dd89946423e1fb3d38d34bed1e0c34c84701afa5da189e7700900e937
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
-> **Re-stamp 2026-09-15 (workspace `cargo fmt` sweep; no drift).** Commit `f9bcd965` ("Add shmq RESERVE batch shared-deadline regression test") ran `cargo fmt` across the whole workspace, reflowing this component's `src/*.rs` (multi-line ↔ single-line argument lists and struct literals, import reordering). `git diff -w` confirms no token-level logic, signature, or contract change — the only substantive addition in that commit is a regression test in `lib/shmq-dispatcher/src/translate.rs`, which is outside this component and outside the spec-sync gate's `components/` scope. The formatting moved this component's `spec_sync_inputs_sha256`, but its spec↔implementation alignment is unchanged. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
-
-> **Sync 2026-09-15 (reserve_memory `deadline` parameter — code authoritative).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `reserve_memory`. `None` preserves the legacy per-call `store_backpressure_ms` budget (still used by this dispatcher's own `populate`/`batch_populate`); `Some(instant)` lets a caller share one backpressure deadline across a whole reserve batch so total wait is bounded by a single budget rather than `K ×` the budget. FR-056 (reserve_memory) and FR-060 layer 1 (bounded store backpressure) were updated to document the parameter and the per-batch refuse-to-cache-on-deadline behavior. No dispatcher behavior change on the `None` path. Digest recomputed over a clean tree matching CI.
-
-> **Re-stamp 2026-09-09 (merged-branch; store-backpressure implementer).** This
-> is the component that implements the store-backpressure feature
-> (`store_backpressure_ms` + the `store_backpressure_events`/`store_drops_on_full`
-> counters in `idispatcher.rs`); the drift analysis below is current and
-> code-authoritative. The merge's conflict resolution reverted this stamp's
-> `inputs_sha256` to unstable's `b220a1c8` value (which predates the interfaces
-> change) while keeping the correct report body. The digest is recomputed here
-> over the merged tree (`3411518a`) so it matches what CI will recompute. Drift status
-> remains `clean`.
+> **Stamp provenance.** `spec_sync_git_commit` is the HEAD (`e4b97a0b`) the digest
+> was computed against; this report is committed together with the `spec.md`
+> backfill, the `src/lib.rs` edits, and the `src/cold_pool.rs` deletion it
+> certifies, so the tree the next commit lands is exactly the tree the digest
+> covers. The CI Spec-Sync Gate re-runs `scripts/spec-sync-hash.sh
+> components/dispatcher` over `src/**` + `specs/**` (with `components/interfaces/`
+> folded in) and matches `spec_sync_inputs_sha256`; the digest here was recomputed
+> over a clean tree (no untracked files under `src/`/`specs/`) after the last edit.
 
 # Spec Drift Report — dispatcher
 
-> **Digest refreshed 2026-09-03 (interfaces-only hash change).** This branch
-> reworded a doc comment on `IMemoryTier::evict_next_for_key`
-> (`components/interfaces/src/imemory_tier.rs`) as part of the memory-tier
-> spec-sync. `scripts/spec-sync-hash.sh` folds the whole `components/interfaces`
-> tree into every component's hash, so this component's digest moved even though
-> no interface signature or behavior changed and dispatcher was not otherwise
-> re-synced. The interface delta is confined to documentation and cannot affect
-> dispatcher's spec↔implementation alignment; the report body below stands
-> unchanged and drift status remains `clean`. Digest recomputed against the
-> current interface tree.
-
-Generated: 2026-09-02
+Generated: 2026-09-21
 Project: dispatcher (spec: specs/001-dispatcher-cache-interface/spec.md)
-Mode: Read-only drift analysis, then BACKFILL apply to `spec.md` (code authoritative).
-Branch: `fix-dispatcher-store-backpressure`
+Mode: Read-only drift analysis, then apply — **BACKFILL** to `spec.md` (Finding 1,
+code authoritative) plus a **CODE deletion** of dead `ColdReadPool` scaffolding
+(Finding 2, user-directed).
+Branch: `evolve-throughput`
 
 ## Summary
 
 | Category | Count |
 |----------|-------|
 | Specs Analyzed | 1 |
-| Drift findings this sweep | 1 (two-layer store-backpressure feature) |
-| ⚠️ Drifted → resolved by backfill | 1 |
+| Drift findings this sweep | 2 |
+| ⚠️ Drifted → resolved by backfill (spec→code) | 1 (Finding 1: scatter-gather batch cold path) |
+| 🧹 Dead code → resolved by deletion (code) | 1 (Finding 2: unused `ColdReadPool`) |
 | ✗ Not Implemented | 0 |
-| 🆕 Unspecced Code | 0 |
+| 🆕 Unspecced Code | 0 (after this sweep; `scatter_gather_multi_drive_zero_copy` now specced as FR-061) |
 
-Scope of this sweep (2026-09-09): since the last clean sync (spec commit
-`787b8263`, 2026-09-02, inputs `2886506a…`) the hashed inputs changed in two
-places, both introducing the **same feature**:
+Scope of this sweep: since the last clean sync the only input-changing commit on
+this component's data path is **`6f35b13a`** ("optimizer iter-005:
+iter005-prop001-scatter-gather"), which rewrote `batch_lookup`'s cold (BlockDevice)
+promotion path. All prior sweeps' findings (store backpressure + drop-on-full
+FR-060; Check→Pin graceful degrade FR-024/FR-039; per-device streams FR-037/FR-052;
+coalesced per-object H2D FR-019) were re-verified against the current source and
+remain **aligned** — see "Regression re-verification" below.
 
-- `components/dispatcher/src/lib.rs` — `reserve_memory` now applies bounded
-  store backpressure, and `populate`/`batch_populate` best-effort **drop on
-  full** after the backpressure budget is spent (commits `39ffee9b`,
-  `c400ced8`).
-- `components/interfaces/src/idispatcher.rs` — `DispatcherConfig` gained
-  `store_backpressure_ms: u64` (default 5000); `TierEventStats` gained two `u64`
-  counters `store_backpressure_events` and `store_drops_on_full`.
+## Detailed Findings
 
-The single behavioral finding is **code-authoritative** (shipped fix; aligning
-code→spec would reintroduce the fatal vLLM `assert transfer_result.success` →
-`EngineDeadError` on a full tier), so it was resolved by backfilling `spec.md`.
+### 1. `batch_lookup` cold path: per-drive threads + `ColdReadPool` → single-thread multi-drive scatter-gather — severity: major — RESOLVED BY BACKFILL (code authoritative)
 
-## Detailed Findings (resolved by BACKFILL)
+- Commit: `6f35b13a`.
+- New shipped code (`src/pipeline.rs`):
+  - `pub struct DriveWork<'a> { channels: &ClientChannels, drive: &dyn IBlockDevice, jobs: &[ColdReadJob] }` (`src/pipeline.rs:746`).
+  - `pub unsafe fn scatter_gather_multi_drive_zero_copy(gpu, streams: &[GpuStream; 2], drive_works: &[DriveWork], chunk_size, max_queue_depth, metrics) -> Vec<Vec<Result<(), DispatcherError>>>` (`src/pipeline.rs:766`). Fans NVMe reads out to all drives and fans completions in via **one multiplexed poll loop on the caller thread**; distributes `max_queue_depth` proportionally per drive by segment count (`src/pipeline.rs:848`); preserves coalesced per-object H2D and per-object completion routing.
+- Call site (`src/lib.rs`, `batch_lookup` cold path):
+  - Group by drive via `Self::drive_index(entry.key, num_drives)` (`src/lib.rs:2341`), which is a **splitmix64 finalizer mod `num_drives`** (`src/lib.rs:494-503`), *not* the raw `key % num_drives` the pre-sync FR-039(4) claimed.
+  - Per-drive cold-prep builds `pipeline::ColdReadJob`s via `evict_and_insert`; `AllocationFailed` entries defer to the staging post-pass (`src/lib.rs:2385-2411`).
+  - Checks out **one** `ChannelLease` per active drive from that drive's `ChannelPool` (`src/lib.rs:2468-2481`), builds one `DriveWork` per drive, and calls `scatter_gather_multi_drive_zero_copy` **once** on the caller thread (`src/lib.rs:2492-2501`). No `std::thread::scope`, no `MAX_QUEUES_PER_DRIVE`, no `pipelined_multi_object_zero_copy` per thread.
+  - Uses the per-device pipeline stream **pair** `dev_streams.pipe[0]/[1]` (`src/lib.rs:2431-2461`), falling back to temporary created streams.
+  - Staging post-pass unchanged in intent — `serve_cold_staged` one lease at a time (`src/lib.rs:2553-2566`).
+- Spec (pre-sync) described the superseded model: FR-039(4)/(5), FR-019 ("`max_queue_depth=128` per thread"), User Story 11 narrative + scenarios 1 & 3 ("per-drive thread groups", "`MAX_QUEUES_PER_DRIVE` … threads per drive", "single thread per drive"), Key Entities "Pipelined Reader", and the Session Q&A all described spawning per-drive threads each running `pipelined_multi_object_zero_copy`.
+- Why code is authoritative: `6f35b13a` is the shipped throughput optimization on `evolve-throughput`; the scatter-gather loop is what runs today and the per-drive-thread model no longer exists in source. Direction confirmed with the user: **backfill spec → scatter-gather.**
+- Backfill applied to `spec.md`:
+  - **New FR-061** — specifies `scatter_gather_multi_drive_zero_copy` + `DriveWork`: single caller-thread multiplexed loop, proportional `max_queue_depth` split by segment count, coalesced per-object H2D on the per-device pipe stream pair, per-drive drain-all-on-error (FR-054), results indexed by drive then job.
+  - **FR-039** steps (4)/(5) rewritten to the checkout-one-channel-per-drive + single scatter-gather model; `key % num_drives` corrected to the splitmix64-hash-mod-`num_drives` that `drive_index` computes.
+  - **FR-019** last sentences: `promote_and_serve` (single-entry) still uses `pipelined_multi_object_zero_copy`; `batch_lookup` now uses `scatter_gather_multi_drive_zero_copy`.
+  - **FR-052** — `cold_pool::ColdReadRequest { gpu_device }` device-selection sentence replaced with the caller-thread batch-device → pipe-stream-pair path.
+  - **User Story 11** — narrative + acceptance scenarios 1 & 3 rewritten to the scatter-gather model (no threads, proportional queue-depth share).
+  - **Key Entities "Pipelined Reader"** + **Session Q&A** — scatter-gather listed as the primary batch cold variant.
+  - New **Last Synced: 2026-09-21** metadata line.
 
-### 1. Two-layer store backpressure + best-effort drop-on-full — severity: major
-- Commits: `39ffee9b` (bounded store backpressure), `c400ced8` (best-effort
-  drop on full after budget).
-- Locations:
-  - `reserve_memory` `src/lib.rs:3115` — retry loop: on `evict_and_insert`
-    returning `AllocationFailed`, sleep 20 ms and retry until the
-    `store_backpressure_ms` budget is exhausted, then fail fast with a final
-    `evict_and_insert(...)?`. `budget.is_zero()` (config `= 0`) restores the
-    original single-shot fail-fast path.
-  - `populate` `src/lib.rs:2950` and `batch_populate` `src/lib.rs:3017` — after
-    `reserve_memory` ultimately fails with `AllocationFailed`, both callers
-    **unconditionally** treat the store as a best-effort drop: they log, bump
-    `store_drops_on_full`, and return `Ok(())` **without caching**, rather than
-    propagating `AllocationFailed`. This prevents the connector's fatal
-    `assert transfer_result.success`.
-  - `DispatcherConfig.store_backpressure_ms` and the two `TierEventStats`
-    counters: `components/interfaces/src/idispatcher.rs`.
-- Spec (pre-sync) documented only the read-path staging deferral (FR-053) and a
-  four-field `TierEventStats` (FR-058); the store path had no backpressure or
-  drop semantics, and `populate`/`batch_populate` were specified to surface
-  `AllocationFailed` on a full tier.
-- Why code is authoritative: dropping (not erroring) on a genuinely full tier is
-  the load-bearing behavior that keeps the vLLM connector alive under store
-  pressure; the bounded backpressure gives the async evictor a window to free
-  space before the drop. Reverting to spec (return `AllocationFailed`) reintroduces
-  the crash. See memory `certus-async-full-tier-crash` for the failure this fix
-  addresses.
-- **Accuracy note (verified against `src/lib.rs:3150-3202` this sweep):** the
-  drop-on-full in `populate`/`batch_populate` is *unconditional* — it does not
-  depend on `store_backpressure_ms`. Setting `store_backpressure_ms = 0` disables
-  only the **retry** inside `reserve_memory` (fail fast on first
-  `AllocationFailed`); the caller still catches that failure and drops. The spec
-  text (FR-033, FR-056, FR-060, edge case) was worded to state this precisely and
-  does **not** claim that `store_backpressure_ms = 0` restores an
-  `AllocationFailed`-returning `populate`.
-- Backfill applied to `spec.md` this sweep:
-  - **New FR-060** — the two-layer store-backpressure requirement:
-    (1) bounded store backpressure in `reserve_memory`; (2) best-effort
-    drop-on-full in `populate`/`batch_populate` (unconditional). Complements the
-    FR-053 read-path staging deferral.
-  - **FR-003** (populate) — appended backpressure/drop note referencing FR-060.
-  - **FR-033** (config) — added `store_backpressure_ms` (u64, default 5000) to
-    the field list plus disable semantics (0 = `reserve_memory` fails fast, but
-    drop-on-full per FR-060 still applies).
-  - **FR-056** (`reserve_memory`) — bounded store-backpressure description,
-    deadlock-free rationale, `store_backpressure_ms = 0` restores fail-fast.
-  - **FR-058** — "four `u64` fields" → "six `u64` fields"; added
-    `store_backpressure_events` and `store_drops_on_full`.
-  - **FR-059** (`batch_populate`) — appended the drop-on-full note (`c400ced8`).
-  - **Edge case** bullet — populate applies bounded backpressure then
-    best-effort drops (returns `Ok(())`), does NOT return `AllocationFailed`.
-  - **User Story 1** — new acceptance scenario 5 (drop-on-full returns success,
-    no dispatch-map entry, increments `store_drops_on_full`).
-  - New **Last Synced: 2026-09-09** metadata line summarizing the backfill.
+### 2. Unused `ColdReadPool` scaffolding — severity: moderate (dead code) — RESOLVED BY DELETION (user-directed)
+
+- After `6f35b13a` routed the batch cold path through scatter-gather, the `ColdReadPool` (module `src/cold_pool.rs`: `ColdReadPool`, `ColdReadRequest`, `Drop`) was still **constructed** in `initialize()` and **torn down** in `shutdown()` but was **never submitted to** — the batch cold path builds `DriveWork` and calls `scatter_gather_multi_drive_zero_copy` directly. Verified: no `submit`/enqueue call to the pool remained in `batch_lookup` or elsewhere in `src/lib.rs`.
+- FR-044 (pre-sync) still *required* a `ColdReadPool` ("The dispatcher MUST provide a `ColdReadPool` … `batch_lookup` dispatches cold entries to the pool"). This was drift: a load-bearing requirement whose subject was dead in the implementation.
+- User decision (interactive step): **"Remove ColdRealPool redundant code."** — i.e. delete the dead scaffolding rather than merely document it.
+- Code change applied (`src/lib.rs`, `src/cold_pool.rs`):
+  - Removed `pub mod cold_pool;`.
+  - Removed the `cold_pool: Mutex<Option<cold_pool::ColdReadPool>>` field from the `define_component!` `fields: {}` block.
+  - Removed the `initialize()` construction block (`ColdReadPool::new(...)`, `COLD_POOL_QUEUES_PER_DRIVE`).
+  - Removed the `shutdown()` teardown block (`pool.shutdown()`).
+  - `git rm src/cold_pool.rs`.
+  - Fixed the resulting positional-constructor arity: the `define_component!`-generated `DispatcherComponent::new(...)` dropped one field, so all 23 test call sites had one `Mutex::new(None)` (the `cold_pool` slot) removed via a uniform `replace_all` edit.
+- Spec change: **FR-044 marked `~~REMOVED~~`** (superseded 2026-09-21, `6f35b13a`) with a pointer to FR-034 (per-drive `ChannelPool`) + FR-061 (scatter-gather) for cold-read resource management. FR-052's `cold_pool::ColdReadRequest` reference removed (see Finding 1).
+- Verification: `grep -rn 'cold_pool|ColdReadPool|ColdReadRequest|COLD_POOL' components/dispatcher/src` → none. `cargo check -p dispatcher --tests` → clean (arity break resolved, no other references). **Note:** `components/dispatcher-p2p` has a *separate* `P2pColdReadPool` that is still actively used — it was deliberately **not** touched (out of scope).
+- Stale source comments corrected in the same pass (no behavior change): module threading-model doc (`src/lib.rs:46`), the cold-promotion comment (`src/lib.rs:2291`), and the staging post-pass comment's `pool_guard` reference (`src/lib.rs:2548`).
+
+## Regression re-verification (prior sweeps still aligned)
+
+- **FR-060** (store backpressure + drop-on-full): `reserve_memory` retry loop and `populate`/`batch_populate` unconditional drop-on-full intact.
+- **FR-024 / FR-039(1)/(3)** (Check→Pin graceful degrade, `1d55b9c2`): skip-not-drop eviction and the removal of the single-entry inline `promote_and_serve` fast path intact; single-key cold still takes the pooled (now scatter-gather) path.
+- **FR-034** (per-drive `ChannelPool` + RAII `ChannelLease`, completion-drain on checkout): now the *sole* cold-read channel manager after `ColdReadPool` deletion; scatter-gather checks out exactly one lease per active drive.
+- **FR-037 / FR-052** (per-device warm/store streams + pipeline pair): scatter-gather consumes the per-device pipe pair; warm/store unchanged.
+- **FR-053** (cold-load staging fallback) and **FR-054** (drain-all-on-error, no early break): staging post-pass and per-drive drain semantics preserved in the scatter-gather loop.
 
 ## Not Implemented
 None.
 
 ## Unspecced Code
-None. The store-backpressure config field, both new counters, and the
-drop-on-full behavior are now covered by FR-033/FR-056/FR-058/FR-059/FR-060.
+None after this sweep. `scatter_gather_multi_drive_zero_copy` and `DriveWork` are now specified by FR-061; the retired `ColdReadPool` is deleted.
 
 ## Recommendations
-1. Commit this `drift-report.md` (with the freshness stamp above) together with
-   the `spec.md` backfill and the `src/lib.rs` + `idispatcher.rs` inputs it
-   certifies so the CI Spec-Sync Gate sees a fresh, matching report.
-2. Follow-up (out of this sweep's scope, carried over): the source still carries
-   two "gRPC handler" comments in `src/lib.rs`; a source-comment cleanup remains
-   pending.
+1. Commit this `drift-report.md` (with the freshness stamp above) together with the
+   `spec.md` backfill, the `src/lib.rs` edits, and the `src/cold_pool.rs` deletion it
+   certifies, so the CI Spec-Sync Gate sees a fresh, matching report.
+2. Follow-up (carried over from earlier sweeps) — ✅ **RESOLVED**: the two stale
+   transport-example source comments in `copy_gpu_to_memory_async` were removed in
+   commit `6d7ba234` ("revert dispatcher GPU experiments to specified stream
+   model"). Verified this sweep: `grep -rin grpc components/dispatcher/src` returns
+   nothing, and the canonical spec's FR-040 / FR-042 already describe the shm-queue
+   control transport (`2026-08-31` sweep). `align-tasks.md` T1 is closed. No
+   dispatcher source or spec references to the removed control transport remain;
+   residual mentions live only in dated `.specify/sync/` changelog/backup records
+   and unrelated `certus-server` gRPC-server specs, which are left intact as
+   historical / legitimate.

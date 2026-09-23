@@ -61,7 +61,11 @@ COMMON_RUN_ARGS=(
   # container on its own GPU with its own isolated tiers. Default 0/1 = single.
   -e "DP_RANK=${DP_RANK:-0}"
   -e "DP_SIZE=${DP_SIZE:-1}"
-  -e "HF_HUB_OFFLINE=0"
+  # Forward the shell's HF_HUB_OFFLINE (podman does NOT inherit host env). Default
+  # 0 preserves the online behavior, but on a DISCONNECTED node the caller sets
+  # HF_HUB_OFFLINE=1 so huggingface_hub goes straight to the local cache instead
+  # of trying (and failing, [Errno 101] Network is unreachable) to reach the hub.
+  -e "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}"
   -v "${HF_CACHE}:/root/.cache/huggingface:z"
 )
 

@@ -28,7 +28,7 @@ def _parse_iso(s):
     return datetime.fromisoformat(s)
 
 
-def load_otel_convs(trace_dir, num_convs=None):
+def load_otel_convs(trace_dir, num_convs=None, with_arrivals=False):
     """Load the OTel corpus at ``trace_dir`` into a list of conversations.
 
     Files are read in sorted name order; ``num_convs`` (falsy = all) caps how
@@ -36,6 +36,15 @@ def load_otel_convs(trace_dir, num_convs=None):
     ``(human_text, max_tokens, delay_before_sec)`` in trace order —
     ``delay_before_sec`` is 0.0 for the first turn and
     ``max(0, start[k] - end[k-1])`` seconds for later turns.
+
+    When ``with_arrivals`` is True the return value is ``(convs, arrivals)``
+    where ``arrivals`` is a parallel list of per-conversation arrival offsets in
+    seconds: each conversation's first-span ``start_time`` minus the earliest
+    first-span ``start_time`` across all kept conversations (so the earliest
+    arrival is 0.0). This is the timing gate the random-admission scheduler uses
+    to decide which conversations are "ready" (see ``run_otel_async.run_otel``).
+    The default (``with_arrivals=False``) returns just ``convs`` so existing
+    callers are unaffected.
 
     Exits the process if ``trace_dir`` is not a directory (a misconfigured corpus
     path is a fatal setup error, not something to silently replay as empty).
@@ -48,6 +57,7 @@ def load_otel_convs(trace_dir, num_convs=None):
         paths = paths[:num_convs]
 
     convs = []
+    first_starts = []  # first-span start datetime per kept conv (parallel to convs)
     skipped = 0
     for path in paths:
         with open(path) as f:
@@ -56,6 +66,7 @@ def load_otel_convs(trace_dir, num_convs=None):
                        key=lambda s: s.get("start_time", ""))
         turns = []
         prev_end = None
+        conv_start = None  # first usable span's start_time in this conv
         for sp in spans:
             attrs = sp.get("attributes", {})
             raw = attrs.get("gen_ai.input.messages")
@@ -77,13 +88,23 @@ def load_otel_convs(trace_dir, num_convs=None):
             delay = 0.0
             if prev_end is not None:
                 delay = max(0.0, (start - prev_end).total_seconds())
+            else:
+                conv_start = start  # first usable span == conversation arrival
             turns.append((human, max_tok, delay))
             prev_end = end
         if turns:
             convs.append(turns)
+            first_starts.append(conv_start)
         else:
             skipped += 1
     if skipped:
         print(f"[otel] skipped {skipped} files with no usable spans",
               file=sys.stderr)
-    return convs
+    if not with_arrivals:
+        return convs
+    if first_starts:
+        base = min(first_starts)
+        arrivals = [(fs - base).total_seconds() for fs in first_starts]
+    else:
+        arrivals = []
+    return convs, arrivals

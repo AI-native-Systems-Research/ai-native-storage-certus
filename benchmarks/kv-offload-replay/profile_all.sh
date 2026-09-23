@@ -53,6 +53,7 @@ OUTPUT_TOKENS=150
 MAX_MODEL_LEN=8192
 MAX_NUM_SEQS=64
 GPU_MEM_UTIL=0.90
+GPU_KV_GB=""            # --gpu-kv-gb: absolute GPU KV cache size (GiB); empty = off
 GPU="all"
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # Certus-SPDK shmq mailbox (host <-> client)
 CHANNELS="${CHANNELS:-32}"                      # server worker threads / max in-flight requests
@@ -148,6 +149,12 @@ IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-bench}"
 # it beside this script — accept either.
 DATASET_HOST="${SCRIPT_DIR}/../../data/sharegpt_12turn_450.json"
 [[ -f "$DATASET_HOST" ]] || DATASET_HOST="${SCRIPT_DIR}/sharegpt_12turn_450.json"
+# --dataset <path>: replay an arbitrary ShareGPT-format JSON (a list of
+# {"id","conversations":[{"from","value"},...]}) instead of the baked set. When
+# set (below, after arg parse) it replaces DATASET_HOST and is forwarded to
+# run-bench.sh, which bind-mounts it read-only and points DATASET_PATH at it
+# (winning over the baked default). Empty = the baked/named dataset.
+DATASET_OVERRIDE=""
 SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
 # llmd_fs_backend repo (for --rebuild of the SharedStorage image). Empty = auto:
 # resolved after --model-fs is parsed, preferring <model-fs>/llm-d-kv-cache/...
@@ -169,12 +176,22 @@ Flags (all optional; defaults shown):
   --model <hf-id>               Model applied to all four variants.
                                 [NousResearch/Meta-Llama-3-8B]
   --num-convs <n>               Conversations to replay. [450]
+  --dataset <path>              Replay an arbitrary ShareGPT-format JSON on the
+                               host (a list of {"id","conversations":[{"from",
+                               "value"},...]}) instead of the baked/named set.
+                               Mounted read-only into the client; DATASET_PATH
+                               points at it, winning over the baked default. Pair
+                               with --num-convs to set how many of its convs run
+                               (else the sharegpt default, 450 at 12/12, caps it).
   --max-rounds <n>              Cap every backend at N rounds/turns (MAX_ROUNDS env).
                                 0 = replay all 12 turns. [0]
   --output-tokens <n>          Generated tokens per turn (for uniform tok/s). [150]
   --max-model-len <n>          vLLM max model length. [8192]
   --max-num-seqs <n>           vLLM max concurrent sequences. [64]
   --gpu-mem-util <f>           vLLM GPU memory utilization. [0.90]
+  --gpu-kv-gb <N>              Pin GPU KV cache to N GiB (absolute; vLLM
+                               kv_cache_memory_bytes). Overrides the KV slice
+                               of --gpu-mem-util; forces overflow to Certus tiers.
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
   --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). Wins over
                                --total-mem if both are given. [CERTUS_HUGEPAGES-3 G]
@@ -214,6 +231,12 @@ Flags (all optional; defaults shown):
                                LONGDOC_NUM_DOCS / LONGDOC_SEED (defaults 4000/8/1000);
                                NUM_CONVS defaults to LONGDOC_NUM_DOCS. Big docs need a
                                matching --max-model-len.
+                               "synth-multiturn" = the Claude-authored synthetic
+                               multi-turn ShareGPT corpus baked into the image
+                               (data/synth_multiturn.json.gz; ~1000 convs, mean-50
+                               human turns — a heavy multi-turn KV working set for
+                               offload stress). Self-contained (no mount/DATASET_HOST);
+                               NUM_CONVS defaults to 1000.
                                "synthetic-agentic" = the inference-perf agentic
                                ReplayGraph DAG (tool loops, sub-agent fan-out, context
                                compaction). It is HTTP-only, so each backend is run in
@@ -269,11 +292,13 @@ while [[ $# -gt 0 ]]; do
         --model-fs)         MODEL_FS="$2"; shift 2;;
         --model)            MODEL="$2"; shift 2;;
         --num-convs)        NUM_CONVS="$2"; shift 2;;
+        --dataset)          DATASET_OVERRIDE="$2"; shift 2;;
         --max-rounds)       MAX_ROUNDS="$2"; shift 2;;
         --output-tokens)    OUTPUT_TOKENS="$2"; shift 2;;
         --max-model-len)    MAX_MODEL_LEN="$2"; shift 2;;
         --max-num-seqs)     MAX_NUM_SEQS="$2"; shift 2;;
         --gpu-mem-util)     GPU_MEM_UTIL="$2"; shift 2;;
+        --gpu-kv-gb)        GPU_KV_GB="$2"; shift 2;;
         --gpu)              GPU="$2"; shift 2;;
         --memory-tier-size) MEM_TIER_SIZE="$2"; MEM_TIER_EXPLICIT=1; shift 2;;
         --total-mem)        TOTAL_MEM_GIB="$2"; shift 2;;
@@ -297,6 +322,16 @@ while [[ $# -gt 0 ]]; do
         *) echo "error: unknown argument '$1'" >&2; usage >&2; exit 2;;
     esac
 done
+
+# --dataset override wins over the baked/named dataset: repoint DATASET_HOST at
+# it (used by the preflight check and forwarded to run-bench.sh, which mounts it
+# and sets DATASET_PATH). Fail fast if the file is missing rather than silently
+# falling back to the baked set. warn() isn't defined yet here, so echo to stderr.
+if [[ -n "$DATASET_OVERRIDE" ]]; then
+    [[ -f "$DATASET_OVERRIDE" ]] || { echo "error: --dataset file not found: $DATASET_OVERRIDE" >&2; exit 2; }
+    DATASET_HOST="$DATASET_OVERRIDE"
+    [[ -z "$NUM_CONVS" ]] && echo "[profile] note: --dataset set without --num-convs; the sharegpt default conv count applies (450 at 12/12) and may cap your file" >&2
+fi
 
 # --min-turns/--max-turns only mean anything for the sharegpt workload, so
 # supplying either without --workload implies it. Without this, turn flags alone
@@ -344,6 +379,11 @@ if [[ -z "$NUM_CONVS" ]]; then
         # a literal here (not read from the workload) so the sharegpt-shaped
         # defaulting below stays untouched for that workload.
         NUM_CONVS="${LONGDOC_NUM_DOCS:-1000}"
+    elif [[ "$WORKLOAD_NAME" == "synth-multiturn" ]]; then
+        # The synthetic multi-turn corpus is exactly 1000 convs; draw them all.
+        # Pinned here (not left empty) so the 12/12 branch below can't cap it at
+        # 450, and so an empty NUM_CONVS never reaches resolve_workload's int().
+        NUM_CONVS=1000
     elif [[ "${SHAREGPT_MIN_TURNS:-12}" == "12" && "${SHAREGPT_MAX_TURNS:-${SHAREGPT_MIN_TURNS:-12}}" == "12" ]]; then
         NUM_CONVS=450     # exactly-12/12 subset
     else
@@ -1277,6 +1317,44 @@ if want certus-spdk; then
         # can't fool the client preflight (the server recreates it anyway).
         rm -f "$SHM_PATH"
         log "starting Certus-SPDK server: ${dev_flags[*]} --memory-tier-size ${MEM_TIER_SIZE} shm=${SHM_PATH} channels=${CHANNELS} (numa node ${HUGEPAGES_1G_NODE})"
+        # certus-server-yaml bundles libcudart, which dlopen()s libcuda.so.1 (the
+        # NVIDIA driver's userspace API lib). Normally that's in the ldconfig cache
+        # and this block is a no-op; where the driver lives off the default loader
+        # path -- ostree/RHCOS (/var/home/core/nvdrv/NVIDIA-<ver>) or a GPU-operator
+        # driver container (/run/nvidia/driver/...) -- CUDA init otherwise fails with
+        # cudaErrorInsufficientDriver ("driver version is insufficient"). Discover
+        # the dir and put it on LD_LIBRARY_PATH so the launch never depends on the
+        # caller's environment.
+        _libcuda_ok=0
+        if ldconfig -p 2>/dev/null | grep -q 'libcuda\.so\.1'; then _libcuda_ok=1; fi
+        if [[ "$_libcuda_ok" -eq 0 && -n "${LD_LIBRARY_PATH:-}" ]]; then
+            _oldifs=$IFS; IFS=:
+            for _d in $LD_LIBRARY_PATH; do
+                if [[ -e "$_d/libcuda.so.1" ]]; then _libcuda_ok=1; break; fi
+            done
+            IFS=$_oldifs
+        fi
+        if [[ "$_libcuda_ok" -eq 0 ]]; then
+            _cuda_dir=""
+            _nv_ver="$(cat /sys/module/nvidia/version 2>/dev/null || true)"
+            for _d in \
+                ${_nv_ver:+"/var/home/core/nvdrv/NVIDIA-$_nv_ver"} \
+                /run/nvidia/driver/usr/lib64 \
+                /run/nvidia/driver/usr/lib/x86_64-linux-gnu \
+                /usr/lib64 /usr/lib/x86_64-linux-gnu; do
+                if [[ -e "$_d/libcuda.so.1" ]]; then _cuda_dir="$_d"; break; fi
+            done
+            if [[ -z "$_cuda_dir" ]]; then
+                _hit="$(find /var/home/core/nvdrv /run/nvidia /opt/nvidia -maxdepth 5 -name 'libcuda.so.1' -print -quit 2>/dev/null || true)"
+                if [[ -n "$_hit" ]]; then _cuda_dir="$(dirname "$_hit")"; fi
+            fi
+            if [[ -n "$_cuda_dir" ]]; then
+                export LD_LIBRARY_PATH="${_cuda_dir}:${LD_LIBRARY_PATH:-}"
+                log "Certus-SPDK server: added ${_cuda_dir} to LD_LIBRARY_PATH for libcuda.so.1"
+            else
+                warn "Certus-SPDK server: libcuda.so.1 not found off the ldconfig path; CUDA init may fail (set LD_LIBRARY_PATH to the NVIDIA driver dir)"
+            fi
+        fi
         "${numa_prefix[@]}" "$SERVER_BIN" "${dev_flags[@]}" \
             --memory-tier-size "$MEM_TIER_SIZE" \
             --memory-tier-eviction-threshold "$EVICT_THRESH" \
@@ -1317,10 +1395,13 @@ if want certus-spdk; then
             GPU="$GPU" \
             SHM_PATH="$SHM_PATH" \
             NUM_CONVS="$NUM_CONVS" \
+            DATASET_HOST="$DATASET_OVERRIDE" \
             MAX_ROUNDS="$MAX_ROUNDS" \
             MODEL="$MODEL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
+            GPU_MEM_UTIL="$GPU_MEM_UTIL" \
+            GPU_KV_GB="$GPU_KV_GB" \
             ENFORCE_EAGER="$ENFORCE_EAGER" \
             WORKLOAD_MODE="$WORKLOAD_MODE" \
             TRACE_OFFLOAD="$TRACE_OFFLOAD" \

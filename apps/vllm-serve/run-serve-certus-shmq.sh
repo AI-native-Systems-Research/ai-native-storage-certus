@@ -25,6 +25,7 @@
 #   PORT=9000 ./run-serve-certus-shmq.sh                        # publish on another port
 #   MAX_MODEL_LEN=32768 ./run-serve-certus-shmq.sh             # native 32K window (no YaRN); default is 128K
 #   MODEL=Qwen/Qwen2.5-14B-Instruct GPU_MEM_UTIL=0.92 ./run-serve-certus-shmq.sh
+#   KV_CACHE_BYTES=4G ./run-serve-certus-shmq.sh              # cap GPU KV cache; spill reuse to the offload tier
 #
 # Clients then use:
 #   Base URL:  http://127.0.0.1:${PORT}/v1     (127.0.0.1 — podman publishes IPv4 only)
@@ -50,6 +51,12 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
 QWEN_NATIVE_CTX="${QWEN_NATIVE_CTX:-32768}"
 GPU="${GPU:-all}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
+# Directly cap the GPU-resident KV cache (per GPU). When set, vLLM IGNORES
+# gpu-memory-utilization and pins the KV pool to this size — accepts human-
+# readable sizes (4G, 512M). Shrinking it forces reused prefixes to spill from
+# GPU HBM into the offload tier, which is what raises the external prefix cache
+# hit rate. Unset (default) = derive KV size from GPU_MEM_UTIL (stock behavior).
+KV_CACHE_BYTES="${KV_CACHE_BYTES:-}"
 
 # ── Certus-SHMQ connector ───────────────────────────────────────────────────────
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # mailbox file (shared into container)
@@ -66,6 +73,29 @@ STORE_FLAGS=(--root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT")
 # HF cache on the large filesystem — NOT $HOME/.cache (the /home partition is
 # small and fills up mid-download).
 HF_CACHE="${HF_CACHE:-/mnt/certus1/hf-cache}"
+
+# ── fix#3: _build_store_jobs length-clamp patch ─────────────────────────────────
+# The stock image's OffloadingConnector scheduler crashes the engine under load
+# on `assert len(offload_keys) == len(offload_block_ids)` in _build_store_jobs
+# (offload_keys advances every step; block_ids only grows on new allocations, so
+# a finishing request can cross an unbacked chunk boundary). This bind-mounts a
+# scheduler.py that clamps num_chunks to the chunks that have both a key and
+# backing GPU blocks. shmq-only variant — it deliberately does NOT carry fix#2's
+# mark_stores_submitted handshake (CertusShmqOffloadingSpec's manager lacks it).
+# Set VLLM_FIX3=0 to run the stock (crash-prone) scheduler.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VLLM_FIX3="${VLLM_FIX3:-1}"
+FIX3_SCHEDULER="${FIX3_SCHEDULER:-${SCRIPT_DIR}/patches/scheduler.fix3.py}"
+FIX3_TARGET=/usr/local/lib/python3.12/dist-packages/vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py
+FIX3_MOUNT=()
+if [[ "$VLLM_FIX3" == "1" ]]; then
+  if [[ -f "$FIX3_SCHEDULER" ]]; then
+    FIX3_MOUNT=(-v "${FIX3_SCHEDULER}:${FIX3_TARGET}:ro,z")
+    echo "[serve] fix#3 scheduler patch: ${FIX3_SCHEDULER} -> in-container scheduler.py"
+  else
+    echo "warning: VLLM_FIX3=1 but patch not found at ${FIX3_SCHEDULER}; running STOCK scheduler (crash-prone under load)" >&2
+  fi
+fi
 
 # ── Preflight ──────────────────────────────────────────────────────────────────
 if ! command podman "${STORE_FLAGS[@]}" image exists "$IMAGE"; then
@@ -105,6 +135,12 @@ SERVE_ARGS=(
   --kv-transfer-config "$KV_CONFIG"
 )
 
+# Optional hard cap on the GPU KV cache (overrides gpu-memory-utilization).
+if [[ -n "$KV_CACHE_BYTES" ]]; then
+  SERVE_ARGS+=(--kv-cache-memory-bytes "$KV_CACHE_BYTES")
+  echo "[serve] GPU KV cache capped at ${KV_CACHE_BYTES} (ignores GPU_MEM_UTIL)"
+fi
+
 # YaRN rope-scaling: only when the requested window exceeds Qwen2.x's native
 # 32768 (Qwen ships no rope_scaling, so vLLM rejects a larger window otherwise).
 # Qwen's official recipe is static YaRN with factor = target / native. Opt out
@@ -131,6 +167,7 @@ exec command podman "${STORE_FLAGS[@]}" run --rm --pull=never \
   -p "${PORT}:${PORT}" \
   -e "HF_HUB_OFFLINE=0" \
   -v "${HF_CACHE}:/root/.cache/huggingface:z" \
+  "${FIX3_MOUNT[@]}" \
   --entrypoint vllm \
   "$IMAGE" \
   serve "${SERVE_ARGS[@]}"
