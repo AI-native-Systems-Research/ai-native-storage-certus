@@ -227,8 +227,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let logger = Arc::clone(&stack.logger);
     logger.info(&format!(
-        "certus-server-yaml: composed from profile, devices={:?}",
-        cli.device_pci
+        "certus-server-yaml: composed from profile '{}', devices={:?}",
+        PROFILE_NAME, cli.device_pci
+    ));
+    logger.info(&format!(
+        "certus-server-yaml: eviction policy = {} (algorithm: {})",
+        EVICTION_POLICY_CRATE, EVICTION_POLICY_ALGORITHM
     ));
     logger.info(&format!(
         "certus-server-yaml: memory-tier-size={} MiB",

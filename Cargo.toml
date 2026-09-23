@@ -34,6 +34,7 @@ members = [
     "components/example-helloworld-dylib",
     "components/eviction-policy-lru",
     "components/eviction-policy-session-lists",
+    "components/eviction-policy-optimized",
     "components/remote-lookup",
     "components/remote-lookup-rdma-initiator",
     "components/remote-lookup-rdma-responder",
@@ -72,6 +73,7 @@ default-members = [
     "components/gpu-services",
     "components/eviction-policy-lru",
     "components/eviction-policy-session-lists",
+    "components/eviction-policy-optimized",
     "apps/eviction-replay-benchmark",
     "lib/shm-queue"
 ]
@@ -106,6 +108,7 @@ extended-metadata-store = { path = "components/extended-metadata-store" }
 gpu-services = { path = "components/gpu-services" }
 eviction-policy-lru = { path = "components/eviction-policy-lru" }
 eviction-policy-session-lists = { path = "components/eviction-policy-session-lists" }
+eviction-policy-optimized = { path = "components/eviction-policy-optimized" }
 remote-lookup = { path = "components/remote-lookup" }
 remote-lookup-rdma-initiator = { path = "components/remote-lookup-rdma-initiator" }
 remote-lookup-rdma-responder = { path = "components/remote-lookup-rdma-responder" }

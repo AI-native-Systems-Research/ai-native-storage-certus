@@ -39,6 +39,10 @@ struct ComponentDecl {
     /// Used to generate the correct factory closure body.
     #[serde(default)]
     receptacles: Vec<String>,
+    /// Human-readable description of the algorithm this component implements.
+    /// Surfaced in the server's startup log (currently used for the
+    /// `eviction_policy` component). Defaults to the crate name when omitted.
+    algorithm: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -160,6 +164,57 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     .unwrap();
     writeln!(code).unwrap();
     writeln!(code, "use component_core::query_interface;").unwrap();
+    writeln!(code).unwrap();
+
+    // --- Profile / eviction-policy metadata constants ---
+    // Compile-time composition means the running server otherwise has no
+    // record of which profile it was built from or which eviction policy was
+    // wired in; emit these so main.rs can log them at startup.
+    writeln!(
+        code,
+        "/// Name of the YAML profile this binary was composed from.",
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "pub const PROFILE_NAME: &str = {:?};",
+        manifest.profile.name
+    )
+    .unwrap();
+    if let Some(decl) = manifest.components.get("eviction_policy") {
+        let algorithm = decl
+            .algorithm
+            .clone()
+            .unwrap_or_else(|| decl.crate_name.clone());
+        writeln!(
+            code,
+            "/// Crate providing the wired-in eviction policy component.",
+        )
+        .unwrap();
+        writeln!(
+            code,
+            "pub const EVICTION_POLICY_CRATE: &str = {:?};",
+            decl.crate_name
+        )
+        .unwrap();
+        writeln!(
+            code,
+            "/// Human-readable description of the eviction algorithm in use.",
+        )
+        .unwrap();
+        writeln!(
+            code,
+            "pub const EVICTION_POLICY_ALGORITHM: &str = {algorithm:?};"
+        )
+        .unwrap();
+    } else {
+        writeln!(code, "pub const EVICTION_POLICY_CRATE: &str = \"none\";").unwrap();
+        writeln!(
+            code,
+            "pub const EVICTION_POLICY_ALGORITHM: &str = \"none (no eviction_policy component)\";"
+        )
+        .unwrap();
+    }
     writeln!(code).unwrap();
 
     // Generate ComponentStack struct
