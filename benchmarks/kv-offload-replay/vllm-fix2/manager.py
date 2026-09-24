@@ -81,31 +81,51 @@ if _TIER_DBG:
     import atexit as _atexit
     import sys as _sys
 
-    _tdbg = {"attempts": 0, "ok": 0, "blocked": 0, "t0": time.monotonic(),
-             "last": 0.0}
+    _tdbg = {"attempts": 0, "ok": 0, "blocked": 0, "cold": 0, "evicted": 0,
+             "t0": time.monotonic(), "last": 0.0}
 
     def _tier_dbg_emit(final=False):
         a = _tdbg["attempts"]
         ok = _tdbg["ok"]
         bl = _tdbg["blocked"]
+        cold = _tdbg["cold"]
+        ev = _tdbg["evicted"]
         pct = (100.0 * bl / a) if a else 0.0
+        m = cold + ev
+        epct = (100.0 * ev / m) if m else 0.0
         tag = "FINAL" if final else "round"
         print(f"[tier-dbg] {tag} promotion_attempts={a} promotion_ok={ok} "
-              f"promotion_blocked_dram_full={bl} ({pct:.1f}%)",
+              f"promotion_blocked_dram_full={bl} ({pct:.1f}%) "
+              f"lookup_miss_cold={cold} lookup_miss_evicted={ev} "
+              f"({epct:.1f}% evicted)",
               file=_sys.stderr, flush=True)
 
-    def _tier_dbg_note(ok):
-        _tdbg["attempts"] += 1
-        _tdbg["ok" if ok else "blocked"] += 1
+    def _tier_dbg_maybe_emit():
         now = time.monotonic()
         if now - _tdbg["last"] >= 10.0:
             _tdbg["last"] = now
             _tier_dbg_emit()
 
+    def _tier_dbg_note(ok):
+        _tdbg["attempts"] += 1
+        _tdbg["ok" if ok else "blocked"] += 1
+        _tier_dbg_maybe_emit()
+
+    def _tier_dbg_miss(evicted):
+        # A lookup that missed EVERY tier. evicted=True if the block had been
+        # cascaded to a secondary tier before (so it was dropped by the bottom
+        # tier's LRU since); else it is a cold first-touch never stored anywhere.
+        _tdbg["evicted" if evicted else "cold"] += 1
+        _tier_dbg_maybe_emit()
+
     _atexit.register(_tier_dbg_emit, final=True)
-    logger.info("[tier-dbg] TIER_DEBUG on: counting promotion-blocked-dram-full")
+    logger.info("[tier-dbg] TIER_DEBUG on: counting promotion-blocked-dram-full "
+                "and cold-vs-evicted lookup misses")
 else:
     def _tier_dbg_note(ok):  # no-op fast path
+        pass
+
+    def _tier_dbg_miss(evicted):  # no-op fast path
         pass
 
 
@@ -248,6 +268,13 @@ class TieringOffloadingManager(OffloadingManager):
         """
         self.primary_tier: CPUPrimaryTierOffloadingManager = primary_tier
         self.secondary_tiers = secondary_tiers or []
+
+        # TIER_DEBUG: set of keys ever cascaded to a secondary tier, so a lookup
+        # that misses EVERY tier can be split into cold (never stored) vs evicted
+        # (stored before, since dropped from the bottom tier). Only allocated when
+        # TIER_DEBUG is on; unbounded, so it is a debug-only probe. See
+        # _tier_dbg_miss and complete_store.
+        self._seen_keys: set | None = set() if _TIER_DBG else None
 
         self._job_id_counter: int = 0
         # Job tracking: maps job_id to metadata for all in-flight transfers.
@@ -404,6 +431,11 @@ class TieringOffloadingManager(OffloadingManager):
             if req_state is not None and req_state.secondary_lookup_start_time is None:
                 req_state.secondary_lookup_start_time = lookup_start
             return LookupResult.RETRY
+        # True miss: the key is resident in no tier at all. Classify it as evicted
+        # (was stored before, since dropped from the bottom tier) vs cold (never
+        # stored). See _seen_keys / _tier_dbg_miss.
+        if self._seen_keys is not None:
+            _tier_dbg_miss(key in self._seen_keys)
         return LookupResult.MISS
 
     def _accumulate_lookup_sync_delay(
@@ -679,6 +711,11 @@ class TieringOffloadingManager(OffloadingManager):
             for tier in self.secondary_tiers:
                 job_metadata = self.create_store_job(keys, req_context)
                 tier.submit_store(job_metadata)
+
+            # TIER_DEBUG: remember every key cascaded to a secondary tier so a
+            # later total miss can be told apart as cold vs evicted.
+            if self._seen_keys is not None:
+                self._seen_keys.update(keys)
 
         # Note: The async transfers are now in flight. Their completion is
         # tracked via get_finished_jobs() / _maybe_process_finished_jobs().
