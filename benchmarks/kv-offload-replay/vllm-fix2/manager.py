@@ -57,6 +57,58 @@ from vllm.v1.kv_offload.tiering.base import (
 logger = init_logger(__name__)
 
 
+# ── TIER_DEBUG: promotion-fail (prepare_store/prepare_write -> None) counter ──
+# The tiered connector runs inside the EngineCore subprocess, which is *spawned*
+# (not forked) whenever CUDA is initialized in the driver — so a driver-side
+# monkeypatch is re-imported fresh in the child and never sees the patch. The
+# only place a counter is reliably seen is the vLLM source that the child
+# imports, i.e. this file (baked over the installed vLLM in the image).
+#
+# What this counts that nothing else does: a *secondary-tier HIT that is blocked
+# from promotion because the primary (DRAM) tier could not allocate a slot*
+# (_initiate_promotion -> primary.prepare_write() -> None -> return False). That
+# path is swallowed as a plain lookup MISS; the connector's ALLOCATION_FAILURE
+# stat only covers the store path, not this promotion path.
+#
+# Off by default (one env read at import). Emits to stderr (-> container logs)
+# on a ~10s throttle plus a final line atexit. Deliberately its own channel:
+# adding a vllm:-prefixed Prometheus counter (what the driver scrapes) would
+# require registering a metric in vLLM — invasive for a debug probe.
+import os as _os
+
+_TIER_DBG = _os.environ.get("TIER_DEBUG", "") not in ("", "0", "false", "False")
+if _TIER_DBG:
+    import atexit as _atexit
+    import sys as _sys
+
+    _tdbg = {"attempts": 0, "ok": 0, "blocked": 0, "t0": time.monotonic(),
+             "last": 0.0}
+
+    def _tier_dbg_emit(final=False):
+        a = _tdbg["attempts"]
+        ok = _tdbg["ok"]
+        bl = _tdbg["blocked"]
+        pct = (100.0 * bl / a) if a else 0.0
+        tag = "FINAL" if final else "round"
+        print(f"[tier-dbg] {tag} promotion_attempts={a} promotion_ok={ok} "
+              f"promotion_blocked_dram_full={bl} ({pct:.1f}%)",
+              file=_sys.stderr, flush=True)
+
+    def _tier_dbg_note(ok):
+        _tdbg["attempts"] += 1
+        _tdbg["ok" if ok else "blocked"] += 1
+        now = time.monotonic()
+        if now - _tdbg["last"] >= 10.0:
+            _tdbg["last"] = now
+            _tier_dbg_emit()
+
+    _atexit.register(_tier_dbg_emit, final=True)
+    logger.info("[tier-dbg] TIER_DEBUG on: counting promotion-blocked-dram-full")
+else:
+    def _tier_dbg_note(ok):  # no-op fast path
+        pass
+
+
 @dataclass
 class PendingPromotion:
     """Accumulator for blocks awaiting submit_load() for one (tier, request)."""
@@ -414,6 +466,7 @@ class TieringOffloadingManager(OffloadingManager):
         if primary_write_result is None:
             # Primary tier is full; caller should treat the block as unavailable
             # rather than retrying indefinitely.
+            _tier_dbg_note(False)
             return False
 
         store_spec = primary_write_result.store_spec
@@ -429,6 +482,7 @@ class TieringOffloadingManager(OffloadingManager):
         entry = tier_pending[ctx_id]
         entry.keys.extend(primary_write_result.keys_to_store)
         entry.block_ids.extend(store_spec.block_ids)
+        _tier_dbg_note(True)
         return True
 
     def _flush_pending_promotions(self) -> None:
