@@ -296,8 +296,7 @@ pub enum Command {
         ///
         /// Named for the format rather than for that one consumer: the shape is
         /// Alibaba's anonymized Bailian usage trace (`qwen-bailian-usagetraces-anon`),
-        /// which is also what several of the corpus traces are in, so a generated file
-        /// and a captured one go through the same readers.
+        /// so a generated file and a captured one go through the same readers.
         ///
         /// A projection is a file rather than a directory because it is not a trace
         /// (FR-075b): no manifest, and never accepted in place of the native trace for
@@ -318,9 +317,11 @@ pub enum Command {
     },
     /// Project a stored trace into another tool's format.
     ///
-    /// Its input is the *schema*, so it works on any trace in it — including the real
-    /// ones in the corpus, which is what makes a real workload and a generated one
-    /// comparable through the identical projection (FR-075a).
+    /// Its input is the Certus unified trace format — what `emit
+    /// --certus-unified-jsonl` and `--certus-unified-parquet` write. It therefore works
+    /// on any trace in that format whatever produced it, so a generated trace and a
+    /// captured one reach a tool through the identical projection and are comparable
+    /// (FR-075a).
     Convert {
         /// A trace directory, or a single JSONL part file.
         trace: PathBuf,

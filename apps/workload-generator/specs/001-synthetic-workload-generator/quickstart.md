@@ -244,8 +244,9 @@ where a hit rate means something.
 ## Scenario 3d — Standard formats from a stored trace, and checking reuse
 
 The same projections Scenario 3b wrote in one pass, applied instead to a trace
-already on disk (FR-075a) — the path that lets a **real** corpus trace and a
-generated one go through an identical transformation:
+already on disk (FR-075a) — the path that lets a **captured** trace and a
+generated one go through an identical transformation, since `convert` reads the
+Certus unified format whatever wrote it:
 
 ```bash
 $G emit $E --seed 42 --until 10 --certus-unified-jsonl /tmp/qs-trace

@@ -85,12 +85,13 @@ workload-gen validate <description.yml>
 - **`plan`** writes the canonical operation-plan serialisation — the artifact
   the byte-identity property is asserted against (FR-060, SC-003).
 - **`convert`** applies the same projections to a trace **already on disk**
-  (FR-075a). It is not a second way to do what `emit` just did: its input is
-  the *schema*, and the corpus of real traces is in that schema, so this is how
-  a real workload and a generated one are pushed through an identical
-  transformation. Use it also for a trace whose description is no longer to
-  hand. `contracts/trace-interop.md` specifies each target, what it drops, and
-  which candidates were rejected.
+  (FR-075a). It is not a second way to do what `emit` just did: its input
+  is the Certus unified trace format (what `emit --certus-unified-jsonl` and
+  `--certus-unified-parquet` write), so any trace in that format converts
+  whatever produced it, and a generated workload and a captured one are
+  pushed through an identical transformation. Use it also for a trace whose
+  description is no longer to hand. `contracts/trace-interop.md` specifies
+  each target, what it drops, and which candidates were rejected.
   - `--to qwen-bailian` — Qwen-Bailian usage-trace JSONL, which
     `apps/eviction-replay-benchmark` reads. See
     `research.md` D1: the simulator reads `{chat_id, parent_chat_id, hash_ids,
