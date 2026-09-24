@@ -163,6 +163,15 @@ PROMO_RE = re.compile(
     r"promotion_ok=(\d+)\s+promotion_blocked_dram_full=(\d+)"
 )
 
+# KV block size in tokens — the granularity of the block-denominated tier
+# movement/refusal counters (promotion_blocked_dram_full, tier_*). The KV lookup
+# accounting panel needs this to convert those counts onto the TOKEN axis, so a
+# refused promotion can be compared against a token-denominated miss. vLLM's
+# default V1 block_size is 16 tokens and these runs do not override it (the log's
+# "GPU KV cache size: 24,576 tokens" is 1,536 blocks × 16). Override with the
+# KVPROFILE_BLOCK_TOKENS env var if a run uses a different block size.
+BLOCK_TOKENS = int(os.environ.get("KVPROFILE_BLOCK_TOKENS", "16"))
+
 # ── Run-total families: the per-round panels show movement over time; these
 # roll each counter up to a single whole-run total and group related counters
 # onto one shared axis so the magnitudes are directly comparable. (title, unit,
@@ -765,6 +774,14 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
             "per scheduling attempt and re-count a waiting request's full context "
             "many times under queue pressure (37× here), so they are not "
             "plotted; the derivation uses only once-per-token counters.", width=150)
+    if "prompt_tokens" in active_keys:
+        note_lines += textwrap.wrap(
+            "KV lookup accounting balances prompt tokens as HBM hit + offload-tier "
+            "hit + miss (recomputed) — the only unit in which hits, misses and "
+            f"refusals are comparable. Refused promotions are shown as a token-"
+            f"equivalent at block_size={BLOCK_TOKENS} (vLLM default; set "
+            "KVPROFILE_BLOCK_TOKENS to override); offload-store refusals are "
+            "per-request and reported as a request count, not converted.", width=150)
     if zeroed:
         names = ", ".join(c[1] for c in zeroed)
         note_lines += textwrap.wrap(
@@ -836,11 +853,16 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
     has_preempt = any(any(v for v in (s["data"].get("num_preemptions") or []))
                       for s in series)
+    # KV lookup accounting: shown whenever prompt tokens were captured — the
+    # balance prompt_tokens = HBM hit + offload hit + miss holds for every backend.
+    has_acct = any(_total(s, "prompt_tokens") for s in series)
     left_cells = []
     if has_gpu_ts:
         left_cells.append(("gputs", None))
     if has_preempt:
         left_cells.append(("preempt", None))
+    if has_acct:
+        left_cells.append(("acct", None))
     left_cells += [("fam", f) for f in active_fams]
     # 2 to a row (each panel targets ~2.8" of width); a single cell takes the row.
     if left_cells:
@@ -1121,6 +1143,99 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         ax.grid(axis="y", color=grid, lw=0.6, zorder=0)
         ax.tick_params(labelsize=8)
 
+    # Segment colours for the accounting stack — mid-tone hues legible on both
+    # themes: hits cool (offload blue, HBM amber), miss warm red.
+    ACCT_MISS, ACCT_OFFLOAD, ACCT_HBM = "#cf5c50", "#4c8edb", "#c99a2e"
+
+    def _draw_acct(ax):
+        # Token-conservation accounting for KV lookups. Every prompt token is
+        # served from the GPU-HBM prefix cache, from the offload tier (DRAM/SSD),
+        # or MISSED and recomputed — and TOKENS is the only unit in which that
+        # balance closes:  prompt_tokens = HBM hit + offload hit + miss.
+        # prompt_tokens_cached splits into HBM vs offload via the derived
+        # prefix_cache_hits_hbm (= cached − external hits). Beside each stacked
+        # bar sits a second bar for the refused-promotion token-equivalent
+        # (promotion_blocked_dram_full × BLOCK_TOKENS) on the SAME axis, so it is
+        # directly visible that refusals are a tiny slice of the miss volume, not
+        # its cause. Generalises across backends: a non-offload series has zero
+        # external hits, so all its cache hits fall in the HBM segment (correct).
+        segs = [("HBM hit", ACCT_HBM), ("offload hit", ACCT_OFFLOAD),
+                ("miss", ACCT_MISS)]
+        drawn = [s for s in series if _total(s, "prompt_tokens")]
+        n = len(drawn)
+        single = (n == 1)
+        vmax = 0.0
+        pw, rw = 0.34, 0.16   # prompt-stack width, refusal-bar width
+        for si, s in enumerate(drawn):
+            prompt = _total(s, "prompt_tokens")
+            cached = _total(s, "prompt_tokens_cached")
+            ext = max(0.0, _total(s, "external_prefix_cache_hits"))
+            hbm = max(0.0, cached - ext)
+            miss = max(0.0, prompt - cached)
+            vmax = max(vmax, prompt)
+            xp = si - 0.12
+            bottom = 0.0
+            for (lab, col), v in zip(segs, [hbm, ext, miss]):
+                ax.bar(xp, v, bottom=bottom, width=pw, color=col,
+                       edgecolor=bg, linewidth=0.6, zorder=3)
+                if v and v / prompt >= 0.08:   # room for an in-bar % label
+                    ax.text(xp, bottom + v / 2, f"{v/prompt*100:.0f}%",
+                            ha="center", va="center", fontsize=7.5,
+                            fontweight="bold", color="#ffffff", zorder=5)
+                bottom += v
+            # Refused-promotion token-equivalent, same y-axis, as its own bar.
+            refused_tok = _total(s, "promotion_blocked_dram_full") * BLOCK_TOKENS
+            if refused_tok:
+                xr = si + 0.26
+                b = ax.bar(xr, refused_tok, width=rw, color="none",
+                           edgecolor=ACCT_MISS, linewidth=1.1, hatch="////",
+                           zorder=3)
+                lbl = fmt_compact(refused_tok)
+                if miss:
+                    lbl += f"\n{refused_tok/miss*100:.1f}% of miss"
+                ax.bar_label(b, labels=[lbl], padding=2, fontsize=6.5,
+                             color=mut)
+        # Single series: a compact "receipt" reconciling the balance in tokens.
+        if single and vmax:
+            s = drawn[0]
+            prompt = _total(s, "prompt_tokens")
+            cached = _total(s, "prompt_tokens_cached")
+            ext = max(0.0, _total(s, "external_prefix_cache_hits"))
+            hbm = max(0.0, cached - ext); miss = max(0.0, prompt - cached)
+            store_ref = _total(s, "kv_offload_allocation_failure")
+            rows = [(ACCT_MISS, "miss", miss, f"{miss/prompt*100:.1f}%", True),
+                    (ACCT_OFFLOAD, "offload hit", ext, f"{ext/prompt*100:.1f}%", False),
+                    (ACCT_HBM, "HBM hit", hbm, f"{hbm/prompt*100:.2f}%", False),
+                    (fg, "prompt", prompt, "100%", True)]
+            y = 0.985
+            for col, lab, v, pct, bold in rows:
+                ax.annotate(f"{lab}: {fmt_compact(v)} tok  ({pct})",
+                            xy=(0.46, y), xycoords="axes fraction", ha="left",
+                            va="top", fontsize=7.3, color=col,
+                            fontweight="bold" if bold else "normal", zorder=6)
+                y -= 0.105
+            if store_ref:
+                ax.annotate(f"+ store refused: {fmt_compact(store_ref)} reqs",
+                            xy=(0.46, y - 0.02), xycoords="axes fraction",
+                            ha="left", va="top", fontsize=7, color=mut, zorder=6)
+            ax.set_xlim(-0.5, 2.7)
+        else:
+            from matplotlib.patches import Patch
+            ax.legend(handles=[Patch(facecolor=c, label=l) for l, c in segs],
+                      loc="upper right", frameon=False, fontsize=7)
+            ax.set_xlim(-0.7, n - 0.2)
+        ax.set_xticks(range(n))
+        ax.set_xticklabels([s["label"] for s in drawn], fontsize=8)
+        ax.set_title("KV lookup accounting — run total", loc="left",
+                     fontsize=10, fontweight="bold", color=fg, pad=6)
+        ax.set_ylabel("tokens", color=mut, fontsize=8)
+        ax.yaxis.set_major_formatter(FuncFormatter(fmt_compact))
+        ax.set_ylim(0, (vmax * 1.12) or 1)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        ax.grid(axis="y", color=grid, lw=0.6, zorder=0)
+        ax.tick_params(labelsize=8)
+
     if left_cells:
         gs_tot = fig.add_gridspec(fam_nrow, fam_ncol, left=L, right=R,
                                   top=pos["totals"][1], bottom=pos["totals"][0],
@@ -1132,6 +1247,8 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
                 _draw_gputs(cell_ax)
             elif kind == "preempt":
                 _draw_preempt(cell_ax)
+            elif kind == "acct":
+                _draw_acct(cell_ax)
             else:
                 _draw_fam(cell_ax, payload)
 
