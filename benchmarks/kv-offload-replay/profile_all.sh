@@ -745,11 +745,44 @@ reap() {
 }
 reap
 
+# ── nvidia-smi resolution ──
+# On nodes with a containerized NVIDIA driver (GPU-operator under
+# /run/nvidia/driver), the host often has no working nvidia-smi on PATH: the
+# driver's own binary can't resolve libnvidia-ml against the host RHCOS libc,
+# and a driver-version roll silently wipes whatever host symlink used to work
+# — which is exactly how GPU telemetry vanishes from a run. Resolve a working
+# invocation ONCE here. NVSMI is an array so it can carry a loader prefix; call
+# it as "${NVSMI[@]}" <args>. have_nvidia_smi replaces the old `command -v`
+# guards. Validated with `-L` so a broken on-PATH nvidia-smi is rejected in
+# favour of the container fallback.
+NVSMI=()
+_resolve_nvidia_smi() {
+    # 1) A working nvidia-smi already on PATH (host install, or the ru10
+    #    /var/home/core/bin wrapper).
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+        NVSMI=(nvidia-smi); return 0
+    fi
+    # 2) Containerized driver: run its nvidia-smi via its OWN dynamic loader and
+    #    lib path so every symbol resolves consistently (no chroot, no sudo, no
+    #    copied libs). Tracks the stable /run/nvidia/driver mount, so it survives
+    #    GPU-operator driver upgrades.
+    local drv=/run/nvidia/driver
+    local ldr="$drv/usr/lib64/ld-linux-x86-64.so.2"
+    local smi="$drv/usr/bin/nvidia-smi"
+    if [[ -x "$ldr" && -x "$smi" ]] \
+       && "$ldr" --library-path "$drv/usr/lib64" "$smi" -L >/dev/null 2>&1; then
+        NVSMI=("$ldr" --library-path "$drv/usr/lib64" "$smi"); return 0
+    fi
+    NVSMI=(); return 1
+}
+have_nvidia_smi() { [[ ${#NVSMI[@]} -gt 0 ]]; }
+_resolve_nvidia_smi || true
+
 # GPU-free check — after reaping our own stale containers, so it only flags usage
 # from a foreign process (which we must not kill). Informational: warns, does not
 # abort — the benchmark may still fit, or the user may want to intervene.
-if command -v nvidia-smi >/dev/null 2>&1; then
-    used="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
+if have_nvidia_smi; then
+    used="$("${NVSMI[@]}" --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
     if [[ -n "$used" && "$used" -gt 1024 ]]; then
         warn "a GPU still has ${used} MiB in use after reaping bench containers — a foreign process may starve the benchmark"
     fi
@@ -769,9 +802,9 @@ fi
 # left pinned after the run.
 GPU_CLOCK_LOCKED=0
 lock_gpu_clocks() {
-    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    have_nvidia_smi || return 0
     local maxsm
-    maxsm="$(nvidia-smi --query-gpu=clocks.max.sm --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
+    maxsm="$("${NVSMI[@]}" --query-gpu=clocks.max.sm --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
     if [[ ! "$maxsm" =~ ^[0-9]+$ ]]; then
         warn "could not read GPU max SM clock — leaving clocks on auto-boost (runs may drift ~10%)"
         return 0
@@ -782,8 +815,8 @@ lock_gpu_clocks() {
         warn "no sudo — cannot pin GPU clocks; generation throughput may drift across backends"
         return 0
     fi
-    if sudo -n nvidia-smi -pm 1 >/dev/null 2>&1 \
-       && sudo -n nvidia-smi -lgc "${maxsm},${maxsm}" >/dev/null 2>&1; then
+    if sudo -n "${NVSMI[@]}" -pm 1 >/dev/null 2>&1 \
+       && sudo -n "${NVSMI[@]}" -lgc "${maxsm},${maxsm}" >/dev/null 2>&1; then
         GPU_CLOCK_LOCKED=1
         log "pinned GPU SM clock to ${maxsm} MHz (persistence on) — stable cross-backend timing"
     else
@@ -793,7 +826,7 @@ lock_gpu_clocks() {
 unlock_gpu_clocks() {
     [[ "${GPU_CLOCK_LOCKED:-0}" == 1 ]] || return 0
     log "resetting GPU clocks to default (auto-boost)"
-    sudo -n nvidia-smi -rgc >/dev/null 2>&1 || warn "could not reset GPU clocks (sudo nvidia-smi -rgc)"
+    sudo -n "${NVSMI[@]}" -rgc >/dev/null 2>&1 || warn "could not reset GPU clocks (sudo nvidia-smi -rgc)"
     GPU_CLOCK_LOCKED=0
 }
 lock_gpu_clocks
@@ -807,14 +840,14 @@ lock_gpu_clocks
 GPU_SAMPLE_SEC="${GPU_SAMPLE_SEC:-2}"
 GPU_SAMPLER_PID=""
 start_gpu_sampler() {
-    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    have_nvidia_smi || return 0
     [[ -n "${LOGDIR:-}" && -d "${LOGDIR:-}" ]] || return 0
     local tl="${LOGDIR}/gpu-timeline.csv"
     echo "epoch_s,gpu_idx,util_gpu_pct,util_mem_pct,mem_used_mib,sm_clock_mhz,temp_c,power_w" > "$tl"
     (
         while true; do
             ts="$(date +%s)"
-            nvidia-smi --query-gpu=index,utilization.gpu,utilization.memory,memory.used,clocks.sm,temperature.gpu,power.draw \
+            "${NVSMI[@]}" --query-gpu=index,utilization.gpu,utilization.memory,memory.used,clocks.sm,temperature.gpu,power.draw \
                 --format=csv,noheader,nounits 2>/dev/null \
                 | sed "s/^/${ts}, /; s/, /,/g" >> "$tl" || true
             sleep "$GPU_SAMPLE_SEC"
