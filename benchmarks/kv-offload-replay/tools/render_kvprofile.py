@@ -109,6 +109,14 @@ COUNTERS = [
     ("ssd_read_bytes",                "SSD bytes read (device)",    "bytes"),
     ("ssd_write_bytes",               "SSD bytes written (device)", "bytes"),
     ("num_preemptions",               "Engine preemptions",         "events"),
+    # A GPU→DRAM offload store the scheduler REFUSED because the DRAM tier had no
+    # room (manager.prepare_store returned None → ALLOCATION_FAILURE, one per
+    # request, logged "Request <id>: cannot store chunks"). Emitted on the [prom]
+    # line as a per-round delta like the other vLLM counters, so it rolls up to a
+    # whole-run refusal count. Distinct from a promotion refusal (see PROMO_*): this
+    # is the store path (fresh GPU blocks can't land in DRAM), that is the load path
+    # (an SSD-resident block can't be pulled up into DRAM).
+    ("kv_offload_allocation_failure", "Offload-store refused (DRAM full)", "events"),
 ]
 COUNTER_KEYS = [c[0] for c in COUNTERS]
 
@@ -128,6 +136,31 @@ TIER_KEYS = [c[0] for c in TIER_COUNTERS]
 TIER_RE = re.compile(
     r"tier-events\s+promotions\[->memory\s+(\d+),\s*->gpu\s+(\d+)\]"
     r"\s+evictions\[memory\s+(\d+),\s*ssd\s+(\d+)\]"
+)
+
+# ── vLLM-native SSD→DRAM promotion counters, parsed from the variant's OWN
+# <variant>.log (not [prom], not server.log). manager.py, when run with
+# TIER_DEBUG=1, prints per round and once at end:
+#   [tier-dbg] round|FINAL promotion_attempts=A promotion_ok=K
+#              promotion_blocked_dram_full=B (P%)
+# for the Tiered-CPU-FS backend's promotion path (an SSD-resident KV block pulled
+# up into the DRAM tier on a hit). A promotion is REFUSED — promotion_blocked_dram_full
+# — when DRAM is already full, the load-side dual of an offload-store allocation
+# failure (see kv_offload_allocation_failure). Counts are CUMULATIVE (like the
+# TIER_COUNTERS), so their whole-run total is the last/max value, not a sum. Only
+# present when the run set TIER_DEBUG=1; absent → the refusals family drops the bar.
+PROMO_COUNTERS = [
+    ("promotion_attempts",          "SSD→DRAM promotion attempts",            "events"),
+    ("promotion_ok",                "SSD→DRAM promotions succeeded",          "events"),
+    ("promotion_blocked_dram_full", "SSD→DRAM promotion refused (DRAM full)", "events"),
+]
+PROMO_KEYS = {c[0] for c in PROMO_COUNTERS}
+# Matches both the periodic "[tier-dbg] round …" line and the "[tier-dbg] FINAL …"
+# summary (an optional "(EngineCore pid=N)" log prefix sits outside the match, and
+# the trailing "(P%)" is ignored — the rate is recomputed from the counts).
+PROMO_RE = re.compile(
+    r"\[tier-dbg\]\s+(?:round|FINAL)\s+promotion_attempts=(\d+)\s+"
+    r"promotion_ok=(\d+)\s+promotion_blocked_dram_full=(\d+)"
 )
 
 # ── Run-total families: the per-round panels show movement over time; these
@@ -159,6 +192,18 @@ FAMILIES = [
         ("tier_promotions_to_gpu",     "→GPU"),
         ("tier_evictions_from_memory", "evict DRAM"),
         ("tier_evictions_from_ssd",    "evict SSD"),
+    ]),
+    # The two ways a KV move is REFUSED under DRAM pressure, side by side: a
+    # GPU→DRAM store the scheduler couldn't place (kv_offload_allocation_failure,
+    # per-request) and an SSD→DRAM promotion blocked because DRAM was full
+    # (promotion_blocked_dram_full, per-block, TIER_DEBUG only). The promotion bar
+    # is annotated with its refusal rate (blocked / attempts) via HIT_DENOM. Both
+    # are "events" so they share the axis; the store count is typically orders below
+    # the promotion count and reads as a small labelled bar (a measured result: the
+    # store path refuses rarely, the promotion path often under sustained pressure).
+    ("KV movement refusals — run total", "events", [
+        ("promotion_blocked_dram_full",  "SSD→DRAM promo"),
+        ("kv_offload_allocation_failure", "offload store"),
     ]),
 ]
 # num_preemptions gets its OWN run-total panel (one column per series, the rate
@@ -214,6 +259,11 @@ HIT_DENOM = {
     "prefix_cache_hits_hbm":      "prompt_tokens",
     "external_prefix_cache_hits": "external_prefix_cache_queries",
     "prompt_tokens_cached":       "prompt_tokens",
+    # Not a hit rate but the same numerator/denominator annotation: the fraction
+    # of SSD→DRAM promotion attempts that were refused for lack of DRAM room. The
+    # denominator (promotion_attempts) is carried in the series' data but never
+    # plotted itself — it exists only to annotate this bar.
+    "promotion_blocked_dram_full": "promotion_attempts",
 }
 
 # Counters that also get a per-second average (total / active seconds) atop their
@@ -347,6 +397,33 @@ def parse_tier_log(path: str) -> dict:
     return {k: v for k, v in cols.items() if v}
 
 
+def parse_tier_debug_log(path: str) -> dict:
+    """Parse a variant's own <variant>.log for the [tier-dbg] promotion counters.
+
+    Returns {promo_key: [cumulative value per tick]} in log order (the per-round
+    ticks plus the FINAL summary), for promotion_attempts / promotion_ok /
+    promotion_blocked_dram_full. Empty if the run had TIER_DEBUG off (no such
+    lines). Two processes can emit these (an idle frontend logging zeros and the
+    EngineCore doing the real work); since the counts are cumulative and rolled up
+    with max(), the idle stream's zeros never displace the real totals."""
+    cols = {k: [] for k in ("promotion_attempts", "promotion_ok",
+                            "promotion_blocked_dram_full")}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = PROMO_RE.search(line)
+                if not m:
+                    continue
+                a, k, b = (int(g) for g in m.groups())
+                cols["promotion_attempts"].append(a)
+                cols["promotion_ok"].append(k)
+                cols["promotion_blocked_dram_full"].append(b)
+    except OSError as e:
+        print(f"warning: cannot read {path}: {e}", file=sys.stderr)
+        return {}
+    return {k: v for k, v in cols.items() if v}
+
+
 def wall_from_log(path: str):
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -470,6 +547,10 @@ def load_run(run_dir: str, tag: str):
             name = e.get("variant") or "?"
             log = resolve_log(run_dir, e.get("log", ""))
             data = rounds_to_series(parse_prom_log(log)) if log else {}
+            if log:
+                # [tier-dbg] promotion counters live in the variant's own log
+                # (TIER_DEBUG runs only); merge them in for the refusals family.
+                data.update(parse_tier_debug_log(log))
             if norm(name) == "certusspdk":
                 data = {**data, **tier}
             wall = e.get("wall_s")
@@ -491,6 +572,7 @@ def load_run(run_dir: str, tag: str):
         found = True
         name = os.path.splitext(fn)[0]
         data = rounds_to_series(rounds)
+        data.update(parse_tier_debug_log(path))
         if norm(name) == "certusspdk":
             data = {**data, **tier}
         yield {"variant": name, "tag": tag,
@@ -695,8 +777,9 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         if not vals:
             return 0.0
         # vLLM/SSD [prom] values are per-interval deltas → the run total is their
-        # sum; tier counters are parsed cumulative → the total is the last (max).
-        return max(vals) if key in TIER_KEYS else float(sum(vals))
+        # sum; tier counters and [tier-dbg] promotion counters are parsed
+        # cumulative → the total is the last (max).
+        return max(vals) if (key in TIER_KEYS or key in PROMO_KEYS) else float(sum(vals))
 
     def _active_seconds(s, key):
         """Wall seconds from ``key``'s first nonzero round to the run's end.
