@@ -777,10 +777,13 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     if "prompt_tokens" in active_keys:
         note_lines += textwrap.wrap(
             "KV lookup accounting balances prompt tokens as HBM hit + offload-tier "
-            "hit + miss (recomputed) — the only unit in which hits, misses and "
-            f"refusals are comparable. Refused promotions are shown as a token-"
-            f"equivalent at block_size={BLOCK_TOKENS} (vLLM default; set "
-            "KVPROFILE_BLOCK_TOKENS to override); offload-store refusals are "
+            "hit + miss (recomputed) — the only unit in which hits and misses are "
+            "comparable. The miss is split by reason: DRAM-full (load blocked) is "
+            f"promotion_blocked_dram_full × block_size={BLOCK_TOKENS} (a block resident "
+            "in SSD that could not be promoted because DRAM was full; set "
+            "KVPROFILE_BLOCK_TOKENS to override the block size); the remainder missed "
+            "because it was not resident in any tier — never cached (cold) or evicted "
+            "before reuse. offload-store refusals (kv_offload_allocation_failure) are "
             "per-request and reported as a request count, not converted.", width=150)
     if zeroed:
         names = ", ".join(c[1] for c in zeroed)
@@ -1144,8 +1147,19 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         ax.tick_params(labelsize=8)
 
     # Segment colours for the accounting stack — mid-tone hues legible on both
-    # themes: hits cool (offload blue, HBM amber), miss warm red.
+    # themes: hits cool (offload blue, HBM amber), miss warm red; the resource-
+    # blocked slice of the miss a darker hatched red so a ~1% sliver still reads.
     ACCT_MISS, ACCT_OFFLOAD, ACCT_HBM = "#cf5c50", "#4c8edb", "#c99a2e"
+    ACCT_BLOCKED = "#7c241a"
+
+    def _wrap_lbl(s, width=15):
+        # Break long series tags ("Tiered-CPU-FS · 185008_1031298") onto their
+        # own lines — first at the " · " separators, then hard-wrap any long run
+        # — so multi-series category labels stop overlapping under the bars.
+        out = []
+        for part in str(s).split(" · "):
+            out.extend(textwrap.wrap(part, width=width) or [part])
+        return "\n".join(out)
 
     def _draw_acct(ax):
         # Token-conservation accounting for KV lookups. Every prompt token is
@@ -1154,78 +1168,94 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         # balance closes:  prompt_tokens = HBM hit + offload hit + miss.
         # prompt_tokens_cached splits into HBM vs offload via the derived
         # prefix_cache_hits_hbm (= cached − external hits). Beside each stacked
-        # bar sits a second bar for the refused-promotion token-equivalent
-        # (promotion_blocked_dram_full × BLOCK_TOKENS) on the SAME axis, so it is
-        # directly visible that refusals are a tiny slice of the miss volume, not
-        # its cause. Generalises across backends: a non-offload series has zero
-        # external hits, so all its cache hits fall in the HBM segment (correct).
-        segs = [("HBM hit", ACCT_HBM), ("offload hit", ACCT_OFFLOAD),
-                ("miss", ACCT_MISS)]
+        # The MISS is split by reason so "simply not cached vs a resource blocking
+        # the load" is answered on the same axis: the only resource-refusal counter
+        # that converts to tokens is promotion_blocked_dram_full (a block resident
+        # in SSD that could not be promoted because DRAM was full) × BLOCK_TOKENS;
+        # the rest missed because it was not resident in any tier — never cached
+        # (cold) or evicted before reuse. Generalises across backends: a non-offload
+        # series has zero external hits and zero refusals, so all hits fall in HBM
+        # and all miss in "not resident" (correct).
         drawn = [s for s in series if _total(s, "prompt_tokens")]
         n = len(drawn)
         single = (n == 1)
         vmax = 0.0
-        pw, rw = 0.34, 0.16   # prompt-stack width, refusal-bar width
+        pw = 0.5
         for si, s in enumerate(drawn):
             prompt = _total(s, "prompt_tokens")
             cached = _total(s, "prompt_tokens_cached")
             ext = max(0.0, _total(s, "external_prefix_cache_hits"))
             hbm = max(0.0, cached - ext)
             miss = max(0.0, prompt - cached)
+            blocked = min(miss, _total(s, "promotion_blocked_dram_full") * BLOCK_TOKENS)
+            not_res = max(0.0, miss - blocked)
             vmax = max(vmax, prompt)
-            xp = si - 0.12
+            # bottom→top: HBM hit, offload hit, not-resident miss, DRAM-full miss.
+            segs = [(ACCT_HBM, hbm, False), (ACCT_OFFLOAD, ext, False),
+                    (ACCT_MISS, not_res, False), (ACCT_BLOCKED, blocked, True)]
             bottom = 0.0
-            for (lab, col), v in zip(segs, [hbm, ext, miss]):
-                ax.bar(xp, v, bottom=bottom, width=pw, color=col,
-                       edgecolor=bg, linewidth=0.6, zorder=3)
+            for col, v, hatched in segs:
+                ax.bar(si, v, bottom=bottom, width=pw, color=col,
+                       edgecolor=bg, linewidth=0.6, zorder=3,
+                       hatch=("////" if hatched else None))
                 if v and v / prompt >= 0.08:   # room for an in-bar % label
-                    ax.text(xp, bottom + v / 2, f"{v/prompt*100:.0f}%",
+                    ax.text(si, bottom + v / 2, f"{v/prompt*100:.0f}%",
                             ha="center", va="center", fontsize=7.5,
                             fontweight="bold", color="#ffffff", zorder=5)
                 bottom += v
-            # Refused-promotion token-equivalent, same y-axis, as its own bar.
-            refused_tok = _total(s, "promotion_blocked_dram_full") * BLOCK_TOKENS
-            if refused_tok:
-                xr = si + 0.26
-                b = ax.bar(xr, refused_tok, width=rw, color="none",
-                           edgecolor=ACCT_MISS, linewidth=1.1, hatch="////",
-                           zorder=3)
-                lbl = fmt_compact(refused_tok)
-                if miss:
-                    lbl += f"\n{refused_tok/miss*100:.1f}% of miss"
-                ax.bar_label(b, labels=[lbl], padding=2, fontsize=6.5,
-                             color=mut)
-        # Single series: a compact "receipt" reconciling the balance in tokens.
+        # Single series: a compact "receipt" reconciling the balance in tokens,
+        # with the miss itemised by reason so the cold/evicted-vs-blocked split is
+        # answered numerically, not just visually.
         if single and vmax:
             s = drawn[0]
             prompt = _total(s, "prompt_tokens")
             cached = _total(s, "prompt_tokens_cached")
             ext = max(0.0, _total(s, "external_prefix_cache_hits"))
             hbm = max(0.0, cached - ext); miss = max(0.0, prompt - cached)
+            blocked = min(miss, _total(s, "promotion_blocked_dram_full") * BLOCK_TOKENS)
+            not_res = max(0.0, miss - blocked)
             store_ref = _total(s, "kv_offload_allocation_failure")
-            rows = [(ACCT_MISS, "miss", miss, f"{miss/prompt*100:.1f}%", True),
-                    (ACCT_OFFLOAD, "offload hit", ext, f"{ext/prompt*100:.1f}%", False),
-                    (ACCT_HBM, "HBM hit", hbm, f"{hbm/prompt*100:.2f}%", False),
-                    (fg, "prompt", prompt, "100%", True)]
+            pm = lambda v: f"{v/miss*100:.1f}% of miss" if miss else ""
+            pp = lambda v: f"{v/prompt*100:.2f}%" if prompt else ""
+            # (text, colour, fontsize, bold, gap-before-this-row)
+            rows = [
+                (f"miss: {fmt_compact(miss)} tok  ({miss/prompt*100:.1f}%)",
+                 ACCT_MISS, 7.6, True, 0.0),
+                (f"├ cold / evicted: {fmt_compact(not_res)}  ({pm(not_res)})",
+                 ACCT_MISS, 6.7, False, 0.060),
+                (f"└ DRAM-full, load blocked: {fmt_compact(blocked)}  ({pm(blocked)})",
+                 ACCT_BLOCKED, 6.7, False, 0.053),
+                (f"offload hit: {fmt_compact(ext)} tok  ({pp(ext)})",
+                 ACCT_OFFLOAD, 7.6, False, 0.085),
+                (f"HBM hit: {fmt_compact(hbm)} tok  ({pp(hbm)})",
+                 ACCT_HBM, 7.6, False, 0.075),
+                (f"prompt: {fmt_compact(prompt)} tok  (100%)",
+                 fg, 7.6, True, 0.085),
+            ]
             y = 0.985
-            for col, lab, v, pct, bold in rows:
-                ax.annotate(f"{lab}: {fmt_compact(v)} tok  ({pct})",
-                            xy=(0.46, y), xycoords="axes fraction", ha="left",
-                            va="top", fontsize=7.3, color=col,
+            for txt, col, fs, bold, gap in rows:
+                y -= gap
+                ax.annotate(txt, xy=(0.30, y), xycoords="axes fraction",
+                            ha="left", va="top", fontsize=fs, color=col,
                             fontweight="bold" if bold else "normal", zorder=6)
-                y -= 0.105
             if store_ref:
-                ax.annotate(f"+ store refused: {fmt_compact(store_ref)} reqs",
-                            xy=(0.46, y - 0.02), xycoords="axes fraction",
-                            ha="left", va="top", fontsize=7, color=mut, zorder=6)
-            ax.set_xlim(-0.5, 2.7)
+                y -= 0.085
+                ax.annotate(f"+ offload-store refused: {fmt_compact(store_ref)} reqs",
+                            xy=(0.30, y), xycoords="axes fraction", ha="left",
+                            va="top", fontsize=7, color=mut, zorder=6)
+            ax.set_xlim(-0.5, 3.2)
         else:
             from matplotlib.patches import Patch
-            ax.legend(handles=[Patch(facecolor=c, label=l) for l, c in segs],
-                      loc="upper right", frameon=False, fontsize=7)
+            handles = [Patch(facecolor=ACCT_HBM, label="HBM hit"),
+                       Patch(facecolor=ACCT_OFFLOAD, label="offload hit"),
+                       Patch(facecolor=ACCT_MISS, label="miss: cold / evicted"),
+                       Patch(facecolor=ACCT_BLOCKED, hatch="////",
+                             label="miss: DRAM-full blocked")]
+            ax.legend(handles=handles, loc="upper right", frameon=False,
+                      fontsize=7)
             ax.set_xlim(-0.7, n - 0.2)
         ax.set_xticks(range(n))
-        ax.set_xticklabels([s["label"] for s in drawn], fontsize=8)
+        ax.set_xticklabels([_wrap_lbl(s["label"]) for s in drawn], fontsize=7.5)
         ax.set_title("KV lookup accounting — run total", loc="left",
                      fontsize=10, fontweight="bold", color=fg, pad=6)
         ax.set_ylabel("tokens", color=mut, fontsize=8)
@@ -1234,7 +1264,7 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         for sp in ("top", "right"):
             ax.spines[sp].set_visible(False)
         ax.grid(axis="y", color=grid, lw=0.6, zorder=0)
-        ax.tick_params(labelsize=8)
+        ax.tick_params(axis="y", labelsize=8)   # keep wrapped x labels at 7.5
 
     if left_cells:
         gs_tot = fig.add_gridspec(fam_nrow, fam_ncol, left=L, right=R,
