@@ -90,6 +90,7 @@ machine with a normal filesystem on NVMe.
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `--mode` | `replay` | `replay` (Mooncake-compatible) or `tiered-stress` (full storage stack) |
 | `--backend` | `disk` | `disk` or `certus` |
 | `--trace-dir` | `mooncake_traces/` | Trace files directory |
 | `--scenario` | `toolagent` | `conversation`, `synthetic`, `toolagent`, or `all` |
@@ -106,7 +107,12 @@ machine with a normal filesystem on NVMe.
 | `--shm-path` | `/dev/shm/certus-shmq` | shmq mailbox path (certus) |
 | `--gpu-device` | `0` | CUDA device (certus) |
 
-## How It Works
+## Benchmark Modes
+
+### `--mode replay` (default)
+
+Replays traces identically to Mooncake's original methodology. Use for
+comparison against Mooncake's published numbers.
 
 1. **Load trace**: JSONL file → list of `{timestamp, hash_ids, input_length, output_length}`
 2. **Layout**: MLA model config converts each request's `hash_ids` into page access requirements
@@ -118,6 +124,41 @@ machine with a normal filesystem on NVMe.
 
 This is exactly how Mooncake's benchmark works. The only difference is the
 storage backend behind the `read()`/`write()` calls.
+
+### `--mode tiered-stress`
+
+Exercises the full Certus storage stack — memory tier, SSD tier, eviction,
+and cold reads. Use as an optimization target for the Certus storage engine.
+
+Runs in three phases over the trace:
+
+1. **Populate phase** (first 50% of trace requests): Writes all pages using the
+   full logical ID space (no `--max-pages` cap). Pages fill the memory tier and
+   overflow to SSD. Read hits from the `exists()` set are also replayed, but
+   the memory tier is under write pressure so some reads will already be cold.
+
+2. **Cold-read phase** (next 25% of trace requests): All operations are forced
+   to `read()` regardless of `exists()` state. Because the populate phase filled
+   beyond the memory tier, many reads must come from SSD. This is where drive
+   count and page size actually matter.
+
+3. **Mixed phase** (final 25% of trace requests): Normal `exists()→read/write`
+   replay. New writes compete with the cold working set for memory tier space,
+   creating realistic eviction pressure.
+
+Each phase reports separate statistics. The combined report shows hot-hit rate,
+cold-read latency, eviction count, and how they change under mixed load.
+
+```bash
+# Tiered-stress with disk backend (smoke test, no server needed)
+python benchmark.py --backend disk --mode tiered-stress --scenario toolagent
+
+# Tiered-stress with Certus (exercises full SSD+DRAM stack)
+./run.sh --mode tiered-stress
+
+# Tiered-stress sweep over drive counts
+./run.sh --mode tiered-stress --sweep --sweep-drives "1 2 4"
+```
 
 ## Certus Backend — Full Data Path
 
@@ -194,6 +235,43 @@ The GPU buffer pool is reused round-robin across ops — no per-op CUDA allocati
 This matches how vLLM uses Certus (the KV-cache tensor is a single long-lived
 GPU allocation).
 
+## What the Original Mooncake Benchmark Measures
+
+Mooncake's `storage_benchmark_v1` is a **raw disk I/O microbenchmark** — not a
+tiered-cache test. It measures OS page-cache I/O latency through a simple flat
+file, with no DRAM tier, no SSD tier, and no eviction:
+
+- **`write()`** → `os.pwrite()` to a file. With the default `--fsync-mode none`,
+  writes land in the **Linux page cache** and never actually hit the disk.
+- **`read()`** → `os.pread()` from the same file. Served from page cache if the
+  page was recently written.
+- **`exists()`** → Python in-memory `set` tracking which page IDs have been
+  written. This is NOT a storage query — it's a local set membership check.
+- **No tiering, no eviction, no cold path.** The `DiskHashTable` backend is a
+  single flat file (or per-file directory). There is no concept of hot/cold data.
+
+The FAST25 traces themselves measure **KV cache prefix reuse patterns** — how
+much token-block sharing exists across inference requests (conversation turns,
+tool calls, system prompts). The storage benchmark replays those patterns against
+a simple file backend to measure I/O throughput for different page sizes.
+
+### Why our default mode matches
+
+Our benchmark (`--mode replay`, the default) faithfully reproduces the same
+`exists()→read/write` pattern. Everything hitting the Certus DRAM memory tier
+is analogous to everything hitting the OS page cache in Mooncake's original.
+Both measure the **hot-path data plane latency**. For an apples-to-apples
+comparison against Mooncake's published numbers, the default mode is correct.
+
+### Why tiered-stress mode goes further
+
+The original benchmark was never designed to test cold SSD reads, eviction
+pressure, or multi-drive scaling — because Mooncake's `DiskHashTable` doesn't
+have those capabilities. Certus does (DRAM memory tier + SSD tier with LRU
+eviction + SPDK multi-drive striping), so `--mode tiered-stress` exercises
+the paths the original leaves untested. Use it as an **optimization target**
+for the Certus storage stack, not for comparison against Mooncake.
+
 ## Comparing Against Mooncake
 
 Mooncake's FAST25 benchmark (`storage_benchmark_v1`) uses the same traces, same
@@ -209,7 +287,7 @@ layout layer, and same metrics format. The difference is the storage backend:
 To compare:
 
 1. Run Mooncake's benchmark on their hardware (or use their published numbers)
-2. Run this benchmark with `--backend certus` on Certus hardware
+2. Run this benchmark with `--backend certus --mode replay` on Certus hardware
 3. Compare QPS, read/write latency (avg, p50, p95, p99), and bandwidth
 
 The hit rate and write ratio will be identical (same trace, same layout, same

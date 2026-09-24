@@ -55,6 +55,7 @@ MEMORY_TIER_SIZE="4G"
 GPU_DEVICE=0
 DRIVE_COUNT=4
 MODEL="glm5"
+MODE="replay"
 SWEEP=false
 SWEEP_SIZES="1 2 3 4 5 6 7 8 9 10"
 SWEEP_SIZES_KIB=""                     # additional sub-MiB sizes in KiB (e.g. "160 400")
@@ -82,6 +83,7 @@ Options:
   --drive-count N          Use first N discovered NVMe drives (default: 4)
   --device-pci PCI         NVMe PCI address (repeatable; overrides --drive-count)
   --model MODEL            Model preset (default: glm5). Use --list-models for all.
+  --mode MODE              replay (default) or tiered-stress
   --sweep                  Page-size × drive-count sweep with HTML report
   --sweep-sizes "1 2 5 10" Page sizes in MiB (default: 1 2 3 4 5 6 7 8 9 10)
   --sweep-sizes-kib "160 400"  Additional page sizes in KiB (for sub-MiB models)
@@ -122,6 +124,7 @@ while [[ $# -gt 0 ]]; do
         --skip-build)       SKIP_BUILD=true; shift ;;
         --server-running)   SERVER_RUNNING=true; shift ;;
         --model)            MODEL="$2"; shift 2 ;;
+        --mode)             MODE="$2"; shift 2 ;;
         --sweep)            SWEEP=true; shift ;;
         --sweep-sizes)      SWEEP=true; SWEEP_SIZES="$2"; shift 2 ;;
         --sweep-sizes-kib)  SWEEP=true; SWEEP_SIZES_KIB="$2"; shift 2 ;;
@@ -284,6 +287,7 @@ fi
 # Benchmark common args (passed to benchmark.py)
 # ---------------------------------------------------------------------------
 BENCH_COMMON=(
+    --mode "$MODE"
     --scenario "$SCENARIO"
     --max-pages "$MAX_PAGES"
     --threads "$THREADS"

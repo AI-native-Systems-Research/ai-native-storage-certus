@@ -471,6 +471,209 @@ def run_multi_thread(
     }
 
 
+def run_tiered_stress(
+    trace_path: str,
+    model_config: dict,
+    backend: str = "disk",
+    storage_dir: str = "/tmp/certus_mooncake_bench",
+    max_requests: int = None,
+    page_size_tokens: int = 512,
+    file_mode: str = "single",
+    fsync_mode: str = "none",
+    fsync_batch_size: int = 100,
+    replay_scale: float = 0.0,
+    progress_interval: int = 100,
+    shm_path: str = "/dev/shm/certus-shmq",
+    gpu_device: int = 0,
+) -> Dict:
+    """Run tiered-stress benchmark: populate → cold-read → mixed phases.
+
+    Uses the full trace ID space (no max_pages cap) to overflow the memory tier
+    and force SSD reads. Reports separate stats per phase.
+    """
+    print(f"\n{'='*80}")
+    print(f"Running TIERED-STRESS: {Path(trace_path).name}")
+    print(f"Backend: {backend}")
+    print(f"{'='*80}")
+
+    replay = TraceReplay(trace_path)
+    requests = replay.load_all()
+    if max_requests:
+        requests = requests[:max_requests]
+
+    max_page_id = get_max_page_id(requests)
+    max_pages = max_page_id + 1
+    max_pages = ((max_pages + 999) // 1000) * 1000
+
+    layout = create_layout(model_config, page_size_tokens)
+    page_size_bytes = layout.value_size_bytes
+    total_size_gb = max_pages * page_size_bytes / (1024**3)
+
+    print(f"\n[Tiered-Stress Configuration]")
+    print(f"  Requests:     {len(requests):,}")
+    print(f"  Unique pages: {max_page_id + 1:,} (max_pages={max_pages:,})")
+    print(f"  Page size:    {page_size_bytes:,} bytes ({page_size_bytes / (1024*1024):.3f} MiB)")
+    print(f"  Total data:   {total_size_gb:.2f} GB")
+
+    n = len(requests)
+    split1 = n // 2
+    split2 = split1 + n // 4
+    phase_populate = requests[:split1]
+    phase_cold = requests[split1:split2]
+    phase_mixed = requests[split2:]
+    print(f"  Phase 1 (populate): {len(phase_populate):,} requests")
+    print(f"  Phase 2 (cold-read): {len(phase_cold):,} requests")
+    print(f"  Phase 3 (mixed):     {len(phase_mixed):,} requests")
+
+    storage_kwargs = {
+        "page_size": page_size_bytes,
+        "max_pages": max_pages,
+    }
+    if backend == "disk":
+        storage_kwargs.update({
+            "storage_dir": storage_dir,
+            "file_mode": file_mode,
+            "fsync_mode": fsync_mode,
+            "fsync_batch_size": fsync_batch_size,
+        })
+    elif backend == "certus":
+        storage_kwargs.update({
+            "shm_path": shm_path,
+            "gpu_device": gpu_device,
+        })
+
+    storage = create_storage(backend, **storage_kwargs)
+    benchmark = StorageBenchmark(
+        storage=storage,
+        model_config=model_config,
+        page_size_tokens=page_size_tokens,
+    )
+
+    phase_results = {}
+
+    def _reset_stats():
+        benchmark.stats = {
+            "total_requests": 0,
+            "total_tokens": 0,
+            "read_pages": 0,
+            "write_pages": 0,
+            "page_hits": 0,
+            "request_io_latencies_ms": [],
+            "request_wall_latencies_ms": [],
+        }
+        storage.stats["read_count"] = 0
+        storage.stats["write_count"] = 0
+        storage.stats["read_bytes"] = 0
+        storage.stats["write_bytes"] = 0
+        storage.stats["read_latencies_ms"] = []
+        storage.stats["write_latencies_ms"] = []
+        storage.stats["read_time_s"] = 0.0
+        storage.stats["write_time_s"] = 0.0
+        storage.stats["sync_count"] = 0
+        storage.stats["hit"] = 0
+        storage.stats["miss"] = 0
+
+    # Phase 1: Populate (normal exists→read/write replay)
+    print(f"\n{'─'*60}")
+    print(f"  Phase 1: POPULATE ({len(phase_populate)} requests)")
+    print(f"{'─'*60}")
+    start = time.perf_counter()
+    for i, req in enumerate(phase_populate, 1):
+        wait_for_replay_time(req, phase_populate[0].timestamp if phase_populate else 0, start, replay_scale)
+        benchmark.process_request(req)
+        if should_print_progress(i, len(phase_populate), progress_interval):
+            print_progress(i, len(phase_populate), start, benchmark.get_stats(), req)
+    elapsed = time.perf_counter() - start
+    phase_results["populate"] = {
+        "requests": len(phase_populate),
+        "elapsed_s": elapsed,
+        "qps": len(phase_populate) / elapsed if elapsed > 0 else 0,
+        **benchmark.get_stats(),
+    }
+    written_after_populate = len(storage._written_pages)
+
+    # Phase 2: Cold-read (force all ops to read, skip exists check)
+    print(f"\n{'─'*60}")
+    print(f"  Phase 2: COLD-READ ({len(phase_cold)} requests, all forced reads)")
+    print(f"{'─'*60}")
+    _reset_stats()
+    start = time.perf_counter()
+    for i, req in enumerate(phase_cold, 1):
+        wait_for_replay_time(req, phase_cold[0].timestamp if phase_cold else 0, start, replay_scale)
+        benchmark.stats["total_requests"] += 1
+        benchmark.stats["total_tokens"] += req.input_length + req.output_length
+        req_start = time.perf_counter()
+        io_latency_ms = 0.0
+        for access in benchmark.layout.get_operations(req):
+            latency = storage.read(access.page_id, access.offset_in_page, access.length)
+            if latency is not None:
+                io_latency_ms += latency
+                benchmark.stats["read_pages"] += 1
+        wall_ms = (time.perf_counter() - req_start) * 1000.0
+        benchmark.stats["request_io_latencies_ms"].append(io_latency_ms)
+        benchmark.stats["request_wall_latencies_ms"].append(wall_ms)
+        if should_print_progress(i, len(phase_cold), progress_interval):
+            print_progress(i, len(phase_cold), start, benchmark.get_stats(), req)
+    elapsed = time.perf_counter() - start
+    phase_results["cold_read"] = {
+        "requests": len(phase_cold),
+        "elapsed_s": elapsed,
+        "qps": len(phase_cold) / elapsed if elapsed > 0 else 0,
+        **benchmark.get_stats(),
+    }
+
+    # Phase 3: Mixed (normal exists→read/write replay)
+    print(f"\n{'─'*60}")
+    print(f"  Phase 3: MIXED ({len(phase_mixed)} requests)")
+    print(f"{'─'*60}")
+    _reset_stats()
+    start = time.perf_counter()
+    for i, req in enumerate(phase_mixed, 1):
+        wait_for_replay_time(req, phase_mixed[0].timestamp if phase_mixed else 0, start, replay_scale)
+        benchmark.process_request(req)
+        if should_print_progress(i, len(phase_mixed), progress_interval):
+            print_progress(i, len(phase_mixed), start, benchmark.get_stats(), req)
+    elapsed = time.perf_counter() - start
+    phase_results["mixed"] = {
+        "requests": len(phase_mixed),
+        "elapsed_s": elapsed,
+        "qps": len(phase_mixed) / elapsed if elapsed > 0 else 0,
+        **benchmark.get_stats(),
+    }
+
+    benchmark.close()
+
+    # Summary
+    print(f"\n{'='*80}")
+    print(f"  TIERED-STRESS SUMMARY")
+    print(f"{'='*80}")
+    print(f"  Pages written after populate: {written_after_populate:,}")
+    for phase_name, pr in phase_results.items():
+        storage_stats = pr.get("storage", {})
+        read_stats = storage_stats.get("read", {})
+        write_stats = storage_stats.get("write", {})
+        print(f"\n  [{phase_name}]")
+        print(f"    Requests:   {pr['requests']:,}  ({pr['qps']:.1f} QPS)")
+        print(f"    Read:  {read_stats.get('count', 0):,} ops, "
+              f"avg {read_stats.get('avg_ms', 0):.3f}ms, "
+              f"p99 {read_stats.get('p99_ms', 0):.3f}ms")
+        print(f"    Write: {write_stats.get('count', 0):,} ops, "
+              f"avg {write_stats.get('avg_ms', 0):.3f}ms, "
+              f"p99 {write_stats.get('p99_ms', 0):.3f}ms")
+
+    return {
+        "trace_file": Path(trace_path).name,
+        "mode": "tiered-stress",
+        "model": model_config["name"],
+        "backend": backend,
+        "total_requests": len(requests),
+        "max_pages": max_pages,
+        "page_size_bytes": page_size_bytes,
+        "written_after_populate": written_after_populate,
+        "phases": phase_results,
+    }
+
+
 def run_benchmark(
     trace_path: str,
     model_config: dict,
@@ -773,7 +976,10 @@ def print_results(results: List[Dict]):
         print(f"\n{'='*80}")
         print(f"  [{i}/{len(results)}] {r['trace_file']} ({r.get('backend', 'disk')})")
         print(f"{'='*80}")
-        print(format_storage_stats(r))
+        if r.get("mode") == "tiered-stress":
+            pass  # tiered-stress prints its own summary during execution
+        else:
+            print(format_storage_stats(r))
 
 
 # ============================================================================
@@ -788,6 +994,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["replay", "tiered-stress"],
+        default="replay",
+        help="Benchmark mode: replay (Mooncake-compatible, default) or "
+             "tiered-stress (populate → cold-read → mixed phases)",
+    )
     parser.add_argument(
         "--backend",
         type=str,
@@ -973,6 +1187,7 @@ def main():
     else:
         bpt = model_config['bytes_per_token']
         print(f"Model: {model_config['name']} ({bpt:,} bytes/token)")
+    print(f"Mode: {args.mode}")
     print(f"Backend: {args.backend}")
     replay_scales = parse_csv_floats(args.replay_scales)
     if not replay_scales:
@@ -1002,23 +1217,40 @@ def main():
                 run_dir = Path(args.storage_dir) / scenario
                 if use_scale_subdirs:
                     run_dir = run_dir / f"replay_{replay_scale:g}x"
-                result = run_benchmark(
-                    str(trace_path),
-                    model_config,
-                    backend=args.backend,
-                    storage_dir=str(run_dir),
-                    max_requests=args.max_requests,
-                    max_pages=args.max_pages,
-                    page_size_tokens=args.page_size_tokens,
-                    file_mode=args.file_mode,
-                    fsync_mode=args.fsync_mode,
-                    fsync_batch_size=args.fsync_batch_size,
-                    threads=args.threads,
-                    replay_scale=replay_scale,
-                    progress_interval=args.progress_interval,
-                    shm_path=args.shm_path,
-                    gpu_device=args.gpu_device,
-                )
+                if args.mode == "tiered-stress":
+                    result = run_tiered_stress(
+                        str(trace_path),
+                        model_config,
+                        backend=args.backend,
+                        storage_dir=str(run_dir),
+                        max_requests=args.max_requests,
+                        page_size_tokens=args.page_size_tokens,
+                        file_mode=args.file_mode,
+                        fsync_mode=args.fsync_mode,
+                        fsync_batch_size=args.fsync_batch_size,
+                        replay_scale=replay_scale,
+                        progress_interval=args.progress_interval,
+                        shm_path=args.shm_path,
+                        gpu_device=args.gpu_device,
+                    )
+                else:
+                    result = run_benchmark(
+                        str(trace_path),
+                        model_config,
+                        backend=args.backend,
+                        storage_dir=str(run_dir),
+                        max_requests=args.max_requests,
+                        max_pages=args.max_pages,
+                        page_size_tokens=args.page_size_tokens,
+                        file_mode=args.file_mode,
+                        fsync_mode=args.fsync_mode,
+                        fsync_batch_size=args.fsync_batch_size,
+                        threads=args.threads,
+                        replay_scale=replay_scale,
+                        progress_interval=args.progress_interval,
+                        shm_path=args.shm_path,
+                        gpu_device=args.gpu_device,
+                    )
                 results.append(result)
         else:
             print(f"Warning: Trace file not found: {trace_path}")
