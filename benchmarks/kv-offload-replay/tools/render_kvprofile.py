@@ -173,6 +173,9 @@ PROMO_RE = re.compile(
     r"\[tier-dbg\]\s+(?:round|FINAL)\s+promotion_attempts=(\d+)\s+"
     r"promotion_ok=(\d+)\s+promotion_blocked_dram_full=(\d+)"
     r"(?:[^\n]*?lookup_miss_cold=(\d+)\s+lookup_miss_evicted=(\d+))?"
+    r"(?:[^\n]*?tier_promotions_to_memory=(\d+)\s+"
+    r"tier_promotions_to_gpu=(\d+)\s+tier_evictions_from_memory=(\d+)\s+"
+    r"tier_evictions_from_ssd=(\d+))?"
 )
 
 # KV block size in tokens — the granularity of the block-denominated tier
@@ -424,20 +427,25 @@ def parse_tier_debug_log(path: str) -> dict:
     Returns {promo_key: [cumulative value per tick]} in log order (the per-round
     ticks plus the FINAL summary), for promotion_attempts / promotion_ok /
     promotion_blocked_dram_full and, when the log carries them, lookup_miss_cold /
-    lookup_miss_evicted. Empty if the run had TIER_DEBUG off (no such lines). Two
+    lookup_miss_evicted plus the four tier-movement counters (tier_promotions_to_memory,
+    tier_promotions_to_gpu, tier_evictions_from_memory, tier_evictions_from_ssd) —
+    the same names the Certus server.log carries, so the tiered connector populates
+    the same movement bars. Empty if the run had TIER_DEBUG off (no such lines). Two
     processes can emit these (an idle frontend logging zeros and the EngineCore
     doing the real work); since the counts are cumulative and rolled up with
     max(), the idle stream's zeros never displace the real totals."""
     cols = {k: [] for k in ("promotion_attempts", "promotion_ok",
                             "promotion_blocked_dram_full",
-                            "lookup_miss_cold", "lookup_miss_evicted")}
+                            "lookup_miss_cold", "lookup_miss_evicted",
+                            "tier_promotions_to_memory", "tier_promotions_to_gpu",
+                            "tier_evictions_from_memory", "tier_evictions_from_ssd")}
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 m = PROMO_RE.search(line)
                 if not m:
                     continue
-                a, k, b, cold, ev = m.groups()
+                a, k, b, cold, ev, pm, pg, em, es = m.groups()
                 cols["promotion_attempts"].append(int(a))
                 cols["promotion_ok"].append(int(k))
                 cols["promotion_blocked_dram_full"].append(int(b))
@@ -445,6 +453,13 @@ def parse_tier_debug_log(path: str) -> dict:
                 if cold is not None:
                     cols["lookup_miss_cold"].append(int(cold))
                     cols["lookup_miss_evicted"].append(int(ev))
+                # tier-movement counters are optional too (added after the
+                # cold/evicted pair → None on logs predating them).
+                if pm is not None:
+                    cols["tier_promotions_to_memory"].append(int(pm))
+                    cols["tier_promotions_to_gpu"].append(int(pg))
+                    cols["tier_evictions_from_memory"].append(int(em))
+                    cols["tier_evictions_from_ssd"].append(int(es))
     except OSError as e:
         print(f"warning: cannot read {path}: {e}", file=sys.stderr)
         return {}
