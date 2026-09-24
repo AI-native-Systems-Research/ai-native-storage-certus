@@ -35,14 +35,13 @@ because only keys cross the wire.
 
 **Primary Dependencies**: `clap` 4 (repo convention), `serde` + `serde_yaml`
 0.9 (matching `apps/certus-server-yaml`), `rand` 0.8 + **`rand_chacha`** for
-reproducible sampling, `parquet` **behind a non-default feature**,
-`hdrhistogram` (binaries only), `shm-queue` + `shmq-dispatcher` (the node agent
-only, since FR-079), `criterion` for benchmarks. No hashing crate — key
-derivation is a specified splitmix64 chain.
+reproducible sampling, `hdrhistogram` (binaries only), `shm-queue` +
+`shmq-dispatcher` (the node agent only, since FR-079), `criterion` for
+benchmarks. No hashing crate — key derivation is a specified splitmix64 chain.
 
-**Storage**: Output files only — a trace directory (JSONL and/or parquet with a
-`manifest.json`) and a plan serialisation. No database, no persistent state;
-the node agent holds none by design.
+**Storage**: Output files only — one file per requested projection, and a plan
+serialisation. No database, no persistent state, and no interchange format of
+our own (`research.md` D4); the node agent holds none by design.
 
 **Testing**: `cargo test` — unit, doc, and integration. Four of the five crates
 are default members, so `cargo test --all` covers the simulation core,
@@ -86,7 +85,7 @@ this section.*
 | **IV. Comprehensive Testing** | Unit + doc tests; wire contract tests; statistical tests; plan determinism; no hardware dependency; single-threaded-safe | **PASS** — three default-member crates carry it; conformance list in `contracts/node-agent-wire.md`, determinism in `quickstart.md` Scenario 2 |
 | **V. Performance Validation** | Criterion benchmarks; no per-op work proportional to payload; plan-generation cost benchmarked; n ≥ 8 for hardware claims | **PASS** — benchmark on the per-key path; payload is a pre-filled reusable buffer per `contracts/node-agent-wire.md` |
 | **VI. Documentation Standards** | Doc comments with runnable examples; warning-free `cargo doc`; input schema documented in contracts and the example validated as a test | **PASS** — `contracts/workload-input.example.yml` is exercised by Scenario 1 |
-| **VII. Maintainability** | YAGNI; minimal justified dependencies; explicit `Result`; readable structure | **PASS with one item to watch** — five crates is the largest structure here, justified below; `parquet` is a genuinely new dependency and is justified and feature-gated in `research.md` D4 |
+| **VII. Maintainability** | YAGNI; minimal justified dependencies; explicit `Result`; readable structure | **PASS with one item to watch** — five crates is the largest structure here, justified below; no new third-party dependency is introduced for output, because every format written is a projection rather than a container (`research.md` D4) |
 | **VIII. Measurement Validity** (NON-NEGOTIABLE) | Plan-queue depth asserted per run; virtual clock holds on backpressure; plan reproducible; races preserved and their consequence documented | **PASS** — exit code 3 puts invalidity in the process status, not only the report (`contracts/cli.md`); FR-072 enforced by the crate boundary |
 | **IX. Specified Statistical Machinery** | Inverse-transform truncation; half-open integer bounds; residual-life seeding; effective distributions reported; claims traceable | **PASS** — all four are invariants in `data-model.md`; the population measurements are reproducible in `research/population/`, which is also where the controller rationale's own retraction is recorded |
 
@@ -96,8 +95,8 @@ requirements mechanical instead of aspirational. A single crate would put the
 simulation core behind CUDA linkage, so User Story 2's "no accelerator"
 independent test could not run, and FR-072 would rely on nobody writing a
 second simulation path. Each crate boundary corresponds to a real constraint:
-CUDA-free testability, default-member membership, and the feature gate that
-keeps `parquet` out of the default build.
+CUDA-free testability, default-member membership, and keeping the projection
+writers testable with no accelerator and no server.
 
 **Post-Phase-1 re-check**: no new violations. Phase 1 added two contracts
 (`key-derivation.md`, `node-agent-wire.md`) that *strengthen* Principles VIII
@@ -121,8 +120,8 @@ specs/001-synthetic-workload-generator/
 │   ├── workload-input.example.yml       # NORMATIVE input schema
 │   ├── key-derivation.md               # Phase 1: keys, with test vectors
 │   ├── node-agent-wire.md              # Phase 1: TCP protocol
-│   ├── trace-io.md                     # Phase 1: the emitted trace
-│   ├── trace-interop.md                # Phase 1: convert targets, verified
+│   ├── trace-io.md                     # Phase 1: the per-turn record
+│   ├── trace-interop.md                # Phase 1: projection targets, verified
 │   └── cli.md                          # Phase 1: subcommands, reports, exit codes
 └── tasks.md                             # Phase 2 — NOT created by /speckit-plan
 ```
@@ -146,11 +145,11 @@ apps/workload-generator/
 │   │   └── benches/                     # per-key plan-generation cost
 │   ├── workload-trace/                  # default member, CUDA-free
 │   │   ├── src/
-│   │   │   ├── manifest.rs              # self-describing manifest, block_id_space
-│   │   │   ├── jsonl.rs
-│   │   │   ├── parquet.rs               # behind the `parquet` feature
-│   │   │   └── simulator.rs             # the D1 projection
-│   │   └── tests/                       # container equivalence, schema invariants
+│   │   │   ├── record.rs                # the per-turn record every writer reads
+│   │   │   ├── mooncake.rs              # Mooncake FAST'25 projection
+│   │   │   ├── cachesim.rs              # libCacheSim CSV and oracleGeneral
+│   │   │   └── qwen.rs                  # the D1 projection
+│   │   └── tests/                       # target conformance, record invariants
 │   ├── workload-wire/                   # default member, CUDA-free
 │   │   ├── src/{frame.rs,client.rs,server.rs}
 │   │   └── tests/                       # round-trip, oversize, truncation, Hello
@@ -175,7 +174,6 @@ User Story 2 and quickstart Scenarios 1–3 runnable anywhere.
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 | --- | --- | --- |
 | Five crates rather than one | A crate boundary is the only mechanism that makes FR-072 (identical plan across live and emit) enforceable rather than aspirational, and that keeps the simulation core CUDA-free so US2's no-accelerator test can run | One crate puts the core behind CUDA linkage: US2 becomes untestable without CUDA present, and FR-072 becomes an honour-system property that a second execution path could break invisibly |
-| New `parquet` dependency (nothing in the repo uses it today) | FR-055 makes parquet a required output container, and the trace's block-list columns repeat the whole prefix per turn, which is exactly where columnar compression earns its place | Hand-rolling a writer is not serious; a Python converter would make SC-004's "identical records" assertion span two runtimes instead of one test. Mitigated by a non-default feature so the default workspace build never pulls arrow |
 | `rand_chacha` alongside `rand` | `StdRng` and `SmallRng` are explicitly not reproducible across `rand` releases, and FR-012/FR-034 require a seed to reproduce a plan | Using `StdRng` would appear to work and silently break reproducibility on a dependency bump — the failure mode is a plan that no longer matches its own recorded seed |
 
 ## Phase Status

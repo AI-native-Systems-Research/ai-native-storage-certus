@@ -55,58 +55,58 @@
 //!
 //! # Examples
 //!
-//! Two interleaved sessions, each numbering its turns from zero. `chat_id` is a
-//! counter over emitted rows, so they do not collide, and each session's chain is
-//! rooted at −1:
+//! [`QwenWriter`] projects records as the simulation produces them. `chat_id` is a
+//! **turn**, globally unique, and `parent_chat_id` links it to the previous turn of the
+//! same session — the loader reconstructs a conversation by walking to the root.
 //!
 //! ```
-//! use workload_trace::qwen::convert_jsonl;
+//! use workload_trace::qwen::QwenWriter;
+//! use workload_trace::record::InvocationRecord;
 //!
-//! let trace = concat!(
-//!     r#"{"session_id":"a","invocation_index":0,"parent_invocation":-1,"request_start":0.0,"input_length":32,"output_length":16,"full_input_blocks":[1,2],"full_output_blocks":[3]}"#, "\n",
-//!     r#"{"session_id":"b","invocation_index":0,"parent_invocation":-1,"request_start":0.5,"input_length":32,"output_length":16,"full_input_blocks":[4,5],"full_output_blocks":[6]}"#, "\n",
-//!     r#"{"session_id":"a","invocation_index":1,"parent_invocation":0,"request_start":1.5,"input_length":48,"output_length":16,"full_input_blocks":[1,2,3],"full_output_blocks":[7]}"#, "\n",
-//! );
+//! fn rec(session: &str, index: i64, at: f64, input: Vec<u64>, output: Vec<u64>) -> InvocationRecord {
+//!     InvocationRecord {
+//!         trace_id: "demo".to_string(),
+//!         session_id: session.to_string(),
+//!         invocation_index: index,
+//!         parent_invocation: index - 1,
+//!         request_start: at,
+//!         request_end: None,
+//!         timestamp_kind: "virtual",
+//!         timestamp_is_synthetic: true,
+//!         model: None,
+//!         input_length: input.len() as i64 * 16,
+//!         output_length: output.len() as i64 * 16,
+//!         reuse_from: Vec::new(),
+//!         new_input_blocks: Vec::new(),
+//!         new_output_blocks: Vec::new(),
+//!         full_input_blocks: input,
+//!         full_output_blocks: output,
+//!         partial_final_valid: None,
+//!     }
+//! }
 //!
 //! let mut out = Vec::new();
-//! let stats = convert_jsonl(trace.as_bytes(), &mut out).unwrap();
-//! assert_eq!(stats.records, 3);
-//! assert_eq!(stats.sessions, 2);
-//! assert_eq!(stats.distinct_keys, 7);
-//!
-//! let text = String::from_utf8(out).unwrap();
-//! let lines: Vec<&str> = text.lines().collect();
-//! // Prompt blocks then the block this turn generated: key 3 is stored here...
-//! assert_eq!(lines[0], r#"{"chat_id":0,"parent_chat_id":-1,"timestamp":0.0,"turn":0,"type":"request","input_length":32,"output_length":16,"hash_ids":[1,2,3]}"#);
-//! assert_eq!(lines[1], r#"{"chat_id":1,"parent_chat_id":-1,"timestamp":0.5,"turn":0,"type":"request","input_length":32,"output_length":16,"hash_ids":[4,5,6]}"#);
-//! // ...and read back as part of a's next prompt, which also stores key 7. Session a's
-//! // second turn points at chat_id 0, not at the row before it.
-//! assert_eq!(lines[2], r#"{"chat_id":2,"parent_chat_id":0,"timestamp":1.5,"turn":1,"type":"request","input_length":48,"output_length":16,"hash_ids":[1,2,3,7]}"#);
-//! ```
-//!
-//! A chain that does not hold together is refused rather than silently reshaped:
-//!
-//! ```
-//! use workload_trace::qwen::convert_jsonl;
-//!
-//! // Claims a parent, but the converter has no earlier turn for this session.
-//! let orphan = r#"{"session_id":"a","invocation_index":3,"parent_invocation":2,"request_start":1.0,"input_length":16,"output_length":0,"full_input_blocks":[1],"full_output_blocks":[]}"#;
-//! let mut out = Vec::new();
-//! let err = convert_jsonl(orphan.as_bytes(), &mut out).unwrap_err();
-//! assert!(err.to_string().contains("silently reshaped"));
+//! let stats = {
+//!     let mut w = QwenWriter::new(&mut out);
+//!     w.write_record(&rec("a", 0, 0.0, vec![91, 92], vec![93])).unwrap();
+//!     w.write_record(&rec("a", 1, 1.0, vec![91, 92, 93], vec![94])).unwrap();
+//!     w.finish().unwrap()
+//! };
+//! assert_eq!(stats.records, 2);
+//! assert_eq!(stats.sessions, 1);
 //! ```
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::record::InvocationRecord;
 
 /// One record in the Qwen-Bailian format.
 ///
 /// Field order follows the format's own documented example, so a reader that has seen
-/// the real corpus sees ours the same way — and two runs of ours stay byte-comparable.
+/// a captured file sees ours the same way — and two runs of ours stay byte-comparable.
 ///
 /// `PartialEq` without `Eq`, because `timestamp` is an `f64`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -120,11 +120,11 @@ pub struct QwenRecord {
     /// The previous turn of the same session, or −1 at a session root.
     ///
     /// A parent *turn*, never a parent session. The format can express a tree — a real
-    /// corpus records a regenerated answer as a branch — but this generator's sessions
+    /// captured file records a regenerated answer as a branch — but this generator's sessions
     /// are append-only (`record.rs` sets `parent_invocation = index - 1`), so every
     /// chain we write is strictly linear.
     pub parent_chat_id: i64,
-    /// Virtual seconds on the run-global clock, as the corpus writes it (e.g. `61.1`).
+    /// Virtual seconds on the run-global clock, as the format writes it (e.g. `61.1`).
     pub timestamp: f64,
     /// 0-based turn index within the conversation, which is `invocation_index`.
     pub turn: i64,
@@ -142,21 +142,6 @@ pub struct QwenRecord {
 
 /// The fields the projection needs from a trace row.
 ///
-/// A reader of its own rather than deserialising [`InvocationRecord`]: the projection
-/// needs seven fields out of seventeen, and a narrow reader cannot be broken by a
-/// change to a field it does not use.
-#[derive(Debug, Clone, Deserialize)]
-struct Row {
-    session_id: String,
-    invocation_index: i64,
-    parent_invocation: i64,
-    request_start: f64,
-    input_length: i64,
-    output_length: i64,
-    full_input_blocks: Vec<u64>,
-    full_output_blocks: Vec<u64>,
-}
-
 /// One turn's inputs to the projection.
 ///
 /// A struct rather than eight positional arguments, which is both over clippy's limit
@@ -341,77 +326,70 @@ impl<W: Write> QwenWriter<W> {
     }
 }
 
-/// Convert an emitted JSONL trace into the simulator's shape.
-///
-/// The `convert` entry point: its input is the *schema*, so it works on any trace in
-/// it — including the real ones in the corpus, which is what makes a real workload and
-/// a generated one comparable through the identical projection (FR-075a).
-///
-/// # Errors
-///
-/// If a line is not a trace row, or the parent chain does not hold together.
-pub fn convert_jsonl<R: BufRead, W: Write>(input: R, output: W) -> io::Result<QwenStats> {
-    let mut writer = QwenWriter::new(output);
-    for (lineno, line) in input.lines().enumerate() {
-        let line = line?;
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let row: Row = serde_json::from_str(line).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("line {}: not a trace row: {e}", lineno + 1),
-            )
-        })?;
-        writer.write_parts(Parts {
-            session_id: &row.session_id,
-            invocation_index: row.invocation_index,
-            parent_invocation: row.parent_invocation,
-            request_start: row.request_start,
-            input_length: row.input_length,
-            output_length: row.output_length,
-            input: &row.full_input_blocks,
-            output: &row.full_output_blocks,
-        })?;
-    }
-    writer.finish()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// A row with no generated blocks, so these tests' counts stay about the prompt.
     /// `row_with_output` covers the generated run.
-    fn row(session: &str, index: i64, blocks: &[u64]) -> String {
+    ///
+    /// Projected through `QwenWriter`, the path `emit` takes, so what is asserted is a
+    /// claim about the Qwen-Bailian shape.
+    fn row(session: &str, index: i64, blocks: &[u64]) -> InvocationRecord {
         row_with_output(session, index, blocks, &[])
     }
 
-    fn row_with_output(session: &str, index: i64, input: &[u64], output: &[u64]) -> String {
-        let parent = index - 1;
-        // Lengths in tokens at the shipped 16-token geometry, and one virtual second per
-        // turn: the projection now carries all four, so a test row must supply them.
-        let (il, ol) = (input.len() as i64 * 16, output.len() as i64 * 16);
-        let at = index as f64;
-        format!(
-            r#"{{"session_id":"{session}","invocation_index":{index},"parent_invocation":{parent},"request_start":{at},"input_length":{il},"output_length":{ol},"full_input_blocks":{input:?},"full_output_blocks":{output:?}}}"#
-        )
+    fn row_with_output(
+        session: &str,
+        index: i64,
+        input: &[u64],
+        output: &[u64],
+    ) -> InvocationRecord {
+        InvocationRecord {
+            trace_id: "t".to_string(),
+            session_id: session.to_string(),
+            invocation_index: index,
+            parent_invocation: index - 1,
+            request_start: index as f64,
+            request_end: None,
+            timestamp_kind: "virtual",
+            timestamp_is_synthetic: true,
+            model: None,
+            input_length: input.len() as i64 * 16,
+            output_length: output.len() as i64 * 16,
+            reuse_from: Vec::new(),
+            new_input_blocks: Vec::new(),
+            new_output_blocks: Vec::new(),
+            full_input_blocks: input.to_vec(),
+            full_output_blocks: output.to_vec(),
+            partial_final_valid: None,
+        }
+    }
+
+    /// Project records through the writer, returning the bytes and the stats.
+    fn project(records: &[InvocationRecord]) -> io::Result<(Vec<u8>, QwenStats)> {
+        let mut out = Vec::new();
+        let stats = {
+            let mut w = QwenWriter::new(&mut out);
+            for r in records {
+                w.write_record(r)?;
+            }
+            w.finish()?
+        };
+        Ok((out, stats))
     }
 
     #[test]
     fn chat_ids_are_unique_across_sessions() {
         // The failure this guards: the loader keeps ONE chat_id -> root map, so two
         // sessions numbering turns from zero would be merged into one conversation.
-        let input = format!(
-            "{}\n{}\n{}\n{}\n",
+        let input = vec![
             row("a", 0, &[1, 2]),
             row("b", 0, &[3, 4]),
             row("a", 1, &[1, 2, 5]),
             row("b", 1, &[3, 4, 6]),
-        );
-        let mut out = Vec::new();
-        let stats = convert_jsonl(input.as_bytes(), &mut out).unwrap();
+        ];
+        let (out, stats) = project(&input).unwrap();
         assert_eq!(stats.records, 4);
         assert_eq!(stats.sessions, 2);
 
@@ -430,14 +408,12 @@ mod tests {
 
     #[test]
     fn each_session_forms_one_chain_rooted_at_minus_one() {
-        let input = format!(
-            "{}\n{}\n{}\n",
+        let input = vec![
             row("a", 0, &[1]),
             row("a", 1, &[1, 2]),
             row("a", 2, &[1, 2, 3]),
-        );
-        let mut out = Vec::new();
-        convert_jsonl(input.as_bytes(), &mut out).unwrap();
+        ];
+        let (out, _) = project(&input).unwrap();
         let rows: Vec<serde_json::Value> = String::from_utf8(out)
             .unwrap()
             .lines()
@@ -452,47 +428,17 @@ mod tests {
     fn a_row_with_no_blocks_is_dropped_and_counted() {
         // The loader skips these, so emitting them would make the file's row count
         // disagree with what the simulator actually replays.
-        let input = format!("{}\n{}\n", row("a", 0, &[]), row("a", 0, &[7]));
-        let mut out = Vec::new();
-        let stats = convert_jsonl(input.as_bytes(), &mut out).unwrap();
+        let input = vec![row("a", 0, &[]), row("a", 0, &[7])];
+        let (out, stats) = project(&input).unwrap();
         assert_eq!(stats.dropped_empty, 1);
         assert_eq!(stats.records, 1);
         assert_eq!(String::from_utf8(out).unwrap().lines().count(), 1);
     }
 
     #[test]
-    fn a_broken_parent_chain_is_refused_rather_than_silently_reshaped() {
-        // The whole reason the link is checked: a wrong chain still LOADS. The loader
-        // would collapse or split conversations and a lineage-aware policy would score
-        // against a workload nobody described.
-        let orphan = &row_with_output("a", 3, &[1], &[]);
-        let mut out = Vec::new();
-        let err = convert_jsonl(orphan.as_bytes(), &mut out).unwrap_err();
-        assert!(
-            err.to_string().contains("silently reshaped"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn a_root_that_claims_a_parent_is_refused_too() {
-        let input = format!("{}\n{}\n", row("a", 0, &[1]), row("a", 0, &[1, 2]));
-        // The second row claims index 0 with parent -1, but the session already has a
-        // turn on record — an ambiguity, not a chain.
-        let mut out = Vec::new();
-        let err = convert_jsonl(input.as_bytes(), &mut out).unwrap_err();
-        assert!(err.to_string().contains("silently reshaped"));
-    }
-
-    #[test]
     fn statistics_match_the_rows_written() {
-        let input = format!(
-            "{}\n{}\n",
-            row("a", 0, &[1, 2, 3]),
-            row("a", 1, &[1, 2, 3, 4]),
-        );
-        let mut out = Vec::new();
-        let stats = convert_jsonl(input.as_bytes(), &mut out).unwrap();
+        let input = vec![row("a", 0, &[1, 2, 3]), row("a", 1, &[1, 2, 3, 4])];
+        let (_, stats) = project(&input).unwrap();
         assert_eq!(stats.records, 2);
         assert_eq!(stats.key_references, 7);
         assert_eq!(stats.distinct_keys, 4);
@@ -504,13 +450,11 @@ mod tests {
         // Both are accesses, and the store belongs at the turn that produced it. The
         // last turn's output is the case prompt-only lost completely: nothing reads it,
         // so it appeared nowhere while the real cache still held it.
-        let trace = format!(
-            "{}\n{}\n",
+        let trace = vec![
             row_with_output("a", 0, &[1, 2], &[3]),
             row_with_output("a", 1, &[1, 2, 3], &[4]),
-        );
-        let mut out = Vec::new();
-        let stats = convert_jsonl(trace.as_bytes(), &mut out).unwrap();
+        ];
+        let (out, stats) = project(&trace).unwrap();
 
         assert_eq!(stats.records, 2);
         assert_eq!(stats.key_references, 3 + 4);
@@ -530,13 +474,11 @@ mod tests {
         // A turn with an empty prompt still stores what it generated, so it is a record
         // rather than a dropped-empty. Only a turn that touches no blocks at all is
         // dropped, because the loader skips those.
-        let trace = format!(
-            "{}\n{}\n",
+        let trace = vec![
             row_with_output("a", 0, &[], &[9]),
             row_with_output("b", 0, &[], &[]),
-        );
-        let mut out = Vec::new();
-        let stats = convert_jsonl(trace.as_bytes(), &mut out).unwrap();
+        ];
+        let (_, stats) = project(&trace).unwrap();
         assert_eq!(stats.records, 1);
         assert_eq!(stats.dropped_empty, 1);
         assert_eq!(stats.key_references, 1);
@@ -544,9 +486,7 @@ mod tests {
 
     #[test]
     fn the_declared_losses_name_what_this_shape_cannot_carry() {
-        let mut out = Vec::new();
-        let stats =
-            convert_jsonl(format!("{}\n", row("a", 0, &[1, 2])).as_bytes(), &mut out).unwrap();
+        let (_, stats) = project(&[row("a", 0, &[1, 2])]).unwrap();
         let losses = stats.declared_losses();
         for expected in [
             "session identity",
@@ -559,8 +499,8 @@ mod tests {
             );
         }
         // Virtual time must NOT be declared lost: the format has a `timestamp` field and
-        // we fill it. A stale entry here would send a reader to the native trace for
-        // something this file carries.
+        // we fill it. A stale entry here would send a reader elsewhere for something this
+        // file carries.
         assert!(
             !losses.iter().any(|l| l.contains("virtual time")),
             "timestamp is carried now: {losses:?}"
@@ -576,9 +516,8 @@ mod tests {
 
         // And when rows *are* dropped it says so, with the count — the file's row count
         // disagreeing with the trace's is otherwise unexplained.
-        let with_empty = format!("{}\n{}\n", row("a", 0, &[]), row("a", 0, &[1]));
-        let mut out2 = Vec::new();
-        let dropped = convert_jsonl(with_empty.as_bytes(), &mut out2).unwrap();
+        let with_empty = vec![row("a", 0, &[]), row("a", 0, &[1])];
+        let (_, dropped) = project(&with_empty).unwrap();
         assert_eq!(dropped.dropped_empty, 1);
         assert!(
             dropped

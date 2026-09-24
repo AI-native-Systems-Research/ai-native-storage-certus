@@ -1,45 +1,25 @@
-# Contract: Emitted Trace
+# Contract: The Invocation Record
 
 **Version**: 1
 **Status**: Draft
 **Produced by**: `workload-gen emit`
-**Normative for**: `workload-trace`, and any tool that reads a trace this
-feature wrote.
+**Normative for**: `workload-trace`, and any tool reading a file it wrote.
 
-This is the shape an emit run writes. One schema, two containers holding
-identical records (spec FR-055), plus a manifest that tells a reader what the
-trace supports without the reader having to recognise which trace it is
-(FR-056).
+An emit run writes **projections** — one other tool's format per requested
+flag — and every one of them is written from a single per-turn record. This
+contract specifies that record and the invariants it satisfies. What each
+target format does with it is `trace-interop.md`.
 
-**The schema is not ours.** It is the normalisation layer another team built
-over the public LLM-trace formats, and the corpus at `traces/` (24 traces) is
-already in it. We adopted it rather than inventing one, so a generated workload
-and a real trace are interchangeable inputs to the same analysis — which is the
-whole point of emitting a file at all. `research.md` D8 records why it is the
-right superset, and `trace-interop.md` records what we convert it *to*.
+The record is not itself written to disk. It exists so that the three
+projections are written from one description of a turn rather than three, which
+is what lets them be compared to each other and to the report's own counts
+(FR-056). A projection is not a trace: it is lossy on purpose, not
+self-describing, and never accepted in place of the description and seed when
+reproducibility is being checked (FR-072, FR-075b).
 
-**Scope: emitting only.** The full schema also describes a delta encoding and a
-`field_status` capability system, which exist because real traces disagree
-about what they carry. We always write the same thing — the full encoding, with
-every field we support populated — so this contract specifies that case and
-does not re-specify the reader side. Reading real traces in this schema belongs
-to fitting, which is out of scope (spec, Out of scope).
-
-## Layout
-
-```text
-<output_dir>/
-  manifest.json                              # written LAST (see Completeness)
-  invocations/block_size_<N>/part-*.jsonl     # or .parquet, or both
-```
-
-`block_size` counts **tokens per block**, exactly as the corpus's own traces
-do, and appears in the path so the directory is self-locating even if the
-manifest is lost. (An earlier revision of this contract made it a count of
-blocks and put `input_length` in blocks too. That was a mistake: deviating on
-those fields would break the field-level comparability with real traces that
-this whole format exists for.) There is no `blocks/` directory: block role is a
-property real traces recover from text, and we do not model it.
+**Scope: emitting only.** Nothing here specifies a reader for a captured trace.
+Reading real traces belongs to fitting, which is out of scope (spec, Out of
+scope).
 
 ## The invocation record
 
@@ -49,7 +29,7 @@ session of 135 turns is 135 records, tied together by `session_id` and
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `trace_id` | string | the run's identifier, from the manifest |
+| `trace_id` | string | the run's identifier |
 | `session_id` | string | the session this turn belongs to |
 | `invocation_index` | int64 | 0-based position within the session |
 | `parent_invocation` | int64 | previous turn, or −1 at a session root |
@@ -58,7 +38,7 @@ session of 135 turns is 135 records, tied together by `session_id` and
 | `timestamp_kind` | string | always `start` |
 | `timestamp_is_synthetic` | bool | always `true` — the clock is virtual |
 | `model` | string | null; this feature does not model models |
-| `input_length`, `output_length` | int64 | **tokens**, as the corpus does — `blocks * block_size` |
+| `input_length`, `output_length` | int64 | **tokens** — `blocks * block_size` |
 | `reuse_from` | list\<int64\> | invocation indices whose blocks this re-reads |
 | `new_input_blocks` | list\<u64\> | input keys first minted at this turn |
 | `new_output_blocks` | list\<u64\> | output keys first minted at this turn |
@@ -66,64 +46,47 @@ session of 135 turns is 135 records, tied together by `session_id` and
 | `full_output_blocks` | list\<u64\> | the complete ordered output key list |
 | `partial_final_valid` | int64 | always **null**: this generator mints whole blocks |
 
+Lengths are in **tokens** rather than blocks because that is the unit every
+target format states them in, so converting at the boundary would mean each
+projection re-deriving the same figure and being able to disagree about it.
+
 **`request_end` is null, not equal to `request_start`.** A turn occupies a
 single virtual instant because nothing here models service time, so a duration
 of zero would be a measurement this generator did not make. The same rule as
 the emit report's omitted fields (FR-071): a zero is indistinguishable from a
 real result.
 
-`parent_invocations` (the fan-in form) is **absent**, because a session's chain
-is a path and not a graph (spec, Out of scope). A reader must treat an absent
-`parent_invocations` as empty rather than as unknown.
+A fan-in form of `parent_invocation` is **absent**, because a session's chain
+is a path and not a graph (spec, Out of scope). A consumer must treat the
+absence as empty rather than as unknown.
 
-## One record per line means the file streams
+## One record per turn means every projection streams
 
-An emit run walks virtual time and writes each record as its turn is simulated.
-Nothing is buffered, and the file is in clock order.
+An emit run walks virtual time and writes each record's projections as its turn
+is simulated. Nothing is buffered, and every output is in clock order.
 
 This is worth stating because the alternative is a real trap: a format that
-groups by session cannot write a session's record until that session **ends**,
-so emitting it means holding every in-flight session in memory. At the
-concurrency this feature targets that is hundreds of megabytes, held to produce
-a file that is being streamed to disk anyway. See `trace-interop.md` for the
-format where this was measured.
+groups by session cannot write a session's row until that session **ends**, so
+emitting it means holding every in-flight session in memory. At the concurrency
+this feature targets that is hundreds of megabytes, held to produce a file that
+is being streamed to disk anyway. See `trace-interop.md` for the format where
+this was measured.
 
 ## Keys are chained u64, not dense mint-order integers
 
-The corpus's own traces number blocks densely in creation order. We do not: a
-key is the 64-bit chained value `contracts/key-derivation.md` specifies,
+A key is the 64-bit chained value `contracts/key-derivation.md` specifies,
 because stateless prefix derivation is what removes a global trie from the
-per-key hot path.
+per-key hot path. It is **not** an index in creation order.
 
-The manifest therefore declares `block_id_space` (FR-057), and a consumer must
-read it rather than assume density. Anything that treats an identifier as an
-index into a dense array will break on our traces, and it should break loudly
-at the manifest rather than silently at the first key.
+Published formats generally do number blocks densely, so a projection onto one
+of them either carries our identifiers as opaque 64-bit values or declares the
+divergence as a loss (FR-057, FR-077). Anything that treats an identifier as an
+index into a dense array will break on these outputs, which is why no output
+implies density it does not have.
 
-## The manifest
+## Invariants every record satisfies
 
-Written **last**. Every field a reader needs to interpret the records:
-
-| Field | Value we write |
-| --- | --- |
-| `trace_id` | the run's identifier |
-| `source_class` | `pre_hashed` — we mint keys, never text |
-| `provenance` | `synthetic` |
-| `id_semantics` | `rolling_prefix` |
-| `block_id_space` | `chained_u64` — **not** dense mint order (FR-057) |
-| `key_derivation_version` | the version in `key-derivation.md` |
-| `block_size`, `block_sizes_available` | block geometry |
-| `time_unit`, `time_origin` | `seconds`, `run_start` |
-| `timestamp_kind`, `timestamp_is_synthetic` | `start`, `true` |
-| `encoding` | `full` — both `full_*` and `new_*` populated |
-| `censoring` | `{left: false, right: true}` — the span ended the run |
-| `tokenizer_name`, `chat_template_id` | null; there is no text |
-| `description_digest`, `seed` | reproduction parameters (FR-072) |
-| `block_stats` | sessions, invocations, distinct keys |
-
-## Invariants every row satisfies
-
-FR-058 requires these to hold on every emitted row, not on a sample:
+FR-058 requires these to hold on every record, not on a sample:
 
 1. `len(full_input_blocks) * block_size == input_length`, and likewise for
    output — exact, with no rounding, because every block is whole.
@@ -132,22 +95,15 @@ FR-058 requires these to hold on every emitted row, not on a sample:
 3. `new_input_blocks` is the suffix of `full_input_blocks` not present in any
    earlier turn of the session; the prefix before it is exactly the reuse.
 4. Every key in `full_*` is reproducible from `key-derivation.md` given the
-   manifest's salt fields — which is what lets a consumer verify a trace it did
-   not produce.
+   description and seed — which is what lets a consumer verify keys it did not
+   produce.
 5. `partial_final_valid` is in `1..=block_size`, or null when the final block
    is whole.
-6. `request_start` is non-decreasing across the file.
-
-## Completeness is structural, not a flag
-
-The manifest is written last, so **a directory without one is incomplete by
-construction** (FR-073). There is no "complete" flag to get wrong, and a run
-that dies of a full filesystem leaves a directory that no reader will accept.
+6. `request_start` is non-decreasing across the run.
 
 ## Versioning
 
-The record and manifest field names above are pinned. If they have to change
-once traces exist, that is a **new version** recorded in the manifest, never an
-edit — the same rule and the same reason as `key-derivation.md`'s Versioning
-section: an edit produces a trace that loads, replays, and means something
-different.
+The field names above are pinned. If they have to change, that is a **new
+version** and never an edit — the same rule and the same reason as
+`key-derivation.md`'s Versioning section: an edit produces an output that
+loads, replays, and means something different.

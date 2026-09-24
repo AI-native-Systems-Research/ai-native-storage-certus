@@ -24,8 +24,7 @@ use eviction_replay_benchmark::replay;
 use tempfile::TempDir;
 use workload_model::description::WorkloadDescription;
 use workload_model::sim::Simulation;
-use workload_trace::jsonl::JsonlWriter;
-use workload_trace::qwen::{convert_jsonl, QwenWriter};
+use workload_trace::qwen::QwenWriter;
 use workload_trace::record::InvocationRecord;
 
 const BLOCK_SIZE: u64 = 16;
@@ -59,7 +58,7 @@ session_classes:
     .unwrap()
 }
 
-/// Emit a trace, convert it, and load the conversion in the simulator.
+/// A projected run, plus what the projection and the simulator each counted.
 struct Converted {
     trace: replay::Trace,
     sessions_in_run: u64,
@@ -71,26 +70,30 @@ struct Converted {
 fn run(seed: u64, span: f64, dir: &std::path::Path) -> Converted {
     let d = description();
 
-    // Emit, straight through the real writer.
-    let jsonl_path = dir.join("trace.jsonl");
-    let mut sim = Simulation::new(&d, seed, 1).unwrap();
-    let file = std::fs::File::create(&jsonl_path).unwrap();
-    let mut writer = JsonlWriter::new(BufWriter::new(file), "sim", BLOCK_SIZE);
-    sim.run_until(span, &mut |s, t| writer.write(s, t).unwrap());
-    let stats = writer.finish().unwrap();
-
-    // Convert.
+    // Project straight through `QwenWriter::write_record`, the path `emit` takes, and read
+    // the result back through another app's loader rather than our own — reading our own
+    // writing would only prove the two halves of this crate agree.
     let sim_path = dir.join("sim.jsonl");
-    let input = std::io::BufReader::new(std::fs::File::open(&jsonl_path).unwrap());
-    let out = BufWriter::new(std::fs::File::create(&sim_path).unwrap());
-    let converted = convert_jsonl(input, out).unwrap();
+    let mut sim = Simulation::new(&d, seed, 1).unwrap();
+    let mut sessions = std::collections::BTreeSet::new();
+    let converted = {
+        let out = BufWriter::new(std::fs::File::create(&sim_path).unwrap());
+        let mut writer = QwenWriter::new(out);
+        sim.run_until(span, &mut |s, t| {
+            sessions.insert(s.id());
+            writer
+                .write_record(&InvocationRecord::from_turn("sim", s, t, BLOCK_SIZE))
+                .unwrap();
+        });
+        writer.finish().unwrap()
+    };
 
     Converted {
         // `None` is "no conversation cap", which this file requires rather than
         // merely prefers: every assertion below compares the loader's counts against
         // the whole converted trace, so a cap would make them disagree by design.
         trace: replay::load(&sim_path, None).expect("the simulator must load the conversion"),
-        sessions_in_run: stats.sessions,
+        sessions_in_run: sessions.len() as u64,
         converter_distinct: converted.distinct_keys,
         converter_references: converted.key_references,
         converter_records: converted.records,
@@ -164,40 +167,4 @@ fn every_sessions_turns_stay_in_order_within_the_conversion() {
     // chain-walking was never exercised.
     assert!(seen.values().any(|n| *n > 1), "no multi-turn session");
     assert!(seen.values().all(|n| *n >= 1));
-}
-
-#[test]
-fn the_projection_is_the_same_whichever_entry_point_produced_it() {
-    // FR-075a: `emit`'s in-stream path and `convert`'s stored-trace path must use the
-    // same projection, or a trace and its conversion could disagree about the workload.
-    let tmp = TempDir::new().unwrap();
-    let d = description();
-    let span = 400.0;
-
-    // In-stream: build records as turns happen and project them directly.
-    let mut sim = Simulation::new(&d, 25, 1).unwrap();
-    let mut direct: Vec<u8> = Vec::new();
-    let mut w = QwenWriter::new(&mut direct);
-    sim.run_until(span, &mut |s, t| {
-        let record = InvocationRecord::from_turn("sim", s, t, BLOCK_SIZE);
-        w.write_record(&record).unwrap();
-    });
-    let direct_stats = w.finish().unwrap();
-
-    // Via a stored trace.
-    let jsonl_path = tmp.path().join("trace.jsonl");
-    let mut sim = Simulation::new(&d, 25, 1).unwrap();
-    let file = std::fs::File::create(&jsonl_path).unwrap();
-    let mut writer = JsonlWriter::new(BufWriter::new(file), "sim", BLOCK_SIZE);
-    sim.run_until(span, &mut |s, t| writer.write(s, t).unwrap());
-    writer.finish().unwrap();
-    let mut through_file: Vec<u8> = Vec::new();
-    let input = std::io::BufReader::new(std::fs::File::open(&jsonl_path).unwrap());
-    let file_stats = convert_jsonl(input, &mut through_file).unwrap();
-
-    assert_eq!(direct_stats, file_stats, "the two entry points disagree");
-    assert_eq!(
-        direct, through_file,
-        "the two entry points produced different bytes"
-    );
 }

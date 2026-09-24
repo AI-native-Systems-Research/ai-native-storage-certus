@@ -28,15 +28,6 @@
 use serde::Serialize;
 use workload_model::project::Projection;
 
-/// Which containers a run wrote, and how many records went into each.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct ContainerRecords {
-    /// Rows written to JSONL, if that container was requested.
-    pub jsonl: Option<u64>,
-    /// Rows written to parquet, if that container was requested.
-    pub parquet: Option<u64>,
-}
-
 /// Everything needed to reproduce the run that produced a trace (FR-072).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Reproduction {
@@ -68,7 +59,7 @@ pub struct EmitReport {
     ///
     /// Less than `sessions_started` at the end of any run, because the span cuts
     /// the last generation short — that is right-censoring, not an error, and the
-    /// manifest declares it.
+    /// report declares it by carrying both figures.
     pub sessions_completed: u64,
     /// Turns emitted; one LLM request each.
     pub invocations: u64,
@@ -78,8 +69,6 @@ pub struct EmitReport {
     pub block_references: u64,
     /// Virtual seconds covered — the span asked for, not the busiest part of it.
     pub virtual_span: f64,
-    /// Rows per container.
-    pub records: ContainerRecords,
     /// How fast the plan was generated, **labelled** because it is wallclock.
     ///
     /// This is the generator's own speed and says nothing about any server. See the
@@ -130,9 +119,7 @@ impl EmitReport {
     /// # Examples
     ///
     /// ```
-    /// use workload_gen::report::{
-    ///     ContainerRecords, EmitReport, ProjectionSummary, Reproduction,
-    /// };
+    /// use workload_gen::report::{EmitReport, ProjectionSummary, Reproduction};
     ///
     /// let report = EmitReport {
     ///     run_kind: "emit",
@@ -142,7 +129,6 @@ impl EmitReport {
     ///     blocks_minted: 642,
     ///     block_references: 1_908,
     ///     virtual_span: 300.0,
-    ///     records: ContainerRecords { jsonl: Some(214), parquet: None },
     ///     generation_rate_invocations_per_second: 178_000.0,
     ///     generation_wallclock_seconds: 0.0012,
     ///     reproduction: Reproduction {
@@ -165,7 +151,7 @@ impl EmitReport {
     /// // The one wallclock figure allowed, and it says whose speed it is.
     /// assert!(text.contains("not a server result"));
     /// // Fewer completed than started is right-censoring: the span cut the last
-    /// // generation short, and the manifest declares it.
+    /// // generation short, and both figures are reported rather than one.
     /// assert!(text.contains("40 started, 31 completed"));
     ///
     /// // And the structured form carries no latency, lane or ratio field at all —
@@ -192,12 +178,6 @@ impl EmitReport {
             self.block_references,
             self.projection.key_references
         ));
-        if let Some(n) = self.records.jsonl {
-            out.push_str(&format!("  jsonl records     {n}\n"));
-        }
-        if let Some(n) = self.records.parquet {
-            out.push_str(&format!("  parquet records   {n}\n"));
-        }
         out.push_str(&format!(
             "  generation        {:.0} invocations/s over {:.2} s wallclock \
              (the generator's own speed, not a server result)\n",
@@ -243,10 +223,6 @@ mod tests {
             blocks_minted: 12_000,
             block_references: 900_000,
             virtual_span: 1_000.0,
-            records: ContainerRecords {
-                jsonl: Some(4_000),
-                parquet: None,
-            },
             generation_rate_invocations_per_second: 250_000.0,
             generation_wallclock_seconds: 0.016,
             reproduction: Reproduction {
@@ -312,17 +288,6 @@ mod tests {
         assert!(text.contains("--seed 42"));
         assert!(text.contains("--until 1000"));
         assert!(text.contains("0123456789abcdef"), "no description digest");
-    }
-
-    #[test]
-    fn a_container_that_was_not_written_is_absent_rather_than_zero() {
-        // The same rule as the live-only fields, one level down: `parquet: 0` would
-        // read as "wrote a parquet trace with no rows in it".
-        let r = report();
-        assert!(r.records.parquet.is_none());
-        assert!(!r.render().contains("parquet records"));
-        let json = r.to_json().unwrap();
-        assert!(json.contains("\"parquet\": null"), "got:\n{json}");
     }
 
     #[test]
@@ -490,6 +455,22 @@ pub struct Schedule {
     /// Whether it stayed inside that.
     pub kept: bool,
 }
+
+/// The share of lane-time a work-conserving run may spend waiting for the producer before
+/// its throughput stops describing Certus (FR-062).
+///
+/// Here rather than in `live`, because it bounds [`QueueStats::producer_wait_fraction`] and
+/// the rendering of that field has to read it — `live` is a non-default feature, so a
+/// constant owned there would be unavailable to exactly the module that reports on it.
+///
+/// Not zero, and that is the point. Every lane's queue is empty at `t = 0`, so a consumer
+/// cannot help waiting while the producer gets ahead; requiring zero made **every**
+/// work-conserving run invalid, which is how this tolerance came to exist. Measured on the
+/// four-instance stress run, that startup wait is microseconds against a 180-second window —
+/// six orders of magnitude below this bound — while a producer that genuinely could not keep
+/// up would spend seconds per lane and exceed it by a wide margin. 1% therefore separates the
+/// unavoidable from the disqualifying without sitting near either.
+pub const DEFAULT_PRODUCER_WAIT_TOLERANCE: f64 = 0.01;
 
 /// The plan queue's own figures (FR-037, FR-062).
 ///
@@ -846,9 +827,7 @@ impl LiveReport {
             // fill. The wait figure tells the two apart, so it decides the wording.
             if self.queue.producer_blocked > 0 {
                 " (backpressure working: the queue filled, so the generator was ahead)"
-            } else if self.queue.producer_wait_fraction
-                <= crate::live::DEFAULT_PRODUCER_WAIT_TOLERANCE
-            {
+            } else if self.queue.producer_wait_fraction <= DEFAULT_PRODUCER_WAIT_TOLERANCE {
                 " (the queue never filled, and the lanes never waited: the generator was ahead \
                  of them throughout)"
             } else {

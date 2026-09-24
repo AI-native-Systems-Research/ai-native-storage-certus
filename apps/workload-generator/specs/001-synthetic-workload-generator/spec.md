@@ -94,25 +94,25 @@ its own: a repeatable load for any single-node experiment.
 
 ### User Story 2 - Emit a workload trace to a file (Priority: P2)
 
-The same engineer writes a workload to a file instead of issuing it, in either
-of two containers, so that a generated workload and a real serving trace are
-interchangeable inputs to third-party analysis.
+The same engineer writes a workload to a file instead of issuing it, in the
+trace format of whichever tool will read it, so that a generated workload is an
+input to third-party analysis without that tool needing to learn anything new.
 
 **Why this priority**: Independently valuable and independently testable — it
 needs no server, no accelerator, and no cluster, so it is the cheapest way to
 inspect and share a workload. It also exercises the whole simulation core,
 which makes it the natural place to pin determinism.
 
-**Independent Test**: Emit the shipped example workload to both containers with
-a fixed seed and no server present; confirm the two contain identical records,
-that every row satisfies the trace schema's own invariants, and that repeating
-the run reproduces the output byte for byte.
+**Independent Test**: Emit the shipped example workload to each supported
+format with a fixed seed and no server present; confirm every output receives a
+record per turn simulated, that each satisfies its target format's documented
+invariants, and that repeating the run reproduces the output byte for byte.
 
 **Acceptance Scenarios**:
 
 1. **Given** a workload file and an explicit run length, **When** the engineer
-   requests file output, **Then** a self-describing trace is written whose
-   manifest declares its own encoding and identifier conventions.
+   requests file output, **Then** the workload is written in the requested
+   tool's own trace format, which declares whatever that format cannot carry.
 2. **Given** the same workload file, seed, and length, **When** the run is
    repeated, **Then** the output is byte-identical.
 3. **Given** a request for file output with no run length, **When** the
@@ -122,9 +122,10 @@ the run reproduces the output byte for byte.
    completeness — sessions, turns, blocks, virtual-time span, records written —
    and omits latency, lane utilisation, and the virtual-to-wallclock ratio
    entirely rather than reporting them as zero.
-5. **Given** an emitted trace, **When** it is converted to a third-party tool's
-   format, **Then** the conversion preserves cross-session key reuse and the
-   run-global clock, and names whatever the target cannot carry.
+5. **Given** a run projected onto a third-party tool's format, **When** the
+   output is read by that tool, **Then** cross-session key reuse and the
+   run-global clock are preserved, and whatever the target cannot carry is
+   named rather than dropped silently.
 
 ---
 
@@ -215,10 +216,10 @@ modes reorder the policies.
 - **A node vanishes mid-run.** The run aborts and is reported invalid with the
   lost node named. Continuing on the survivors would quietly change the
   workload rather than degrade it visibly.
-- **A conversion target cannot express something the trace holds.** The loss is
+- **A projection target cannot express something a turn holds.** The loss is
   declared in the output or the report, never absorbed silently, and the
-  converted file is not accepted as a substitute for the native trace when
-  reproducibility is being checked. A conversion that quietly drops
+  projected file is not accepted as a substitute for the description and seed
+  when reproducibility is being checked. A projection that quietly drops
   cross-session reuse would still load and still replay, which is why this is a
   stated rule rather than left to judgement.
 - **An emit run is asked for system measurements it cannot make.** Latency,
@@ -488,38 +489,32 @@ The hardware file does not weaken this requirement, it discharges it: those
 
 **File output**
 
-- **FR-055**: System MUST be **able** to emit a workload trace at the same
-  level of abstraction as a real serving trace — sessions, turns, block lists,
-  token counts — in either of two containers, which hold identical records when
-  both are written. Interoperability with other tools' formats is delivered by
-  **projections** (FR-075), which are not containers of the trace and are not
-  required to hold identical records.
+- **FR-055**: System MUST be able to write a workload at the same level of
+  abstraction as a real serving trace — sessions, turns, block lists, token
+  counts — and MUST deliver it as a **projection** onto a published format that
+  a real consumer already reads (FR-075). System MUST NOT define a private
+  interchange format of its own: a workload is repeated from its description
+  and seed (FR-072), so storing one is never the way to repeat it, and a format
+  nothing outside this repository reads earns none of the cost of specifying,
+  versioning and importing it.
 
-  **No run is obliged to write the native trace.** Every output format, native
-  and projected alike, is requested by its own flag with its own destination,
-  and the only rule is that at least one output must be requested. A run that
-  wants a Mooncake file alone writes that and nothing else.
-
-  *Amended 2026-09-17.* This requirement previously said the system MUST emit
-  the trace "in two containers", which made the native format mandatory on
-  every emit run and parquet mandatory within it. Two things were wrong with
-  that. It forced a run wanting a small projection to also write a native trace
-  costing roughly 27 GB at a legal span — the reason `--output` was required
-  and the reason it no longer is. And it made a requirement out of a format
-  whose readership is not yet established: nothing outside this repository
-  reads it, and inside it only the three converters do, each of six fields out
-  of seventeen. The **capability** is required; **producing it on every run**
-  is not. What the native format should ultimately be — named, versioned,
-  extended with a served-by instance column, and published with importers, or
-  dropped in favour of the standard exports — is a decision deliberately
-  deferred until the generator is complete and stable.
-- **FR-056**: The trace MUST be self-describing: a reader MUST learn what it
-  supports by reading its manifest, never by recognising which trace it is.
-- **FR-057**: The manifest MUST declare the identifier space in use, since
-  identifiers are chained keys rather than dense values in creation order.
-- **FR-058**: Every emitted row MUST satisfy the trace schema's stated
-  invariants for the encoding it declares, including the convention for a
-  trailing partial block.
+  **No run is obliged to write any particular output.** Every format is
+  requested by its own flag with its own destination, and the only rule is that
+  at least one output must be requested. A run that wants a Mooncake file alone
+  writes that and nothing else.
+- **FR-056**: Every output of one run MUST be written from **one** per-turn
+  record (`contracts/trace-io.md`), never from a per-format description of the
+  same turn. Two hand-written descriptions of one turn will eventually
+  disagree, and the disagreement would appear as a difference between formats
+  that a reader would attribute to the formats.
+- **FR-057**: No output MUST imply that identifiers are dense values in
+  creation order, since they are chained keys. A target format that assumes
+  density MUST have the divergence declared as a loss (FR-077) rather than
+  papered over by renumbering, which would destroy the prefix relationship the
+  keys exist to carry.
+- **FR-058**: Every record MUST satisfy the invariants
+  `contracts/trace-io.md` states, on every record rather than on a sample,
+  including the convention for a trailing partial block.
 - **FR-059**: Run length is bounded by exactly one control, a span in **virtual
   seconds**. An emit run MUST require it, because an unbounded file has no
   meaning. A live run MUST be unbounded by default and MAY be given the same
@@ -534,20 +529,18 @@ The hardware file does not weaken this requirement, it discharges it: those
   references, and bytes for each output actually requested — and MUST refuse if
   the projection exceeds either the free space on the output filesystem or a
   documented size ceiling, naming both figures. A run asked only for a
-  projection MUST be projected on that basis, not on the native trace it is not
-  writing. Requiring a span is not sufficient protection
-  on its own: a legal span on the shipped example costs tens of gigabytes. The
-  projection MUST report minted keys and key references separately, since the
-  first grows linearly with the span and the second quadratically with session
-  length. The byte figure MUST be the uncompressed single-container size, used
-  as a conservative upper bound; a compressed container's actual size cannot be
-  projected and will be smaller. If a write nonetheless fails for lack of
-  space, the ordinary error MUST propagate — no completeness flag is needed,
-  because the manifest is written last, so a trace directory without one is
-  incomplete by construction (FR-056). The same projection MUST be available
-  without writing, and MUST warn when the span is short relative to the longest
-  finite lifetime in the description, because such a trace cannot exhibit the
-  pool turnover the description specifies.
+  projection MUST be projected on the outputs it actually asked for. Requiring
+  a span is not sufficient protection on its own: a legal span on the shipped
+  example costs tens of gigabytes. The projection MUST report minted keys and
+  key references separately, since the first grows linearly with the span and
+  the second quadratically with session length. The byte figure MUST be a
+  conservative upper bound. If a write nonetheless fails for lack of space, the
+  ordinary error MUST propagate: the report states how many records each output
+  received, so a file short of that count is detectable without a completeness
+  flag to get wrong. The same projection MUST be available without writing, and
+  MUST warn when the span is short relative to the longest finite lifetime in
+  the description, because such a trace cannot exhibit the pool turnover the
+  description specifies.
 - **FR-074**: An unbounded live run MUST stop cleanly on interruption: drain
   in-flight requests, tear down node agents (FR-053), write both report forms,
   and classify itself valid or invalid on the ordinary criteria. Interruption
@@ -558,40 +551,32 @@ The hardware file does not weaken this requirement, it discharges it: those
 
 **Interoperability with other tools' trace formats**
 
-- **FR-075**: Every other trace format System speaks MUST be a **projection of
-  the operation plan**, and MUST be obtainable **in one pass during an emit
-  run**. System MUST NOT require the native trace to be written first as an
-  intermediate: producing a projection of a workload nobody wants stored would
-  otherwise cost tens of gigabytes, plus a possible free-space refusal, to
-  arrive at a file that may be a few hundred megabytes. There is no
-  standards-body format at this level of abstraction, so the emitted schema is
-  chosen for being a superset of the public ones and every target is a
-  projection of it. See `research.md` D8 and `contracts/trace-interop.md`.
-- **FR-075a**: System MUST also apply the same projection to an
-  **already-stored trace** in the emitted schema, and both entry points MUST
-  use the same projection so that they cannot disagree. This is not a redundant
-  path to the same place: the emitted schema is shared with a corpus of real
-  traces, so projecting a stored trace is the only way to put a real workload
-  and a generated one through an identical transformation — which is what makes
-  them comparable at all.
-- **FR-075b**: A projection is **not a trace**. It has no manifest, is not
-  self-describing, and MUST NOT be accepted in place of the native trace or the
-  canonical plan when reproducibility is being checked (FR-060, FR-072).
-  Consumer-specific shapes therefore stay out of the trace contract: what a
-  direct projection changes is where bytes are written, never what a trace
+- **FR-075**: Every trace format System writes MUST be a **projection of the
+  operation plan**, produced **in one pass during an emit run** with no stored
+  intermediate. Writing one would cost tens of gigabytes, plus a possible
+  free-space refusal, to arrive at a file that may be a few hundred megabytes —
+  and it would be a format with no reader. There is no standards-body format at
+  this level of abstraction, so System projects onto several published ones
+  instead of inventing a superset of them. See `research.md` D8 and
+  `contracts/trace-interop.md`.
+- **FR-075b**: A projection is **not a trace**. It is lossy on purpose, not
+  self-describing, and MUST NOT be accepted in place of the description and
+  seed or the canonical plan when reproducibility is being checked (FR-060,
+  FR-072). Consumer-specific shapes therefore stay out of the record contract:
+  what a projection changes is which bytes are written, never what a turn
   means.
-- **FR-076**: A conversion target MUST be judged on two properties before it is
+- **FR-076**: A projection target MUST be judged on two properties before it is
   adopted, and System MUST NOT emit a workload in a format that lacks either:
   identifiers scoped to the whole run, and timestamps on a run-global clock.
   Cross-session interleaving and cross-session key reuse are the two things a
   cache actually responds to, so a format that cannot carry them describes a
   different workload however faithfully it records each session.
-- **FR-077**: A conversion MUST declare what it drops. Where a target cannot
-  carry something the trace holds — session grouping, the separation of input
-  from output blocks, the trailing-partial-block count — the conversion MUST
-  record the loss in its output or its report, and MUST NOT be usable as a
-  reproducibility check in place of the native trace.
-- **FR-078**: Where a target requires dense identifiers, the conversion MUST
+- **FR-077**: A projection MUST declare what it drops. Where a target cannot
+  carry something a turn holds — session grouping, the separation of input from
+  output blocks, the trailing-partial-block count — the projection MUST record
+  the loss in its output or its report, and MUST NOT be usable as a
+  reproducibility check in place of the description and seed.
+- **FR-078**: Where a target requires dense identifiers, the projection MUST
   renumber across the **whole output**, never per session. Per-session
   numbering would destroy cross-session reuse while producing a file that loads
   and replays, which is the failure mode this requirement exists to forbid.
@@ -1126,12 +1111,11 @@ Note that the deployment layer already *generates* an equivalent table:
   slowed, when the run is an emit run with no server at all, and across
   differing request-batching and lane settings — so the workload is provably
   independent of server speed, of execution mode, and of tuning.
-- **SC-004**: A workload written to both containers yields identical records,
-  and 100% of rows satisfy the trace schema's invariants for the encoding
-  declared in the manifest. Scoped to runs that request **both** containers,
-  since FR-055 no longer obliges a run to write either; when both are requested
-  the run itself compares their record counts and refuses on a disagreement, so
-  the claim is checked in production and not only in a test.
+- **SC-004**: Every projection a run requests receives a record for each turn
+  simulated, and 100% of records satisfy the invariants
+  `contracts/trace-io.md` states. The run reports each output's record count
+  beside the turn count, so a format silently receiving fewer is visible on the
+  run that produced it rather than only in a test.
 - **SC-005**: Sweeping cache size across at least five points spanning a
   hundredfold range produces a monotonically rising **cross-session** hit rate
   in which no single step contributes more than half of the total rise — the
@@ -1224,12 +1208,12 @@ Note that the deployment layer already *generates* an equivalent table:
   depends on it — so the consequence is confined to a plan *digest* failing to
   match across boxes. Compare statistics rather than digests when doing that;
   the reasoning is in `crates/workload-model/src/special.rs`.
-- **Reading third-party trace corpora is out of scope**, and so is the
+- **Reading third-party traces is out of scope**, and so is the
   `metadata_only` (arrival-plus-counts) export. The first is deferred rather
-  than rejected — the reasoning for the one corpus worth importing is preserved
-  in `contracts/trace-interop.md` so it need not be re-derived. The second was
-  rejected outright: it discards every trace of reuse, which is the one thing
-  this feature exists to model.
+  than rejected — `contracts/trace-interop.md` records which formats would be
+  worth reading, so it need not be re-derived. The second was rejected
+  outright: it discards every trace of reuse, which is the one thing this
+  feature exists to model.
 - **An OpenTelemetry writer is out of scope**, though it is the only governed
   standard in this space. It holds no block identity, so the reuse structure
   would have to live in fabricated text whose every block tokenises to exactly

@@ -36,7 +36,8 @@ Recorded so the ticks above are auditable rather than asserted.
 
 **Implementation-detail scan.** The spec was scanned for language, framework,
 and API names — Rust, cargo, crate, CUDA, shared-memory paths, the client
-product name, the two container formats, all nine wire operation names, and the
+product name, the three target trace formats, all nine wire operation names,
+and the
 key width. Two hits, both resolved: an accelerator mention in a user story's
 rationale, which is a hardware *dependency* statement and was aligned with the
 vocabulary used in Assumptions; and the word "reserve" inside a generic
@@ -44,10 +45,11 @@ description of a reserve/transfer/commit sequence, which names a behaviour
 rather than an API. The specification refers to "the production client"
 throughout instead of naming it, and describes operations by what they do.
 
-**Counts** (re-validated after the 2026-09-15 clarification session). 4 user
-stories with acceptance scenarios, 12 edge cases, 70 functional requirements, 12
-measurable outcomes, 10 assumptions, 7 recorded clarifications, 0 clarification
-markers, 0 residual template placeholders.
+**Counts** (re-counted 2026-09-24; the figure recorded at the 2026-09-15
+clarification session was 70 and had not been updated as requirements were
+added). 4 user stories with acceptance scenarios, 12 edge cases, 87
+functional requirements, 12 measurable outcomes, 10 assumptions, 7 recorded
+clarifications, 0 clarification markers, 0 residual template placeholders.
 
 **Re-validation after clarification (2026-09-15).** All 16 items were
 re-evaluated against the updated spec; none changed state. The leakage scan was

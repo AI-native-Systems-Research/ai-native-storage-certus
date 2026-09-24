@@ -10,25 +10,10 @@ publish = false
 # workspace default member, so container equivalence and schema invariants are
 # testable with no accelerator and no server.
 
-[features]
-# `parquet` is NOT default: nothing in this repo used parquet before this
-# feature, and enabling it by default would pull arrow into every plain
-# `cargo build` of the workspace (research.md D4).
-default = []
-# Pulls the arrow family, which is why it is gated: nothing in this repo used
-# parquet before, and enabling it by default would put arrow in every plain
-# `cargo build` of the workspace (research.md D4). `arrow-array` and `arrow-schema`
-# are direct dependencies because a `RecordBatch` has to be constructed here —
-# `parquet::arrow` takes one but does not re-export the types to build it.
-parquet = ["dep:parquet", "dep:arrow-array", "dep:arrow-schema"]
-
 [dependencies]
 workload-model.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-parquet = { version = "53", optional = true }
-arrow-array = { version = "53", optional = true }
-arrow-schema = { version = "53", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -37,6 +22,3 @@ tempfile = "3"
 # way to check such a claim is to run the code it is about. Test-only, so this does
 # not make the trace crate depend on an app.
 eviction-replay-benchmark = { path = "../../../eviction-replay-benchmark" }
-# Reading a parquet buffer back for the container-equivalence test needs the same
-# `Bytes` type the parquet reader takes. Test-only.
-bytes = "1"

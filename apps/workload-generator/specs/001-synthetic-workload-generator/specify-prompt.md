@@ -49,9 +49,10 @@ Two programs plus shared framing:
   shm_name)` targets on the command line; sessions are placed across nodes and
   migrate between them, so session prefixes go cold on their new node and the
   remote-lookup path is exercised.
-- **P3 — Emit a trace file.** The same workload is written to JSONL or parquet
-  instead of being issued, so a generated workload and a real trace are
-  interchangeable inputs to third-party analysis.
+- **P3 — Emit a trace file.** The same workload is written to a file instead of
+  being issued, in the trace format of whichever tool will read it, so a
+  generated workload is an input to third-party analysis without that tool
+  needing to learn anything new.
 
 ## Requirements that are already settled
 
@@ -165,11 +166,11 @@ conflated:
 
 - The **workload trace** is the user-facing output, at the same level of
   abstraction as a real LLM serving trace: sessions, turns, block lists, token
-  counts. It adopts the trace-IO schema from the earlier attempt — one schema
-  in two containers (JSONL and parquet), a self-describing `manifest.json`, and
-  block-size-partitioned paths — because that is what makes a generated
-  workload and a real trace interchangeable inputs to any third-party tool, and
-  because the deferred fitting flow will read the same shape when it returns.
+  counts. It is delivered as a **projection** onto a published format that a
+  real consumer already reads, and System defines no interchange format of its
+  own: a workload is repeated from its description and seed, so storing one is
+  never the way to repeat it, and a format nothing outside this repository
+  reads would earn none of the cost of specifying, versioning and importing it.
   Three adaptations are required: emit the **full** encoding
   (`full_input_blocks` populated, delta fields empty) with `source_class:
   pre_hashed`, since chained keys are pre-hashed by construction; honour the
@@ -179,22 +180,18 @@ conflated:
   block IDs be dense integers in mint order rather than hashes is **dropped**:
   IDs are the chained u64 keys directly. Nothing depends on the density, and
   mint order remains recoverable from `invocation_index` together with
-  `new_input_blocks`/`new_output_blocks`, so no information is lost. Because
-  that schema's stated philosophy is that a reader learns what a trace supports
-  by reading its `manifest.json` and never by recognising the trace, the change
-  MUST be declared there — a `block_id_space` field distinguishing chained-hash
-  u64 keys from dense mint-order integers — rather than left as a silent
-  deviation. One consequence to watch: `full_input_blocks` repeats the whole
-  prefix on every turn, so the block-list columns grow quadratically in turns
-  and random u64s dictionary-compress far worse than dense small integers. If
-  file size becomes a problem, switch that trace to the schema's delta
-  encoding, which attacks the repetition itself; do not reintroduce a
+  `new_input_blocks`/`new_output_blocks`, so no information is lost. Where a
+  target format assumes density, the projection onto it MUST either renumber
+  across the whole output or declare the divergence as a loss, rather than
+  leave it as a silent deviation. One consequence to watch: the block lists
+  repeat the whole prefix on every turn, so they grow quadratically in turns
+  and random u64s compress far worse than dense small integers. If file size
+  becomes a problem, attack the repetition itself; do not reintroduce a
   mint-order mapping to shave bytes per element.
 - The **operation plan** is the lower-level ordered sequence of cache
   operations with virtual timestamps that the lanes consume. It needs a
   canonical serialisation because the byte-identical-plan property is asserted
-  against it, but it is a diagnostic artifact, not a published format, and does
-  not need parquet.
+  against it, but it is a diagnostic artifact rather than a published format.
 
 **Daemon lifecycle is per run.** The daemon holds no persistent state and never
 receives block data, so nothing justifies outliving a run: it is started before
@@ -218,8 +215,9 @@ continual load.
   run whose plan queue drained is reported as invalid.
 - The canonical operation-plan serialisation is byte-identical across runs at a
   fixed seed, and across fast and artificially slowed servers.
-- A workload trace emitted to JSONL and to parquet yields identical records,
-  and satisfies the full-encoding invariants of its own schema on every row.
+- Every projection an emit run requests receives a record for each turn
+  simulated, and satisfies that target format's documented invariants on every
+  record.
 - A hit-rate-versus-cache-size sweep produces a smooth concave curve rather
   than a step, and `rank_by: slot` versus `rank_by: recency` produce measurably
   different policy rankings — the evidence that the reuse structure is real.

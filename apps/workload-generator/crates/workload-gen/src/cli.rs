@@ -29,21 +29,17 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use workload_model::description::WorkloadDescription;
 use workload_model::plan::OperationPlan;
 use workload_model::project::{project, span_for_invocations, Projection};
 use workload_model::sim::Simulation;
 use workload_trace::cachesim::CsvWriter;
-use workload_trace::jsonl::JsonlWriter;
-use workload_trace::manifest::{BlockStats, Manifest};
 use workload_trace::mooncake::MooncakeWriter;
-#[cfg(feature = "parquet")]
-use workload_trace::parquet::ParquetWriter;
 use workload_trace::qwen::QwenWriter;
 use workload_trace::record::InvocationRecord;
 
-use crate::report::{ContainerRecords, EmitReport, ProjectionSummary, Reproduction};
+use crate::report::{EmitReport, ProjectionSummary, Reproduction};
 
 /// Documented size ceiling for an emit run, in bytes.
 ///
@@ -70,20 +66,6 @@ pub mod exit {
     pub const INVALID: i32 = 3;
     /// A peer refused: protocol or `build_id` mismatch.
     pub const PEER: i32 = 4;
-}
-
-/// What `convert` projects a stored trace into.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum ConvertTo {
-    /// Qwen-Bailian usage-trace JSONL, which `apps/eviction-replay-benchmark` reads.
-    QwenBailian,
-    /// The Mooncake FAST'25 trace format — the standard-format export.
-    Mooncake,
-    /// libCacheSim CSV.
-    Cachesim,
-    /// libCacheSim's binary `oracleGeneral`, with next-access ordinals — which no real
-    /// trace can supply, so this is what makes Belady baselines available.
-    OracleGeneral,
 }
 
 /// The generator's command line.
@@ -260,7 +242,8 @@ pub enum Command {
         #[command(flatten)]
         args: Box<RunArgs>,
     },
-    /// Write a trace file. Contacts no server and needs no accelerator.
+    /// Write the workload in another tool's trace format. Contacts no server and needs no
+    /// accelerator.
     Emit {
         /// The workload description.
         description: PathBuf,
@@ -271,20 +254,6 @@ pub enum Command {
         /// run whose seed was never printed cannot be repeated.
         #[arg(long)]
         seed: u64,
-        /// Native trace, JSONL container. **A directory**, not a file.
-        ///
-        /// The native format is a self-describing *directory* — `manifest.json` plus
-        /// `invocations/block_size_<N>/part-0.jsonl` — so this names the directory.
-        /// Point this and `--certus-unified-parquet` at the **same** directory to get
-        /// one trace holding both containers, with one manifest and the two record
-        /// counts checked against each other (SC-004). Different directories give two
-        /// independent traces.
-        #[arg(long = "certus-unified-jsonl")]
-        unified_jsonl: Option<PathBuf>,
-        /// Native trace, parquet container. **A directory**; see
-        /// `--certus-unified-jsonl`. Requires the `parquet` feature.
-        #[arg(long = "certus-unified-parquet")]
-        unified_parquet: Option<PathBuf>,
         /// Mooncake projection. A single **file**.
         #[arg(long)]
         mooncake: Option<PathBuf>,
@@ -299,8 +268,8 @@ pub enum Command {
         /// so a generated file and a captured one go through the same readers.
         ///
         /// A projection is a file rather than a directory because it is not a trace
-        /// (FR-075b): no manifest, and never accepted in place of the native trace for
-        /// a reproducibility check.
+        /// (FR-075b): lossy, not self-describing, and never accepted in place of the
+        /// description and seed for a reproducibility check.
         #[arg(long = "qwen-bailian")]
         qwen_bailian: Option<PathBuf>,
         /// Structured report destination.
@@ -314,23 +283,6 @@ pub enum Command {
         /// check.
         #[arg(long)]
         force: bool,
-    },
-    /// Project a stored trace into another tool's format.
-    ///
-    /// Its input is the Certus unified trace format — what `emit
-    /// --certus-unified-jsonl` and `--certus-unified-parquet` write. It therefore works
-    /// on any trace in that format whatever produced it, so a generated trace and a
-    /// captured one reach a tool through the identical projection and are comparable
-    /// (FR-075a).
-    Convert {
-        /// A trace directory, or a single JSONL part file.
-        trace: PathBuf,
-        /// Target format.
-        #[arg(long, value_enum)]
-        to: ConvertTo,
-        /// Output file.
-        #[arg(long)]
-        output: PathBuf,
     },
     /// Run the load-time checks and report the effective distributions and the
     /// projection, without writing anything.
@@ -420,8 +372,6 @@ pub fn run(cli: Cli) -> i32 {
             description,
             until,
             seed,
-            unified_jsonl,
-            unified_parquet,
             mooncake,
             cachesim,
             qwen_bailian,
@@ -432,8 +382,6 @@ pub fn run(cli: Cli) -> i32 {
             until,
             seed,
             Outputs {
-                unified_jsonl,
-                unified_parquet,
                 mooncake,
                 cachesim,
                 qwen_bailian,
@@ -480,40 +428,18 @@ pub fn run(cli: Cli) -> i32 {
                 e.code()
             }
         },
-        Command::Convert { trace, to, output } => match convert(&trace, to, &output) {
-            Ok(text) => {
-                print!("{text}");
-                exit::OK
-            }
-            Err(e) => {
-                eprintln!("{e}");
-                e.code()
-            }
-        },
     }
 }
 
 /// Where an emit run writes. **At least one** must be set.
 ///
 /// Every output is named the same way — one flag, one destination — so nothing is
-/// privileged and no run is obliged to produce a format it does not want. That was not
-/// true while the native trace had `--output` and the projections had their own flags:
-/// obtaining a Mooncake file then meant writing the native trace as well, at gigabytes
-/// for a legal span, to get a file a fraction of the size.
-///
-/// The two native destinations are **directories** and the three projections are
-/// **files**, which reflects a real difference rather than a convention: a native trace
-/// is self-describing, so it is a directory holding a manifest beside its records,
-/// while a projection has no manifest and is not a trace (FR-075b).
+/// privileged and no run is obliged to produce a format it does not want. Each is a
+/// **file**, because a projection is not a trace (FR-075b): it is one other tool's
+/// shape, lossy on purpose, and a workload is repeated from its description and seed
+/// rather than from a stored copy (FR-072).
 #[derive(Debug, Default)]
 pub struct Outputs {
-    /// Native trace directory, JSONL container.
-    pub unified_jsonl: Option<PathBuf>,
-    /// Native trace directory, parquet container.
-    ///
-    /// The same directory as `unified_jsonl` gives one trace with both containers and
-    /// one manifest; a different one gives a second, independent trace.
-    pub unified_parquet: Option<PathBuf>,
     /// Mooncake projection file.
     pub mooncake: Option<PathBuf>,
     /// libCacheSim CSV projection file.
@@ -525,144 +451,19 @@ pub struct Outputs {
 impl Outputs {
     /// Whether nothing at all was asked for.
     fn is_empty(&self) -> bool {
-        self.unified_jsonl.is_none()
-            && self.unified_parquet.is_none()
-            && self.mooncake.is_none()
-            && self.cachesim.is_none()
-            && self.qwen_bailian.is_none()
+        self.mooncake.is_none() && self.cachesim.is_none() && self.qwen_bailian.is_none()
     }
-
-    /// The distinct native trace directories, in flag order.
-    ///
-    /// One entry when both containers share a directory, which is the case that makes
-    /// SC-004's equivalence claim about a single trace rather than about two.
-    fn trace_dirs(&self) -> Vec<PathBuf> {
-        let mut dirs: Vec<PathBuf> = Vec::new();
-        for d in [self.unified_jsonl.as_ref(), self.unified_parquet.as_ref()]
-            .into_iter()
-            .flatten()
-        {
-            if !dirs.contains(d) {
-                dirs.push(d.clone());
-            }
-        }
-        dirs
-    }
-}
-
-/// The `convert` subcommand.
-fn convert(trace: &Path, to: ConvertTo, output: &Path) -> Result<String, Failure> {
-    let input_path = if trace.is_dir() {
-        find_jsonl_part(trace).ok_or_else(|| {
-            Failure::config(format!(
-                "{} holds no invocations/*/part-*.jsonl to convert",
-                trace.display()
-            ))
-        })?
-    } else {
-        trace.to_path_buf()
-    };
-    let input = fs::File::open(&input_path)
-        .map_err(|e| Failure::config(format!("cannot read {}: {e}", input_path.display())))?;
-    let out = fs::File::create(output)
-        .map_err(|e| Failure::other(format!("cannot create {}: {e}", output.display())))?;
-
-    if matches!(to, ConvertTo::Cachesim | ConvertTo::OracleGeneral) {
-        // Bytes per block, not tokens: a cache holds bytes, and `obj_size` is what the
-        // simulator's capacity is measured against.
-        let object_bytes = u32::try_from(block_bytes_of(trace)?).map_err(|_| {
-            Failure::config(
-                "the description's blocks.bytes exceeds oracleGeneral's 32-bit obj_size"
-                    .to_string(),
-            )
-        })?;
-        let input = std::io::BufReader::new(input);
-        let sink = BufWriter::new(out);
-        let (stats, kind) = if matches!(to, ConvertTo::Cachesim) {
-            (
-                workload_trace::cachesim::convert_jsonl_csv(input, sink, object_bytes),
-                "csv",
-            )
-        } else {
-            (
-                workload_trace::cachesim::convert_jsonl_oracle(input, sink, object_bytes),
-                "oracleGeneral",
-            )
-        };
-        let stats = stats
-            .map_err(|e| Failure::other(format!("converting {}: {e}", input_path.display())))?;
-        let mut text = format!(
-            "converted {} to {} as libCacheSim {kind}\n  \
-             accesses {}  distinct objects {}  object size {} bytes\n",
-            input_path.display(),
-            output.display(),
-            stats.accesses,
-            stats.distinct_objects,
-            stats.object_bytes,
-        );
-        if kind == "csv" {
-            // The columns are configurable, so a CSV file cannot say what its own
-            // columns mean. Printing the command is the only way that does not get lost.
-            text.push_str(&format!(
-                "  read it with: {}\n",
-                stats.example_command(&output.display().to_string())
-            ));
-        }
-        text.push_str(&render_losses("  ", &stats.declared_losses()));
-        return Ok(text);
-    }
-
-    if let ConvertTo::Mooncake = to {
-        // Block size comes from the trace's own manifest, since the Mooncake format
-        // carries no block-geometry field and a guess would be silently wrong.
-        let block_size = block_size_of(trace)?;
-        let stats = workload_trace::mooncake::convert_jsonl(
-            std::io::BufReader::new(input),
-            BufWriter::new(out),
-            block_size,
-        )
-        .map_err(|e| Failure::other(format!("converting {}: {e}", input_path.display())))?;
-        let mut text = format!(
-            "converted {} to {} in the Mooncake format\n  \
-             records {}  distinct identifiers {}  references {}\n",
-            input_path.display(),
-            output.display(),
-            stats.records,
-            stats.distinct_ids,
-            stats.references,
-        );
-        text.push_str(&render_losses("  ", &stats.declared_losses()));
-        return Ok(text);
-    }
-
-    let stats =
-        workload_trace::qwen::convert_jsonl(std::io::BufReader::new(input), BufWriter::new(out))
-            .map_err(|e| Failure::other(format!("converting {}: {e}", input_path.display())))?;
-
-    let mut text = format!(
-        "converted {} to {} as a Qwen-Bailian usage trace\n  \
-         records {}  sessions {}  distinct keys {}  key references {}\n",
-        input_path.display(),
-        output.display(),
-        stats.records,
-        stats.sessions,
-        stats.distinct_keys,
-        stats.key_references,
-    );
-    text.push_str(&render_losses("  ", &stats.declared_losses()));
-    Ok(text)
 }
 
 /// Render one projection's declared losses (FR-077).
 ///
 /// # Why this is shared rather than written per format
 ///
-/// FR-077's declaration is only worth anything if it is the *same* declaration wherever a
-/// projection is produced. Each format owns its list — it alone knows what it dropped — but
-/// the rendering is one function called by `convert` and by `emit`, for the reason FR-075a
-/// gives for the projections themselves: two hand-written copies of something that must
-/// agree will eventually not. Until this existed, the `emit` path declared **nothing**,
-/// which is the path FR-075 exists to make the ordinary one.
+/// FR-077's declaration is only worth anything if it is the *same* declaration for every
+/// format. Each format owns its list — it alone knows what it dropped — but the rendering
+/// is one function, for the same reason FR-056 gives about the record: two hand-written
+/// copies of something that must agree will eventually not. Until this existed, only one
+/// of the three formats declared anything at all.
 fn one_projections_losses(indent: &str, losses: &[String]) -> String {
     let mut out = String::new();
     for loss in losses {
@@ -672,75 +473,6 @@ fn one_projections_losses(indent: &str, losses: &[String]) -> String {
         out.push('\n');
     }
     out
-}
-
-/// A projection's losses followed by the one thing true of every projection.
-///
-/// The FR-075b line is deliberately not a per-format loss entry: it holds for every
-/// projection, so a format that listed it would be claiming it as its own and a format that
-/// forgot it would be silently exempt. `convert` writes exactly one projection per
-/// invocation, so it prints the line here; `emit` may write three and prints it once for the
-/// run instead.
-fn render_losses(indent: &str, losses: &[String]) -> String {
-    let mut out = one_projections_losses(indent, losses);
-    out.push_str(indent);
-    out.push_str(workload_trace::PROJECTION_IS_NOT_A_TRACE);
-    out.push('\n');
-    out
-}
-
-/// Read `block_bytes` out of a trace's manifest.
-fn block_bytes_of(trace: &Path) -> Result<u64, Failure> {
-    manifest_field(trace, "block_bytes")
-}
-
-/// Read `block_size` out of a trace's manifest.
-///
-/// Not guessed and not defaulted: the Mooncake format carries no block geometry, so a
-/// wrong value here produces a file whose lengths are silently wrong by a constant
-/// factor — which nothing downstream would flag.
-fn block_size_of(trace: &Path) -> Result<u64, Failure> {
-    manifest_field(trace, "block_size")
-}
-
-/// Read one integer field from a trace's manifest.
-fn manifest_field(trace: &Path, field: &str) -> Result<u64, Failure> {
-    let path = if trace.is_dir() {
-        trace.join("manifest.json")
-    } else {
-        trace
-            .parent()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .map(|p| p.join("manifest.json"))
-            .unwrap_or_else(|| Path::new("manifest.json").to_path_buf())
-    };
-    let text = fs::read_to_string(&path).map_err(|e| {
-        Failure::config(format!(
-            "cannot read {} for {field}: {e}. Neither the Mooncake nor the libCacheSim \
-             format carries block geometry, so it has to come from the trace's manifest",
-            path.display()
-        ))
-    })?;
-    let v: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| Failure::config(format!("{}: {e}", path.display())))?;
-    v.get(field)
-        .and_then(|b| b.as_u64())
-        .ok_or_else(|| Failure::config(format!("{} has no {field}", path.display())))
-}
-
-/// The first `invocations/*/part-*.jsonl` under a trace directory.
-fn find_jsonl_part(dir: &Path) -> Option<PathBuf> {
-    for entry in fs::read_dir(dir.join("invocations")).ok()? {
-        let sub = entry.ok()?.path();
-        for f in fs::read_dir(sub).ok()? {
-            let f = f.ok()?.path();
-            if f.extension().is_some_and(|e| e == "jsonl") {
-                return Some(f);
-            }
-        }
-    }
-    None
 }
 
 /// A failure with the exit code it should produce.
@@ -854,23 +586,15 @@ fn free_bytes(dir: &Path) -> Result<u64, Failure> {
 ///
 /// | Output | Measured bytes | Per reference |
 /// | --- | --- | --- |
-/// | native JSONL | 44 122 546 | 22.5 |
-/// | native parquet | 12 181 962 | 6.2 |
 /// | Mooncake JSONL | 12 485 126 | 6.4 |
 /// | libCacheSim CSV | 62 863 382 | 32.0 |
 /// | qwen-bailian JSONL | 40 451 114 | 20.6 |
 ///
 /// Rounded **up** in every case, because the check exists to refuse a run that would
 /// fill a filesystem and an estimator that reads low fails at exactly the job it has.
-/// Parquet's figure is the compressed size, so it is the one that can be beaten by an
-/// incompressible workload; it is also the smallest, so being wrong about it costs
-/// least. `oracleGeneral` is not here because it is exact — 24 bytes per reference,
-/// fixed layout — and `convert` sizes nothing, since its input is already on disk.
+/// `oracleGeneral` is not here because it is exact — 24 bytes per reference, fixed
+/// layout.
 mod bytes_per_reference {
-    /// Our JSONL container: keys as decimal text, repeated across `full_*` and `new_*`.
-    pub const JSONL: u64 = 23;
-    /// Our parquet container, zstd-compressed.
-    pub const PARQUET: u64 = 7;
     /// Mooncake: dense small integers, one prompt list per row.
     pub const MOONCAKE: u64 = 7;
     /// libCacheSim CSV: one whole row per reference, so the largest of all.
@@ -907,16 +631,6 @@ fn planned_outputs(projection: &Projection, outputs: &Outputs) -> Vec<PlannedOut
             });
         }
     };
-    add(
-        "--certus-unified-jsonl",
-        &outputs.unified_jsonl,
-        bytes_per_reference::JSONL,
-    );
-    add(
-        "--certus-unified-parquet",
-        &outputs.unified_parquet,
-        bytes_per_reference::PARQUET,
-    );
     add(
         "--mooncake",
         &outputs.mooncake,
@@ -960,16 +674,14 @@ fn check_sizes(
     // directory behind on a refusal.
     let mut by_device: BTreeMap<u64, (PathBuf, Vec<&PlannedOutput>)> = BTreeMap::new();
     for p in planned {
-        let dir = match p.flag {
-            // A native destination is itself a directory; a projection is a file.
-            "--certus-unified-jsonl" | "--certus-unified-parquet" => p.path.clone(),
-            _ => p
-                .path
-                .parent()
-                .filter(|d| !d.as_os_str().is_empty())
-                .unwrap_or(Path::new("."))
-                .to_path_buf(),
-        };
+        // Every output is a file, so the filesystem to check is the one its parent
+        // directory sits on.
+        let dir = p
+            .path
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
+            .to_path_buf();
         let probe = nearest_existing(&dir);
         let device = fs::metadata(&probe)
             .map_err(|e| Failure::other(format!("cannot stat {}: {e}", probe.display())))?
@@ -1005,8 +717,8 @@ fn check_sizes(
             return Err(Failure::config(format!(
                 "refusing to emit: the outputs on {}'s filesystem need about {need} \
                  bytes and it has {free} free. --force does not override this, because \
-                 overriding it produces a truncated trace and a full filesystem rather \
-                 than a trace.\n{}{}",
+                 overriding it produces a truncated file and a full filesystem rather \
+                 than an output anything can read.\n{}{}",
                 probe.display(),
                 breakdown(),
                 projection.render()
@@ -1083,15 +795,11 @@ fn emit(
         ));
     }
 
-    // At least one output, and none of the five is privileged. Asking for one
-    // projection and nothing else is the ordinary case: a legal span costs gigabytes as
-    // a native trace, and there is no reason to pay that to obtain a Mooncake file
-    // (`contracts/cli.md`).
+    // At least one output, and none of the three is privileged (`contracts/cli.md`).
     if outputs.is_empty() {
         return Err(Failure::config(
-            "nothing to write: pass at least one of --certus-unified-jsonl <dir>, \
-             --certus-unified-parquet <dir>, --mooncake <file>, --libcachesim <file>, \
-             --qwen-bailian <file>"
+            "nothing to write: pass at least one of --mooncake <file>, \
+             --libcachesim <file>, --qwen-bailian <file>"
                 .to_string(),
         ));
     }
@@ -1100,14 +808,6 @@ fn emit(
 
     let projection = project(&description, until, seed)
         .map_err(|e| Failure::config(format!("cannot project the run: {e}")))?;
-
-    if outputs.unified_parquet.is_some() && !cfg!(feature = "parquet") {
-        return Err(Failure::config(
-            "this build has no parquet support; rebuild with --features parquet, or \
-             use --certus-unified-jsonl instead"
-                .to_string(),
-        ));
-    }
 
     // Sized against exactly what will be written, each destination checked against the
     // free space on its own filesystem.
@@ -1125,12 +825,6 @@ fn emit(
     // projection-only run must leave no trace directory behind: an empty one with no
     // manifest is exactly the incomplete-looking thing FR-073 relies on being
     // meaningful.
-    let records_dir = |root: &Path| -> Result<PathBuf, Failure> {
-        let d = root.join(format!("invocations/block_size_{block_size}"));
-        fs::create_dir_all(&d)
-            .map_err(|e| Failure::other(format!("cannot create {}: {e}", d.display())))?;
-        Ok(d)
-    };
 
     let mut sim = Simulation::new(&description, seed, 1)
         .map_err(|e| Failure::config(format!("cannot start the simulation: {e}")))?;
@@ -1140,44 +834,6 @@ fn emit(
     // Two writers over one pass rather than a conversion afterwards: a conversion would
     // prove the converter right and say nothing about the writers, and SC-004's claim
     // is about the writers.
-    let jsonl_path = match &outputs.unified_jsonl {
-        Some(root) => records_dir(root)?.join("part-0.jsonl"),
-        None => PathBuf::new(),
-    };
-    let mut writer = match &outputs.unified_jsonl {
-        Some(_) => {
-            let file = fs::File::create(&jsonl_path).map_err(|e| {
-                Failure::other(format!("cannot create {}: {e}", jsonl_path.display()))
-            })?;
-            Some(JsonlWriter::new(
-                BufWriter::new(file),
-                &trace_id,
-                block_size,
-            ))
-        }
-        None => None,
-    };
-
-    #[cfg(feature = "parquet")]
-    let parquet_path = match &outputs.unified_parquet {
-        Some(root) => records_dir(root)?.join("part-0.parquet"),
-        None => PathBuf::new(),
-    };
-    #[cfg(feature = "parquet")]
-    let mut parquet_writer = match &outputs.unified_parquet {
-        Some(_) => {
-            let file = fs::File::create(&parquet_path).map_err(|e| {
-                Failure::other(format!("cannot create {}: {e}", parquet_path.display()))
-            })?;
-            Some(
-                ParquetWriter::new(BufWriter::new(file), &trace_id, block_size).map_err(|e| {
-                    Failure::other(format!("cannot start {}: {e}", parquet_path.display()))
-                })?,
-            )
-        }
-        None => None,
-    };
-
     // The projections, written in the same pass rather than by converting the trace
     // afterwards (FR-075): a projection of a workload nobody wants stored should not
     // require storing it first.
@@ -1207,42 +863,31 @@ fn emit(
         None => None,
     };
 
-    // A message rather than an `io::Error`, because the parquet writer's error type is
-    // its own and every one of these failures wants naming its file anyway.
+    // A message rather than an `io::Error`, because every one of these failures wants
+    // naming the file it happened on.
     let mut write_error: Option<String> = None;
     sim.run_until(until, &mut |s, t| {
-        if write_error.is_none() {
-            if let Some(w) = writer.as_mut() {
-                if let Err(e) = w.write(s, t) {
-                    write_error = Some(format!("writing {}: {e}", jsonl_path.display()));
+        // The `is_some` guard is not redundant with the loop: building the record walks a
+        // turn's whole prefix, so a run that asked for no projection must not pay for it.
+        if write_error.is_none()
+            && (mooncake_writer.is_some() || cachesim_writer.is_some() || qwen_writer.is_some())
+        {
+            let record = InvocationRecord::from_turn(&trace_id, s, t, block_size);
+            if let Some(w) = mooncake_writer.as_mut() {
+                if let Err(e) = w.write_record(&record) {
+                    write_error = Some(format!("writing the mooncake projection: {e}"));
                     return;
                 }
             }
-            #[cfg(feature = "parquet")]
-            if let Some(w) = parquet_writer.as_mut() {
-                if let Err(e) = w.write(s, t) {
-                    write_error = Some(format!("writing {}: {e}", parquet_path.display()));
+            if let Some(w) = cachesim_writer.as_mut() {
+                if let Err(e) = w.write_record(&record) {
+                    write_error = Some(format!("writing the cachesim projection: {e}"));
                     return;
                 }
             }
-            if mooncake_writer.is_some() || cachesim_writer.is_some() || qwen_writer.is_some() {
-                let record = InvocationRecord::from_turn(&trace_id, s, t, block_size);
-                if let Some(w) = mooncake_writer.as_mut() {
-                    if let Err(e) = w.write_record(&record) {
-                        write_error = Some(format!("writing the mooncake projection: {e}"));
-                        return;
-                    }
-                }
-                if let Some(w) = cachesim_writer.as_mut() {
-                    if let Err(e) = w.write_record(&record) {
-                        write_error = Some(format!("writing the cachesim projection: {e}"));
-                        return;
-                    }
-                }
-                if let Some(w) = qwen_writer.as_mut() {
-                    if let Err(e) = w.write_record(&record) {
-                        write_error = Some(format!("writing the qwen-bailian projection: {e}"));
-                    }
+            if let Some(w) = qwen_writer.as_mut() {
+                if let Err(e) = w.write_record(&record) {
+                    write_error = Some(format!("writing the qwen-bailian projection: {e}"));
                 }
             }
         }
@@ -1271,66 +916,7 @@ fn emit(
         ),
         None => None,
     };
-    let jsonl_stats: Option<BlockStats> = match writer {
-        Some(w) => Some(
-            w.finish()
-                .map_err(|e| Failure::other(format!("closing {}: {e}", jsonl_path.display())))?,
-        ),
-        None => None,
-    };
-
-    #[cfg(feature = "parquet")]
-    let parquet_stats: Option<BlockStats> = match parquet_writer {
-        Some(w) => Some(
-            w.finish()
-                .map_err(|e| Failure::other(format!("closing {}: {e}", parquet_path.display())))?,
-        ),
-        None => None,
-    };
-    #[cfg(not(feature = "parquet"))]
-    let parquet_stats: Option<BlockStats> = None;
-
-    // With both containers written, their counts must agree — that is SC-004's
-    // equivalence claim, checked on every real run rather than only in the test that
-    // compares a handful of records. A disagreement here means one writer dropped or
-    // duplicated a row, which is exactly the failure that would otherwise be found by
-    // whoever later compared the two files.
-    if let (Some(j), Some(p)) = (jsonl_stats.as_ref(), parquet_stats.as_ref()) {
-        if j != p {
-            return Err(Failure::other(format!(
-                "the two containers disagree: jsonl wrote {j:?} and parquet wrote {p:?}. \
-                 One of them dropped or duplicated a row (SC-004)"
-            )));
-        }
-    }
-    // Either container's counts describe the run; they are equal when both were
-    // written, and there are none on a projection-only run.
-    let stats: BlockStats = jsonl_stats
-        .clone()
-        .or_else(|| parquet_stats.clone())
-        .unwrap_or_default();
     let wallclock = started.elapsed().as_secs_f64();
-
-    // Built either way, because the report's reproduction block needs the description
-    // digest — but **written** only into native trace directories. A projection carries
-    // no manifest by design (FR-075b), and writing one beside a projection would make it
-    // look like a trace.
-    //
-    // One per distinct directory: pointing both container flags at the same directory
-    // gives one trace with two containers and therefore one manifest, while separate
-    // directories are two independent traces and each needs its own.
-    //
-    // It goes last, so a directory without one is incomplete by construction (FR-073).
-    // Nothing between here and the write may fail silently.
-    let manifest = Manifest::new(&trace_id, &description, &text, seed, until, stats.clone());
-    let manifest_json = manifest
-        .to_json()
-        .map_err(|e| Failure::other(format!("serialising the manifest: {e}")))?;
-    for root in outputs.trace_dirs() {
-        let manifest_path = root.join("manifest.json");
-        fs::write(&manifest_path, &manifest_json)
-            .map_err(|e| Failure::other(format!("writing {}: {e}", manifest_path.display())))?;
-    }
 
     // Across every session class, not class 0's: a two-class description would
     // otherwise under-report with nothing to show it had.
@@ -1343,10 +929,6 @@ fn emit(
         blocks_minted: sim.blocks_minted(),
         block_references: sim.blocks_read(),
         virtual_span: until,
-        records: ContainerRecords {
-            jsonl: jsonl_stats.as_ref().map(|s| s.invocations),
-            parquet: parquet_stats.as_ref().map(|s| s.invocations),
-        },
         generation_rate_invocations_per_second: if wallclock > 0.0 {
             sim.turns_taken() as f64 / wallclock
         } else {
@@ -1356,7 +938,7 @@ fn emit(
         reproduction: Reproduction {
             seed,
             until,
-            description_digest: manifest.description_digest.clone(),
+            description_digest: digest_of(&text),
             description_path: description_path.display().to_string(),
         },
         projection: ProjectionSummary::from(&projection),
@@ -1367,18 +949,13 @@ fn emit(
         },
     };
 
-    // `report.json` goes into every native trace directory, and to `--report` if given.
-    // A projection-only run has nowhere it obviously belongs, so there `--report` is the
-    // only way to keep the structured form — it is rendered to the terminal either way,
-    // so nothing is lost silently.
+    // Every output is one other tool's file, so there is no artifact of ours a report
+    // could sit beside: `--report` is the only destination for the structured form. It is
+    // rendered to the terminal either way, so nothing is lost silently.
     let report_json = report
         .to_json()
         .map_err(|e| Failure::other(format!("serialising the report: {e}")))?;
-    let mut report_paths: Vec<PathBuf> = outputs
-        .trace_dirs()
-        .into_iter()
-        .map(|d| d.join("report.json"))
-        .collect();
+    let mut report_paths: Vec<PathBuf> = Vec::new();
     if let Some(explicit) = report_path {
         if !report_paths.contains(&explicit) {
             report_paths.push(explicit);
@@ -1887,7 +1464,7 @@ fn live_report(
                      Worst lane waited {:.3}s of {:.3}s; the queue was found empty {} times \
                      out of {} pops",
                     stats.producer_wait_fraction() * 100.0,
-                    crate::live::DEFAULT_PRODUCER_WAIT_TOLERANCE * 100.0,
+                    crate::report::DEFAULT_PRODUCER_WAIT_TOLERANCE * 100.0,
                     stats.worst_lane_producer_wait_us() as f64 / 1e6,
                     stats.elapsed,
                     stats.underruns(),
@@ -2089,10 +1666,10 @@ fn migration_is_not_emitted(description: &WorkloadDescription) -> Option<String>
     ))
 }
 
-/// Non-cryptographic digest of a description, matching the trace manifest's.
+/// Non-cryptographic digest of the description text a run was given.
 ///
-/// Live-only: the emit path takes its digest from the manifest it is already building.
-#[cfg(feature = "live")]
+/// Recorded by both `run` and `emit` so that a report names which description produced it
+/// — with the seed, that is the whole of what FR-072 needs to repeat the workload.
 fn digest_of(text: &str) -> String {
     let mut acc = 0x9e37_79b9_7f4a_7c15u64;
     for b in text.as_bytes() {
@@ -2121,8 +1698,8 @@ mod tests {
     /// description or a run.
     fn planned(bytes: u64) -> Vec<PlannedOutput> {
         vec![PlannedOutput {
-            flag: "--certus-unified-jsonl",
-            path: PathBuf::from("/tmp"),
+            flag: "--mooncake",
+            path: PathBuf::from("/tmp/mc.jsonl"),
             bytes,
         }]
     }
@@ -2263,186 +1840,6 @@ mod tests {
             },
         );
         assert!(just_cachesim[0].bytes > just_mooncake[0].bytes * 4);
-    }
-
-    #[test]
-    fn both_native_flags_on_one_directory_are_one_trace() {
-        let same = Outputs {
-            unified_jsonl: Some(PathBuf::from("/tmp/t")),
-            unified_parquet: Some(PathBuf::from("/tmp/t")),
-            ..Default::default()
-        };
-        assert_eq!(same.trace_dirs().len(), 1, "one directory is one trace");
-
-        let apart = Outputs {
-            unified_jsonl: Some(PathBuf::from("/tmp/a")),
-            unified_parquet: Some(PathBuf::from("/tmp/b")),
-            ..Default::default()
-        };
-        assert_eq!(
-            apart.trace_dirs().len(),
-            2,
-            "two directories are two traces"
-        );
-
-        // A projection is not a trace, so it contributes no trace directory and
-        // therefore no manifest (FR-075b).
-        let projection_only = Outputs {
-            mooncake: Some(PathBuf::from("/tmp/mc.jsonl")),
-            ..Default::default()
-        };
-        assert!(projection_only.trace_dirs().is_empty());
-        assert!(!projection_only.is_empty(), "it does have an output");
-        assert!(Outputs::default().is_empty());
-    }
-
-    /// A real description rather than a hand-written fragment: a `blocks` missing `tokens`
-    /// exits 2 for a reason that has nothing to do with what is under test.
-    const SMALL: &str = r#"
-version: 1
-blocks: {tokens: 16, bytes: 32768}
-shared_classes:
-  manual:
-    length: {constant: 4}
-    lifetime: {constant: .inf}
-session_classes:
-  chat:
-    pool: {size: {exact: 5}}
-    uses: [{class: manual, count: {constant: 1}}]
-    turns: {constant: 4}
-    input_growth: {constant: 2}
-    output_growth: {constant: 1}
-    think_time: {constant: 10}
-"#;
-
-    #[test]
-    fn both_entry_points_declare_the_same_losses_for_the_same_projection() {
-        // FR-077 on the path that had nothing. `emit --qwen-bailian` and `convert --to
-        // qwen-bailian` produce the same file from the same records, so a reader who is told
-        // what was dropped on one path and not the other is being told the file is
-        // different depending on how it was obtained.
-        let tmp = tempfile::TempDir::new().unwrap();
-        let description = tmp.path().join("small.yml");
-        fs::write(&description, SMALL).unwrap();
-        let trace = tmp.path().join("trace");
-        let emitted = emit(
-            &description,
-            200.0,
-            7,
-            Outputs {
-                unified_jsonl: Some(trace.clone()),
-                mooncake: Some(tmp.path().join("mc.jsonl")),
-                cachesim: Some(tmp.path().join("cs.csv")),
-                qwen_bailian: Some(tmp.path().join("qwen.jsonl")),
-                ..Default::default()
-            },
-            None,
-            false,
-        )
-        .expect("the emit must succeed");
-
-        // One line for the run, not one per projection: three copies would read as three
-        // claims about three files rather than one property of all of them.
-        assert_eq!(
-            emitted
-                .matches(workload_trace::PROJECTION_IS_NOT_A_TRACE)
-                .count(),
-            1,
-            "{emitted}"
-        );
-
-        // Every loss the convert path declares for this format is declared by the emit
-        // path too. Asserted in that direction because the failure this catches is emit
-        // being the quieter of the two, which is how it was.
-        let converted = convert(
-            &trace,
-            ConvertTo::QwenBailian,
-            &tmp.path().join("converted.jsonl"),
-        )
-        .expect("the convert must succeed");
-        let mut compared = 0;
-        for line in converted
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix("DROPPED: "))
-        {
-            assert!(
-                emitted.contains(line),
-                "the emit path does not declare {line:?}:\n{emitted}"
-            );
-            compared += 1;
-        }
-        // Three, since this projection stopped declaring virtual time lost once it began
-        // writing `timestamp`. The floor is here so a projection that silently declared
-        // nothing would fail rather than pass vacuously.
-        assert!(compared >= 3, "only {compared} losses were compared");
-
-        // And each of the other two formats declares its own, so a run that asks for all
-        // three is told about all three.
-        for expected in ["16 tokens", "32768 bytes", "chat_id/parent_chat_id chain"] {
-            assert!(
-                emitted.contains(expected),
-                "no projection declared {expected:?}:\n{emitted}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_projection_is_not_accepted_where_a_trace_is_expected() {
-        // FR-075b's operative half, pinned rather than argued.
-        //
-        // There is no subcommand that ingests a trace and checks reproducibility — `plan`
-        // takes a *description* and writes the canonical serialisation, so a projection
-        // cannot be offered to it in the first place. That leaves `convert`'s input as the
-        // one place a projection could be mistaken for a trace, and it is refused there.
-        //
-        // The refusal takes two shapes, and both are recorded here rather than flattened
-        // into "it errors":
-        //
-        // * Mooncake and libCacheSim need block geometry, which only a manifest carries, so
-        //   they refuse at the manifest — FR-075b's own words, "it has no manifest", as an
-        //   executable check, and a **configuration** refusal (exit 2).
-        // * The qwen-bailian projection needs no manifest, so it gets as far as the rows and is
-        //   refused by the schema (exit 1). That is sufficient rather than lucky: no
-        //   projection satisfies any target's row schema — a qwen-bailian row has no
-        //   `request_start`, a Mooncake row has no `session_id`, and a libCacheSim CSV is
-        //   not JSON at all.
-        let tmp = tempfile::TempDir::new().unwrap();
-        let description = tmp.path().join("small.yml");
-        fs::write(&description, SMALL).unwrap();
-        let projection = tmp.path().join("sim.jsonl");
-        emit(
-            &description,
-            200.0,
-            7,
-            Outputs {
-                qwen_bailian: Some(projection.clone()),
-                ..Default::default()
-            },
-            None,
-            false,
-        )
-        .expect("the emit must succeed");
-
-        // It is a file with no manifest beside it, because it is not a trace.
-        assert!(projection.is_file());
-        assert!(!tmp.path().join("manifest.json").exists());
-
-        for (target, expected_code) in [
-            (ConvertTo::QwenBailian, exit::OTHER),
-            (ConvertTo::Mooncake, exit::CONFIG),
-            (ConvertTo::Cachesim, exit::CONFIG),
-            (ConvertTo::OracleGeneral, exit::CONFIG),
-        ] {
-            let err = convert(&projection, target, &tmp.path().join("again.out"))
-                .expect_err("a projection must not be convertible as though it were a trace");
-            assert_eq!(err.code(), expected_code, "{target:?}: {err}");
-            if expected_code == exit::CONFIG {
-                assert!(
-                    err.to_string().contains("manifest"),
-                    "the refusal should name what is missing: {err}"
-                );
-            }
-        }
     }
 
     #[test]

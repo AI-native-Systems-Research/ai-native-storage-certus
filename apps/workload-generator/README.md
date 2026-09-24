@@ -39,12 +39,12 @@ The split is not organisational. Four crates are CUDA-free and are workspace
 default members; **one** links CUDA and is not. That boundary is what makes
 "the plan is identical across the live and emit paths" a property the compiler
 enforces rather than one a reviewer has to check, because the simulation core
-cannot see a mailbox, a device or an output container.
+cannot see a mailbox, a device or an output format.
 
 | crate | default member | what it owns |
 | --- | --- | --- |
 | `workload-model` | yes | the simulation core: YAML schema and validation, the five distribution kinds, populations and residual seeding, selection over rank, the key chain, sessions and turns, the virtual-time loop, and the canonical `OperationPlan` |
-| `workload-trace` | yes | output containers (JSONL, parquet behind a non-default feature), the self-describing manifest, and the Mooncake / libCacheSim / Qwen-Bailian projections |
+| `workload-trace` | yes | the per-turn record every output is written from, and the Mooncake / libCacheSim / Qwen-Bailian projection writers |
 | `workload-wire` | yes | the generator↔agent TCP protocol: framing, the `Hello` handshake, and its conformance cases |
 | `workload-gen` | yes | the `workload-gen` binary — CLI, the plan queue, the driver, pacing, and the structured report. Links no CUDA and attaches to no mailbox |
 | `workload-node-agent` | **no** | the per-node daemon, and **everything that touches the mailbox or the GPU**: the turn executor, the opcode mapping, the payload buffer. It holds no simulation state |
@@ -76,14 +76,11 @@ turning the feature off drops the networking too:
 cargo build -p workload-gen --no-default-features
 ```
 
-That build drops the `run` subcommand and keeps the other four — `emit`,
-`convert`, `validate` and `plan` — which is enough to write a trace, project it
-into another tool's format, check a description, and produce the canonical plan
-serialisation that reproducibility is asserted against. Quickstart Scenarios 1–3
-and the whole of User Story 2 run on it, on any machine.
-
-Add `--features parquet` for the parquet container; it pulls the arrow family,
-which is why it is not on by default.
+That build drops the `run` subcommand and keeps the other three — `emit`,
+`validate` and `plan` — which is enough to write a workload in another tool's
+trace format, check a description, and produce the canonical plan serialisation
+that reproducibility is asserted against. Quickstart Scenarios 1–3 and the
+whole of User Story 2 run on it, on any machine.
 
 ## Which formats an emit run writes
 
@@ -92,20 +89,15 @@ default output and no format a run is obliged to produce:
 
 | Flag | Writes | Destination |
 | --- | --- | --- |
-| `--certus-unified-jsonl` | native trace, JSONL container | a directory |
-| `--certus-unified-parquet` | native trace, parquet container | a directory |
 | `--mooncake` | Mooncake FAST'25 projection | a file |
-| `--libcachesim` | libCacheSim CSV projection | a file |
+| `--libcachesim` | libCacheSim CSV projection, and its binary `oracleGeneral` form | a file |
 | `--qwen-bailian` | Qwen-Bailian usage-trace JSONL, which `apps/eviction-replay-benchmark` reads | a file |
 
-The native destinations are directories because a native trace is
-self-describing — a `manifest.json` beside its records. A projection has no
-manifest and is not a trace, so it is one file. Point both native flags at the
-**same** directory for one trace holding both containers, whose record counts the
-run then checks against each other.
-
-The cheap path is to ask for a standard format and nothing else, which writes no
-trace directory at all:
+Every destination is a file, and **there is no Certus-private container** to
+write first. A workload is repeated from its description and seed, so storing
+one is never the way to repeat it — which leaves interoperability as the only
+job an output has, and a projection onto a format someone already reads does
+that job directly:
 
 ```bash
 cargo run -p workload-gen --no-default-features -- emit description.yml \
@@ -113,11 +105,9 @@ cargo run -p workload-gen --no-default-features -- emit description.yml \
 ```
 
 Sizes measured at a 30-second span on the shipped example, since the trade is not
-what you would guess: **libCacheSim CSV is the largest of the four** (62.9 MB)
+what you would guess: **libCacheSim CSV is the largest of the three** (62.0 MB)
 while carrying the least, because it writes a row per block reference rather than
-per request; and the full 17-field schema in parquet (12.2 MB) is *smaller* than
-4-field Mooncake JSONL (12.5 MB), so the extra fields cost nothing once the
-container stops being text. Native JSONL is 44.1 MB.
+per request, where 4-field Mooncake JSONL is 12.1 MB and Qwen-Bailian 40.4 MB.
 
 The pre-flight sizes only what you asked for and checks each destination against
 the free space on **its own** filesystem, so a refusal names the flag to drop.

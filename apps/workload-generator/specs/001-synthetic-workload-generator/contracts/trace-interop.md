@@ -2,31 +2,30 @@
 
 **Version**: 1
 **Status**: Draft
-**Applies to**: `workload-gen convert`
-**Companion to**: `trace-io.md`, which specifies the native emitted trace
+**Applies to**: `workload-gen emit`
+**Companion to**: `trace-io.md`, which specifies the record these are written from
 
-Every format here is a **conversion**, never a second thing an emit run writes.
-That rule comes from `research.md` D1 and it is what keeps consumer-specific
-shapes out of the published trace: an emit run writes one schema in two
-containers (spec FR-055), and `convert` projects that into whatever a
-particular tool eats.
+Every format here is a **projection** of the per-turn record, written in the
+same pass as the run (spec FR-075). That rule comes from `research.md` D1 and
+it is what keeps consumer-specific shapes out of the record contract: each
+target gets whatever it eats, and none of them defines what a turn means.
 
 **Every claim below was verified against upstream bytes**, not recalled. Where
 a detail is unverified it says so, and that is a task, not a footnote.
 
 ## The compatibility ladder
 
-The corpus's `source_class` field turns out to be the whole map, because each
-rung has a different de-facto format and a different loss:
+Traces in this space divide into three classes, and the class is the whole map:
+each has a different de-facto format and a different loss.
 
-| `source_class` | Carries | Upstream examples | What is lost coming from us |
+| Class | Carries | Upstream examples | What is lost coming from us |
 | --- | --- | --- | --- |
 | `metadata_only` | arrivals + counts | Azure, BurstGPT | all reuse structure |
 | `pre_hashed` | **block identity** | Mooncake, WekaTrace | varies; see below |
 | `raw_text` | prompt text | WildChat, ragbench | nothing — but needs a tokenizer |
 
-We are natively `pre_hashed`, so that rung is where interop is cheap and
-lossless enough to be worth doing.
+System mints keys and never text, so it is natively `pre_hashed`, and that rung
+is where interop is cheap and lossless enough to be worth doing.
 
 **There is no standards-body format at this level.** OpenTelemetry GenAI
 semantic conventions are the only governed standard anywhere nearby and they
@@ -45,7 +44,7 @@ Both were learned by measuring a format that fails one of them:
    *between* sessions. A format whose identifiers are scoped per session cannot
    express that at all, no matter how faithfully it records each session.
 
-## Mooncake — `convert --to mooncake` (the recommended target)
+## Mooncake — `--mooncake` (the recommended target)
 
 `github.com/kvcache-ai/Mooncake` @ `main:FAST25-release/traces/`:
 `conversation_trace.jsonl`, `synthetic_trace.jsonl`, `toolagent_trace.jsonl`.
@@ -59,10 +58,10 @@ JSONL, **one document per line, one line per request**, exactly four fields:
 
 Verified on 2 328 rows of `conversation_trace.jsonl`:
 
-- `timestamp` is **milliseconds**, non-decreasing. Their corpus quantises it to
-  a 3 000 ms tick (delta histogram 3000×151, 2999×54, 3001×53 — a 3 s tick with
-  ±1 ms jitter), 6–12 requests per tick, 774 s span, 3.0 req/s. **The
-  quantisation is their corpus's, not the format's**, so we write true
+- `timestamp` is **milliseconds**, non-decreasing. The published trace
+  quantises it to a 3 000 ms tick (delta histogram 3000×151, 2999×54, 3001×53 —
+  a 3 s tick with ±1 ms jitter), 6–12 requests per tick, 774 s span, 3.0 req/s.
+  **The quantisation is that capture's, not the format's**, so we write true
   millisecond values from the virtual clock.
 - `len(hash_ids) == ceil(input_length / 512)` on **2 328 of 2 328** rows, so
   block size 512 and — note — **ceil**: the trailing partial block gets an
@@ -103,12 +102,12 @@ recommended target.
   on import**, so a round trip through this format is lossy and must not be
   used as a determinism check.
 - **Dense identifiers.** Their `hash_ids` are dense mint-order integers and
-  ours are chained u64 (`trace-io.md`, § Keys are chained u64). The converter
+  ours are chained u64 (`trace-io.md`, § Keys are chained u64). The projection
   must **renumber**, keeping one dense identifier per distinct key for the
   whole output so that global scope survives. Renumbering per session would
   destroy the sharing and is the one mistake that would look like success.
 
-## libCacheSim CSV — `convert --to cachesim`
+## libCacheSim CSV — `--libcachesim`
 
 `github.com/1a1a11a/libCacheSim` @ `develop:doc/quickstart_cachesim.md`.
 `trace_type` values are `vscsi`, `csv`, `txt`, `oracleGeneral`, plus a generic
@@ -128,7 +127,7 @@ example:
   -t "time-col=2, obj-id-col=5, obj-size-col=4, obj-id-is-num=true"
 ```
 
-So the converter picks a layout and the contract documents the `-t` string to
+So the projection picks a layout and the contract documents the `-t` string to
 use. Two verified traps:
 
 - **Numeric identifiers need `obj-id-is-num=1`** or the reader errors out with
@@ -162,17 +161,17 @@ than csv trace and uses less DRAM" — storing **time, obj-id, size,
 next-access-time (in reference count)**.
 
 Next-access-time is an *oracle* field. A real trace can only get it by a full
-offline pass, but **an emit run knows the entire future of its own trace**, so
-it is one backward pass over the plan. That makes optimal-policy (Belady)
-baselines available for our eviction comparisons, which is a capability the
-native format does not give anyone.
+offline pass, but **an emit run knows the entire future of its own run**, so it
+is one backward pass over the plan. That makes optimal-policy (Belady)
+baselines available for our eviction comparisons, which is the strongest reason
+this target is worth carrying.
 
 **Unverified**: the doc describes those four fields in prose only. The exact
 struct layout, field widths and endianness have **not** been read from the
 reader source. That check is a task and must happen before any bytes are
 written.
 
-## Qwen-Bailian — `convert --to qwen-bailian`
+## Qwen-Bailian — `--qwen-bailian`
 
 `github.com/alibaba-edu/qwen-bailian-usagetraces-anon`, read in this
 repository by `apps/eviction-replay-benchmark` (`src/replay.rs`). JSONL, one
@@ -183,11 +182,11 @@ document per line, one line per request:
  "type": "text", "hash_ids": [1089, 1090, 6326]}
 ```
 
-**Named for the format, not for that one consumer.** The flag was
-`--simulator` until it was renamed, which said nothing about what the bytes
-are, and invited the reader to think the shape was ours. Several corpus traces
-are in this format, so a generated file and a captured one go through identical
-readers — the same argument FR-075a makes for `convert` existing at all.
+**Named for the format, not for that one consumer.** `--qwen-bailian` says what
+the bytes are; a name like `--simulator` would say only who happens to read
+them here, and would invite the reader to think the shape was ours. It is
+Alibaba's anonymized Bailian usage trace (`qwen-bailian-usagetraces-anon`), so
+a generated file and a captured one go through identical readers.
 
 **`chat_id` is a turn, not a session**, despite the name, and it is scoped
 **globally to the file**. The reader keeps one `chat_id -> root` map and
@@ -201,12 +200,13 @@ linear chain.
 ignores (`timestamp`, `turn`, `input_length`, `output_length`). A file carrying
 only what one consumer reads is a subset of that consumer's needs rather than a
 Qwen-Bailian trace, and another reader of the same format can use them.
-`timestamp` is written at full `f64` precision rather than the corpus's
-one-decimal style, for the same reason we do not reproduce Mooncake's 3 s tick:
+`timestamp` is written at full `f64` precision rather than the published
+capture's one-decimal style, for the same reason we do not reproduce Mooncake's
+3 s tick:
 the precision of a captured file is a property of that capture, not of the
 format.
 
-**What the conversion loses:** session identity as such (the `session_id`
+**What the projection loses:** session identity as such (the `session_id`
 string becomes a number chain), which references are reads versus stores, and
 how full a trailing partial block was. `hash_ids` stays chained u64 rather than
 dense — the reader takes u64 keys directly, so no renumbering is needed or
@@ -228,14 +228,13 @@ think_time}`, where `type` is `s` (main stream), `n` (nested) or `subagent` — 
 group carrying `agent_id`, `subagent_type`, `duration_ms`, `status`, nested
 `requests[]`.
 
-**We must never write this format, and reading it is deferred** — a real corpus
-is valuable but this feature already has 24 traces in the emitted schema, and
-importing is a different axis from emitting. Two measured reasons never to
-write it:
+**We must never write this format, and reading it is deferred** — real captures
+are valuable, but importing is a different axis from emitting and belongs with
+the fitting work. Two measured reasons never to write it:
 
 1. **`first t = 0.0` for every session** (checked on all 6 sessions parseable
    from the first 20 MB), and the schema has **no field for session start**. So
-   the corpus carries no cross-session arrival information and fails property
+   the format carries no cross-session arrival information and fails property
    1. Emitting it would discard our interleaving; preserving it would mean
    extending someone else's schema with a field they would not read.
 2. **`hash_id_scope: "local"`** — dense per-trace identifiers, which fails
@@ -257,7 +256,7 @@ ever built, these are the measured notes it needs:
 - **102 of 130 main requests in one session are strict prefix extensions of
   their predecessor, and 27 diverge.** The append-only chain plus context
   trimming — independent corroboration of the turn model (spec FR-035), from a
-  corpus this feature was not fitted against.
+  published capture this feature was not fitted against.
 - `hash_id_scope` must be **checked, not assumed**: a future revision declaring
   a global scope would change what an import means.
 
@@ -270,7 +269,7 @@ project, and it is what a lot of serving-throughput tooling consumes.
 It would be trivial to write, and it is still **not worth having**: everything
 about reuse is gone, and reuse is the one thing this feature exists to model.
 The single argument for it — placing our arrivals beside published real ones —
-does not need a converter, because arrival rate is a parameter of the
+does not need a projection, because arrival rate is a parameter of the
 description rather than something recovered from output. Recorded so the idea
 is not re-proposed as free.
 
@@ -279,7 +278,7 @@ is not re-proposed as free.
 The only real standard here, and still the wrong tool. Recorded because the
 reasoning is not obvious and someone will propose it again.
 
-The repo's own corpus generator is
+The repository's own generator for it is
 `benchmarks/kv-offload-otel-replay/trace-gen/trace_to_otel.py`; the loader is
 `benchmarks/kv-offload-replay/otel_corpus.py`. One JSON **file** per
 conversation, `{trace_id, span_count, collected_at, spans: [...]}`, each span
@@ -290,9 +289,9 @@ JSON strings.
 
 - **The format is not the problem.** `start_time`/`end_time` are absolute ISO
   8601 and express arbitrary interleaving natively, so property 1 is
-  satisfiable. The existing *corpus* fails it anyway: `BASE = datetime(2026, 1,
-  1, 0, 0, 0, UTC)` is a module constant and every conversation starts at `t =
-  BASE`, so its timestamps look absolute while being session-relative.
+  satisfiable. The existing *generator* fails it anyway: `BASE = datetime(2026,
+  1, 1, 0, 0, 0, UTC)` is a module constant and every conversation starts at `t
+  = BASE`, so its timestamps look absolute while being session-relative.
   `load_otel_convs` then keeps only per-conversation gaps and discards absolute
   time entirely.
 - **It carries no block identity**, so the cache structure would have to live
@@ -319,5 +318,5 @@ JSON strings.
   guardrail routing, speculative-decode acceptance.
 
 **Conclusion**: implement only if driving a real inference engine becomes a
-goal, and then as a lossy secondary output with the tokenizer pinned in the
-manifest.
+goal, and then as a lossy secondary output that names the tokenizer and chat
+template it was written against.

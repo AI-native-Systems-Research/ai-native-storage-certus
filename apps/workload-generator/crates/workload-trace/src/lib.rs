@@ -1,35 +1,32 @@
-//! Trace output containers and the projections onto other tools' formats.
+//! Projections of a generated workload onto other tools' trace formats.
 //!
-//! `contracts/trace-io.md` is normative for what an emit run writes;
-//! `contracts/trace-interop.md` is normative for what `convert` projects it into.
-//! This crate is CUDA-free and a workspace default member, so container
-//! equivalence and every schema invariant are testable with no accelerator, no
-//! server and no network.
+//! `contracts/trace-io.md` is normative for what an emit run writes. This crate is
+//! CUDA-free and a workspace default member, so every schema invariant is testable with
+//! no accelerator, no server and no network.
 //!
-//! # Two halves, and the line between them
+//! # Projections, and what they deliberately are not
 //!
-//! A **container** ([`jsonl`], and `parquet` behind its feature) is a trace: it carries the full
-//! [`record`] schema and a [`manifest`] describing itself. A **projection**
-//! ([`mooncake`], [`cachesim`], [`qwen`]) is another tool's shape, written
-//! from that schema and lossy on purpose — no manifest, and never accepted in
-//! place of a trace for a reproducibility check (FR-075b). Every projection
+//! A **projection** ([`mooncake`], [`cachesim`], [`qwen`]) is another tool's shape,
+//! written from the [`record`] schema as each turn happens, and lossy on purpose. It is
+//! not a trace: not self-describing, and never accepted in place of the description and
+//! seed or the canonical plan for a reproducibility check (FR-075b). Every projection
 //! declares what it dropped rather than leaving it to be discovered (FR-077).
 //!
-//! Because a projection's input is the *schema* and not this generator's internals,
-//! the same converter runs over a real corpus trace and a generated one, which is
-//! what makes the two comparable (FR-075a).
+//! Each target is a **published** format with a real consumer — Mooncake's FAST'25
+//! shape, libCacheSim's CSV and `oracleGeneral`, and the Qwen-Bailian usage trace that
+//! `apps/eviction-replay-benchmark` reads. Nothing here writes a Certus-private
+//! interchange format: a workload is reproduced from its description and seed (FR-072),
+//! so storing one is never the way to repeat it.
 //!
 //! # Examples
 //!
-//! Write a trace, then project it onto the Qwen-Bailian shape
-//! `apps/eviction-replay-benchmark` reads:
+//! Project a run onto the Qwen-Bailian shape `apps/eviction-replay-benchmark` reads:
 //!
 //! ```
 //! use workload_model::description::WorkloadDescription;
 //! use workload_model::sim::Simulation;
-//! use workload_trace::jsonl::JsonlWriter;
-//! use workload_trace::manifest::Manifest;
-//! use workload_trace::qwen;
+//! use workload_trace::qwen::QwenWriter;
+//! use workload_trace::record::InvocationRecord;
 //!
 //! let yaml = r#"
 //! version: 1
@@ -46,42 +43,40 @@
 //!     think_time: {constant: 5}
 //! "#;
 //! let description: WorkloadDescription = yaml.parse().unwrap();
+//! let block_size = description.blocks.tokens;
 //!
-//! // The container.
-//! let mut trace = Vec::new();
-//! let mut sim = Simulation::new(&description, 7, 1).unwrap();
-//! let mut writer = JsonlWriter::new(&mut trace, "demo", description.blocks.tokens);
-//! sim.run_until(60.0, &mut |s, t| writer.write(s, t).unwrap());
-//! let stats = writer.finish().unwrap(); // releases the borrow on `trace`
-//!
-//! // The manifest, written last so an incomplete directory is unreadable (FR-073).
-//! let manifest = Manifest::new("demo", &description, yaml, 7, 60.0, stats.clone());
-//! assert_eq!(manifest.block_id_space, "chained_u64");
-//!
-//! // The projection, driven by the schema rather than by the simulation.
+//! // Written in the same pass as the simulation, not by converting a stored file.
 //! let mut projected = Vec::new();
-//! let p = qwen::convert_jsonl(trace.as_slice(), &mut projected).unwrap();
-//! assert_eq!(p.records, stats.invocations);
-//! assert_eq!(p.sessions, stats.sessions);
+//! let mut sim = Simulation::new(&description, 7, 1).unwrap();
+//! let mut turns = 0u64;
+//! let stats = {
+//!     let mut writer = QwenWriter::new(&mut projected);
+//!     sim.run_until(60.0, &mut |s, t| {
+//!         turns += 1;
+//!         writer
+//!             .write_record(&InvocationRecord::from_turn("demo", s, t, block_size))
+//!             .unwrap();
+//!     });
+//!     writer.finish().unwrap()
+//! };
+//!
+//! assert_eq!(stats.records, turns);
+//! assert!(!stats.declared_losses().is_empty(), "a projection says what it dropped");
 //! ```
 #![warn(missing_docs)]
 
 /// What a projection is, said once so that both entry points say it identically (FR-075b).
 ///
-/// Printed after a projection's declared losses by `emit` and by `convert` alike. It is a
-/// property of every projection rather than of any one format, so it lives here and not in
-/// a `declared_losses` list — and it is one string rather than two so the two paths cannot
-/// drift into saying it differently, which is the same argument as FR-075a's for the
-/// projections themselves.
+/// Printed once per emit run, after every projection's declared losses. It is a property of
+/// every projection rather than of any one format, so it lives here and not in a
+/// `declared_losses` list, and it is one string so that no two callers can drift into
+/// saying it differently.
 pub const PROJECTION_IS_NOT_A_TRACE: &str =
-    "a projection is not a trace: no manifest, not self-describing, and not accepted in \
-     place of the native trace or the canonical plan for a reproducibility check (FR-075b)";
+    "a projection is not a trace: lossy on purpose, not self-describing, and not accepted \
+     in place of the description and seed or the canonical plan for a reproducibility \
+     check (FR-075b)";
 
 pub mod cachesim;
-pub mod jsonl;
-pub mod manifest;
 pub mod mooncake;
-#[cfg(feature = "parquet")]
-pub mod parquet;
 pub mod qwen;
 pub mod record;

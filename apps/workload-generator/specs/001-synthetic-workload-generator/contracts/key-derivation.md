@@ -212,12 +212,11 @@ cross-node hit. They were revised exactly once, when the field widths were
 rebalanced (see *Field widths* above), and that was only defensible because no
 trace existed yet.
 
-If the key function ever has to change once traces exist, the change is a **new
-version**, not an edit: the old function stays, the trace manifest records
-which version produced it, and a consumer refuses a trace whose version it
-cannot compute. Editing these values in place is never the answer, because the
-failure it produces is invisible — a trace that loads, replays, and quietly
-misses.
+If the key function ever has to change once files exist, the change is a **new
+version**, not an edit: the old function stays, the run reports which version
+produced its keys, and a consumer refuses a file whose version it cannot
+compute. Editing these values in place is never the answer, because the failure
+it produces is invisible — a file that loads, replays, and quietly misses.
 
 ## Collision posture
 

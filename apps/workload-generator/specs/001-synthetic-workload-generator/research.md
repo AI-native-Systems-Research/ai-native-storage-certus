@@ -7,8 +7,8 @@ Where a claim rests on a measurement, the measurement is named.
 
 ## D1. Does the emitted trace have to feed `apps/eviction-replay-benchmark`?
 
-**Decision**: Yes, but through a **documented converter subcommand**, not by
-adding a third output shape to the published trace format.
+**Decision**: Yes, through a **documented projection an emit run writes**
+(`--qwen-bailian`), not by teaching the simulator anything new.
 
 **Rationale**: The simulator does not read the trace-IO schema. Its loader
 (`apps/eviction-replay-benchmark/src/replay.rs:88`) reads a much simpler JSONL
@@ -21,7 +21,7 @@ Two facts make the conversion a pure projection needing no information our
 trace lacks:
 
 - Its `hash_ids` are already `CacheKey` u64 values, **not** dense mint-order
-  integers. So dropping the trace-IO density requirement (spec FR-057) is
+  integers. So carrying chained keys rather than dense ones (spec FR-057) is
   compatible with this consumer — a point worth recording, because it would
   have been the obvious objection to that decision.
 - Our per-turn records carry the full ordered prefix and the session lineage,
@@ -44,16 +44,17 @@ trace lacks:
 
 **Alternatives rejected**:
 
-- *Emit the simulator's shape as a third container.* Contradicts FR-055's "two
-  containers holding identical records" and would put a consumer-specific
-  format in the published contract.
-- *Teach the simulator to read trace-IO.* Modifies another app, so this
-  feature's correctness would depend on a change outside it. Rejected as scope
-  creep.
+- *Name the flag for the consumer (`--simulator`).* Says who reads the bytes
+  here rather than what they are, and invites the reader to think the shape is
+  ours. It is Alibaba's Bailian usage-trace format, which several published
+  captures are in.
+- *Teach the simulator to read a Certus-private schema.* Modifies another app,
+  so this feature's correctness would depend on a change outside it, and it
+  would mean defining such a schema at all. Rejected as scope creep.
 
-**Consequence for the plan**: one converter subcommand, and a quickstart step
-that round-trips a generated trace through the simulator to prove the
-projection is faithful.
+**Consequence for the plan**: one projection writer, and a quickstart step that
+runs a generated file through the simulator to prove the projection is
+faithful.
 
 ## D2. Generator ↔ daemon transport
 
@@ -100,7 +101,7 @@ members, matching `apps/remote-lookup-bench`.
 | Crate | Kind | Default member | Contents |
 | --- | --- | --- | --- |
 | `workload-model` | lib | yes | YAML schema, distributions, populations, selection, key chaining, session/turn simulation, the plan |
-| `workload-trace` | lib | yes | trace-IO writer (JSONL always; parquet behind a feature) and the D1 converter |
+| `workload-trace` | lib | yes | the per-turn record and the three projection writers |
 | `workload-wire` | lib | yes | generator↔daemon framing and both halves of the TCP transport |
 | `workload-gen` | bin | no | the CLI; live path behind a default-on `live` feature |
 | `workload-node-agent` | bin | no | the per-node daemon |
@@ -108,7 +109,7 @@ members, matching `apps/remote-lookup-bench`.
 **Rationale**: FR-072 requires the plan and trace to be identical across live
 and emit runs. A comment cannot enforce that; a crate boundary can.
 `workload-model` owns the simulation and knows nothing about shmq, CUDA,
-sockets, or output containers, so both execution paths are *obliged* to consume
+sockets, or output formats, so both execution paths are *obliged* to consume
 the same plan rather than merely intended to. Two parallel paths would have to
 duplicate a library to diverge, which is visible in review.
 
@@ -121,27 +122,38 @@ whole determinism and distribution test surface runs under a plain `cargo test
 CUDA linkage, making US2 untestable without CUDA present and leaving FR-072 as
 an honour-system property.
 
-## D4. Parquet
+## D4. Does System need a trace container of its own?
 
-**Decision**: Use the `parquet` crate, gated behind a **non-default** cargo
-feature on `workload-trace`, which `workload-gen` enables.
+**Decision**: No. Every output is a **projection** onto a published format that
+a real consumer already reads (`--mooncake`, `--libcachesim`,
+`--qwen-bailian`), and System defines no interchange format of its own.
 
-**Rationale**: There is **no parquet dependency anywhere in this repository
-today** — not in Rust, not in Python — so this is a genuinely new dependency
-and Principle VII requires it be justified. It is: FR-055 makes parquet a
-required output container, and the trace's block-list columns repeat the whole
-prefix per turn (spec's own note), so it is exactly the case where columnar
-compression matters. Hand-rolling a parquet writer is not a serious option.
+**Rationale**: A workload is repeated from its description and seed (FR-072), so
+a stored copy is never the way to repeat one — which removes the only reason a
+private container would have to exist. What remains is interoperability, and a
+projection serves that directly and at a fraction of the size: the shipped
+example's 30-second span is 12.1 MB as Mooncake against tens of gigabytes as a
+full-fidelity container at a legal span.
 
-Gating it matters because `parquet` pulls the arrow-rs family. Without a
-feature gate, every `cargo build` in the workspace would pull arrow, since
-`workload-trace` is a default member. With the gate, the default build is
-unaffected and only the non-default-member binary pays.
+A private format would also have to be earned: specified, versioned, and given
+importers, with nothing outside this repository able to read it in the
+meantime. That is a real cost against a benefit that only materialises if
+someone adopts it, and adoption is not this feature's to decide.
 
-**Alternative rejected**: *JSONL from Rust plus a Python parquet converter.*
-The repository does have Python tooling, but SC-004 requires the two containers
-to yield identical records, and a cross-language pipeline makes that assertion
-span two runtimes instead of one test.
+**Alternatives rejected**:
+
+- *A columnar container (parquet) for the block-list columns.* The compression
+  argument is sound in isolation — those columns repeat the whole prefix per
+  turn — but it is an argument about how to store a format, and the decision
+  above is that there is no such format to store. It also pulls the arrow-rs
+  family into a workspace that has no other user for it.
+- *A JSONL container of the full record schema.* Cheaper, and still a format
+  with no reader: the three projections between them carry everything any known
+  consumer reads.
+
+**Consequence for the plan**: `workload-trace` writes projections only, and the
+per-turn record (`contracts/trace-io.md`) exists as the single in-memory shape
+all three are written from (FR-056) rather than as anything that reaches disk.
 
 ## D5. Reproducibility: RNG and key chaining
 
@@ -204,35 +216,25 @@ repo-wide rather than only here.
 
 ## D8. Standard trace formats: which to speak, and which not to emit
 
-**Added during Phase 1**, after the emitted trace's schema was questioned:
-whether it is a standard, and whether we should emit a standard one instead.
+**Added during Phase 1**, when it was asked whether an emit run should write a
+standard format instead of one of our own.
 
-**Decision**: Keep the adopted schema as the **only** thing an emit run writes,
-and reach every other format through `convert`, as D1 already established for
-the simulator. Add exactly **two**: a **Mooncake writer**, which is the
-standard block-level format, and a **libCacheSim CSV writer**, which serves
-this feature's stated purpose of evaluating eviction. Do **not** add an
-OpenTelemetry writer, a WekaTrace writer, or an arrival-only export, and defer
-reading third-party corpora. All specifics are in `contracts/trace-interop.md`.
+**Decision**: Write **only** published formats — the **Mooncake writer**, which
+is the standard block-level format, the **libCacheSim CSV writer**, which
+serves this feature's stated purpose of evaluating eviction, and the
+**Qwen-Bailian writer** D1 settled. Do **not** add an OpenTelemetry writer, a
+WekaTrace writer, or an arrival-only export, and defer reading third-party
+traces. All specifics are in `contracts/trace-interop.md`.
 
 **Rationale**:
 
-First, what the schema is. It is **not a standard and not adopted from one** —
-it is the normalisation layer another team built over the public formats, and
-the evidence is in the corpus's own manifests: each of the 24 traces has a
-different `source_url` (Azure `AzurePublicDataset`, BurstGPT, Mooncake FAST'25,
-qwen-bailian, ragbench, SWE-agent, WildChat), and `field_status: native |
-reconstructed | unavailable` exists *only* because those sources disagree about
-what they carry. A standard would not need that field; a normaliser cannot work
-without it. Being a superset of seven upstream formats is exactly the property
-that makes it the right thing to emit and the right thing to convert *from*.
-
-Second, there is **no standards-body format at this level at all**.
+First, "adopt the standard" is not an available move, because there is **no
+standards-body format at this level at all**.
 OpenTelemetry GenAI semantic conventions are the only governed standard nearby
-and they describe requests and text, not blocks. So "adopt the standard" is not
-an available move; the choice is only which de-facto formats to speak.
+and they describe requests and text, not blocks. The choice is only which
+de-facto formats to speak.
 
-Third, two properties decide any candidate, and both were learned by measuring
+Second, two properties decide any candidate, and both were learned by measuring
 a format that fails one:
 
 - **A run-global clock**, because cross-session interleaving *is* the workload
@@ -249,57 +251,51 @@ field for session start, and `hash_id_scope: "local"`.
 
 **Alternatives rejected**:
 
-- *Replace our schema with WekaTrace.* Considered seriously and rejected on the
-  measurements above: it would discard the interleaving, and being grouped by
+- *Write WekaTrace.* Considered seriously and rejected on the measurements
+  above: it would discard the interleaving, and being grouped by
   session it also cannot be streamed — a session's line is unwritable until the
   session ends, so emitting it means holding every in-flight session in memory
   (hundreds of megabytes at this feature's concurrency) to produce a file we
   are streaming anyway. Its first line is 2.76 MB for 135 requests.
-- *Emit Mooncake as a third container.* Same objection D1 made about the
-  simulator's shape: it contradicts FR-055's "two containers holding identical
-  records" and would put a consumer-specific format in the published contract.
-  Also lossy — its ceil convention discards `partial_final_valid`, so a round
-  trip could not serve as a determinism check.
+- *Treat a Mooncake file as the artifact a run is reproduced from.* It is lossy
+  — its ceil convention discards `partial_final_valid` — so a round trip could
+  not serve as a determinism check. That is FR-075b: a projection is not a
+  trace, and reproduction is from the description and seed.
 - *Emit OpenTelemetry.* The format itself is capable (absolute ISO 8601
   timestamps carry interleaving fine), but it holds no block identity, so the
   cache structure would have to live in fabricated text whose every block
   tokenises to exactly `block_size` tokens — pinning one tokenizer and chat
   template into the artifact, at roughly 50× the size, to arrive back at the
   keys we started from. Worth it only to drive a real inference engine.
-- *Wait for a standard to emerge.* Rejected: `convert` targets are cheap
-  precisely because they are projections of a superset. Adding one later costs
-  a writer, not a redesign.
+- *Wait for a standard to emerge.* Rejected: a projection target is cheap
+  precisely because it is a function of the plan. Adding one later costs a
+  writer, not a redesign.
 
-**Correction applied after this decision was first written.** It initially said
-every target must be a *conversion of the emitted trace*, which over-applied
-D1. D1's concern was keeping consumer-specific shapes out of the published
-trace contract — not forbidding a direct writer — and the stronger rule imposed
-a real cost: a legal span on the shipped example is roughly 27 GB as a native
-trace, so requiring it as an intermediate meant paying that, plus a possible
-free-space refusal, to obtain a Mooncake file of a few hundred megabytes. What
-actually needed protecting is narrower and is now what FR-075b says: a
-projection is a function of the **plan**, never a second simulation, and a
-projection is not a trace. Direct emission satisfies both, and avoids a JSONL
-parse step that could itself be wrong.
+**One rule was over-applied and is recorded so it is not reimposed.** This
+decision first said every target must be a conversion of a stored Certus trace,
+which took D1's concern — keep consumer-specific shapes out of what a turn
+*means* — and turned it into a requirement to write an intermediate. The cost
+was real: a legal span on the shipped example is roughly 27 GB as a
+full-fidelity container, so obtaining a Mooncake file of a few hundred
+megabytes meant paying that first, plus a possible free-space refusal. What
+actually needed protecting is what FR-075b now says: a projection is a function
+of the **plan**, never a second simulation, and it is not a trace. Writing it
+directly satisfies both and avoids a parse step that could itself be wrong.
 
-So the projections live in `workload-trace` as functions, with **two entry
-points calling the same function**: `emit` applies them in-stream, and
-`convert` applies them to a stored trace. Keeping `convert` is not redundancy —
-its input is the *schema*, and the 24 real traces in `traces/` are in that
-schema, so it is the only way to push a real workload and a generated one
-through an identical transformation. That is the comparability goal, and it
-cannot be reached from the emit path at all.
+So the projections live in `workload-trace` as writers fed by one record stream
+(FR-056), with no stored intermediate anywhere in the path.
 
-**Consequence for the plan**: `emit` grows one flag per projection, and
-`convert` grows a `--to` selector; two writers become tasks; and the
-`oracleGeneral` binary layout needs reading from upstream source before any
-bytes are written, because upstream documents those fields in prose only.
+**Consequence for the plan**: `emit` grows one flag per projection; three
+writers become tasks; and the `oracleGeneral` binary layout needs reading from
+upstream source before any bytes are written, because upstream documents those
+fields in prose only.
 
-**Unexpected bonus, recorded because it is a capability the native format does
-not give anyone**: libCacheSim's preferred `oracleGeneral` format wants
-next-access-time, which a real trace can only obtain by a full offline pass. An
-emit run knows the entire future of its own trace, so it is one backward pass —
-making optimal-policy (Belady) baselines available for eviction comparisons.
+**Unexpected bonus, recorded because it is the strongest reason the libCacheSim
+target is worth carrying**: libCacheSim's preferred `oracleGeneral` format
+wants next-access-time, which a real trace can only obtain by a full offline
+pass. An emit run knows the entire future of its own trace, so it is one
+backward pass — making optimal-policy (Belady) baselines available for eviction
+comparisons.
 
 ## D9. Open questions carried into Phase 1
 
@@ -386,9 +382,9 @@ are — `splitmix64` over a salt of `(session, epoch)` — buys three things:
 
 There is **no replay path at all** today: the live driver runs from the
 simulation, never from a trace. So this is a new capability rather than a fix,
-and its value is not replaying our own `emit` output — it is that the trace
-corpus becomes driveable against Certus. A captured real trace has no instance
-assignment either, so one derivation serves both.
+and its value is not replaying our own `emit` output — it is that a
+**captured** trace becomes driveable against Certus. A captured trace has no
+instance assignment either, so one derivation serves both.
 
 ### Two traps to carry into the work
 
@@ -396,13 +392,13 @@ assignment either, so one derivation serves both.
   or two replays are incomparable. Same argument as the hardware file's digest.
 - **The loss is at the emit boundary, not the projection boundary.** This was
   first written here as "placement is a declared loss for the projections", and
-  that was **wrong**: a projection's `declared_losses()` names what the *trace*
-  carries and the target cannot, and the trace never carried placement, so
-  declaring it there puts the loss one stage later than it happens. What is
-  missing from an emitted trace is the migration **event**, and the emit path
-  now declares that — FR-077 applied where the loss occurs. If the placement
-  epoch above is ever built the projections *will* then drop it and a
-  `declared_losses()` entry becomes correct, but not before.
+  that was **wrong**: a projection's `declared_losses()` names what the
+  *record* carries and the target cannot, and the record never carried
+  placement, so declaring it there puts the loss one stage later than it
+  happens. What is missing from an emitted trace is the migration **event**,
+  and the emit path now declares that — FR-077 applied where the loss occurs.
+  If the placement epoch above is ever built the projections *will* then drop
+  it and a `declared_losses()` entry becomes correct, but not before.
 
 ## D11. Dense block identifiers instead of chained hashes: DEFERRED
 

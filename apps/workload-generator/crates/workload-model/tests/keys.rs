@@ -11,7 +11,7 @@
 //! test", it makes every trace ever produced by this tool unverifiable, and it
 //! does so silently, because such a trace still loads and still replays. If a
 //! change here ever looks necessary, the key function has to be *versioned*
-//! instead, with the manifest recording which version produced the trace.
+//! instead, with the run reporting which version produced the keys.
 
 use workload_model::keys::{self, CacheKey, ROOT_PARENT};
 

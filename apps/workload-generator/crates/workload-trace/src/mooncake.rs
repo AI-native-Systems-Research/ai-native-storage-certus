@@ -19,8 +19,8 @@
 //!
 //! # Three conversions, each with a reason
 //!
-//! - **Time.** Ours is virtual seconds, theirs is **milliseconds**. Their corpus
-//!   quantises to a 3 000 ms tick, but that is a property of *their* corpus and not of
+//! - **Time.** Ours is virtual seconds, theirs is **milliseconds**. The published
+//!   trace quantises to a 3 000 ms tick, but that is a property of *that capture* and not of
 //!   the format, so we write true millisecond values off the virtual clock.
 //! - **Lengths.** Tokens, as ours are. Their invariant is
 //!   `len(hash_ids) == ceil(input_length / block_size)`; our blocks are whole, so the
@@ -57,38 +57,58 @@
 //!
 //! # Examples
 //!
-//! [`convert_jsonl`] takes emitted trace rows and writes Mooncake lines. Note what
-//! the renumbering does with the shared prefix — it is the whole point of the format
-//! being global rather than per session:
+//! [`MooncakeWriter`] projects records as the simulation produces them. Note what the
+//! renumbering does with the shared prefix — it is the whole point of the identifiers
+//! being global to the file rather than per session:
 //!
 //! ```
-//! use workload_trace::mooncake::convert_jsonl;
+//! use workload_trace::mooncake::MooncakeWriter;
+//! use workload_trace::record::InvocationRecord;
 //!
 //! // Two turns of one session: the second re-reads the first's prompt.
-//! let trace = concat!(
-//!     r#"{"request_start":0.0,"full_input_blocks":[91,92],"full_output_blocks":[93]}"#, "\n",
-//!     r#"{"request_start":1.5,"full_input_blocks":[91,92,93],"full_output_blocks":[94]}"#, "\n",
-//! );
-//!
 //! let mut out = Vec::new();
-//! let stats = convert_jsonl(trace.as_bytes(), &mut out, 16).unwrap();
+//! let stats = {
+//!     let mut w = MooncakeWriter::new(&mut out, 16);
+//!     for (at, input, output) in [
+//!         (0.0, vec![91u64, 92], vec![93u64]),
+//!         (1.5, vec![91, 92, 93], vec![94]),
+//!     ] {
+//!         w.write_record(&InvocationRecord {
+//!             trace_id: "demo".to_string(),
+//!             session_id: "s".to_string(),
+//!             invocation_index: 0,
+//!             parent_invocation: -1,
+//!             request_start: at,
+//!             request_end: None,
+//!             timestamp_kind: "virtual",
+//!             timestamp_is_synthetic: true,
+//!             model: None,
+//!             input_length: 0,
+//!             output_length: 0,
+//!             reuse_from: Vec::new(),
+//!             new_input_blocks: Vec::new(),
+//!             new_output_blocks: Vec::new(),
+//!             full_input_blocks: input,
+//!             full_output_blocks: output,
+//!             partial_final_valid: None,
+//!         })
+//!         .unwrap();
+//!     }
+//!     w.finish().unwrap()
+//! };
 //! assert_eq!(stats.records, 2);
 //! assert_eq!(stats.distinct_ids, 3); // 91, 92, 93 renumbered to 0, 1, 2
 //!
 //! let text = String::from_utf8(out).unwrap();
 //! let lines: Vec<&str> = text.lines().collect();
 //! assert_eq!(lines[0], r#"{"timestamp":0,"input_length":32,"output_length":16,"hash_ids":[0,1]}"#);
-//! // The prefix keeps its identifiers, so the reuse is still visible.
 //! assert_eq!(lines[1], r#"{"timestamp":1500,"input_length":48,"output_length":16,"hash_ids":[0,1,2]}"#);
-//!
-//! // And the conversion says what it gave up, rather than leaving it to be found.
-//! assert!(stats.declared_losses().iter().any(|l| l.contains("16 tokens")));
 //! ```
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::record::InvocationRecord;
 
@@ -106,14 +126,6 @@ pub struct MooncakeRecord {
     pub output_length: i64,
     /// The prompt's blocks, as dense identifiers global to the file.
     pub hash_ids: Vec<i64>,
-}
-
-/// The fields the projection needs from a trace row.
-#[derive(Debug, Clone, Deserialize)]
-struct Row {
-    request_start: f64,
-    full_input_blocks: Vec<u64>,
-    full_output_blocks: Vec<u64>,
 }
 
 /// What a conversion produced, and what it had to give up.
@@ -265,50 +277,49 @@ impl<W: Write> MooncakeWriter<W> {
     }
 }
 
-/// Convert an emitted JSONL trace into the Mooncake format.
-///
-/// The `convert --to mooncake` entry point. Its input is the *schema*, so it works on
-/// any trace in it, which is what lets a real corpus trace and a generated one be
-/// pushed through the identical projection (FR-075a).
-///
-/// # Errors
-///
-/// If a line is not a trace row, or a timestamp goes backwards.
-pub fn convert_jsonl<R: BufRead, W: Write>(
-    input: R,
-    output: W,
-    block_size: u64,
-) -> io::Result<MooncakeStats> {
-    let mut writer = MooncakeWriter::new(output, block_size);
-    for (lineno, line) in input.lines().enumerate() {
-        let line = line?;
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let row: Row = serde_json::from_str(line).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("line {}: not a trace row: {e}", lineno + 1),
-            )
-        })?;
-        writer.write_parts(
-            row.request_start,
-            &row.full_input_blocks,
-            &row.full_output_blocks,
-        )?;
-    }
-    writer.finish()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn row(at: f64, input: &[u64], output: &[u64]) -> String {
-        format!(
-            r#"{{"request_start":{at},"full_input_blocks":{input:?},"full_output_blocks":{output:?}}}"#
-        )
+    /// One record, built directly and projected through `MooncakeWriter`, the path
+    /// `emit` takes, so every assertion is a claim about Mooncake's own shape, verified
+    /// against upstream.
+    fn row(at: f64, input: &[u64], output: &[u64]) -> InvocationRecord {
+        InvocationRecord {
+            trace_id: "t".to_string(),
+            session_id: "s".to_string(),
+            invocation_index: 0,
+            parent_invocation: -1,
+            request_start: at,
+            request_end: None,
+            timestamp_kind: "virtual",
+            timestamp_is_synthetic: true,
+            model: None,
+            input_length: 0,
+            output_length: 0,
+            reuse_from: Vec::new(),
+            new_input_blocks: Vec::new(),
+            new_output_blocks: Vec::new(),
+            full_input_blocks: input.to_vec(),
+            full_output_blocks: output.to_vec(),
+            partial_final_valid: None,
+        }
+    }
+
+    /// Project records through the writer, returning the bytes and the stats.
+    fn project(
+        records: &[InvocationRecord],
+        block_size: u64,
+    ) -> io::Result<(Vec<u8>, MooncakeStats)> {
+        let mut out = Vec::new();
+        let stats = {
+            let mut w = MooncakeWriter::new(&mut out, block_size);
+            for r in records {
+                w.write_record(r)?;
+            }
+            w.finish()?
+        };
+        Ok((out, stats))
     }
 
     fn lines_of(bytes: Vec<u8>) -> Vec<serde_json::Value> {
@@ -323,13 +334,11 @@ mod tests {
     fn the_upstream_invariant_holds_on_every_row() {
         // `len(hash_ids) == ceil(input_length / block_size)`, measured on 2328/2328
         // upstream rows. Ours divides exactly because blocks are whole.
-        let input = format!(
-            "{}\n{}\n",
+        let input = vec![
             row(0.0, &[10, 11, 12], &[20]),
             row(1.5, &[10, 11, 12, 20, 13], &[21, 22]),
-        );
-        let mut out = Vec::new();
-        let stats = convert_jsonl(input.as_bytes(), &mut out, 16).unwrap();
+        ];
+        let (out, stats) = project(&input, 16).unwrap();
         assert_eq!(stats.records, 2);
         for v in lines_of(out) {
             let n = v["hash_ids"].as_array().unwrap().len() as i64;
@@ -344,14 +353,12 @@ mod tests {
         // Upstream: range 0..44683 with 44684 distinct — perfectly dense. A gap or a
         // per-session restart would both break a consumer that treats an identifier as
         // an index.
-        let input = format!(
-            "{}\n{}\n{}\n",
+        let input = vec![
             row(0.0, &[100], &[]),
             row(1.0, &[200, 201], &[]),
             row(2.0, &[100, 300], &[]),
-        );
-        let mut out = Vec::new();
-        let stats = convert_jsonl(input.as_bytes(), &mut out, 16).unwrap();
+        ];
+        let (out, stats) = project(&input, 16).unwrap();
         let all: Vec<i64> = lines_of(out)
             .iter()
             .flat_map(|v| {
@@ -381,13 +388,8 @@ mod tests {
     fn a_repeated_key_keeps_its_identifier_across_rows() {
         // The whole of reuse. If a key were renumbered on each appearance the file
         // would show no cache hits at all while looking entirely well formed.
-        let input = format!(
-            "{}\n{}\n",
-            row(0.0, &[7, 8], &[]),
-            row(1.0, &[7, 8, 9], &[])
-        );
-        let mut out = Vec::new();
-        convert_jsonl(input.as_bytes(), &mut out, 16).unwrap();
+        let input = vec![row(0.0, &[7, 8], &[]), row(1.0, &[7, 8, 9], &[])];
+        let (out, _) = project(&input, 16).unwrap();
         let rows = lines_of(out);
         let first = rows[0]["hash_ids"].as_array().unwrap();
         let second = rows[1]["hash_ids"].as_array().unwrap();
@@ -396,9 +398,8 @@ mod tests {
 
     #[test]
     fn timestamps_are_milliseconds_and_non_decreasing() {
-        let input = format!("{}\n{}\n", row(0.25, &[1], &[]), row(2.5, &[1, 2], &[]));
-        let mut out = Vec::new();
-        convert_jsonl(input.as_bytes(), &mut out, 16).unwrap();
+        let input = vec![row(0.25, &[1], &[]), row(2.5, &[1, 2], &[])];
+        let (out, _) = project(&input, 16).unwrap();
         let rows = lines_of(out);
         assert_eq!(rows[0]["timestamp"], 250);
         assert_eq!(rows[1]["timestamp"], 2500);
@@ -408,9 +409,8 @@ mod tests {
     fn a_backwards_timestamp_is_refused() {
         // Upstream's timestamp is non-decreasing; a reader that sorts on it would
         // silently reorder the workload rather than fail.
-        let input = format!("{}\n{}\n", row(5.0, &[1], &[]), row(1.0, &[2], &[]));
-        let mut out = Vec::new();
-        let err = convert_jsonl(input.as_bytes(), &mut out, 16).unwrap_err();
+        let input = vec![row(5.0, &[1], &[]), row(1.0, &[2], &[])];
+        let err = project(&input, 16).unwrap_err();
         assert!(err.to_string().contains("non-decreasing"), "got: {err}");
     }
 
@@ -419,9 +419,8 @@ mod tests {
         // Upstream's shape: `hash_ids` is the prompt. A turn's output enters the next
         // request's prefix, so nothing is lost except the final turn's — which is
         // stored and never read again.
-        let input = row(0.0, &[1, 2], &[3, 4, 5]);
-        let mut out = Vec::new();
-        convert_jsonl(input.as_bytes(), &mut out, 16).unwrap();
+        let input = vec![row(0.0, &[1, 2], &[3, 4, 5])];
+        let (out, _) = project(&input, 16).unwrap();
         let v = &lines_of(out)[0];
         assert_eq!(v["hash_ids"].as_array().unwrap().len(), 2);
         assert_eq!(v["output_length"], 3 * 16);
@@ -431,8 +430,7 @@ mod tests {
     fn the_field_order_matches_upstream() {
         // A reader that has seen their files should see ours the same way, and two runs
         // of ours must be byte-comparable.
-        let mut out = Vec::new();
-        convert_jsonl(row(0.0, &[1], &[2]).as_bytes(), &mut out, 16).unwrap();
+        let (out, _) = project(&[row(0.0, &[1], &[2])], 16).unwrap();
         let text = String::from_utf8(out).unwrap();
         let expected = r#"{"timestamp":0,"input_length":16,"output_length":16,"hash_ids":[0]}"#;
         assert_eq!(text.trim(), expected);
@@ -442,8 +440,7 @@ mod tests {
     fn the_declared_losses_name_the_block_size() {
         // The format carries no block-size field, so a file is only interpretable by a
         // consumer told what it is.
-        let mut out = Vec::new();
-        let stats = convert_jsonl(row(0.0, &[1], &[]).as_bytes(), &mut out, 64).unwrap();
+        let (_, stats) = project(&[row(0.0, &[1], &[])], 64).unwrap();
         let losses = stats.declared_losses();
         assert!(losses.iter().any(|l| l.contains("64 tokens")), "{losses:?}");
         assert!(losses.iter().any(|l| l.contains("session grouping")));

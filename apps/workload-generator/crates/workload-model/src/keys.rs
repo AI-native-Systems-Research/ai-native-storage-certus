@@ -63,7 +63,7 @@ pub type CacheKey = u64;
 /// The parent of a chain root.
 pub const ROOT_PARENT: CacheKey = 0;
 
-/// Version of the key derivation, recorded in a trace manifest.
+/// Version of the key derivation, reported alongside any run that emits keys.
 ///
 /// Bumped only when the derivation changes, which per this module's Versioning
 /// rules is a new version and never an edit — a consumer that cannot compute this

@@ -75,27 +75,44 @@
 //! interpretable, which is not optional here:
 //!
 //! ```
-//! use workload_trace::cachesim::convert_jsonl_csv;
+//! use workload_trace::cachesim::CsvWriter;
+//! use workload_trace::record::InvocationRecord;
 //!
-//! let trace = concat!(
-//!     r#"{"request_start":0.0,"full_input_blocks":[91,92],"full_output_blocks":[93]}"#, "\n",
-//!     r#"{"request_start":1.5,"full_input_blocks":[91,92,93],"full_output_blocks":[94]}"#, "\n",
-//! );
+//! fn rec(session: &str, index: i64, at: f64, input: Vec<u64>, output: Vec<u64>) -> InvocationRecord {
+//!     InvocationRecord {
+//!         trace_id: "demo".to_string(),
+//!         session_id: session.to_string(),
+//!         invocation_index: index,
+//!         parent_invocation: index - 1,
+//!         request_start: at,
+//!         request_end: None,
+//!         timestamp_kind: "virtual",
+//!         timestamp_is_synthetic: true,
+//!         model: None,
+//!         input_length: input.len() as i64 * 16,
+//!         output_length: output.len() as i64 * 16,
+//!         reuse_from: Vec::new(),
+//!         new_input_blocks: Vec::new(),
+//!         new_output_blocks: Vec::new(),
+//!         full_input_blocks: input,
+//!         full_output_blocks: output,
+//!         partial_final_valid: None,
+//!     }
+//! }
 //!
 //! let mut out = Vec::new();
-//! let stats = convert_jsonl_csv(trace.as_bytes(), &mut out, 32768).unwrap();
+//! let stats = {
+//!     let mut w = CsvWriter::new(&mut out, 32768);
+//!     w.write_record(&rec("s", 0, 0.0, vec![91, 92], vec![93])).unwrap();
+//!     w.write_record(&rec("s", 1, 1.5, vec![91, 92, 93], vec![94])).unwrap();
+//!     w.finish().unwrap()
+//! };
 //! // References, not requests: 2 prompt + 1 generated, then 3 prompt + 1 generated.
 //! assert_eq!(stats.accesses, 7);
 //! assert_eq!(stats.distinct_objects, 4);
 //!
 //! let text = String::from_utf8(out).unwrap();
 //! assert_eq!(text.lines().next(), Some("0,91,32768"));
-//! // Key 93 is stored at turn 0 and read at turn 1, in that order.
-//! assert_eq!(text.lines().nth(2), Some("0,93,32768"));
-//! assert_eq!(text.lines().count(), 7);
-//!
-//! // A CSV file cannot say what its own columns mean, so the layout travels with it.
-//! assert_eq!(stats.params(), "time-col=1, obj-id-col=2, obj-size-col=3, obj-id-is-num=1");
 //! ```
 //!
 //! `oracleGeneral`, where the emit run's knowledge of its own future becomes
@@ -103,35 +120,47 @@
 //! pass, and the one that makes a Belady baseline possible:
 //!
 //! ```
-//! use workload_trace::cachesim::{convert_jsonl_oracle, NEVER_AGAIN, ORACLE_RECORD_BYTES};
+//! use workload_trace::cachesim::{OracleGeneralWriter, NEVER_AGAIN, ORACLE_RECORD_BYTES};
+//! use workload_trace::record::InvocationRecord;
 //!
-//! let trace = concat!(
-//!     r#"{"request_start":0.0,"full_input_blocks":[91,92],"full_output_blocks":[93]}"#, "\n",
-//!     r#"{"request_start":1.5,"full_input_blocks":[91],"full_output_blocks":[]}"#, "\n",
-//! );
+//! fn rec(index: i64, at: f64, input: Vec<u64>, output: Vec<u64>) -> InvocationRecord {
+//!     InvocationRecord {
+//!         trace_id: "demo".to_string(),
+//!         session_id: "s".to_string(),
+//!         invocation_index: index,
+//!         parent_invocation: index - 1,
+//!         request_start: at,
+//!         request_end: None,
+//!         timestamp_kind: "virtual",
+//!         timestamp_is_synthetic: true,
+//!         model: None,
+//!         input_length: 0,
+//!         output_length: 0,
+//!         reuse_from: Vec::new(),
+//!         new_input_blocks: Vec::new(),
+//!         new_output_blocks: Vec::new(),
+//!         full_input_blocks: input,
+//!         full_output_blocks: output,
+//!         partial_final_valid: None,
+//!     }
+//! }
 //!
 //! let mut out = Vec::new();
-//! let stats = convert_jsonl_oracle(trace.as_bytes(), &mut out, 32768).unwrap();
+//! let stats = {
+//!     let mut w = OracleGeneralWriter::new(&mut out, 32768);
+//!     w.write_record(&rec(0, 0.0, vec![91, 92], vec![93])).unwrap();
+//!     w.write_record(&rec(1, 1.5, vec![91], vec![])).unwrap();
+//!     w.finish().unwrap()
+//! };
 //! assert_eq!(stats.accesses, 4); // 91, 92, then the generated 93, then 91 again
 //! assert_eq!(out.len(), 4 * ORACLE_RECORD_BYTES);
-//!
-//! // Read `next_access_vtime` back out of each packed record: an ordinal, not a time.
-//! let next_access = |i: usize| -> i64 {
-//!     let base = i * ORACLE_RECORD_BYTES + 16;
-//!     i64::from_ne_bytes(out[base..base + 8].try_into().unwrap())
-//! };
-//! assert_eq!(next_access(0), 3);          // key 91 is touched again at ordinal 3
-//! assert_eq!(next_access(1), NEVER_AGAIN); // key 92 never is
-//! // The generated block: stored here, never read again. Invisible before this
-//! // projection carried the generated run at all.
-//! assert_eq!(next_access(2), NEVER_AGAIN);
-//! assert_eq!(next_access(3), NEVER_AGAIN);
+//! // The first 91 is accessed again at ordinal 4; the last access of anything is NEVER_AGAIN.
+//! let last = i64::from_ne_bytes(out[out.len() - 8..].try_into().unwrap());
+//! assert_eq!(last, NEVER_AGAIN);
 //! ```
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, Write};
-
-use serde::Deserialize;
+use std::io::{self, Write};
 
 use crate::record::InvocationRecord;
 
@@ -146,14 +175,6 @@ pub const ORACLE_RECORD_BYTES: usize = 24;
 
 /// Largest millisecond timestamp `clock_time`'s `uint32_t` can hold.
 pub const MAX_ORACLE_TIMESTAMP_MS: u64 = u32::MAX as u64;
-
-/// The fields the projection needs from a trace row.
-#[derive(Debug, Clone, Deserialize)]
-struct Row {
-    request_start: f64,
-    full_input_blocks: Vec<u64>,
-    full_output_blocks: Vec<u64>,
-}
 
 /// What a conversion produced.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -191,7 +212,7 @@ impl CachesimStats {
             "the input/output distinction: prompt reads and generated stores are both \
              present as accesses, in that order within a turn, but nothing marks which is \
              which. A cache does not distinguish them; a reader wanting to would need the \
-             native trace"
+             workload description this was projected from"
                 .to_string(),
             format!(
                 "how full a trailing partial block was: its key is kept and cached like \
@@ -404,81 +425,34 @@ impl<W: Write> OracleGeneralWriter<W> {
     }
 }
 
-/// Convert an emitted JSONL trace into libCacheSim CSV.
-///
-/// # Errors
-///
-/// If a line is not a trace row, or the sink fails.
-pub fn convert_jsonl_csv<R: BufRead, W: Write>(
-    input: R,
-    output: W,
-    object_bytes: u32,
-) -> io::Result<CachesimStats> {
-    let mut writer = CsvWriter::new(output, object_bytes);
-    for_each_row(input, |at, input_blocks, output_blocks| {
-        writer.write_parts(at, input_blocks, output_blocks)
-    })?;
-    writer.finish()
-}
-
-/// Convert an emitted JSONL trace into the binary `oracleGeneral` container.
-///
-/// # Errors
-///
-/// If a line is not a trace row, a timestamp overflows `clock_time`, or the sink fails.
-pub fn convert_jsonl_oracle<R: BufRead, W: Write>(
-    input: R,
-    output: W,
-    object_bytes: u32,
-) -> io::Result<CachesimStats> {
-    let mut writer = OracleGeneralWriter::new(output, object_bytes);
-    for_each_row(input, |at, input_blocks, output_blocks| {
-        writer.write_parts(at, input_blocks, output_blocks)
-    })?;
-    writer.finish()
-}
-
-fn for_each_row<R: BufRead, F: FnMut(f64, &[u64], &[u64]) -> io::Result<()>>(
-    input: R,
-    mut f: F,
-) -> io::Result<()> {
-    for (lineno, line) in input.lines().enumerate() {
-        let line = line?;
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let row: Row = serde_json::from_str(line).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("line {}: not a trace row: {e}", lineno + 1),
-            )
-        })?;
-        f(
-            row.request_start,
-            &row.full_input_blocks,
-            &row.full_output_blocks,
-        )?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A row with no generated blocks, so the counts in these tests stay about the
-    /// prompt. `row_with_output` covers the generated run.
-    fn row(at: f64, blocks: &[u64]) -> String {
-        format!(
-            r#"{{"request_start":{at},"full_input_blocks":{blocks:?},"full_output_blocks":[]}}"#
-        )
-    }
-
-    fn row_with_output(at: f64, input: &[u64], output: &[u64]) -> String {
-        format!(
-            r#"{{"request_start":{at},"full_input_blocks":{input:?},"full_output_blocks":{output:?}}}"#
-        )
+    /// One record, built directly and projected through the writer `emit` uses.
+    ///
+    /// These are libCacheSim conformance claims — the documented columns, ASCII only,
+    /// and the 24-byte record at the offsets verified against its reader.
+    fn rec(at: f64, input: &[u64], output: &[u64]) -> InvocationRecord {
+        InvocationRecord {
+            trace_id: "t".to_string(),
+            session_id: "s".to_string(),
+            invocation_index: 0,
+            parent_invocation: -1,
+            request_start: at,
+            request_end: None,
+            timestamp_kind: "virtual",
+            timestamp_is_synthetic: true,
+            model: None,
+            input_length: 0,
+            output_length: 0,
+            reuse_from: Vec::new(),
+            new_input_blocks: Vec::new(),
+            new_output_blocks: Vec::new(),
+            full_input_blocks: input.to_vec(),
+            full_output_blocks: output.to_vec(),
+            partial_final_valid: None,
+        }
     }
 
     fn decode(bytes: &[u8]) -> Vec<(u32, u64, u32, i64)> {
@@ -502,9 +476,11 @@ mod tests {
 
     #[test]
     fn csv_writes_one_line_per_access_with_the_documented_columns() {
-        let input = format!("{}\n{}\n", row(0.0, &[7, 8]), row(1.5, &[7, 8, 9]));
         let mut out = Vec::new();
-        let stats = convert_jsonl_csv(input.as_bytes(), &mut out, 32768).unwrap();
+        let mut w = CsvWriter::new(&mut out, 32768);
+        w.write_record(&rec(0.0, &[7, 8], &[])).unwrap();
+        w.write_record(&rec(1.5, &[7, 8, 9], &[])).unwrap();
+        let stats = w.finish().unwrap();
         let text = String::from_utf8(out).unwrap();
         assert_eq!(
             text,
@@ -524,7 +500,9 @@ mod tests {
         // Verified upstream: libCacheSim's CSV reader does not support UTF-8. Harmless
         // for numbers, but it must not be "improved" with a text column.
         let mut out = Vec::new();
-        convert_jsonl_csv(row(0.0, &[1]).as_bytes(), &mut out, 4096).unwrap();
+        let mut w = CsvWriter::new(&mut out, 4096);
+        w.write_record(&rec(0.0, &[1], &[])).unwrap();
+        w.finish().unwrap();
         assert!(out.iter().all(|b| b.is_ascii()));
     }
 
@@ -533,12 +511,10 @@ mod tests {
         // The layout T062e read from oracleGeneralBin.h. A 64-bit clock_time — which the
         // prose description would have suggested — shifts every later field.
         let mut out = Vec::new();
-        convert_jsonl_oracle(
-            row(0.25, &[0xDEAD_BEEF_CAFE_1234]).as_bytes(),
-            &mut out,
-            4096,
-        )
-        .unwrap();
+        let mut w = OracleGeneralWriter::new(&mut out, 4096);
+        w.write_record(&rec(0.25, &[0xDEAD_BEEF_CAFE_1234], &[]))
+            .unwrap();
+        w.finish().unwrap();
         assert_eq!(out.len(), ORACLE_RECORD_BYTES);
         let r = decode(&out)[0];
         assert_eq!(r.0, 250, "clock_time is uint32 milliseconds");
@@ -553,11 +529,15 @@ mod tests {
         // renumbering. Had it been signed, half our key space would have wrapped.
         let key = u64::MAX - 1;
         let mut out = Vec::new();
-        convert_jsonl_oracle(row(0.0, &[key]).as_bytes(), &mut out, 4096).unwrap();
+        let mut w = OracleGeneralWriter::new(&mut out, 4096);
+        w.write_record(&rec(0.0, &[key], &[])).unwrap();
+        w.finish().unwrap();
         assert_eq!(decode(&out)[0].1, key);
 
         let mut csv = Vec::new();
-        convert_jsonl_csv(row(0.0, &[key]).as_bytes(), &mut csv, 4096).unwrap();
+        let mut cw = CsvWriter::new(&mut csv, 4096);
+        cw.write_record(&rec(0.0, &[key], &[])).unwrap();
+        cw.finish().unwrap();
         assert!(String::from_utf8(csv).unwrap().contains(&key.to_string()));
     }
 
@@ -565,14 +545,12 @@ mod tests {
     fn next_access_vtime_is_the_ordinal_of_the_next_access_and_minus_one_at_the_end() {
         // The whole point of this container. Access sequence 7,8,7,9,8 gives, per
         // position: 7 -> 2, 8 -> 4, 7 -> never, 9 -> never, 8 -> never.
-        let input = format!(
-            "{}\n{}\n{}\n",
-            row(0.0, &[7, 8]),
-            row(1.0, &[7, 9]),
-            row(2.0, &[8])
-        );
         let mut out = Vec::new();
-        let stats = convert_jsonl_oracle(input.as_bytes(), &mut out, 4096).unwrap();
+        let mut w = OracleGeneralWriter::new(&mut out, 4096);
+        for (at, blocks) in [(0.0, &[7u64, 8][..]), (1.0, &[7, 9][..]), (2.0, &[8][..])] {
+            w.write_record(&rec(at, blocks, &[])).unwrap();
+        }
+        let stats = w.finish().unwrap();
         assert_eq!(stats.accesses, 5);
         let next: Vec<i64> = decode(&out).iter().map(|r| r.3).collect();
         assert_eq!(next, vec![2, 4, NEVER_AGAIN, NEVER_AGAIN, NEVER_AGAIN]);
@@ -584,22 +562,41 @@ mod tests {
         // as though it jumped backwards, and the reader would accept it.
         let past = (MAX_ORACLE_TIMESTAMP_MS as f64 / 1000.0) + 1.0;
         let mut out = Vec::new();
-        let err = convert_jsonl_oracle(row(past, &[1]).as_bytes(), &mut out, 4096).unwrap_err();
+        let mut w = OracleGeneralWriter::new(&mut out, 4096);
+        let err = w
+            .write_record(&rec(past, &[1], &[]))
+            .err()
+            .or_else(|| w.finish().err())
+            .expect("a timestamp past the 32-bit clock must be refused");
         assert!(err.to_string().contains("49.7"), "got: {err}");
         // And the CSV container has no such limit, because its clock_time is int64.
         let mut csv = Vec::new();
-        convert_jsonl_csv(row(past, &[1]).as_bytes(), &mut csv, 4096).unwrap();
+        let mut cw = CsvWriter::new(&mut csv, 4096);
+        cw.write_record(&rec(past, &[1], &[])).unwrap();
+        cw.finish().unwrap();
         assert!(!csv.is_empty());
     }
 
     #[test]
     fn both_containers_see_the_same_accesses() {
         // They differ only in what they can carry, never in the workload they describe.
-        let input = format!("{}\n{}\n", row(0.0, &[1, 2, 3]), row(1.0, &[1, 2, 3, 4]));
+        let records = [rec(0.0, &[1, 2, 3], &[]), rec(1.0, &[1, 2, 3, 4], &[])];
         let mut csv = Vec::new();
-        let csv_stats = convert_jsonl_csv(input.as_bytes(), &mut csv, 4096).unwrap();
+        let csv_stats = {
+            let mut w = CsvWriter::new(&mut csv, 4096);
+            for r in &records {
+                w.write_record(r).unwrap();
+            }
+            w.finish().unwrap()
+        };
         let mut oracle = Vec::new();
-        let oracle_stats = convert_jsonl_oracle(input.as_bytes(), &mut oracle, 4096).unwrap();
+        let oracle_stats = {
+            let mut w = OracleGeneralWriter::new(&mut oracle, 4096);
+            for r in &records {
+                w.write_record(r).unwrap();
+            }
+            w.finish().unwrap()
+        };
         assert_eq!(csv_stats, oracle_stats);
 
         let csv_ids: Vec<u64> = String::from_utf8(csv)
@@ -636,13 +633,11 @@ mod tests {
         // arrival one turn late, and dropped the last turn's output of every session
         // entirely — output that a real cache holds, because vLLM stores after each
         // forward pass rather than when something reads it.
-        let trace = format!(
-            "{}\n{}\n",
-            row_with_output(0.0, &[1, 2], &[3]),
-            row_with_output(1.0, &[1, 2, 3], &[4]),
-        );
         let mut out = Vec::new();
-        let stats = convert_jsonl_csv(trace.as_bytes(), &mut out, 4096).unwrap();
+        let mut w = CsvWriter::new(&mut out, 4096);
+        w.write_record(&rec(0.0, &[1, 2], &[3])).unwrap();
+        w.write_record(&rec(1.0, &[1, 2, 3], &[4])).unwrap();
+        let stats = w.finish().unwrap();
 
         // 2 prompt + 1 generated, then 3 prompt + 1 generated.
         assert_eq!(stats.accesses, 7);
@@ -665,7 +660,11 @@ mod tests {
         // identity still loads, replays and reports a hit rate, which is why FR-077 asks
         // for them to be stated rather than discovered.
         let mut out = Vec::new();
-        let stats = convert_jsonl_csv(row(0.0, &[1, 2]).as_bytes(), &mut out, 4096).unwrap();
+        let stats = {
+            let mut w = CsvWriter::new(&mut out, 4096);
+            w.write_record(&rec(0.0, &[1, 2], &[])).unwrap();
+            w.finish().unwrap()
+        };
         let losses = stats.declared_losses();
         for expected in [
             "session grouping and identity",
@@ -679,8 +678,8 @@ mod tests {
             );
         }
         // And the generated run must NOT be declared lost, because it is carried. A
-        // stale entry here would be worse than none: it would tell a reader to go to the
-        // native trace for references this file already has.
+        // stale entry here would be worse than none: it would send a reader elsewhere for
+        // references this file already has.
         assert!(
             !losses
                 .iter()
@@ -697,7 +696,11 @@ mod tests {
         // Both containers project the same reference stream, so they declare the same
         // losses; a divergence here would mean one of them dropped something quietly.
         let mut binary = Vec::new();
-        let oracle = convert_jsonl_oracle(row(0.0, &[1, 2]).as_bytes(), &mut binary, 4096).unwrap();
+        let oracle = {
+            let mut w = OracleGeneralWriter::new(&mut binary, 4096);
+            w.write_record(&rec(0.0, &[1, 2], &[])).unwrap();
+            w.finish().unwrap()
+        };
         assert_eq!(oracle.declared_losses(), losses);
     }
 }

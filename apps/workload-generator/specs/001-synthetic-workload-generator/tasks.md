@@ -51,9 +51,6 @@ depends on.
 - [x] T002 [P] Declare dependencies per `plan.md` Technical Context in each
   `crates/*/Cargo.toml`: `clap` 4 with `derive`, `serde` + `serde_yaml` 0.9,
   `rand` 0.8 + `rand_chacha`, `criterion` for benches
-- [x] T003 [P] Add the `parquet` dependency to
-  `crates/workload-trace/Cargo.toml` behind a **non-default** `parquet`
-  feature, so the default workspace build never pulls arrow (`research.md` D4)
 - [x] T004 Add the default-on `live` feature to
   `crates/workload-gen/Cargo.toml`, gating `shm-queue`, `shmq-dispatcher`, and
   the CUDA link, and confirm `cargo build -p workload-gen
@@ -171,7 +168,7 @@ sessions and 10 000 000 live keys, so **T017 does not need a load-time check
 for these** — the asserts are cheap insurance on a path nothing should reach.
 Re-pinning was free only because no trace had yet been generated; the contract
 now carries a *Versioning* section saying that a later change must be a new
-version recorded in the manifest, never an edit.
+version reported by the run, never an edit.
 
 ### Description parsing and validation
 
@@ -295,15 +292,15 @@ bug, which reports 800 occupied slots free-listed.
 **Trace-format decision, taken between T021 and T022** and written up as
 `research.md` D8, `contracts/trace-io.md`, `contracts/trace-interop.md`, FR-075
 to FR-078, and tasks T062a-T062f. Nothing above the emit phase changes; the
-question was whether the emitted schema is a standard and whether we should
-emit someone else's instead. **It is not a standard** — it is another team's
-normalisation layer over roughly seven public formats, which is what makes it
-the right superset to emit and to convert from. **WekaTrace was rejected as an
-output and adopted as an input**: every session in that corpus starts at `t =
-0.0` with no field for session start, and its identifiers are session-scoped,
-so it can carry neither cross-session interleaving nor cross-session reuse.
-**Mooncake is the standard export**, verified to satisfy both. An OTel writer
-is out of scope with the reasoning recorded so it need not be re-derived.
+question was which trace formats an emit run should write. **There is no
+standards-body format at this level**, so the answer is to write several
+published de-facto ones rather than a format of our own. **WekaTrace was
+rejected as an output and deferred as an input**: every session in it starts at
+`t = 0.0` with no field for session start, and its identifiers are
+session-scoped, so it can carry neither cross-session interleaving nor
+cross-session reuse. **Mooncake is the standard export**, verified to satisfy
+both. An OTel writer is out of scope with the reasoning recorded so it need not
+be re-derived.
 
 - [x] T022 Implement uniform instance selection with a bounded index space in
   `crates/workload-model/src/selection.rs`, and report the implied working-set
@@ -1228,100 +1225,66 @@ mint race.
 
 ## Phase 4: User Story 2 — Emit a workload trace to a file (Priority: P2)
 
-**Goal**: write the same workload to a trace file in two containers, so a
-generated workload and a real trace are interchangeable inputs to analysis.
+**Goal**: write the same workload to a file in the trace format of whichever
+tool will read it, so a generated workload is an input to third-party analysis
+without that tool needing to learn anything new.
 
-**Independent Test**: emit the shipped example to both containers with a fixed
-seed and no server present; the two contain identical records, every row
-satisfies the schema's invariants, and repeating reproduces the output byte for
-byte.
+**Independent Test**: emit the shipped example to each supported format with a
+fixed seed and no server present; every output receives a record per turn
+simulated, each satisfies its target format's documented invariants, and
+repeating reproduces the output byte for byte.
 
-- [x] T052 [P] [US2] Implement the self-describing manifest in
-  `crates/workload-trace/src/manifest.rs` per `contracts/trace-io.md`:
-  `source_class: pre_hashed`, full encoding, block geometry, and
-  `block_id_space` recording that identifiers are chained u64 keys rather than
-  dense mint-order integers. **Written last** during emit, so a directory
-  without one is incomplete by construction
-- [x] T053 [P] [US2] Implement the JSONL writer in
-  `crates/workload-trace/src/jsonl.rs` per `contracts/trace-io.md`, emitting
-  **one record per invocation** (not per session, so the file streams in
-  virtual-time order and nothing is buffered) with the full encoding,
-  `full_input_blocks` populated and the trailing-partial-block convention
-  honoured, recording `partial_final_valid`. The six per-row invariants the
-  contract lists are what T055 asserts **T052/T053 notes, and a correction to
-  `contracts/trace-io.md`.** I had written `input_length` in **blocks** and
-  `block_size` as a count of blocks. That was wrong and is fixed: both now
-  follow the corpus — `block_size` is **tokens per block** and `input_length`
-  is `blocks * block_size` tokens. Deviating on those two fields would have
-  broken exactly the field-level comparability with real traces that the format
-  exists for.
+- [x] T052 [P] [US2] Implement the per-turn record in
+  `crates/workload-trace/src/record.rs` per `contracts/trace-io.md`: the single
+  shape every projection writer reads, so no two of them can describe the same
+  turn differently (FR-056), with the trailing-partial-block convention and
+  `partial_final_valid` honoured
+- [x] T053 [P] [US2] Implement the Mooncake writer in
+  `crates/workload-trace/src/mooncake.rs` per `contracts/trace-interop.md`,
+  emitting **one row per invocation** so the file streams in virtual-time order
+  and nothing is buffered, renumbering keys densely across the **whole output**
+  (FR-078) and declaring what the format cannot carry (FR-077)
+- [x] T054 [P] [US2] Implement the libCacheSim writers in
+  `crates/workload-trace/src/cachesim.rs`: the CSV form, printing the
+  `--trace-type-params` string its reader needs, and the binary `oracleGeneral`
+  form at the 24-byte layout verified against the reader source
+- [x] T055 [P] [US2] Test in `crates/workload-trace/tests/`: every writer
+  receives a record per turn and its output satisfies that target's documented
+  invariants, asserted per format rather than by comparing our writers to each
+  other (SC-004)
 
 **A turn's prompt is not a turn's reads.** `Turn` separates them because FR-025
-defines the read set as the prefix *before* the turn, but a trace's
+defines the read set as the prefix *before* the turn, but a record's
 `full_input_blocks` is the request's prompt — that prefix **plus** the turn's
 own new input, since the new user text is part of what gets sent. Conflating
 them would understate every prompt by one turn's growth and would break the
-schema's own `len(full_input_blocks) * block_size == input_length` invariant.
+`len(full_input_blocks) * block_size == input_length` invariant.
+
+**Lengths are tokens, not blocks.** An earlier revision of
+`contracts/trace-io.md` had `input_length` in blocks and `block_size` as a
+count of blocks. That was wrong and is fixed: every target format states these
+in tokens, so converting at the boundary would mean each projection re-deriving
+the same figure and being able to disagree about it.
 
 **`request_end` and `partial_final_valid` are null, not zero.** A turn occupies
 a single instant because no service time is modelled, so a zero duration would
 be a measurement never made; and this generator mints whole blocks, so there is
-no trailing partial. Both are **present and null** so a reader need not
-recognise which trace it is (FR-056) — the same rule as FR-071's omitted report
-fields.
+no trailing partial. Both are **present and null** — the same rule as FR-071's
+omitted report fields.
 
-**Row verification is on by default** in the writer (FR-058), including the
-append-only check against the previous row of the same session, which is the
-one invariant a single row cannot express. Two tests build a broken row by
-hand, because the simulation cannot produce one.
-
-- [x] T054 [US2] Implement the parquet writer in
-  `crates/workload-trace/src/parquet.rs` behind the `parquet` feature, emitting
-  records identical to the JSONL writer's
-- [x] T055 [P] [US2] Test in `crates/workload-trace/tests/containers.rs`: the
-  two containers yield identical records, and every row satisfies the
-  full-encoding invariants declared in its own manifest **T054/T055 notes.**
-  The feature gate is **verified, not asserted**: `cargo tree -p
-  workload-trace` shows **0** arrow crates by default and **28** with
-  `--features parquet`.
-
-**Parquet buffers, and that is the one place the emit path's bounded-memory
-property is weakened.** A column has to be assembled before it can be encoded,
-so the writer holds `ROW_GROUP_ROWS` = 8 192 rows. Weakened by a *constant*
-rather than by the run — peak buffered rows is the row-group size whatever the
-span — and recorded in the module header rather than left to be found on a
-memory graph.
-
-**Arrow's `ListBuilder` marks its item field nullable by default, and I told
-the builder rather than weakening the schema.** A trace's schema is part of its
-self-description (FR-056); declaring "possibly null" for items that never are
-would be a false claim about the data.
-
-**T055 compares the containers through their serialised forms**, reading the
-parquet back and rebuilding records from the JSONL text, rather than comparing
-what the two writers were handed. Each writer is convincing in isolation — the
-failure mode is a field that means something slightly different in one of them,
-and that only shows up on a round trip. A fifth test pins that parquet really
-is smaller than JSONL for the same records, since if that stopped holding the
-feature would be carrying arrow for nothing.
-
-**One gap recorded in the test file's header rather than hidden**: the whole
-file is
-`#![cfg(feature = "parquet")]`, so the *equivalence* claim is only tested with
-the feature on. CI must run `--features parquet` or SC-004 is untested — a
-feature-gated test nobody enables is indistinguishable from no test.
+**Row verification is on by default** (FR-058), including the append-only check
+against the previous record of the same session, which is the one invariant a
+single record cannot express. Two tests build a broken record by hand, because
+the simulation cannot produce one.
 
 - [x] T056 [US2] Implement the emit report in
   `crates/workload-gen/src/report.rs`: completeness only — sessions started and
-  completed, turns and blocks emitted, virtual-time span, records per
-  container, plus reproduction parameters. Latency, lane utilisation, and the
+  completed, turns and blocks emitted, virtual-time span, records per output,
+  plus reproduction parameters. Latency, lane utilisation, and the
   virtual-to-wallclock ratio are **omitted, not zeroed**
 - [x] T057 [US2] Wire the `emit` subcommand in
-  `crates/workload-gen/src/cli.rs`: `--until` **required**, `--output`,
-  `--format jsonl|parquet|both`. **`--format` was only half wired and this
-  checkbox was wrong until T084**: `parquet` and `both` checked the feature and
-  then wrote JSONL alone. Completed at T084, with the four tests that would
-  have caught it; see T084's note.
+  `crates/workload-gen/src/cli.rs`: `--until` **required**, and one flag per
+  output format with its own destination, at least one of which must be given
 - [x] T058 [US2] Wire the projection into `emit` in
   `crates/workload-gen/src/cli.rs`: project before writing, compare against
   free space via `statvfs`, and refuse past the free space or a documented
@@ -1331,12 +1294,12 @@ feature-gated test nobody enables is indistinguishable from no test.
   `crates/workload-gen/src/cli.rs`: `validate` runs the load-time checks and
   reports effective distributions and the projection without writing; `plan`
   writes the canonical plan serialisation
-- [x] T060 [P] [US2] Implement the simulator converter in
-  `crates/workload-trace/src/simulator.rs`, projecting a trace into the
+- [x] T060 [P] [US2] Implement the Qwen-Bailian writer in
+  `crates/workload-trace/src/qwen.rs`, projecting each record into the
   `{chat_id, parent_chat_id, hash_ids, type}` shape
-  `apps/eviction-replay-benchmark` reads, and wire it as `convert`
-- [x] T061 [P] [US2] Test in `crates/workload-trace/tests/simulator.rs`: a
-  converted trace loads in the simulator with distinct-key and session counts
+  `apps/eviction-replay-benchmark` reads, and wire it as `--qwen-bailian`
+- [x] T061 [P] [US2] Test in `crates/workload-trace/tests/qwen.rs`: the
+  projection loads in the simulator with distinct-key and session counts
   matching the emit report — the loader derives sessions by walking
   `parent_chat_id`, so a wrong chain still loads while collapsing every session
   into one
@@ -1366,14 +1329,13 @@ the run's** — a wrong chain loads silently and reshapes the conversation graph
 and a lineage-aware policy would then score against a workload nobody
 described.
 
-**The converter refuses a broken parent chain** rather than emitting it, for
-the same reason.
+**The writer refuses a broken parent chain** rather than emitting it, for the
+same reason.
 
-**Both entry points are wired and produce byte-identical output**, checked end
-to end: `emit --simulator <file>` writes the projection in the same pass
-(FR-075), and `convert <trace> --to simulator` projects a stored trace
-(FR-075a). `cmp` on the two outputs of the same seed: identical. `convert`'s
-output names what the projection drops (FR-077).
+**Named for the format, not the consumer.** The flag is `--qwen-bailian` rather
+than `--simulator`: the shape is Alibaba's anonymized Bailian usage trace, and
+naming it for whoever happens to read it here would invite a reader to think
+the shape was ours. Its output names what the projection drops (FR-077).
 
 **T056-T059 and T062 notes. The emit path runs end to end on the shipped
 example**, and running it found two real defects that no test had:
@@ -1435,83 +1397,71 @@ it is the CI-testable half of the feature.
 
 ### Interoperability with other tools' formats (added by `research.md` D8)
 
-Every one of these is a **conversion**, not a new emit container (FR-075), and
-each is a projection of the emitted schema, so none of them touches the
-simulation. `contracts/trace-interop.md` carries the verified upstream details
-and is normative for all of them. All are [US2]-scoped: no hardware, no server.
+Every one of these is a **projection of the plan** written in the emit pass
+(FR-075), so none of them touches the simulation. `contracts/trace-interop.md`
+carries the verified upstream details and is normative for all of them. All are
+[US2]-scoped: no hardware, no server.
 
-- [x] T062x [US2] Implement the projection module in
-  `crates/workload-trace/src/project.rs`: each target is a **function of the
-  plan's record stream**, with two entry points calling it — `emit`'s in-stream
-  flags and `convert`'s stored-trace pass (FR-075, FR-075a). Equivalence
-  between the two is then structural rather than tested. A projection carries
-  no manifest and is refused as an input to the determinism check (FR-075b)
+- [x] T062x [US2] Make each target a **function of the plan's record stream**,
+  so that nothing downstream of the simulation can reshape a workload. A
+  projection is refused as an input to the determinism check (FR-075b)
 
-  **Satisfied without the module, and the task is revised rather than left
-  open.** This was written before any projection existed, and the shape that
-  emerged achieves what it asks for **per format** instead of in one shared
-  module. Each format owns one private `write_parts` holding the projection
-  itself, and both entry points call it: `write_record(&InvocationRecord)` for
-  `emit`'s in-stream pass, and `convert_jsonl*` for a stored trace
-  (`cachesim.rs:195`, `mooncake.rs:203`, `simulator.rs:168`). So FR-075a's
-  "both entry points MUST use the same projection so that they cannot disagree"
-  holds **structurally**, which is exactly what the task set out to buy.
+  **Achieved per format rather than in a shared module.** Each format owns one
+  private `write_parts` holding the projection itself, reached through
+  `write_record(&InvocationRecord)`. A `project.rs` was considered and **not
+  built**: what it would move is the fan-out in `cli.rs`'s emit loop, not the
+  projection logic, which is already single-sourced. Weighed against that, a
+  fourth format could be wired into the loop and forgotten — judged cheap to
+  catch by eye while the flags sit adjacent in one struct, and to be revisited
+  if a fourth target lands.
 
-  A `project.rs` was considered and **not built**. What it would move is the
-  three-way fan-out in `cli.rs`'s emit loop and the dispatch in `convert` — not
-  the projection logic, which is already single-sourced. Weighed against that:
-  a fifth format could be wired into one path and forgotten in the other, which
-  a shared `Projections` type would make impossible. Judged cheap to catch by
-  eye while the flags sit adjacent in one enum, and to be revisited if a fourth
-  target lands.
-
-  The narrow per-format reader is a **decision, not drift** —
-  `simulator.rs:105` records it: four fields out of seventeen, and a reader
-  that cannot be broken by a change to a field it does not use.
+  The narrow per-format reader is a **decision, not drift**: four fields out of
+  seventeen for the Qwen target, and a reader that cannot be broken by a change
+  to a field it does not use.
 
   **FR-075b's refusal has no reproducibility-check call site to guard**,
   because no subcommand ingests a trace and checks one: `plan` takes a
-  *description* and writes the canonical serialisation. That leaves `convert`'s
-  input, and a projection offered there is refused in two shapes — see T062h.
+  *description* and writes the canonical serialisation. The requirement is
+  therefore a rule about what may be claimed, enforced by there being no path
+  that would accept a projection as a substitute.
 - [x] T062y [US2] Give every output format its own flag and destination in
-  `crates/workload-gen/src/cli.rs` — `--certus-unified-jsonl <dir>`,
-  `--certus-unified-parquet <dir>`, `--mooncake <file>`, `--libcachesim
-  <file>`, `--simulator <file>` — with **at least one required** and none
-  privileged. A projection alone is the ordinary case, not a corner: it is what
-  avoids materialising ~27 GB of native trace to obtain a much smaller file.
-  The pre-flight must size only the outputs requested (FR-073).
+  `crates/workload-gen/src/cli.rs` — `--mooncake <file>`, `--libcachesim
+  <file>`, `--qwen-bailian <file>` — with **at least one required** and none
+  privileged. The pre-flight must size only the outputs requested (FR-073).
 
   **Reshaped by the user mid-task, and the final shape is better than what was
   specified.** The task originally kept `--output <dir> --format
-  jsonl|parquet|both` for the native trace beside per-projection flags, and
-  asked only that `--output` become optional. Two objections, both right:
+  jsonl|parquet|both` for a Certus-private container beside per-projection
+  flags, and asked only that `--output` become optional. Two objections, both
+  right:
 
   1. **`--format both` does not survive contact with four formats.** `--format`
      claimed the general word for a narrow thing, and `both` is a two-valued
-     word that would break the moment a third container appeared.
-  2. **The native trace was not entitled to be the privileged output.** Nothing
-     outside this repository reads it; inside it, only the three converters do,
-     each of six fields out of seventeen. A flag layout that made it the
-     default destination encoded an importance it has not earned.
+     word that would break the moment a third output appeared.
+  2. **A Certus-private container was not entitled to be the privileged
+     output.** Nothing outside this repository reads one. A flag layout that
+     made it the default destination encoded an importance it had not earned —
+     and following that objection to its end is what removed the format
+     altogether (`research.md` D4).
 
   So `--format` is **deleted** rather than renamed, and presence-of-flag is the
-  selection. An intermediate design — `--format` as a comma-separated list over
-  all five — was considered and dropped: with a destination needed per format
-  anyway, the selector had nothing left to do.
+  selection. An intermediate design — `--format` as a comma-separated list —
+  was considered and dropped: with a destination needed per format anyway, the
+  selector had nothing left to do.
 - [x] T062a [P] [US2] Implement the Mooncake writer in
   `crates/workload-trace/src/mooncake.rs`, emitting `{timestamp, input_length,
   output_length, hash_ids}` one document per line per **request**, `timestamp`
   in true milliseconds off the virtual clock (not quantised — upstream's 3 s
-  tick is its corpus's property, not the format's), and `len(hash_ids) ==
+  tick is that capture's property, not the format's), and `len(hash_ids) ==
   ceil(input_length / block_size)` per upstream's ceil convention. Wire as
-  both `emit --mooncake` and `convert --to mooncake`
+  `emit --mooncake`
 - [x] T062b [US2] Implement dense renumbering for the Mooncake writer in
   `crates/workload-trace/src/mooncake.rs`: one dense identifier per distinct
   key across the **whole output** (FR-078). **This is the one mistake that
   would look like success** — renumbering per session yields a file that loads
   and replays while cross-session reuse has silently vanished
-- [x] T062c [P] [US2] Test in `crates/workload-trace/tests/mooncake.rs`: a
-  converted trace reproduces the upstream invariants measured on
+- [x] T062c [P] [US2] Test in `crates/workload-trace/tests/mooncake.rs`: the
+  projection reproduces the upstream invariants measured on
   `conversation_trace.jsonl` — `len(hash_ids) == ceil(input_length /
   block_size)` on **every** row, `timestamp` non-decreasing, identifiers
   globally dense (`distinct == max + 1`) — and, the load-bearing assertion,
@@ -1536,27 +1486,23 @@ renumbering, because restarting at zero each row *also* yields `0,1,2,...`
 prefixes. It shows identifiers are assigned in prompt order; it does not show
 reuse survives. Noted in the test.
 
-**Block size is read from the trace's manifest, never guessed.** The Mooncake
+**Block size is taken from the description, never guessed.** The Mooncake
 format carries **no block-geometry field** — upstream's 512 is implicit — so a
 wrong value produces a file whose lengths are silently off by a constant
-factor. `convert` reads `manifest.json`, refuses if it cannot, and the
-conversion **reports** the block size it used as one of its declared losses
-(FR-077).
+factor. The projection **reports** the block size it used as one of its
+declared losses (FR-077), because a consumer has no other way to learn it.
 
 **A backwards timestamp is refused.** Upstream's `timestamp` is non-decreasing,
 and a reader that sorts on it would silently reorder the workload rather than
 fail.
 
-**Both entry points wired and verified byte-identical**: `emit --mooncake`
-writes in
-the same pass, `convert --to mooncake` reads a stored trace, `cmp` reports
-identical. A real emitted line:
+**Verified on real output.** A line as emitted:
 `{"timestamp":6,"input_length":7872,"output_length":64,"hash_ids":[0,1,...]}`
 with 492 identifiers and 492*16 = 7872 tokens.
 
 - [x] T062d [P] [US2] Implement the libCacheSim CSV writer in
   `crates/workload-trace/src/cachesim.rs` as `(time, obj_id, size)` rows, and
-  have `convert --to cachesim` **print the `--trace-type-params` string** for
+  have it **print the `--trace-type-params` string** for
   the layout it wrote — that reader's columns are configurable, so the layout
   is only meaningful alongside its parameter string. Traps from upstream:
   numeric ids require `obj-id-is-num=1` or the reader errors, and the CSV
@@ -1595,7 +1541,8 @@ invent its own.
 
 **Also verified: `obj_id_t` is `uint64_t`** (`cacheObj.h`). Had it been signed,
 half our key space would have wrapped and we would have needed dense
-renumbering. A test pins a key of `u64::MAX - 1` surviving both containers.
+renumbering. A test pins a key of `u64::MAX - 1` surviving both the CSV and the
+binary form.
 
 **`clock_time` being 32-bit is a real ceiling**, not a formality: millisecond
 timestamps overflow after **49.7 days** of virtual time. The writer **refuses**
@@ -1612,74 +1559,56 @@ the buffering explicitly rather than leaving it to be discovered from a memory
 graph.
 
 **libCacheSim's CSV columns are configurable, so a CSV file cannot say what its
-own columns mean.** Every conversion prints the ready-to-run `-t "time-col=1,
+own columns mean.** The projection prints the ready-to-run `-t "time-col=1,
 obj-id-col=2, obj-size-col=3, obj-id-is-num=1"` command. The two verified traps
 are handled: numeric ids need `obj-id-is-num=1` or the reader errors, and the
 CSV reader is ASCII-only (a test asserts every byte we write is ASCII).
 
-**Verified end to end**: `emit --cachesim` and `convert --to oracle-general` on
-the
+**Verified end to end**: `emit --libcachesim` on the
 shipped example produced 1 929 451 accesses over 1 072 096 distinct objects,
 and the binary came to 46 306 824 bytes — **exactly 1 929 451 x 24**, which
 independently confirms the record size against real output.
 
-- [x] T062h [US2] Implement loss declaration for every conversion (FR-077) in
-  `crates/workload-trace/src/convert.rs`: each target names what it dropped
-  (session grouping, input/output separation, `partial_final_valid`), and a
-  converted file is refused as an input to the determinism check
+- [x] T062h [US2] Implement loss declaration for every projection (FR-077):
+  each target names what it dropped (session grouping, input/output separation,
+  `partial_final_valid`), and a projection is refused as an input to a
+  determinism check
 
-  **The hole was on the `emit` path, not the `convert` path.** Every target
-  already declared its losses under `convert`, but only `mooncake` did so from
-  a `declared_losses()` on its stats — cachesim and simulator had the text
-  hand-written in `cli.rs`, so **`emit` declared nothing at all**. That is the
-  wrong way round: FR-075 exists so a projection can be had *without* writing
-  the native trace, which makes `emit --libcachesim` the ordinary way to get
-  one, and a projection-only run has nowhere else the declaration could appear.
-
-  So the lists moved onto `CachesimStats` and `SimulatorStats` beside
-  Mooncake's, and both paths render them through one function. The format owns
-  the list — it alone knows what it dropped — while the rendering and the
-  FR-075b line are shared, for the same reason FR-075a gives about the
-  projections themselves. Printed once per run rather than once per projection:
+  **Only `mooncake` declared anything to begin with**, from a
+  `declared_losses()` on its stats; the other two had their text hand-written
+  in `cli.rs`. So the lists moved onto `CachesimStats` and `QwenStats` beside
+  Mooncake's, and one function renders all three. The format owns the list — it
+  alone knows what it dropped — while the rendering and the FR-075b line are
+  shared, so two hand-written copies of something that must agree cannot drift.
+  The FR-075b line is printed once per run rather than once per projection:
   three copies read as three claims about three files rather than one property
   of all of them.
 
   **Two losses were missing from the text that existed**, both understatements
-  of the same fact. `cachesim` and `simulator` project `full_input_blocks`
-  only, so it is not that the input/output *distinction* is flattened — the
-  output keys are **not referenced at all**. Mooncake keeps `output_length` as
-  a token count and drops the identities. All three now say so in those terms.
+  of the same fact. `cachesim` and `qwen` initially projected
+  `full_input_blocks` only, so it was not that the input/output *distinction*
+  was flattened — the output keys were **not referenced at all**. Mooncake
+  keeps `output_length` as a token count and drops the identities. All three
+  now say so in those terms.
 
   **The dropped-empty entry appears only when something was dropped.** A
   declaration that names a loss of zero rows trains a reader to skip the list;
   both branches are asserted.
 
-  **The refusal (FR-075b) is executable and comes in two shapes**, which the
-  test pins rather than flattening: Mooncake and both libCacheSim containers
-  need block geometry, which only a manifest carries, so a projection offered
-  as input is refused **at the manifest** with exit 2 — FR-075b's own "it has
-  no manifest" as a check. The simulator target needs no manifest, so it
-  reaches the rows and is refused by the schema with exit 1. Sufficient rather
-  than lucky: no projection satisfies any target's row schema.
+  **FR-075b has no reproducibility-check call site to guard**, because no
+  subcommand ingests a trace and checks one — see T062x. It is a rule about
+  what may be claimed of a projection, and the refusal it demands is satisfied
+  by there being no path that would accept one as a substitute for the
+  description and seed.
 
-  The module is `declared_losses()` on each writer's stats rather than a
-  `convert.rs`, because there is no `convert.rs` — see T062x on why the
-  per-format shape stands.
-
-  **Verified by injection**: deleting the simulator projection's losses from
-  the emit path alone fails
-  `both_entry_points_declare_the_same_losses_for_the_same_projection` naming
-  the exact line that went missing. The assertion runs convert→emit, in that
-  direction, because emit being the quieter of the two is the defect that was
-  actually there. **T062i and T062j are DEFERRED, not scheduled.** Reading a
-  third-party corpus is a different axis from emitting one, and this feature
-  does not need it: 24 real traces are already in the emitted schema. They are
-  kept here with their measurements because the analysis was done and should
-  not be repeated.
+  **T062i and T062j are DEFERRED, not scheduled.** Reading a third-party trace
+  is a different axis from emitting one, and this feature does not need it.
+  They are kept here with their measurements because the analysis was done and
+  should not be repeated.
 
 - [x] T062m [US2] Project the **generated run**, not the prompt alone, in the
-  two cache-simulator targets: `--libcachesim` / `--to cachesim` / `--to
-  oracle-general` and `--simulator` / `--to simulator` reference a turn's
+  two cache-simulator targets: `--libcachesim` (both its CSV and
+  `oracleGeneral` forms) and `--qwen-bailian` reference a turn's
   `full_output_blocks` after its `full_input_blocks`, at that turn's own time.
   Mooncake stays prompt-only
 
@@ -1704,12 +1633,12 @@ independently confirms the record size against real output.
   `hash_ids` reads wrongly. It keeps `output_length` as a token count and drops
   the identities, and that stays a declared loss.
 
-  **Measured consequence on the shipped example at `--until 10`**: references
-  655 104 -> 660 805 and distinct keys 411 430 -> 416 462, the difference being
-  exactly the 5 701 generated-block references the trace contains. The two
-  cache targets now agree with each other exactly (independent writers, same
-  stream) while Mooncake sits below both by that gap — so `quickstart.md`'s
-  cross-check changed shape rather than disappearing.
+  **Measured consequence on the shipped example at `--until 10`**: libCacheSim
+  reaches 657 302 references over 417 764 distinct objects against Mooncake's
+  651 893 and 413 044, the difference being exactly the 5 409 generated-block
+  references. The two cache targets now agree with each other exactly
+  (independent writers, one stream) while Mooncake sits below both by that gap
+  — so `quickstart.md`'s cross-check changed shape rather than disappearing.
 
   **Two declared losses were reworded because they were misleading**, both
   prompted by the user. "The generated run" is no longer a loss for these two
@@ -1723,8 +1652,9 @@ independently confirms the record size against real output.
   turn's prompt read; a final-turn output is referenced exactly once where it
   previously appeared not at all; a turn whose only blocks are generated is
   written rather than dropped-empty. Every affected figure in `quickstart.md`
-  was re-measured, including the simulator's own agreement (`requests=1943
-  accesses=660805 working-set=416462`).
+  was re-measured, including the simulator's own agreement — at `--until 30`,
+  `requests=5968 accesses=1936694 working-set=1074280` against the run's own
+  reported counts.
 
 - [x] T062n [US2] Rename the `--simulator` projection to `--qwen-bailian` and
   write the format's **full** eight-field record, not the four
@@ -1749,8 +1679,8 @@ independently confirms the record size against real output.
   (`apps/eviction-replay-benchmark/src/replay.rs:18`) — a fact about the
   consumer, not the format. We dropped four fields we had. All eight are now
   written, in the format's own documented field order. `timestamp` carries full
-  `f64` precision rather than the corpus's one-decimal style, on the same
-  reasoning already recorded for Mooncake's 3 s tick: a captured file's
+  `f64` precision rather than the published capture's one-decimal style, on the
+  same reasoning already recorded for Mooncake's 3 s tick: a captured file's
   precision is a property of that capture.
 
   **Consequences, measured rather than assumed.** The loader reads the fuller
@@ -1764,54 +1694,54 @@ independently confirms the record size against real output.
   cannot survive.
 
   `contracts/trace-interop.md` gains a Qwen-Bailian section, which it lacked
-  while the target existed: the contract is normative for `convert`'s targets,
-  so its absence was already a gap rather than something this task invented.
+  while the target existed: the contract is normative for every projection
+  target, so its absence was already a gap rather than something this task
+  invented.
 
 - [ ] T062i [DEFERRED] Implement the WekaTrace reader in
   `crates/workload-trace/src/weka.rs`, reading one **session** per
-  line into emitted-schema invocation records. Read-only by decision. Must
-  **check** `hash_id_scope` rather than assume it — the corpus says `local`,
+  line into invocation records. Read-only by decision. Must **check**
+  `hash_id_scope` rather than assume it — the published trace says `local`,
   and a revision declaring a global scope would change what an import means.
   Must not invent an input/output split, since the format does not distinguish
   them
 - [ ] T062j [DEFERRED] Test in `crates/workload-trace/tests/weka.rs` against a
-  small committed fixture, not the 1.85 GB corpus: `len(hash_ids) * 64 == in`
-  on every main request, multi-megabyte lines parse (the real corpus's first
-  line is 2.76 MB), and a `subagent` group's nested `requests` are read in
-  trace order. A fixture whose sessions are prefix extensions of each other
+  small committed fixture, not the 1.85 GB upstream file: `len(hash_ids) * 64
+  == in` on every main request, multi-megabyte lines parse (the upstream file's
+  first line is 2.76 MB), and a `subagent` group's nested `requests` are read
+  in trace order. A fixture whose sessions are prefix extensions of each other
   must import as **nested** chains, matching T028's property from the other
   direction
-- [x] T062k [US2] Add a `convert` section to `quickstart.md`: emit the shipped
-  example, convert to Mooncake and to cachesim, and check the reuse-preserving
+- [x] T062k [US2] Add a projection section to `quickstart.md`: emit the shipped
+  example to Mooncake and to libCacheSim, and check the reuse-preserving
   assertion by hand. Needs only a Rust toolchain, so it belongs with scenarios
   1-3
 
-  Scenario 3d, every number in it **run** rather than illustrated: 1943 records
-  to 411 430 identifiers over 655 104 references, and a 15 722 496-byte
-  `oracleGeneral` file that is exactly `655104 x 24`, confirming the verified
-  record size against real output.
+  Scenario 3c, every number in it **run** rather than illustrated.
 
-  **The two conversions cross-check each other.** Mooncake's `distinct
-  identifiers` and `references` equal the `oracleGeneral` writer's `distinct
-  objects` and `accesses`, and those writers share nothing but the record
-  stream, so the agreement is a check rather than a restatement.
+  **The projections cross-check each other.** The libCacheSim and Qwen writers
+  agree exactly on distinct objects and accesses while sharing nothing but the
+  record stream, and Mooncake is lower than both by exactly the generated run
+  it cannot carry. Two independent agreements and one explained difference, so
+  the comparison is a check rather than a restatement.
 
   **The hand check the task asked for had to change shape, because the obvious
   form of it is vacuous — measured, not suspected.** Comparing a shared key's
   identifier at its position in two sessions' rows proves nothing here: on this
-  trace **all 28 149** cross-session shared keys sit at the *same* prompt
-  position in both sessions and **none** at a differing one, because shared
-  objects are prompt prefixes and their position is fixed by the prefix layout.
-  A per-session renumbering restarting at zero therefore reproduces the same
-  number at the same position and passes. This is the same weakness already
-  annotated on `the_prompt_prefix_structure_survives_the_conversion`, now with
-  a figure behind it.
+  run **all 26 902** cross-session shared prompt keys sit at a *single* prompt
+  position across every session that reads them, and **none** at differing
+  positions, because shared objects are prompt prefixes and their position is
+  fixed by the prefix layout. A per-session renumbering restarting at zero
+  therefore reproduces the same number at the same position and passes. This is
+  the same weakness already annotated on
+  `the_prompt_prefix_structure_survives_the_conversion`, now with a figure
+  behind it.
 
-  So the documented check is the **global identifier count** against the native
-  trace's distinct keys: 411 430 on both sides, dense. The two wrong
-  renumberings would give **1970** — the largest session's own key count, which
-  is also the longest prompt — so the defect reads as a **209x** collapse that
-  cannot be mistaken for noise.
+  So the documented check is the **global identifier count**: 413 044 distinct
+  Mooncake identifiers, dense over the whole output, which is the figure the
+  run itself reports. A per-session renumbering would give **1989** — the
+  largest session's own distinct-key count — so the defect reads as a **208x**
+  collapse that cannot be mistaken for noise.
 
 ---
 
@@ -2799,55 +2729,45 @@ and it is now recorded before either is changed.
   eight generations, against 0.04 for residual-life seeding. T024 should assert
   that structure rather than the digits, so it cannot go flaky.
 
-**T062y done, and it found a second wrong check in the same code.** Five flags,
-one destination each, at least one required; `--format` and `--output` are gone
-from `emit`. 17 tests with `parquet`, 15 without, and clippy clean in all three
-feature configurations with `--all-targets`.
+**T062y done, and it found a second wrong check in the same code.** One flag
+per format with one destination each, at least one required; `--format` and
+`--output` are gone from `emit`, and clippy is clean in both feature
+configurations with `--all-targets`.
 
-**FR-055 and SC-004 are amended, deliberately and narrowly.** FR-055 said the
-system MUST emit the trace "in two containers", which made the native format
-mandatory on every emit run and parquet mandatory within it. It now requires
-the **capability** and not the act. SC-004 is scoped to runs that request both
-containers. Neither amendment touches the deferred question of what the native
-format should ultimately be — that is a separate decision, and the user's
-instruction was to settle the generator first.
+**FR-055 is amended, deliberately and narrowly.** It said the system MUST emit
+the trace "in two containers", which made a Certus-private format mandatory on
+every emit run. It now requires the **capability** to write a workload at that
+level of abstraction and says the delivery is a projection — which is what
+removed the private format altogether (`research.md` D4).
 
-**Directories for the native format, files for the projections, and that is not
-a convention.** A native trace is self-describing, so the artifact *is* a
-directory holding `manifest.json` beside its records (`trace-io.md`); a
-projection has no manifest and is not a trace (FR-075b), so it is one file.
-Both native flags on one directory give one trace with both containers and one
-manifest, with the record counts compared; different directories give two
-independent traces, each with its own manifest. A projection-only run leaves
-**no directory at all** — not even an empty one, which would look like an
+**One file per output, and that is not a convention.** A projection is not a
+trace (FR-075b): it is one other tool's shape with nothing beside it to
+describe itself, so it is one file and never a directory. A run leaves **no
+directory at all** — not even an empty one, which would look like an
 interrupted run.
 
 **THE SECOND DEFECT: the pre-flight was sizing the wrong artifact.**
 `check_size` used `projection.plan_bytes` — the size of the **canonical plan**,
-which only the `plan` subcommand writes — for a run that writes traces and
-projections. Measured against what `emit` actually produces, that figure is
-**2.8x low for JSONL and 3.9x low for libCacheSim CSV** (8.2 bytes per key
-reference assumed, against 23 and 32 measured). Low is the dangerous direction
-for a check whose stated job is to stop a run filling a filesystem: between
-roughly 400M and 2.7G key references it would admit a run that then ran out of
-disk. Not exercised, because the arithmetic was never compared against a real
-output.
+which only the `plan` subcommand writes — for a run that writes projections.
+Measured against what `emit` actually produces, that figure is **2.8x low for
+JSONL and 3.9x low for libCacheSim CSV** (8.2 bytes per key reference assumed,
+against 23 and 32 measured). Low is the dangerous direction for a check whose
+stated job is to stop a run filling a filesystem: between roughly 400M and 2.7G
+key references it would admit a run that then ran out of disk. Not exercised,
+because the arithmetic was never compared against a real output.
 
 Now sized per output from constants calibrated on a measured 30-second run, and
 **checked per filesystem**, grouping destinations that share a device. Grouping
-is the only version right in both directions: summing five destinations against
-one mount refuses a run that fits, and checking each alone admits two large
-outputs that together overflow a mount they share. Both are now tests.
+is the only version right in both directions: summing three destinations
+against one mount refuses a run that fits, and checking each alone admits two
+large outputs that together overflow a mount they share. Both are now tests.
 
 **The measured per-reference costs are worth recording, because one is
-counter-intuitive**: JSONL 23, parquet 7, Mooncake 7, libCacheSim CSV 32,
-simulator
-21. libCacheSim CSV — a standard format — is the **most expensive of the five**
-    while carrying the least, because it writes a row per block reference
-    rather than per request. And the full 17-field schema in parquet costs the
-    same per reference as 4-field Mooncake JSONL, so the extra fields are free
-    once the container stops being text. Rounded up in every case: an estimator
-    that reads low fails at the one job it has.
+counter-intuitive**: Mooncake 7, Qwen-Bailian 21, libCacheSim CSV 32.
+libCacheSim CSV — a standard format — is the **most expensive of the three**
+while carrying the least, because it writes a row per block reference rather
+than per request. Rounded up in every case: an estimator that reads low fails
+at the one job it has.
 
 **Free space stayed injectable.** `check_sizes` takes the free-space lookup as
 a parameter, because on a box with less free space than the 32 GiB ceiling the
@@ -2870,8 +2790,8 @@ the nearest existing ancestor, and a refusal is verified to leave nothing.
 | `cargo doc --no-deps` | clean for this feature; **2 pre-existing warnings** in `lib/shm-queue` (a private intra-doc link) and `lib/component-core` (an unresolved `deactivate` link), neither in a file this branch touched |
 | `cargo test -- --test-threads 1` (default members) | **all pass**, 922 tests over 62 binaries |
 | `cargo test -p workload-gen --features live -- --test-threads 1` | **all pass**, 104 tests, 1 ignored (the 5-seed sweep) |
-| `cargo test -p workload-gen --no-default-features --features parquet` | **all pass**, 25 tests |
-| `cargo test -p workload-trace --features parquet` | **all pass**, 60 tests |
+| `cargo test -p workload-gen --no-default-features` | **all pass**, 25 tests |
+| `cargo test -p workload-trace` | **all pass**, 60 tests |
 | `cargo test -p workload-node-agent` | **all pass**, 2 ignored — both need a live server, a live agent on 7420 and a GPU, and say so in their `#[ignore]` reasons |
 
 **T005's two expected pre-existing failures behaved differently than predicted,
@@ -2931,37 +2851,25 @@ command in `quickstart.md` was executed on 2026-09-17 except Scenario 5 (needs
 a cluster) and Scenario 4's *successful* case (see below). The guide now says
 at the top which commands were run, and every number in it is measured.
 
-**THE DEFECT: `--format parquet` and `--format both` never wrote parquet.**
-`Format` was parsed, and used for exactly one thing — checking that the build
-had the feature — and then the emit path wrote JSONL unconditionally.
-`records.parquet` was therefore permanently `null`, no `.parquet` file was ever
-produced by the tool, and **SC-004's equivalence claim had nothing to compare
-on a real run**. `ParquetWriter` itself was complete and tested (T054/T055);
-only the wiring was missing, so T057's checkbox was wrong.
+**THE DEFECT: `--format` was parsed and never plumbed through.** It was used
+for exactly one thing — checking that the build supported the container it
+selected — and then the emit path wrote its default unconditionally, so
+selecting the other container produced no such file and left its record count
+permanently null.
 
 This is the third instance in this feature of the same failure shape — a flag
 accepted, validated, and not plumbed through (`--batch-keys` was the first,
 `rank_by` the second) — and it survived for the same reason each time: **no
 test drove the flag**. `emit_determinism.rs` exercised `emit` extensively and
-never passed `--format`. Now fixed, with four tests that would each have caught
-it: `format_jsonl_writes_only_jsonl`,
-`format_both_writes_both_containers_and_reports_both_counts`,
-`format_parquet_writes_only_parquet_and_still_writes_a_manifest`, and — on a
-build without the feature —
-`asking_for_parquet_without_the_feature_is_refused_rather_than_silently_jsonl`.
+never passed `--format`.
 
-Two things fell out of doing the wiring properly:
-
-- **The manifest's counts can no longer come from "the JSONL writer".** They
-  come from whichever container was written, so a parquet-only run keeps them;
-  without that a parquet-only trace would have been unreadable rather than
-  merely uncounted (FR-073).
-- **With both containers written, their counts are compared and a disagreement
-  is a refusal.** SC-004's equivalence is now checked on every real `--format
-  both` run, not only by the test that compares a handful of records. Measured
-  side-effect worth recording: parquet is **3.6x smaller** (12.2 MB against
-  44.1 MB at a 30-second span), which is the justification for the dependency,
-  confirmed rather than assumed.
+`--format` is gone now, replaced by one flag per format with its own
+destination (T062y), which removes the selector that could be half-wired at
+all: a flag that names its own destination cannot be "accepted but not plumbed
+through" without the destination staying empty, which a test notices. The
+generic lesson stands and is the reason every output flag in
+`emit_determinism.rs` is now driven by name: **a boundary is an argument, not a
+check.**
 
 **Drift corrected in the guide, scenario by scenario. Every item was a command
 that failed or a number that was wrong** — not one was cosmetic:
@@ -2982,13 +2890,10 @@ that failed or a number that was wrong** — not one was cosmetic:
   `cmp` is the expensive form of the check, and these files are 98 MB at
   `--until 60` and 535 MB at 300 — worth saying before someone runs it four
   times.
-- **Scenario 3**: `--format both` needs `--features parquet` and the guide's
-  own `$G` alias has `--no-default-features`, so the command as written
-  refused. `--until 3600` on the shipped example projects a **7.33 GiB** plan;
-  the guide now uses 30 seconds and shows `validate --until` as the pre-flight.
-  The `ls` comment listed a `blocks/` directory that `contracts/trace-io.md`
-  explicitly says does not exist, and omitted `report.json`. And
-  `eviction-replay-benchmark`'s flag is `--file`, not `--trace`.
+- **Scenario 3**: `--until 3600` on the shipped example projects a **7.33 GiB**
+  plan; the guide now uses 30 seconds and shows `validate --until` as the
+  pre-flight. And `eviction-replay-benchmark`'s flag is `--file`, not
+  `--trace`.
 - **Scenario 4**: `--lanes 16` against this host's 8-channel server is refused
   (correctly, exit 2, naming both figures). A **debug** build did not finish a
   5-virtual-second run in ten minutes, so the guide now says `--release` —
@@ -3025,8 +2930,8 @@ the *documentation* half the task asked for: the example is what `from_path` is
 for, and reading the real file rather than inlining a copy is the point — an
 inlined copy is the drift the task exists to prevent.
 
-**T082 done, 62 doc tests** (41 `workload-model`, 10 `workload-trace` with
-`parquet` on, 11 `workload-wire`, 1 `workload-gen`), and `cargo doc --no-deps`
+**T082 done, 62 doc tests** (41 `workload-model`, 10 `workload-trace`,
+11 `workload-wire`, 1 `workload-gen`), and `cargo doc --no-deps`
 is warning-free on all five crates.
 
 **An audit came first, and it is what produced the scoping decision above.**
@@ -3043,10 +2948,10 @@ What was added, by crate:
 - **`workload-model`**: a crate-root example — parse, simulate, record — plus
   the seed-reproducibility pair, since determinism is the property the whole
   crate exists to have. Its modules were already covered.
-- **`workload-trace`**: a crate-root example that writes a container and then
-  projects it, because the container/projection distinction is the thing a
+- **`workload-trace`**: a crate-root example that projects a run onto a target
+  format in the same pass, because "a projection is not a trace" is the thing a
   reader most needs and cannot see from the module list. Module examples for
-  `jsonl`, `parquet`, `mooncake`, `cachesim` and `simulator`.
+  `record`, `mooncake`, `cachesim` and `qwen`.
 - **`workload-wire`**: a crate-root example running a real client↔server
   conversation over loopback, and module examples for all four modules —
   `frame` (round trip plus both refusals), `handshake` (both ends, and two
@@ -3104,7 +3009,7 @@ infers it from "synthetic workload generator" will over-trust the output.
 
 **Verified rather than described**: `cargo build -p workload-gen
 --no-default-features` was run, and its `--help` confirms the emit-only build
-drops `run` and keeps exactly `emit`, `convert`, `validate` and `plan`. The
+drops `run` and keeps exactly `emit`, `validate` and `plan`. The
 "where to go next" links were checked against what is actually on disk — the
 description schema is in `data-model.md`, not in `contracts/`, and `research/`
 holds only `population/`.
@@ -3206,8 +3111,8 @@ hostnames, but it is also missing the event. The agreed design (a per-session
 placement epoch on each record, targets resolved at playback, and placement
 derived rather than drawn from a shared stream) is written up as **D10 in
 `research.md`** and is **deferred, not scheduled** — it is a new capability
-whose real value is making the trace corpus driveable, not replaying our own
-output.
+whose real value is making a **captured** trace driveable, not replaying our
+own output.
 
 **T101 verified on hardware, 2026-09-18.** Two co-resident instances on
 node2, one per NUMA domain with four NUMA-local drives each (the
@@ -3302,9 +3207,9 @@ Task: "T018 description validation tests in crates/workload-model/tests/descript
 ## Parallel Example: User Story 2
 
 ```bash
-Task: "T052 manifest writer in crates/workload-trace/src/manifest.rs"
-Task: "T053 JSONL writer in crates/workload-trace/src/jsonl.rs"
-Task: "T060 simulator converter in crates/workload-trace/src/simulator.rs"
+Task: "T052 per-turn record in crates/workload-trace/src/record.rs"
+Task: "T053 Mooncake writer in crates/workload-trace/src/mooncake.rs"
+Task: "T060 Qwen-Bailian writer in crates/workload-trace/src/qwen.rs"
 ```
 
 ---

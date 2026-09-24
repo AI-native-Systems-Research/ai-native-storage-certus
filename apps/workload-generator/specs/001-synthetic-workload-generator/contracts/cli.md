@@ -13,15 +13,11 @@ The workload description file says *what* the workload is. Everything here says
 ```text
 workload-gen run     <description.yml> [target options] [tuning] [reporting]
 workload-gen emit    <description.yml> --until <virtual-seconds> --seed <n>
-                     [--certus-unified-jsonl <dir>]
-                     [--certus-unified-parquet <dir>]
                      [--mooncake <file>]
                      [--libcachesim <file>]
                      [--qwen-bailian <file>]
                      [--report <file>] [--force]
 workload-gen plan    <description.yml> --output <file>
-workload-gen convert <trace-dir> --to qwen-bailian|mooncake|cachesim|oracle-general
-                                 --output <file>
 workload-gen validate <description.yml>
 ```
 
@@ -34,94 +30,63 @@ workload-gen validate <description.yml>
   **One flag per format, one destination each, and none of them privileged.**
   The only rule is that **at least one is required**; there is no default
   output and no format a run is obliged to produce. A run that asked for
-  nothing is refused with exit 2 and the message names all five flags.
+  nothing is refused with exit 2 and the message names all three flags.
 
   | Flag | Writes | Destination |
   | --- | --- | --- |
-  | `--certus-unified-jsonl` | native trace, JSONL container | a **directory** |
-  | `--certus-unified-parquet` | native trace, parquet container | a **directory** |
   | `--mooncake` | Mooncake projection | a **file** |
   | `--libcachesim` | libCacheSim CSV projection | a **file** |
   | `--qwen-bailian` | Qwen-Bailian usage-trace JSONL | a **file** |
 
-  The native destinations are directories and the projections are files because
-  that is what they are, not by convention: a native trace is
-  **self-describing**, so it is a directory holding `manifest.json` beside its
-  records, exactly as `contracts/trace-io.md` specifies. A projection has no
-  manifest and is not a trace (FR-075b), so it is one file.
-
-  **Both native flags pointed at the same directory** give one trace holding
-  both containers, with one manifest, and the two record counts are checked
-  against each other — that is SC-004's equivalence claim, verified on every
-  such run rather than only in a test. **Different directories** give two
-  independent traces, each with its own manifest.
-
-  Asking for a projection and nothing else is an ordinary case, not a corner: a
-  legal span on the shipped example costs roughly 27 GB as a native trace, and
-  there is no reason to pay that to obtain a Mooncake file a fraction of the
-  size. Such a run leaves **no trace directory at all** — not even an empty
-  one, which would look like an interrupted run.
+  Each destination is a **file** and not a directory because a projection is
+  not a trace (FR-075b): it is one other tool's shape, lossy on purpose, with
+  nothing beside it to describe itself. A workload is repeated from its
+  description and seed (FR-072), so System writes no self-describing container
+  of its own — a format nothing outside this repository reads would earn none
+  of the cost of specifying, versioning and importing it (FR-055).
 
   **Every projection an emit run writes declares what it dropped**, in the
-  rendered report beneath that projection's own line, from the same lists
-  `convert` prints (FR-077). The declaration belongs here and not only on the
-  `convert` path precisely because FR-075 makes this the ordinary way to obtain
-  a projection: a projection-only run has nowhere else the loss could appear.
-  The "a projection is not a trace" line (FR-075b) is printed **once for the
-  run** rather than once per projection — three copies would read as three
-  claims about three files instead of one property of all of them.
+  rendered report beneath that projection's own line (FR-077): a run that
+  writes only one projection has nowhere else the loss could appear. The "a
+  projection is not a trace" line (FR-075b) is printed **once for the run**
+  rather than once per projection — three copies would read as three claims
+  about three files instead of one property of all of them.
 
-  `--report <file>` is an additional destination for the structured report,
-  which is also written as `report.json` into every native trace directory and
-  always rendered to the terminal. On a projection-only run it is the only way
-  to keep the structured form.
+  `--report <file>` is a destination for the structured report, which is always
+  rendered to the terminal as well. It is the only way to keep the structured
+  form.
 
   The pre-flight sizes **only the outputs requested**, and checks each against
   the free space on **its own filesystem**, grouping destinations that share
-  one (FR-073). Five independent destinations can be on five different mounts;
-  summing them against one would refuse a run that fits, and checking each
-  alone would admit two large outputs that together overflow a mount they
+  one (FR-073). Three independent destinations can be on three different
+  mounts; summing them against one would refuse a run that fits, and checking
+  each alone would admit two large outputs that together overflow a mount they
   share.
 - **`plan`** writes the canonical operation-plan serialisation — the artifact
   the byte-identity property is asserted against (FR-060, SC-003).
-- **`convert`** applies the same projections to a trace **already on disk**
-  (FR-075a). It is not a second way to do what `emit` just did: its input
-  is the Certus unified trace format (what `emit --certus-unified-jsonl` and
-  `--certus-unified-parquet` write), so any trace in that format converts
-  whatever produced it, and a generated workload and a captured one are
-  pushed through an identical transformation. Use it also for a trace whose
-  description is no longer to hand. `contracts/trace-interop.md` specifies
-  each target, what it drops, and which candidates were rejected.
-  - `--to qwen-bailian` — Qwen-Bailian usage-trace JSONL, which
-    `apps/eviction-replay-benchmark` reads. See
-    `research.md` D1: the simulator reads `{chat_id, parent_chat_id, hash_ids,
-    type}`, not the emitted schema, and the projection needs no information the
-    trace lacks.
-  - `--to mooncake` — the Mooncake FAST'25 trace format, the recommended
+  `contracts/trace-interop.md` specifies each target, what it drops, and which
+  candidates were rejected:
+  - `--qwen-bailian` — Qwen-Bailian usage-trace JSONL, which
+    `apps/eviction-replay-benchmark` reads. See `research.md` D1: the simulator
+    reads `{chat_id, parent_chat_id, hash_ids, type}` and the projection needs
+    no information a turn lacks.
+  - `--mooncake` — the Mooncake FAST'25 trace format, the recommended
     standard-format export. Renumbers keys densely across the **whole output**
     (FR-078), and reports the losses named in the interop contract.
-  - `--to cachesim` — libCacheSim CSV. Prints the `--trace-type-params` string
+  - `--libcachesim` — libCacheSim CSV. Prints the `--trace-type-params` string
     to use, since that reader's columns are configurable rather than fixed.
-  - `--to oracle-general` — libCacheSim's binary `oracleGeneral`, the same
-    reference stream carrying `next_access_vtime`. Only an emit run can fill
-    that field, which is what makes Belady baselines available; it buffers the
-    whole stream to do it, and refuses a span past 49.7 days rather than
-    wrapping its 32-bit clock.
-  Every conversion MUST name what it dropped (FR-077), and a converted file is
-  never accepted in place of the native trace for a reproducibility check.
-  **That refusal is executable, in two shapes**: Mooncake and both libCacheSim
-  containers need block geometry, which only a manifest carries, so a
-  projection offered as input is refused *at the manifest* (exit 2); the
-  simulator target needs no manifest and is refused by the row schema (exit 1),
-  which is sufficient because no projection satisfies any target's schema.
+    Its binary `oracleGeneral` form carries `next_access_vtime`, which only a
+    whole-run pass can fill — that is what makes Belady baselines available; it
+    buffers the whole stream to do it, and refuses a span past 49.7 days rather
+    than wrapping its 32-bit clock.
 - **`validate`** performs the load-time checks and the effective-distribution
   report (FR-002, FR-003, FR-004) and exits. Cheap, and the fastest way to find
   a configuration error.
 
 An **emit-only build** is available: `--no-default-features` drops the `live`
 feature, so `run` disappears along with the CUDA and mailbox dependencies, and
-`emit`/`plan`/`convert`/`validate` build on a machine with no accelerator and
-no Certus.
+`emit`/`plan`/`validate` build on a machine with no accelerator and no
+Certus.
 
 ## Run length
 
@@ -171,7 +136,7 @@ does not warrant a flag.
 
 Against that: five flags for one job, and a first-to-fire rule under which two
 runs nominally using "the same cap" can stop for different reasons, which the
-manifest would then have to disambiguate. Richness belongs on the query side
+report would then have to disambiguate. Richness belongs on the query side
 instead, where `validate` can invert the projection and suggest a span for a
 target record count.
 
@@ -180,7 +145,7 @@ target record count.
 Requiring `--until` does not by itself protect the filesystem: `--until 100000`
 is legal on the shipped example and costs roughly 27 GB. So before writing
 anything, `emit` MUST project the run from the description's own rates —
-invocations, distinct keys minted, key references, and bytes per container —
+invocations, distinct keys minted, key references, and bytes per output —
 compare that against free space on the output filesystem, and **refuse** if the
 projection exceeds either the free space or a documented size ceiling, naming
 both numbers. `--force` overrides the ceiling but never the free-space check.
@@ -190,12 +155,11 @@ separately: minted keys grow linearly with the span while references grow
 quadratically with session length. On the shipped example a 100,000-second span
 mints ~2 × 10^8 keys but makes ~3.4 × 10^9 references.
 
-The byte figure is the **uncompressed** single-container size, quoted as a
-conservative upper bound — a compressed container's real size depends on its
-compression ratio and is not projected, only guaranteed to be smaller. If a
-write fails for lack of space anyway, the error simply propagates; no
-completeness flag is needed, because the manifest is written **last**, so a
-trace directory without one is incomplete by construction (FR-056).
+The byte figure is a conservative upper bound, calibrated per output from a
+measured run (`bytes_per_reference`) and rounded up. If a write fails for lack
+of space anyway, the error simply propagates; no completeness flag is needed,
+because the report states how many records each output received, so a file
+short of that count is detectable without a flag to get wrong.
 
 `validate --until <n>` reports the same projection without writing, turning
 "pick a number, wait, discover it was 27 GB" into a one-second query. It also
@@ -388,7 +352,7 @@ structured files, so no one has to scrape terminal text.
 
 **An emit run** (FR-071) reports completeness instead: sessions started and
 completed, turns and blocks emitted, virtual-time span covered, records written
-per container, plus the same reproduction parameters. It MAY report generation
+per output, plus the same reproduction parameters. It MAY report generation
 speed, explicitly labelled as such. It **MUST omit** latency, lane utilisation,
 and the virtual-to-wallclock ratio — absent, not zero, because a zero is
 indistinguishable from a measurement and invites comparison against live

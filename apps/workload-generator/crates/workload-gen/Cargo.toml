@@ -23,8 +23,6 @@ publish = false
 # there is nothing here to gate. Default-ON, because driving a run is the point.
 default = ["live"]
 live = []
-# Pass-through for the trace crate's non-default parquet container.
-parquet = ["workload-trace/parquet"]
 
 [dependencies]
 workload-model.workspace = true

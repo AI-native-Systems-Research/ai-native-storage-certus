@@ -53,7 +53,7 @@
 //!
 //! What replaces it is [`LaneStats::producer_wait_us`] — the **time** a lane spent blocked
 //! waiting for the producer — against the lane-time available, bounded by
-//! [`DEFAULT_PRODUCER_WAIT_TOLERANCE`]. That reads directly as the share by which the
+//! [`crate::report::DEFAULT_PRODUCER_WAIT_TOLERANCE`]. That reads directly as the share by which the
 //! reported throughput understates Certus, which is the claim FR-062 has to settle, and it
 //! separates the unavoidable from the disqualifying by six orders of magnitude rather than
 //! by a flag. The empty-pop count is still reported; it is a symptom, not the verdict.
@@ -171,18 +171,6 @@ impl Pacing {
 /// which are per-operation latencies in the tens to hundreds of microseconds. 100 ms sits between
 /// those by three orders of magnitude at each end.
 pub const DEFAULT_LATENESS_TOLERANCE_US: u64 = 100_000;
-
-/// The share of lane-time a work-conserving run may spend waiting for the producer before its
-/// throughput stops describing Certus (FR-062).
-///
-/// Not zero, and that is the point. Every lane's queue is empty at `t = 0`, so a consumer
-/// cannot help waiting while the producer gets ahead; requiring zero made **every**
-/// work-conserving run invalid, which is how this tolerance came to exist. Measured on the
-/// four-instance stress run, that startup wait is microseconds against a 180-second window —
-/// six orders of magnitude below this bound — while a producer that genuinely could not keep
-/// up would spend seconds per lane and exceed it by a wide margin. 1% therefore separates the
-/// unavoidable from the disqualifying without sitting near either.
-pub const DEFAULT_PRODUCER_WAIT_TOLERANCE: f64 = 0.01;
 
 /// One lane's view of its own queue and its own traffic.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -505,7 +493,7 @@ impl LiveStats {
     /// Whether the run is valid — and **which test that is depends on the mode**.
     ///
     /// Work-conserving: **lanes spent almost none of their time waiting for the producer**
-    /// (FR-062), the bound being [`DEFAULT_PRODUCER_WAIT_TOLERANCE`] of lane-time. Time, not a
+    /// (FR-062), the bound being [`crate::report::DEFAULT_PRODUCER_WAIT_TOLERANCE`] of lane-time. Time, not a
     /// count of empty pops: the count cannot tell a startup wait from a stall, and since every
     /// queue starts empty it can never reach zero, so requiring zero of it disqualified every
     /// work-conserving run — measured, on runs whose producer had in fact finished the entire
@@ -526,7 +514,9 @@ impl LiveStats {
         }
         match self.pacing {
             Pacing::Real => self.kept_the_schedule(),
-            Pacing::None => self.producer_wait_fraction() <= DEFAULT_PRODUCER_WAIT_TOLERANCE,
+            Pacing::None => {
+                self.producer_wait_fraction() <= crate::report::DEFAULT_PRODUCER_WAIT_TOLERANCE
+            }
         }
     }
 
@@ -895,7 +885,7 @@ mod tests {
         );
         // ... and the empty pops are still counted and reported, just not adjudicated on.
         assert_eq!(brief.underruns(), 11);
-        assert!(brief.producer_wait_fraction() < DEFAULT_PRODUCER_WAIT_TOLERANCE);
+        assert!(brief.producer_wait_fraction() < crate::report::DEFAULT_PRODUCER_WAIT_TOLERANCE);
 
         // Fewer empty pops, but half a second of real starvation on one of them.
         let starved = stats(

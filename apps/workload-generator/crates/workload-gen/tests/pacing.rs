@@ -308,7 +308,7 @@ fn a_slow_node_makes_the_run_late_and_that_invalidates_it() {
     // queue is the test. Asserting the queue looked healthy here would be asserting something
     // false about a mode where an idle queue is correct.
     assert!(
-        out.stats.producer_wait_fraction() > workload_gen::live::DEFAULT_PRODUCER_WAIT_TOLERANCE,
+        out.stats.producer_wait_fraction() > workload_gen::report::DEFAULT_PRODUCER_WAIT_TOLERANCE,
         "a paced run is expected to idle its lanes waiting for the next due turn; at {:.4}% it \
          did not, so this test no longer demonstrates why lateness must replace the queue test \
          under pacing",

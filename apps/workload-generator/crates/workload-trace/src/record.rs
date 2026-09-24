@@ -22,7 +22,7 @@
 //!
 //! # Lengths are in tokens, because real traces are
 //!
-//! `input_length` is `blocks * block_size` tokens, matching the corpus. Reporting
+//! `input_length` is `blocks * block_size` tokens, as every target states it. Reporting
 //! blocks would have been more natural for this generator and would have broken
 //! field-level comparability with the real traces the format exists to sit beside.
 //!

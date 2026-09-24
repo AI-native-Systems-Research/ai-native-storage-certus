@@ -17,13 +17,11 @@
 //! rows, and are recorded in `contracts/trace-interop.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::BufWriter;
 
 use tempfile::TempDir;
 use workload_model::description::WorkloadDescription;
 use workload_model::sim::Simulation;
-use workload_trace::jsonl::JsonlWriter;
-use workload_trace::mooncake::{convert_jsonl, MooncakeWriter};
+use workload_trace::mooncake::MooncakeWriter;
 use workload_trace::record::InvocationRecord;
 
 const BLOCK_SIZE: u64 = 16;
@@ -52,28 +50,29 @@ session_classes:
     .unwrap()
 }
 
-/// Emit and convert, returning (mooncake rows, the trace's own rows).
-fn convert(
+/// Project a run into Mooncake rows, returning (the rows, the records they came from).
+///
+/// Driven straight through `MooncakeWriter::write_record`, the path `emit` takes, so the
+/// assertions below are about Mooncake's own invariants rather than about how the rows
+/// were produced.
+fn project(
     seed: u64,
     span: f64,
-    dir: &std::path::Path,
+    _dir: &std::path::Path,
 ) -> (Vec<serde_json::Value>, Vec<InvocationRecord>) {
     let d = description();
 
-    let jsonl_path = dir.join("trace.jsonl");
     let mut sim = Simulation::new(&d, seed, 1).unwrap();
-    let file = std::fs::File::create(&jsonl_path).unwrap();
-    let mut writer = JsonlWriter::new(BufWriter::new(file), "mc", BLOCK_SIZE);
-    let mut records = Vec::new();
-    sim.run_until(span, &mut |s, t| {
-        writer.write(s, t).unwrap();
-        records.push(InvocationRecord::from_turn("mc", s, t, BLOCK_SIZE));
-    });
-    writer.finish().unwrap();
-
     let mut out: Vec<u8> = Vec::new();
-    let input = std::io::BufReader::new(std::fs::File::open(&jsonl_path).unwrap());
-    convert_jsonl(input, &mut out, BLOCK_SIZE).unwrap();
+    let mut records = Vec::new();
+    {
+        let mut writer = MooncakeWriter::new(&mut out, BLOCK_SIZE);
+        sim.run_until(span, &mut |s, t| {
+            let record = InvocationRecord::from_turn("mc", s, t, BLOCK_SIZE);
+            writer.write_record(&record).unwrap();
+            records.push(record);
+        });
+    }
     let rows = String::from_utf8(out)
         .unwrap()
         .lines()
@@ -99,7 +98,7 @@ fn two_sessions_that_shared_an_instance_still_share_identifiers() {
     // rows from *different* sessions that shared a key in the source must share an
     // identifier in the conversion, and rows that shared no key must share none.
     let tmp = TempDir::new().unwrap();
-    let (rows, records) = convert(31, 400.0, tmp.path());
+    let (rows, records) = project(31, 400.0, tmp.path());
     assert_eq!(rows.len(), records.len(), "a row was dropped");
 
     // Group rows by source session, and collect each session's identifier set.
@@ -151,7 +150,7 @@ fn the_conversion_conforms_to_the_upstream_invariants() {
     // *none* of this catches per-session renumbering, which is why the test above
     // exists.
     let tmp = TempDir::new().unwrap();
-    let (rows, _) = convert(32, 400.0, tmp.path());
+    let (rows, _) = project(32, 400.0, tmp.path());
     assert!(rows.len() > 20);
 
     let mut previous_ts = i64::MIN;
@@ -197,7 +196,7 @@ fn the_prompt_prefix_structure_survives_the_conversion() {
     // reuse is preserved. `two_sessions_that_shared_an_instance_still_share_identifiers`
     // is what catches that, and it does.
     let tmp = TempDir::new().unwrap();
-    let (rows, records) = convert(33, 400.0, tmp.path());
+    let (rows, records) = project(33, 400.0, tmp.path());
 
     let mut previous: BTreeMap<String, Vec<i64>> = BTreeMap::new();
     let mut extensions = 0;
@@ -224,7 +223,7 @@ fn a_conversion_is_byte_identical_at_a_fixed_seed() {
     let text = |seed: u64, sub: &str| {
         let dir = tmp.path().join(sub);
         std::fs::create_dir_all(&dir).unwrap();
-        let (rows, _) = convert(seed, 300.0, &dir);
+        let (rows, _) = project(seed, 300.0, &dir);
         rows.iter()
             .map(|r| r.to_string())
             .collect::<Vec<_>>()
@@ -232,42 +231,4 @@ fn a_conversion_is_byte_identical_at_a_fixed_seed() {
     };
     assert_eq!(text(34, "a"), text(34, "b"));
     assert_ne!(text(34, "c"), text(35, "d"));
-}
-
-#[test]
-fn both_entry_points_produce_the_same_bytes() {
-    // FR-075a: `emit --mooncake` writes in the same pass, `convert --to mooncake` reads
-    // a stored trace, and they must be one projection rather than two.
-    let tmp = TempDir::new().unwrap();
-    let d = description();
-    let span = 300.0;
-
-    let mut direct: Vec<u8> = Vec::new();
-    let mut sim = Simulation::new(&d, 36, 1).unwrap();
-    let mut w = MooncakeWriter::new(&mut direct, BLOCK_SIZE);
-    sim.run_until(span, &mut |s, t| {
-        let record = InvocationRecord::from_turn("mc", s, t, BLOCK_SIZE);
-        w.write_record(&record).unwrap();
-    });
-    let direct_stats = w.finish().unwrap();
-
-    let jsonl_path = tmp.path().join("trace.jsonl");
-    let mut sim = Simulation::new(&d, 36, 1).unwrap();
-    let file = std::fs::File::create(&jsonl_path).unwrap();
-    let mut writer = JsonlWriter::new(BufWriter::new(file), "mc", BLOCK_SIZE);
-    sim.run_until(span, &mut |s, t| writer.write(s, t).unwrap());
-    writer.finish().unwrap();
-
-    let mut through_file: Vec<u8> = Vec::new();
-    let input = std::io::BufReader::new(std::fs::File::open(&jsonl_path).unwrap());
-    let file_stats = convert_jsonl(input, &mut through_file, BLOCK_SIZE).unwrap();
-
-    assert_eq!(
-        direct_stats, file_stats,
-        "the entry points disagree on counts"
-    );
-    assert_eq!(
-        direct, through_file,
-        "the entry points produced different bytes"
-    );
 }

@@ -8,9 +8,9 @@ Certus, and no cluster** — they are the bulk of the acceptance surface.
 
 Every command below was **run** as written on 2026-09-17, except Scenario 5,
 which needs a cluster, and Scenario 4's successful case, which needs a server
-with free mailbox channels. Numbers quoted in the expectations are measured, not
-illustrative — so a figure that no longer matches is either drift or a change
-worth explaining.
+with free mailbox channels. Numbers quoted in the expectations are measured,
+not illustrative — so a figure that no longer matches is either drift or a
+change worth explaining.
 
 Details live in the contracts rather than here: `contracts/cli.md` for options,
 `contracts/key-derivation.md` for keys, `contracts/node-agent-wire.md` for the
@@ -54,8 +54,8 @@ echo "exit=$?"
 ```
 
 The implied maximum then discards 13.5%, over the 5% threshold, so it exits
-**2** and names both the requested mean (5) and the effective one (**3.9515**) —
-see FR-004. Nothing is issued.
+**2** and names both the requested mean (5) and the effective one (**3.9515**)
+— see FR-004. Nothing is issued.
 
 Those two effective means are the means of the **rounded** variable, because a
 count is integral. The continuous truncated means of the same distributions are
@@ -98,8 +98,8 @@ cannot be checked here, and that is the point.** `plan` has no such flags: they
 belong to the live path, and `workload-model` has no parameter through which a
 batch size or a lane count could arrive. Passing them to `plan` is an
 `unexpected argument` error rather than a passing comparison. So the guarantee
-rests on the crate boundary, and its executable form is a test rather than a CLI
-invocation:
+rests on the crate boundary, and its executable form is a test rather than a
+CLI invocation:
 
 ```bash
 cargo test -p workload-gen --features live --test op_stream \
@@ -108,217 +108,164 @@ cargo test -p workload-gen --features live --test op_stream \
 
 **Expect**: passes. It drives one plan at `--batch-keys 4` and at 4096 through a
 mock mailbox and asserts the requests differ while the workload does not. That
-property was silently untrue for a while when `--batch-keys` was parsed but never
-plumbed through — a boundary is an argument, not a check.
+property was silently untrue for a while when `--batch-keys` was parsed but
+never plumbed through — a boundary is an argument, not a check.
 
-## Scenario 3 — Emit a trace, both containers, and feed the simulator
+## Scenario 3 — Emit a workload to a file, in the formats other tools read
 
-**Check the size before writing.** `validate --until` is the pre-flight, and the
-shipped example is denser than it looks — a 3600-second span projects a 7.33 GiB
-plan and a trace larger again:
+**Check the size before writing.** `validate --until` is the pre-flight, and
+the shipped example is denser than it looks — a 3600-second span projects a
+7.33 GiB plan and files larger again:
 
 ```bash
 $G validate $E --until 3600 | tail -8
 ```
 
 An emit run does this check itself and refuses past free space (which `--force`
-does not override) or past a 32 GiB ceiling (which it does). Below, a 30-second
-span, which writes about 54 MiB across the two containers:
+does not override) or past a 32 GiB ceiling (which it does).
 
-**One flag per format, and at least one is required.** There is no default output
-and no format a run must produce — asking for a Mooncake file alone writes exactly
-that. Pointing both native flags at the same directory is how you get one trace
-holding both containers:
-
-```bash
-# The parquet container needs the parquet feature: it is non-default so that a
-# plain workspace build never pulls arrow.
-P="cargo run -q -p workload-gen --no-default-features --features parquet --"
-$P emit $E --seed 42 --until 30 \
-  --certus-unified-jsonl /tmp/trace \
-  --certus-unified-parquet /tmp/trace
-find /tmp/trace -type f
-```
-
-**Expect** exactly four files, and no `blocks/` directory — block role is
-something real traces recover from text, and this generator does not model it
-(`contracts/trace-io.md`):
-
-```text
-/tmp/trace/manifest.json
-/tmp/trace/report.json
-/tmp/trace/invocations/block_size_16/part-0.jsonl
-/tmp/trace/invocations/block_size_16/part-0.parquet
-```
-
-- `manifest.json` declares the encoding (`source_class: pre_hashed`, full
-  encoding), the block geometry, and `block_id_space: chained_u64` recording that
-  identifiers are chained keys rather than dense mint-order integers (FR-057).
-- The JSONL and parquet records are **identical**, and every row satisfies the
-  full-encoding invariants including the trailing-partial-block convention
-  (SC-004, FR-058). The run checks the two containers' counts against each other
-  and refuses if they disagree, so `jsonl records` and `parquet records` in the
-  report being equal is that check having passed rather than a coincidence.
-  Parquet is about 3.6x smaller here — 12.2 MB against 44.1 MB — which is the
-  whole reason the dependency is justified.
-- The run report states completeness — sessions, turns, blocks, virtual-time
-  span, records written — and **omits** latency, lane utilisation, and the
-  virtual-to-wallclock ratio entirely. Their presence as zeros is a failure,
-  not a cosmetic issue: a zero is indistinguishable from a measurement
-  (FR-071). Check it: `grep -c latency /tmp/trace/report.json` must be 0.
-- Expect **warnings**, not silence: at 30 seconds every class's mean lifetime is
-  longer than the span, so the run says it cannot exhibit the pool turnover the
-  description asks for. That is the projection earning its place.
-
-Point them at **different** directories and you get two independent traces, each
-with its own manifest. Ask for only `--certus-unified-parquet` and only parquet is
-written — but note the projections below read the JSONL schema, so a parquet-only
-trace has nothing for `convert` to read.
-
-## Scenario 3b — The standard formats, without writing a trace first
-
-This is the cheap path, and the one to reach for by default: no native trace, no
-`convert` step, both standard formats written in the same pass.
+**One flag per format, and at least one is required.** There is no default
+output and no format a run must produce — asking for a Mooncake file alone
+writes exactly that. There is no Certus-private container to write first: a
+workload is repeated from its description and seed (FR-072), so every output is
+one other tool's own format (FR-055).
 
 ```bash
 $G emit $E --seed 42 --until 30 \
   --mooncake /tmp/mc.jsonl \
-  --libcachesim /tmp/lcs.csv
-ls -l /tmp/mc.jsonl /tmp/lcs.csv
+  --libcachesim /tmp/lcs.csv \
+  --qwen-bailian /tmp/qwen.jsonl \
+  --report /tmp/emit-report.json
+ls -l /tmp/mc.jsonl /tmp/lcs.csv /tmp/qwen.jsonl
 ```
 
-**Expect** the two files and **nothing else** — no trace directory, not even an
-empty one, because a directory holding records with no manifest is precisely what
-FR-073 makes unreadable. The report is rendered to the terminal; pass `--report
-<file>` to keep its structured form, which is the only way to keep it on a run
-with no trace directory to hold `report.json`.
+**Expect** exactly those three files and nothing else — no directory, and
+nothing beside them, because a projection is not a trace (FR-075b).
+
+- The run report states completeness — sessions, turns, blocks, virtual-time
+  span, records written per output — and **omits** latency, lane utilisation,
+  and the virtual-to-wallclock ratio entirely. Their presence as zeros is a
+  failure, not a cosmetic issue: a zero is indistinguishable from a measurement
+  (FR-071). Check it: `grep -c latency /tmp/emit-report.json` must be 0.
+- Every output receives a record per turn simulated, and each satisfies its
+  target format's documented invariants (SC-004, FR-058).
+- Every projection declares what it dropped (FR-077), and `--libcachesim`
+  prints the `--trace-type-params` string its reader needs, since libCacheSim's
+  columns are configurable and a CSV file cannot say what its own columns mean.
+- Expect **warnings**, not silence: at 30 seconds every class's mean lifetime
+  is longer than the span, so the run says it cannot exhibit the pool turnover
+  the description asks for. That is the projection earning its place.
+- `--report <file>` is the only way to keep the structured form; it is rendered
+  to the terminal either way.
 
 Measured at a 30-second span, so the trade is concrete:
 
 | Output | Bytes | Carries |
 | --- | --- | --- |
-| `--mooncake` | 12.5 MB | 4 fields: timestamp, two lengths, prompt block ids |
-| `--libcachesim` | 63.4 MB | `(time, id, size)` triples, one row **per block reference** |
-| `--qwen-bailian` | 41.3 MB | the Qwen-Bailian eight-field request shape |
-| `--certus-unified-parquet` | 12.2 MB | the full 17-field schema |
-| `--certus-unified-jsonl` | 44.1 MB | the same, as text |
+| `--mooncake` | 12.1 MB | 4 fields: timestamp, two lengths, prompt block ids |
+| `--libcachesim` | 62.0 MB | `(time, id, size)` triples, one row **per block reference** |
+| `--qwen-bailian` | 40.4 MB | the Qwen-Bailian eight-field request shape |
 
-Two things worth reading off that table. libCacheSim CSV is the **largest** of the
-five while carrying the least per row, because it writes a row per reference
-rather than per request — an existing standard format is not automatically the
-lean choice. And the full schema in parquet is *smaller* than raw Mooncake
-JSONL, so the extra fifteen fields cost nothing once the container stops being
-text.
+Worth reading off that table: libCacheSim CSV is the **largest** of the three
+while carrying the least per row, because it writes a row per reference rather
+than per request. An existing standard format is not automatically the lean
+choice.
 
-Every projection declares what it dropped (FR-077), and `--libcachesim` prints
-the `--trace-type-params` string its reader needs, since libCacheSim's columns
-are configurable and a CSV file cannot say what its own columns mean.
+## Scenario 3b — Feed the simulator
 
-## Scenario 3c — Converting a stored trace
-
-Then the deferred integration question, now settled (`research.md` D1):
+Then the deferred integration question, now settled (`research.md` D1) — the
+Qwen-Bailian projection is what `apps/eviction-replay-benchmark` reads:
 
 ```bash
-$G convert /tmp/trace --to qwen-bailian --output /tmp/trace-qwen.jsonl
+$G emit $E --seed 42 --until 30 --qwen-bailian /tmp/qwen.jsonl
 cargo run --release -p eviction-replay-benchmark -- \
-  --file /tmp/trace-qwen.jsonl --policy lru --cache-size 4096
+  --file /tmp/qwen.jsonl --policy lru --cache-size 4096
 ```
 
 **Expect**: the simulator loads it and reports a hit rate. Its loader derives
-sessions by walking `parent_chat_id` to a root, so a converted trace whose
-`parent_chat_id` chain is wrong will still *load* while collapsing every session
-into one — so check the numbers agree rather than only that it ran. `convert`
-prints `records / sessions / distinct keys / key references` and the simulator
-prints `requests / working-set / accesses(block-refs)`; the three that overlap
-must match:
+sessions by walking `parent_chat_id` to a root, so a file whose
+`parent_chat_id` chain is wrong will still *load* while collapsing every
+session into one — so check the numbers agree rather than only that it ran. The
+emit run prints each projection's own counts and the simulator prints `requests
+/ accesses / working-set`; the three that overlap must match exactly. At the
+30-second span above:
 
 ```text
-convert:    records 6109  sessions 4238  distinct keys 1119473  key references 1979669
-simulator:  requests=6109  accesses(block-refs)=1979669  working-set(distinct blocks)=1119473
+cachesim       1936694 accesses (1074280 distinct objects)
+qwen-bailian   5968 records (4148 sessions, 1074280 distinct keys)
+simulator      requests=5968  accesses(block-refs)=1936694  working-set(distinct blocks)=1074280
 ```
+
+The simulator's accesses come from the **qwen** file, so their agreeing with
+the libCacheSim projection's count is two independent writers agreeing, not one
+number printed twice.
 
 Its default cache sizes are 256–4096 **blocks** against a working set of over a
 million, so a low hit rate there says nothing about the workload. Scenario 6 is
 where a hit rate means something.
 
-## Scenario 3d — Standard formats from a stored trace, and checking reuse
+## Scenario 3c — Cross-checking the projections against each other
 
-The same projections Scenario 3b wrote in one pass, applied instead to a trace
-already on disk (FR-075a) — the path that lets a **captured** trace and a
-generated one go through an identical transformation, since `convert` reads the
-Certus unified format whatever wrote it:
+Three writers fed by one record stream should agree wherever their formats
+overlap, and **how they differ is the check**:
 
 ```bash
-$G emit $E --seed 42 --until 10 --certus-unified-jsonl /tmp/qs-trace
-$G convert /tmp/qs-trace --to mooncake       --output /tmp/qs-mc.jsonl
-$G convert /tmp/qs-trace --to oracle-general --output /tmp/qs-og.bin
-$G convert /tmp/qs-trace --to qwen-bailian   --output /tmp/qs-qwen.jsonl
+$G emit $E --seed 42 --until 10 \
+  --mooncake /tmp/qs-mc.jsonl \
+  --libcachesim /tmp/qs-lcs.csv \
+  --qwen-bailian /tmp/qs-qwen.jsonl
 ```
 
-**Expect** every conversion to declare what it dropped and to end with the
-FR-075b line, and these counts:
+**Expect** every projection to declare what it dropped, the FR-075b line once
+for the run, and these counts:
 
 ```text
-mooncake:       records 1943  distinct identifiers 411430  references 655104
-oracleGeneral:  accesses 660805  distinct objects 416462  object size 65536 bytes
-qwen-bailian:   records 1943  sessions 1627  distinct keys 416462  key refs 660805
+mooncake       1934 records (413044 distinct identifiers)
+cachesim       657302 accesses (417764 distinct objects)
+qwen-bailian   1934 records (1622 sessions, 417764 distinct keys)
 ```
 
-**They do not all match, and how they differ is the check.** The two cache
-targets agree exactly — 416 462 objects over 660 805 accesses, from writers
-that share nothing but the record stream. Mooncake is lower by exactly the
-generated run: **655 104 + 5 701 = 660 805**, where 5 701 is the total length
-of every `full_output_blocks` in the trace. libCacheSim and the simulator carry
-a turn's generated blocks as stores at that turn; Mooncake cannot, because
+**They do not all match, and the differences are the check.** The two record
+counts agree, because a record is a turn. The two cache targets agree exactly
+on both figures — 417 764 objects over 657 302 references, from writers that
+share nothing but the record stream. Mooncake is lower on both, by exactly the
+generated run: its 651 893 references plus the 5 409 output-block references it
+cannot carry give 657 302. libCacheSim and the simulator carry a turn's
+generated blocks as accesses at that turn; Mooncake cannot, because
 `len(hash_ids) == ceil(input_length / block_size)` is a conformance invariant
 there. So expect that gap when comparing the two, rather than a bug.
-
-The binary is **15 859 320 bytes**, exactly `660805 × 24` — the verified
-`oracleGeneral` record size, confirmed against real output rather than against
-the prose that documents it.
-
-`convert` reads block geometry from the trace's `manifest.json`, because
-neither format carries it. That is also why a **projection** cannot be fed
-back in: it has no manifest, so it is refused with exit 2 (FR-075b).
 
 ### The reuse check, and why the obvious form of it is vacuous
 
 FR-078 is the one mistake here that would look like success: renumbering per
 session yields a file that loads and replays while cross-session reuse has
 silently vanished. The check that catches it is the **global identifier
-count**, against the native trace's own distinct keys:
+count**, against the keys the run actually minted:
 
 ```bash
-python3 - <<'PY'
+python3 -c "
 import json
-native = [json.loads(l) for l in
-          open('/tmp/qs-trace/invocations/block_size_16/part-0.jsonl')]
 mc = [json.loads(l) for l in open('/tmp/qs-mc.jsonl')]
-keys = {k for r in native for k in r['full_input_blocks']}
-ids  = {i for r in mc for i in r['hash_ids']}
-print('native distinct keys ', len(keys))
-print('mooncake identifiers ', len(ids), 'dense:', max(ids) + 1 == len(ids))
-PY
+ids = {i for r in mc for i in r['hash_ids']}
+print('mooncake identifiers', len(ids), 'dense:', max(ids) + 1 == len(ids))
+"
 ```
 
-**Expect** `411430` from both lines, and `dense: True`. That equality is what
-global scope means. The snippet compares **prompt** keys only, deliberately:
-Mooncake carries the prompt alone, so folding in `full_output_blocks` would
-make the two sides differ for a reason unrelated to renumbering. For the two
-cache targets the same count is `416462`.
+**Expect** `413044` identifiers and `dense: True`. That density at whole-output
+scope is what global scope means, and the count is the one the run itself
+reports, so a renumbering that lost cross-session sharing would disagree with
+the report rather than only with this snippet. It is on **prompt** keys alone
+because that is all Mooncake carries.
 
-Measured on this trace, the two wrong renumberings would
-give **1970** instead — the largest session's own key count, which is also the
-longest prompt — so the defect shows up as a **209×** collapse and cannot be
-mistaken for noise.
+Measured on this run, a per-session renumbering would give **1989** instead —
+the largest session's own distinct-key count — so the defect shows up as a
+**208×** collapse and cannot be mistaken for noise.
 
 **Do not check it positionally.** Comparing a shared key's identifier at its
 position in two sessions' rows looks like the more direct test and proves
-nothing: on this trace **all 28 149** cross-session shared keys sit at the
-*same* prompt position in both sessions, and **none** at differing positions.
-Shared objects are prompt prefixes, so their position is fixed by the prefix
-layout — which means a per-session renumbering restarting at zero reproduces
-the same number at the same position and passes. The unit test
+nothing: shared objects are prompt prefixes, so their position is fixed by the
+prefix layout, which means a per-session renumbering restarting at zero
+reproduces the same number at the same position and passes. The unit test
 `the_prompt_prefix_structure_survives_the_conversion` is annotated as weak for
 exactly this reason; the count is the assertion with teeth.
 
@@ -558,13 +505,13 @@ nothing. They are worth knowing before writing a description to sweep:
   footprint and hit above it — a cliff, ~85% of the rise in one step, for
   concentrated and uniform popularity alike.
 - **Keep the top of the ladder well below the key space** (0.1%-10% of it). A
-  cache the size of the key space evicts nothing, so its hit rate is 1.0 for any
-  workload whatsoever.
+  cache the size of the key space evicts nothing, so its hit rate is 1.0 for
+  any workload whatsoever.
 - **Scale-free popularity is not sufficient.** With `turns` and `uses.count`
-  held constant every session has the same footprint, so the working set has one
-  characteristic size and the curve cliffs there however the pool is selected.
-  Both must be heavy-tailed, and `selection` needs a *scale-free* shape —
-  `exponential` gives one hot band and steps; an `empirical` ladder
+  held constant every session has the same footprint, so the working set has
+  one characteristic size and the curve cliffs there however the pool is
+  selected. Both must be heavy-tailed, and `selection` needs a *scale-free*
+  shape — `exponential` gives one hot band and steps; an `empirical` ladder
   `[1, 4, 16, 64, ...]` with `interpolate: true` puts equal mass in each octave
   of rank, which is a power law.
 
