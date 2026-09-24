@@ -47,6 +47,8 @@ CERTUS_PROFILE="${CERTUS_PROFILE:-full-optimized}"
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"
 DEVICE_PCI_1="${DEVICE_PCI_1:-0000:61:00.0}"
 DEVICE_PCI_2="${DEVICE_PCI_2:-0000:62:00.0}"
+DEVICE_PCI_3="${DEVICE_PCI_3:-0000:63:00.0}"
+DEVICE_PCI_4="${DEVICE_PCI_4:-0000:64:00.0}"
 MEM_TIER_SIZE="${MEM_TIER_SIZE:-30G}"
 EVICT_THRESHOLD="${EVICT_THRESHOLD:-0.9}"
 STORE_BACKPRESSURE_MS="${STORE_BACKPRESSURE_MS:-5000}"
@@ -158,16 +160,17 @@ SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
 [[ -e "$SHM_PATH" ]] && { warn "stale mailbox ${SHM_PATH} present — removing"; rm -f "$SHM_PATH" 2>/dev/null || true; }
 log "starting certus-server -> ${SERVER_LOG}"
 numactl --cpunodebind=0 --membind=0 "$SERVER_BIN" \
-  --device-pci "$DEVICE_PCI_1" --device-pci "$DEVICE_PCI_2" \
-  --shm-path "$SHM_PATH" \
-  --memory-tier-size "$MEM_TIER_SIZE" \
-  --memory-tier-eviction-threshold "$EVICT_THRESHOLD" \
-  --store-backpressure-ms "$STORE_BACKPRESSURE_MS" \
-  --channels "$CHANNELS" \
-  --poller-base-cpu "$POLLER_BASE_CPU" \
-  --shmq-poller-cpu "$SHMQ_POLLER_CPU" \
-  --format \
-  >"$SERVER_LOG" 2>&1 &
+	--device-pci "$DEVICE_PCI_1" --device-pci "$DEVICE_PCI_2" \
+	--device-pci "$DEVICE_PCI_3" --device-pci "$DEVICE_PCI_4" \
+	--shm-path "$SHM_PATH" \
+	--memory-tier-size "$MEM_TIER_SIZE" \
+	--memory-tier-eviction-threshold "$EVICT_THRESHOLD" \
+	--store-backpressure-ms "$STORE_BACKPRESSURE_MS" \
+	--channels "$CHANNELS" \
+	--poller-base-cpu "$POLLER_BASE_CPU" \
+	--shmq-poller-cpu "$SHMQ_POLLER_CPU" \
+	--format \
+	>"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 log "waiting up to ${SERVER_READY_TIMEOUT}s for mailbox ${SHM_PATH} ..."
