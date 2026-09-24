@@ -257,7 +257,7 @@ footer {{
     <div class="legend-item"><div class="legend-swatch read"></div>Read</div>
     <div class="legend-item"><div class="legend-swatch write"></div>Write</div>
   </div>
-  <div class="chart-title">Bandwidth (MB/s)</div>
+  <div class="chart-title">Bandwidth (GB/s)</div>
   <svg id="svg-bw"></svg>
   <div class="tooltip" id="tip-bw"></div>
 </div>
@@ -287,6 +287,7 @@ footer {{
 <tr>
   <th>Drives</th>
   <th>Page Size</th>
+  <th>Trace</th>
   <th>QPS</th>
   <th>Hit Rate</th>
   <th>Read Avg</th>
@@ -310,18 +311,24 @@ footer {{
 <script>
 const DATA = {rows_json};
 
+// ── helpers ──
+function fmtSize(mib) {{
+  if (mib < 1) return (mib * 1024).toFixed(0) + ' KiB';
+  return mib + ' MiB';
+}}
+
 // ── stat tiles ──
 const statsRow = document.getElementById('stats-row');
 if (DATA.length > 0) {{
-  const maxBw = Math.max(...DATA.map(r => Math.max(r.read_bw_mbs, r.write_bw_mbs)));
+  const maxBwGbs = Math.max(...DATA.map(r => Math.max(r.read_bw_mbs, r.write_bw_mbs))) / 1024;
   const avgQps = (DATA.reduce((s,r) => s + r.qps, 0) / DATA.length).toFixed(1);
   const minLat = Math.min(...DATA.map(r => Math.min(r.read_avg_ms, r.write_avg_ms)));
-  const sizes = DATA.map(r => r.page_mib).filter(x => x > 0);
-  const sizeRange = sizes.length ? sizes[0] + '–' + sizes[sizes.length-1] + ' MiB' : 'N/A';
+  const sizes = [...new Set(DATA.map(r => r.page_mib))].filter(x => x > 0).sort((a,b)=>a-b);
+  const sizeRange = sizes.length ? fmtSize(sizes[0]) + ' – ' + fmtSize(sizes[sizes.length-1]) : 'N/A';
   const tiles = [
     ['Page Sizes', sizeRange, ''],
     ['Runs', DATA.length, ''],
-    ['Peak BW', maxBw.toFixed(0), 'MB/s'],
+    ['Peak BW', maxBwGbs.toFixed(1), 'GB/s'],
     ['Avg QPS', avgQps, 'req/s'],
     ['Min Latency', minLat.toFixed(3), 'ms'],
   ];
@@ -351,15 +358,16 @@ DATA.forEach(r => {{
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td>${{r.drives || '—'}}</td>
-    <td>${{r.page_mib}} MiB</td>
+    <td>${{fmtSize(r.page_mib)}}</td>
+    <td>${{r.trace || ''}}</td>
     <td>${{r.qps.toFixed(1)}}</td>
     <td>${{r.hit_rate.toFixed(1)}}%</td>
     <td>${{r.read_avg_ms.toFixed(3)}} ms</td>
     <td>${{r.read_p99_ms.toFixed(3)}} ms</td>
-    <td>${{r.read_bw_mbs.toFixed(0)}} MB/s</td>
+    <td>${{(r.read_bw_mbs/1024).toFixed(2)}} GB/s</td>
     <td>${{r.write_avg_ms.toFixed(3)}} ms</td>
     <td>${{r.write_p99_ms.toFixed(3)}} ms</td>
-    <td>${{r.write_bw_mbs.toFixed(0)}} MB/s</td>
+    <td>${{(r.write_bw_mbs/1024).toFixed(2)}} GB/s</td>
     <td>${{r.req_wall_p99_ms.toFixed(3)}} ms</td>
   `;
   tbody.appendChild(tr);
@@ -499,7 +507,38 @@ if (hasDrives && driveGroups.length > 1) {{
   driveLegend('chart-lat');
   driveLegend('chart-qps');
 
-  function drawMultiLineChart(svgId, tipId, getY, yLabel) {{
+  // Aggregate: average across traces for each (drives, page_size) combo
+  const aggMap = {{}};
+  DATA.forEach(r => {{
+    const key = r.drives + '|' + r.page_mib;
+    if (!aggMap[key]) aggMap[key] = {{drives: r.drives, page_mib: r.page_mib, vals: []}};
+    aggMap[key].vals.push(r);
+  }});
+  const AGG = Object.values(aggMap).map(g => {{
+    const n = g.vals.length;
+    const avg = (fn) => g.vals.reduce((s,r) => s + fn(r), 0) / n;
+    return {{
+      drives: g.drives, page_mib: g.page_mib,
+      write_bw_gbs: avg(r => r.write_bw_mbs / 1024),
+      read_bw_gbs: avg(r => r.read_bw_mbs / 1024),
+      write_avg_ms: avg(r => r.write_avg_ms),
+      read_avg_ms: avg(r => r.read_avg_ms),
+      qps: avg(r => r.qps),
+    }};
+  }});
+
+  // Log-scale x positioning
+  const pageSizes = [...new Set(AGG.map(r => r.page_mib))].sort((a,b) => a-b);
+  const logMin = Math.log10(Math.max(0.001, pageSizes[0]));
+  const logMax = Math.log10(Math.max(0.001, pageSizes[pageSizes.length-1]));
+  const logRange = Math.max(0.001, logMax - logMin);
+  function xForSize(mib, M, cW) {{
+    if (pageSizes.length <= 1) return M.left + cW/2;
+    const t = (Math.log10(Math.max(0.001, mib)) - logMin) / logRange;
+    return M.left + t * cW;
+  }}
+
+  function drawMultiLineChart(svgId, tipId, getY, yLabel, yFmt) {{
     const svg = document.getElementById(svgId);
     const tip = document.getElementById(tipId);
     const container = svg.parentElement;
@@ -512,34 +551,35 @@ if (hasDrives && driveGroups.length > 1) {{
     svg.setAttribute('height', H);
     svg.setAttribute('viewBox', `0 0 ${{W}} ${{H}}`);
 
-    const pageSizes = [...new Set(DATA.map(r => r.page_mib))].sort((a,b) => a-b);
-    const allVals = DATA.map(getY);
+    const allVals = AGG.map(getY);
     const maxVal = Math.max(...allVals) * 1.15;
-    const step = cW / Math.max(1, pageSizes.length - 1);
+    if (!yFmt) yFmt = v => maxVal > 100 ? v.toFixed(0) : v.toFixed(2);
 
     let html = '';
+    // Y grid
     for (let i = 0; i <= 4; i++) {{
       const y = M.top + cH - (i/4)*cH;
-      const val = (maxVal*i/4).toFixed(maxVal>100?0:2);
       html += `<line class="grid-line" x1="${{M.left}}" x2="${{W-M.right}}" y1="${{y}}" y2="${{y}}"/>`;
-      html += `<text x="${{M.left-6}}" y="${{y+4}}" text-anchor="end">${{val}}</text>`;
+      html += `<text x="${{M.left-6}}" y="${{y+4}}" text-anchor="end">${{yFmt(maxVal*i/4)}}</text>`;
     }}
+    // X axis + labels (log-spaced)
     html += `<line class="axis-line" x1="${{M.left}}" x2="${{W-M.right}}" y1="${{M.top+cH}}" y2="${{M.top+cH}}"/>`;
-    pageSizes.forEach((ps, i) => {{
-      html += `<text x="${{M.left+step*i}}" y="${{M.top+cH+16}}" text-anchor="middle">${{ps}} MiB</text>`;
+    pageSizes.forEach(ps => {{
+      const x = xForSize(ps, M, cW);
+      html += `<text x="${{x}}" y="${{M.top+cH+16}}" text-anchor="middle">${{fmtSize(ps)}}</text>`;
+      html += `<line class="grid-line" x1="${{x}}" x2="${{x}}" y1="${{M.top}}" y2="${{M.top+cH}}" style="stroke-dasharray:2,4;opacity:0.3"/>`;
     }});
 
     driveGroups.forEach((d, di) => {{
-      const series = DATA.filter(r => r.drives === d).sort((a,b) => a.page_mib - b.page_mib);
+      const series = AGG.filter(r => r.drives === d).sort((a,b) => a.page_mib - b.page_mib);
       const color = driveColor(di);
       let path = '';
       series.forEach((r, i) => {{
-        const xi = pageSizes.indexOf(r.page_mib);
-        const x = M.left + step * xi;
+        const x = xForSize(r.page_mib, M, cW);
         const v = getY(r);
         const y = M.top + cH - (v/maxVal)*cH;
         path += (i===0?'M':'L') + x + ',' + y;
-        html += `<circle cx="${{x}}" cy="${{y}}" r="4" fill="${{color}}" data-d="${{d}}" data-ps="${{r.page_mib}}" data-v="${{v.toFixed(2)}}"/>`;
+        html += `<circle cx="${{x}}" cy="${{y}}" r="5" fill="${{color}}" data-d="${{d}}" data-ps="${{fmtSize(r.page_mib)}}" data-v="${{yFmt(v)}}"/>`;
       }});
       html = `<path d="${{path}}" fill="none" stroke="${{color}}" stroke-width="2"/>` + html;
     }});
@@ -547,7 +587,7 @@ if (hasDrives && driveGroups.length > 1) {{
 
     svg.querySelectorAll('circle').forEach(c => {{
       c.addEventListener('mouseenter', e => {{
-        tip.innerHTML = `<b>${{e.target.dataset.d}} drive(s), ${{e.target.dataset.ps}} MiB</b><br>${{e.target.dataset.v}} ${{yLabel}}`;
+        tip.innerHTML = `<b>${{e.target.dataset.d}} drive(s), ${{e.target.dataset.ps}}</b><br>${{e.target.dataset.v}} ${{yLabel}}`;
         tip.classList.add('visible');
       }});
       c.addEventListener('mousemove', e => {{
@@ -559,11 +599,12 @@ if (hasDrives && driveGroups.length > 1) {{
     }});
   }}
 
-  drawMultiLineChart('svg-bw', 'tip-bw', r => r.write_bw_mbs, 'MB/s');
-  document.querySelector('#chart-bw .chart-title').textContent = 'Write Bandwidth vs Page Size (MB/s)';
-  drawMultiLineChart('svg-lat', 'tip-lat', r => r.write_avg_ms, 'ms');
-  document.querySelector('#chart-lat .chart-title').textContent = 'Write Avg Latency vs Page Size (ms)';
-  drawMultiLineChart('svg-qps', 'tip-qps', r => r.qps, 'req/s');
+  drawMultiLineChart('svg-bw', 'tip-bw', r => r.write_bw_gbs, 'GB/s', v => v.toFixed(1));
+  document.querySelector('#chart-bw .chart-title').textContent = 'Write Bandwidth vs Page Size (GB/s) — log scale';
+  drawMultiLineChart('svg-lat', 'tip-lat', r => r.write_avg_ms, 'ms', v => v.toFixed(3));
+  document.querySelector('#chart-lat .chart-title').textContent = 'Write Avg Latency vs Page Size (ms) — log scale';
+  drawMultiLineChart('svg-qps', 'tip-qps', r => r.qps, 'req/s', v => v.toFixed(0));
+  document.querySelector('#chart-qps .chart-title').textContent = 'QPS vs Page Size — log scale';
 }} else {{
   drawBarChart('svg-bw', 'tip-bw', r => [r.read_bw_mbs, r.write_bw_mbs], 'MB/s');
   drawBarChart('svg-lat', 'tip-lat', r => [r.read_avg_ms, r.write_avg_ms], 'ms');

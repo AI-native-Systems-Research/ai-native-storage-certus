@@ -57,6 +57,7 @@ DRIVE_COUNT=4
 MODEL="glm5"
 SWEEP=false
 SWEEP_SIZES="1 2 3 4 5 6 7 8 9 10"
+SWEEP_SIZES_KIB=""                     # additional sub-MiB sizes in KiB (e.g. "160 400")
 SWEEP_DRIVES=""                        # empty = just use DRIVE_COUNT / EXPLICIT_PCI
 RESULTS_DIR=""
 SCENARIO="toolagent"
@@ -83,6 +84,7 @@ Options:
   --model MODEL            Model preset (default: glm5). Use --list-models for all.
   --sweep                  Page-size × drive-count sweep with HTML report
   --sweep-sizes "1 2 5 10" Page sizes in MiB (default: 1 2 3 4 5 6 7 8 9 10)
+  --sweep-sizes-kib "160 400"  Additional page sizes in KiB (for sub-MiB models)
   --sweep-drives "1 2 4"   Drive counts to sweep (default: just --drive-count)
   --results-dir DIR        Save JSON + HTML report here (default: results/<timestamp>)
   --disk-only              Run disk baseline only (no server, no GPU)
@@ -122,6 +124,7 @@ while [[ $# -gt 0 ]]; do
         --model)            MODEL="$2"; shift 2 ;;
         --sweep)            SWEEP=true; shift ;;
         --sweep-sizes)      SWEEP=true; SWEEP_SIZES="$2"; shift 2 ;;
+        --sweep-sizes-kib)  SWEEP=true; SWEEP_SIZES_KIB="$2"; shift 2 ;;
         --sweep-drives)     SWEEP=true; SWEEP_DRIVES="$2"; shift 2 ;;
         --results-dir)      RESULTS_DIR="$2"; shift 2 ;;
         --scenario)         SCENARIO="$2"; shift 2 ;;
@@ -336,7 +339,11 @@ if [[ "$SWEEP" == true ]]; then
 
     echo ""
     echo "╔══════════════════════════════════════════════════════════════════════════════╗"
-    echo "║  SWEEP: page sizes [${SWEEP_SIZES}] MiB × drives [${SWEEP_DRIVES}]"
+    if [[ -n "$SWEEP_SIZES_KIB" ]]; then
+        echo "║  SWEEP: page sizes [${SWEEP_SIZES_KIB}] KiB + [${SWEEP_SIZES}] MiB × drives [${SWEEP_DRIVES}]"
+    else
+        echo "║  SWEEP: page sizes [${SWEEP_SIZES}] MiB × drives [${SWEEP_DRIVES}]"
+    fi
     echo "║  Results: ${RESULTS_DIR}/"
     echo "╚══════════════════════════════════════════════════════════════════════════════╝"
 
@@ -355,6 +362,28 @@ if [[ "$SWEEP" == true ]]; then
             fi
         fi
 
+        # Sub-MiB page sizes (KiB)
+        for SIZE_KIB in $SWEEP_SIZES_KIB; do
+            # bytes_per_token = (SIZE_KiB * 1024) / page_size_tokens
+            # Default page_size_tokens=512, so bytes_per_token = SIZE_KiB * 2
+            BPT=$((SIZE_KIB * 2))
+            # page_size_mib as decimal for tagging
+            PAGE_MIB=$(python3 -c "print(round($SIZE_KIB / 1024, 3))")
+            echo ""
+            echo "  ── ${NUM_DRIVES} drive(s) × ${SIZE_KIB} KiB pages (bytes_per_token=${BPT}) ──"
+            cd "$SCRIPT_DIR"
+            python3 benchmark.py \
+                --bytes-per-token "$BPT" \
+                --tag "drives=$NUM_DRIVES" \
+                --tag "page_size_mib=$PAGE_MIB" \
+                --output-json "$RESULTS_JSON" \
+                "${CERTUS_ARGS[@]}" "${BENCH_COMMON[@]}" || {
+                echo "  ⚠️  ${NUM_DRIVES}d × ${SIZE_KIB} KiB failed, continuing..."
+                continue
+            }
+        done
+
+        # MiB page sizes
         for SIZE_MIB in $SWEEP_SIZES; do
             BPT=$((SIZE_MIB * 2048))
             echo ""
