@@ -48,6 +48,50 @@ session_classes:
     think_time: {constant: 5}
 "#;
 
+/// A workload whose key selection is genuinely **random**, so that an RNG-stream
+/// divergence can actually change which keys a session reads.
+///
+/// `MIGRATING` and `STATIC` cannot: their shared class has no `pool` (one immortal
+/// instance) and `count: {constant: 1}`, with constant turns and growths, so every
+/// session's keys are forced regardless of what the generator draws. That is fine for
+/// the migration tests, which are about a session's *node*, and useless for
+/// `the_workload_is_the_same_whatever_the_node_count`, which is about its *keys*.
+const RANDOM_KEYS: &str = r#"
+version: 1
+blocks: {tokens: 16, bytes: 32768}
+shared_classes:
+  tool:
+    length: {uniform: {min: 1, max: 20}}
+    lifetime: {exponential: {mean: 200, min: 1}}
+    pool:
+      size: 40
+      rank_by: slot
+      selection: {exponential: {mean: 6}}
+session_classes:
+  chat:
+    pool: {size: 30}
+    uses: [{class: tool, count: {uniform: {min: 1, max: 5}}}]
+    turns: {exponential: {mean: 6, min: 1}}
+    input_growth: {normal: {mean: 4, sigma: 1, min: 1}}
+    output_growth: {normal: {mean: 2, sigma: 1, min: 1}}
+    think_time: {exponential: {mean: 8}}
+    migration_interval: {exponential: {mean: 15}}
+"#;
+
+/// Run and record, per turn, `(session id, turn index, the WHOLE key path)`.
+///
+/// The whole path rather than [`run`]'s first key: a stream divergence that left the
+/// first key alone while changing the rest would pass the weaker comparison.
+fn run_paths(yaml: &str, seed: u64, nodes: usize, span: f64) -> (Vec<(u64, usize, Vec<u64>)>, u64) {
+    let d: WorkloadDescription = yaml.parse().unwrap();
+    let mut sim = Simulation::new(&d, seed, nodes).unwrap();
+    let mut seen = Vec::new();
+    sim.run_until(span, &mut |s, t| {
+        seen.push((s.id(), t.index(), s.reads_of(t).to_vec()));
+    });
+    (seen, sim.migrations())
+}
+
 /// Run and record, per turn, `(session id, node, first key of the path, turn index)`.
 fn run(yaml: &str, seed: u64, nodes: usize, span: f64) -> (Vec<(u64, usize, u64, usize)>, u64) {
     let d: WorkloadDescription = yaml.parse().unwrap();
@@ -236,23 +280,49 @@ fn migration_leaves_the_prefix_alone() {
 #[test]
 fn the_workload_is_the_same_whatever_the_node_count() {
     // Placement is a property of the deployment, so a two-node run and a four-node run must be
-    // the same workload dispatched differently — not two different workloads. The node draw is
-    // taken even on one node precisely so this holds.
-    let mut previous: Option<Vec<(u64, u64, usize)>> = None;
+    // the same workload dispatched differently — not two different workloads.
+    //
+    // What secures that is `placement_rng`: placement draws from its own substream, so a node
+    // draw cannot shift the stream `bind` takes a session's shared instances from. When the two
+    // shared one stream this was violated, because `gen_range(0..1)` and `gen_range(0..4)`
+    // consume different amounts of entropy, so the node count moved every later key.
+    //
+    // **This test used `MIGRATING` and was therefore vacuous**: that fixture's keys are forced
+    // (one immortal shared instance, `count: {constant: 1}`, constant growths), so it passed
+    // under arbitrary stream divergence and could not fail. `RANDOM_KEYS` gives `bind` real
+    // choices — a 40-instance pool, a `selection` spread, a random `count` — and the whole key
+    // path is compared rather than the first key.
+    let mut previous: Option<Vec<(u64, usize, Vec<u64>)>> = None;
+    let mut migrations_seen = Vec::new();
     for nodes in [1usize, 2, 3, 8] {
-        let (turns, _) = run(MIGRATING, 16, nodes, 300.0);
-        let keys: Vec<(u64, u64, usize)> = turns
-            .iter()
-            .map(|(id, _, key, turn)| (*id, *key, *turn))
-            .collect();
+        let (turns, migrations) = run_paths(RANDOM_KEYS, 5, nodes, 300.0);
+        assert!(!turns.is_empty(), "no turns at all at {nodes} nodes");
+        migrations_seen.push(migrations);
         if let Some(prev) = &previous {
             assert_eq!(
-                *prev, keys,
+                prev.len(),
+                turns.len(),
+                "the turn COUNT changed with the node count ({nodes} nodes)"
+            );
+            assert_eq!(
+                *prev, turns,
                 "the workload changed with the node count ({nodes} nodes)"
             );
         }
-        previous = Some(keys);
+        previous = Some(turns);
     }
+
+    // And the deployments genuinely differed, or the comparison above is vacuous for a second
+    // reason — identical workloads prove nothing if nothing about the runs was different.
+    assert_eq!(
+        migrations_seen[0], 0,
+        "one node must leave migration inert (FR-049)"
+    );
+    assert!(
+        migrations_seen[1..].iter().all(|&m| m > 0),
+        "a multi-node run performed no migrations, so no run differed from the one-node run: \
+         {migrations_seen:?}"
+    );
 }
 
 #[test]
