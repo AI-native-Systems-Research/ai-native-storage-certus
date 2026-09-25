@@ -14,11 +14,14 @@ The obvious reading is that counting remote hits needs `served_by`, because the 
 what exposes counters and the server only learns the tier if the dispatcher returns it. That
 reading is wrong: **the counter does not have to be incremented by the server.**
 
-`dispatcher` reaches remote lookup at three sites of its own —
-`components/dispatcher/src/lib.rs:1986`, `:2070`, `:2575` — each guarded by
-`if let Ok(rl) = self.remote_lookup.get()`. At those sites the dispatcher already knows
-whether the peer served the key, one line before it folds the answer into
-`Result<(), DispatcherError>`. A counter incremented there needs:
+**Corrected 2026-09-25**: an earlier draft of this section said three sites. There are three
+`self.remote_lookup.get()` guards, but only one is a lookup — `:1986` is `join_cluster` and
+`:2070` is `leave_cluster`. The fetch path is **`components/dispatcher/src/lib.rs:2575`
+alone**, which is simpler than the draft claimed.
+
+There, the dispatcher collects the `KeyNotFound` indices, calls `rl.batch_lookup`, and zips
+the answers back — so it knows per key whether the peer served it, one line before it folds
+the answer into `Result<(), DispatcherError>`. A counter incremented there needs:
 
 - no change to `IDispatcher::batch_lookup`'s signature,
 - no change to the `interfaces` crate,
@@ -68,27 +71,42 @@ Note this is *not* the cause of a zero reading on its own, because `NotExist` **
 `KeyNotFound` (`components/dispatcher/src/lib.rs`, the `LookupResult::NotExist` arm), so an
 ordinarily-absent key should be counted.
 
-### Open: what the remote-lookup path returns on a remote miss
+### CONFIRMED, and it is the cause: a remote miss is relabelled as an I/O error
 
-**This is the leading candidate for the zero itself and it is not yet settled.** The
-dispatcher deliberately does *not* return `KeyNotFound` early when remote lookup is
-configured — a comment at the `NotExist` arm says `KeyNotFound` "would forward a live key to
-remote-lookup". So with peers configured, a locally-absent key goes to the peer, and if the
-peer also does not have it, the error the dispatcher finally returns may not be
-`KeyNotFound` — in which case `Err(_) => {}` drops it and misses stays at zero.
+This began as a hypothesis about the remote path and is now settled **by reading the code**,
+not by inference.
 
-Every measurement that observed the zero had peers configured (`--rl-group stress_a`), which
-fits.
+At `components/dispatcher/src/lib.rs:2624-2627`, when the peer does not have the key:
 
-**Experiment that settles it, and it is cheap**: run a single instance in a solo RDMA group
-with a workload that misses, and read `certus_lookup_misses_total`. If it is non-zero with
-no peers and zero with peers, the remote path is the cause. The generator can produce this
-directly — it is the same solo-versus-shared comparison already used to measure store
-declines, so the harness exists.
+```rust
+if let Err(e) = remote_res {
+    results[pos] =
+        Some(Err(DispatcherError::IoError(format!("remote lookup: {e}"))));
+    continue;
+}
+```
 
-**Do not fix before measuring.** The two confirmed holes are real regardless, but the zero
-reading has a specific cause worth knowing, because "we fixed the accounting and the number
-changed" is not evidence that the cause was understood.
+Every remote failure — including a plain peer miss — overwrites the original `KeyNotFound`
+with **`IoError`**. `translate.rs`'s `Err(_) => {}` then drops it. So with peers configured,
+a locally-absent key is forwarded to the peer, comes back absent, and is counted as neither
+a hit nor a miss. That is the zero.
+
+**It is worse than an accounting hole: it is a misclassification.** A key that no node holds
+is a *miss*, not an I/O error. Any consumer reasoning about error rates sees transport
+failures that never happened.
+
+**And the fix is small, because the distinction already exists.**
+`IRemoteLookup::batch_lookup` returns `Vec<Result<(), RemoteLookupError>>` with
+`RemoteLookupError::{NotFound, TransportError(String)}`
+(`components/interfaces/src/iremote_lookup.rs:102-106`). The dispatcher collapses both arms
+into `IoError` and throws the distinction away. Preserving it maps `NotFound` back to
+`KeyNotFound` and leaves `TransportError` as `IoError`.
+
+**Measure anyway, as confirmation with a prediction.** The reading is now a test of
+understanding rather than a search: a solo-group run should report **non-zero** misses and a
+shared-group run **zero**, on the same workload. If that does not hold, something else is
+also wrong and the fix would have masked it. The harness exists — it is the same
+solo-versus-shared comparison used for store declines.
 
 ## R3. Where the counters live, and what a new one costs
 

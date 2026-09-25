@@ -19,12 +19,15 @@ established its cost and neither could establish its benefit.
 Phase 1 delivers three things inside `dispatcher` and `certus-server-yaml`, with no
 interface or wire change:
 
-1. A requester-side remote-hit counter, incremented where the dispatcher already knows the
-   answer (`lib.rs:1986`, `:2070`, `:2575`).
+1. A requester-side remote-hit counter, incremented at the one site where the dispatcher
+   already knows the answer (`lib.rs:2575`; the other two `remote_lookup.get()` guards are
+   `join_cluster` and `leave_cluster`, not lookups).
 2. Closure of the two confirmed accounting holes, so hits plus misses plus errors equals
    entries requested (FR-024).
-3. A measurement that settles why `certus_lookup_misses_total` read 0, **before** the holes
-   are closed, so the fix is explained rather than merely effective.
+3. Restoration of the miss classification the dispatcher currently destroys — the **confirmed**
+   cause of the zero reading (`research.md` R2): a peer miss is relabelled `IoError`, which the
+   counter then drops. Plus a measurement that confirms it against a stated prediction rather
+   than merely observing the number move.
 
 ## Technical Context
 
@@ -101,7 +104,7 @@ components/dispatcher/specs/002-served-by-tier-attribution/
 ### Source Code (repository root)
 
 ```text
-components/dispatcher/src/lib.rs        # count at the three remote-lookup sites
+components/dispatcher/src/lib.rs        # count + reclassify at lib.rs:2575
 lib/shmq-dispatcher/src/translate.rs    # close both accounting holes; new observer method
 apps/certus-server-yaml/src/
 ├── metrics.rs                          # ServiceCounters gains the counters
@@ -134,5 +137,5 @@ are worth.
 | Item | Why needed | Simpler alternative rejected because |
 | --- | --- | --- |
 | A new `TranslatorObserver` method | The remote count is known in `dispatcher`, but counters live in the server; the observer is the existing seam between them | Returning it through `batch_lookup` is the Phase 2 interface change this phase exists to avoid. Reading it from a global would make two servers in one process share a counter |
-| Measuring before fixing | The zero reading has a specific suspected cause (`research.md` R2) that closing the holes would mask | Fixing first and observing the number change proves the symptom moved, not that the cause was understood — and the suspected cause is in the remote path, which the fix does not touch |
+| Measuring with a prediction, not merely after the fix | R2's cause is now confirmed by code reading, so the measurement becomes a test of understanding: solo must read non-zero misses and shared zero, on one workload | Observing only that the number moved cannot distinguish "we understood it" from "we changed something adjacent". If the prediction fails, a second defect is hiding behind the first |
 | Counting requester-side only | It is what the open question needs: what this node obtained from peers | A responder-side counter measures what peers asked of this node. Both are useful; conflating them under one name would produce a metric nobody can interpret |

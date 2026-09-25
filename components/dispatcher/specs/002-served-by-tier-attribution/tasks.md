@@ -1,0 +1,175 @@
+# Tasks: Serving-Tier Attribution — Phase 1 (counters)
+
+**Input**: Design documents from `specs/002-served-by-tier-attribution/`
+**Prerequisites**: spec.md (reconciled), plan.md (Phase 1 scope), research.md (R1–R5)
+
+**Scope**: Phase 1 only. No interface change, no wire change, `dispatcher` and
+`certus-server-yaml` only. Phases 2–4 are declared in plan.md and are not tasked here.
+
+**Tests**: Included. Two of the three defects below are *silent* — they drop information
+rather than fail — so a test that merely exercises the path proves nothing. Every test task
+below states what it must be shown to fail against.
+
+## Format: `[ID] [P?] Description`
+
+- **[P]**: can run in parallel (different files, no dependency)
+- Ordering is deliberate: **T001 measures before anything is fixed.** See T001's note.
+
+## Phase 1a: Establish the baseline before changing anything
+
+- [ ] **T001** Measure the zero reading against a stated prediction, on the existing build.
+  Two runs of one workload that misses, `--until 10 --rate inf`, reading
+  `curl localhost:9400/metrics` after each:
+  - **solo** (one server, `SOLO=1`, no peers) — predict `certus_lookup_misses_total` > 0
+  - **shared** (`stress_a`, peers reachable) — predict `certus_lookup_misses_total` == 0
+
+  Record both readings plus `certus_lookup_hits_total` in `research.md` R2.
+
+  **Why first, and why it is not optional**: R2's cause is confirmed by reading the code, so
+  this is a test of that understanding, not a search. If solo *also* reads zero, a second
+  defect is hiding and T004's fix would mask it — the number would move and we would wrongly
+  conclude we had understood it. Harness: `/tmp/stress-servers.sh`, `/tmp/stress-agents.sh`,
+  `/tmp/rate-probe.sh` (cold-format per probe; see its header).
+
+- [ ] **T002** [P] Capture the current `hits + misses` versus entries-requested gap on the same
+  two runs, from the generator's own per-run counts against the server's counters. This is the
+  FR-024 baseline: without it, "accounting is now complete" is unfalsifiable.
+
+## Phase 1b: The classification fix — the confirmed cause
+
+- [ ] **T003** [P] Unit test in `components/dispatcher` proving a remote **miss** is reported
+  as `KeyNotFound`, not `IoError`, and that a remote **transport failure** is still `IoError`.
+  Mock `IRemoteLookup` returning `RemoteLookupError::NotFound` for one key and
+  `TransportError` for another in one batch.
+
+  **Must be shown to fail** against today's code, which maps both to `IoError`. A test that
+  passes before the fix is testing nothing.
+
+- [ ] **T004** Preserve the distinction at `components/dispatcher/src/lib.rs:2624-2627`: map
+  `RemoteLookupError::NotFound` → `DispatcherError::KeyNotFound(key)` and leave
+  `TransportError` → `IoError`. The interface already carries the distinction
+  (`iremote_lookup.rs:102-106`); the dispatcher collapses it.
+
+  **This is a behaviour change to a Certus component, not only an accounting fix**: a key no
+  node holds stops being reported as an I/O error. Any consumer reasoning about error rates
+  currently sees transport failures that never happened.
+
+- [ ] **T005** Re-run T001's two readings. **Predicted outcome**: both now report non-zero
+  misses, and the shared-versus-solo miss counts differ by roughly the number of keys a peer
+  did serve. Record against the prediction, and say so plainly if it does not hold.
+
+## Phase 1c: The remote-hit counter
+
+- [ ] **T006** Add `on_remote_lookup(&self, hits: u64, misses: u64)` to `TranslatorObserver`
+  (`lib/shmq-dispatcher/src/translate.rs:41-48`), **defaulted to a no-op**.
+
+  Defaulting is load-bearing, not politeness: the plain `certus-server` passes no observer and
+  every test host implements this trait, so a non-defaulted method breaks both (research.md
+  R5).
+
+- [ ] **T007** Count per batch at `components/dispatcher/src/lib.rs:2575`, where the dispatcher
+  zips `remote_results` back and already knows each key's outcome. Requester-side: what this
+  node *obtained from* peers.
+
+  Do **not** count in `remote-lookup` — that measures what peers asked *of* this node, which
+  is a different quantity under a name that would invite conflation (research.md R4).
+
+- [ ] **T008** Carry the counts to the observer. The dispatcher cannot call the observer
+  directly — it has no handle — so this is the one plumbing question in Phase 1. Resolve it
+  the cheapest way that does not touch `IDispatcher`: either a counter the translator reads
+  after `batch_lookup`, or an observer handle held by the dispatcher.
+
+  **Record the choice and why in plan.md's Complexity Tracking.** If neither is possible
+  without widening `IDispatcher`, **stop and report** — that would mean Phase 1's independence
+  claim (research.md R1) is wrong, and the phasing should be revisited rather than quietly
+  extended into Phase 2.
+
+- [ ] **T009** [P] `ServiceCounters` gains `remote_lookup_hits` and `remote_lookup_misses`
+  (`apps/certus-server-yaml/src/metrics.rs`), and `CountersObserver` implements
+  `on_remote_lookup`.
+
+- [ ] **T010** [P] Export both as OTel observable counters
+  (`apps/certus-server-yaml/src/telemetry.rs:111-125`), named
+  `certus.remote_lookup_hits_total` and `certus.remote_lookup_misses_total` — dots in the
+  declaration, underscores in Prometheus, matching the existing pair.
+
+- [ ] **T011** Test that the counters move only on remote service, and are untouched by a
+  purely local hit. **Must be shown to fail** if `on_remote_lookup` is wired to the local
+  path — the failure mode that would make the counter agree with `lookup_hits` and look
+  plausible while measuring nothing.
+
+## Phase 1d: Close the two accounting holes (FR-024)
+
+- [ ] **T012** Count held-back entries. Entries whose handles fail to open are excluded from
+  the batch and reported `ok = 0` (`translate.rs:571-583`), so the counting loop never sees
+  them. They must be counted — as misses or as a third category, decided in T013.
+
+- [ ] **T013** Decide and record whether a handle-resolution failure is a *miss* or an
+  *error*. It is not obviously either: the key may well be resident, and the failure is the
+  caller's handle. **Recommendation**: a third `errors` count, because calling it a miss would
+  corrupt the hit rate with a client-side fault. Needs a decision before T014.
+
+- [ ] **T014** Replace `Err(_) => {}` (`translate.rs:604-605`) so every dispatched entry lands
+  in exactly one of hits / misses / errors. `KeyNotFound` → miss; everything else → error.
+
+- [ ] **T015** Extend `on_lookup` to carry the error count, or add it alongside — same
+  defaulting constraint as T006.
+
+- [ ] **T016** Test the FR-024 identity directly: for a batch mixing a hit, a miss, a
+  transport failure and an unopenable handle, assert
+  `hits + misses + errors == entries requested`. **Must be shown to fail** against today's
+  code, which drops two of those four.
+
+## Phase 1e: Documentation (FR-030, FR-031)
+
+- [ ] **T017** [P] Update `components/dispatcher/specs/001-dispatcher-cache-interface/` for the
+  `KeyNotFound`-versus-`IoError` behaviour change. T004 changes what `batch_lookup` returns for
+  a remote miss, and that component's spec is the artifact describing its contract.
+
+- [ ] **T018** [P] Document the new observer method and the accounting rule beside their
+  definitions in `lib/shmq-dispatcher/src/translate.rs` — it owns no `specs/`, so the site is
+  the record (FR-031), following how `check_state` documents its own widening.
+
+- [ ] **T019** [P] Record in this spec which of FR-024..FR-026 Phase 1 satisfies and which
+  await later phases, so a reader is not left inferring it from the task list.
+
+- [ ] **T020** Update `research.md` R2 with T001's and T005's actual readings. A research
+  document asserting a prediction without its outcome is the failure this phase is structured
+  to avoid.
+
+## Phase 1f: Gate
+
+- [ ] **T021** `cargo fmt --check`, `cargo clippy --no-deps -p dispatcher -p shmq-dispatcher
+  -p certus-server-yaml --all-targets -- -D warnings`, `cargo doc --no-deps`, and
+  `LD_LIBRARY_PATH=/usr/local/lib cargo test --all -- --test-threads 1`.
+
+  `LD_LIBRARY_PATH` is required or `dispatcher-p2p`'s test binary exits 127 on
+  `libgdrapi.so.2` and reads as a failure that is not one.
+
+- [ ] **T022** Rebuild **both** the server and the node agent before any hardware re-run. The
+  provenance digest spans all crates, so a stale agent is refused at the handshake (FR-051) —
+  correctly, but it will look like a broken run.
+
+## Dependencies
+
+```text
+T001 ──┬─> T003 ──> T004 ──> T005 ──> T020
+T002 ──┘                      │
+                              ├─> T017
+T006 ──> T007 ──> T008 ──> T009 ─┬─> T010 ──> T011
+                                 └─> T018
+T012 ──> T013 ──> T014 ──> T015 ──> T016
+T005, T011, T016 ──> T021 ──> T022
+```
+
+T001 blocks T004 by intent, not by data: the fix must not land before the baseline exists.
+
+T008 is the risk. If it cannot be resolved without widening `IDispatcher`, it invalidates
+Phase 1's independence and the phasing needs revisiting — which is why it says *stop and
+report* rather than *carry on into Phase 2*.
+
+## Out of scope for Phase 1, restated
+
+The `ServedBy` taxonomy, `IDispatcher::batch_lookup`'s return type, the `LOOKUP` byte
+widening and its open five-value decision, `dispatcher-p2p`, `remote-lookup`, and both
+verification-bearing component specs. All are Phases 2–4.
