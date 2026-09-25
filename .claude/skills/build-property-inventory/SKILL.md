@@ -11,8 +11,9 @@ named. Output is one inventory in which every property is (a) **traced** to spec
 sizes then fall out *by counting* — never eyeballed.
 
 This is **tool-independent** (Role 1). It does NOT choose a lane, run a prover, or record proved/not_yet.
-- `tools-verify-{creusot,kani}-with-properties` (Role 2) consume this inventory and write `status` per id.
-- `tools-aggregate-coverage-by-interface` (Role 3) renders the bundle view + scoreboard from inventory + statuses.
+- `tools-verify-{creusot,kani}-with-properties` (Role 2) consume this inventory and produce id-named proof
+  artifacts; the shipped **scorer** (not the agent, not this skill) writes `status` per id by reproducing each proof.
+- `tools-aggregate-coverage-by-interface` (Role 3) renders the bundle view + scoreboard from inventory + scorer-written statuses.
 
 ## The unit and the granularity (do not change)
 - **Aggregation unit = the public method** of the `I<component>` trait (the `fn` lines in
@@ -37,8 +38,9 @@ This is **tool-independent** (Role 1). It does NOT choose a lane, run a prover, 
   global:    false                     # true iff |methods| > 1 (a maintained/shared invariant); see below
   attachments: 1                       # = |methods|; the property's leverage. REQUIRED, computed by counting
 ```
-Deliberately **absent**: `lane` and `status`. Those are added by Role 2 / Role 3. If you find yourself
-wanting to write "Creusot proves this" here — stop; that is not this skill's job.
+Deliberately **absent**: `lane` and `status`. Status is written **downstream by the scorer** — Role 2 produces
+the proof artifacts, the scorer reproduces them and writes status. If you find yourself wanting to write
+"Creusot proves this" here — stop; that is not this skill's job, and no agent writes status at all.
 
 **`global` and `attachments` are the leverage signal Role 2 relies on.** Set `global: true` when a property
 is a maintained/shared invariant sitting in more than one bundle, and always emit `attachments` (= |methods|).
@@ -59,8 +61,13 @@ Run `extract-verifiable-properties` **once per artifact, blind** — each extrac
 artifact, never the other's output and never any prior inventory. Independence is the point: agreement
 between two lists derived in isolation is real corroboration, and it prevents anchoring (reading code first
 silently shrinks the spec list to the shape of what happens to be implemented).
-1. the component **spec** — `components/<name>/specs/**/spec.md` → `props_from_spec.md`
-2. the component **code** — `components/<name>/src/**` (+ the `I<name>` interface) → `props_from_code.md`
+1. the component **spec** — `components/<name>/specs/**/spec.md` → `verif/spec_properties.yaml`
+2. the component **code** — `components/<name>/src/**` (+ the `I<name>` interface) → `verif/code_properties.yaml`
+
+Each blind pass emits **one YAML file** (FROM_SPEC schema — see `extract-verifiable-properties`), written
+directly to its deliverable name: **`spec_properties.yaml`** and **`code_properties.yaml`**. No `.md` is
+produced. They carry the two blind denominators `spec_total` and `code_total`, and every property's
+`statement` is full plain English (non-specialist-readable) per the extraction skill's rule.
 
 **Only spec and code are extraction sources.** Do **not** feed prior harnesses / verif artifacts / an older
 inventory into extraction: they carry stale, renamed, or dead properties and let "what a prover already did"
@@ -92,16 +99,39 @@ conditions, absent-key returns, error cases) and sits far below the raw code cou
 - **Code ledger:** every public fn, error-return branch, and state transition maps to ≥1 id or a reason.
 
 ## Required output
-`components/<name>/verif/<name>_property_inventory.md` (the canonical source of truth), containing:
-1. **Header:** the N public methods listed (the denominator), and the date/commit of spec + code read.
-2. **Property table:** one row per id, full schema above.
-3. **Bundle rollup:** per public method — its bundle size and the ids in it (mark shared ids).
-4. **Global-invariant ledger:** every `global: true` property, **sorted by `attachments` descending**, with
-   its methods — the prioritized prove-once worklist Role 2 consumes.
-5. **Counts:** distinct properties (M), attachments (Σ|methods|), and bundle size per method.
-6. **Reconciliation notes:** every spec-only / code-only / divergent / refinement-gap flag.
-7. **Coverage ledgers:** method / spec / code, per above.
-This `.md` is the input to Roles 2 and 3. The HTML views are rendered later, not here.
+Write **three YAML files** under `components/<name>/verif/` — **no `.md`**:
+
+**(1) `spec_properties.yaml`** and **(2) `code_properties.yaml`** — the two blind extraction outputs (from
+step 2), carrying the two blind denominators. Do not re-derive these; they are the FROM_SPEC-schema YAML
+the two `extract-verifiable-properties` passes already wrote.
+
+**(3) `unified_properties.yaml`** — the **reconciled single source of truth** that Roles 2 and 3 consume,
+in the extended schema documented in `component-verify` (superset of the inventory record + FROM_SPEC
+fields + **null-placeholder** per-tool `creusot:`/`kani:` blocks). Per property carry
+`id/subject/methods/object_fn/kind/verifiable/global/attachments/origin/source/statement/traces`; emit
+each tool block as a pure placeholder — **`{evidence: null, fidelity: null, note: null}` with NO `status`
+key at all**. Do **not** write `status: not-attempted` (or any status): under the reproduction gate the
+scorer is the only writer of `status`, and absence-of-`status` is exactly how Role 3 detects a property
+that has not been scored yet (renders as pending `·`, not as a failure). Requirements:
+- **`statement` in full plain English** (non-specialist-readable — carry the extraction rule through; do
+  not compress back to symbols during reconciliation).
+- **Bundle & global data inline:** `methods` (the bundle), `global: true` iff |methods|>1, `attachments`
+  (= |methods|), so Role 2 can order the prove-once worklist by `attachments` descending and Role 3 can
+  size bundles — all by counting, never eyeballing.
+- **Not-verifiable ledger** as `NV-*` records (`verifiable: false`, `reason` in plain English, no tool blocks).
+- **Reconciliation captured in-file**, not in a dropped `.md`: each property's `origin`
+  (spec+code | spec-only | code-only | divergent) plus a top-level `reconciliation:` block listing the
+  spec-only / code-only / divergent / refinement-gap flags and the implementing-obligation map (code
+  internals collapsed up to the observable property they serve).
+- **`counts:`** with `methods (N) / spec_total / code_total / unified (M) / attachments / not_verifiable`.
+- **Integrity rule:** record count == `counts.unified` + `counts.not_verifiable`; `verifiable: true`
+  count == `counts.unified`.
+
+**Uniformity (fixes em/mt gaps):** every verifiable record MUST carry a per-property `kind`, and the
+**NV ledger is mandatory** for every component (empty list only if genuinely none — state that explicitly).
+Do not fall back to the older section-`group:`/no-NV format.
+
+`unified_properties.yaml` is the input to Roles 2 and 3. The HTML is rendered later, not here.
 
 ## Honesty rules (non-negotiable)
 - **Tool-independent.** No prover named, no `proved`/`not_yet` written. If a property is hard for *some*
@@ -114,12 +144,15 @@ This `.md` is the input to Roles 2 and 3. The HTML views are rendered later, not
 ## Procedure
 1. List the `I<component>` public methods → fixes N and the empty bundles.
 2. Run `extract-verifiable-properties` on spec and on code as two BLIND passes (each sees only its own
-   artifact) → separate files. Do NOT use prior verif artifacts / an older inventory as a source.
-3. Reconcile by obligation; assign stable ids; set `origin`; flag divergences.
+   artifact) → `spec_properties.yaml` and `code_properties.yaml`. Do NOT use prior verif artifacts / an
+   older inventory as a source.
+3. Reconcile by obligation; assign stable ids; set `origin`; flag divergences (into the `reconciliation:`
+   block of `unified_properties.yaml`).
 4. Assign each id its `methods` (subject + every dependent method); compute bundle sizes by counting.
-5. Build the three ledgers; confirm nothing is unaccounted.
-6. Write `<name>_property_inventory.md`. Report: "N methods; M distinct properties; A attachments;
-   bundle sizes […]; K reconciliation flags."
+5. Build the three ledgers (method / spec / code coverage); confirm nothing is unaccounted.
+6. Write the three YAML outputs (`spec_properties.yaml`, `code_properties.yaml`, `unified_properties.yaml`).
+   Report: "N methods; M distinct properties; A attachments; spec_total/code_total; bundle sizes […];
+   K reconciliation flags; NV ledger of size Q."
 
 ## Anti-patterns
 - ❌ Eyeballing a bundle size instead of counting ids. (Defect #4.)
@@ -131,4 +164,7 @@ This `.md` is the input to Roles 2 and 3. The HTML views are rendered later, not
 
 ## Routing
 General methodology → `unstable` (promote via PR; do not leave siloed on a verif branch).
-Generated `<name>_property_inventory.md` → PR to `unstable`.
+When run under the `component-verify` orchestrator, the orchestrator owns all git: `unified_properties.yaml`
+rides the per-component `verif/<tool>/<name>` branches with the proof code, and all three
+(`spec_properties.yaml` / `code_properties.yaml` / `unified_properties.yaml`) ship as deliverables under
+`formal-verification/<name>/`.

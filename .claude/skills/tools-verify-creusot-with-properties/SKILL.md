@@ -1,22 +1,38 @@
 ---
 name: tools-verify-creusot-with-properties
-description: Create a Creusot verification for a Certus component from BOTH its spec and its Rust code — at function granularity with spec-derived contracts — prove it, and emit a plain-English `<component>_properties.md` recording exactly what was proved (with evidence). Attempt every property you can express as a contract — do not pre-filter by lane, effort, or difficulty. Use for the normal verify-and-document workflow (not the blind property-extraction experiment).
+description: Create a Creusot verification for a Certus component from BOTH its spec and its Rust code — at function granularity with spec-derived contracts — prove it, and record exactly what was proved (with evidence) by writing each property's status/symbol/fidelity/evidence into the shared `unified_properties.yaml` under its `creusot:` block. Attempt every property you can express as a contract — do not pre-filter by lane, effort, or difficulty. Use for the normal verify-and-document workflow (not the blind property-extraction experiment).
 argument-hint: "<component-name-or-path>"
 ---
 
 ## Goal
-Verify a component with Creusot **and** leave a human-readable record of the proven properties.
+Verify a component with Creusot **and** record exactly what was proved.
 Inputs are the component's **spec** (the intended behavior) and its **Rust code** (the functions to
-prove). Outputs are (1) the Creusot `verif/` artifacts and (2) `<component>_properties.md` beside them.
+prove). Outputs are (1) the Creusot `verif/` artifacts and (2) the per-property status/symbol/
+fidelity/evidence written back into the shared `unified_properties.yaml` under each property's
+`creusot:` block.
 
-This skill = **`tools-verify-creusot` + explicit spec pairing + a documented-properties step.** Use
+This skill = **`tools-verify-creusot` + explicit spec pairing + a status-write-back step.** Use
 `tools-verify-creusot` for the create/proof mechanics (pure-core extraction, `verif/` crate,
 `#[requires]`/`#[ensures]`, drift/equality check, fault-injection validation). This skill adds the
-spec-derived-contract sourcing and the plain-English output.
+spec-derived-contract sourcing and the structured write-back into `unified_properties.yaml`.
 
 ## Steps
+0. **Environment — make the toolchain reachable FIRST (mandatory).** The agent/tool shell does **not**
+   source `~/.bashrc`, so the bundled Creusot toolchain (`why3` + the SMT provers) is off `PATH` by
+   default. Before any `cargo creusot`, self-establish it and confirm the provers are registered — a
+   "why3 not found" / "no prover" error is an **environment fault to fix here**, never a `tool-boundary`
+   and never a reason to leave a property unattempted:
+   ```bash
+   export PATH="$HOME/.local/share/creusot/bin:$PATH"   # why3 + alt-ergo/cvc4/cvc5/z3 (absolute paths in ~/.why3.conf)
+   command -v why3 >/dev/null || { echo "FATAL: why3 unreachable — creusot bundle missing, escalate to user"; exit 1; }
+   why3 config detect >/dev/null 2>&1 || true           # re-register provers if ~/.why3.conf lost them
+   why3 config list-provers | grep -qiE "alt-ergo|z3|cvc" || { echo "FATAL: no SMT prover registered"; exit 1; }
+   ```
+   Prepend the same `PATH` export to every heredoc/`cargo creusot` invocation in this run (a fresh tool
+   shell starts without it). If the bundle itself is genuinely absent, that is a **blocker to escalate to
+   the user**, not a per-property verdict — it does not license leaving any property unattempted.
 1. **Resolve inputs — consume the inventory, do NOT re-extract.** Resolve to `components/<name>/` and
-   load the **property inventory** `verif/<name>_property_inventory.md` (Role 1,
+   load the **property inventory** `verif/unified_properties.yaml` (Role 1,
    `build-property-inventory`): the agreed, id-keyed, tool-independent property set. Also open the Rust
    functions to prove (`src/**`); use the spec only to read the wording of an obligation, never to mint a
    new one. **Do not build a private per-tool property list.** If the inventory is missing, stop and run
@@ -42,11 +58,63 @@ spec-derived-contract sourcing and the plain-English output.
 5. **Validate (anti-vacuity).** Fault-inject each function (a contract-violating change) and confirm the
    proof goes **red**; if it stays green, the contract is vacuous — strengthen it. Then revert. For a
    maintained invariant, also fault-inject a mutator that *breaks* it and confirm the preservation VC fails.
-6. **Document → `components/<name>/verif/<name>_properties.md`** (see shape below): for each proven
-   property, the operation, the property in **plain English**, its **spec source**, and the **evidence**.
-   Be honest — a green proof of a *mirror* only covers the mirror; say so, and list trusted boundaries.
-   Every property that was *not* proved is reported under one of the two buckets in the shape below —
-   with a concrete signature, never a bare verdict.
+6. **Produce artifacts the scorer can reproduce — you do NOT write your own status.** The verdict is
+   assigned in Step 7 by the shipped scorer, which *re-runs `cargo creusot` from source* (it `touch`es
+   every `src/**.rs` first, so a hand-edited `.coma` cannot fake a `Proved`). Your job in Step 6 is to
+   leave, for every property, a proof unit the scorer can name and run:
+   - **One why3 module per property `id`** — a function or lemma named `verify_<id>` (id lowercased,
+     `-`→`_`) carrying the contract, so it compiles to `verif/<crate>_rlib/verify_<id>.coma`. If the
+     obligation is discharged inside a differently-named module, point the scorer at it with
+     `creusot.evidence.module: <name>` (or `modules: [<a>, <b>]` when several must all prove) — but each
+     named module must exist and prove.
+   - **For any property you cannot prove on the first clean attempt, build the lever-battery variants**
+     that `gate/lever_battery_creusot.yaml` requires for the failure class you hit, as *named modules*:
+     `verify_<id>__inv` (strengthened invariant), `lemma_<id>` (inductive `#[logic]` lemma),
+     `verify_<id>__fmap` (FMap/Seq ghost mirror of a std container), `verify_<id>__trusted` (opaque type
+     behind a contract-carrying `#[trusted]` u64-handle boundary). The scorer runs the *scorer-applied*
+     levers itself (prover portfolio `-P alt-ergo,z3,cvc5,cvc4`, `--time`/`--depth` budget,
+     `-T split_vc,compute_specified`); the *code* levers above it demands as artifacts. A tool-boundary
+     is **inadmissible** until every required code-lever module exists — a missing one scores UNRESOLVED,
+     not tool-boundary.
+   - **An anti-vacuity twin** `verify_<id>__mutant` (a contract-violating copy) wherever the property
+     could pass vacuously — the scorer requires it to go RED.
+   - In `unified_properties.yaml` under the `creusot:` block you may fill **only the advisory fields the
+     scorer does not own**: `fidelity` (`real-type | ghost-mirror | trusted-boundary`), a human `note`
+     (name every `#[trusted]` boundary and what it therefore does *not* prove), the `evidence.module(s)`
+     pointer above, and for a genuine cross-*component* delegation a resolvable `delegate_to:`. **Do NOT
+     write `status`, `symbol`, or the run-measured `evidence` (vcs/coma/wall/rss)** — the scorer
+     overwrites them from the live run and stamps `_scored_by: scorer_creusot`. The only way to move a
+     property's status is to make its module reproduce.
+   `fidelity` meanings: `real-type` = proved against the real product code; `ghost-mirror` = proved
+   against a logic FMap/Seq model of the real container (`★`); `trusted-boundary` = the effect sits behind
+   a contract-carrying `#[trusted]` boundary (block-device I/O, crc32fast, UTF-16, Mutex, raw ptr/FFI)
+   (`★`). Report evidence in prose as **VCs/goals discharged + `.coma` count — never bare "files"**.
+7. **Gate — the shipped scorer decides, by reproduction (mandatory; you cannot grade yourself).** The
+   authoritative gate is `scorer_creusot.py`, which the `component-verify` orchestrator runs in its Step
+   2.5. If you are running this skill standalone, invoke it yourself before returning and paste its output
+   into your report:
+   ```bash
+   python3 "$(git rev-parse --show-toplevel)/.claude/skills/component-verify/gate/scorer_creusot.py" \
+       components/<name>/verif --crate-dir components/<name>/verif --cap-seconds <cap>
+   ```
+   The scorer touches all sources (anti-tamper), runs scoped `cargo creusot <module>` for each property's
+   module(s) (a `Proved (…) ✔` with no `✘`/`unproved` and exit 0 is a pass), captures VCs/`.coma`/wall/RSS
+   **from the run**, checks the anti-vacuity mutant, applies the scorer-owned levers on failure, and writes
+   the scorer-owned `status`/`evidence`/`note`/`_scored_by`. It assigns `proved` / `tool-boundary` (only
+   after the scorer-applied levers ran, every required code-lever module was present and re-run, and the
+   residual signature is not a known defeat) / `delegated` (resolvable referent) / **UNRESOLVED** (no
+   module, an unreproducible pass, a missing required code-lever module, a known-defeat signature, or a
+   broken/untranslatable crate) — and **exits non-zero if any verifiable property is UNRESOLVED.** If it
+   exits non-zero you are **not done**: for each UNRESOLVED `id`, produce the missing module / the demanded
+   lever module / fix the crate, and re-run the scorer. Iterate until it exits 0. A translate error in the *real* verif crate is a
+   broken crate (UNRESOLVED), never a tool-boundary. "Better suited to Kani" is not an exit — a
+   within-component obligation Creusot genuinely cannot express earns a `tool-boundary` **only** by mapping
+   to an active construct in `gate/inexpressible_creusot.yaml` (add `claims_inexpressible: <IX-ID>`; the
+   scorer confirms it via an isolated canonical probe and records the covering tool from the entry's
+   `covered_by`). It is not a delegation (delegation crosses a *component* boundary). You may not
+   hand back the run or write a "partial run" summary while the scorer fails, no matter how many properties
+   are proved; editing the YAML to say `proved` does nothing, since the scorer regenerates from source and
+   overwrites it.
 
 ## Coverage discipline (mandatory)
 **Attempt every property in the inventory that you can express as a contract. You do not get to pick
@@ -64,23 +132,90 @@ fail *trying*, and to record the outcome **keyed to the inventory `id`** so Role
   Maps/collections → logic-level `FMap`/`Seq` models. Nonlinear/division facts → `proof_assert!` bridges.
   Do not defer a bit-vector or container obligation as "out of reach" without first trying these.
 - **Bounded effort, not infinite grind.** Give each proof a real attempt against a stated cap (e.g. one
-  full portfolio pass, or a per-VC solver timeout). If it exceeds the cap, record the concrete outcome and
-  move on — do not silently drop it.
+  full portfolio pass, or a per-VC solver timeout). Exceeding the cap converts the property to a
+  **`tool-boundary` with the solver-timeout signature** (`miss_class: TOOL`, `note:` the exact
+  `>N min, portfolio alt-ergo/z3/cvc5` string) — it does **not** license leaving the property unattempted.
+  The cap decides *when the captured signature is ready for the scorer*, never *whether you may skip*.
 - **Every non-success carries a reproducible signature**, never a subjective verdict: the failing VC, a
   solver timeout (`>N min, portfolio alt-ergo/z3/cvc5`), or a specific SMT model gap (e.g. `leading_zeros`
   modelled only relationally, so `leading_zeros ↔ log2` won't discharge). Ban bare "intractable"/"out of scope".
 - **Only two legitimate non-proofs**, each needing a one-line technical reason and a suggested route:
-  (a) **Not expressible** in Creusot's sequential logic at all — concurrency/interleaving, liveness/timing;
+  (a) **Not expressible** in Creusot's logic at all — and *inexpressibility is not yours to assert from a
+  hunch*: it holds only when the property maps to an **active construct in `gate/inexpressible_creusot.yaml`**
+  (a documented tool-model fact), which you claim with `claims_inexpressible: <IX-ID>` for the scorer to
+  confirm (see the record-format section). Concurrency/interleaving and liveness/timing are **delegated to a
+  concurrency model (Loom/Spin)**, not claimed here;
   (b) **Depends on effects Creusot cannot model** — real I/O, hardware, FFI byte layout.
-  Everything else must be attempted and reported with its signature under bucket (a) of the shape.
+  Everything else must be attempted and reported with its signature under the tool-boundary shape.
+
+## Coverage-extending levers — exhaust these BEFORE recording ⊘ (mandatory)
+A "tool boundary" is only legitimate after the applicable levers below have been *tried and shown to
+fail with a captured signature*. A wall that a documented lever clears is a **recipe gap, not a tool
+boundary** — recording ⊘ without trying the lever is a false negative. In particular a
+`HashMap`/`HashSet`-backed field is **not** an automatic boundary: `creusot-std` already gives it a
+`View` (`ViewTy = FMap<K::DeepModelTy, V>`) and you supply the mutation specs yourself.
+
+- **`HashMap` / `HashSet` field (`insert`/`get`/`remove`/`contains`/`len`).** DEFEATABLE. The `@`
+  model exists but `creusot-std` ships specs for *iteration only* — write your own `extern_spec!`
+  against the `FMap` API to give the mutators semantics:
+  ```rust
+  use creusot_std::{logic::FMap, prelude::*};
+  use std::collections::HashMap; use std::hash::{BuildHasher, Hash};
+  extern_spec! {
+      impl<K: DeepModel + Eq + Hash, V, S: BuildHasher> HashMap<K, V, S> {
+          #[check(ghost)]
+          #[ensures((^self)@ == (*self)@.insert(key.deep_model(), value))]
+          #[ensures(result == (*self)@.get(key.deep_model()))]
+          fn insert(&mut self, key: K, value: V) -> Option<V>;
+          // ...get / remove: see catalog §5 for the full Borrow/DeepModel-bounded block
+      }
+  }
+  ```
+  Fidelity `ghost-mirror` (symbol `★`): you assert `DeepModel` equality coincides with `Eq`/`Hash`.
+  Ship this `extern_spec!` block once as shared project infrastructure, not per-component.
+- **`extern "C"` / raw-pointer / FFI in the path.** `#[trusted]` program fn with the real `unsafe`
+  body + a contract that models the C effect logically + a ghost `Ghost<Perm<*const T>>` permission
+  token the caller threads through (`creusot-std/src/std/ptr.rs:555-660`). Fidelity
+  `trusted-boundary` (`★`). Only ⊘ if no faithful effect model exists.
+- **Foreign/std fn with no spec.** `extern_spec! { impl … { #[ensures(...)] fn … ; } }` attaches a
+  contract to a fn you don't own (the `Vec`→`Seq` pattern). `#[trusted]` for a whole opaque body.
+- **Trusted modules to widen coverage (contract-carrying `#[trusted]` boundaries — the coverage-over-a-hard-leaf
+  lever).** When a leaf fn/module is genuinely hard for Creusot (Creusot can't build it, a solver times out on
+  its body, or it wraps an effect Creusot can't model), do **not** let it sink the whole call graph. Mark that
+  leaf `#[trusted]` **and give it a full `#[ensures]`/`#[requires]` contract** stating what it guarantees; the
+  callers above it then verify *natively* against that contract instead of inlining the unprovable body. One
+  trusted leaf with a good contract can unblock many callers — this is the primary lever for raising the
+  *percentage* of code Creusot covers. Discipline that keeps it honest, not a rug:
+  - **A `#[trusted]` contract is a promise, not a proof.** It is an obligation you have *shifted*, not
+    discharged. Every trusted item must be recorded per-property as `fidelity: trusted-boundary` (`★`), with the
+    `note` naming *why* it is trusted and *what it therefore does not prove*. Never mark a leaf trusted merely
+    because proving it is tedious — only when a lever above genuinely failed (capture that signature).
+  - **Make the contract as tight as the real behavior** — an over-strong trusted `#[ensures]` silently makes
+    every caller's proof vacuous. Anti-vacuity still applies: fault-inject a *caller* to confirm the caller
+    proof depends on the trusted contract (goes red), and where feasible discharge the trusted contract by other
+    means (a Kani harness over the leaf, a runtime witness test, or a later native Creusot proof) and cite that
+    route in the `note`. Untrusted-by-another-tool > trusted-and-unchecked.
+  - **Keep the trusted surface small and explicit.** Prefer trusting one narrow leaf over a broad module; the
+    coverage you claim is "callers proved *given* these N trusted contracts", and Role 3 must be able to list
+    those N. Shrink the trusted set over time as real proofs replace the promises.
+- **Complex / unbounded body.** Decompose via sub-fn contracts + loop `#[invariant]`/`#[variant]`
+  (termination measure) + `#[maintains(inv)]` to thread the data-structure invariant; call sites use
+  only the contract.
+- **Bit-level property.** `#[bitwise_proof]` reasons over `&`/`|`/`<<`/`>>` and `Vec<u64>` words — a
+  bitmap round-trip is *in scope*.
+- **Reference:** `verif/skills_research/CREUSOT_capability_catalog.md` in the
+  eviction-policy-session-lists component carries the full catalog (0.12 renames, `extern_spec!`
+  HashMap→FMap recipe with copy-paste `get`/`remove`, the `Ghost<Perm>` FFI pattern, soundness costs).
 
 ## Definition of done — "not attempted" is not an outcome (mandatory)
 Every inventory property must reach **exactly one** of three end states. There is no fourth box.
 1. **Proved** — a green proof (native), or a disclosed faithful whole-function mirror / `#[trusted]` boundary, named.
 2. **Delegated** — the obligation is owned by a **different component** across a real interface boundary; name it and route it. "Belongs to another *tool*" is **not** delegation — that is still your property to attempt here.
-3. **Tool boundary hit** — you **wrote the contract, ran the proof, and captured a reproducible failure signature** (failing VC / solver timeout `>N min portfolio` / specific SMT model gap). Evidence is mandatory; a limit asserted *without a proof attempt* is not a legitimate boundary.
+3. **Tool boundary hit** — you **exhausted the applicable coverage-extending levers, wrote the contract, ran the proof, and captured a reproducible failure signature** (failing VC / solver timeout `>N min portfolio` / specific SMT model gap). Evidence is mandatory; a limit asserted *without a proof attempt*, or before trying the lever that clears it (e.g. the `extern_spec!` `FMap` recipe for a HashMap field), is **not** a legitimate boundary — it is a recipe gap.
 
 **"Contract not written" / "authorable but not done" is NOT an end state.** A property with no contract is *unfinished work*, never a rating. Do not report it, do not park it, do not hand back the run with it open. The only exit from the not-done set is an actual attempt, which forces the property to (1) or (3). On uncertainty the default is **attempt**, never "tool limitation." A run returned with unattempted properties has not met the bar, no matter how many were proved.
+
+**An unattempted property — no runnable proof unit produced — is a transient working state, never returnable.** It means the work is *unfinished*, not that a boundary was found. You do **not** write `status` at all (Step 6); enforcement is by **reproduction**, not by reading a field you set. The **gate (Step 7) is the shipped `scorer_creusot.py`**, which `touch`es every source and re-runs `cargo creusot` from scratch: for any property lacking a proof unit it can re-run to `Proved`, a completed run lever-battery, or a resolvable delegation, it returns **UNRESOLVED and exits non-zero** — the hand-back fails. (An advisory `miss_class: AGENT` you leave behind is your own admission the item is unfinished, never a verdict.) There is no "partial run" hand-back and no asking the user to accept the remainder — you either finish (every property the scorer re-runs to proved / delegated to a named component / tool-boundary with a captured signature that survives the lever battery) or you keep working. The highest-leverage unfinished items are the shared/global invariants (Step 2, ordered by attachment count); the scorer flags them first because one left unattempted keeps every method in its bundle unproved.
 
 ## Clean-slate re-run protocol (mandatory for re-runs)
 A re-run must not inherit credit from a prior run's artifacts.
@@ -90,33 +225,40 @@ A re-run must not inherit credit from a prior run's artifacts.
 - **Diff against the baseline** and report three sets: re-proved, regressed, and prior-"proved" that did **not** reproduce (phantom coverage). That diff is the audit.
 - Capture **wall-clock + peak RSS** for every proof in the fresh run; report proofs as VCs/goals discharged + `.coma` count, never bare "files".
 
-## `<component>_properties.md` shape
-```
-# Verified properties — <component> (Creusot)
-Proven from spec `specs/<...>/spec.md` against code `src/<...>`. Artifacts: `verif/`.
-
-## <operation>
-- `<inventory-id>` **[Postcondition]** <property in plain English>. — spec FR-nnn / US-n — proved: `<fn>.coma` (N/N VCs)
-- **[Precondition]** ...
-- **[Invariant]** ...
-
-## Assumptions / trusted boundaries
-- <#[trusted] item / mirror / environment assumption> — why trusted, and what it therefore does NOT prove.
-
-## Not proved — attempted, tool boundary hit
-- <property> — **attempted** with <capability tried: `#[bitwise_proof]` / `FMap` / `proof_assert!`>,
-  blocked by <concrete signature: failing VC / solver timeout >N min / SMT model gap>.
-
-## Not proved — not expressible in Creusot (shape)
-- <property> — one-line reason: concurrency/interleaving, liveness/timing, or I/O/hardware/FFI layout.
-  Route: <Loom / Spin / fault-injection test>.
-```
+## What each `creusot:` block must record (per `id`)
+Write these into `unified_properties.yaml`; there is **no `.md`** — the YAML is the record and the HTML
+(Role 3) is the human-readable form.
+- **Proved rows:** `status: proved`, `symbol: ✓` (native) or `★` (faithful ghost mirror / `#[trusted]`
+  boundary), the `fidelity`, and `evidence` as **VCs/goals discharged + `.coma` count** (never "files") with
+  wall-clock + peak RSS. If the proof is against a mirror, say what it therefore does **not** cover in `note`.
+- **Trusted boundaries:** name each `#[trusted]` item / mirror / environment assumption in the `note` of the
+  property it guards — why trusted, and what it therefore does NOT prove (`fidelity: trusted-boundary`, `★`).
+- **Not proved — attempted, tool boundary hit:** `status: tool-boundary`, `symbol: ⊘`, `miss_class: TOOL`,
+  and a `note` giving the capability tried (`#[bitwise_proof]` / `FMap` / `proof_assert!`) and the concrete
+  signature that blocked it (failing VC / solver timeout `>N min` / SMT model gap).
+- **Not proved — genuinely NOT EXPRESSIBLE in Creusot:** you do **not** write `status` or a prose excuse.
+  A property is inexpressible **only** if it maps to an **active construct** in
+  `gate/inexpressible_creusot.yaml` — a curated, documented tool-model fact (e.g.
+  `IX-CREUSOT-STRING-CONTENT`: concrete string/char CONTENT sits behind an opaque `Seq<char>` view). If it
+  does, add **`claims_inexpressible: <IX-ID>`** to the property's `creusot:` block (an advisory *claim*, not
+  a verdict) and stop — the scorer confirms it by building that construct's canonical probe in isolation and
+  observing the model-predicted signature; only then does it award `tool-boundary` (`fidelity:
+  not-expressible`, `covered_by` recorded). **You may only reference an existing active construct — never
+  invent one, and never use this for "hard to prove."** A goal you can *state* but the solver won't discharge
+  is bucket (a) above (battery + captured signature), not this. If no construct fits, the property is either
+  provable (attempt it) or a concurrency/interleaving obligation that is **delegated** to Loom/Spin (a
+  different model), not an inexpressibility claim here.
+- **Delegated:** `status: delegated`, `symbol: ⤴`, `note` naming the owning component/test.
 
 ## Notes
 - Construction + documentation skill — **distinct** from the read-only audits
   `component-check-spec-translation` / `component-check-verif-translation`, from the source-agnostic
   extraction primitive `extract-verifiable-properties`, and from the inventory builder
   `build-property-inventory` (Role 1) whose output this skill **consumes** by `id`.
-- Every proved / not-proved line **cites its inventory `id`**, so `tools-aggregate-coverage-by-interface`
-  (Role 3) can attach the status to the right bundle without re-reconciling.
-- Routing: Creusot verifs → `unstable-creusot`.
+- Every outcome is written to `unified_properties.yaml`'s `creusot:` block by `id`, so
+  `tools-aggregate-coverage-by-interface` (Role 3) renders from structured data without re-reconciling.
+- Routing: Creusot proof code (the `verif/` crate + `.coma` + the `unified_properties.yaml` write-back)
+  → the per-component **`verif/creusot/<name>`** branch, overwrite-in-place, committed only under
+  `components/<name>/`. Under the `component-verify` orchestrator, the orchestrator performs the
+  branch/commit/push and enforces the component-folder-only contamination gate — this skill just leaves
+  the artifacts in the working tree.
