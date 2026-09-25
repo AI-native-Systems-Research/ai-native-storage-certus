@@ -1,0 +1,9 @@
+# Downloaded extension-catalog cache (~220 KB, 172 extensions). Refetched on
+# demand by `specify extension search/info/add`, so it is derived data, not state.
+# The installed-extension state that DOES matter is .specify/extensions/.registry
+# and .specify/extensions.yml, both of which are tracked.
+.specify/extensions/.cache/
+
+# Python bytecode from research/analysis scripts.
+__pycache__/
+*.pyc
