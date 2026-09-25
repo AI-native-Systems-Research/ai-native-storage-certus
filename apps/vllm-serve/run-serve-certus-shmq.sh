@@ -147,6 +147,23 @@ if [[ -n "$KV_CACHE_BYTES" ]]; then
   echo "[serve] GPU KV cache capped at ${KV_CACHE_BYTES} (ignores GPU_MEM_UTIL)"
 fi
 
+# Extra pass-through `vllm serve` flags for wrappers that need model-specific
+# options this generic script doesn't model (e.g. multimodal --limit-mm-per-prompt
+# / --mm-processor-kwargs for a VL model). Word-split, so quote per-shell rules;
+# for a JSON value with spaces set the flag and value as one element via an array
+# is not possible through env, so keep JSON compact (no spaces). Appended last so
+# it can also override earlier flags. Unset (default) = no extra args.
+if [[ -n "${EXTRA_SERVE_ARGS:-}" ]]; then
+  # Split on whitespace only. Disable brace expansion first so a JSON value like
+  # {"image":2,"video":0} (comma inside braces) is NOT expanded into two words.
+  set +B
+  # shellcheck disable=SC2206  # intentional word-split of caller-provided flags
+  EXTRA_ARR=(${EXTRA_SERVE_ARGS})
+  set -B
+  SERVE_ARGS+=("${EXTRA_ARR[@]}")
+  echo "[serve] extra serve args: ${EXTRA_SERVE_ARGS}"
+fi
+
 # YaRN rope-scaling: only when the requested window exceeds Qwen2.x's native
 # 32768 (Qwen ships no rope_scaling, so vLLM rejects a larger window otherwise).
 # Qwen's official recipe is static YaRN with factor = target / native. Opt out

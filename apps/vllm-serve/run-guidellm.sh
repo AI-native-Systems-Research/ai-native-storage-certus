@@ -70,6 +70,14 @@ MAX_REQUESTS="${MAX_REQUESTS:-}"       # alternative bound; if set, overrides MA
 DATA="${DATA:-prompt_tokens=256,output_tokens=256,prefix_tokens=2048,prefix_count=32}"
 HASH_ID_BLOCK_SIZE="${HASH_ID_BLOCK_SIZE:-64}"  # tokens per hash id, for Mooncake file replay
 
+# Optional SECOND --data source, passed to guidellm verbatim and merged with DATA
+# column-wise (guidellm zips multiple datasets into one row). This is how a
+# multimodal request is built: DATA carries the text (synthetic_text -> "prompt"
+# column) and IMAGE_DATA carries the image (kind=synthetic_image,... -> "image"
+# column), which the openai_http chat backend renders as an image_url content
+# part. Unset (default) = single-source text-only workload.
+IMAGE_DATA="${IMAGE_DATA:-}"
+
 STAMP="$(date +%Y%m%d_%H%M%S)"
 OUTPUT="${OUTPUT:-${SCRIPT_DIR}/guidellm_${RATE_TYPE}_${STAMP}.json}"
 
@@ -77,6 +85,22 @@ OUTPUT="${OUTPUT:-${SCRIPT_DIR}/guidellm_${RATE_TYPE}_${STAMP}.json}"
 if ! command -v guidellm >/dev/null 2>&1; then
   echo "error: guidellm not found on PATH — install it on the host: pip install guidellm" >&2
   exit 1
+fi
+# Multimodal needs guidellm's vision extra (Pillow). Without it the synthetic_image
+# generator raises inside a worker thread during scheduler startup, and instead of
+# failing cleanly the multiprocessing readiness barrier deadlocks — the run hangs
+# forever with zero requests sent. Fail fast here with an actionable message.
+# Check with the interpreter that lives next to guidellm (its venv), not whatever
+# python3 happens to resolve to on PATH.
+if [[ -n "$IMAGE_DATA" ]]; then
+  GUIDELLM_PY="$(dirname "$(command -v guidellm)")/python3"
+  [[ -x "$GUIDELLM_PY" ]] || GUIDELLM_PY="python3"
+  if ! "$GUIDELLM_PY" -c 'import PIL' >/dev/null 2>&1; then
+    echo "error: IMAGE_DATA is set (multimodal) but Pillow/guidellm[vision] is not installed" >&2
+    echo "       -> pip install 'guidellm[vision]'   (in the same env as guidellm)" >&2
+    echo "       Without it the guidellm scheduler DEADLOCKS at worker startup (no error)." >&2
+    exit 1
+  fi
 fi
 # Fail fast with a clear message if no server is answering (rather than deep in guidellm).
 if command -v curl >/dev/null 2>&1; then
@@ -140,6 +164,11 @@ ARGS=(
   --data "$DATA_SPEC"
   --output "kind=json,path=${OUTPUT}"
 )
+# Additional --data source for multimodal (repeatable option); merged with the
+# text dataset above into a single text+image chat request.
+if [[ -n "$IMAGE_DATA" ]]; then
+  ARGS+=(--data "$IMAGE_DATA")
+fi
 # constant/poisson require a numeric rate; throughput requires a max_concurrency;
 # sweep/synchronous take no extra field.
 if [[ "$RATE_TYPE" == "constant" || "$RATE_TYPE" == "poisson" ]]; then
@@ -196,6 +225,7 @@ snap_metrics() {  # $1 = label; prints matching counters (or a note if none)
 
 echo "[guidellm] target=${TARGET}  model=${MODEL}  rate-type=${RATE_TYPE}${RATE:+ rate=${RATE}}"
 echo "[guidellm] data: ${DATA}"
+[[ -n "$IMAGE_DATA" ]] && echo "[guidellm] image data: ${IMAGE_DATA}"
 echo "[guidellm] results -> ${OUTPUT}"
 echo "[guidellm] metrics -> ${METRICS_OUT}"
 
