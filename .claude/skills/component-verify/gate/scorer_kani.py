@@ -190,6 +190,78 @@ def classify(stderr, battery):
     return None
 
 
+_BUILD_FAILURE_SIGS = [
+    r"Failed to get cargo metadata",
+    r"`cargo metadata` exited with an error",
+    r"failed to load source for dependency",
+    r"failed to parse manifest at",
+    r"error inheriting `[^`]+` from workspace root",
+    r"could not find `Cargo\.toml`",
+    r"error: failed to (?:read|open|parse|select)",
+    r"no such command:",
+    r"error: could not compile .* due to \d+ previous error",
+    r"linking with `cc` failed",
+    r"toolchain '[^']+' is not installed",
+    # build-script failures: a missing native dependency (e.g. an uninitialised SPDK submodule in
+    # a fresh worktree) panics in build.rs long before any harness is reached. Observed as
+    # "failed to run custom build command for `spdk-sys`" + a build.rs panic.
+    r"failed to run custom build command",
+    r"process didn't exit successfully: .*build-script-build",
+    r"panicked at [^\n]*build\.rs",
+    r"Failed to execute cargo \(exit status",
+]
+
+
+def build_failure(out):
+    """The FIRST matching build/toolchain signature in `out`, else None.
+
+    This is an ENVIRONMENT fault, categorically different from a harness that fails to verify:
+    cargo never got as far as running a proof, so the harness is not implicated at all. Keeping
+    the two apart matters — a real incident (a stray gitignored `creusot` symlink inside a
+    component made `cargo metadata` unresolvable) was reported as 28 separate "the harness is
+    broken, fix it" verdicts, pointing the operator at 28 innocent harnesses instead of at the
+    one broken path."""
+    for sig in _BUILD_FAILURE_SIGS:
+        m = re.search(sig, out or "", re.I)
+        if m:
+            return m.group(0)
+    return None
+
+
+def kani_env():
+    """The PATH-augmented environment every cargo invocation here uses. Shared by the doctor and
+    the real runs deliberately: a doctor that probed a different PATH could pass while the runs
+    fail, which is worse than having no doctor."""
+    env = dict(os.environ)
+    env["PATH"] = (os.path.expanduser("~/.cargo/bin") + ":"
+                   + os.path.expanduser("~/.local/share/creusot/bin") + ":" + env.get("PATH", ""))
+    return env
+
+
+def kani_doctor(component_dir):
+    """Preflight: can cargo even read this component? Returns (ok, detail).
+
+    The Creusot side has had a prover doctor since day one; Kani had no equivalent, so a broken
+    build surfaced only as mass UNRESOLVED. One ~1s `cargo metadata` call here turns that into a
+    single accurate error before any property is scored."""
+    # NOTE: deliberately NOT --no-deps. The fault this exists to catch lives in DEPENDENCY
+    # resolution (a bad path dep / stray symlink inside the component), and --no-deps skips
+    # exactly that: measured on the real incident it returned 0 while full resolution returned
+    # 101. A doctor that cannot fail on the fault it was written for is worse than none.
+    try:
+        r = subprocess.run(["cargo", "metadata", "--format-version", "1"],
+                           cwd=component_dir, capture_output=True, text=True, timeout=180,
+                           env=kani_env())
+    except Exception as e:
+        return False, f"cargo metadata could not be run: {e}"
+    if r.returncode == 0:
+        return True, "cargo metadata ok"
+    out = (r.stdout or "") + (r.stderr or "")
+    sig = build_failure(out) or "cargo metadata failed"
+    first = next((ln.strip() for ln in out.splitlines() if ln.strip()), "")
+    return False, f"{sig} :: {first[:300]}"
+
+
 def known_defeat(stderr, registry):
     for d in registry.get("defeats", []):
         for sig in d.get("signatures", []):
@@ -213,9 +285,7 @@ def run_kani(harness, component_dir, cap, mem_mb=None, cap_max=None, escalate=Tr
     failure is decisive at the base cap), if escalate and cap_max>cap we retry the SAME harness
     once at cap_max before classing it a sat-timeout, so a merely-slow proof is not mislabelled a
     tool-boundary. Mutant/probe runs pass escalate=False (they are meant to be fast/decisive)."""
-    env = dict(os.environ)
-    env["PATH"] = (os.path.expanduser("~/.cargo/bin") + ":"
-                   + os.path.expanduser("~/.local/share/creusot/bin") + ":" + env.get("PATH", ""))
+    env = kani_env()
     time_bin = shutil.which("time") or "/usr/bin/time"
 
     def once(c):
@@ -305,7 +375,15 @@ def score_property(p, ctx):
         ev = {"harness": named, "result": "SUCCESS", "wall_clock_s": wall, "peak_rss_mb": rss}
         return "proved", ev, "scorer re-ran harness -> VERIFICATION SUCCESSFUL"
 
-    # ---- failed: registry first (a beaten wall is never a boundary) ----
+    # ---- failed: an ENVIRONMENT fault is not a verdict about the harness ----
+    # cargo never reached a proof, so nothing can be concluded about this property. Flag it as a
+    # build fault and let the caller stop the whole stage: one accurate error beats N misleading
+    # "fix your harness" verdicts against harnesses that were never compiled.
+    bf = build_failure(out)
+    if bf:
+        return "BUILD-ERROR", {"harness": named}, (
+            f"BUILD/TOOLCHAIN failure, not a harness or tool limit — cargo never ran a proof: {bf}")
+    # ---- registry next (a beaten wall is never a boundary) ----
     kd = known_defeat(out, ctx["registry"])
     if kd:
         return "UNRESOLVED", {"harness": named}, (
@@ -409,6 +487,22 @@ def main():
             "  Fix: ensure a user systemd manager is running (XDG_RUNTIME_DIR set; check "
             "`systemctl --user status`), or pass --no-mem-cap to override at your own risk.")
 
+    # PREFLIGHT (live runs only): can cargo read this component at all? The Creusot side has had
+    # a prover doctor from the start; without the Kani equivalent a broken build was reported as
+    # mass UNRESOLVED against innocent harnesses. ~1s to turn that into one accurate error.
+    if not a.dry_run:
+        ok, detail = kani_doctor(component_dir)
+        if not ok:
+            sys.exit(
+                "scorer_kani: ENVIRONMENT FAILURE — cargo cannot read this component, so NO "
+                "property can be scored and nothing here is a verdict about any harness.\n"
+                f"  component: {component_dir}\n"
+                f"  cause:     {detail}\n"
+                "  This is a build/toolchain fault: fix the component's cargo setup (a stray path "
+                "dependency or symlink inside the component dir is a common cause), then re-run. "
+                "Statuses were left untouched.")
+        print(f"  preflight: {detail}")
+
     print(f"scorer_kani: {len(ctx['harnesses'])} kani::proof harnesses found in {component_dir}")
     if ctx["harnesses"]:
         print("  harnesses:", ", ".join(sorted(ctx["harnesses"])))
@@ -435,6 +529,17 @@ def main():
             print(f"  = {p['id']:32s} {prior['status']:13s} resumed (already scorer-owned; --resume)")
             continue
         status, ev, note = score_property(p, ctx)
+        # A build/toolchain fault mid-run (the preflight passed, then the environment broke, or a
+        # property's own lever variant fails to compile): stop the stage NOW. Grinding the rest
+        # would burn compute and emit a work-list of harnesses that were never even built.
+        if status == "BUILD-ERROR":
+            print(f"  ! {p['id']:32s} BUILD-ERROR   {note}")
+            sys.exit(
+                f"\nscorer_kani: ENVIRONMENT FAILURE at {p['id']} — aborting the stage after "
+                f"{counts.get('proved', 0)} proved. cargo could not build, so the remaining "
+                "properties are unscored, NOT failed, and no harness is implicated.\n"
+                f"  cause: {note}\n"
+                "  Fix the build, then re-run with --resume to continue from here.")
         counts[status] = counts.get(status, 0) + 1
         if status == "UNRESOLVED":
             unresolved.append((p["id"], note))

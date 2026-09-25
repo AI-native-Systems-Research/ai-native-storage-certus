@@ -134,6 +134,31 @@ The rule behind both: prefer a self-describing artifact over a side-ledger that 
 
 ---
 
+## 3b. Per-component layout — three directories, only one is `verif/`
+
+    components/<component>/
+      verif/            the metadata bundle: the 3 YAMLs + the scoring HTML   <- scorers READ/WRITE here
+      verif-creusot/     the Creusot proof crate (.coma)                       <- scorer_creusot --crate-dir
+      verif-kani/        the Kani harnesses (#[kani::proof])                   <- scorer_kani --component-dir
+
+Pointing a scorer at `verif/` instead of its tool crate produces mass UNRESOLVED that says nothing
+about the proofs — the scorer finds artifact *names* (it searches recursively) but then runs `cargo`
+where they are not part of the crate. It has cost a debugging session once per tool. The exact
+commands are in SKILL.md Step 2.5.
+
+**Environment prerequisites a fresh worktree does not inherit.** `git worktree add` does not bring
+submodule checkouts, so a component whose build needs SPDK fails in `build.rs` before any proof runs.
+Link the already-built copies rather than rebuilding:
+
+    ln -sfn <main-checkout>/deps/spdk       <worktree>/deps/spdk
+    ln -sfn <main-checkout>/deps/spdk-build <worktree>/deps/spdk-build
+
+Also watch for a `[patch.crates-io]` in `components/<c>/.cargo/config.toml`: at component scope it
+applies to **every** cargo command there, including `cargo kani`, which does not need `creusot-std` —
+a relative patch path there broke all Kani runs for that component. The per-tool crate's own
+`Cargo.toml` is the right place for such a patch. The Kani preflight doctor now reports both classes
+of fault in one line instead of one bogus verdict per property.
+
 ## 4. Running it
 
 ```bash

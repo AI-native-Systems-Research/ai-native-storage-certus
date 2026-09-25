@@ -57,6 +57,18 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(a.log)) or ".", exist_ok=True)
     marker = a.marker or (os.path.splitext(a.log)[0] + ".done")
 
+    # Clear any marker from a PREVIOUS run before starting. The marker means "this stage finished
+    # and here is its exit code"; leaving a stale one in place means an operator (or a script)
+    # checking back mid-run reads the last run's verdict as if it were this one's — observed for
+    # real: a stale `exit=1` marker sat beside a healthy run that was still executing. Absence of
+    # the marker must unambiguously mean "not finished yet".
+    try:
+        os.remove(marker)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        print(f"SENTINEL: {a.name} WARN could not clear stale marker {marker}: {e}", flush=True)
+
     t0 = time.time()
     print(f"SENTINEL: {a.name} START {_iso()}", flush=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
