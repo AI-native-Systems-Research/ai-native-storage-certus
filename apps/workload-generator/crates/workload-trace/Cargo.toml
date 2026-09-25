@@ -1,0 +1,24 @@
+[package]
+name = "workload-trace"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Trace output containers and the Qwen-Bailian projection. CUDA-free and a
+# workspace default member, so container equivalence and schema invariants are
+# testable with no accelerator and no server.
+
+[dependencies]
+workload-model.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+# T061 drives the simulator's own loader rather than a reimplementation of it. The
+# claim being tested is about *that* app's record shape (research.md D1), and the only
+# way to check such a claim is to run the code it is about. Test-only, so this does
+# not make the trace crate depend on an app.
+eviction-replay-benchmark = { path = "../../../eviction-replay-benchmark" }
