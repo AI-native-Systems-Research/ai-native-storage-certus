@@ -480,10 +480,25 @@ SS_XFS_LABEL="sskv"
 # Plain `findmnt <mountpoint>` matches only an exact mountpoint (empty otherwise).
 DISK_DEV="$(findmnt -no SOURCE "$SHARED_FS" 2>/dev/null | xargs -r basename)"
 # Accept only a real md array; otherwise pick the lowest free /dev/mdN
-# (md0 is the persistent model-fs array -> md1, and so on).
+# (md0 is the persistent model-fs array -> md1, and so on). This picks the ARRAY
+# NODE that reconfigure creates for RAID0 (2+ drives) — see MD_DEVICE below.
 if [[ "$DISK_DEV" != md* ]]; then
     _n=0; while [[ -e "/dev/md${_n}" ]]; do _n=$((_n + 1)); done; DISK_DEV="md${_n}"
 fi
+
+# The IO-stats device (for the runner's /sys/block/<dev>/stat snapshots) is the
+# REAL backing device of the mounted shared group: nvme0n1 for a SINGLE drive
+# (no array — configure-bench formats the bare device), mdN for RAID0. It is only
+# knowable AFTER reconfigure mounts $SHARED_FS (before that the drives may be on
+# vfio for the certus phase), so resolve it live at container-launch time. Falls
+# back to the array-node guess above if the mount can't be read. Without this a
+# single-drive run would hand the container a nonexistent md node and record no
+# fs-tier IO. Exact mountpoint match (no --target) — see the walk-up note above.
+iostat_dev() {
+    local d
+    d="$(findmnt -no SOURCE "$SHARED_FS" 2>/dev/null | xargs -r basename)"
+    [[ -n "$d" ]] && printf '%s' "$d" || printf '%s' "$DISK_DEV"
+}
 
 # Reconfigure the shared NVMe group for a phase via tools/configure-bench.sh.
 #   sharedstorage -> kernel nvme + RAID0/XFS at $SHARED_FS
@@ -929,7 +944,9 @@ run_container_bench() {  # variant image extra-args...
         -e "LONGDOC_QUESTIONS=${LONGDOC_QUESTIONS}" \
         -e "LONGDOC_NUM_DOCS=${LONGDOC_NUM_DOCS}" \
         -e "LONGDOC_SEED=${LONGDOC_SEED}" \
-        -e "HF_HUB_OFFLINE=0" \
+        -e "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}" \
+        -e "TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}" \
+        -e "GPU_KV_GB=${GPU_KV_GB}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${wl[@]}" \
         "${extra[@]}" \
@@ -1397,6 +1414,9 @@ if want certus-spdk; then
             NUM_CONVS="$NUM_CONVS" \
             DATASET_HOST="$DATASET_OVERRIDE" \
             MAX_ROUNDS="$MAX_ROUNDS" \
+            OUTPUT_TOKENS="$OUTPUT_TOKENS" \
+            MAX_MODEL_LEN="$MAX_MODEL_LEN" \
+            MAX_NUM_SEQS="$MAX_NUM_SEQS" \
             MODEL="$MODEL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
@@ -1503,11 +1523,7 @@ if want sharedstorage; then
         warn "SharedStorage SKIPPED: $ss_skip"
     else
         mkdir -p "${SHARED_FS}/shared-kv"
-        dev="$DISK_DEV"
-        if [[ -z "$dev" ]]; then
-            dev="$(findmnt -no SOURCE --target "$SHARED_FS" 2>/dev/null | xargs -r basename)"
-            [[ -z "$dev" ]] && dev="md0"
-        fi
+        dev="$(iostat_dev)"
         run_container_bench "SharedStorage" "$IMG_SHARED" \
             -v "${SHARED_FS}:/mnt/fs-backend-bench:z" \
             -e "DRAM=${DRAM}" \
@@ -1565,15 +1581,16 @@ if want tiered-cpu-fs; then
         # (Plain CPUOffload uses a CUDA pinned buffer, not /dev/shm, so it is fine.)
         # Give /dev/shm the tier size + 2 GiB headroom.
         tier_shm=$((CPU_BYTES + 2 * (1 << 30)))
-        # DISK_DEV lets the runner snapshot /sys/block/<md>/stat per round so the
+        # DISK_DEV lets the runner snapshot /sys/block/<dev>/stat per round so the
         # fs secondary tier's real SSD read/write is recorded (like SharedStorage).
+        # Resolve the live backing device (nvme0n1 single-drive, mdN for RAID0).
         run_container_bench "Tiered-CPU-FS" "$IMG_CPU" \
             --shm-size="${tier_shm}" \
             -v "${SHARED_FS}:/mnt/fs-tier:z" \
             -e "CPU_BYTES=${CPU_BYTES}" \
             -e "SECONDARY_TIER=fs" \
             -e "FS_ROOT_DIR=/mnt/fs-tier/kv-tier" \
-            -e "DISK_DEV=${DISK_DEV}"
+            -e "DISK_DEV=$(iostat_dev)"
     fi
 fi
 

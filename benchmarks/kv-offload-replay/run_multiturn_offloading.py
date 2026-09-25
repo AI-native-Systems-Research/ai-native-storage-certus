@@ -81,6 +81,12 @@ if __name__ == "__main__":
     # bounds the running batch). Keep <= MAX_NUM_SEQS so the driver is the gate.
     ACTIVE_SESSIONS = int(os.environ.get("ACTIVE_SESSIONS", 0))
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
+    # GPU_KV_GB (--gpu-kv-gb) — absolute cap on the GPU KV-cache in GiB. Empty =
+    # off (size the KV cache from gpu_memory_utilization, the historical default).
+    # When set it maps to vLLM's EngineArgs.kv_cache_memory_bytes, which pins the
+    # KV region to an exact byte count and OVERRIDES the gpu_memory_utilization
+    # slice — the knob for forcing early spill onto the offload/tiering path.
+    GPU_KV_GB = os.environ.get("GPU_KV_GB", "").strip()
     CPU_BYTES = int(os.environ.get("CPU_BYTES", 4 * (1 << 30)))
     MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
     MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # 0 = until convs exhausted
@@ -309,6 +315,16 @@ if __name__ == "__main__":
         disable_log_stats=not CAPTURE_METRICS,
         **_mfu_kwargs,
     )
+
+    # --gpu-kv-gb: pin the GPU KV cache to an absolute size. vLLM's EngineArgs
+    # gained kv_cache_memory_bytes in 0.26; when set it takes precedence over the
+    # gpu_memory_utilization-derived KV budget. Left off, the cache is sized from
+    # gpu_memory_utilization as before (no behaviour change for existing runs).
+    if GPU_KV_GB:
+        engine_kwargs["kv_cache_memory_bytes"] = int(float(GPU_KV_GB) * (1 << 30))
+        print(f"[driver] GPU_KV_GB={GPU_KV_GB} -> "
+              f"kv_cache_memory_bytes={engine_kwargs['kv_cache_memory_bytes']}",
+              flush=True)
 
     sp = SamplingParams(
         temperature=0.7,

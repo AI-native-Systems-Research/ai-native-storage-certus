@@ -252,7 +252,7 @@ impl DispatcherP2pComponent {
         self.eviction_dropped.swap(0, Ordering::Relaxed)
     }
 
-    fn drive_index(key: CacheKey, num_drives: usize) -> usize {
+    pub(crate) fn drive_index(key: CacheKey, num_drives: usize) -> usize {
         // splitmix64 finalizer: distributes sequential keys uniformly.
         let mut h = key;
         h ^= h >> 30;
