@@ -530,6 +530,38 @@ def main():
              f"pin <code>{esc(pin)}</code>. Source of truth <code>unified_properties.yaml</code>. "
              f"Rendered by <code>render_scoring.py</code>. No <code>.md</code> backing file.</p>")
 
+    # Which GATE produced these statuses. Written by the scorers into `run:`; shown here so the
+    # page is self-describing — a reader can tell exactly which code and toolchain scored it,
+    # and whether a re-score today would be running the same gate.
+    run = d.get("run") or {}
+    if isinstance(run, dict) and run:
+        bits = []
+        gc, gb = run.get("gate_commit"), run.get("gate_branch")
+        if gc:
+            bits.append(f"gate <code>{esc(str(gc))}</code>" + (f" on <code>{esc(str(gb))}</code>" if gb else ""))
+        if run.get("gate_dirty"):
+            bits.append("<b>gate had uncommitted edits when this ran</b> — the commit above does "
+                        "not fully describe the code that scored it")
+        for tool in ("creusot", "kani"):
+            blk = run.get(tool)
+            if not isinstance(blk, dict):
+                continue
+            seg = []
+            for key, label in (("creusot", "Creusot"), ("kani_version", ""), ("why3", ""),
+                               ("provers", "provers"), ("finished", "finished")):
+                v = blk.get(key)
+                if v is None:
+                    continue
+                v = ", ".join(str(x) for x in v) if isinstance(v, list) else str(v)
+                seg.append(f"{label} {esc(v)}".strip())
+            cmd = blk.get("command")
+            if cmd:
+                seg.append(f"<code>{esc(str(cmd))}</code>")
+            if seg:
+                bits.append(f"<b>{tool}</b>: " + " · ".join(seg))
+        if bits:
+            P.append("<p class='foot'>Run provenance — " + "<br>".join(bits) + "</p>")
+
     P.append("</div>")
 
     # --require-complete: a verifiable property is "complete" for a rendered tool iff its tool

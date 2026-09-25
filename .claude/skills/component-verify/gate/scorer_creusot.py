@@ -43,6 +43,7 @@ completeness + registry matching only. Use it to watch the gate fail-closed
 instantly over a whole component before spending compute.
 """
 import argparse, os, re, signal, subprocess, sys, time, shutil, glob, tempfile, json
+from datetime import datetime
 try:
     import yaml
 except ImportError:
@@ -51,6 +52,88 @@ except ImportError:
 ACCEPT = {"proved", "tool-boundary", "delegated"}
 CREUSOT_BIN = os.path.expanduser("~/.local/share/creusot/bin") + ":" + os.path.expanduser("~/.cargo/bin")
 _UNIT_SEQ = 0
+
+
+def _capture(cmd, cwd=None, timeout=60, env=None):
+    """First line of a command's output, or None. Never raises: provenance is best-effort
+    metadata and must never fail a scoring run."""
+    try:
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
+        if r.returncode != 0:
+            return None
+        lines = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
+        return lines[0].strip()[:160] if lines else None
+    except Exception:
+        return None
+
+
+def _why3_provers(env=None):
+    """The distinct prover portfolio why3 will actually dispatch to, e.g.
+    ['Alt-Ergo 2.6.2', 'CVC4 1.8', 'CVC5 1.3.1', 'Z3 ...']. Recorded because a Creusot result
+    is only reproducible against the same portfolio — a missing prover changes the outcome."""
+    try:
+        r = subprocess.run(["why3", "config", "list-provers"], capture_output=True, text=True,
+                           timeout=120, env=env)
+        if r.returncode != 0:
+            return None
+        seen = []
+        for ln in (r.stdout or "").splitlines():
+            base = ln.split("(")[0].strip()          # drop "(counterexamples)" / "(BV)" variants
+            if base and base not in seen:
+                seen.append(base)
+        return seen or None
+    except Exception:
+        return None
+
+
+def _gate_provenance():
+    """Identity of the gate code doing the scoring, derived at RUNTIME from this file's own
+    location — so a result can always be traced back to the exact code that produced it, with
+    nothing hardcoded and nothing to update when the branch moves.
+
+    `gate_dirty: true` means the gate had uncommitted edits when it ran, so the commit alone
+    does NOT fully describe what scored the run. That flag is the honest signal: without it, a
+    bare SHA in the record would overstate how reproducible the result is."""
+    gd = os.path.dirname(os.path.abspath(__file__))
+    commit = _capture(["git", "-C", gd, "rev-parse", "--short", "HEAD"])
+    if not commit:
+        return {"gate_commit": "unknown — gate dir is not a git checkout"}
+    out = {"gate_commit": commit}
+    branch = _capture(["git", "-C", gd, "rev-parse", "--abbrev-ref", "HEAD"])
+    if branch:
+        out["gate_branch"] = branch
+    try:
+        r = subprocess.run(["git", "-C", gd, "status", "--porcelain", "--", gd],
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and r.stdout.strip():
+            out["gate_dirty"] = True
+    except Exception:
+        pass
+    return out
+
+
+def _stamp_run(d, tool, tool_env, started):
+    """Write the `run:` provenance block — which gate, which command, which tool versions —
+    so a result on a verif branch says what produced it.
+
+    Each scorer owns ONLY `run[<tool>]`, and the shared gate identity both write is identical,
+    so the two scorers cannot clobber each other. argv[0] is reduced to its basename so the
+    record carries no machine-specific path."""
+    run = d.get("run")
+    if not isinstance(run, dict):
+        run = {}
+    run.update(_gate_provenance())
+    blk = {
+        "scored_by": f"scorer_{tool}",
+        "command": " ".join([os.path.basename(sys.argv[0])] + sys.argv[1:]),
+        "started": started,
+        "finished": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    for k, v in (tool_env or {}).items():
+        if v is not None:
+            blk[k] = v
+    run[tool] = blk
+    d["run"] = run
 
 
 def module_id(pid):
@@ -597,6 +680,7 @@ def main():
         n = touch_sources(crate_dir)
         print(f"scorer_creusot: touched {n} src/**.rs to force from-source .coma regeneration (anti-tamper)")
 
+    started = datetime.now().astimezone().isoformat(timespec="seconds")
     mem_mb = None if a.no_mem_cap else a.mem_max_mb
     ctx = {
         "modules": find_coma_modules(crate_dir),
@@ -661,6 +745,20 @@ def main():
         print(f"  {tag} {p['id']:32s} {status:13s} {note}")
 
     if not a.dry_run:
+        # Provenance: stamp WHICH gate + command + toolchain produced these statuses, so the
+        # result travels onto the verif branch self-describing. Dry runs write nothing.
+        # The Creusot checkout is located via the same portable resolver the probe uses, so its
+        # commit is recorded without hardcoding any path.
+        penv = dict(os.environ)
+        penv["PATH"] = CREUSOT_BIN + ":" + penv.get("PATH", "")
+        std = _resolve_creusot_std(crate_dir, inexpressible or {})
+        _stamp_run(d, "creusot", {
+            "creusot": _capture(["git", "-C", os.path.dirname(std), "describe", "--tags",
+                                 "--always"]) if std else None,
+            "why3": _capture(["why3", "--version"], env=penv),
+            "provers": _why3_provers(env=penv),
+            "cap_seconds": a.cap_seconds, "cap_max": a.cap_max, "mem_max_mb": mem_mb,
+        }, started)
         _save_yaml(d, yaml_path)
 
     print(f"\nSUMMARY: {counts}")

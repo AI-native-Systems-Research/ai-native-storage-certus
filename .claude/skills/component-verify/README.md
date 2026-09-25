@@ -87,21 +87,41 @@ The branches record *what was proved*. They do not, by themselves, record *which
 and which command* produced it — and across a 22-component batch the gate may change between
 runs.
 
-**Decision: stamp the provenance into `unified_properties.yaml`**, which already carries `pin`
-and `generated`, and which travels onto both verif branches and feeds the HTML's provenance
-block:
+So each scorer stamps a `run:` block into `unified_properties.yaml` — which already carries
+`pin` and `generated`, travels onto both verif branches, and feeds the HTML's provenance
+footer. A real (non-dry) run produces:
 
 ```yaml
 run:
-  gate_commit: <sha of this skills branch>
-  command:     "component-verify <component> --tools creusot,kani [--no-push]"
-  pin:         <origin/unstable commit the run was based on>
-  started / finished
-  kani_version / creusot_version / why3 prover set
+  gate_commit: 312a774c                     # the gate that scored it
+  gate_branch: skills/verify-methodology-to-unstable
+  gate_dirty:  true                         # ONLY if the gate had uncommitted edits
+  creusot:
+    scored_by: scorer_creusot
+    command:   "scorer_creusot.py verif --crate-dir verif-creusot --cap-seconds 60 …"
+    creusot:   v0.11.0-169-g9cf662ce6       # the Creusot checkout's own git describe
+    why3:      "Why3 platform, version 1.8.2+git"
+    provers:   [Alt-Ergo 2.6.2, CVC4 1.8, CVC5 1.3.1, Z3 4.16.0]
+    cap_seconds / cap_max / mem_max_mb, started, finished
+  kani:
+    scored_by: scorer_kani
+    command:   "scorer_kani.py verif --component-dir . --cap-seconds 60 …"
+    kani_version: "cargo-kani 0.67.0"
+    cap_seconds / cap_max / mem_max_mb, started, finished
 ```
 
-Every result then carries its own provenance in the same commit — self-describing, nothing to
-keep in sync. **Status: decided, not yet implemented.**
+Every result therefore carries its own provenance in the same commit — self-describing, with
+nothing to keep in sync. Three properties worth knowing:
+
+- **Nothing is hardcoded.** The gate identity comes from `git -C <the gate's own dir>` resolved
+  through `__file__`, and the Creusot checkout is located with the same portable resolver the
+  inexpressibility probe uses. `argv[0]` is reduced to its basename, so the record carries no
+  machine-specific path and reads the same in anyone's checkout.
+- **`gate_dirty: true` is the honest signal.** If the gate had uncommitted edits, the commit
+  alone does not describe what ran — so the flag is recorded and the HTML says so in bold.
+  Without it a bare SHA would overstate how reproducible the result is.
+- **The two scorers cannot clobber each other.** Each owns only `run.<tool>`; the shared gate
+  identity they both write is identical. Dry runs write nothing at all.
 
 ### What we deliberately did *not* build
 
@@ -181,7 +201,7 @@ agent. Anything else is `UNRESOLVED`, which fails the gate — it is never persi
 | 7 skills + 8 gate files consolidated on the branch | done |
 | `creusot-std` path made checkout-relative (portable to another clone) | done |
 | Gate smoke-tested in place (block-device-filesys dry-run reproduces baseline) | done |
-| Provenance `run:` stamp (§3) | decided, not implemented |
+| Provenance `run:` stamp (§3), written by both scorers + shown in the HTML footer | done |
 | Orchestrator end-to-end run | **never executed — first run must be supervised** |
 | Push / PR to `unstable` | pending, supervised |
 

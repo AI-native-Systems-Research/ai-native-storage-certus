@@ -26,6 +26,7 @@ completeness + registry matching only, and reports what WOULD run. Use it to see
 the gate fail-closed instantly over a whole component before spending compute.
 """
 import argparse, os, re, signal, subprocess, sys, time, shutil, fnmatch
+from datetime import datetime
 try:
     import yaml
 except ImportError:
@@ -33,6 +34,69 @@ except ImportError:
 
 ACCEPT = {"proved", "tool-boundary", "delegated"}
 _UNIT_SEQ = 0
+
+
+def _capture(cmd, cwd=None, timeout=60):
+    """First line of a command's output, or None. Never raises: provenance is best-effort
+    metadata and must never fail a scoring run."""
+    try:
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        if r.returncode != 0:
+            return None
+        lines = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
+        return lines[0].strip()[:160] if lines else None
+    except Exception:
+        return None
+
+
+def _gate_provenance():
+    """Identity of the gate code doing the scoring, derived at RUNTIME from this file's own
+    location — so a result can always be traced back to the exact code that produced it, with
+    nothing hardcoded and nothing to update when the branch moves.
+
+    `gate_dirty: true` means the gate had uncommitted edits when it ran, so the commit alone
+    does NOT fully describe what scored the run. That flag is the honest signal: without it, a
+    bare SHA in the record would overstate how reproducible the result is."""
+    gd = os.path.dirname(os.path.abspath(__file__))
+    commit = _capture(["git", "-C", gd, "rev-parse", "--short", "HEAD"])
+    if not commit:
+        return {"gate_commit": "unknown — gate dir is not a git checkout"}
+    out = {"gate_commit": commit}
+    branch = _capture(["git", "-C", gd, "rev-parse", "--abbrev-ref", "HEAD"])
+    if branch:
+        out["gate_branch"] = branch
+    try:
+        r = subprocess.run(["git", "-C", gd, "status", "--porcelain", "--", gd],
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and r.stdout.strip():
+            out["gate_dirty"] = True
+    except Exception:
+        pass
+    return out
+
+
+def _stamp_run(d, tool, tool_env, started):
+    """Write the `run:` provenance block — which gate, which command, which tool versions —
+    so a result on a verif branch says what produced it.
+
+    Each scorer owns ONLY `run[<tool>]`, and the shared gate identity both write is identical,
+    so the two scorers cannot clobber each other. argv[0] is reduced to its basename so the
+    record carries no machine-specific path."""
+    run = d.get("run")
+    if not isinstance(run, dict):
+        run = {}
+    run.update(_gate_provenance())
+    blk = {
+        "scored_by": f"scorer_{tool}",
+        "command": " ".join([os.path.basename(sys.argv[0])] + sys.argv[1:]),
+        "started": started,
+        "finished": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    for k, v in (tool_env or {}).items():
+        if v is not None:
+            blk[k] = v
+    run[tool] = blk
+    d["run"] = run
 
 
 def harness_id(pid):
@@ -327,6 +391,7 @@ def main():
     battery = load(os.path.join(a.gate_dir, "lever_battery_kani.yaml"))
     registry = load(os.path.join(a.gate_dir, "known_defeats.yaml"))
 
+    started = datetime.now().astimezone().isoformat(timespec="seconds")
     mem_mb = None if a.no_mem_cap else a.mem_max_mb
     ctx = {
         "harnesses": find_harness_names(component_dir),
@@ -384,6 +449,12 @@ def main():
         print(f"  {tag} {p['id']:32s} {status:13s} {note}")
 
     if not a.dry_run:
+        # Provenance: stamp WHICH gate + command + tool versions produced these statuses, so
+        # the result travels onto the verif branch self-describing. Dry runs write nothing.
+        _stamp_run(d, "kani", {
+            "kani_version": _capture(["cargo", "kani", "--version"], cwd=component_dir),
+            "cap_seconds": a.cap_seconds, "cap_max": a.cap_max, "mem_max_mb": mem_mb,
+        }, started)
         _save_yaml(d, yaml_path)
 
     print(f"\nSUMMARY: {counts}")
