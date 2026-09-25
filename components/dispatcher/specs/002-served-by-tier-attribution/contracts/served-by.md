@@ -1,12 +1,12 @@
-# Contract: Serving-Tier Taxonomy and Its gRPC Surface
+# Contract: Serving-Tier Taxonomy and Its Control-Plane Surface
 
 **Version**: 1
 **Status**: Draft
 **Producers**: `components/dispatcher`, `components/dispatcher-p2p` (via `components/remote-lookup` for the two remote values)
-**Consumers**: `apps/certus-server`, `apps/certus-server-yaml`, and any `Lookup` client
+**Consumers**: `apps/certus-server-yaml`'s counters, and any `LOOKUP` client
 
 This is the normative reference for what each attribution value means and how it crosses the
-gRPC boundary. The Rust-side interface delta is `contracts/idispatcher.md`.
+shm-queue control plane. The Rust-side interface delta is `contracts/idispatcher.md`.
 
 ## The taxonomy
 
@@ -62,110 +62,81 @@ only for `KEY_NOT_FOUND` and counts every other failure as neither.
 `ERROR` is deliberately flat. It does not record which tier was being attempted when the
 failure occurred. That refinement is deferred; it is not needed to measure hit rate.
 
-## gRPC surface
+## Control-plane surface
 
-### Enum
+*Rewritten 2026-09-25. This section specified a proto3 enum and an `EntryResult` field on a
+gRPC surface that `97e26738` removed. The intent is preserved; the mechanism is smaller.*
 
-Added to both `apps/certus-server/proto/dispatcher.proto` and
-`apps/certus-server-yaml/proto/dispatcher.proto`, identically. Naming follows the existing
-`ErrorCode` convention in the same file (prefix repeated on each value, explicit
-`_UNSPECIFIED = 0`).
+### The one channel available
 
-```protobuf
-// Which tier served a looked-up entry, or why it was not served.
-//
-// Describes the route the request took, not where the entry resides afterwards:
-// a block read from SSD and promoted into DRAM while serving is SERVED_BY_SSD.
-//
-// A conforming server never emits SERVED_BY_UNSPECIFIED. Clients observing it are
-// talking to a server that predates serving-tier attribution.
-enum ServedBy {
-  SERVED_BY_UNSPECIFIED = 0;
-  // Local memory tier hit; already resident.
-  SERVED_BY_DRAM = 1;
-  // A local data drive was read to serve this request.
-  SERVED_BY_SSD = 2;
-  // A peer served it, advertising memory-tier residency.
-  SERVED_BY_REMOTE_DRAM = 3;
-  // A peer served it, advertising SSD residency: the peer read its own disk.
-  // The fabric transfer itself is always out of the peer's DRAM.
-  SERVED_BY_REMOTE_SSD = 4;
-  // Not found in any tier, local or remote.
-  SERVED_BY_MISS = 5;
-  // Present, but at a different size than requested.
-  SERVED_BY_SIZE_MISMATCH = 6;
-  // Attempted and failed for some other reason.
-  SERVED_BY_ERROR = 7;
-}
+`op_lookup` returns exactly one byte per key — `ok_flags`, currently `0` or `1`
+(`lib/shmq-dispatcher/src/translate.rs:567`). It is the **only** per-key channel in a
+`LOOKUP` response. So attribution either widens that byte or changes the framing, and
+widening is available because `check_state` in the same module already did it and documented
+the rule: `MISS`/`RESIDENT` keep their `0`/`1` meaning and `PENDING` takes `2`, so a reader
+testing `byte != 0` is unaffected (`lib/shmq-dispatcher/src/wire.rs:98-110`).
+
+### **DECISION — needs sign-off:** the wire carries a 5-value projection, not all 7
+
+The taxonomy has seven values, but only four of them mean *served*. On this byte `0` already
+means *not served*, and `MISS`, `SIZE_MISMATCH` and `ERROR` are all not-served — so they
+cannot each take a distinct non-zero value without making `byte != 0` report "served" for a
+key whose data was never delivered. That would be worse than losing a distinction: a reader
+would act on absent data.
+
+So the byte carries **not-served, or which tier served**:
+
+```text
+0  not served          (was: ok = 0 — meaning preserved exactly)
+1  DRAM                local memory tier hit; already resident
+2  SSD                 a local data drive was read to serve this request
+3  REMOTE_DRAM         a peer served it, advertising memory-tier residency
+4  REMOTE_SSD          a peer served it, advertising SSD residency
 ```
 
-### Field
+and the full seven-value `ServedBy` lives in `components/interfaces`, where the dispatcher
+produces it and the **server's counters consume it**. That is where the not-served breakdown
+is actually needed: FR-024 requires hits plus misses plus errors to equal entries requested,
+which is a counter reconciliation, not a per-key wire question. `MISS`, `SIZE_MISMATCH` and
+`ERROR` therefore remain distinguishable in the place that reconciles them and collapse to
+`0` on the wire, where the client's only question is "was this key served, and if so from
+where".
 
-`EntryResult` currently uses field numbers 1-4, so the addition takes 5:
+**Why this is not a loss.** A tiered hit rate needs the numerator split by tier and the
+denominator counted — the byte gives the first, the counters give the second. If a client
+ever needs the per-key not-served reason it must come with a framing change, and that is a
+separate feature rather than something to smuggle into a byte whose zero value is load
+bearing.
 
-```protobuf
-message EntryResult {
-  uint64 key = 1;
-  bool success = 2;
-  ErrorCode error_code = 3;
-  string error_message = 4;
-  // Which tier served this entry. Populated on Lookup responses; see
-  // "Scope on other RPCs" below for the other RPCs that reuse this message.
-  ServedBy served_by = 5;
-}
-```
+**What would change this decision:** evidence that a client needs per-key
+`SIZE_MISMATCH` versus `MISS` discrimination. The known consumer — the vLLM connector —
+treats a size mismatch as a miss by design (`size-mismatch = cache miss`), so it does not.
 
 ### Compatibility
 
-- **Adding a field and an enum is a backward- and forward-compatible proto3 change.** An old
-  client decoding a new server's response ignores field 5. A new client decoding an old
-  server's response sees the field absent and reads the proto3 default, `0` —
-  `SERVED_BY_UNSPECIFIED`.
-- **That default is the version-detection mechanism**, which is why the zero value must exist
-  and must never be emitted. A client seeing `SERVED_BY_UNSPECIFIED` on a successful lookup
-  knows the server predates attribution and must report "attribution unsupported" rather than
-  guessing a tier.
-- **A conforming server never emits it.** This is a server-side obligation with no wire
-  enforcement, so it needs a test: assert no `Lookup` response carries the zero value.
-- **The Rust change is compiler-enforced.** Both servers construct `EntryResult` through
-  fully-exhaustive struct literals with no `..Default::default()` — two literals per server,
-  inside a `success_result`/`error_result` helper pair that funnels 22 success and 47 error
-  call sites. So exactly four literals must gain the field and the compiler finds them all.
-  Only two call sites need a *real* tier rather than a default: the `success_result` call in
-  each server's `lookup` handler. The other twenty belong to RPCs that reuse the message.
-- **Nothing else in Rust is at risk.** All four `tonic_build` consumers regenerate at build
-  time; no `.pb.rs` is checked in. Clients read `EntryResult` by field access, never by
-  exhaustive match or full-struct equality.
-- **Python is not compiler-enforced and must be handled deliberately.** Three sets of
-  *checked-in* generated stubs exist, all produced by hand-run `generate_pb.sh` scripts
-  reading `apps/certus-server/proto/dispatcher.proto`. They will keep working un-regenerated
-  (additive field, and every consumer reads by attribute), but they will not expose
-  `served_by` until regenerated. Two of the three are **already stale on unrelated messages**,
-  so regenerating them pulls in drift this feature did not cause — that must be a separate,
-  visible step rather than a silent side effect. One of these stub sets is also copied to
-  remote nodes by the multi-node test script, so staleness propagates to the cluster.
-- **There is no proto lint or compatibility gate in CI** — no `buf`, no `protolock`, and no
-  proto reference in the Jenkinsfile or the GitHub workflows. Compatibility here is a review
-  obligation, not an automated one.
+- **`0` keeps its meaning exactly**, so every reader testing `byte != 0` classifies every key
+  as it did before. The Python connector reads it that way and needs no change.
+- **There is no "unspecified" value, deliberately.** The proto3 design needed one because
+  proto3 reserves zero as a default and it doubled as version detection. Here `0` is already
+  spoken for, and reserving it for "unknown" would silently reclassify every miss as an
+  unattributed hit. Version detection belongs to the mailbox's own protocol version.
+- **A conforming server never emits a value outside `0..=4`.** No wire enforcement, so it
+  needs a test.
+- **The interface change is compiler-enforced; the byte is not.** Widening
+  `IDispatcher::batch_lookup`'s return type makes every implementor and call site a compile
+  error until updated. Writing the wrong `u8` compiles cleanly, which is why the attribution
+  tests must be shown to fail against deliberately wrong attribution before being trusted.
 
-### Scope on other RPCs
+### Scope on other operations
 
-`EntryResult` is reused as the result type of ten RPCs (`Populate`, `Lookup`, `Remove`,
-`Touch`, `Reserve`, `CopyToStore`, `CommitStore`, `AbortStore`, `Pin`, `Unpin`). `served_by`
-is meaningful only for `Lookup`.
+`CHECK` keeps `check_state` unchanged. The two answer different questions — `check_state` is
+*residency* ("is it here, is a store in flight"), `served_by` is *route* ("where did this
+served key come from") — and a key can be `RESIDENT` to a check and peer-served to a lookup.
+Collapsing them would destroy the distinction this feature exists to expose.
 
-The contract is therefore:
-
-- **`Lookup`**: `served_by` MUST be populated on every entry, and MUST NOT be
-  `SERVED_BY_UNSPECIFIED`.
-- **All other RPCs**: `served_by` is unspecified-by-design and MUST be left at
-  `SERVED_BY_UNSPECIFIED`. Consumers MUST NOT read it.
-
-Stating this explicitly is the point. The alternative — a field that is sometimes meaningful
-depending on which RPC produced the message — is the kind of ambiguity that gets discovered
-by a wrong dashboard six months later. A future feature may extend population to other RPCs
-(for example, attributing what a `Touch`-with-promote actually did); until then the field's
-silence there is contractual rather than accidental.
+No other operation gains attribution. Stating that explicitly is the point: a value that is
+sometimes meaningful depending on which operation produced it is the ambiguity that gets
+discovered by a wrong dashboard six months later.
 
 ## The `IRemoteLookup` delta
 
@@ -203,21 +174,30 @@ The contract this feature requires:
   would be compatible where a new field is not — which is the shape any future serve-time
   ground-truth feature must take.
 
-## Internal-to-proto mapping
+## Internal-to-wire mapping
 
-One-to-one, no reinterpretation at the server boundary. A server MUST NOT infer a tier from
-an error code, a latency, or any other proxy; it may only translate what the dispatcher
-returned.
+**Not one-to-one, and that is the decision above.** The seven internal values project onto
+five wire values, because three of them mean *not served* and the byte's `0` already says so.
+A server MUST NOT infer a tier from a latency or any other proxy; it may only report what the
+dispatcher returned, and it MUST NOT invent a wire value for a not-served key.
 
-| `ServedBy` (Rust) | `ServedBy` (proto) | `success` | Typical `error_code` |
+| `ServedBy` (Rust, in `interfaces`) | `LOOKUP` byte | Served? | Counter it increments |
 | --- | --- | --- | --- |
-| `Dram` | `SERVED_BY_DRAM` | true | — |
-| `Ssd` | `SERVED_BY_SSD` | true | — |
-| `RemoteDram` | `SERVED_BY_REMOTE_DRAM` | true | — |
-| `RemoteSsd` | `SERVED_BY_REMOTE_SSD` | true | — |
-| `Miss` | `SERVED_BY_MISS` | false | `ERROR_CODE_KEY_NOT_FOUND` |
-| `SizeMismatch` | `SERVED_BY_SIZE_MISMATCH` | false | `ERROR_CODE_INVALID_PARAMETER` |
-| `Error` | `SERVED_BY_ERROR` | false | `ERROR_CODE_IO_ERROR` and others |
+| `Dram` | `1` | yes | `lookup_hits`, `lookup_hits_dram` |
+| `Ssd` | `2` | yes | `lookup_hits`, `lookup_hits_ssd` |
+| `RemoteDram` | `3` | yes | `lookup_hits`, `remote_lookup_hits` |
+| `RemoteSsd` | `4` | yes | `lookup_hits`, `remote_lookup_hits` |
+| `Miss` | `0` | no | `lookup_misses` |
+| `SizeMismatch` | `0` | no | `lookup_misses` (see below) |
+| `Error` | `0` | no | `lookup_errors` |
+
+The three `0` rows are why the internal taxonomy stays seven-valued: the counters need the
+distinction that the wire cannot carry, and FR-024's reconciliation — hits plus misses plus
+errors equals entries requested — is only checkable if `Error` is counted apart from `Miss`.
+
+`SizeMismatch` counting as a miss matches the known consumer: the vLLM connector treats a
+size mismatch as a cache miss by design. Whether it deserves its own counter is left open;
+what it must not do is silently vanish from the reconciliation.
 
 ## Counter reconciliation
 

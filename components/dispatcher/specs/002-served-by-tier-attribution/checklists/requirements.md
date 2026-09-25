@@ -32,7 +32,7 @@
 ## Feature Readiness
 
 - [X] All functional requirements have clear acceptance criteria
-- [X] User scenarios cover the primary flows (interface, gRPC, remote, accounting, both
+- [X] User scenarios cover the primary flows (interface, control plane, remote, accounting, both
       dispatchers)
 - [X] Feature meets the measurable outcomes defined in Success Criteria
 - [X] No implementation leakage into the success criteria

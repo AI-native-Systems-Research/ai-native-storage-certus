@@ -145,7 +145,13 @@ proto surface, because the same taxonomy crosses both boundaries.
 
 ## Migration
 
-Compiler-enforced; nothing silently keeps working. Implementors:
+Compiler-enforced; nothing silently keeps working.
+
+**The inventory below is from 2026-08-04 and is NOT re-verified.** It predates the gRPC
+removal (`97e26738`) and an upstream rework of `dispatcher/src/lib.rs`, so both the line
+numbers and the set of call sites must be re-counted at plan time. It is kept because the
+*shape* of the blast radius — a handful of implementors, a couple of production call sites,
+a tail of test call sites — is still the useful fact. Implementors:
 `components/dispatcher/src/lib.rs:1631`, `components/dispatcher-p2p/src/lib.rs:1121`,
 `components/remote-lookup/src/seams.rs:629` (`unimplemented!`),
 `apps/certus-server/src/service.rs:1093` (test mock). Production call sites:

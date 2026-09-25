@@ -4,32 +4,40 @@
 
 **Created**: 2026-08-04
 
-**Status**: Draft
+**Status**: Draft — reconciled 2026-09-25 against a Certus that changed under it; see
+`## Reconciliation`.
 
 **Input**: Expose, per looked-up key, **which tier actually served it** — local DRAM, local
 SSD, a peer's DRAM, a peer's SSD — or why it was not served. Today a successful `Lookup`
-is indistinguishable across all four, so no tiered hit rate is measurable. Raised as the
-blocking prerequisite of
-`apps/workload-generator/specs/001-synthetic-workload-generator` (spec.md:93-98, 107-110),
-which cannot measure hit rate per tier (its US3, US4) without it.
+is indistinguishable across all four, so no tiered hit rate is measurable.
+
+**Why now, measured rather than asserted.** Two hardware measurements on 2026-09-24/25
+established remote lookup's **cost** and neither could establish its **benefit**, because
+no instrument can separate a local hit from a remote one. Driving four instances that could
+see each other versus the same workload with each instance isolated: hit rate 33.9% with
+peers against 34.6% without — no detectable benefit — while store declines went from 41.2%
+to 0.0%. A second sweep reproduced the decline half at a different rate and in a different
+pacing mode (49.6% with peers, 1.5% without). So the feature the cluster most needs is not
+faster remote lookup; it is an instrument that says whether remote lookup serves anything
+at all. `certus_lookup_hits_total` counts blocks served without distinguishing the source,
+and `certus_lookup_misses_total` read **0** against roughly 4M reserves.
 
 ## Scope and boundary
 
 The datum this feature exposes already exists inside the dispatcher and is discarded at an
 interface boundary. `IDispatchMap::lookup` returns exactly the discriminant needed —
 `LookupResult::{NotExist, MismatchSize, BlockDevice, MemoryTier}`
-(`components/interfaces/src/idispatch_map.rs:9-28`) — and both dispatchers match on it
+(`components/interfaces/src/idispatch_map.rs:11-28`) — and both dispatchers match on it
 throughout `batch_lookup`, but every arm collapses to `Ok(())` or `Err(DispatcherError)`
-(`components/dispatcher/src/lib.rs:2088-2143`,
-`components/dispatcher-p2p/src/lib.rs:1631-1701`). The tier is known one line before it is
+(`components/dispatcher/src/lib.rs:2106`,
+`components/dispatcher-p2p/src/lib.rs:1584`). The tier is known one line before it is
 thrown away.
 
-**This is therefore an interface change, not only a proto change.** The prerequisite note
-in the workload-generator spec (spec.md:671) calls it "a plumbing change rather than new
-bookkeeping"; that is accurate about the *bookkeeping* — no new measurement is introduced —
-but it understates the surface. `IDispatcher::batch_lookup` returns
-`Vec<Result<(), DispatcherError>>` (`components/interfaces/src/idispatcher.rs:377-380`), so
-the value has to be carried through the `interfaces` crate before any server can report it.
+**This is therefore an interface change, not only a transport change.** No new measurement
+is introduced — the datum exists — but the surface is wider than it looks:
+`IDispatcher::batch_lookup` returns `Vec<Result<(), DispatcherError>>`
+(`components/interfaces/src/idispatcher.rs:360-363`), so the value has to be carried
+through the `interfaces` crate before any server can report it.
 
 In scope:
 
@@ -37,42 +45,136 @@ In scope:
 - Carrying it out of `batch_lookup` in **both** `dispatcher` and `dispatcher-p2p`.
 - Carrying the peer's advertised tier out of `remote-lookup` so remote hits split into
   peer-DRAM and peer-SSD.
-- Exposing it on the gRPC surface of **both** `apps/certus-server` and
-  `apps/certus-server-yaml`.
+- Exposing it on the **shm-queue control plane**, by widening the per-key `ok` byte that
+  `LOOKUP` already returns (see *Boundary with the control plane*).
 - Making the servers' aggregate hit/miss counters account for every request (see
-  Clarifications).
+  Clarifications), including a remote-lookup counter that does not exist today.
+- Updating the **specs of every component this changes**, not only this one (see
+  *Per-component documentation*).
 
 Out of scope, deliberately: see `## Out of Scope`.
 
-### Boundary with the servers' gRPC surface
+### Boundary with the control plane
 
-`apps/certus-server-yaml` has no `specs/` directory and no `.specify/` tree, so it cannot
-own a feature. `apps/certus-server` has its own spec series (001-003) covering the gRPC
-server, operational config, and OTel observability. This feature is filed under
-`components/dispatcher` because the dispatcher is where the tier is resolved and because
-this repo specifies `interfaces`-crate changes in the *consuming* component's spec rather
-than under `components/interfaces/specs/` — the precedent being
-`components/dispatcher/specs/001-dispatcher-cache-interface/spec.md:250` (FR-001, which
-specifies the `IDispatcher` trait itself) with the trait surface mirrored as
-`contracts/idispatcher.md`. The multi-unit reach is declared below in the same form
-`components/remote-lookup/specs/002-remote-lookup-rdma/spec.md:97` uses.
+**There is no gRPC surface any more.** It was removed by `97e26738` ("Remove gRPC; make
+shm-queue the sole control transport"), which also deleted `apps/certus-server`'s spec
+series. Every requirement in this spec that named a proto field or a gRPC method has been
+rewritten against the mailbox; the earlier wording is recorded in `## Reconciliation`
+rather than silently dropped, because a reader of the git history will find it.
 
-The proto field is a *presentation* of the dispatcher's datum. Both servers' protos must
-change identically; they are byte-identical today except for two comments.
+The tier surfaces by **widening a byte that already exists**. `op_lookup` returns one `ok`
+byte per key (`ok_flags`, `lib/shmq-dispatcher/src/translate.rs:567`), currently `0` or
+`1`. `served_by` replaces that byte's value space, keeping `0` = not served so that any
+reader testing `byte != 0` still sees a served key as served.
+
+That is not an invention: `check_state` in the same wire module made exactly this move and
+documented the rule — "Widened from a plain `bool`: `MISS`/`RESIDENT` keep the old `0`/`1`
+meaning, `PENDING` is new, so a reader doing `byte != 0` still sees a pending key as
+'exists'" (`lib/shmq-dispatcher/src/wire.rs:98-110`). This feature follows that precedent
+for `LOOKUP`, which means **no new wire structure and no framing change**.
+
+`CHECK` keeps `check_state` untouched. The two answer different questions: `check_state` is
+about *residency* — is this key here, and is a store still in flight — while `served_by` is
+about the *route* a served key travelled. A key can be `RESIDENT` to a check and served
+from a peer to a lookup, and collapsing the two would lose exactly the distinction this
+feature exists to expose.
+
+This feature is filed under `components/dispatcher` because the dispatcher is where the
+tier is resolved, and because this repo specifies `interfaces`-crate changes in the
+*consuming* component's spec rather than under `components/interfaces/specs/` — the
+precedent being `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md:7`
+(FR-001, which specifies the `IDispatcher` trait itself) with the trait surface mirrored as
+`contracts/idispatcher.md`. The multi-unit reach is declared in the same form
+`components/remote-lookup/specs/002-remote-lookup-rdma/spec.md:196` uses.
+
+### Per-component documentation
+
+Each Certus component carries its own complete specification, and those specifications feed
+formal verification — `dispatcher-p2p`, `remote-lookup` and `remote-lookup-rdma-*` all
+carry Creusot and Spin tooling. A change that edits a component's code without editing that
+component's spec therefore does not merely leave documentation stale; it invalidates the
+artifact a proof is written against.
+
+So this feature is **not** done when `components/dispatcher` is updated. Every unit it
+changes owns docs that must change with it:
+
+| Unit changed | Spec that must be updated | Verification-bearing |
+| --- | --- | --- |
+| `components/interfaces` | `001-interfaces` — the taxonomy type and the `batch_lookup` signature | no |
+| `components/dispatcher` | `001-dispatcher-cache-interface` and this spec | no |
+| `components/dispatcher-p2p` | `001-gpudirect-cold-path` — its own `batch_lookup` arms | **yes** |
+| `components/remote-lookup` | `002-remote-lookup-rdma` — the peer's advertised tier | **yes** |
+| `lib/shmq-dispatcher` | no `specs/` dir; the wire change is documented in `wire.rs` beside `check_state` | no |
+
+`apps/certus-server` and `apps/certus-server-yaml` own no specs — the former's were deleted
+with gRPC — so their changes are covered by the units above.
 
 ### Relationship to the workload generator
 
-This feature is scoped to what the workload generator needs and nothing more. Two
-consequences of that scoping are visible below and are intentional:
+**This is no longer a dependency in either direction, and the earlier wording that said it
+was is withdrawn.** The workload generator was rewritten between this spec being written
+and being picked up; its spec now mentions `served_by` and serving tiers **zero times**,
+defines no `Outcome` entity, and its FR-039 — which this spec cited as assuming a
+five-value taxonomy — now reads "The operation stream MUST be what the production client
+would emit for the same workload". The generator was deliberately de-coupled from Certus's
+internals, so it neither assumes a taxonomy nor needs updating to match one.
 
-- The taxonomy is **seven-valued, not five** (`## Clarifications`). The workload-generator
-  spec assumes five (`spec.md:502`, FR-039; US3 acceptance 1; the `Outcome` entity at
-  `spec.md:579`). That spec must be updated to match; the mismatch is recorded here rather
-  than silently reconciled.
-- Remote hits are attributed by the peer's **advertised** tier, which is precise enough for
-  a hit-rate measurement but is not serve-time ground truth. The distinction is spelled out
-  in FR-016..FR-018 and in `## Assumptions`, because a report that says `REMOTE_SSD` is
-  making a weaker claim than it appears to.
+What survives is the *measurement* relationship, which is stronger than the spec
+dependency was: the generator can drive a workload that exercises remote lookup
+(`--probe lookup`, its FR-083) and can report a hit rate, but **cannot attribute it**. That
+is the gap this feature closes, and it is why the motivation in `**Input**` is now a
+measurement result rather than another spec's requirement.
+
+One consequence of the original scoping survives and is still intentional: remote hits are
+attributed by the peer's **advertised** tier, which is precise enough for a hit-rate
+measurement but is not serve-time ground truth. The distinction is spelled out in
+FR-016..FR-018 and in `## Assumptions`, because a report that says `REMOTE_SSD` is making a
+weaker claim than it appears to.
+
+## Reconciliation (2026-09-25)
+
+This spec was written on 2026-08-04 and picked up on 2026-09-25. Certus changed underneath
+it in the interval, and three of its scoping decisions rested on things that no longer
+exist. Recorded here rather than silently rewritten, because the git history shows the
+earlier wording and a reader deserves to know which parts were re-verified.
+
+**What was checked and still holds — the load-bearing premises are intact:**
+
+| Premise | Status |
+| --- | --- |
+| `LookupResult` carries the four-way discriminant | holds, `idispatch_map.rs:11-28` |
+| `IDispatcher::batch_lookup` discards it | holds, `idispatcher.rs:360-363` |
+| Both dispatchers collapse every arm | holds, `dispatcher/src/lib.rs:2106`, `dispatcher-p2p/src/lib.rs:1584` |
+| The peer's tier already crosses the wire | holds, `Avail::{None, Memory, Disk}`, `remote-lookup/src/wire.rs:23-30` |
+| No remote-lookup wire change needed | holds |
+
+Every line citation in the original had drifted and has been re-pinned.
+
+**What changed, and what was done about it:**
+
+1. **The gRPC surface is gone.** `97e26738` ("Remove gRPC; make shm-queue the sole control
+   transport") removed it and deleted `apps/certus-server`'s spec series. This invalidated a
+   boundary section, a P1 user story, a requirements block, a proto-artifacts block, four
+   out-of-scope bullets and four assumptions. All are rewritten against the mailbox. The
+   replacement is *smaller* than the original design: the tier widens the per-key `ok` byte
+   `LOOKUP` already returns, following the precedent `check_state` set in the same module,
+   so there is no new wire field and no framing change.
+2. **The workload-generator dependency is withdrawn in both directions.** The generator was
+   rewritten; its spec now mentions serving tiers **zero times**, defines no `Outcome`
+   entity, and its FR-039 — cited here as assuming a five-value taxonomy — now says something
+   else entirely. The instruction "that spec must be updated to match" was therefore acting
+   on a document that had already moved. The motivation is now a measurement result instead:
+   two hardware runs established remote lookup's cost and neither could establish its
+   benefit.
+3. **Per-component documentation was not a requirement and now is.** The original declared
+   multi-unit reach but committed only to its own spec. Each Certus component carries a
+   complete specification that its formal verification is written against, and two of the
+   units this feature changes — `dispatcher-p2p` and `remote-lookup` — carry Creusot and Spin
+   tooling. FR-030..FR-032 and *Per-component documentation* make the obligation explicit.
+
+**Not re-verified, and flagged rather than assumed:** the implementor and call-site counts in
+*Dependencies on other components* predate both the gRPC removal and the upstream dispatcher
+rework. They must be re-counted at plan time; the line numbers there are known stale.
 
 ## Clarifications
 
@@ -122,21 +224,24 @@ consequences of that scoping are visible below and are intentional:
   (`lib.rs:2128-2137`), so "served from SSD" and "now DRAM-resident" are both true of the
   same request; the former is what a hit-rate measurement means. This distinction is sharper
   in `dispatcher-p2p`, where the cold path does **not** populate DRAM synchronously (FR-014).
-- Q: Which value does a proto3 default of 0 mean? → A: `SERVED_BY_UNSPECIFIED = 0` MUST
-  exist, because proto3 requires it and because it is the only way a client can detect an
-  old server, but a conforming server MUST never emit it (FR-020, FR-021).
+- Q: Which value does a zero byte mean? → A: **`0` means "not served", and nothing else.**
+  *Amended 2026-09-25.* This originally reserved `0` for `SERVED_BY_UNSPECIFIED` because
+  proto3 requires a zero default and it let a client detect an old server. With gRPC gone the
+  constraint is inverted: `LOOKUP`'s byte already means "not served" at `0`, so reserving it
+  for "unknown" would silently reclassify every miss. There is therefore **no
+  `UNSPECIFIED` value** — an old server is detected by the mailbox's own protocol version,
+  not by an in-band sentinel (`check_state` set this precedent too: it widened into the
+  unused values above `1` and left `0` alone).
 
 ### Dependencies on other components (implied by the above)
 
 1. **`components/interfaces` — the sole `interfaces`-crate change for this feature.** Adds a
    public `ServedBy` enum and changes `IDispatcher::batch_lookup`'s return type
-   (`idispatcher.rs:377-380`). Lands as its own commit, ahead of the implementations. Blast
-   radius is bounded and compiler-enforced: 4 implementors
-   (`components/dispatcher/src/lib.rs:1631`, `components/dispatcher-p2p/src/lib.rs:1121`,
-   `components/remote-lookup/src/seams.rs:629` which is `unimplemented!`,
-   `apps/certus-server/src/service.rs:1093` test mock), 2 production call sites
-   (`apps/certus-server-yaml/src/service.rs:420`, `apps/certus-server/src/service.rs:441`),
-   and ~14 test call sites across the two dispatchers.
+   (`idispatcher.rs:360-363`). Lands as its own commit, ahead of the implementations, and
+   updates `components/interfaces/specs/001-interfaces` with it. Blast radius is bounded and
+   compiler-enforced, but **every implementor and call site count below predates the gRPC
+   removal and the upstream dispatcher rework and MUST be re-counted at plan time** — the
+   line numbers in particular are known stale.
 2. **`components/dispatcher`** — attribution at every resolution site in `batch_lookup`
    (FR-008..FR-013). This is the component that owns the feature.
 3. **`components/dispatcher-p2p`** — the same, plus the cold-path residency difference in
@@ -146,16 +251,18 @@ consequences of that scoping are visible below and are intentional:
    advertised `Avail` out (FR-016), which requires `KeyState` or the result projection to
    gain a tier dimension (`operation.rs:19-27`, `:149-160`) and an `interfaces`-visible type.
    **No wire-protocol change.**
-5. **`apps/certus-server` and `apps/certus-server-yaml`** — identical proto addition
-   (FR-019..FR-021) and the counter correction (FR-024..FR-026). Neither server may report a
-   tier it did not receive from the dispatcher.
-6. **`components/dispatch-map`, `components/memory-tier`, `components/eviction-policy-lru`** —
-   no change. The discriminant already exists at `idispatch_map.rs:9-28`.
-7. **Generated gRPC bindings** — the four Rust `tonic_build` consumers regenerate at build
-   time and need no action beyond recompiling (note that `apps/remote-lookup-bench/build.rs`
-   compiles the `certus-server-yaml` copy, so the benchmark picks the field up
-   automatically). Python is different: three sets of **checked-in** stubs are produced by
-   hand-run `generate_pb.sh` scripts, and regenerating them is a deliberate step (FR-030).
+5. **`lib/shmq-dispatcher`** — widens `LOOKUP`'s per-key `ok` byte (`translate.rs:567`,
+   `wire.rs:98-110`). It owns no `specs/` directory, so the wire change is documented beside
+   `check_state`, which already documents its own widening and its compatibility rule.
+6. **`apps/certus-server` and `apps/certus-server-yaml`** — the counter correction
+   (FR-024..FR-026), including a remote-lookup counter. Neither server may report a tier it
+   did not receive from the dispatcher. Neither owns a `specs/` directory:
+   `apps/certus-server`'s was deleted with gRPC in `97e26738`.
+7. **`components/dispatch-map`, `components/memory-tier`, `components/eviction-policy-lru`** —
+   no change. The discriminant already exists at `idispatch_map.rs:11-28`.
+8. **The Python connector** (`certus-shmq-connector`) — reads the `LOOKUP` byte, so the
+   widening reaches it. It keeps working untouched by the compatibility rule (`byte != 0`),
+   and capturing the tier there is optional and separately scoped.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -190,32 +297,36 @@ per-key tier.
 
 ---
 
-### User Story 2 - Tiered Hit Rate Over gRPC (Priority: P1)
+### User Story 2 - Tiered Hit Rate Over the Control Plane (Priority: P1)
 
-A benchmark client issues `Lookup` against a server and reads, per entry, which tier served
+A client issues `LOOKUP` over the shm-queue mailbox and reads, per key, which tier served
 it — so that a tiered hit rate and per-tier latency percentiles become computable from the
 response alone.
 
-**Why this priority**: This is the story the workload generator is blocked on (its US3), and
-it is what makes the value observable outside the process. It delivers on a single node.
+**Why this priority**: it is what makes the value observable outside the process, and it is
+the half that turns the measurement gap in `**Input**` from unanswerable into answerable.
+It delivers on a single node.
 
-**Independent Test**: Run a single-node server with a working set exceeding DRAM capacity,
-issue lookups, and confirm the DRAM/SSD split in the responses moves as capacity is varied.
+**Independent Test**: Run a single-node server with a working set exceeding the memory tier,
+issue lookups, and confirm the DRAM/SSD split in the response bytes moves as
+`--memory-tier-size` is varied.
 
 **Acceptance Scenarios**:
 
-1. **Given** a successful `Lookup` served from local DRAM, **When** the client reads the
-   `EntryResult`, **Then** `served_by` is `SERVED_BY_DRAM`.
-2. **Given** a `Lookup` for an absent key, **When** the client reads the `EntryResult`,
-   **Then** `success` is false, `error_code` is `ERROR_CODE_KEY_NOT_FOUND`, and `served_by`
-   is `SERVED_BY_MISS`.
-3. **Given** any `Lookup` response from a conforming server, **When** every entry is
-   examined, **Then** no entry carries `SERVED_BY_UNSPECIFIED`.
-4. **Given** a client built against the new proto talking to an **old** server, **When** it
-   reads `served_by`, **Then** it observes `SERVED_BY_UNSPECIFIED` and can report the server
-   as not supporting attribution rather than mis-reporting a tier.
-5. **Given** both `apps/certus-server` and `apps/certus-server-yaml`, **When** the same batch
-   is issued to each, **Then** both report attribution with identical semantics.
+1. **Given** a key served from local DRAM, **When** the client reads that key's `LOOKUP`
+   response byte, **Then** it is the DRAM value and is non-zero.
+2. **Given** a `LOOKUP` for an absent key, **When** the client reads its byte, **Then** it is
+   `0` — preserving today's "not served" meaning exactly.
+3. **Given** an existing reader that tests `byte != 0` to mean "served", **When** it reads a
+   response from a server built with this feature, **Then** it classifies every key as it did
+   before the widening. This is the compatibility rule `check_state` already set.
+4. **Given** a client that knows the widened value space, **When** it reads any served key,
+   **Then** the byte names a specific tier and never a catch-all "unspecified" value — an
+   attributed lookup that cannot say where it came from is the defect this feature exists to
+   remove, not an acceptable state.
+5. **Given** the same batch issued to a server with peers and to one isolated, **When** the
+   bytes are compared, **Then** the difference is attributable to the remote values alone —
+   which is the check the two hardware measurements in `**Input**` could not make.
 
 ---
 
@@ -380,22 +491,30 @@ assert identical attribution for identical residency, except where FR-014 specif
 - **FR-018**: This feature MUST NOT change the remote-lookup wire protocol, MUST NOT change
   `WIRE_VERSION`, and MUST remain interoperable with an unmodified peer.
 
-### gRPC surface
+### Control-plane surface
 
-- **FR-019**: Both servers' `EntryResult` MUST carry a `served_by` field expressing the
-  taxonomy, added identically to `apps/certus-server/proto/dispatcher.proto` and
-  `apps/certus-server-yaml/proto/dispatcher.proto`.
-- **FR-020**: The field MUST reserve a zero value meaning "unspecified", so that a new client
-  can detect an old server.
-- **FR-021**: A conforming server MUST NOT emit the unspecified value on any `Lookup`
-  response.
-- **FR-022**: The addition MUST be wire-compatible: an old client MUST continue to work
-  against a new server without modification.
+*Rewritten 2026-09-25: this section specified a proto field on a gRPC surface that
+`97e26738` removed. The requirements below carry the same intent onto the mailbox.*
+
+- **FR-019**: The taxonomy MUST be expressed by **widening the existing per-key `ok` byte**
+  that `LOOKUP` returns (`lib/shmq-dispatcher/src/translate.rs:567`). The feature MUST NOT
+  add a wire field, change framing, or alter the request encoding.
+- **FR-020**: The byte value `0` MUST continue to mean **not served**. There MUST NOT be an
+  "unspecified" value: reserving `0` for unknown would silently reclassify every miss, and an
+  old server is detected by the protocol version rather than by an in-band sentinel.
+- **FR-021**: A conforming server MUST NOT emit a value outside the taxonomy on any `LOOKUP`
+  response, and MUST NOT emit a catch-all "served, tier unknown" value — that state is the
+  defect this feature removes.
+- **FR-022**: The widening MUST be backward compatible in the sense `check_state` already
+  established (`lib/shmq-dispatcher/src/wire.rs:98-110`): a reader testing `byte != 0`
+  MUST classify every key exactly as it did before. The Python connector MUST keep working
+  untouched.
 - **FR-023**: A server MUST NOT report a tier it did not receive from the dispatcher; it MUST
   NOT infer one from latency, error code, or any other proxy.
-- **FR-023a**: `served_by` MUST be populated on `Lookup` responses. Its meaning on the other
-  nine RPCs that reuse `EntryResult` MUST be specified explicitly — either populated or
-  documented as unspecified-by-design — so that no consumer has to guess.
+- **FR-023a**: `CHECK` MUST keep `check_state` unchanged. `check_state` answers *residency*
+  and `served_by` answers the *route* a served key travelled; a key may be `RESIDENT` to a
+  check and peer-served to a lookup, so collapsing the two would lose the distinction this
+  feature exists to expose.
 ### Server counters
 
 - **FR-024**: The servers' aggregate lookup counters MUST account for every requested entry,
@@ -415,15 +534,26 @@ assert identical attribution for identical residency, except where FR-014 specif
 - **FR-029**: The test suites MUST cover both the default and the `integrity-check` feature
   configurations.
 
-### Generated bindings and other proto artifacts
+### Per-component documentation
 
-- **FR-030**: The three sets of checked-in Python stubs MUST either be regenerated as an
-  explicit, separately reviewable step, or be left untouched with their staleness recorded.
-  Regeneration MUST NOT silently import the unrelated drift two of them already carry.
-- **FR-031**: The reduced proto copy in `apps/baseline-generalized-fs/proto/` and the frozen
-  spec-contract copy under `apps/certus-server/specs/001-grpc-dispatcher-server/contracts/`
-  MUST be explicitly decided about — changed, or left with the divergence recorded — rather
-  than overlooked because they share the `certus.dispatcher.v1` package name.
+*Added 2026-09-25, replacing a section about generated proto bindings that no longer exist.*
+
+- **FR-030**: Every component whose code this feature changes MUST have its **own** spec
+  updated in the same change: `components/interfaces` (`001-interfaces`),
+  `components/dispatcher` (`001-dispatcher-cache-interface` and this spec),
+  `components/dispatcher-p2p` (`001-gpudirect-cold-path`) and `components/remote-lookup`
+  (`002-remote-lookup-rdma`). A component whose code moves while its spec does not is not
+  merely undocumented: each component's specification is the artifact its formal
+  verification is written against, and `dispatcher-p2p` and `remote-lookup` both carry
+  Creusot and Spin tooling.
+- **FR-031**: Where a changed unit owns no `specs/` directory — `lib/shmq-dispatcher`, both
+  servers — the change MUST be documented at the site instead, beside the definition it
+  modifies. For the wire byte that means documenting the widening next to `check_state`,
+  which already documents its own.
+- **FR-032**: This spec MUST NOT be the only record of the taxonomy. The value space MUST be
+  defined once, in `components/interfaces`, and every other document MUST reference it rather
+  than restate it — a taxonomy written down twice is a taxonomy that will disagree with
+  itself, which is the failure this feature's own history demonstrates.
 
 ### Key Entities
 
@@ -489,21 +619,17 @@ assert identical attribution for identical residency, except where FR-014 specif
   `tier` attribute is observability work belonging to the `certus-server` OTel series.
 - **Reconciling with the SimPy simulator's three-way `hot`/`cold`/`miss` bucketing**
   (`tools/simulator/certus_sim/metrics.py:19-20`), which is modelled rather than measured.
-- **Attribution in `apps/baseline-generalized-fs`.** It is a baseline comparison app with its
-  own deliberately reduced proto (7 RPCs, no `ipc_handles`) that happens to share the
-  `certus.dispatcher.v1` package name. It has four exhaustive `EntryResult` literals of its
-  own and breaks only if its copy is edited. Leaving it unattributed is the default; FR-031
-  requires that be a decision rather than an oversight.
-- **Fixing the pre-existing drift in the checked-in Python stubs.** Two of the three sets are
-  already behind the live proto on unrelated messages — one lacks `LookupEntry.ipc_handles`
-  and `ReserveEntry.session_id`; one is frozen at a five-RPC surface. That drift predates this
-  feature and repairing it belongs to its own change (FR-030).
-- **Refreshing the frozen spec-contract proto copy** under
-  `apps/certus-server/specs/001-grpc-dispatcher-server/contracts/dispatcher.proto`, which is a
-  documentation artifact nothing compiles.
-- **Adding a proto lint or compatibility gate to CI.** None exists — no `buf`, no
-  `protolock`, no proto reference in the Jenkinsfile or the GitHub workflows. Worth having,
-  but not a prerequisite for this field.
+- **Anything to do with the removed gRPC surface.** Four bullets here previously scoped out
+  proto artifacts — a reduced proto in `apps/baseline-generalized-fs`, drift in three sets of
+  checked-in Python stubs, a frozen spec-contract proto copy, and the absence of a proto lint
+  in CI. `97e26738` removed gRPC and made shm-queue the sole control transport, so none of
+  those artifacts is on this feature's path. They are left here as a record of what the
+  earlier scoping worried about, not as work.
+- **Capturing the tier in the Python connector.** The widened byte reaches
+  `certus-shmq-connector`, which keeps working untouched by FR-022's compatibility rule.
+  Reading and recording the tier there is useful and separately scoped — it is what would let
+  a vLLM run report a tiered hit rate — but it is not needed for the measurement in
+  `**Input**`, which the node agent can make directly.
 - **Any change to the eviction policy, dispatch-map, or memory-tier interfaces.**
 
 ## Assumptions
@@ -523,17 +649,19 @@ assert identical attribution for identical residency, except where FR-014 specif
   the entry into the peer's DRAM, a repeated remote fetch of the same key is expected to
   report `REMOTE_DRAM`. A test or report that expects a stable `REMOTE_SSD` fraction from a
   fixed holder configuration is mis-specified.
-- Both dispatcher protos remain byte-identical in the fields they define, so one field
-  addition applies to both without divergence.
 - The dispatcher selection remains a build-time profile choice (`CERTUS_PROFILE`), so both
-  dispatchers must be verified separately rather than switched at runtime.
-- `CacheKey` remains an opaque `u64` and the existing batched gRPC lookup surface remains the
-  measurement path.
-- **The Rust side of this change is compiler-enforced and the Python side is not.** Both
-  servers build `EntryResult` through exhaustive struct literals with no defaulting
-  initializer, so the four literals that must gain the field cannot be missed. The
-  checked-in Python stubs carry no such guarantee, and no CI gate checks proto compatibility,
-  so those steps rest on review.
-- Adding a field and an enum to proto3 is backward- and forward-compatible, and every known
-  client reads `EntryResult` by field access rather than by exhaustive match or full-struct
-  equality — so no existing consumer breaks by construction.
+  dispatchers must be verified separately rather than switched at runtime. This is why
+  FR-014's cold-path difference cannot be tested by flipping a flag.
+- `CacheKey` remains an opaque `u64`, and the batched `LOOKUP` over the shm-queue mailbox
+  remains the measurement path.
+- **The compiler enforces the interface change; it does not enforce the wire change.**
+  Widening `IDispatcher::batch_lookup`'s return type makes every implementor and call site a
+  compile error until it is updated, so none can be missed. The `ok` byte is a `u8`: writing
+  the wrong value there compiles cleanly. That asymmetry is why FR-028 requires the
+  attribution tests be demonstrated to fail against deliberately wrong attribution before
+  being trusted — a mock that returns a plausible tier for the wrong reason would pass a test
+  that only checks the byte is non-zero.
+- Widening a byte whose `0` meaning is preserved is backward compatible for every reader that
+  tests `byte != 0`, which is how the connector reads it. A reader that instead matched
+  exhaustively on `0`/`1` would break — none is known, and `check_state`'s precedent
+  established the same assumption once already.
