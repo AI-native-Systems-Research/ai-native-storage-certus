@@ -45,7 +45,8 @@ members = [
     "components/zyre",
     "lib/shm-queue",
     "lib/shmq-dispatcher",
-    "apps/certus-server"
+    "apps/certus-server",
+    "apps/workload-generator/crates/workload-model"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -75,7 +76,8 @@ default-members = [
     "components/eviction-policy-session-lists",
     "components/eviction-policy-optimized",
     "apps/eviction-replay-benchmark",
-    "lib/shm-queue"
+    "lib/shm-queue",
+    "apps/workload-generator/crates/workload-model"
 ]
 
 resolver = "2"
@@ -116,4 +118,5 @@ zyre = { path = "components/zyre" }
 certus-connector = { path = "certus-connector" }
 shm-queue = { path = "lib/shm-queue" }
 shmq-dispatcher = { path = "lib/shmq-dispatcher" }
+workload-model = { path = "apps/workload-generator/crates/workload-model" }
 libloading = "0.8"
