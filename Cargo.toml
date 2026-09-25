@@ -47,7 +47,8 @@ members = [
     "lib/shmq-dispatcher",
     "apps/certus-server",
     "apps/workload-generator/crates/workload-model",
-    "apps/workload-generator/crates/workload-trace"
+    "apps/workload-generator/crates/workload-trace",
+    "apps/workload-generator/crates/workload-wire"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -79,7 +80,8 @@ default-members = [
     "apps/eviction-replay-benchmark",
     "lib/shm-queue",
     "apps/workload-generator/crates/workload-model",
-    "apps/workload-generator/crates/workload-trace"
+    "apps/workload-generator/crates/workload-trace",
+    "apps/workload-generator/crates/workload-wire"
 ]
 
 resolver = "2"
@@ -122,4 +124,5 @@ shm-queue = { path = "lib/shm-queue" }
 shmq-dispatcher = { path = "lib/shmq-dispatcher" }
 workload-model = { path = "apps/workload-generator/crates/workload-model" }
 workload-trace = { path = "apps/workload-generator/crates/workload-trace" }
+workload-wire = { path = "apps/workload-generator/crates/workload-wire" }
 libloading = "0.8"
