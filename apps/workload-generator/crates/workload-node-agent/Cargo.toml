@@ -1,0 +1,38 @@
+[package]
+name = "workload-node-agent"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# The per-node relay daemon, and the only crate here that touches the mailbox or a
+# GPU. NOT a workspace default member: it attaches to the local mailbox and links
+# CUDA. Build it explicitly with `-p workload-node-agent`.
+#
+# The agent is a relay and holds no simulation state: it never decides *what* to
+# issue. Everything it does is driven by `SubmitTurn` frames from the generator, so
+# the single simulation core stays single (FR-072).
+#
+# It used to depend on `workload-gen` so that FR-072a's reactive rule had exactly one
+# implementation — an arrow the wrong way round for a daemon, accepted for the
+# stronger property. FR-079 removed the reason for it: the generator no longer has a
+# mailbox path, so the executor, the opcode mapping and the payload buffer live here,
+# in the crate that uses them, and there is still exactly one of each.
+#
+# Like `apps/remote-lookup-bench`, this deliberately does NOT depend on
+# `gpu-services`. That crate's `IGpuServices` impl is only complete when its own
+# `spdk` feature is on, so any cargo invocation that also builds a crate enabling
+# `interfaces/spdk` would unify features and leave it an incomplete impl. The handful
+# of CUDA symbols needed here are declared locally instead (Principle II, and
+# plan.md's Constitution Check).
+
+[dependencies]
+workload-model.workspace = true
+workload-wire.workspace = true
+shm-queue.workspace = true
+shmq-dispatcher.workspace = true
+# So the node agent can ship a histogram back: quantiles do not merge across nodes,
+# but histograms do (contracts/node-agent-wire.md).
+hdrhistogram = { version = "7", features = ["serialization"] }
+clap = { version = "4", features = ["derive", "env"] }

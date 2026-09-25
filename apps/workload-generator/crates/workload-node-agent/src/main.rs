@@ -1,0 +1,222 @@
+//! The per-node daemon.
+//!
+//! Attaches to the local Certus mailbox and serves `SubmitTurn` frames from the generator by
+//! applying FR-072a's rule against it — check the path, load what is resident, store what is
+//! absent. Only **keys** cross the network; the payload is a pre-filled device buffer here.
+//!
+//! It is not a second generator. Which keys, which session and which virtual time all come
+//! from the generator's single simulation core, and the rule it applies is
+//! [`workload_node_agent::exec::TurnExecutor`] — of which there is exactly one, in this crate,
+//! since FR-079 left the agent as the only thing that talks to a mailbox.
+//!
+//! Everything is in [`workload_node_agent`]; this file is the command line and nothing else.
+//!
+//! Exits non-zero if the local mailbox is absent, so a missing server is a startup failure
+//! rather than a run that quietly measures nothing.
+#![warn(missing_docs)]
+
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
+use clap::Parser;
+use workload_node_agent::agent::AgentFactory;
+use workload_node_agent::exec::Probe;
+use workload_node_agent::mailbox;
+use workload_node_agent::payload::PayloadBuffer;
+use workload_wire::handshake;
+use workload_wire::server::Server;
+
+/// Exit codes. Non-zero for anything that means the node cannot serve a run.
+mod exit {
+    /// Clean stop, asked for by the generator.
+    pub const OK: i32 = 0;
+    /// The mailbox, the GPU or the port could not be obtained.
+    pub const SETUP: i32 = 2;
+}
+
+/// The node agent's command line.
+#[derive(Debug, Parser)]
+#[command(
+    name = "workload-node-agent",
+    about = "Per-node daemon: applies the generator's turns to the local Certus mailbox"
+)]
+struct Cli {
+    /// Port to listen on.
+    #[arg(long, default_value_t = 7420, env = "WORKLOAD_AGENT_PORT")]
+    port: u16,
+
+    /// Address to bind. Defaults to every interface, since the generator is remote.
+    #[arg(long, default_value = "0.0.0.0")]
+    bind: String,
+
+    /// The local Certus mailbox.
+    #[arg(long, default_value = "/dev/shm/certus-shmq")]
+    shm_path: String,
+
+    /// Connections to serve, each claiming its own mailbox channel.
+    ///
+    /// A connection is a lane. The mailbox is depth-1 per channel, so a lane needs its own:
+    /// sharing one would serialise lanes while still reporting the concurrency asked for.
+    #[arg(long, default_value_t = 4)]
+    lanes: usize,
+
+    /// Bytes per block, which must match the description the generator is running.
+    #[arg(long, default_value_t = 32768)]
+    block_bytes: u32,
+
+    /// Keys per request (FR-069). Must be at least what the generator uses.
+    #[arg(long, default_value_t = 64)]
+    batch_keys: usize,
+
+    /// How a turn discovers residency: `check` (what the production client does) or
+    /// `lookup` (skip `CHECK`; a zero `ok` byte from `LOOKUP` is the miss).
+    ///
+    /// `lookup` is the mode that exercises **remote lookup**: only `LOOKUP` reaches
+    /// `batch_lookup`, the one dispatcher entry point that forwards a local miss to a peer,
+    /// so a `check`-first run never asks the fabric for anything. Must match the
+    /// generator's `--probe`, which passes this through.
+    #[arg(long, default_value = "check")]
+    probe: String,
+
+    /// GPU device for the payload buffer.
+    #[arg(long, default_value_t = 0)]
+    gpu_device: i32,
+
+    /// Serve the control path only, issuing no data-moving operations.
+    ///
+    /// For a node with no accelerator. Runs against it are **partial** and the generator's
+    /// report says so, because a throughput from a stream missing its loads and stores is not
+    /// comparable with a complete run's.
+    #[arg(long)]
+    no_payload: bool,
+
+    /// Stamp each stored block with its key. Costs a host-to-device copy per key.
+    #[arg(long)]
+    stamp_keys: bool,
+
+    /// Seconds to wait for the first generator connection before giving up.
+    ///
+    /// An agent nobody ever connects to was launched for a run that never came, and sitting
+    /// there holds this node's mailbox channels and a device allocation. Long, because a
+    /// generator may be starting agents on many nodes before connecting to any; finite, because
+    /// forever is a leak.
+    #[arg(long, default_value_t = 300)]
+    first_connect_secs: u64,
+
+    /// Seconds to wait after the last connection closes before exiting.
+    ///
+    /// A closed socket means the control process is gone — more reliable than any
+    /// silence-based guess, since TCP tells us for free whether it exited, panicked or was
+    /// killed. The grace period exists only because a generator opening its lanes one at a
+    /// time, or reconnecting one, passes briefly through zero connections.
+    ///
+    /// There is deliberately **no idle timeout**: under paced mode a session's think time is
+    /// real waiting, so a node may legitimately receive nothing for minutes, and an agent that
+    /// took silence for failure would exit in the middle of the workload it was serving.
+    #[arg(long, default_value_t = 5)]
+    linger_secs: u64,
+
+    /// Check each loaded block against its key, and count mismatches.
+    ///
+    /// Implies `--stamp-keys`. This is what separates "bytes arrived" from "the right bytes
+    /// arrived": the pre-filled buffer is one repeated byte, so without it a cache returning
+    /// the wrong block would produce a run that looked correct. Costs a device-to-host copy per
+    /// key, and wants a **cold** cache — a block stored by a run that did not stamp holds the
+    /// fill byte, so checking it would report a mismatch that is the agent's own fault.
+    #[arg(long)]
+    verify_payload: bool,
+}
+
+fn main() {
+    let cli = Cli::parse();
+    match run(&cli) {
+        Ok(()) => std::process::exit(exit::OK),
+        Err(e) => {
+            eprintln!("workload-node-agent: {e}");
+            std::process::exit(exit::SETUP);
+        }
+    }
+}
+
+fn run(cli: &Cli) -> Result<(), String> {
+    // Provenance first, before anything expensive is set up: an agent that cannot describe the
+    // sources it was built from will be refused by every generator that connects (FR-051), so
+    // saying it here is more useful than discovering it one handshake later.
+    if !handshake::is_known() {
+        eprintln!(
+            "warning: this agent cannot describe the sources it was built from, so every \
+             generator will refuse it (FR-051). Build from a readable source tree, or set \
+             WORKLOAD_SOURCE_ID deliberately."
+        );
+    }
+
+    // The mailbox, and the channels this agent will hand out one per connection. Absent
+    // mailbox is a startup failure: a daemon that came up without one would accept
+    // connections and measure nothing.
+    // Held for the whole of `run`, so the claim is given back on the way out — an ordinary exit
+    // and a panic alike. A claim lives in the shared segment and outlives the process that made
+    // it, so an agent that exited without releasing leaves channels no later run can use until
+    // the server restarts; see `mailbox::Claim`.
+    let claim = mailbox::attach(&cli.shm_path, cli.lanes)?;
+    let client = Arc::clone(claim.client());
+    let channels = claim.channels().to_vec();
+    eprintln!(
+        "attached {} with {} channels; serving {} lanes",
+        cli.shm_path,
+        client.channel_count(),
+        channels.len()
+    );
+
+    // One allocation for the whole run, filled before anything is served (FR-038). Without it
+    // the two data-moving operations cannot be issued, which is a legitimate mode on a node
+    // with no accelerator but never a silent fallback.
+    let payload = if cli.no_payload {
+        eprintln!("no payload buffer: LOOKUP and COPY_TO_STORE will be counted, not issued");
+        None
+    } else {
+        Some(Arc::new(PayloadBuffer::new(
+            channels.len(),
+            cli.batch_keys,
+            cli.block_bytes,
+            cli.gpu_device,
+            cli.stamp_keys || cli.verify_payload,
+            cli.verify_payload,
+        )?))
+    };
+
+    // Parsed here rather than per connection: a misspelled mode must refuse the agent at
+    // startup, not produce a run that silently used the default rule.
+    let probe = Probe::parse(&cli.probe)?;
+
+    let factory = AgentFactory::new(
+        Arc::clone(&client),
+        channels,
+        payload,
+        cli.block_bytes,
+        cli.batch_keys,
+        probe,
+    );
+    let addr = format!("{}:{}", cli.bind, cli.port);
+    let server = Server::bind(&addr, factory)
+        .map_err(|e| format!("bind {addr}: {e}"))?
+        .with_first_connect_timeout(std::time::Duration::from_secs(cli.first_connect_secs))
+        .with_linger(std::time::Duration::from_secs(cli.linger_secs));
+    eprintln!("listening on {addr}; source id {}", handshake::SOURCE_ID);
+
+    // Three ways this ends, and none of them is an idle timeout. The generator sends a
+    // `Shutdown` frame, which is teardown as part of the protocol so it can be *verified*
+    // rather than assumed (FR-053). Or every connection closes, which is TCP telling us the
+    // control process is gone however it went — that is what makes FR-053 hold for a generator
+    // killed outright, rather than deferring the cleanup to whenever someone next starts a run.
+    // Or nobody ever connects, and the agent gives up rather than holding this node's channels
+    // for a run that never came.
+    let stop = Arc::new(AtomicBool::new(false));
+    server.serve(stop).map_err(|e| format!("serve: {e}"))?;
+    // Explicit, though `Drop` would do it: releasing the channels is the last thing this process
+    // owes the mailbox, and saying so here is what makes the count visible in the log a failed
+    // run leaves behind.
+    let released = claim.channels().len();
+    drop(claim);
+    eprintln!("stopped; released {released} mailbox channel(s)");
+    Ok(())
+}
