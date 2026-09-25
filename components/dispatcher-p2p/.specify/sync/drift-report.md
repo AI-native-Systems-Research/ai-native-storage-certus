@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-15T22:04:08Z
-spec_sync_git_commit: f9bcd965
-spec_sync_inputs_sha256: 242cbe0e0e25b403cf8143e06cf629f213c289e015c29e0f16a74a022f6142dd
+spec_sync_synced_at: 2026-09-25T17:13:57Z
+spec_sync_git_commit: 13caf87e
+spec_sync_inputs_sha256: 70a5510d022d173d353ba97b2d4d4c7582a6bdc3df7f7c702f44c9aaac2244ad
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-25 (SSD-evictor drive-selection bug fix; drift resolved by backfill).** Branch `fix/ssd-evictor-drive-index-hash`. The `BackgroundEvictor` (`src/background.rs`) freed the backing extent on the extent manager chosen by a raw `key % num_drives`, while write-through placement enqueues each `WriteJob` with `device_index = drive_index(key, num_drives)` (splitmix64, FR-018). For `num_drives > 1` the two disagree for almost all keys, so the evictor freed the wrong extent manager — leaking the intended extent and potentially freeing a live extent for another key on the wrong drive. CODE (authoritative): the evictor now routes through `drive_index` (made `pub(crate)`). SPEC BACKFILL: FR-019 was silent on the evictor's drive selection; a clause now states it uses the same `drive_index(key, num_drives)` placement hash as FR-018 and records the prior `key % num_drives` drift. `src/lib.rs` + `src/background.rs` changed (moved the digest); `spec.md` FR-019 changed (moved it again). Digest recomputed over a clean tree matching CI; drift status `clean`.
+
 > **Re-stamp 2026-09-15 (workspace `cargo fmt` sweep; no drift).** Commit `f9bcd965` ("Add shmq RESERVE batch shared-deadline regression test") ran `cargo fmt` across the whole workspace, reflowing this component's `src/*.rs` (multi-line ↔ single-line argument lists and struct literals, import reordering). `git diff -w` confirms no token-level logic, signature, or contract change — the only substantive addition in that commit is a regression test in `lib/shmq-dispatcher/src/translate.rs`, which is outside this component and outside the spec-sync gate's `components/` scope. The formatting moved this component's `spec_sync_inputs_sha256`, but its spec↔implementation alignment is unchanged. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
 
 > **Re-stamp 2026-09-15 (interface signature threaded; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory`. This component's `src/` was touched only to thread that parameter through to satisfy the trait — it is ignored here (this dispatcher allocates straight-through / the mock is `unimplemented!()`), so there is no behavioral or contract change. This component's spec does not describe `reserve_memory`. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
