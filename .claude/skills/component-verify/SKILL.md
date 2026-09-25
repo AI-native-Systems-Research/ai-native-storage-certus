@@ -28,7 +28,14 @@ These rails exist because most of last week was lost to unclean/stale trees. The
 1. **Clean tree.** If the current working tree has uncommitted changes to tracked files, **stop** — print `git status --porcelain` and refuse. The operator commits/stashes first.
 2. **Fresh base.** `git fetch origin`. Create a **fresh worktree off `origin/unstable`** for this run (do not reuse an old checkout). Every role runs inside this fresh worktree. Record the resolved `origin/unstable` commit as the run **pin** — it stamps every YAML and the HTML.
 3. **Prover doctor (Creusot runs only).** Confirm the SMT portfolio is registered: `why3 config list-provers` must show **Alt-Ergo, Z3, CVC5, CVC4**. If any are missing, ensure `~/.local/share/creusot/bin` is on `PATH` and run `why3 config detect` (this writes absolute prover paths into `why3.conf`). Re-check; if still short, **stop** and report which prover is unavailable — do not run Creusot against a degraded portfolio and mis-attribute the misses to a tool boundary.
-4. **Component exists.** `components/<component>/` and its `I<component>` interface must exist. If not, stop.
+4. **Component exists.** `components/<component>/` must exist, and so must its interface — but the interface is **not** in the component's own directory and is **macro-generated**, so do not grep for `trait I<component>`: that text appears nowhere in the repo and every component would falsely fail this gate. Look in **`components/interfaces/src/i<component>.rs`** for the block
+   ```
+   component_macros::define_interface! {
+       pub I<Component> {   // often under #[cfg(feature = "spdk")]
+   ```
+   and take the `fn` names declared inside that block as the public-method surface **`N`** (the scoreboard denominator). Example: `idispatch_map.rs` declares `pub IDispatchMap { … }` with `N = 20`.
+
+   The filename is **not always** a literal transform of the component name (`block-device-filesys` is served by `iblock_device.rs`), and a component may implement an interface whose method count differs from its scoreboard denominator — so resolve the interface from the component's own `use interfaces::{…}` import and its `impl I<X> for …`, then confirm the `define_interface!` block. All 16 interface files in the repo follow this pattern; if you cannot locate the block for this component, stop rather than guess.
 
 Print a one-line precondition summary (`clean ✓ | base <pin> | provers alt-ergo/z3/cvc5/cvc4 ✓ | component ✓`) before continuing.
 
