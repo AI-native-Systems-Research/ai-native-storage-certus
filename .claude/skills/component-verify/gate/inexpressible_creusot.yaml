@@ -48,10 +48,14 @@ tool: creusot
 
 # Fallback build environment for the isolated confirmation probe. The scorer PREFERS the
 # creusot-std patch path parsed from the component's own Cargo.toml (so the probe builds
-# against the identical toolchain the real proofs use); this is used only when that parse
-# fails. Update if the checkout moves.
+# against the identical toolchain the real proofs use); these are used only when that parse
+# fails. Paths are CHECKOUT-RELATIVE, resolved against the repo root (the nearest ancestor of
+# the component holding .git) — never absolute machine paths, so this registry is portable to
+# any colleague's clone. Add a candidate if a checkout vendors creusot-std elsewhere; to point
+# at a one-off location without editing this file, export $CREUSOT_STD_PATH.
 probe_env:
-  creusot_std_path: "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std"
+  creusot_std_candidates:
+    - "tools/creusot/creusot/creusot-std"
 
 constructs:
   - id: IX-CREUSOT-STRING-CONTENT

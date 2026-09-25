@@ -295,6 +295,58 @@ def _component_creusot_std(crate_dir):
     return m.group(1) if m else None
 
 
+def _repo_root(start):
+    """Nearest ancestor of `start` holding a `.git` entry (the checkout root); None if none."""
+    d = os.path.abspath(start)
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+
+def _resolve_creusot_std(crate_dir, reg):
+    """ABSOLUTE path to the creusot-std the isolated probe patches against, or None.
+
+    Checkout-agnostic by construction: nothing here assumes a particular $HOME or clone
+    location, so the gate runs unchanged in any colleague's checkout. Tried in order:
+      1. $CREUSOT_STD_PATH — explicit operator override;
+      2. the component's OWN Cargo.toml patch path, so the probe builds against the same
+         creusot-std as the real proofs. Cargo reads such a path relative to the manifest,
+         so a relative one is resolved against crate_dir (it is later written into a /tmp
+         probe crate, where only an absolute path can resolve);
+      3. registry `probe_env.creusot_std_candidates`, each resolved against the repo root;
+      4. registry `probe_env.creusot_std_path` — legacy absolute fallback, `~` expanded.
+    The first candidate that is an existing directory wins.
+    """
+    cands = []
+    env_p = os.environ.get("CREUSOT_STD_PATH")
+    if env_p:
+        cands.append(os.path.expanduser(env_p))
+    parsed = _component_creusot_std(crate_dir)
+    if parsed:
+        parsed = os.path.expanduser(parsed)
+        cands.append(parsed if os.path.isabs(parsed)
+                     else os.path.normpath(os.path.join(os.path.abspath(crate_dir), parsed)))
+    pe = reg.get("probe_env") or {}
+    root = _repo_root(crate_dir)
+    for rel in (pe.get("creusot_std_candidates") or []):
+        rel = os.path.expanduser(rel)
+        if os.path.isabs(rel):
+            cands.append(rel)
+        elif root:
+            cands.append(os.path.normpath(os.path.join(root, rel)))
+    legacy = pe.get("creusot_std_path")
+    if legacy:
+        cands.append(os.path.expanduser(legacy))
+    for c in cands:
+        if os.path.isdir(c):
+            return c
+    return None
+
+
 def build_probe_isolated(construct, ctx):
     """Build the construct's SCORER-OWNED canonical probe (`probe_lib_rs`) in an ISOLATED
     throwaway crate mirroring the component's creusot-std patch + why3find.json; return
@@ -310,10 +362,11 @@ def build_probe_isolated(construct, ctx):
         cache[cid] = (None, f"construct {cid} has no probe_lib_rs to build")
         return cache[cid]
     reg = ctx.get("inexpressible") or {}
-    std_path = _component_creusot_std(ctx["crate_dir"]) or (reg.get("probe_env") or {}).get("creusot_std_path")
-    if not std_path or not os.path.isdir(std_path):
-        cache[cid] = (None, f"cannot locate a creusot-std patch path for the isolated probe "
-                            f"(component Cargo.toml + registry probe_env); got {std_path!r}")
+    std_path = _resolve_creusot_std(ctx["crate_dir"], reg)
+    if not std_path:
+        cache[cid] = (None, f"cannot locate a creusot-std directory for the isolated probe — tried "
+                            f"$CREUSOT_STD_PATH, the component Cargo.toml patch path, and the registry "
+                            f"probe_env candidates relative to the repo root of {ctx['crate_dir']!r}")
         return cache[cid]
     tmp = tempfile.mkdtemp(prefix=f"ix_probe_{cid}_")
     try:
