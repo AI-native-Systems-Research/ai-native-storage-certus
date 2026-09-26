@@ -1,0 +1,300 @@
+# Blind code extraction for eviction-policy-lru.
+# Source artifacts: components/eviction-policy-lru/src/** (lib.rs, lru_list.rs) and the
+# IEvictionPolicy interface ONLY (no spec, no prior inventory seen). Code surfaces
+# implementation-internal obligations (arena machinery); these are kept here as their own
+# records and are collapsed up to observable properties during reconciliation in unified.
+component:  eviction-policy-lru
+source:     code
+artifact:   components/eviction-policy-lru/src/lib.rs, components/eviction-policy-lru/src/lru_list.rs
+pin:        f3de84aa
+method:     blind-extraction
+generated:  2026-09-22
+counts: {total: 36, methods: 9, verifiable: 34, not_verifiable: 2}
+properties:
+  # ---- component layer (lib.rs) ----
+  - id:         CODE-CREATEPOOL-SEQ
+    subject:    create_pool
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      create_pool returns the current number of pools as the new pool id and then appends a fresh
+      empty pool, so ids come out as 0, 1, 2, ... on successive calls.
+    traces:     ["lib.rs:44-54"]
+  - id:         CODE-TRACK-OK-INC
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      track on an existing pool pushes the key onto that pool's list and returns Ok(handle); the
+      pool's active-entry count increases by exactly one.
+    traces:     ["lib.rs:56-74"]
+  - id:         CODE-TRACK-HANDLE-POOL
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The handle returned by track carries the pool id that was passed in and the node index that
+      the pool's list assigned to the new entry.
+    traces:     ["lib.rs:72-73"]
+  - id:         CODE-TRACK-PUSHBACK-NEW
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      track unconditionally calls push_back on the pool's list; it never checks whether the key is
+      already present, so re-tracking a key adds another entry and returns a new handle.
+    traces:     ["lib.rs:72"]
+  - id:         CODE-TRACK-INVALIDPOOL
+    subject:    track
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When the requested pool index is out of range, track returns Err(InvalidPool(pool)) and does
+      not modify any pool.
+    traces:     ["lib.rs:63-70"]
+  - id:         CODE-TOUCH-OK
+    subject:    touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      touch on an existing pool calls move_to_back on the referenced index and returns Ok(()); the
+      pool's active-entry count is unchanged.
+    traces:     ["lib.rs:76-90"]
+  - id:         CODE-TOUCH-INVALIDPOOL
+    subject:    touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When the handle's pool index is out of range, touch returns Err(InvalidPool) and does not
+      modify any pool.
+    traces:     ["lib.rs:78-86"]
+  - id:         CODE-REMOVE-OK-DEC
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      remove on an existing pool calls the list's remove on the referenced index and returns
+      Ok(()); if that index was active, the pool's active-entry count decreases by exactly one.
+    traces:     ["lib.rs:120-134"]
+  - id:         CODE-REMOVE-INVALIDPOOL
+    subject:    remove
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When the handle's pool index is out of range, remove returns Err(InvalidPool) and does not
+      modify any pool.
+    traces:     ["lib.rs:122-130"]
+  - id:         CODE-EVICT-POPFRONT
+    subject:    identify_next_to_evict
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      identify_next_to_evict on an existing pool returns pop_front of that pool's list: the oldest
+      (head) key, removing it, or None when the pool is empty.
+    traces:     ["lib.rs:136-141"]
+  - id:         CODE-EVICT-DEGRADE
+    subject:    identify_next_to_evict
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When the pool index is out of range, identify_next_to_evict returns None (the ? on
+      pools.get short-circuits) rather than erroring.
+    traces:     ["lib.rs:138"]
+  - id:         CODE-CANDIDATES-PEEK
+    subject:    get_eviction_candidates
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      get_eviction_candidates on an existing pool returns peek_front_n(n) of that pool's list: up
+      to n oldest keys, oldest first, without removing them.
+    traces:     ["lib.rs:143-152"]
+  - id:         CODE-CANDIDATES-DEGRADE
+    subject:    get_eviction_candidates
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When the pool index is out of range, get_eviction_candidates returns an empty vector.
+    traces:     ["lib.rs:150"]
+  - id:         CODE-LEN-RETURNS
+    subject:    len
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      len on an existing pool returns that pool's list length; the value equals the number of active
+      entries.
+    traces:     ["lib.rs:154-163"]
+  - id:         CODE-LEN-DEGRADE
+    subject:    len
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When the pool index is out of range, len returns 0.
+    traces:     ["lib.rs:160-161"]
+  - id:         CODE-CLEAR-RESETS
+    subject:    clear_pool
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      clear_pool on an existing pool calls the list's clear, after which the pool length is 0 and
+      eviction returns None.
+    traces:     ["lib.rs:165-171"]
+  - id:         CODE-CLEAR-DEGRADE
+    subject:    clear_pool
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When the pool index is out of range, clear_pool does nothing (the if-let guard fails
+      silently).
+    traces:     ["lib.rs:166-170"]
+  - id:         CODE-BATCH-EMPTY-OK
+    subject:    batch_touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      batch_touch with an empty slice returns Ok(()) immediately, touching nothing.
+    traces:     ["lib.rs:92-95"]
+  - id:         CODE-BATCH-MOVESALL
+    subject:    batch_touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      batch_touch calls move_to_back for every handle in the slice, switching to the correct pool's
+      lock whenever consecutive handles name different pools.
+    traces:     ["lib.rs:96-117"]
+  - id:         CODE-BATCH-INVALIDPOOL
+    subject:    batch_touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When any handle in the slice names an out-of-range pool, batch_touch returns
+      Err(InvalidPool) for that pool id.
+    traces:     ["lib.rs:98-101", "lib.rs:108-112"]
+  # ---- arena layer (lru_list.rs) internals ----
+  - id:         CODE-PUSHBACK-LEN-INC
+    subject:    push_back
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      push_back increases the list length by exactly one and returns the index of the newly
+      inserted node.
+    traces:     ["lru_list.rs:37-67"]
+  - id:         CODE-PUSHBACK-TAIL
+    subject:    push_back
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After push_back the new node is the tail of the list (most-recently-used), linked from the
+      previous tail, and it is also the head when the list was previously empty.
+    traces:     ["lru_list.rs:57-63"]
+  - id:         CODE-PUSHBACK-RECYCLE
+    subject:    push_back
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      push_back reuses a slot from the free list when one is available (popping it) and only grows
+      the backing vector when the free list is empty.
+    traces:     ["lru_list.rs:38-55"]
+  - id:         CODE-MOVE-INACTIVE-NOOP
+    subject:    move_to_back
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      move_to_back on an index whose node is inactive returns immediately, changing nothing.
+    traces:     ["lru_list.rs:70-73"]
+  - id:         CODE-MOVE-TAIL-NOOP
+    subject:    move_to_back
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      move_to_back on an index that is already the tail returns immediately, changing nothing.
+    traces:     ["lru_list.rs:74-76"]
+  - id:         CODE-MOVE-TO-TAIL
+    subject:    move_to_back
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      move_to_back on an active non-tail node unlinks it from its current position and relinks it as
+      the new tail, leaving the list length unchanged.
+    traces:     ["lru_list.rs:78-96"]
+  - id:         CODE-POP-HEAD
+    subject:    pop_front
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      pop_front returns the key of the head node (or None if the list is empty) and removes that
+      head node.
+    traces:     ["lru_list.rs:99-104"]
+  - id:         CODE-PEEK-NONDESTRUCTIVE
+    subject:    peek_front_n
+    kind:       frame
+    verifiable: true
+    statement:  >
+      peek_front_n reads keys by walking from the head along next pointers and never mutates the
+      list; length and contents are unchanged.
+    traces:     ["lru_list.rs:107-118"]
+  - id:         CODE-PEEK-COUNT-ORDER
+    subject:    peek_front_n
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      peek_front_n(n) returns the first up-to-n keys in head-to-tail (oldest-first) order, stopping
+      at n or at the end of the list.
+    traces:     ["lru_list.rs:107-118"]
+  - id:         CODE-REMOVE-INACTIVE-NOOP
+    subject:    remove_node
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The list's remove on an already-inactive index returns immediately and changes nothing,
+      including not decrementing the length.
+    traces:     ["lru_list.rs:121-124"]
+  - id:         CODE-REMOVE-DEC
+    subject:    remove_node
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The list's remove on an active index unlinks the node, marks it inactive, pushes its slot to
+      the free list, and decrements length by one.
+    traces:     ["lru_list.rs:121-145"]
+  - id:         CODE-CLEAR-EMPTY
+    subject:    clear
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The list's clear empties the node vector and free list, sets head and tail to None, and sets
+      length to 0.
+    traces:     ["lru_list.rs:148-154"]
+  - id:         CODE-LEN-EQ-ACTIVE
+    subject:    lru-invariant
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The stored length field always equals the number of active nodes, and head, tail, and every
+      node's prev/next pointer are either None or a valid in-range node index.
+    traces:     ["lru_list.rs:17-23", "lru_list.rs:65", "lru_list.rs:144"]
+  - id:         CODE-POOL-ISOLATION
+    subject:    pool-isolation
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Each pool is a separate Mutex-guarded list in the pools vector, so an operation that locks and
+      mutates one pool leaves every other pool's list untouched.
+    traces:     ["lib.rs:26-28", "lib.rs:62-72"]
+  # ---- not-verifiable ledger ----
+  - id:         NV-CODE-1
+    scope:      "RwLock/Mutex concurrency safety"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The top-level RwLock plus per-pool Mutex give thread safety, but that concurrent callers never
+      corrupt state is not decidable by a single-threaded functional verifier; it belongs to a
+      concurrency model checker (Loom).
+    traces:     ["lib.rs:26-27", "lib.rs:45", "lib.rs:62"]
+  - id:         NV-CODE-2
+    scope:      "logger receptacle side effects"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The debug/warn logging calls on the optional logger receptacle are best-effort side effects
+      with no observable effect on eviction state, so there is no behavioral counterexample to check.
+    traces:     ["lib.rs:50-52", "lib.rs:64-68"]
