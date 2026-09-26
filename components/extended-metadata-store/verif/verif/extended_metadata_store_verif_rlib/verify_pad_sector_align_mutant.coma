@@ -1,0 +1,61 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 53 0 53 71 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 54 12 54 21
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 55 12 55 13
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 58 9 58 18
+let%span slib'2 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 58 21 58 22
+let%span slib'3 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 58 8 58 23
+let%span slib'4 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 58 8 58 28
+let%span slib'5 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 49 11 49 18
+let%span slib'6 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 50 11 50 37
+let%span slib'7 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 51 11 51 20
+let%span slib'8 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 52 10 52 26
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_pad_sector_align__mutant [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 53 0 53 71]
+  (size: UInt64.t) (ss: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_pad_sector_align__mutant requires] ([@stop_split] [@expl:verify_pad_sector_align__mutant requires #0] [%#slib'5] UInt64.t'int ss
+    > 0)
+  /\ ([@stop_split] [@expl:verify_pad_sector_align__mutant requires #1] [%#slib'6] UInt64.t'int size + UInt64.t'int ss
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:verify_pad_sector_align__mutant requires #2] [%#slib'7] UInt64.t'int size > 0)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_14 <- ss ] s1
+    | s1 = [ &_15 <- _14 = ([%#slib] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:remainder by zero] [%#slib] not _15} s3
+    | s3 = UInt64.rem [%#slib] {size} {_14} (fun (_x: UInt64.t) -> [ &r <- _x ] s4)
+    | s4 = [ &_16 <- r = ([%#slib'0] (0: UInt64.t)) ] s5
+    | s5 = any [ br0 -> {_16 = false} (! bb3) | br1 -> {_16} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &_ret <- size ] s1 | s1 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = [ &_21 <- ss ] s1
+    | s1 = [ &_22 <- _21 = ([%#slib'1] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:division by zero] [%#slib'1] not _22} s3
+    | s3 = UInt64.div [%#slib'1] {size} {_21} (fun (_x: UInt64.t) -> [ &_19 <- _x ] s4)
+    | s4 = UInt64.add [%#slib'3] {_19} {[%#slib'2] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_18 <- _x ] s5)
+    | s5 = UInt64.mul [%#slib'4] {_18} {ss} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s6)
+    | s6 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & size: UInt64.t = size
+  | & ss: UInt64.t = ss
+  | & r: UInt64.t = Any.any_l ()
+  | & _14: UInt64.t = Any.any_l ()
+  | & _15: bool = Any.any_l ()
+  | & _16: bool = Any.any_l ()
+  | & _18: UInt64.t = Any.any_l ()
+  | & _19: UInt64.t = Any.any_l ()
+  | & _21: UInt64.t = Any.any_l ()
+  | & _22: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_pad_sector_align__mutant ensures] [%#slib'8] UInt64.t'int result = UInt64.t'int size}
+    (! return {result}) ]

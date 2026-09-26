@@ -1,0 +1,45 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 272 0 272 100 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 273 13 273 29
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 273 44 273 58
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 273 4 273 84
+let%span slib'2 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 270 11 270 97
+let%span slib'3 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 271 10 271 25
+let%span slib'4 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 23 0 23 31
+let%span slib'5 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 24 0 24 29
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+constant const_SUPERBLOCK_MAGIC: UInt64.t = [%#slib'4] (4847371095961326657: UInt64.t)
+
+constant const_FORMAT_VERSION: UInt32.t = [%#slib'5] (1: UInt32.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_sb_roundtrip__mutant [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 272 0 272 100]
+  (magic: UInt64.t) (version: UInt32.t) (stored_crc: UInt32.t) (comp_crc: UInt32.t) (return (x: bool)) =
+{[@stop_split] [@expl:verify_sb_roundtrip__mutant requires] [%#slib'2] UInt64.t'int magic
+    = UInt64.t'int const_SUPERBLOCK_MAGIC
+  /\ UInt32.t'int version = UInt32.t'int const_FORMAT_VERSION /\ UInt32.t'int stored_crc = UInt32.t'int comp_crc}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_11 <- magic = ([%#slib] const_SUPERBLOCK_MAGIC) ] s1
+    | s1 = any [ br0 -> {_11 = false} (! bb5) | br1 -> {_11} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &_13 <- version = ([%#slib'0] const_FORMAT_VERSION) ] s1
+    | s1 = any [ br0 -> {_13 = false} (! bb5) | br1 -> {_13} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &_ret <- stored_crc = comp_crc ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- [%#slib'1] false ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & magic: UInt64.t = magic
+  | & version: UInt32.t = version
+  | & stored_crc: UInt32.t = stored_crc
+  | & comp_crc: UInt32.t = comp_crc
+  | & _11: bool = Any.any_l ()
+  | & _13: bool = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_sb_roundtrip__mutant ensures] [%#slib'3] result = false}
+    (! return {result}) ]

@@ -1,0 +1,40 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 155 0 155 82 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 156 17 156 18
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 151 11 151 27
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 152 10 152 32
+let%span slib'2 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 153 10 153 69
+let%span slib'3 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 154 10 154 69
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_region_offset_swap [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 155 0 155 82]
+  (a_off: UInt64.t) (b_off: UInt64.t) (active: UInt8.t) (return (x: tup2_u64_u64)) =
+{[@stop_split] [@expl:verify_region_offset_swap requires] [%#slib'0] UInt64.t'int a_off <> UInt64.t'int b_off}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_16 <- active = ([%#slib] (0: UInt8.t)) ] s1
+    | s1 = any [ br0 -> {_16 = false} (! bb2) | br1 -> {_16} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- { f0 = a_off; f1 = b_off } ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- { f0 = b_off; f1 = a_off } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup2_u64_u64 = Any.any_l ()
+  | & a_off: UInt64.t = a_off
+  | & b_off: UInt64.t = b_off
+  | & active: UInt8.t = active
+  | & _16: bool = Any.any_l () ])
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:verify_region_offset_swap ensures] ([@stop_split] [@expl:verify_region_offset_swap ensures #0] [%#slib'1] UInt64.t'int result.f0
+      <> UInt64.t'int result.f1)
+    /\ ([@stop_split] [@expl:verify_region_offset_swap ensures #1] [%#slib'2] UInt8.t'int active = 0
+      -> UInt64.t'int result.f0 = UInt64.t'int a_off /\ UInt64.t'int result.f1 = UInt64.t'int b_off)
+    /\ ([@stop_split] [@expl:verify_region_offset_swap ensures #2] [%#slib'3] UInt8.t'int active <> 0
+    -> UInt64.t'int result.f0 = UInt64.t'int b_off /\ UInt64.t'int result.f1 = UInt64.t'int a_off)}
+    (! return {result}) ]

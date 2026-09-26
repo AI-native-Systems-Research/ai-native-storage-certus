@@ -1,0 +1,71 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 69 0 69 64 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 70 12 70 22
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 71 12 71 13
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 72 8 72 18
+let%span slib'2 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 74 8 74 18
+let%span slib'3 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 74 21 74 22
+let%span slib'4 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 74 8 74 22
+let%span slib'5 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 64 11 64 18
+let%span slib'6 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 65 11 65 38
+let%span slib'7 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 66 10 66 38
+let%span slib'8 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 67 10 67 33
+let%span slib'9 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 68 10 68 53
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bytes_to_sectors [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 69 0 69 64]
+  (bytes: UInt64.t) (ss: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_bytes_to_sectors requires] ([@stop_split] [@expl:verify_bytes_to_sectors requires #0] [%#slib'5] UInt64.t'int ss
+    > 0)
+  /\ ([@stop_split] [@expl:verify_bytes_to_sectors requires #1] [%#slib'6] UInt64.t'int bytes + UInt64.t'int ss
+  <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_18 <- ss ] s1
+    | s1 = [ &_19 <- _18 = ([%#slib] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:remainder by zero] [%#slib] not _19} s3
+    | s3 = UInt64.rem [%#slib] {bytes} {_18} (fun (_x: UInt64.t) -> [ &r <- _x ] s4)
+    | s4 = [ &_20 <- r = ([%#slib'0] (0: UInt64.t)) ] s5
+    | s5 = any [ br0 -> {_20 = false} (! bb4) | br1 -> {_20} (! bb2) ] ]
+  | bb2 = s0
+    [ s0 = [ &_23 <- ss ] s1
+    | s1 = [ &_24 <- _23 = ([%#slib'1] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:division by zero] [%#slib'1] not _24} s3
+    | s3 = UInt64.div [%#slib'1] {bytes} {_23} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s4)
+    | s4 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = [ &_27 <- ss ] s1
+    | s1 = [ &_28 <- _27 = ([%#slib'2] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:division by zero] [%#slib'2] not _28} s3
+    | s3 = UInt64.div [%#slib'2] {bytes} {_27} (fun (_x: UInt64.t) -> [ &_25 <- _x ] s4)
+    | s4 = UInt64.add [%#slib'4] {_25} {[%#slib'3] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s5)
+    | s5 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & bytes: UInt64.t = bytes
+  | & ss: UInt64.t = ss
+  | & r: UInt64.t = Any.any_l ()
+  | & _18: UInt64.t = Any.any_l ()
+  | & _19: bool = Any.any_l ()
+  | & _20: bool = Any.any_l ()
+  | & _23: UInt64.t = Any.any_l ()
+  | & _24: bool = Any.any_l ()
+  | & _25: UInt64.t = Any.any_l ()
+  | & _27: UInt64.t = Any.any_l ()
+  | & _28: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_bytes_to_sectors ensures] ([@stop_split] [@expl:verify_bytes_to_sectors ensures #0] [%#slib'7] UInt64.t'int bytes
+        = 0 -> UInt64.t'int result = 0)
+    /\ ([@stop_split] [@expl:verify_bytes_to_sectors ensures #1] [%#slib'8] UInt64.t'int result * UInt64.t'int ss
+      >= UInt64.t'int bytes)
+    /\ ([@stop_split] [@expl:verify_bytes_to_sectors ensures #2] [%#slib'9] UInt64.t'int bytes > 0
+    -> (UInt64.t'int result - 1) * UInt64.t'int ss < UInt64.t'int bytes)}
+    (! return {result}) ]

@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_crc32_deterministic__mutant": {
+        "prover": "alt-ergo",
+        "time": 0.015
+      }
+    }
+  }
+}

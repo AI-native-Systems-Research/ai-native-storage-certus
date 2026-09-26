@@ -1,0 +1,53 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 141 0 141 66 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 142 16 142 20
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 143 23 143 24
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 143 17 143 25
+let%span slib'2 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 143 28 143 29
+let%span slib'3 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 143 17 143 29
+let%span slib'4 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 145 16 145 17
+let%span slib'5 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 145 16 145 26
+let%span slib'6 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 138 11 138 18
+let%span slib'7 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 139 11 139 27
+let%span slib'8 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 140 10 140 32
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type tup4_u64_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t; f3: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_sb_geometry__mutant [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 141 0 141 66]
+  (ps: UInt64.t) (return (x: tup4_u64_u64_u64_u64)) =
+{[@stop_split] [@expl:verify_sb_geometry__mutant requires] ([@stop_split] [@expl:verify_sb_geometry__mutant requires #0] [%#slib'6] UInt64.t'int ps
+    > 1)
+  /\ ([@stop_split] [@expl:verify_sb_geometry__mutant requires #1] [%#slib'7] UInt64.t'int ps
+  <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &a_off <- [%#slib] (1: UInt64.t) ] s1
+    | s1 = UInt64.sub [%#slib'1] {ps} {[%#slib'0] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_9 <- _x ] s2)
+    | s2 = [ &_11 <- ([%#slib'2] (2: UInt64.t)) = ([%#slib'3] (0: UInt64.t)) ] s3
+    | s3 = {[@expl:division by zero] [%#slib'3] not _11} s4
+    | s4 = UInt64.div [%#slib'3] {_9} {[%#slib'2] (2: UInt64.t)} (fun (_x: UInt64.t) -> [ &a_size <- _x ] s5)
+    | s5 = [ &b_size <- a_size ] s6
+    | s6 = UInt64.add [%#slib'5] {[%#slib'4] (1: UInt64.t)} {a_size} (fun (_x: UInt64.t) -> [ &b_off <- _x ] s7)
+    | s7 = [ &_ret <- { f0 = a_off; f1 = a_size; f2 = b_off; f3 = b_size } ] s8
+    | s8 = return {_ret} ] ]
+  [ & _ret: tup4_u64_u64_u64_u64 = Any.any_l ()
+  | & ps: UInt64.t = ps
+  | & a_off: UInt64.t = Any.any_l ()
+  | & a_size: UInt64.t = Any.any_l ()
+  | & _9: UInt64.t = Any.any_l ()
+  | & _11: bool = Any.any_l ()
+  | & b_size: UInt64.t = Any.any_l ()
+  | & b_off: UInt64.t = Any.any_l () ])
+  [ return (result: tup4_u64_u64_u64_u64) ->
+  {[@stop_split] [@expl:verify_sb_geometry__mutant ensures] [%#slib'8] UInt64.t'int result.f1 <> UInt64.t'int result.f3}
+    (! return {result}) ]

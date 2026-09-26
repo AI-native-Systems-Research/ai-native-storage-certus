@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_dirty_count_increment": {
+        "prover": "alt-ergo",
+        "time": 0.016
+      }
+    }
+  }
+}

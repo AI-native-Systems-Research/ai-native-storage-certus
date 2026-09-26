@@ -1,0 +1,1650 @@
+component: extended-metadata-store
+interface: IExtendedMetadataStore
+pin: f3de84aa
+spec_source: components/extended-metadata-store/specs/001-extended-metadata-store/spec.md
+code_source: components/extended-metadata-store/src/**
+tools:
+- creusot
+- kani
+counts:
+  N_methods: 5
+  spec_total: 26
+  code_total: 34
+  unified_verifiable: 39
+  unified_nv: 7
+run:
+  gate_commit: 7757ae4b
+  gate_branch: skills/verify-methodology-to-unstable
+  creusot:
+    scored_by: scorer_creusot
+    command: scorer_creusot.py /home/cornel/rescore-20260925/extended-metadata-store/verif --crate-dir
+      /home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif --cap-seconds
+      60 --cap-max 300
+    started: '2026-09-25T18:13:25-07:00'
+    finished: '2026-09-25T18:14:03-07:00'
+    creusot: v0.11.0-169-g9cf662ce6
+    why3: Why3 platform, version 1.8.2+git
+    provers:
+    - Alt-Ergo 2.6.2
+    - CVC4 1.8
+    - CVC5 1.3.1
+    - Coq 8.20.1
+    - Z3 4.16.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+  kani:
+    scored_by: scorer_kani
+    command: scorer_kani.py /home/cornel/rescore-20260925/extended-metadata-store/verif --component-dir
+      /home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store --cap-seconds
+      60 --cap-max 300
+    started: '2026-09-25T18:14:03-07:00'
+    finished: '2026-09-25T18:31:25-07:00'
+    kani_version: cargo-kani 0.67.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+properties:
+- id: PUT-GET-ROUNDTRIP
+  statement: After put(key, value) succeeds (value length 0..=131072), a subsequent get(key) returns Ok
+    holding a byte-for-byte identical copy of value.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - put
+  - get
+  global: true
+  attachments: 2
+  object_fn: IExtendedMetadataStore::put + IExtendedMetadataStore::get over RwLock<HashMap<String,Vec<u8>>>
+    (src/lib.rs:158-180)
+  traces:
+    spec:
+    - SPEC-PUT-GET-ROUNDTRIP
+    - FR-01
+    - FR-02
+    - US1
+    code:
+    - CODE-PUT-INSERT
+    - src/lib.rs:165-166
+    - src/lib.rs:176-179
+  creusot:
+    fidelity: logic-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_put_get_roundtrip
+      result: Proved
+      wall_clock_s: 0.82
+      peak_rss_mb: 129
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: kani-tool-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Creusot FMap: after put(k,v), get(k) == Some(v)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: PUT-SIZE-LIMIT
+  statement: put returns Err(ValueTooLarge) and performs no insertion and no dirty-count increment whenever
+    value.len() > MAX_VALUE_SIZE (131072).
+  kind: safety
+  verifiable: true
+  origin: both
+  methods:
+  - put
+  global: false
+  attachments: 1
+  object_fn: IExtendedMetadataStore::put size guard + MAX_VALUE_SIZE (src/lib.rs:159-161, src/lib.rs:63)
+  traces:
+    spec:
+    - SPEC-PUT-SIZE-LIMIT
+    - FR-06
+    - US1
+    code:
+    - CODE-PUT-MAX-GUARD
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_put_size_limit
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-shallow
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_put_size_limit
+      result: SUCCESS
+      wall_clock_s: 13.42
+      peak_rss_mb: 557
+    _scored_by: scorer_kani
+- id: PUT-OVERWRITE
+  statement: A second put on an existing key replaces the value; a following get returns the most recently
+    written value.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - put
+  - get
+  global: true
+  attachments: 2
+  object_fn: HashMap::insert replace semantics via IExtendedMetadataStore::put (src/lib.rs:165-166)
+  traces:
+    spec:
+    - SPEC-PUT-OVERWRITE
+    - FR-01
+    - US1
+    code:
+    - CODE-PUT-OVERWRITE
+  creusot:
+    fidelity: logic-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_put_overwrite
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: kani-tool-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Creusot FMap: second insert on same key replaces value, cardinality stays 1'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: GET-NOTFOUND
+  statement: get on a key that is not present returns Err(NotFound).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - get
+  global: false
+  attachments: 1
+  object_fn: IExtendedMetadataStore::get (src/lib.rs:176-179)
+  traces:
+    spec:
+    - SPEC-GET-NOTFOUND
+    - FR-02
+    - US1
+    code:
+    - CODE-GET-NOTFOUND
+  creusot:
+    fidelity: logic-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_get_notfound
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 50
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_get_notfound
+      result: SUCCESS
+      wall_clock_s: 5.81
+      peak_rss_mb: 68
+    _scored_by: scorer_kani
+- id: DELETE-REMOVES
+  statement: 'After delete(key) the key is absent: get(key) returns NotFound and the pair is excluded
+    from iterate_all().'
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - delete
+  - get
+  - iterate_all
+  global: true
+  attachments: 3
+  object_fn: IExtendedMetadataStore::delete via HashMap::remove (src/lib.rs:186-190)
+  traces:
+    spec:
+    - SPEC-DELETE-REMOVES
+    - FR-03
+    - US3
+    code:
+    - CODE-DELETE-REMOVE
+  creusot:
+    fidelity: logic-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_delete_removes
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: kani-tool-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Creusot FMap: after remove(k), get(k)==None and !contains(k)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: DELETE-IDEMPOTENT
+  statement: Deleting a key that is not present returns Ok(()) and leaves membership unchanged (idempotent).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - delete
+  global: false
+  attachments: 1
+  object_fn: IExtendedMetadataStore::delete ignores HashMap::remove Option (src/lib.rs:186-190)
+  traces:
+    spec:
+    - SPEC-DELETE-IDEMPOTENT
+    - FR-03
+    - US3
+    code:
+    - CODE-DELETE-IDEMPOTENT
+  creusot:
+    fidelity: logic-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_delete_idempotent
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: kani-tool-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Creusot FMap: remove of an absent key is Ok and leaves the map unchanged'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: ITERATE-REFLECTS
+  statement: 'iterate_all() returns exactly the current set of (key,value) pairs: every present key appears
+    once with its stored value, and no deleted/absent key appears.'
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - iterate_all
+  global: false
+  attachments: 1
+  object_fn: IExtendedMetadataStore::iterate_all snapshot clone (src/lib.rs:193-199)
+  traces:
+    spec:
+    - SPEC-ITERATE-SNAPSHOT
+    - FR-04
+    - US4
+    code:
+    - CODE-ITERATE-CLONE
+  creusot:
+    fidelity: logic-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_iterate_reflects
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: kani-tool-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Creusot FMap: iterate yields exactly the live entries and excludes deleted keys'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: DIRTY-COUNT-INCREMENT
+  statement: Each successful put and each delete increases the dirty count by exactly one; a put rejected
+    for ValueTooLarge does not change it.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - put
+  - delete
+  global: true
+  attachments: 2
+  object_fn: dirty_count.fetch_add(1) in put/delete (src/lib.rs:168, 189, 72-74)
+  traces:
+    spec:
+    - SPEC-DIRTY-COUNT
+    - FR-14
+    - US3
+    code:
+    - CODE-DIRTY-COUNT-FETCH-ADD
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_dirty_count_increment
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: kani-tool-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Creusot FMap + counter: dirty counter increments by 1 on each put and each delete'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: FORCE-FLUSH-NOOP
+  statement: In pure in-memory mode (flush_trigger is None) force_flush() returns Ok(()) as a no-op.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: force_flush None-branch over RwLock<Option<FlushTrigger>> (src/lib.rs:210-214)
+  traces:
+    spec:
+    - SPEC-FORCE-FLUSH-NOOP
+    - FR-05
+    code:
+    - CODE-FORCE-FLUSH-TRIGGER
+  creusot:
+    fidelity: logic-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_force_flush_noop
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_force_flush_noop
+      result: SUCCESS
+      wall_clock_s: 0.94
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: PAD-SECTOR-ALIGN
+  statement: pad_to_sector(size, ss) returns 0 for size 0, else a multiple of ss with size <= result <
+    size + ss; it is idempotent (pad(pad(x))==pad(x)).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::pad_to_sector (src/on_disk.rs:353-358)
+  traces:
+    spec:
+    - SPEC-SECTOR-ALIGNED
+    - NFR-03
+    code:
+    - CODE-PAD-TO-SECTOR
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_pad_sector_align
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_pad_sector_align
+      result: SUCCESS
+      wall_clock_s: 0.64
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: BYTES-TO-SECTORS
+  statement: bytes_to_sectors(b, ss) == pad_to_sector(b, ss)/ss == ceil(b/ss) (0 when b==0).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::bytes_to_sectors (src/on_disk.rs:360-362)
+  traces:
+    spec:
+    - SPEC-SECTOR-ALIGNED
+    - NFR-03
+    code:
+    - CODE-BYTES-TO-SECTORS
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bytes_to_sectors
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bytes_to_sectors
+      result: SUCCESS
+      wall_clock_s: 0.67
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: ENTRY-SIZE-ALIGNED
+  statement: EntryRecord::serialized_size == pad_to_sector(12 + key.len() + value.len(), ss) and is a
+    multiple of ss; the serialize() buffer has exactly that length.
+  kind: functional
+  verifiable: true
+  origin: code-only
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::EntryRecord::serialized_size/serialize (src/on_disk.rs:222-255)
+  traces:
+    spec:
+    - SPEC-SECTOR-ALIGNED
+    - NFR-03
+    code:
+    - CODE-ENTRY-SERIALIZED-SIZE
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_entry_size_aligned
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 52
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_entry_size_aligned
+      result: SUCCESS
+      wall_clock_s: 10.45
+      peak_rss_mb: 152
+    _scored_by: scorer_kani
+- id: SB-GEOMETRY
+  statement: Superblock::new(ss, ps) with ps > 1 yields region_a_offset=1, region_a_size=region_b_size=(ps-1)/2,
+    region_b_offset=1+region_a_size, so the two equal regions are adjacent, ordered, and lie within the
+    partition; ps<=1 gives all-zero geometry.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::Superblock::new (src/on_disk.rs:27-57)
+  traces:
+    spec:
+    - SPEC-DUAL-REGION-PINGPONG
+    - FR-07
+    code:
+    - CODE-SUPERBLOCK-NEW-GEOMETRY
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_sb_geometry
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_sb_geometry
+      result: SUCCESS
+      wall_clock_s: 0.68
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: REGION-OFFSET-SWAP
+  statement: active_region_offset() and inactive_region_offset() select opposite region offsets by active_region
+    (0 -> A/B, else B/A) and are distinct whenever region_a_offset != region_b_offset.
+  kind: functional
+  verifiable: true
+  origin: code-only
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::Superblock::{active,inactive}_region_offset (src/on_disk.rs:131-145)
+  traces:
+    spec:
+    - SPEC-DUAL-REGION-PINGPONG
+    - FR-07
+    code:
+    - CODE-REGION-OFFSET-SWAP
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_region_offset_swap
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_region_offset_swap
+      result: SUCCESS
+      wall_clock_s: 0.63
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: REGION-CAPACITY-BYTES
+  statement: Superblock::region_capacity_bytes() == region_a_size * (sector_size as u64).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::Superblock::region_capacity_bytes (src/on_disk.rs:147-149)
+  traces:
+    spec:
+    - SPEC-REGION-CAPACITY-BYTES
+    - FR-18
+    code:
+    - CODE-REGION-CAPACITY-BYTES
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_region_capacity_bytes
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_region_capacity_bytes
+      result: SUCCESS
+      wall_clock_s: 0.59
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LE-BYTEORDER
+  statement: 'The little-endian integer helpers round-trip: read_u64(write_u64(buf,x)) == x (and u32/u16),
+    each advancing the cursor by 8/4/2.'
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: true
+  attachments: 1
+  object_fn: on_disk::{write_u64,read_u64,write_u32,read_u32,write_u16,read_u16} (src/on_disk.rs:379-410)
+  traces:
+    spec:
+    - SPEC-LITTLE-ENDIAN
+    - NFR-09
+    code:
+    - CODE-LE-HELPERS-ROUNDTRIP
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_le_byteorder
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_le_byteorder
+      result: SUCCESS
+      wall_clock_s: 3.5
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: CRC32-DETERMINISTIC
+  statement: crc32_of is a deterministic pure function of its input bytes (equal inputs give equal CRCs);
+    it implements reflected CRC-32 (poly 0xEDB88320, init/xorout 0xFFFFFFFF).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::crc32_of (src/on_disk.rs:364-377)
+  traces:
+    spec:
+    - SPEC-CRC32-INTEGRITY
+    - NFR-02
+    code:
+    - CODE-CRC32-PURE
+  creusot:
+    fidelity: null
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    status: tool-boundary
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_crc32_deterministic
+      result: SUCCESS
+      wall_clock_s: 8.5
+      peak_rss_mb: 241
+    _scored_by: scorer_kani
+- id: SB-ROUNDTRIP
+  statement: Superblock::serialize then deserialize reproduces every integer field and recomputes a matching
+    CRC, returning Some with equal fields.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::Superblock::{serialize,deserialize} (src/on_disk.rs:59-129)
+  traces:
+    spec:
+    - SPEC-CRC32-INTEGRITY
+    - NFR-02
+    - FR-07
+    code:
+    - CODE-SUPERBLOCK-ROUNDTRIP
+  creusot:
+    fidelity: structural
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_sb_roundtrip
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-shallow
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_sb_roundtrip
+      result: SUCCESS
+      wall_clock_s: 35.14
+      peak_rss_mb: 703
+    _scored_by: scorer_kani
+- id: SB-CRC-REJECT
+  statement: 'A serialized superblock whose CRC-covered prefix is altered (recomputed CRC != stored CRC)
+    is rejected: deserialize returns None.'
+  kind: safety
+  verifiable: true
+  origin: code-only
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::Superblock::deserialize CRC guard (src/on_disk.rs:110-113)
+  traces:
+    spec:
+    - SPEC-CRC32-INTEGRITY
+    - NFR-02
+    code:
+    - CODE-SUPERBLOCK-CRC-REJECT
+  creusot:
+    fidelity: structural
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_sb_crc_reject
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_sb_crc_reject
+      result: SUCCESS
+      wall_clock_s: 29.89
+      peak_rss_mb: 357
+    _scored_by: scorer_kani
+- id: SB-MAGIC-REJECT
+  statement: Superblock::deserialize returns None when the leading magic != SUPERBLOCK_MAGIC, the version
+    != FORMAT_VERSION, or data.len() < 84.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::Superblock::deserialize magic/version/length guards (src/on_disk.rs:85-98)
+  traces:
+    spec:
+    - SPEC-SUPERBLOCK-MAGIC
+    - NFR-10
+    code:
+    - CODE-SUPERBLOCK-MAGIC-VERSION-REJECT
+  creusot:
+    fidelity: structural
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_sb_magic_reject
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_sb_magic_reject
+      result: SUCCESS
+      wall_clock_s: 17.13
+      peak_rss_mb: 263
+    _scored_by: scorer_kani
+- id: REGIONHEADER-ROUNDTRIP
+  statement: RegionHeader::serialize then deserialize reproduces flush_seq, entry_count, and total_data_bytes
+    with a matching CRC; a corrupted covered byte yields None.
+  kind: functional
+  verifiable: true
+  origin: code-only
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::RegionHeader::{serialize,deserialize} (src/on_disk.rs:161-197)
+  traces:
+    spec:
+    - SPEC-CRC32-INTEGRITY
+    - NFR-02
+    code:
+    - CODE-REGIONHEADER-ROUNDTRIP
+  creusot:
+    fidelity: structural
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_regionheader_roundtrip
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-shallow
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_regionheader_roundtrip
+      result: SUCCESS
+      wall_clock_s: 10.11
+      peak_rss_mb: 172
+    _scored_by: scorer_kani
+- id: ENTRY-ROUNDTRIP
+  statement: EntryRecord::serialize then deserialize reproduces the exact key String, value bytes, and
+    flags, returning raw_size = 12 + key.len() + value.len().
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::EntryRecord::{serialize,deserialize} (src/on_disk.rs:227-289)
+  traces:
+    spec:
+    - SPEC-CRC32-INTEGRITY
+    - NFR-02
+    code:
+    - CODE-ENTRY-ROUNDTRIP
+  note_reconcile: Concrete string-content equality of the key is Kani-expressible (byte model checking)
+    but NOT Creusot-expressible (opaque Seq<char> view) -> Creusot cites IX-CREUSOT-STRING-CONTENT; Kani
+    proves byte-exact.
+  creusot:
+    fidelity: null
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    status: tool-boundary
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-shallow
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_entry_roundtrip
+      result: SUCCESS
+      wall_clock_s: 249.26
+      peak_rss_mb: 1218
+    _scored_by: scorer_kani
+- id: ENTRY-CRC-REJECT
+  statement: Altering a byte within the CRC-covered portion of a serialized EntryRecord (recomputed CRC
+    != stored CRC) causes deserialize to return None.
+  kind: safety
+  verifiable: true
+  origin: code-only
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::EntryRecord::deserialize CRC guard (src/on_disk.rs:281-283)
+  traces:
+    spec:
+    - SPEC-CRC32-INTEGRITY
+    - NFR-02
+    code:
+    - CODE-ENTRY-CRC-REJECT
+  creusot:
+    fidelity: null
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    status: tool-boundary
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_entry_crc_reject
+      result: SUCCESS
+      wall_clock_s: 160.96
+      peak_rss_mb: 1205
+    _scored_by: scorer_kani
+- id: REGION-ROUNDTRIP
+  statement: serialize_region(entries, seq, ss) then deserialize_region reproduces the header (flush_seq==seq,
+    entry_count==entries.len()) and the full ordered list of (key,value) pairs.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: on_disk::{serialize_region,deserialize_region} (src/on_disk.rs:293-349)
+  traces:
+    spec:
+    - SPEC-CRC32-INTEGRITY
+    - FR-07
+    - NFR-02
+    code:
+    - CODE-REGION-ROUNDTRIP
+  note_reconcile: Entry key content is a String -> Creusot cites IX-CREUSOT-STRING-CONTENT for the per-entry
+    content; Kani proves byte-exact over concrete entries.
+  creusot:
+    fidelity: null
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    status: tool-boundary
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-shallow
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_region_roundtrip
+      result: SUCCESS
+      wall_clock_s: 302.27
+      peak_rss_mb: 1713
+    _scored_by: scorer_kani
+- id: FLUSH-SEQ-MONOTONE
+  statement: A flush computes new_seq = flush_seq + 1 (strictly greater than the previous flush_seq) and
+    stores it on success; successive flushes produce strictly increasing sequence numbers.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: flush::flush_to_disk sequence bump (src/flush.rs:26, 46) + mark_flushed (src/lib.rs:98-101)
+  traces:
+    spec:
+    - SPEC-FLUSH-SEQ-MONOTONE
+    - US2
+    - FR-07
+    code:
+    - CODE-FLUSH-SEQ-INCREMENT
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_flush_seq_monotone
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_flush_seq_monotone
+      result: SUCCESS
+      wall_clock_s: 0.56
+      peak_rss_mb: 61
+    _scored_by: scorer_kani
+- id: FLUSH-PINGPONG-ATOMIC
+  statement: Flush writes the serialized state to the inactive region and only then flips active_region
+    and writes the superblock as the single atomic commit point (write ordering enforced by the block
+    device).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: flush::flush_to_disk write ordering over BlockDeviceClient (src/flush.rs:20-53)
+  traces:
+    spec:
+    - SPEC-DUAL-REGION-PINGPONG
+    - FR-07
+    - US2
+    code:
+    - CODE-FLUSH-PINGPONG-ORDER
+  delegate_referent: block-device component (IBlockDevice write-durability/ordering contract)
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device write-ordering: FlushManager::do_flush commit-point ordering over MockBlockDevice
+      (src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device write-ordering: FlushManager::do_flush commit-point ordering over MockBlockDevice
+      (src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: FLUSH-CAPACITY-CHECK
+  statement: flush_to_disk returns Err before writing when the serialized region requires more sectors
+    than region_a_size (region capacity).
+  kind: safety
+  verifiable: true
+  origin: code-only
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: flush::flush_to_disk capacity guard (src/flush.rs:32-38)
+  traces:
+    spec:
+    - SPEC-DUAL-REGION-PINGPONG
+    - FR-07
+    code:
+    - CODE-FLUSH-CAPACITY-CHECK
+  delegate_referent: block-device component (region geometry + write path); arithmetic guard exercised
+    via BlockDeviceClient
+  creusot:
+    fidelity: real
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_flush_capacity_check
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_flush_capacity_check
+      result: SUCCESS
+      wall_clock_s: 0.56
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: CRASH-CONSISTENCY
+  statement: A crash at any point during a flush leaves either the previously-committed state or the new
+    state intact; a partial flush never corrupts previously-committed data.
+  kind: safety
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: dual-region commit protocol (src/flush.rs) under a power-fail/crash model
+  traces:
+    spec:
+    - SPEC-CRASH-CONSISTENCY
+    - NFR-04
+    - US2
+    code:
+    - CODE-FLUSH-PINGPONG-ORDER
+  delegate_referent: block-device component (write-atomicity / power-fail model of IBlockDevice); crash-injection
+    owned there
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'crash-injection: MockBlockDevice fault injection + recovery::recover_from_disk (src/recovery.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'crash-injection: MockBlockDevice fault injection + recovery::recover_from_disk (src/recovery.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RECOVER-ACTIVE
+  statement: Recovery reads the superblock, selects the active region, and deserializes its entries back
+    into memory (header flush_seq matching the superblock).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: recovery::recover_from_disk active-region path (src/recovery.rs:44-59)
+  traces:
+    spec:
+    - SPEC-RECOVER-ACTIVE
+    - FR-08
+    - US2
+    code:
+    - CODE-RECOVER-PATH
+  delegate_referent: block-device component (BlockDeviceClient read path over IBlockDevice)
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device I/O: recovery::recover_from_disk active-region read (src/recovery.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device I/O: recovery::recover_from_disk active-region read (src/recovery.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RECOVER-FALLBACK
+  statement: If the active region is corrupt or its flush_seq mismatches, recovery falls back to the inactive
+    region (previous checkpoint).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: recovery::recover_from_disk fallback path (src/recovery.rs:60-85)
+  traces:
+    spec:
+    - SPEC-RECOVER-FALLBACK
+    - FR-09
+    - US2
+    code:
+    - CODE-RECOVER-PATH
+  delegate_referent: block-device component (region read + corruption injection over IBlockDevice)
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device I/O: recovery::recover_from_disk inactive-region fallback (src/recovery.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device I/O: recovery::recover_from_disk inactive-region fallback (src/recovery.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RECOVER-FRESH
+  statement: A partition with no valid superblock (bad magic/CRC / all zeros), or with both regions corrupt,
+    initializes an empty store without crashing.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: recovery::{recover_from_disk,format_fresh} (src/recovery.rs:27-33, 88-103)
+  traces:
+    spec:
+    - SPEC-RECOVER-FRESH
+    - FR-10
+    - US2
+    code:
+    - CODE-RECOVER-PATH
+  delegate_referent: block-device component (BlockDeviceClient read of virgin/corrupt partition)
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device I/O: recovery::recover_from_disk fresh-format path (src/recovery.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device I/O: recovery::recover_from_disk fresh-format path (src/recovery.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: CONCURRENT-READERS
+  statement: Multiple concurrent get()/iterate_all() calls acquire a shared read lock and proceed without
+    blocking one another; put/delete acquire an exclusive write lock.
+  kind: liveness
+  verifiable: true
+  origin: both
+  methods:
+  - get
+  - put
+  - delete
+  - iterate_all
+  global: true
+  attachments: 4
+  object_fn: RwLock read/write discipline on the store field (src/lib.rs:48, 165, 176, 186, 197)
+  traces:
+    spec:
+    - SPEC-CONCURRENT-READERS
+    - NFR-01
+    - US5
+    code:
+    - CODE-RWLOCK-CONCURRENCY
+  delegate_referent: 'Loom concurrency model of std::sync::RwLock reader/writer scheduling (referent:
+    loom-model verify_emstore_rwlock_readers)'
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Loom: RwLock<HashMap> concurrent read vs exclusive write interleavings (src/lib.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Loom: RwLock<HashMap> concurrent read vs exclusive write interleavings (src/lib.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: ITERATE-CONCURRENT-SAFE
+  statement: Concurrent writers do not corrupt the result of an in-progress iterate_all(); the returned
+    snapshot is internally consistent.
+  kind: safety
+  verifiable: true
+  origin: both
+  methods:
+  - iterate_all
+  global: false
+  attachments: 1
+  object_fn: iterate_all read-lock snapshot vs put/delete write-lock (src/lib.rs:193-199)
+  traces:
+    spec:
+    - SPEC-ITERATE-CONCURRENT-SAFE
+    - US4
+    - US5
+    code:
+    - CODE-RWLOCK-CONCURRENCY
+  delegate_referent: 'Loom concurrency model (referent: loom-model verify_emstore_iterate_concurrent)'
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Loom: iterate_all read-lock vs put/delete write-lock interleavings (src/lib.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Loom: iterate_all read-lock vs put/delete write-lock interleavings (src/lib.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: FLUSH-COALESCE
+  statement: Multiple concurrent force_flush()/trigger_flush() calls coalesce into a single in-flight
+    flush; all waiters observe completion of one flush.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: FlushManager::trigger_flush + do_flush Condvar coalescing (src/flush.rs:142-165, 208-234)
+  traces:
+    spec:
+    - SPEC-FLUSH-COALESCE
+    - FR-12
+    - US6
+    code:
+    - CODE-FLUSH-COALESCE
+  delegate_referent: 'Loom concurrency model of the Condvar coalescing protocol (referent: loom-model
+    verify_emstore_flush_coalesce)'
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Loom: FlushManager Condvar wait_while flush coalescing (src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'Loom: FlushManager Condvar wait_while flush coalescing (src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: FLUSH-BG-TRIGGERS
+  statement: The background FlushManager flushes on a configurable timer interval and when the dirty count
+    reaches the configured threshold.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: FlushManager::worker_loop timer/threshold logic (src/flush.rs:172-206)
+  traces:
+    spec:
+    - SPEC-FLUSH-BG-TRIGGERS
+    - FR-11
+    - US6
+    code:
+    - CODE-FLUSH-COALESCE
+  delegate_referent: 'Loom + timing model of the worker loop (referent: loom-model verify_emstore_flush_bg);
+    wall-clock interval is NV timing'
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'background timer/thread model: FlushManager worker timer interval + dirty-count threshold
+      (src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'background timer/thread model: FlushManager worker timer interval + dirty-count threshold
+      (src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: FLUSH-FINAL-ON-DROP
+  statement: Dropping a FlushManager sets shutdown, wakes the worker, and joins it after one final flush
+    (graceful shutdown).
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: FlushManager::drop + worker final flush (src/flush.rs:185-189, 237-251)
+  traces:
+    spec:
+    - SPEC-FLUSH-FINAL-ON-DROP
+    - FR-13
+    - US6
+    code:
+    - CODE-FLUSH-DROP
+  delegate_referent: 'Loom concurrency model of Drop/join ordering (referent: loom-model verify_emstore_flush_drop)'
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'thread-join/drop: FlushManager::drop final do_flush on shutdown (src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'thread-join/drop: FlushManager::drop final do_flush on shutdown (src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: FORCE-FLUSH-DURABLE
+  statement: When a durable-flush trigger is installed, force_flush() invokes it, blocks until it returns,
+    maps a trigger error to StorageError, and returns Ok only once all data is durable.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: force_flush Some-branch -> FlushTrigger -> FlushManager::trigger_flush -> flush_to_disk (src/lib.rs:210-213)
+  traces:
+    spec:
+    - SPEC-FORCE-FLUSH-DURABLE
+    - FR-05
+    - US6
+    code:
+    - CODE-FORCE-FLUSH-TRIGGER
+  delegate_referent: block-device component (durability of the write path) + Loom (trigger/worker handshake);
+    the None-branch no-op is proved separately as FORCE-FLUSH-NOOP
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device durability: FlushTrigger closure -> FlushManager::trigger_flush (src/lib.rs,
+      src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device durability: FlushTrigger closure -> FlushManager::trigger_flush (src/lib.rs,
+      src/flush.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BLOCK-IO-CLIENT
+  statement: BlockDeviceClient issues ReadSync/WriteSync commands over IBlockDevice channels with DMA-allocated
+    buffers and correct sector-offset arithmetic.
+  kind: functional
+  verifiable: true
+  origin: code-only
+  methods:
+  - force_flush
+  global: false
+  attachments: 1
+  object_fn: block_io::BlockDeviceClient read/write over IBlockDevice (src/block_io.rs)
+  traces:
+    spec:
+    - SPEC-DMA-ABSTRACTION
+    - NFR-08
+    code:
+    - CODE-BLOCK-IO-CLIENT
+  delegate_referent: block-device component (IBlockDevice command/channel + DMA-buffer contract)
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device/DMA: BlockDeviceClient ReadSync/WriteSync + DmaAllocFn over IBlockDevice
+      (src/block_io.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'block-device/DMA: BlockDeviceClient ReadSync/WriteSync + DmaAllocFn over IBlockDevice
+      (src/block_io.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: COMPONENT-MACRO-WIRING
+  statement: define_component! correctly wires the component to provide IExtendedMetadataStore with an
+    optional ILogger receptacle and the declared fields, so query_interface! yields a working store.
+  kind: functional
+  verifiable: true
+  origin: both
+  methods:
+  - put
+  - get
+  - delete
+  - iterate_all
+  - force_flush
+  global: true
+  attachments: 5
+  object_fn: define_component! expansion + query_interface! (src/lib.rs:40-60)
+  traces:
+    spec:
+    - FR-15
+    - FR-16
+    code:
+    - CODE-COMPONENT-MACRO
+  delegate_referent: component-framework crate (define_component!/query_interface! macro correctness;
+    verified once for the framework, not per component)
+  creusot:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'component-framework: define_component!/query_interface! wiring of IExtendedMetadataStore
+      (src/lib.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'component-framework: define_component!/query_interface! wiring of IExtendedMetadataStore
+      (src/lib.rs)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: NV-LOGGING
+  statement: Each interface method emits a logger.debug(...) side effect when the ILogger receptacle is
+    connected.
+  kind: observational
+  verifiable: false
+  origin: both
+  methods:
+  - put
+  - get
+  - delete
+  - iterate_all
+  - force_flush
+  nv_reason: Optional side effect gated on receptacle connection with no functional postcondition on store
+    state; logger correctness is owned by the logger component. The presence of a debug() call is a code
+    fact, not a state obligation.
+  traces:
+    spec:
+    - SPEC-LOGGING
+    - FR-16
+    code:
+    - CODE-LOGGING-CALLS
+- id: NV-NO-PANIC-STRESS
+  statement: No panics occur under 8-thread concurrent stress (1000 ops/thread) and the final state is
+    self-consistent.
+  kind: robustness
+  verifiable: false
+  origin: spec-only
+  methods:
+  - put
+  - get
+  - delete
+  nv_reason: Stress/exhaustion property over unbounded interleavings and op counts, not a bounded functional
+    obligation. The bounded reader/writer-safety core is captured by CONCURRENT-READERS (delegated to
+    Loom).
+  traces:
+    spec:
+    - SPEC-NO-PANIC-STRESS
+    - US5
+    code:
+    - CODE-RWLOCK-CONCURRENCY
+- id: NV-CAPACITY-EXHAUSTED
+  statement: The store returns CapacityExhausted when it reaches its capacity limit.
+  kind: functional
+  verifiable: false
+  origin: spec-only
+  methods:
+  - put
+  nv_reason: 'ALIGN gap: the CapacityExhausted interface variant is defined but no code path constructs
+    it (Known Gaps). There is no implemented behavior to verify; per-value size is enforced as ValueTooLarge
+    and region capacity as a String error at flush time.'
+  traces:
+    spec:
+    - SPEC-CAPACITY-EXHAUSTED
+    - interfaces/src/iextended_metadata_store.rs:12
+    code: []
+- id: NV-DMA-ABSTRACTION
+  statement: DMA memory allocation is abstracted via DmaAllocFn for portability between heap (test) and
+    hugepages (production).
+  kind: functional
+  verifiable: false
+  origin: spec-only
+  methods:
+  - force_flush
+  nv_reason: Portability/FFI seam; correctness of DMA allocation and hugepage backing is owned by the
+    block-device / SPDK environment, outside this component's verifiable surface. The client behavior
+    it feeds is delegated (BLOCK-IO-CLIENT).
+  traces:
+    spec:
+    - SPEC-DMA-ABSTRACTION
+    - NFR-08
+    code:
+    - CODE-BLOCK-IO-CLIENT
+- id: NV-TEST-INFRA-MOCK
+  statement: Test infrastructure provides MockBlockDevice with fault injection (fail_after_n_writes) for
+    deterministic testing.
+  kind: functional
+  verifiable: false
+  origin: spec-only
+  methods: []
+  nv_reason: Test-only scaffolding (testing-feature gated), not part of the production behavior contract.
+  traces:
+    spec:
+    - SPEC-TEST-INFRA
+    - NFR-07
+    code: []
+- id: NV-TEST-COMPONENT-RECONSTRUCT
+  statement: create_test_component_from_state() reconstructs a component over a reboot-preserved MockState
+    to simulate a process restart.
+  kind: functional
+  verifiable: false
+  origin: spec-only
+  methods: []
+  nv_reason: Test-only scaffolding (testing-feature gated) supporting persistence tests; not a production
+    obligation.
+  traces:
+    spec:
+    - NFR-11
+    code: []
+- id: NV-BUILD-HYGIENE
+  statement: cargo clippy -D warnings is clean, all public items are documented (cargo doc warning-free),
+    and the unit/persistence/SSD suites pass.
+  kind: process
+  verifiable: false
+  origin: spec-only
+  methods: []
+  nv_reason: Build/CI hygiene and test-suite passage, not a runtime state property amenable to formal
+    proof.
+  traces:
+    spec:
+    - SC-1
+    - SC-2
+    - SC-3
+    - SC-6
+    - SC-7
+    code: []
+interface_methods:
+- put
+- get
+- delete
+- iterate_all
+- force_flush

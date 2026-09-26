@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_put_get_roundtrip": { "prover": "alt-ergo", "time": 0.02 }
+    }
+  }
+}

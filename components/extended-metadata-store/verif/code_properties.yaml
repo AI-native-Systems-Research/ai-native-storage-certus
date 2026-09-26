@@ -1,0 +1,258 @@
+# Blind property extraction — CODE SIDE
+# Sources: src/lib.rs, src/on_disk.rs, src/flush.rs, src/recovery.rs, src/block_io.rs
+# Interface: IExtendedMetadataStore (put, get, delete, iterate_all, force_flush) + inherent FR-17 API
+# Extraction is BLIND: derived from the implementation alone.
+component: extended-metadata-store
+pin: f3de84aa
+extraction_side: code
+interface_methods: [put, get, delete, iterate_all, force_flush]   # N = 5
+properties:
+  # ---- IExtendedMetadataStore impl (src/lib.rs) ----
+  - id: CODE-PUT-INSERT
+    statement: "put converts key to String and value to Vec<u8> and inserts them into the RwLock<HashMap> store under a write lock; a following get of the same key clones back an equal Vec<u8>."
+    kind: functional
+    source: ["src/lib.rs:158-170", "src/lib.rs:172-180"]
+    verifiable: true
+    methods: [put, get]
+
+  - id: CODE-PUT-MAX-GUARD
+    statement: "put returns Err(ValueTooLarge) immediately (before touching the map or dirty count) whenever value.len() > MAX_VALUE_SIZE (131072)."
+    kind: safety
+    source: ["src/lib.rs:159-161", "src/lib.rs:63"]
+    verifiable: true
+    methods: [put]
+
+  - id: CODE-PUT-OVERWRITE
+    statement: "A second put with the same key overwrites the map entry (HashMap::insert replaces), so get returns the latest value."
+    kind: functional
+    source: ["src/lib.rs:165-166"]
+    verifiable: true
+    methods: [put, get]
+
+  - id: CODE-GET-NOTFOUND
+    statement: "get returns map.get(key).cloned().ok_or(NotFound), i.e. Err(NotFound) exactly when the key is absent."
+    kind: functional
+    source: ["src/lib.rs:176-179"]
+    verifiable: true
+    methods: [get]
+
+  - id: CODE-DELETE-REMOVE
+    statement: "delete calls HashMap::remove(key) under a write lock, so a subsequent get returns NotFound and iterate_all omits the key; the return is always Ok(())."
+    kind: functional
+    source: ["src/lib.rs:186-190"]
+    verifiable: true
+    methods: [delete, get, iterate_all]
+
+  - id: CODE-DELETE-IDEMPOTENT
+    statement: "delete ignores the Option returned by HashMap::remove and always returns Ok(()), so deleting an absent key is a successful no-op on membership."
+    kind: functional
+    source: ["src/lib.rs:186-190"]
+    verifiable: true
+    methods: [delete]
+
+  - id: CODE-ITERATE-CLONE
+    statement: "iterate_all takes a read lock and returns a freshly cloned Vec of every (key, value) pair currently in the map."
+    kind: functional
+    source: ["src/lib.rs:193-199", "src/lib.rs:92-95"]
+    verifiable: true
+    methods: [iterate_all]
+
+  - id: CODE-DIRTY-COUNT-FETCH-ADD
+    statement: "put and delete each perform dirty_count.fetch_add(1, Relaxed) after mutating the map, so the dirty count increases by exactly one per successful mutation; a rejected (ValueTooLarge) put does not increment it."
+    kind: functional
+    source: ["src/lib.rs:168", "src/lib.rs:189", "src/lib.rs:72-74"]
+    verifiable: true
+    methods: [put, delete]
+
+  - id: CODE-FORCE-FLUSH-TRIGGER
+    statement: "force_flush reads the flush_trigger Option: if Some, it calls the trigger and maps Err(String) to StorageError; if None it returns Ok(()) (no-op)."
+    kind: functional
+    source: ["src/lib.rs:201-215", "src/lib.rs:68"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-MARK-FLUSHED
+    statement: "mark_flushed(seq) stores seq into flush_seq and resets dirty_count to 0; load_entries clears the map, inserts the given entries, and resets dirty_count to 0."
+    kind: functional
+    source: ["src/lib.rs:82-101"]
+    verifiable: true
+    methods: [force_flush]
+
+  # ---- on_disk.rs pure format code ----
+  - id: CODE-PAD-TO-SECTOR
+    statement: "pad_to_sector(size, sector_size) returns 0 for size 0, otherwise size.div_ceil(sector_size)*sector_size: a multiple of sector_size that is >= size and < size + sector_size."
+    kind: functional
+    source: ["src/on_disk.rs:353-358"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-BYTES-TO-SECTORS
+    statement: "bytes_to_sectors(bytes, sector_size) == pad_to_sector(bytes, sector_size)/sector_size, i.e. ceil(bytes/sector_size) (and 0 for bytes 0)."
+    kind: functional
+    source: ["src/on_disk.rs:360-362"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-ENTRY-SERIALIZED-SIZE
+    statement: "EntryRecord::serialized_size = pad_to_sector(12 + key.len() + value.len(), sector_size); serialize() returns a buffer of exactly that length, which is a multiple of sector_size."
+    kind: functional
+    source: ["src/on_disk.rs:222-255"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-SUPERBLOCK-NEW-GEOMETRY
+    statement: "Superblock::new with partition_sectors > 1 sets region_a_offset = 1, region_a_size = region_b_size = (partition_sectors-1)/2, and region_b_offset = 1 + region_a_size, so the two equal regions are adjacent, ordered, and fit after the 1-sector superblock; degenerate partitions (<=1 sector) yield all-zero geometry."
+    kind: functional
+    source: ["src/on_disk.rs:27-57"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-REGION-OFFSET-SWAP
+    statement: "active_region_offset() returns region_a_offset when active_region==0 else region_b_offset; inactive_region_offset() returns the opposite; the two are distinct whenever region_a_offset != region_b_offset."
+    kind: functional
+    source: ["src/on_disk.rs:131-145"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-REGION-CAPACITY-BYTES
+    statement: "region_capacity_bytes() == region_a_size * (sector_size as u64)."
+    kind: functional
+    source: ["src/on_disk.rs:147-149"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-LE-HELPERS-ROUNDTRIP
+    statement: "The write_uN/read_uN helpers are little-endian inverses: read_u64(write_u64(x)) == x, and likewise for u32 and u16, and each advances pos by 8/4/2 bytes."
+    kind: functional
+    source: ["src/on_disk.rs:379-410"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-CRC32-PURE
+    statement: "crc32_of is a deterministic pure function of its input slice (bitwise reflected CRC-32, polynomial 0xEDB88320, init/final 0xFFFFFFFF)."
+    kind: functional
+    source: ["src/on_disk.rs:364-377"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-SUPERBLOCK-ROUNDTRIP
+    statement: "Superblock::serialize followed by deserialize reproduces every integer field (magic, version, sector_size, geometry, active_region, flush_seq, entry_count) and the recomputed CRC matches, yielding Some."
+    kind: functional
+    source: ["src/on_disk.rs:59-129"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-SUPERBLOCK-CRC-REJECT
+    statement: "If any byte inside the CRC-covered prefix of a serialized superblock is altered, deserialize recomputes a different CRC and returns None."
+    kind: safety
+    source: ["src/on_disk.rs:85-113"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-SUPERBLOCK-MAGIC-VERSION-REJECT
+    statement: "deserialize returns None when the leading magic != SUPERBLOCK_MAGIC or the version != FORMAT_VERSION, and when data.len() < 84."
+    kind: functional
+    source: ["src/on_disk.rs:85-98"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-REGIONHEADER-ROUNDTRIP
+    statement: "RegionHeader::serialize then deserialize reproduces flush_seq, entry_count, and total_data_bytes with a matching CRC (Some); a corrupted covered byte yields None."
+    kind: functional
+    source: ["src/on_disk.rs:161-197"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-ENTRY-ROUNDTRIP
+    statement: "EntryRecord::serialize then deserialize reproduces the exact key String, value bytes, and flags, and returns raw_size = 12 + key.len() + value.len()."
+    kind: functional
+    source: ["src/on_disk.rs:227-289"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-ENTRY-CRC-REJECT
+    statement: "Altering a byte within the CRC-covered portion of a serialized EntryRecord causes deserialize to return None."
+    kind: safety
+    source: ["src/on_disk.rs:257-289"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-REGION-ROUNDTRIP
+    statement: "serialize_region(entries, seq, ss) then deserialize_region reproduces the header (flush_seq==seq, entry_count==entries.len()) and the full ordered list of (key, value) pairs."
+    kind: functional
+    source: ["src/on_disk.rs:293-349"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-FLUSH-SEQ-INCREMENT
+    statement: "flush_to_disk computes new_seq = superblock.flush_seq + 1 and, on success, sets superblock.flush_seq = new_seq (strictly greater) and flips active_region (0<->1)."
+    kind: functional
+    source: ["src/flush.rs:26-52"]
+    verifiable: true
+    methods: [force_flush]
+
+  # ---- I/O + concurrency code (delegation candidates) ----
+  - id: CODE-FLUSH-PINGPONG-ORDER
+    statement: "flush_to_disk serializes to the inactive region, checks capacity, writes the region to disk, then flips active_region and writes the superblock last as the commit point."
+    kind: functional
+    source: ["src/flush.rs:20-53"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-FLUSH-CAPACITY-CHECK
+    statement: "flush_to_disk returns Err when region_sectors > region_a_size (region data exceeds region capacity), before writing."
+    kind: safety
+    source: ["src/flush.rs:32-38"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-RECOVER-PATH
+    statement: "recover_from_disk formats fresh when there is no valid superblock, returns empty when flush_seq==0, else reads the active region and (on mismatch/corruption) falls back to the inactive region, else formats fresh."
+    kind: functional
+    source: ["src/recovery.rs:23-125"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-FLUSH-COALESCE
+    statement: "FlushManager::trigger_flush sets flush_in_progress, signals the worker via Condvar, and waits (wait_while) until the worker clears it; concurrent triggers share the single in-flight flush."
+    kind: functional
+    source: ["src/flush.rs:142-165", "src/flush.rs:208-234"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-FLUSH-DROP
+    statement: "FlushManager::drop sets shutdown, wakes the worker, and joins it; the worker performs one final do_flush before returning."
+    kind: functional
+    source: ["src/flush.rs:185-189", "src/flush.rs:237-251"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-RWLOCK-CONCURRENCY
+    statement: "The store field is an RwLock: get/iterate_all take read locks (concurrent), put/delete take write locks (exclusive)."
+    kind: safety
+    source: ["src/lib.rs:48", "src/lib.rs:165", "src/lib.rs:176", "src/lib.rs:186", "src/lib.rs:197"]
+    verifiable: true
+    methods: [get, put, delete, iterate_all]
+
+  - id: CODE-BLOCK-IO-CLIENT
+    statement: "BlockDeviceClient issues ReadSync/WriteSync commands over IBlockDevice channels with DMA-allocated buffers and sector-offset arithmetic."
+    kind: functional
+    source: ["src/block_io.rs"]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: CODE-COMPONENT-MACRO
+    statement: "The component is declared via define_component! providing IExtendedMetadataStore with an optional ILogger receptacle and the store/dirty_count/flush_seq/flush_trigger fields."
+    kind: functional
+    source: ["src/lib.rs:40-60"]
+    verifiable: true
+    methods: [put, get, delete, iterate_all, force_flush]
+
+  # ---- code-side non-verifiable ----
+  - id: CODE-LOGGING-CALLS
+    statement: "Each interface method emits a logger.debug(...) call when the logger receptacle is connected."
+    kind: observational
+    source: ["src/lib.rs:162-164", "src/lib.rs:173-175", "src/lib.rs:183-185", "src/lib.rs:194-196", "src/lib.rs:202-204"]
+    verifiable: false
+    nv_reason: "Optional side effect gated on receptacle connection; no functional postcondition on store state. Logger behavior owned by the logger component."
+    methods: [put, get, delete, iterate_all, force_flush]

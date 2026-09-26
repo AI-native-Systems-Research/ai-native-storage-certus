@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_force_flush_noop": { "prover": "alt-ergo", "time": 0.011 }
+    }
+  }
+}

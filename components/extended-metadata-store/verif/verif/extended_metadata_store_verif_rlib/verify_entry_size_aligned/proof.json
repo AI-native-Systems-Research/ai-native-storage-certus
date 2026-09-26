@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_entry_size_aligned": { "prover": "cvc4", "time": 0.147 }
+    }
+  }
+}

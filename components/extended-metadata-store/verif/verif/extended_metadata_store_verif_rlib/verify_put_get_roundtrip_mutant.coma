@@ -1,0 +1,60 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 331 0 331 55 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 332 18 332 71
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 62 14 62 70
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 63 14 63 88
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 45 14 45 31
+let%span sfmap'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 46 14 46 55
+let%span sfmap'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+let%span sfmap'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+
+use creusot.int.UInt64
+use map.Map
+use map.Const
+use creusot.prelude.Any
+use int.Int
+
+type t_FMap_u64_u64
+
+type t_Option_u64 = None | Some UInt64.t
+
+function to_mapping_u64 (self: t_FMap_u64_u64) : Map.map UInt64.t t_Option_u64
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_u64) (k: UInt64.t) : t_Option_u64 =
+  [%#sfmap] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+function len_u64 (self: t_FMap_u64_u64) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_u64 [len_u64 self]. [%#sfmap'4] len_u64 self >= 0
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_u64) (k: UInt64.t) = [%#sfmap'5] get_u64 self k <> None
+
+meta "rewrite_def" predicate contains_u64
+
+function insert_u64 (self: t_FMap_u64_u64) (k: UInt64.t) (v: UInt64.t) : t_FMap_u64_u64
+
+axiom insert_u64_spec:
+  forall self: t_FMap_u64_u64, k: UInt64.t, v: UInt64.t [insert_u64 self k v]. [%#sfmap'0] to_mapping_u64 (insert_u64 self k v)
+    = Map.set (to_mapping_u64 self) k (Some v)
+
+axiom insert_u64_spec'0:
+  forall self: t_FMap_u64_u64, k: UInt64.t, v: UInt64.t [insert_u64 self k v]. [%#sfmap'1] len_u64 (insert_u64 self k v)
+    = (if contains_u64 self k then len_u64 self else len_u64 self + 1)
+
+constant empty_u64 : t_FMap_u64_u64
+
+axiom empty_u64_spec: [%#sfmap'2] len_u64 empty_u64 = 0
+
+axiom empty_u64_spec'0: [%#sfmap'3] to_mapping_u64 empty_u64 = Const.const (None)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_put_get_roundtrip__mutant [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 331 0 331 55]
+  (k: UInt64.t) (v: UInt64.t) (return (x: ())) = (! bb0
+  [ bb0 = s0 [ s0 = {[@expl:assertion] [%#slib] get_u64 (insert_u64 empty_u64 k v) k = None} s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & k: UInt64.t = k | & v: UInt64.t = v ]) [ return (result: ()) -> (! return {result}) ]

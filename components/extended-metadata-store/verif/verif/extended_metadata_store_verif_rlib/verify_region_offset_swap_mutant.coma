@@ -1,0 +1,34 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 165 0 165 90 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 166 17 166 18
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 163 11 163 27
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 164 10 164 32
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_region_offset_swap__mutant [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 165 0 165 90]
+  (a_off: UInt64.t) (b_off: UInt64.t) (active: UInt8.t) (return (x: tup2_u64_u64)) =
+{[@stop_split] [@expl:verify_region_offset_swap__mutant requires] [%#slib'0] UInt64.t'int a_off <> UInt64.t'int b_off}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_8 <- active = ([%#slib] (0: UInt8.t)) ] s1
+    | s1 = any [ br0 -> {_8 = false} (! bb2) | br1 -> {_8} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- { f0 = a_off; f1 = b_off } ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- { f0 = b_off; f1 = a_off } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup2_u64_u64 = Any.any_l ()
+  | & a_off: UInt64.t = a_off
+  | & b_off: UInt64.t = b_off
+  | & active: UInt8.t = active
+  | & _8: bool = Any.any_l () ])
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:verify_region_offset_swap__mutant ensures] [%#slib'1] UInt64.t'int result.f0
+    = UInt64.t'int result.f1}
+    (! return {result}) ]

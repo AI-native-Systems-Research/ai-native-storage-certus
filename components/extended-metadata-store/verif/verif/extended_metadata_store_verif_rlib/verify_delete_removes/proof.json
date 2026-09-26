@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_delete_removes": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

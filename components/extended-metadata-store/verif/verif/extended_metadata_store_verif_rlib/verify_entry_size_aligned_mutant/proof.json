@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_entry_size_aligned__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.017 },
+          { "prover": "alt-ergo", "time": 0.017 },
+          { "prover": "alt-ergo", "time": 0.015 },
+          { "prover": "alt-ergo", "time": 0.016 },
+          { "prover": "alt-ergo", "time": 0.018 },
+          { "prover": "alt-ergo", "time": 0.019 },
+          { "prover": "alt-ergo", "time": 0.023 },
+          { "prover": "alt-ergo", "time": 0.026 },
+          null,
+          null
+        ]
+      }
+    }
+  }
+}

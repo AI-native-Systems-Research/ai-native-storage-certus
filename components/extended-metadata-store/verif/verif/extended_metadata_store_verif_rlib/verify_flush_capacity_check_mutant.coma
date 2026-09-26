@@ -1,0 +1,25 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 210 0 210 91 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 208 11 208 43
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 209 10 209 25
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_flush_capacity_check__mutant [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 210 0 210 91]
+  (region_sectors: UInt64.t) (region_a_size: UInt64.t) (return (x: bool)) =
+{[@stop_split] [@expl:verify_flush_capacity_check__mutant requires] [%#slib] UInt64.t'int region_sectors
+  > UInt64.t'int region_a_size}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- UInt64.gt region_sectors region_a_size ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & region_sectors: UInt64.t = region_sectors
+  | & region_a_size: UInt64.t = region_a_size ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_flush_capacity_check__mutant ensures] [%#slib'0] result
+    = false}
+    (! return {result}) ]

@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_sb_geometry__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.015 },
+              { "prover": "alt-ergo", "time": 0.013 },
+              { "prover": "alt-ergo", "time": 0.016 },
+              null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

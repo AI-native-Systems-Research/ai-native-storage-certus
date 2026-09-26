@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_region_capacity_bytes": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      }
+    }
+  }
+}

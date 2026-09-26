@@ -1,0 +1,32 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 183 0 183 72 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 184 4 184 15
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 180 11 180 37
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 181 11 181 33
+let%span slib'2 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 182 10 182 28
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_region_capacity_bytes__mutant [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 183 0 183 72]
+  (a_size: UInt64.t) (ss: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_region_capacity_bytes__mutant requires] ([@stop_split] [@expl:verify_region_capacity_bytes__mutant requires #0] [%#slib'0] UInt64.t'int a_size
+      * UInt64.t'int ss
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:verify_region_capacity_bytes__mutant requires #1] [%#slib'1] UInt64.t'int a_size > 0
+  /\ UInt64.t'int ss > 1)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.mul [%#slib] {a_size} {ss} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & a_size: UInt64.t = a_size | & ss: UInt64.t = ss ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_region_capacity_bytes__mutant ensures] [%#slib'2] UInt64.t'int result
+    = UInt64.t'int a_size}
+    (! return {result}) ]

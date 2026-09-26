@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_region_capacity_bytes__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.013 }, null ]
+      }
+    }
+  }
+}

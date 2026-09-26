@@ -1,0 +1,69 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 40 0 40 63 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 41 12 41 21
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 42 12 42 13
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 45 9 45 18
+let%span slib'2 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 45 21 45 22
+let%span slib'3 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 45 8 45 23
+let%span slib'4 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 45 8 45 28
+let%span slib'5 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 34 11 34 18
+let%span slib'6 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 35 11 35 37
+let%span slib'7 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 36 10 36 37
+let%span slib'8 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 37 10 37 28
+let%span slib'9 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 38 10 38 26
+let%span slib'10 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 39 10 39 31
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.ComputerDivision
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_pad_sector_align [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 40 0 40 63]
+  (size: UInt64.t) (ss: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_pad_sector_align requires] ([@stop_split] [@expl:verify_pad_sector_align requires #0] [%#slib'5] UInt64.t'int ss
+    > 0)
+  /\ ([@stop_split] [@expl:verify_pad_sector_align requires #1] [%#slib'6] UInt64.t'int size + UInt64.t'int ss
+  <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_19 <- ss ] s1
+    | s1 = [ &_20 <- _19 = ([%#slib] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:remainder by zero] [%#slib] not _20} s3
+    | s3 = UInt64.rem [%#slib] {size} {_19} (fun (_x: UInt64.t) -> [ &r <- _x ] s4)
+    | s4 = [ &_21 <- r = ([%#slib'0] (0: UInt64.t)) ] s5
+    | s5 = any [ br0 -> {_21 = false} (! bb3) | br1 -> {_21} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &_ret <- size ] s1 | s1 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = [ &_26 <- ss ] s1
+    | s1 = [ &_27 <- _26 = ([%#slib'1] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:division by zero] [%#slib'1] not _27} s3
+    | s3 = UInt64.div [%#slib'1] {size} {_26} (fun (_x: UInt64.t) -> [ &_24 <- _x ] s4)
+    | s4 = UInt64.add [%#slib'3] {_24} {[%#slib'2] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_23 <- _x ] s5)
+    | s5 = UInt64.mul [%#slib'4] {_23} {ss} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s6)
+    | s6 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & size: UInt64.t = size
+  | & ss: UInt64.t = ss
+  | & r: UInt64.t = Any.any_l ()
+  | & _19: UInt64.t = Any.any_l ()
+  | & _20: bool = Any.any_l ()
+  | & _21: bool = Any.any_l ()
+  | & _23: UInt64.t = Any.any_l ()
+  | & _24: UInt64.t = Any.any_l ()
+  | & _26: UInt64.t = Any.any_l ()
+  | & _27: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_pad_sector_align ensures] ([@stop_split] [@expl:verify_pad_sector_align ensures #0] [%#slib'7] UInt64.t'int size
+        = 0 -> UInt64.t'int result = 0)
+    /\ ([@stop_split] [@expl:verify_pad_sector_align ensures #1] [%#slib'8] ComputerDivision.mod (UInt64.t'int result) (UInt64.t'int ss)
+      = 0)
+    /\ ([@stop_split] [@expl:verify_pad_sector_align ensures #2] [%#slib'9] UInt64.t'int result >= UInt64.t'int size)
+    /\ ([@stop_split] [@expl:verify_pad_sector_align ensures #3] [%#slib'10] UInt64.t'int result
+    < UInt64.t'int size + UInt64.t'int ss)}
+    (! return {result}) ]

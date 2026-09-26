@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_flush_seq_monotone__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.015 }, null ]
+      }
+    }
+  }
+}

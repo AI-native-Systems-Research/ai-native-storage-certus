@@ -1,0 +1,61 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 130 0 130 58 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 131 16 131 20
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 132 23 132 24
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 132 17 132 25
+let%span slib'2 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 132 28 132 29
+let%span slib'3 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 132 17 132 29
+let%span slib'4 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 134 16 134 17
+let%span slib'5 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 134 16 134 26
+let%span slib'6 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 124 11 124 18
+let%span slib'7 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 125 11 125 27
+let%span slib'8 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 126 10 126 24
+let%span slib'9 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 127 10 127 32
+let%span slib'10 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 128 10 128 44
+let%span slib'11 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 129 10 129 38
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type tup4_u64_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t; f3: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_sb_geometry [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 130 0 130 58]
+  (ps: UInt64.t) (return (x: tup4_u64_u64_u64_u64)) =
+{[@stop_split] [@expl:verify_sb_geometry requires] ([@stop_split] [@expl:verify_sb_geometry requires #0] [%#slib'6] UInt64.t'int ps
+    > 1)
+  /\ ([@stop_split] [@expl:verify_sb_geometry requires #1] [%#slib'7] UInt64.t'int ps <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &a_off <- [%#slib] (1: UInt64.t) ] s1
+    | s1 = UInt64.sub [%#slib'1] {ps} {[%#slib'0] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_13 <- _x ] s2)
+    | s2 = [ &_15 <- ([%#slib'2] (2: UInt64.t)) = ([%#slib'3] (0: UInt64.t)) ] s3
+    | s3 = {[@expl:division by zero] [%#slib'3] not _15} s4
+    | s4 = UInt64.div [%#slib'3] {_13} {[%#slib'2] (2: UInt64.t)} (fun (_x: UInt64.t) -> [ &a_size <- _x ] s5)
+    | s5 = [ &b_size <- a_size ] s6
+    | s6 = UInt64.add [%#slib'5] {[%#slib'4] (1: UInt64.t)} {a_size} (fun (_x: UInt64.t) -> [ &b_off <- _x ] s7)
+    | s7 = [ &_ret <- { f0 = a_off; f1 = a_size; f2 = b_off; f3 = b_size } ] s8
+    | s8 = return {_ret} ] ]
+  [ & _ret: tup4_u64_u64_u64_u64 = Any.any_l ()
+  | & ps: UInt64.t = ps
+  | & a_off: UInt64.t = Any.any_l ()
+  | & a_size: UInt64.t = Any.any_l ()
+  | & _13: UInt64.t = Any.any_l ()
+  | & _15: bool = Any.any_l ()
+  | & b_size: UInt64.t = Any.any_l ()
+  | & b_off: UInt64.t = Any.any_l () ])
+  [ return (result: tup4_u64_u64_u64_u64) ->
+  {[@stop_split] [@expl:verify_sb_geometry ensures] ([@stop_split] [@expl:verify_sb_geometry ensures #0] [%#slib'8] UInt64.t'int result.f0
+      = 1)
+    /\ ([@stop_split] [@expl:verify_sb_geometry ensures #1] [%#slib'9] UInt64.t'int result.f1 = UInt64.t'int result.f3)
+    /\ ([@stop_split] [@expl:verify_sb_geometry ensures #2] [%#slib'10] UInt64.t'int result.f2
+      = UInt64.t'int result.f0 + UInt64.t'int result.f1)
+    /\ ([@stop_split] [@expl:verify_sb_geometry ensures #3] [%#slib'11] UInt64.t'int result.f2 + UInt64.t'int result.f3
+    <= UInt64.t'int ps)}
+    (! return {result}) ]

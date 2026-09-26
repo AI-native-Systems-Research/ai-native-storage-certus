@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_sb_magic_reject": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

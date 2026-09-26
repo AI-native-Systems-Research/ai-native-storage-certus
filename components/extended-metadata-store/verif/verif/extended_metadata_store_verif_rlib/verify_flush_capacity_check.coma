@@ -1,0 +1,21 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 204 0 204 83 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 203 10 203 54
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_flush_capacity_check [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 204 0 204 83]
+  (region_sectors: UInt64.t) (region_a_size: UInt64.t) (return (x: bool)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- UInt64.gt region_sectors region_a_size ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & region_sectors: UInt64.t = region_sectors
+  | & region_a_size: UInt64.t = region_a_size ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_flush_capacity_check ensures] [%#slib] result
+    = (UInt64.t'int region_sectors > UInt64.t'int region_a_size)}
+    (! return {result}) ]

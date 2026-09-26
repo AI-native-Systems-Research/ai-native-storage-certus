@@ -1,0 +1,22 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 313 0 313 84 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 311 11 311 35
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 312 10 312 24
+
+use creusot.prelude.Any
+use creusot.int.UInt32
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_regionheader_roundtrip__mutant [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 313 0 313 84]
+  (stored_crc: UInt32.t) (comp_crc: UInt32.t) (return (x: bool)) =
+{[@stop_split] [@expl:verify_regionheader_roundtrip__mutant requires] [%#slib] UInt32.t'int stored_crc
+  <> UInt32.t'int comp_crc}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- stored_crc = comp_crc ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & stored_crc: UInt32.t = stored_crc | & comp_crc: UInt32.t = comp_crc ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_regionheader_roundtrip__mutant ensures] [%#slib'0] result
+    = true}
+    (! return {result}) ]

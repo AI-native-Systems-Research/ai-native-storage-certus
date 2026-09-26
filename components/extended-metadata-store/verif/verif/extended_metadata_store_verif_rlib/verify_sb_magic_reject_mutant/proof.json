@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_sb_magic_reject__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          null,
+          { "prover": "alt-ergo", "time": 0.015 },
+          { "prover": "alt-ergo", "time": 0.015 }
+        ]
+      }
+    }
+  }
+}

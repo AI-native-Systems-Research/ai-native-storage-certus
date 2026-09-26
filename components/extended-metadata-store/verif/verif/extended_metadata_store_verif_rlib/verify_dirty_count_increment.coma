@@ -1,0 +1,30 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 396 0 396 50 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 397 8 397 9
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 397 4 397 9
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 393 11 393 25
+let%span slib'2 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 394 10 394 27
+let%span slib'3 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 395 10 395 22
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dirty_count_increment [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 396 0 396 50]
+  (c: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_dirty_count_increment requires] [%#slib'1] UInt64.t'int c < UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib'0] {c} {[%#slib] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: UInt64.t = Any.any_l () | & c: UInt64.t = c ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_dirty_count_increment ensures] ([@stop_split] [@expl:verify_dirty_count_increment ensures #0] [%#slib'2] UInt64.t'int result
+      = UInt64.t'int c + 1)
+    /\ ([@stop_split] [@expl:verify_dirty_count_increment ensures #1] [%#slib'3] UInt64.t'int result > UInt64.t'int c)}
+    (! return {result}) ]

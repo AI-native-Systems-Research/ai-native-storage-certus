@@ -1,0 +1,23 @@
+(* #"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 409 0 409 48 *)
+
+let%span slib = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 410 10 410 24
+let%span slib'0 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 408 10 408 44
+let%span slib'1 = "/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 26 0 26 31
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX_VALUE_SIZE: UInt64.t = [%#slib'1] (131072: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_put_size_limit [#"/home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif/src/lib.rs" 409 0 409 48]
+  (len: UInt64.t) (return (x: bool)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- UInt64.gt len ([%#slib] const_MAX_VALUE_SIZE) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & len: UInt64.t = len ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_put_size_limit ensures] [%#slib'0] result
+    = (UInt64.t'int len > UInt64.t'int const_MAX_VALUE_SIZE)}
+    (! return {result}) ]

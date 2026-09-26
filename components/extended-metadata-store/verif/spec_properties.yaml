@@ -1,0 +1,239 @@
+# Blind property extraction — SPEC SIDE
+# Source: components/extended-metadata-store/specs/001-extended-metadata-store/spec.md
+# Interface: IExtendedMetadataStore (put, get, delete, iterate_all, force_flush) + FR-17 inherent wiring API
+# Extraction is BLIND: derived from the specification text alone, before consulting the code side.
+component: extended-metadata-store
+pin: f3de84aa
+extraction_side: spec
+interface_methods: [put, get, delete, iterate_all, force_flush]   # N = 5
+properties:
+  - id: SPEC-PUT-GET-ROUNDTRIP
+    statement: "After put(key, value) succeeds with a value of 0..=128 KiB, a subsequent get(key) returns Ok holding an identical copy of the stored bytes."
+    kind: functional
+    source: [FR-01, FR-02, US1]
+    verifiable: true
+    methods: [put, get]
+
+  - id: SPEC-PUT-SIZE-LIMIT
+    statement: "put rejects any value strictly larger than 128 KiB (MAX_VALUE_SIZE) by returning ExtendedMetadataStoreError::ValueTooLarge, and no such value is stored."
+    kind: safety
+    source: [FR-06, US1]
+    verifiable: true
+    methods: [put]
+
+  - id: SPEC-PUT-OVERWRITE
+    statement: "Writing an existing key with put replaces the previous value atomically; a following get returns the most recently written value."
+    kind: functional
+    source: [FR-01, US1]
+    verifiable: true
+    methods: [put, get]
+
+  - id: SPEC-GET-NOTFOUND
+    statement: "get on a key that is not present returns ExtendedMetadataStoreError::NotFound."
+    kind: functional
+    source: [FR-02, US1]
+    verifiable: true
+    methods: [get]
+
+  - id: SPEC-DELETE-REMOVES
+    statement: "After delete(key) the key is absent: get(key) returns NotFound and the pair is excluded from iterate_all()."
+    kind: functional
+    source: [FR-03, US3]
+    verifiable: true
+    methods: [delete, get, iterate_all]
+
+  - id: SPEC-DELETE-IDEMPOTENT
+    statement: "Deleting a key that is not present is idempotent and returns Ok(())."
+    kind: functional
+    source: [FR-03, US3]
+    verifiable: true
+    methods: [delete]
+
+  - id: SPEC-ITERATE-SNAPSHOT
+    statement: "iterate_all() returns a consistent snapshot-at-call-time of every current key-value pair, with deleted entries excluded and no partial updates visible."
+    kind: functional
+    source: [FR-04, US4]
+    verifiable: true
+    methods: [iterate_all]
+
+  - id: SPEC-DIRTY-COUNT
+    statement: "The dirty count tracks mutations since the last flush; each put and each delete increases it."
+    kind: functional
+    source: [FR-14, US3]
+    verifiable: true
+    methods: [put, delete]
+
+  - id: SPEC-FORCE-FLUSH-NOOP
+    statement: "In pure in-memory mode (no durable-flush trigger installed) force_flush() is a correct no-op returning Ok(())."
+    kind: functional
+    source: [FR-05]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-FORCE-FLUSH-DURABLE
+    statement: "When the wiring layer has installed a durable-flush trigger, force_flush() invokes it, blocks until it returns, and maps any trigger error to StorageError; it returns Ok only once all data is durable."
+    kind: functional
+    source: [FR-05, US6]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-DUAL-REGION-PINGPONG
+    statement: "Flush writes the serialized state to the inactive region and only then flips the superblock's active-region pointer and writes the superblock as the single atomic commit point."
+    kind: functional
+    source: [FR-07, US2]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-CRASH-CONSISTENCY
+    statement: "A crash at any point during a flush leaves either the previous committed state or the new state intact; a partial flush never corrupts previously-committed data."
+    kind: safety
+    source: [NFR-04, US2]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-FLUSH-SEQ-MONOTONE
+    statement: "Flush sequence numbers are monotonically increasing across successive flushes."
+    kind: functional
+    source: [US2, FR-07]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-RECOVER-ACTIVE
+    statement: "Recovery reads the superblock, identifies the active region, and deserializes its entries back into memory."
+    kind: functional
+    source: [FR-08, US2]
+    verifiable: true
+    methods: [force_flush]      # recovery is FR-17 wiring; attached to durability surface
+
+  - id: SPEC-RECOVER-FALLBACK
+    statement: "If the active region is corrupt, recovery falls back to the inactive region (previous checkpoint)."
+    kind: functional
+    source: [FR-09, US2]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-RECOVER-FRESH
+    statement: "A fresh (all-zeros / no valid superblock) partition is auto-detected and formatted to an empty store without crashing; if both regions are corrupt the store initializes empty."
+    kind: functional
+    source: [FR-10, US2]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-CRC32-INTEGRITY
+    statement: "On-disk superblock, region headers, and entry records carry CRC32 integrity checks; a record whose stored CRC does not match its recomputed CRC is rejected."
+    kind: safety
+    source: [NFR-02]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-SECTOR-ALIGNED
+    statement: "All on-disk structures are sector-aligned (default 4096-byte sectors)."
+    kind: functional
+    source: [NFR-03]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-LITTLE-ENDIAN
+    statement: "All on-disk integer fields use little-endian byte order and round-trip losslessly."
+    kind: functional
+    source: [NFR-09]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-SUPERBLOCK-MAGIC
+    statement: "The superblock is identified by magic number 0x4345525445544D41 (CERTMETA) and a format version; deserialization rejects data with a wrong magic or version."
+    kind: functional
+    source: [NFR-10]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-REGION-CAPACITY-BYTES
+    statement: "Superblock::region_capacity_bytes() returns the usable per-region byte capacity, region_a_size * sector_size."
+    kind: functional
+    source: [FR-18]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-CONCURRENT-READERS
+    statement: "Multiple concurrent get() calls proceed without blocking one another (shared read lock); put/delete take an exclusive write lock."
+    kind: liveness
+    source: [NFR-01, US5]
+    verifiable: true
+    methods: [get, put, delete]
+
+  - id: SPEC-ITERATE-CONCURRENT-SAFE
+    statement: "Concurrent writers do not corrupt the result of an in-progress iterate_all()."
+    kind: safety
+    source: [US4, US5]
+    verifiable: true
+    methods: [iterate_all]
+
+  - id: SPEC-FLUSH-COALESCE
+    statement: "Multiple concurrent force_flush() calls coalesce into a single in-flight flush operation."
+    kind: functional
+    source: [FR-12, US6]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-FLUSH-BG-TRIGGERS
+    statement: "The background FlushManager supports a configurable timer interval and a dirty-count threshold that trigger flushes."
+    kind: functional
+    source: [FR-11, US6]
+    verifiable: true
+    methods: [force_flush]
+
+  - id: SPEC-FLUSH-FINAL-ON-DROP
+    statement: "FlushManager performs a final flush when it is dropped (graceful shutdown)."
+    kind: functional
+    source: [FR-13, US6]
+    verifiable: true
+    methods: [force_flush]
+
+  # ---- Non-verifiable / spec-only items (ledger) ----
+  - id: SPEC-LOGGING
+    statement: "All store operations are logged via the optional ILogger receptacle."
+    kind: observational
+    source: [FR-16, US1]
+    verifiable: false
+    nv_reason: "Optional side effect with no functional postcondition on the store; logger correctness is owned by the logger component. Presence of a debug() call is a code fact, not a state obligation."
+    methods: [put, get, delete, iterate_all, force_flush]
+
+  - id: SPEC-NO-PANIC-STRESS
+    statement: "No panics occur under 8-thread concurrent stress (1000 ops per thread); final state is self-consistent."
+    kind: robustness
+    source: [US5]
+    verifiable: false
+    nv_reason: "Stress/exhaustion property over unbounded interleavings and op counts; not a bounded functional obligation. The bounded consistency core is captured by SPEC-CONCURRENT-READERS (delegated to Loom)."
+    methods: [put, get, delete]
+
+  - id: SPEC-CAPACITY-EXHAUSTED
+    statement: "The store returns CapacityExhausted when it reaches its capacity limit."
+    kind: functional
+    source: [interface-contract]
+    verifiable: false
+    nv_reason: "ALIGN gap: the CapacityExhausted variant is defined in the interface but no code path constructs it (per Known Gaps). There is no implemented behavior to verify; region-capacity is enforced at flush time as a String error instead."
+    methods: [put]
+
+  - id: SPEC-DMA-ABSTRACTION
+    statement: "DMA memory allocation is abstracted via DmaAllocFn for portability between heap (test) and hugepages (production)."
+    kind: functional
+    source: [NFR-08]
+    verifiable: false
+    nv_reason: "Portability/FFI seam; correctness of DMA allocation and hugepage backing is owned by the block-device / SPDK environment, outside this component's verifiable surface."
+    methods: [force_flush]
+
+  - id: SPEC-TEST-INFRA
+    statement: "Test infrastructure provides MockBlockDevice with fault injection and create_test_component_from_state() for reboot simulation."
+    kind: functional
+    source: [NFR-07, NFR-11]
+    verifiable: false
+    nv_reason: "Test-only scaffolding, not part of the production behavior contract."
+    methods: []
+
+  - id: SPEC-BUILD-HYGIENE
+    statement: "cargo clippy -D warnings passes clean and all public items are documented (cargo doc warning-free); unit/persistence/SSD test suites pass."
+    kind: process
+    source: [SC-1, SC-2, SC-3, SC-6, SC-7]
+    verifiable: false
+    nv_reason: "Build/CI hygiene and test-suite passage, not a runtime state property amenable to formal proof."
+    methods: []
