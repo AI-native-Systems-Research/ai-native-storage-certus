@@ -1,0 +1,15 @@
+[package]
+name = "remote-lookup-verif-kani"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone: opt out of the repo root workspace. This mirror crate depends on NO
+# real component crates (the real remote-lookup pulls spdk-sys + zyre native libs
+# and cannot build under Kani), so it verifies faithful in-crate mirrors of the
+# wire codec + operation state machine + batch_lookup decision core.
+[workspace]
+
+[lib]
+name = "rl_verif_kani"
+path = "src/lib.rs"

@@ -1,0 +1,1551 @@
+component: remote-lookup
+interface: IRemoteLookup
+pin: f3de84aa (origin/unstable, 2026-09-22)
+generated: 2026-09-22
+spec_source: 'components/remote-lookup/specs/002-remote-lookup-rdma/spec.md (Status: Synced; supersedes
+  001-remote-lookup-placeholder)'
+code_source: components/remote-lookup/src/{wire.rs, operation.rs, lib.rs} (+ components/interfaces/src/{iremote_lookup.rs,
+  idispatch_map.rs, izyre.rs, iremote_lookup_rdma_responder.rs})
+tools:
+- creusot
+- kani
+counts:
+  methods: 4
+  spec_total: 40
+  code_total: 34
+  unified: 31
+  attachments: 47
+  not_verifiable: 4
+reconciliation:
+  method: Blind spec-extraction (from specs/002-remote-lookup-rdma/spec.md alone) and blind code-extraction
+    (from src/{wire,operation,lib}.rs + interfaces) were performed separately, then reconciled by an explicit
+    FR/US/SC <-> code-symbol table rather than by string similarity.
+  spec_only:
+  - SC-001
+  - SC-003
+  - SC-004
+  - FR-016a (pin-leak, no detector)
+  notes: Spec-only items are the quantitative success criteria (SC-001/003/004) and the non-detectable
+    pin-leak liveness (FR-016a), all captured in the not-verifiable ledger. Code-only items are the internal
+    pure helpers with no direct FR (Avail/RdmaStatusCode tag bijections, size_of, state_of default), captured
+    as verifiable properties RL-AVAIL-TAG-BIJECTION, RL-STATUS-TAG-BIJECTION, RL-OP-SIZEOF, RL-OP-STATEOF-DEFAULT.
+    Every FR maps to at least one unified property or a delegated referent; concurrency/network/RDMA FRs
+    (FR-002, FR-006/008, FR-013/014, FR-016/024, FR-020, FR-026, FR-027/028) are delegated to named referents
+    (Loom, zyre, the two RDMA components, dispatch-map, memory-tier).
+run:
+  gate_commit: 7757ae4b
+  gate_branch: skills/verify-methodology-to-unstable
+  creusot:
+    scored_by: scorer_creusot
+    command: scorer_creusot.py /home/cornel/rescore-20260925/remote-lookup/verif --crate-dir /home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif
+      --cap-seconds 60 --cap-max 300
+    started: '2026-09-25T18:31:26-07:00'
+    finished: '2026-09-25T18:32:02-07:00'
+    creusot: v0.11.0-169-g9cf662ce6
+    why3: Why3 platform, version 1.8.2+git
+    provers:
+    - Alt-Ergo 2.6.2
+    - CVC4 1.8
+    - CVC5 1.3.1
+    - Coq 8.20.1
+    - Z3 4.16.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+  kani:
+    scored_by: scorer_kani
+    command: scorer_kani.py /home/cornel/rescore-20260925/remote-lookup/verif --component-dir /home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif-kani
+      --cap-seconds 60 --cap-max 300
+    started: '2026-09-25T18:32:02-07:00'
+    finished: '2026-09-25T19:19:56-07:00'
+    kani_version: cargo-kani 0.67.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+properties:
+- id: RL-WIRE-OPID
+  subject: WireMessage::op_id
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::op_id(&self) -> u64
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-018
+    - 'Key Entities: WireMessage'
+    code:
+    - wire.rs:156-164
+  statement: 'For every variant of a decoded wire message (KeyQuery, KeyResponse, RdmaRequest, RdmaStatus,
+    and the Unknown sentinel), the op_id() accessor returns exactly the op_id value that is stored in
+    the header field of that variant, so a server can always echo the correlation id it received.
+
+    '
+  traces:
+  - FR-018
+  - wire.rs:156-164
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_wire_opid
+      result: Proved
+      wall_clock_s: 1.03
+      peak_rss_mb: 160
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_wire_opid
+      result: SUCCESS
+      wall_clock_s: 1.77
+      peak_rss_mb: 55
+    _scored_by: scorer_kani
+- id: RL-AVAIL-TAG-BIJECTION
+  subject: Avail
+  methods:
+  - batch_lookup
+  object_fn: wire::Avail::to_u8 / Avail::from_u8
+  kind: invariant
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code
+  source:
+    spec:
+    - FR-015
+    code:
+    - wire.rs:32-49
+  statement: 'The availability tag encoding is a faithful round trip on its domain: for every Avail value
+    (None, Memory, Disk) decoding the byte produced by encoding it yields back the same Avail value, and
+    any byte outside the domain {0,1,2} decodes to None (rejected) rather than being silently mapped to
+    a valid availability.
+
+    '
+  traces:
+  - FR-015
+  - wire.rs:32-49
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_avail_tag_bijection
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_avail_tag_bijection
+      result: SUCCESS
+      wall_clock_s: 0.66
+      peak_rss_mb: 25
+    _scored_by: scorer_kani
+- id: RL-STATUS-TAG-BIJECTION
+  subject: RdmaStatusCode
+  methods:
+  - batch_lookup
+  object_fn: wire::RdmaStatusCode::to_u8 / RdmaStatusCode::from_u8
+  kind: invariant
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code
+  source:
+    spec:
+    - FR-016
+    code:
+    - wire.rs:65-82
+  statement: 'The RDMA status-code tag encoding is a faithful round trip on its domain: for every RdmaStatusCode
+    value (Success, UnableToConnect, KeyNoLongerAvailable) decoding the byte produced by encoding it yields
+    back the same value, and any byte outside the domain {0,1,2} decodes to None (rejected) rather than
+    being mapped to a valid status.
+
+    '
+  traces:
+  - FR-016
+  - wire.rs:65-82
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_status_tag_bijection
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_status_tag_bijection
+      result: SUCCESS
+      wall_clock_s: 0.66
+      peak_rss_mb: 25
+    _scored_by: scorer_kani
+- id: RL-WIRE-HEADER-LAYOUT
+  subject: WireMessage::encode
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::encode (put_header)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-018
+    code:
+    - wire.rs:170-230
+    - wire.rs:315-319
+  statement: 'Every encoded frame begins with the fixed 10-byte header layout mandated by FR-018: byte
+    0 is the protocol version constant WIRE_VERSION (1), byte 1 is the message-type tag, and bytes 2 through
+    9 are the op_id serialized as little-endian u64.
+
+    '
+  traces:
+  - FR-018
+  - wire.rs:315-319
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_wire_header_layout
+      result: Proved
+      wall_clock_s: 0.54
+      peak_rss_mb: 57
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_wire_header_layout
+      result: SUCCESS
+      wall_clock_s: 4.21
+      peak_rss_mb: 70
+    _scored_by: scorer_kani
+- id: RL-WIRE-ROUNDTRIP-KEYQUERY
+  subject: WireMessage encode/decode
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::decode(encode(KeyQuery))
+  kind: roundtrip
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-004
+    - FR-005
+    code:
+    - wire.rs:173-180
+    - wire.rs:250-259
+  statement: 'Decoding the bytes produced by encoding a KEY_QUERY message reconstructs an identical message:
+    the op_id and the full ordered list of (key, size) entries are recovered exactly, so the (key, size)
+    wire identity of FR-004 survives serialization and deserialization.
+
+    '
+  traces:
+  - FR-004
+  - wire.rs:250-259
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_wire_roundtrip_keyquery
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_wire_roundtrip_keyquery
+      result: SUCCESS
+      wall_clock_s: 26.13
+      peak_rss_mb: 401
+    _scored_by: scorer_kani
+- id: RL-WIRE-ROUNDTRIP-RDMASTATUS
+  subject: WireMessage encode/decode
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::decode(encode(RdmaStatus))
+  kind: roundtrip
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-016
+    - FR-018
+    code:
+    - wire.rs:211-218
+    - wire.rs:294-302
+  statement: 'Decoding the bytes produced by encoding an RDMA_STATUS message reconstructs an identical
+    message: the op_id and the full ordered list of (key, status-code) entries are recovered exactly,
+    each status tag mapping back to the same RdmaStatusCode.
+
+    '
+  traces:
+  - FR-016
+  - wire.rs:294-302
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_wire_roundtrip_rdmastatus
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_wire_roundtrip_rdmastatus
+      result: SUCCESS
+      wall_clock_s: 28.38
+      peak_rss_mb: 472
+    _scored_by: scorer_kani
+- id: RL-WIRE-ROUNDTRIP-KEYRESPONSE
+  subject: WireMessage encode/decode
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::decode(encode(KeyResponse))
+  kind: roundtrip
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-015
+    - FR-018
+    code:
+    - wire.rs:181-194
+    - wire.rs:260-275
+  statement: 'Decoding the bytes produced by encoding a KEY_RESPONSE message reconstructs an identical
+    message: the op_id, the responder endpoint (its IP string and port), and the full ordered list of
+    (key, size, availability) entries are recovered exactly. (The endpoint IP is a String whose concrete
+    character content must survive the round trip.)
+
+    '
+  traces:
+  - FR-015
+  - wire.rs:260-275
+  creusot:
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: 'battery exhausted for class ''sat-timeout''; residual signature captured: TIMEOUT after 300s'
+    status: tool-boundary
+    evidence:
+      harness: verify_rl_wire_roundtrip_keyresponse
+      result: FAILED
+      wall_clock_s: 360.66
+      peak_rss_mb: null
+      signature: TIMEOUT after 300s
+    _scored_by: scorer_kani
+- id: RL-WIRE-ROUNDTRIP-RDMAREQUEST
+  subject: WireMessage encode/decode
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::decode(encode(RdmaRequest))
+  kind: roundtrip
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-007
+    - FR-018
+    code:
+    - wire.rs:195-210
+    - wire.rs:276-293
+  statement: 'Decoding the bytes produced by encoding an RDMA_REQUEST message reconstructs an identical
+    message: the op_id, the requester endpoint (IP string and port), the pool-wide rkey, and the full
+    ordered list of landing slots (key, addr, length) are recovered exactly. (The endpoint IP is a String
+    whose concrete character content must survive the round trip.)
+
+    '
+  traces:
+  - FR-007
+  - wire.rs:276-293
+  creusot:
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: 'battery exhausted for class ''sat-timeout''; residual signature captured: TIMEOUT after 300s'
+    status: tool-boundary
+    evidence:
+      harness: verify_rl_wire_roundtrip_rdmarequest
+      result: FAILED
+      wall_clock_s: 360.32
+      peak_rss_mb: null
+      signature: TIMEOUT after 300s
+    _scored_by: scorer_kani
+- id: RL-WIRE-DECODE-TRUNCATED
+  subject: WireMessage::decode
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::decode (Reader::take bounds check)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-018
+    - 'Edge Cases: malformed/truncated frame'
+    code:
+    - wire.rs:235-239
+    - wire.rs:352-360
+  statement: 'A buffer that ends before a fixed-size field or a declared record can be read is rejected
+    as a hard error: decoding any frame shorter than the 10-byte header, or any frame whose declared entry/slot
+    count exceeds the bytes actually present, returns Err(WireError::Truncated) rather than reading out
+    of bounds or fabricating data.
+
+    '
+  traces:
+  - FR-018
+  - wire.rs:352-360
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_wire_decode_truncated
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_wire_decode_truncated
+      result: SUCCESS
+      wall_clock_s: 23.0
+      peak_rss_mb: 734
+    _scored_by: scorer_kani
+- id: RL-WIRE-DECODE-BADTAG
+  subject: WireMessage::decode
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::decode (Avail/RdmaStatusCode::from_u8 -> ok_or BadTag)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-018
+    - 'Edge Cases: bad tag'
+    code:
+    - wire.rs:267
+    - wire.rs:299
+  statement: 'A KEY_RESPONSE or RDMA_STATUS frame that is well-framed but carries an availability or status
+    tag byte outside its valid domain is rejected with Err(WireError::BadTag); an out-of-range tag is
+    never silently accepted as a valid availability or status value.
+
+    '
+  traces:
+  - FR-018
+  - wire.rs:267
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_wire_decode_badtag
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_wire_decode_badtag
+      result: SUCCESS
+      wall_clock_s: 13.35
+      peak_rss_mb: 161
+    _scored_by: scorer_kani
+- id: RL-WIRE-DECODE-UNKNOWN-TYPE
+  subject: WireMessage::decode
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::decode (unknown msg_type arm)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-018
+    - 'Edge Cases: unrecognized msg_type'
+    code:
+    - wire.rs:304-308
+  statement: 'A frame whose version is the supported WIRE_VERSION but whose msg_type tag is not one of
+    the four recognized types decodes successfully to WireMessage::Unknown, preserving the version, msg_type,
+    and op_id header fields so the caller can log-and-ignore it (FR-018) rather than erroring.
+
+    '
+  traces:
+  - FR-018
+  - wire.rs:304-308
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_wire_decode_unknown_type
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_wire_decode_unknown_type
+      result: SUCCESS
+      wall_clock_s: 10.46
+      peak_rss_mb: 130
+    _scored_by: scorer_kani
+- id: RL-WIRE-DECODE-BAD-VERSION
+  subject: WireMessage::decode
+  methods:
+  - batch_lookup
+  object_fn: wire::WireMessage::decode (version != WIRE_VERSION arm)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-018
+    code:
+    - wire.rs:241-247
+  statement: 'A frame whose leading version byte is not the supported WIRE_VERSION (1) decodes successfully
+    to WireMessage::Unknown carrying the observed version, msg_type, and op_id, so an unsupported protocol
+    version is logged-and-ignored rather than misinterpreted or hard-errored.
+
+    '
+  traces:
+  - FR-018
+  - wire.rs:241-247
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_wire_decode_bad_version
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_wire_decode_bad_version
+      result: SUCCESS
+      wall_clock_s: 10.67
+      peak_rss_mb: 141
+    _scored_by: scorer_kani
+- id: RL-OP-QUORUM-ZERO
+  subject: Operation::quorum_reached
+  methods:
+  - batch_lookup
+  object_fn: operation::Operation::quorum_reached
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-010
+    - US6-AS1
+    code:
+    - operation.rs:115-118
+  statement: 'When the group had no expected peers at SHOUT time (peers_expected == 0), quorum is treated
+    as already reached for any quorum percentage, so an operation in an empty or single-node group short-circuits
+    to completion instead of waiting out the Phase-1 timeout.
+
+    '
+  traces:
+  - FR-010
+  - operation.rs:115-118
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_op_quorum_zero
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_op_quorum_zero
+      result: SUCCESS
+      wall_clock_s: 2.04
+      peak_rss_mb: 32
+    _scored_by: scorer_kani
+- id: RL-OP-QUORUM-ARITH
+  subject: Operation::quorum_reached
+  methods:
+  - batch_lookup
+  object_fn: operation::Operation::quorum_reached
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-010
+    - US6-AS1
+    code:
+    - operation.rs:115-118
+  statement: 'For a group with at least one expected peer, quorum_reached(pct) is true exactly when the
+    number of distinct peers that have replied, times 100, is at least the expected peer count times the
+    quorum percentage; equivalently the Phase-2 transition fires precisely once the replied fraction reaches
+    the configured quorum percentage (e.g. 8 of 10 peers at 80%).
+
+    '
+  traces:
+  - FR-010
+  - US6-AS1
+  - operation.rs:115-118
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_op_quorum_arith
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_op_quorum_arith
+      result: SUCCESS
+      wall_clock_s: 124.74
+      peak_rss_mb: 49
+    _scored_by: scorer_kani
+- id: RL-OP-RESULTS-LEN
+  subject: Operation::results
+  methods:
+  - batch_lookup
+  object_fn: operation::Operation::results
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-001
+    - FR-012
+    code:
+    - operation.rs:149-160
+    - lib.rs:275-314
+  statement: 'The positional result vector produced for an operation has exactly one entry for each requested
+    (key, size) entry and in the same order, so batch_lookup returns precisely one Result per input entry
+    (one-result-per-entry, positional correspondence with the request).
+
+    '
+  traces:
+  - FR-001
+  - FR-012
+  - operation.rs:149-160
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_op_results_len
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_op_results_len
+      result: SUCCESS
+      wall_clock_s: 10.39
+      peak_rss_mb: 233
+    _scored_by: scorer_kani
+- id: RL-OP-RESULTS-POSITIONAL
+  subject: Operation::results
+  methods:
+  - batch_lookup
+  object_fn: operation::Operation::results
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-012
+    - US1-AS1
+    - US1-AS3
+    code:
+    - operation.rs:149-160
+  statement: 'In the positional result vector, the result at position i is Ok(()) exactly when the key
+    of the i-th requested entry is in the Satisfied state, and is Err(NotFound) otherwise; a satisfied
+    key reports success and an unsatisfied key reports not-found, each at its own position.
+
+    '
+  traces:
+  - FR-012
+  - US1-AS1
+  - US1-AS3
+  - operation.rs:149-160
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_op_results_positional
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 54
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_op_results_positional
+      result: SUCCESS
+      wall_clock_s: 13.2
+      peak_rss_mb: 302
+    _scored_by: scorer_kani
+- id: RL-OP-SIZEOF
+  subject: Operation::size_of
+  methods:
+  - batch_lookup
+  object_fn: operation::Operation::size_of
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code
+  source:
+    spec:
+    - FR-004
+    code:
+    - operation.rs:121-125
+  statement: 'size_of(key) returns Some(size) with the requested size of the first requested entry whose
+    key equals the argument, and returns None when no requested entry has that key, preserving the (key,
+    size) identity for each in-flight key.
+
+    '
+  traces:
+  - FR-004
+  - operation.rs:121-125
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_op_sizeof
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_op_sizeof
+      result: SUCCESS
+      wall_clock_s: 6.04
+      peak_rss_mb: 161
+    _scored_by: scorer_kani
+- id: RL-OP-STATEOF-DEFAULT
+  subject: Operation::state_of
+  methods:
+  - batch_lookup
+  object_fn: operation::Operation::state_of
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code
+  source:
+    spec:
+    - 'Key Entities: Operation'
+    code:
+    - operation.rs:128-133
+  statement: 'state_of(key) returns the tracked per-key state when the key is present in the state map,
+    and defaults to Unsatisfied for any key not tracked by the operation, so an unknown key is never reported
+    as satisfied or in-progress.
+
+    '
+  traces:
+  - operation.rs:128-133
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_op_stateof_default
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_op_stateof_default
+      result: SUCCESS
+      wall_clock_s: 5.9
+      peak_rss_mb: 178
+    _scored_by: scorer_kani
+- id: RL-OP-TRIED-DEDUP
+  subject: Operation tried-peer set
+  methods:
+  - batch_lookup
+  object_fn: operation::Operation::note_tried / already_tried
+  kind: invariant
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-011
+    - US5-AS1
+    code:
+    - operation.rs:163-175
+  statement: 'After recording that a peer was tried for a key, already_tried reports that peer as tried
+    for that key; recording the same peer again does not add a duplicate entry, so the set of peers tried
+    for a key never contains the same peer twice and retries never re-target a peer already known to have
+    failed the key (FR-011).
+
+    '
+  traces:
+  - FR-011
+  - US5-AS1
+  - operation.rs:163-175
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_op_tried_dedup
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_op_tried_dedup
+      result: SUCCESS
+      wall_clock_s: 20.67
+      peak_rss_mb: 1314
+    _scored_by: scorer_kani
+- id: RL-BL-EMPTY
+  subject: batch_lookup
+  methods:
+  - batch_lookup
+  object_fn: RemoteLookupComponent::batch_lookup (empty-input guard)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - 'Edge Cases: empty entry list'
+    code:
+    - lib.rs:276-278
+  statement: 'Calling batch_lookup with an empty entry slice returns an empty result vector immediately,
+    without contacting the actor, allocating any landing slot, or performing any wire activity.
+
+    '
+  traces:
+  - lib.rs:276-278
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_bl_empty
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_bl_empty
+      result: SUCCESS
+      wall_clock_s: 1.94
+      peak_rss_mb: 29
+    _scored_by: scorer_kani
+- id: RL-BL-UNINIT-NOTFOUND
+  subject: batch_lookup
+  methods:
+  - batch_lookup
+  object_fn: RemoteLookupComponent::batch_lookup (uninitialized guard)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - 'Edge Cases: no peers / uninitialized'
+    code:
+    - lib.rs:279-289
+  statement: 'When the component has not been initialized (no actor submission channel exists), a non-empty
+    batch_lookup returns Err(NotFound) for every requested entry, and the returned vector still has exactly
+    one result per input entry in order.
+
+    '
+  traces:
+  - lib.rs:279-289
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_bl_uninit_notfound
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_bl_uninit_notfound
+      result: SUCCESS
+      wall_clock_s: 4.29
+      peak_rss_mb: 102
+    _scored_by: scorer_kani
+- id: RL-CLUSTER-UNINIT-ERROR
+  subject: join_cluster / leave_cluster
+  methods:
+  - join_cluster
+  - leave_cluster
+  object_fn: RemoteLookupComponent::join_cluster / leave_cluster (uninitialized guard)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-003
+    code:
+    - lib.rs:318-333
+  statement: 'When the component has not been initialized (no actor submission channel exists), join_cluster
+    and leave_cluster each return Err(RemoteLookupError::TransportError) rather than panicking or silently
+    succeeding, because both are routed to the actor thread that does not exist until initialize.
+
+    '
+  traces:
+  - FR-003
+  - lib.rs:318-333
+  creusot:
+    fidelity: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_rl_cluster_uninit_error
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_rl_cluster_uninit_error
+      result: SUCCESS
+      wall_clock_s: 2.04
+      peak_rss_mb: 45
+    _scored_by: scorer_kani
+- id: RL-ACTOR-DEDICATED-THREAD
+  subject: actor lifecycle
+  methods:
+  - initialize
+  object_fn: RemoteLookupComponent::initialize -> actor::run (dedicated thread owns IZyreNode)
+  kind: architecture
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-002
+    - FR-023
+    code:
+    - lib.rs:194-243
+    - actor.rs
+  statement: 'The component runs as an actor on a dedicated OS thread that exclusively owns the IZyreNode
+    and polls it in its event loop; all operation state lives on that one thread, so there is no shared-memory
+    data race on operation state. This thread-ownership and single-threaded state-confinement property
+    is a concurrency-model obligation rather than a single-crate pure proof.
+
+    '
+  traces:
+  - FR-002
+  - lib.rs:194-243
+  creusot:
+    delegate_to: Loom concurrency model (interleaving harness over the actor thread) + component-framework
+      thread-ownership contract
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    delegate_to: Loom concurrency model (interleaving harness over the actor thread) + component-framework
+      thread-ownership contract
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RL-CONCURRENCY-INTERLEAVE
+  subject: multi-operation concurrency
+  methods:
+  - batch_lookup
+  object_fn: actor::run (multiple concurrent op_ids interleaved)
+  kind: concurrency
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec
+  source:
+    spec:
+    - FR-020
+    - FR-030
+    code:
+    - actor.rs
+  statement: 'The actor supports multiple concurrent in-flight operations, each keyed by a unique op_id,
+    interleaving event handling across them so that a slow or timing-out operation does not block the
+    progress or completion of the others.
+
+    '
+  traces:
+  - FR-020
+  - FR-030
+  creusot:
+    delegate_to: Loom concurrency model (multi-op interleaving over the actor mailbox)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    delegate_to: Loom concurrency model (multi-op interleaving over the actor mailbox)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RL-SINGLE-FLIGHT
+  subject: single-flight coalescing
+  methods:
+  - batch_lookup
+  object_fn: actor per-key in-flight index (single-flight coalescing)
+  kind: concurrency
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec
+  source:
+    spec:
+    - FR-026
+    - SC-008
+    - 'Edge Cases: concurrent same-key'
+    code:
+    - actor.rs
+  statement: 'Concurrent batch_lookup operations that request the same unsatisfied (key, size) coalesce
+    onto a single in-flight remote fetch through the actor per-key in-flight index: the later operation
+    attaches as a follower and waits for the one fill rather than issuing a duplicate remote fetch, and
+    the follower then observes the published value or the not-found result.
+
+    '
+  traces:
+  - FR-026
+  - SC-008
+  creusot:
+    delegate_to: Loom concurrency model (concurrent same-key coalescing over the in-flight index)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    delegate_to: Loom concurrency model (concurrent same-key coalescing over the in-flight index)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RL-PUBLISH-ON-SUCCESS
+  subject: publish-on-success landing slot
+  methods:
+  - batch_lookup
+  object_fn: actor publish_success (create_memory_tier_entry + release_write; remove on failure)
+  kind: protocol-invariant
+  verifiable: true
+  global: false
+  attachments: 3
+  origin: spec
+  source:
+    spec:
+    - FR-006
+    - FR-008
+    - US1-AS1
+    - 'Edge Cases: AlreadyExists size-collision'
+    code:
+    - actor.rs:576-591
+  statement: 'A landing slot is reserved privately in the local memory-tier pool and is published to dispatch-map
+    (via create_memory_tier_entry then release_write) only after the RDMA transfer succeeds; on failure
+    or peer-exit the slot is discarded (memory_tier.remove) and no dispatch-map entry is ever created.
+    A racing create_memory_tier_entry that returns AlreadyExists counts as success only when the resident
+    entry size equals the slot length, and a size mismatch discards the private slot without evicting
+    or overwriting the resident entry.
+
+    '
+  traces:
+  - FR-006
+  - FR-008
+  - actor.rs:576-591
+  creusot:
+    delegate_to: dispatch-map component + memory-tier component (create_memory_tier_entry / release_write
+      / remove contracts) integrated by the actor
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    delegate_to: dispatch-map component + memory-tier component (create_memory_tier_entry / release_write
+      / remove contracts) integrated by the actor
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RL-TEARDOWN-BEFORE-RECLAIM
+  subject: teardown-before-reclaim
+  methods:
+  - batch_lookup
+  object_fn: actor Disconnect/DisconnectAck gate before slot reclaim (DISCONNECT_ACK_TIMEOUT)
+  kind: memory-safety
+  verifiable: true
+  global: false
+  attachments: 3
+  origin: spec
+  source:
+    spec:
+    - FR-014
+    - SC-005
+    - US7-AS2
+    code:
+    - actor.rs:37
+    - actor.rs:1020-1033
+  statement: 'Before a landing slot that was exposed to a departing or severed peer is returned to the
+    allocator, the actor issues a responder Disconnect for that peer and blocks (bounded by the fixed
+    DISCONNECT_ACK_TIMEOUT) for the DisconnectAck, whose receipt guarantees the peer QP is in ERROR state
+    so no late one-sided write can land in the reclaimed slot.
+
+    '
+  traces:
+  - FR-014
+  - SC-005
+  - actor.rs:1020-1033
+  creusot:
+    delegate_to: remote-lookup-rdma-responder component (Disconnect/DisconnectAck QP-teardown contract)
+      + Loom ordering model
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    delegate_to: remote-lookup-rdma-responder component (Disconnect/DisconnectAck QP-teardown contract)
+      + Loom ordering model
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RL-ONE-SIDED-RDMA
+  subject: one-sided RDMA data path
+  methods:
+  - batch_lookup
+  object_fn: server::serve_rdma_request -> IRemoteLookupRdmaInitiator::push_async; RDMA_STATUS mapping
+  kind: protocol
+  verifiable: true
+  global: false
+  attachments: 3
+  origin: spec
+  source:
+    spec:
+    - FR-007
+    - FR-016
+    - FR-024
+    - US3
+    code:
+    - server.rs
+    - worker.rs:81-108
+  statement: 'The component contains no RDMA transport logic of its own: outbound one-sided writes are
+    delegated to IRemoteLookupRdmaInitiator::push_async carrying each landing RemoteRegion, and each PushStatus
+    is mapped to the correct RDMA_STATUS code (Success->Success, UnableToConnect->UnableToConnect, KeyNotFound/SizeMismatch->KeyNoLongerAvailable)
+    whispered back per key.
+
+    '
+  traces:
+  - FR-007
+  - FR-016
+  - FR-024
+  creusot:
+    delegate_to: remote-lookup-rdma-initiator + remote-lookup-rdma-responder components (one-sided write
+      + memory-region registration) and the RDMA transport model
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    delegate_to: remote-lookup-rdma-initiator + remote-lookup-rdma-responder components (one-sided write
+      + memory-region registration) and the RDMA transport model
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RL-ZYRE-DISCOVERY-WARM
+  subject: zyre discovery / self-filter / connection warming
+  methods:
+  - initialize
+  - join_cluster
+  - leave_cluster
+  object_fn: actor zyre poll loop (join group, self-filter, warm on Enter)
+  kind: protocol
+  verifiable: true
+  global: false
+  attachments: 3
+  origin: spec
+  source:
+    spec:
+    - FR-003
+    - FR-021
+    - FR-027
+    - FR-028
+    code:
+    - actor.rs
+    - worker.rs:77-80
+  statement: 'The actor joins the configured zyre group on activation and leaves it on deactivation, ignores
+    any SHOUT whose peer id equals its own uuid (defensive self-filter), and on discovering a peer that
+    advertises a responder endpoint proactively warms an RDMA connection off the poll loop so the cold
+    rdma_cm connect happens at discovery time rather than inline on the first serve.
+
+    '
+  traces:
+  - FR-003
+  - FR-021
+  - FR-027
+  creusot:
+    delegate_to: zyre component (IZyre discovery/group membership) + network transport model
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    delegate_to: zyre component (IZyre discovery/group membership) + network transport model
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RL-PEER-EXIT
+  subject: peer departure handling
+  methods:
+  - batch_lookup
+  object_fn: actor on-Exit handling (drop reply, requeue in-progress keys, re-evaluate completion)
+  kind: protocol
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec
+  source:
+    spec:
+    - FR-013
+    - US7-AS1
+    - SC-006
+    code:
+    - actor.rs
+  statement: 'When a zyre Exit for a peer arrives during an operation, the actor deletes that peer''s
+    cached reply, returns any of its in-progress keys to the unsatisfied set, and re-evaluates the completion
+    criteria, so a departed peer cannot leave the operation hanging past the point its remaining criteria
+    are met.
+
+    '
+  traces:
+  - FR-013
+  - US7-AS1
+  - SC-006
+  creusot:
+    delegate_to: actor event-ordering model (Loom) over zyre Exit vs in-flight state
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    delegate_to: actor event-ordering model (Loom) over zyre Exit vs in-flight state
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RL-COMPLETION-CRITERIA
+  subject: operation completion / timeout
+  methods:
+  - batch_lookup
+  object_fn: actor finalize (all-satisfied / no-holder / retry-cap / deadline)
+  kind: protocol
+  verifiable: true
+  global: false
+  attachments: 2
+  origin: spec
+  source:
+    spec:
+    - FR-012
+    - US6
+    - SC-002
+    code:
+    - actor.rs
+  statement: 'An operation finalizes at the first of: all keys satisfied; no cached peer holds any remaining
+    unsatisfied key and no further replies are expected; the retry-round cap is reached; or the operation
+    deadline (op_deadline) expires. On deadline expiry with no peer reply all keys are reported Err(NotFound)
+    and the operation completes without hanging.
+
+    '
+  traces:
+  - FR-012
+  - US6
+  - SC-002
+  creusot:
+    delegate_to: actor timing model (monotonic Instant deadlines) + Loom event-ordering model
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    delegate_to: actor timing model (monotonic Instant deadlines) + Loom event-ordering model
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: RL-NV-INTEGRITY-FEATURE
+  subject: integrity-check cargo feature
+  methods: []
+  object_fn: Cargo feature integrity-check -> interfaces/integrity-check
+  kind: build-config
+  verifiable: false
+  global: false
+  attachments: 0
+  origin: spec+code
+  source:
+    spec:
+    - FR-034
+    code:
+    - Cargo.toml:12-14
+  statement: 'The crate exposes an integrity-check Cargo feature that forwards to interfaces/integrity-check.
+    This is pure build configuration with no runtime-behavior requirement of its own, so there is no functional
+    postcondition to verify.
+
+    '
+  not_verifiable_reason: build-time feature plumbing; no runtime behavior to prove (verified by the build
+    system, not a proof tool).
+- id: RL-NV-LATENCY
+  subject: RDMA latency / hit-rate outcomes
+  methods:
+  - batch_lookup
+  object_fn: end-to-end latency and retry hit-rate (SC-001, SC-003, SC-004)
+  kind: performance
+  verifiable: false
+  global: false
+  attachments: 0
+  origin: spec
+  source:
+    spec:
+    - SC-001
+    - SC-003
+    - SC-004
+    code: []
+  statement: 'Sub-millisecond added latency dominated by RDMA transfer time (SC-001), same-event greedy
+    dispatch (SC-003), and >=95% first-attempt retry success (SC-004) are quantitative performance/latency
+    outcomes measured on real RoCE/IB hardware, not functional correctness postconditions.
+
+    '
+  not_verifiable_reason: quantitative performance/latency/hit-rate targets measured empirically on hardware;
+    not expressible as a functional proof obligation.
+- id: RL-NV-PIN-LEAK
+  subject: read-pin lifetime (no leak)
+  methods:
+  - batch_lookup
+  object_fn: server pin/unpin read references owned by completion callback (FR-016a)
+  kind: resource-liveness
+  verifiable: false
+  global: false
+  attachments: 0
+  origin: spec
+  source:
+    spec:
+    - FR-016a
+    - SC-005
+    code:
+    - server.rs
+  statement: 'Every read reference pinned to serve a value must be released when the completion callback
+    runs or is dropped, so no pin is ever leaked (a leaked read reference makes its entry permanently
+    unevictable and there is no leak detector). This is an all-paths resource-liveness property over ownership/drop
+    of a closure held across an asynchronous RDMA completion.
+
+    '
+  not_verifiable_reason: all-paths drop/liveness over an async completion closure held across the RDMA
+    transport boundary; delegated in spirit to the initiator component and RAII, not a bounded single-crate
+    proof obligation.
+- id: RL-NV-CONFIG-DEFAULTS
+  subject: LookupConfig defaults
+  methods:
+  - initialize
+  object_fn: LookupConfig::default (field defaults)
+  kind: data-constant
+  verifiable: false
+  global: false
+  attachments: 0
+  origin: spec+code
+  source:
+    spec:
+    - FR-022
+    - FR-033
+    code:
+    - iremote_lookup.rs
+  statement: 'LookupConfig derives Default with a sensible per-field default (group "remote_lookup", quorum_pct
+    80, phase1_timeout 20ms, op_deadline 50ms, max_retry_rounds 2, max_keys_per_query 256, bind_ip empty,
+    etc.). These are fixed data constants of the interfaces crate, adequately covered by a unit assertion
+    rather than a proof tool.
+
+    '
+  not_verifiable_reason: fixed default data constants defined in the interfaces crate; a constant-equality
+    check, not a behavioral proof obligation for remote-lookup.
