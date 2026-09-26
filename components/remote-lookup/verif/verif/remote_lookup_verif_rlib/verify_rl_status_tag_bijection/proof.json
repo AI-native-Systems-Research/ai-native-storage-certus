@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_rl_status_tag_bijection": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      }
+    }
+  }
+}

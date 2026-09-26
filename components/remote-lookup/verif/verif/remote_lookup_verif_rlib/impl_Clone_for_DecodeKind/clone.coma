@@ -1,0 +1,39 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 9 53 14 *)
+
+(* <DecodeKind as std::clone::Clone> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 9 53 14
+
+use creusot.prelude.Any
+
+type t_DecodeKind = KeyQuery | KeyResponse | RdmaRequest | RdmaStatus | Unknown
+
+type tup2_DecodeKind_DecodeKind = { f0: t_DecodeKind; f1: t_DecodeKind }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_DecodeKind [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 9 53 14]
+  (self: t_DecodeKind) (return (x: t_DecodeKind)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {self = KeyQuery} (! bb10)
+    | br1 -> {self = KeyResponse} (! bb9)
+    | br2 -> {self = RdmaRequest} (! bb8)
+    | br3 -> {self = RdmaStatus} (! bb7)
+    | br4 -> {self = Unknown} (! bb6) ]
+  | bb6 = s0 [ s0 = [ &_ret <- Unknown ] s1 | s1 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_ret <- RdmaStatus ] s1 | s1 = return {_ret} ]
+  | bb8 = s0 [ s0 = [ &_ret <- RdmaRequest ] s1 | s1 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- KeyResponse ] s1 | s1 = return {_ret} ]
+  | bb10 = s0 [ s0 = [ &_ret <- KeyQuery ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_DecodeKind = Any.any_l () | & self: t_DecodeKind = self ])
+  [ return (result: t_DecodeKind) -> {[@stop_split] [@expl:clone ensures] [%#slib] match { f0 = self; f1 = result } with
+      | {f0 = KeyQuery; f1 = KeyQuery} -> true
+      | {f0 = KeyResponse; f1 = KeyResponse} -> true
+      | {f0 = RdmaRequest; f1 = RdmaRequest} -> true
+      | {f0 = RdmaStatus; f1 = RdmaStatus} -> true
+      | {f0 = Unknown; f1 = Unknown} -> true
+      | _ -> false
+      end}
+    (! return {result}) ]

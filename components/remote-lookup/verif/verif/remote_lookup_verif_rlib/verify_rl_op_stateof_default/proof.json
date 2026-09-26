@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_tup2_u64_KeyState_Global'0": {
+        "prover": "alt-ergo",
+        "time": 0.013
+      },
+      "vc_len_tup2_u64_KeyState": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_rl_op_stateof_default": {
+        "prover": "alt-ergo",
+        "time": 0.028
+      }
+    }
+  }
+}

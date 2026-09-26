@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_len_tup2_u64_u64": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_new_Result_u64_LookupErr": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_push_Result_u64_LookupErr": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_rl_bl_uninit_notfound": {
+        "prover": "alt-ergo",
+        "time": 0.036
+      }
+    }
+  }
+}

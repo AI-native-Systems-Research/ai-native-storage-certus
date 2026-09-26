@@ -1,0 +1,51 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 341 0 341 102 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 342 7 342 14
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 345 11 345 18
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 338 11 338 35
+let%span slib'2 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 339 10 339 68
+let%span slib'3 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 340 10 340 69
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_WireErr = Truncated | BadTag
+
+type t_Result_usize_WireErr = Ok UInt64.t | Err t_WireErr
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_wire_decode_truncated [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 341 0 341 102]
+  (buf_len: UInt64.t) (pos: UInt64.t) (n: UInt64.t) (return (x: t_Result_usize_WireErr)) =
+{[@stop_split] [@expl:verify_rl_wire_decode_truncated requires] [%#slib'1] UInt64.t'int pos + UInt64.t'int n
+  <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib] {pos} {n} (fun (_x: UInt64.t) -> [ &_16 <- _x ] s1)
+    | s1 = [ &_15 <- UInt64.gt _16 buf_len ] s2
+    | s2 = any [ br0 -> {_15 = false} (! bb2) | br1 -> {_15} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_20 <- Truncated ] s1 | s1 = [ &_ret <- Err _20 ] s2 | s2 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = UInt64.add [%#slib'0] {pos} {n} (fun (_x: UInt64.t) -> [ &_21 <- _x ] s1)
+    | s1 = [ &_ret <- Ok _21 ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_usize_WireErr = Any.any_l ()
+  | & buf_len: UInt64.t = buf_len
+  | & pos: UInt64.t = pos
+  | & n: UInt64.t = n
+  | & _15: bool = Any.any_l ()
+  | & _16: UInt64.t = Any.any_l ()
+  | & _20: t_WireErr = Any.any_l ()
+  | & _21: UInt64.t = Any.any_l () ])
+  [ return (result: t_Result_usize_WireErr) ->
+  {[@stop_split] [@expl:verify_rl_wire_decode_truncated ensures] ([@stop_split] [@expl:verify_rl_wire_decode_truncated ensures #0] [%#slib'2] UInt64.t'int pos
+          + UInt64.t'int n
+        > UInt64.t'int buf_len -> result = Err (Truncated))
+    /\ ([@stop_split] [@expl:verify_rl_wire_decode_truncated ensures #1] [%#slib'3] UInt64.t'int pos + UInt64.t'int n
+      <= UInt64.t'int buf_len -> result <> Err (Truncated))}
+    (! return {result}) ]

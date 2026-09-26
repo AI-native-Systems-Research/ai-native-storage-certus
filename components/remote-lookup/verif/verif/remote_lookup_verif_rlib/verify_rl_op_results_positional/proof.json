@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_eq_KeyState": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_index_Vec_KeyState_Global'0": {
+        "prover": "alt-ergo",
+        "time": 0.013
+      },
+      "vc_len_u64": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_new_Result_u64_LookupErr": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_push_Result_u64_LookupErr": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_verify_rl_op_results_positional": { "prover": "z3", "time": 0.018 }
+    }
+  }
+}

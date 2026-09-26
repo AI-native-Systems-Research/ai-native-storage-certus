@@ -1,0 +1,102 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 115 0 115 59 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 122 18 122 51
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 123 4 123 8
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 114 10 114 24
+let%span sord = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
+let%span sord'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
+let%span sord'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
+let%span sord'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 180 41 180 102
+let%span sord'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 186 41 186 83
+let%span sord'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 192 42 192 59
+let%span sord'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 193 42 193 59
+let%span sord'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 194 41 194 58
+let%span sord'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 200 42 200 83
+let%span sord'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 201 41 201 85
+let%span sord'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 207 42 207 86
+let%span sord'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 208 41 208 82
+let%span sord'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 214 41 214 97
+let%span sord'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 296 16 302 17
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Avail = None | Memory | Disk
+
+type t_Option_Avail = None'0 | Some'0 t_Avail
+
+type t_Ordering = Less | Equal | Greater
+
+function cmp_log_u8 (self: UInt8.t) (o: UInt8.t) : t_Ordering = [%#sord'12] if UInt8.lt self o then
+    Less
+  else
+    if self = o then Equal else Greater
+
+
+function eq_cmp_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom eq_cmp_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord'11] (x = y) = (cmp_log_u8 x y = Equal)
+
+function antisym2_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom antisym2_u8_spec: forall x: UInt8.t, y: UInt8.t. ([%#sord'9] cmp_log_u8 x y = Greater)
+    -> ([%#sord'10] cmp_log_u8 y x = Less)
+
+function antisym1_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom antisym1_u8_spec: forall x: UInt8.t, y: UInt8.t. ([%#sord'7] cmp_log_u8 x y = Less)
+    -> ([%#sord'8] cmp_log_u8 y x = Greater)
+
+function trans_u8 (x: UInt8.t) (y: UInt8.t) (z: UInt8.t) (o: t_Ordering) : ()
+
+axiom trans_u8_spec: forall x: UInt8.t, y: UInt8.t, z: UInt8.t, o: t_Ordering. ([%#sord'4] cmp_log_u8 x y = o)
+    -> ([%#sord'5] cmp_log_u8 y z = o) -> ([%#sord'6] cmp_log_u8 x z = o)
+
+function refl_u8 (x: UInt8.t) : ()
+
+axiom refl_u8_spec: forall x: UInt8.t. [%#sord'3] cmp_log_u8 x x = Equal
+
+function cmp_gt_log_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom cmp_gt_log_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord'2] UInt8.gt x y = (cmp_log_u8 x y = Greater)
+
+function cmp_ge_log_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom cmp_ge_log_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord'1] UInt8.ge x y = (cmp_log_u8 x y <> Less)
+
+function cmp_lt_log_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom cmp_lt_log_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord'0] UInt8.lt x y = (cmp_log_u8 x y = Less)
+
+function cmp_le_log_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom cmp_le_log_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord] UInt8.le x y = (cmp_log_u8 x y <> Greater)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_avail_tag_bijection__mutant [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 115 0 115 59]
+  (b: UInt8.t) (return (x: bool)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {b = (0: UInt8.t)} (! bb7)
+    | br1 -> {b = (1: UInt8.t)} (! bb6)
+    | br2 -> {b = (2: UInt8.t)} (! bb5)
+    | default -> -{b <> (0: UInt8.t) /\ b <> (1: UInt8.t) /\ b <> (2: UInt8.t)}- (! bb1) ]
+  | bb1 = s0 [ s0 = [ &dec2 <- None'0 ] s1 | s1 = bb8 ]
+  | bb5 = s0 [ s0 = [ &_6 <- Disk ] s1 | s1 = [ &dec2 <- Some'0 _6 ] s2 | s2 = bb8 ]
+  | bb6 = s0 [ s0 = [ &_5 <- Memory ] s1 | s1 = [ &dec2 <- Some'0 _5 ] s2 | s2 = bb8 ]
+  | bb7 = s0 [ s0 = [ &_4 <- None ] s1 | s1 = [ &dec2 <- Some'0 _4 ] s2 | s2 = bb8 ]
+  | bb8 = s0
+    [ s0 = {[@expl:assertion] [%#slib] UInt8.gt b (2: UInt8.t) -> dec2 <> None'0} s1
+    | s1 = [ &_ret <- [%#slib'0] true ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & b: UInt8.t = b
+  | & dec2: t_Option_Avail = Any.any_l ()
+  | & _4: t_Avail = Any.any_l ()
+  | & _5: t_Avail = Any.any_l ()
+  | & _6: t_Avail = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_rl_avail_tag_bijection__mutant ensures] [%#slib'1] result
+    = true}
+    (! return {result}) ]

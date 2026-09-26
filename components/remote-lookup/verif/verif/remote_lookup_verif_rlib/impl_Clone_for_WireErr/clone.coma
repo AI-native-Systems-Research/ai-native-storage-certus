@@ -1,0 +1,28 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 70 9 70 14 *)
+
+(* <WireErr as std::clone::Clone> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 70 9 70 14
+
+use creusot.prelude.Any
+
+type t_WireErr = Truncated | BadTag
+
+type tup2_WireErr_WireErr = { f0: t_WireErr; f1: t_WireErr }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_WireErr [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 70 9 70 14]
+  (self: t_WireErr) (return (x: t_WireErr)) = (! bb0
+  [ bb0 = any [ br0 -> {self = Truncated} (! bb4) | br1 -> {self = BadTag} (! bb3) ]
+  | bb3 = s0 [ s0 = [ &_ret <- BadTag ] s1 | s1 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_ret <- Truncated ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_WireErr = Any.any_l () | & self: t_WireErr = self ])
+  [ return (result: t_WireErr) -> {[@stop_split] [@expl:clone ensures] [%#slib] match { f0 = self; f1 = result } with
+      | {f0 = Truncated; f1 = Truncated} -> true
+      | {f0 = BadTag; f1 = BadTag} -> true
+      | _ -> false
+      end}
+    (! return {result}) ]

@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_new_Result_u64_LookupErr": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_p_b": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

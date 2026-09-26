@@ -1,0 +1,34 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 22 53 31 *)
+
+(* <DecodeKind as std::cmp::PartialEq> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 22 53 31
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 37 53 46
+let%span smodel = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/model.rs" 36 8 36 28
+let%span scmp = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/cmp.rs" 14 26 14 75
+
+type t_DecodeKind = KeyQuery | KeyResponse | RdmaRequest | RdmaStatus | Unknown
+
+type t_DecodeKindDeepModel = KeyQuery'0 | KeyResponse'0 | RdmaRequest'0 | RdmaStatus'0 | Unknown'0
+
+function deep_model_DecodeKind [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 37 53 46] (self: t_DecodeKind) : t_DecodeKindDeepModel
+ = [%#slib'0] match self with
+    | KeyQuery -> KeyQuery'0
+    | KeyResponse -> KeyResponse'0
+    | RdmaRequest -> RdmaRequest'0
+    | RdmaStatus -> RdmaStatus'0
+    | Unknown -> Unknown'0
+    end
+
+function deep_model_ref_DecodeKind [@inline:trivial] (self: t_DecodeKind) : t_DecodeKindDeepModel =
+  [%#smodel] deep_model_DecodeKind self
+
+meta "rewrite_def" function deep_model_ref_DecodeKind
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+goal refines: forall self_: t_DecodeKind, rhs: t_DecodeKind. forall result: bool. ([%#slib] result
+        = (deep_model_ref_DecodeKind self_ = deep_model_ref_DecodeKind rhs))
+      -> ([%#scmp] result = (deep_model_ref_DecodeKind self_ = deep_model_ref_DecodeKind rhs))

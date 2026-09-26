@@ -1,0 +1,30 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 610 0 610 82 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 614 7 614 11
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 608 11 608 23
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 609 10 609 50
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_LookupErr = NotFound | TransportError
+
+type t_Result_u64_LookupErr = Ok UInt64.t | Err t_LookupErr
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_cluster_uninit_error [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 610 0 610 82]
+  (initialized: bool) (return (x: t_Result_u64_LookupErr)) =
+{[@stop_split] [@expl:verify_rl_cluster_uninit_error requires] [%#slib'0] not initialized}
+  (! bb0
+  [ bb0 = any [ br0 -> {initialized = false} (! bb1) | br1 -> {initialized} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- Ok ([%#slib] (0: UInt64.t)) ] s1 | s1 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_8 <- TransportError ] s1 | s1 = [ &_ret <- Err _8 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_u64_LookupErr = Any.any_l ()
+  | & initialized: bool = initialized
+  | & _8: t_LookupErr = Any.any_l () ])
+  [ return (result: t_Result_u64_LookupErr) ->
+  {[@stop_split] [@expl:verify_rl_cluster_uninit_error ensures] [%#slib'1] result = Err (TransportError)}
+    (! return {result}) ]

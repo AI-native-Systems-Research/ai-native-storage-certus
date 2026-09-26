@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_rl_wire_decode_unknown_type": {
+        "prover": "alt-ergo",
+        "time": 0.019
+      }
+    }
+  }
+}

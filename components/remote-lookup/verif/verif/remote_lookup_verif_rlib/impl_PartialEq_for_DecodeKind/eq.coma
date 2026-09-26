@@ -1,0 +1,87 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 22 53 31 *)
+
+(* <DecodeKind as std::cmp::PartialEq> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 22 53 31
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 37 53 46
+let%span smodel = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/model.rs" 36 8 36 28
+
+use creusot.prelude.Any
+
+type t_DecodeKind = KeyQuery | KeyResponse | RdmaRequest | RdmaStatus | Unknown
+
+type tup2_ref_DecodeKind_ref_DecodeKind = { f0: t_DecodeKind; f1: t_DecodeKind }
+
+type t_DecodeKindDeepModel = KeyQuery'0 | KeyResponse'0 | RdmaRequest'0 | RdmaStatus'0 | Unknown'0
+
+function deep_model_DecodeKind [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 37 53 46] (self: t_DecodeKind) : t_DecodeKindDeepModel
+ = [%#slib'0] match self with
+    | KeyQuery -> KeyQuery'0
+    | KeyResponse -> KeyResponse'0
+    | RdmaRequest -> RdmaRequest'0
+    | RdmaStatus -> RdmaStatus'0
+    | Unknown -> Unknown'0
+    end
+
+function deep_model_ref_DecodeKind [@inline:trivial] (self: t_DecodeKind) : t_DecodeKindDeepModel =
+  [%#smodel] deep_model_DecodeKind self
+
+meta "rewrite_def" function deep_model_ref_DecodeKind
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let eq_DecodeKind [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 53 22 53 31]
+  (self: t_DecodeKind) (rhs: t_DecodeKind) (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_6 <- { f0 = self; f1 = rhs } ] s1
+    | s1 = any
+      [ br0 -> {_6.f0 = KeyQuery} (! bb2)
+      | br1 -> {_6.f0 = KeyResponse} (! bb4)
+      | br2 -> {_6.f0 = RdmaRequest} (! bb6)
+      | br3 -> {_6.f0 = RdmaStatus} (! bb8)
+      | br4 -> {_6.f0 = Unknown} (! bb10) ] ]
+  | bb10 = any
+    [ br0 -> {_6.f1 = KeyQuery} (! bb1)
+    | br1 -> {_6.f1 = KeyResponse} (! bb1)
+    | br2 -> {_6.f1 = RdmaRequest} (! bb1)
+    | br3 -> {_6.f1 = RdmaStatus} (! bb1)
+    | br4 -> {_6.f1 = Unknown} (! bb12) ]
+  | bb12 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ]
+  | bb8 = any
+    [ br0 -> {_6.f1 = KeyQuery} (! bb1)
+    | br1 -> {_6.f1 = KeyResponse} (! bb1)
+    | br2 -> {_6.f1 = RdmaRequest} (! bb1)
+    | br3 -> {_6.f1 = RdmaStatus} (! bb13)
+    | br4 -> {_6.f1 = Unknown} (! bb1) ]
+  | bb13 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ]
+  | bb6 = any
+    [ br0 -> {_6.f1 = KeyQuery} (! bb1)
+    | br1 -> {_6.f1 = KeyResponse} (! bb1)
+    | br2 -> {_6.f1 = RdmaRequest} (! bb14)
+    | br3 -> {_6.f1 = RdmaStatus} (! bb1)
+    | br4 -> {_6.f1 = Unknown} (! bb1) ]
+  | bb14 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ]
+  | bb4 = any
+    [ br0 -> {_6.f1 = KeyQuery} (! bb1)
+    | br1 -> {_6.f1 = KeyResponse} (! bb15)
+    | br2 -> {_6.f1 = RdmaRequest} (! bb1)
+    | br3 -> {_6.f1 = RdmaStatus} (! bb1)
+    | br4 -> {_6.f1 = Unknown} (! bb1) ]
+  | bb15 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ]
+  | bb2 = any
+    [ br0 -> {_6.f1 = KeyQuery} (! bb16)
+    | br1 -> {_6.f1 = KeyResponse} (! bb1)
+    | br2 -> {_6.f1 = RdmaRequest} (! bb1)
+    | br3 -> {_6.f1 = RdmaStatus} (! bb1)
+    | br4 -> {_6.f1 = Unknown} (! bb1) ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib] false ] s1 | s1 = return {_ret} ]
+  | bb16 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & self: t_DecodeKind = self
+  | & rhs: t_DecodeKind = rhs
+  | & _6: tup2_ref_DecodeKind_ref_DecodeKind = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:eq ensures] [%#slib] result
+    = (deep_model_ref_DecodeKind self = deep_model_ref_DecodeKind rhs)}
+    (! return {result}) ]

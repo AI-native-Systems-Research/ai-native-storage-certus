@@ -1,0 +1,15 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 36 33 36 35 *)
+
+(* <RdmaStatusCode as std::cmp::Eq> *)
+
+use creusot.prelude.Any
+
+type t_RdmaStatusCode = Success | UnableToConnect | KeyNoLongerAvailable
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let assert_fields_are_eq_RdmaStatusCode [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 36 33 36 35]
+  (self: t_RdmaStatusCode) (return (x: ())) = (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ]) [ return (result: ()) -> (! return {result}) ]

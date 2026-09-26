@@ -1,0 +1,112 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 367 0 367 87 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 368 23 368 24
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 371 14 371 27
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 370 16 370 68
+let%span slib'2 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 369 16 369 36
+let%span slib'3 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 372 18 372 21
+let%span slib'4 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 375 13 375 14
+let%span slib'5 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 375 8 375 14
+let%span slib'6 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 373 31 373 34
+let%span slib'7 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 364 10 364 102
+let%span slib'8 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 365 10 366 92
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 42 20 42 29
+let%span svec'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span sslice = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_tup2_u64_u64_Global
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_u64_Global (self: t_Vec_tup2_u64_u64_Global) : Seq.seq tup2_u64_u64
+
+axiom view_Vec_tup2_u64_u64_Global_spec:
+  forall self: t_Vec_tup2_u64_u64_Global [view_Vec_tup2_u64_u64_Global self]. [%#svec'1] Seq.length (view_Vec_tup2_u64_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_tup2_u64_u64 (self_: t_Vec_tup2_u64_u64_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_tup2_u64_u64_Global self_)}
+    (! return {result}) ]
+
+function index_Vec_tup2_u64_u64_Global [@inline:trivial] (self: t_Vec_tup2_u64_u64_Global) (ix: int) : tup2_u64_u64 =
+  [%#svec'0] Seq.get (view_Vec_tup2_u64_u64_Global self) ix
+
+meta "rewrite_def" function index_Vec_tup2_u64_u64_Global
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_u64) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_u64) (out: tup2_u64_u64) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_tup2_u64_u64_Global'0 (self_: t_Vec_tup2_u64_u64_Global) (ix: UInt64.t) (return (x: tup2_u64_u64)) =
+{[@stop_split] [@expl:index requires] [%#svec'2] in_bounds_usize ix (view_Vec_tup2_u64_u64_Global self_)}
+  any
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'3] has_value_usize ix (view_Vec_tup2_u64_u64_Global self_) result}
+    (! return {result}) ]
+
+type t_Option_u64 = None | Some UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_op_sizeof [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 367 0 367 87]
+  (entries: t_Vec_tup2_u64_u64_Global) (key: UInt64.t) (return (x: t_Option_u64)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &i <- [%#slib] (0: UInt64.t) ] s1 | s1 = bb1 ]
+  | bb1 = bb1
+    [ bb1 = {[@expl:loop invariant #0] [%#slib'2] UInt64.t'int i <= Seq.length (view_Vec_tup2_u64_u64_Global entries)}
+      {[@expl:loop invariant #1] [%#slib'1] forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> (index_Vec_tup2_u64_u64_Global entries j).f0 <> key}
+      (! s0)
+      [ s0 = len_tup2_u64_u64 [%#slib'0] {entries} (fun (_x: UInt64.t) -> [ &_22 <- _x ] s1)
+      | s1 = [ &_20 <- UInt64.lt i _22 ] s2
+      | s2 = any [ br0 -> {_20 = false} (! bb9) | br1 -> {_20} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = index_Vec_tup2_u64_u64_Global'0 [%#slib'3] {entries} {i} (fun (_x: tup2_u64_u64) -> [ &_27 <- _x ] s1)
+        | s1 = [ &_25 <- _27.f0 = key ] s2
+        | s2 = any [ br0 -> {_25 = false} (! bb8) | br1 -> {_25} (! bb6) ] ]
+      | bb8 = s0
+        [ s0 = UInt64.add [%#slib'5] {i} {[%#slib'4] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
+        | s1 = bb1 ] ] ]
+  | bb6 = s0
+    [ s0 = index_Vec_tup2_u64_u64_Global'0 [%#slib'6] {entries} {i} (fun (_x: tup2_u64_u64) -> [ &_33 <- _x ] s1)
+    | s1 = [ &_ret <- Some (_33.f1) ] s2
+    | s2 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Option_u64 = Any.any_l ()
+  | & entries: t_Vec_tup2_u64_u64_Global = entries
+  | & key: UInt64.t = key
+  | & i: UInt64.t = Any.any_l ()
+  | & _20: bool = Any.any_l ()
+  | & _22: UInt64.t = Any.any_l ()
+  | & _25: bool = Any.any_l ()
+  | & _27: tup2_u64_u64 = Any.any_l ()
+  | & _33: tup2_u64_u64 = Any.any_l () ])
+  [ return (result: t_Option_u64) ->
+  {[@stop_split] [@expl:verify_rl_op_sizeof ensures] ([@stop_split] [@expl:verify_rl_op_sizeof ensures #0] [%#slib'7] result
+        = None
+      -> (forall j: int. 0 <= j /\ j < Seq.length (view_Vec_tup2_u64_u64_Global entries)
+        -> (index_Vec_tup2_u64_u64_Global entries j).f0 <> key))
+    /\ ([@stop_split] [@expl:verify_rl_op_sizeof ensures #1] [%#slib'8] forall v: UInt64.t. result = Some v
+      -> (exists j: int. 0 <= j
+        /\ j < Seq.length (view_Vec_tup2_u64_u64_Global entries)
+        /\ (index_Vec_tup2_u64_u64_Global entries j).f0 = key /\ (index_Vec_tup2_u64_u64_Global entries j).f1 = v))}
+    (! return {result}) ]

@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_rl_wire_decode_bad_version__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          null, null, null, null, { "prover": "alt-ergo", "time": 0.018 }
+        ]
+      }
+    }
+  }
+}

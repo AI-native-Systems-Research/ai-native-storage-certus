@@ -1,0 +1,31 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 44 9 44 14 *)
+
+(* <KeyState as std::clone::Clone> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 44 9 44 14
+
+use creusot.prelude.Any
+
+type t_KeyState = Unsatisfied | InProgress | Satisfied
+
+type tup2_KeyState_KeyState = { f0: t_KeyState; f1: t_KeyState }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_KeyState [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 44 9 44 14]
+  (self: t_KeyState) (return (x: t_KeyState)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {self = Unsatisfied} (! bb6) | br1 -> {self = InProgress} (! bb5) | br2 -> {self = Satisfied} (! bb4) ]
+  | bb4 = s0 [ s0 = [ &_ret <- Satisfied ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- InProgress ] s1 | s1 = return {_ret} ]
+  | bb6 = s0 [ s0 = [ &_ret <- Unsatisfied ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_KeyState = Any.any_l () | & self: t_KeyState = self ])
+  [ return (result: t_KeyState) -> {[@stop_split] [@expl:clone ensures] [%#slib] match { f0 = self; f1 = result } with
+      | {f0 = Unsatisfied; f1 = Unsatisfied} -> true
+      | {f0 = InProgress; f1 = InProgress} -> true
+      | {f0 = Satisfied; f1 = Satisfied} -> true
+      | _ -> false
+      end}
+    (! return {result}) ]

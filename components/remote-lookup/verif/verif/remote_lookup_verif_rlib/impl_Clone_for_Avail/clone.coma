@@ -1,0 +1,30 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 28 9 28 14 *)
+
+(* <Avail as std::clone::Clone> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 28 9 28 14
+
+use creusot.prelude.Any
+
+type t_Avail = None | Memory | Disk
+
+type tup2_Avail_Avail = { f0: t_Avail; f1: t_Avail }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Avail [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 28 9 28 14]
+  (self: t_Avail) (return (x: t_Avail)) = (! bb0
+  [ bb0 = any [ br0 -> {self = None} (! bb6) | br1 -> {self = Memory} (! bb5) | br2 -> {self = Disk} (! bb4) ]
+  | bb4 = s0 [ s0 = [ &_ret <- Disk ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- Memory ] s1 | s1 = return {_ret} ]
+  | bb6 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Avail = Any.any_l () | & self: t_Avail = self ])
+  [ return (result: t_Avail) -> {[@stop_split] [@expl:clone ensures] [%#slib] match { f0 = self; f1 = result } with
+      | {f0 = None; f1 = None} -> true
+      | {f0 = Memory; f1 = Memory} -> true
+      | {f0 = Disk; f1 = Disk} -> true
+      | _ -> false
+      end}
+    (! return {result}) ]

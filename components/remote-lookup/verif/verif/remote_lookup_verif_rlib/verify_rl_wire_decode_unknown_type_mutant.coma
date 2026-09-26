@@ -1,0 +1,43 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 293 0 293 90 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 294 18 294 30
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 292 10 292 40
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 76 0 76 26
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+constant const_WIRE_VERSION: UInt8.t = [%#slib'1] (1: UInt8.t)
+
+type t_DecodeKind = KeyQuery | KeyResponse | RdmaRequest | RdmaStatus | Unknown
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_wire_decode_unknown_type__mutant [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 293 0 293 90]
+  (version: UInt8.t) (msg_type: UInt8.t) (return (x: t_DecodeKind)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_4 <- version <> ([%#slib] const_WIRE_VERSION) ] s1
+    | s1 = any [ br0 -> {_4 = false} (! bb2) | br1 -> {_4} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- Unknown ] s1 | s1 = return {_ret} ]
+  | bb2 = any
+    [ br0 -> {msg_type = (1: UInt8.t)} (! bb11)
+    | br1 -> {msg_type = (2: UInt8.t)} (! bb10)
+    | br2 -> {msg_type = (3: UInt8.t)} (! bb9)
+    | br3 -> {msg_type = (4: UInt8.t)} (! bb8)
+    | default -> -{msg_type <> (1: UInt8.t)
+      /\ msg_type <> (2: UInt8.t) /\ msg_type <> (3: UInt8.t) /\ msg_type <> (4: UInt8.t)}-
+      (! bb3) ]
+  | bb3 = s0 [ s0 = [ &_ret <- Unknown ] s1 | s1 = return {_ret} ]
+  | bb8 = s0 [ s0 = [ &_ret <- RdmaStatus ] s1 | s1 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- RdmaRequest ] s1 | s1 = return {_ret} ]
+  | bb10 = s0 [ s0 = [ &_ret <- KeyResponse ] s1 | s1 = return {_ret} ]
+  | bb11 = s0 [ s0 = [ &_ret <- KeyQuery ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_DecodeKind = Any.any_l ()
+  | & version: UInt8.t = version
+  | & msg_type: UInt8.t = msg_type
+  | & _4: bool = Any.any_l () ])
+  [ return (result: t_DecodeKind) ->
+  {[@stop_split] [@expl:verify_rl_wire_decode_unknown_type__mutant ensures] [%#slib'0] result = KeyQuery}
+    (! return {result}) ]

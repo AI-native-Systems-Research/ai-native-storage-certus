@@ -1,0 +1,155 @@
+# code_properties.yaml — BLIND code extraction for remote-lookup.
+# Extracted from components/remote-lookup/src/{wire.rs, operation.rs, lib.rs} and
+# the worker/server/actor modules, before reconciling against the spec. This is the
+# code side of the Role-1 reconciliation; the operative artifact is
+# unified_properties.yaml. Each entry names the concrete symbol and a full
+# plain-English statement of the behaviour the code exhibits.
+component: remote-lookup
+interface: IRemoteLookup
+source: components/remote-lookup/src/{wire.rs,operation.rs,lib.rs,worker.rs,server.rs,actor.rs}
+extraction: blind-from-code
+counts:
+  modules_read: 6
+  derived_properties: 24
+properties:
+- id: CP-OPID-ACCESSOR
+  symbol: wire::WireMessage::op_id
+  loc: wire.rs:156-164
+  verifiable: true
+  statement: op_id() returns the op_id header field for every WireMessage variant including the
+    Unknown sentinel.
+- id: CP-AVAIL-CODEC
+  symbol: wire::Avail::{to_u8,from_u8}
+  loc: wire.rs:32-49
+  verifiable: true
+  statement: Avail::from_u8 is the left inverse of Avail::to_u8 on {None,Memory,Disk}; bytes
+    outside {0,1,2} return None.
+- id: CP-STATUS-CODEC
+  symbol: wire::RdmaStatusCode::{to_u8,from_u8}
+  loc: wire.rs:65-82
+  verifiable: true
+  statement: RdmaStatusCode::from_u8 is the left inverse of to_u8 on the three codes; bytes
+    outside {0,1,2} return None.
+- id: CP-HEADER
+  symbol: wire::put_header
+  loc: wire.rs:315-319
+  verifiable: true
+  statement: Every encoded frame starts with WIRE_VERSION, then the msg-type tag, then the op_id
+    as little-endian u64 (10-byte header).
+- id: CP-ROUNDTRIP-KEYQUERY
+  symbol: wire encode/decode (KeyQuery)
+  loc: wire.rs:173-180,250-259
+  verifiable: true
+  statement: decode(encode(KeyQuery)) recovers the op_id and the ordered (key,size) entries
+    exactly.
+- id: CP-ROUNDTRIP-KEYRESPONSE
+  symbol: wire encode/decode (KeyResponse)
+  loc: wire.rs:181-194,260-275
+  verifiable: true
+  statement: decode(encode(KeyResponse)) recovers the op_id, endpoint (ip string + port), and
+    ordered (key,size,avail) entries exactly.
+- id: CP-ROUNDTRIP-RDMAREQUEST
+  symbol: wire encode/decode (RdmaRequest)
+  loc: wire.rs:195-210,276-293
+  verifiable: true
+  statement: decode(encode(RdmaRequest)) recovers the op_id, endpoint, rkey, and ordered slot
+    descriptors exactly.
+- id: CP-ROUNDTRIP-RDMASTATUS
+  symbol: wire encode/decode (RdmaStatus)
+  loc: wire.rs:211-218,294-302
+  verifiable: true
+  statement: decode(encode(RdmaStatus)) recovers the op_id and ordered (key,status) entries
+    exactly.
+- id: CP-DECODE-TRUNCATED
+  symbol: wire::Reader::take
+  loc: wire.rs:352-360
+  verifiable: true
+  statement: Any read past the end of the buffer, or a declared record count exceeding available
+    bytes, returns Err(Truncated) with no out-of-bounds access.
+- id: CP-DECODE-BADTAG
+  symbol: wire::WireMessage::decode (from_u8 ok_or BadTag)
+  loc: wire.rs:267,299
+  verifiable: true
+  statement: An availability or status tag outside its domain yields Err(BadTag).
+- id: CP-DECODE-UNKNOWN-TYPE
+  symbol: wire::WireMessage::decode (default arm)
+  loc: wire.rs:304-308
+  verifiable: true
+  statement: A supported-version frame with an unrecognized msg_type decodes to Unknown carrying
+    the header fields.
+- id: CP-DECODE-BAD-VERSION
+  symbol: wire::WireMessage::decode (version guard)
+  loc: wire.rs:241-247
+  verifiable: true
+  statement: A frame whose version byte is not WIRE_VERSION decodes to Unknown carrying the
+    header fields.
+- id: CP-QUORUM
+  symbol: operation::Operation::quorum_reached
+  loc: operation.rs:115-118
+  verifiable: true
+  statement: quorum_reached is true iff peers_expected==0 or peers_replied*100 >=
+    peers_expected*quorum_pct.
+- id: CP-SIZEOF
+  symbol: operation::Operation::size_of
+  loc: operation.rs:121-125
+  verifiable: true
+  statement: size_of(key) returns the size of the first matching entry, or None if absent.
+- id: CP-STATEOF
+  symbol: operation::Operation::state_of
+  loc: operation.rs:128-133
+  verifiable: true
+  statement: state_of(key) returns the tracked state or Unsatisfied by default.
+- id: CP-RESULTS
+  symbol: operation::Operation::results
+  loc: operation.rs:149-160
+  verifiable: true
+  statement: results() yields one entry per requested key in order, Ok for Satisfied keys and
+    Err(NotFound) otherwise.
+- id: CP-ALL-SATISFIED
+  symbol: operation::Operation::all_satisfied
+  loc: operation.rs:143-145
+  verifiable: true
+  statement: all_satisfied is true iff every tracked key state is Satisfied.
+- id: CP-TRIED-DEDUP
+  symbol: operation::Operation::{note_tried,already_tried}
+  loc: operation.rs:163-175
+  verifiable: true
+  statement: note_tried records a peer for a key without duplicates; already_tried reflects it.
+- id: CP-BL-EMPTY
+  symbol: RemoteLookupComponent::batch_lookup (empty guard)
+  loc: lib.rs:276-278
+  verifiable: true
+  statement: batch_lookup([]) returns an empty vector immediately.
+- id: CP-BL-UNINIT
+  symbol: RemoteLookupComponent::batch_lookup (submit_tx guard)
+  loc: lib.rs:279-289
+  verifiable: true
+  statement: batch_lookup on an uninitialized component returns Err(NotFound) for each entry,
+    one per entry.
+- id: CP-CLUSTER-UNINIT
+  symbol: RemoteLookupComponent::{join_cluster,leave_cluster}
+  loc: lib.rs:318-333
+  verifiable: true
+  statement: join_cluster/leave_cluster return Err(TransportError) when submit_tx is unset
+    (uninitialized).
+- id: CP-INIT-IDEMPOTENT
+  symbol: RemoteLookupComponent::initialize (config latch)
+  loc: lib.rs:107-112
+  verifiable: true
+  delegated: requires zyre/receptacle wiring (integration)
+  statement: initialize returns an error if the component is already initialized (config latch)
+    or a required receptacle is unbound.
+- id: CP-WORKER-OFFLOAD
+  symbol: worker::run + InitiatorCmd
+  loc: worker.rs:71-114
+  verifiable: true
+  delegated: concurrency-model
+  statement: Blocking RDMA connect/serve runs on an off-loop worker thread and posts results back
+    to the poll loop; the worker exits when its command channel closes.
+- id: CP-STATUS-CALLBACK-MAP
+  symbol: server::serve_rdma_request
+  loc: server.rs
+  verifiable: true
+  delegated: RDMA initiator/responder components
+  statement: serve_rdma_request pushes each slot via the initiator and maps each PushStatus to
+    the correct RdmaStatusCode reported back to the poll loop.

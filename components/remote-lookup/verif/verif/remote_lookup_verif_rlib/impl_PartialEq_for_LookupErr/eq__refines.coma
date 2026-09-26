@@ -1,0 +1,31 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 63 22 63 31 *)
+
+(* <LookupErr as std::cmp::PartialEq> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 63 22 63 31
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 63 37 63 46
+let%span smodel = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/model.rs" 36 8 36 28
+let%span scmp = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/cmp.rs" 14 26 14 75
+
+type t_LookupErr = NotFound | TransportError
+
+type t_LookupErrDeepModel = NotFound'0 | TransportError'0
+
+function deep_model_LookupErr [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 63 37 63 46] (self: t_LookupErr) : t_LookupErrDeepModel
+ = [%#slib'0] match self with
+    | NotFound -> NotFound'0
+    | TransportError -> TransportError'0
+    end
+
+function deep_model_ref_LookupErr [@inline:trivial] (self: t_LookupErr) : t_LookupErrDeepModel =
+  [%#smodel] deep_model_LookupErr self
+
+meta "rewrite_def" function deep_model_ref_LookupErr
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+goal refines: forall self_: t_LookupErr, rhs: t_LookupErr. forall result: bool. ([%#slib] result
+        = (deep_model_ref_LookupErr self_ = deep_model_ref_LookupErr rhs))
+      -> ([%#scmp] result = (deep_model_ref_LookupErr self_ = deep_model_ref_LookupErr rhs))

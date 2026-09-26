@@ -1,0 +1,137 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 566 0 566 116 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 567 7 567 20
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 567 24 567 25
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 568 15 568 25
+let%span slib'2 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 582 4 582 14
+let%span slib'3 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 571 51 571 61
+let%span slib'4 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 572 27 572 28
+let%span slib'5 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 576 18 576 31
+let%span slib'6 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 575 20 575 85
+let%span slib'7 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 574 20 574 36
+let%span slib'8 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 573 20 573 40
+let%span slib'9 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 577 12 577 46
+let%span slib'10 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 578 17 578 18
+let%span slib'11 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 578 12 578 18
+let%span slib'12 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 563 11 563 23
+let%span slib'13 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 564 10 564 41
+let%span slib'14 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 565 10 565 89
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 42 20 42 29
+let%span svec'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_tup2_u64_u64_Global
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_u64_Global (self: t_Vec_tup2_u64_u64_Global) : Seq.seq tup2_u64_u64
+
+axiom view_Vec_tup2_u64_u64_Global_spec:
+  forall self: t_Vec_tup2_u64_u64_Global [view_Vec_tup2_u64_u64_Global self]. [%#svec'2] Seq.length (view_Vec_tup2_u64_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_tup2_u64_u64 (self_: t_Vec_tup2_u64_u64_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_tup2_u64_u64_Global self_)}
+    (! return {result}) ]
+
+type t_Vec_Result_u64_LookupErr_Global
+
+type t_LookupErr = NotFound | TransportError
+
+type t_Result_u64_LookupErr = Ok UInt64.t | Err t_LookupErr
+
+function view_Vec_Result_u64_LookupErr_Global (self: t_Vec_Result_u64_LookupErr_Global) : Seq.seq t_Result_u64_LookupErr
+
+axiom view_Vec_Result_u64_LookupErr_Global_spec:
+  forall self: t_Vec_Result_u64_LookupErr_Global [view_Vec_Result_u64_LookupErr_Global self]. [%#svec'2] Seq.length (view_Vec_Result_u64_LookupErr_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_Result_u64_LookupErr (return (x: t_Vec_Result_u64_LookupErr_Global)) = any
+  [ return (result: t_Vec_Result_u64_LookupErr_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec'0] Seq.length (view_Vec_Result_u64_LookupErr_Global result) = 0}
+    (! return {result}) ]
+
+function index_Vec_Result_u64_LookupErr_Global [@inline:trivial] (self: t_Vec_Result_u64_LookupErr_Global) (ix: int) : t_Result_u64_LookupErr
+ = [%#svec'1] Seq.get (view_Vec_Result_u64_LookupErr_Global self) ix
+
+meta "rewrite_def" function index_Vec_Result_u64_LookupErr_Global
+
+let push_Result_u64_LookupErr (self_: MutBorrow.t t_Vec_Result_u64_LookupErr_Global) (v: t_Result_u64_LookupErr)
+  (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:push ensures] [%#svec'3] view_Vec_Result_u64_LookupErr_Global self_.final
+    = Seq.snoc (view_Vec_Result_u64_LookupErr_Global self_.current) v}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_bl_uninit_notfound [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 566 0 566 116]
+  (entries: t_Vec_tup2_u64_u64_Global) (initialized: bool) (return (x: t_Vec_Result_u64_LookupErr_Global)) =
+{[@stop_split] [@expl:verify_rl_bl_uninit_notfound requires] [%#slib'12] not initialized}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = len_tup2_u64_u64 [%#slib] {entries} (fun (_x: UInt64.t) -> [ &_10 <- _x ] s1)
+    | s1 = [ &_9 <- _10 = ([%#slib'0] (0: UInt64.t)) ] s2
+    | s2 = any [ br0 -> {_9 = false} (! bb3) | br1 -> {_9} (! bb2) ] ]
+  | bb2 = s0
+    [ s0 = new_Result_u64_LookupErr [%#slib'1] (fun (_x: t_Vec_Result_u64_LookupErr_Global) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ]
+  | bb3 = any [ br0 -> {initialized = false} (! bb5) | br1 -> {initialized} (! bb4) ]
+  | bb4 = s0
+    [ s0 = new_Result_u64_LookupErr [%#slib'2] (fun (_x: t_Vec_Result_u64_LookupErr_Global) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ]
+  | bb5 = s0
+    [ s0 = new_Result_u64_LookupErr [%#slib'3] (fun (_x: t_Vec_Result_u64_LookupErr_Global) -> [ &out <- _x ] s1)
+    | s1 = [ &i <- [%#slib'4] (0: UInt64.t) ] s2
+    | s2 = bb7 ]
+  | bb7 = bb7
+    [ bb7 = {[@expl:loop invariant #0] [%#slib'8] UInt64.t'int i <= Seq.length (view_Vec_tup2_u64_u64_Global entries)}
+      {[@expl:loop invariant #1] [%#slib'7] Seq.length (view_Vec_Result_u64_LookupErr_Global out) = UInt64.t'int i}
+      {[@expl:loop invariant #2] [%#slib'6] forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> index_Vec_Result_u64_LookupErr_Global out j = Err (NotFound)}
+      (! s0)
+      [ s0 = len_tup2_u64_u64 [%#slib'5] {entries} (fun (_x: UInt64.t) -> [ &_32 <- _x ] s1)
+      | s1 = [ &_30 <- UInt64.lt i _32 ] s2
+      | s2 = any [ br0 -> {_30 = false} (! bb12) | br1 -> {_30} (! bb10) ] ]
+      [ bb10 = s0
+        [ s0 = [ &_37 <- NotFound ] s1
+        | s1 = [ &_36 <- Err _37 ] s2
+        | s2 = MutBorrow.borrow_mut <t_Vec_Result_u64_LookupErr_Global> {out}
+            (fun (_bor: MutBorrow.t t_Vec_Result_u64_LookupErr_Global) -> [ &_35 <- _bor ] [ &out <- _bor.final ] s3)
+        | s3 = push_Result_u64_LookupErr [%#slib'9] {_35} {_36} (fun (_x: ()) -> [ &_34 <- _x ] s4)
+        | s4 = UInt64.add [%#slib'11] {i} {[%#slib'10] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s5)
+        | s5 = bb7 ] ] ]
+  | bb12 = s0 [ s0 = [ &_ret <- out ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_Result_u64_LookupErr_Global = Any.any_l ()
+  | & entries: t_Vec_tup2_u64_u64_Global = entries
+  | & initialized: bool = initialized
+  | & _9: bool = Any.any_l ()
+  | & _10: UInt64.t = Any.any_l ()
+  | & out: t_Vec_Result_u64_LookupErr_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _30: bool = Any.any_l ()
+  | & _32: UInt64.t = Any.any_l ()
+  | & _34: () = Any.any_l ()
+  | & _35: MutBorrow.t t_Vec_Result_u64_LookupErr_Global = Any.any_l ()
+  | & _36: t_Result_u64_LookupErr = Any.any_l ()
+  | & _37: t_LookupErr = Any.any_l () ])
+  [ return (result: t_Vec_Result_u64_LookupErr_Global) ->
+  {[@stop_split] [@expl:verify_rl_bl_uninit_notfound ensures] ([@stop_split] [@expl:verify_rl_bl_uninit_notfound ensures #0] [%#slib'13] Seq.length (view_Vec_Result_u64_LookupErr_Global result)
+      = Seq.length (view_Vec_tup2_u64_u64_Global entries))
+    /\ ([@stop_split] [@expl:verify_rl_bl_uninit_notfound ensures #1] [%#slib'14] forall j: int. 0 <= j
+        /\ j < Seq.length (view_Vec_Result_u64_LookupErr_Global result)
+      -> index_Vec_Result_u64_LookupErr_Global result j = Err (NotFound))}
+    (! return {result}) ]

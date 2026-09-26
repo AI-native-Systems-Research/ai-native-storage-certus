@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_rl_op_quorum_zero__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.018 },
+          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.019 },
+          null
+        ]
+      }
+    }
+  }
+}

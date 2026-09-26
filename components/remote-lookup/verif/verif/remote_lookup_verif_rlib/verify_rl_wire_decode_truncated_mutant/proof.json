@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_rl_wire_decode_truncated__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.017 },
+          null,
+          { "prover": "alt-ergo", "time": 0.017 },
+          null
+        ]
+      }
+    }
+  }
+}

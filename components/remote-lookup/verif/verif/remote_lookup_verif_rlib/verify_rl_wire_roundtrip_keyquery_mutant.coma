@@ -1,0 +1,256 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 733 0 733 94 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 734 12 734 25
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 735 31 735 41
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 736 4 736 22
+let%span slib'2 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 737 4 737 25
+let%span slib'3 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 738 23 738 24
+let%span slib'4 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 742 16 743 82
+let%span slib'5 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 741 16 741 34
+let%span slib'6 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 740 16 740 43
+let%span slib'7 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 739 16 739 24
+let%span slib'8 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 746 27 746 30
+let%span slib'9 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 746 8 746 33
+let%span slib'10 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 747 27 747 30
+let%span slib'11 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 747 8 747 33
+let%span slib'12 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 748 13 748 14
+let%span slib'13 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 748 8 748 14
+let%span slib'14 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 750 35 750 45
+let%span slib'15 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 751 23 751 24
+let%span slib'16 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 755 16 756 68
+let%span slib'17 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 754 16 754 32
+let%span slib'18 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 753 16 753 43
+let%span slib'19 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 752 16 752 24
+let%span slib'20 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 758 29 758 30
+let%span slib'21 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 758 29 758 34
+let%span slib'22 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 758 25 758 26
+let%span slib'23 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 758 25 758 34
+let%span slib'24 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 758 24 758 35
+let%span slib'25 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 759 30 759 31
+let%span slib'26 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 759 30 759 35
+let%span slib'27 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 759 26 759 27
+let%span slib'28 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 759 26 759 35
+let%span slib'29 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 759 25 759 36
+let%span slib'30 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 760 8 760 29
+let%span slib'31 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 761 13 761 14
+let%span slib'32 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 761 8 761 14
+let%span slib'33 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 763 18 764 68
+let%span slib'34 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 765 4 765 8
+let%span slib'35 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 731 11 731 36
+let%span slib'36 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 732 10 732 24
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 42 20 42 29
+let%span svec'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span sslice = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_tup2_u64_u64_Global
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_u64_Global (self: t_Vec_tup2_u64_u64_Global) : Seq.seq tup2_u64_u64
+
+axiom view_Vec_tup2_u64_u64_Global_spec:
+  forall self: t_Vec_tup2_u64_u64_Global [view_Vec_tup2_u64_u64_Global self]. [%#svec'3] Seq.length (view_Vec_tup2_u64_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_tup2_u64_u64 (self_: t_Vec_tup2_u64_u64_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_tup2_u64_u64_Global self_)}
+    (! return {result}) ]
+
+type t_Vec_u64_Global
+
+function view_Vec_u64_Global (self: t_Vec_u64_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_u64_Global_spec:
+  forall self: t_Vec_u64_Global [view_Vec_u64_Global self]. [%#svec'3] Seq.length (view_Vec_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_u64 (return (x: t_Vec_u64_Global)) = any
+  [ return (result: t_Vec_u64_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec'0] Seq.length (view_Vec_u64_Global result) = 0}
+    (! return {result}) ]
+
+let push_u64 (self_: MutBorrow.t t_Vec_u64_Global) (v: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'1] view_Vec_u64_Global self_.final
+    = Seq.snoc (view_Vec_u64_Global self_.current) v}
+    (! return {result}) ]
+
+function index_Vec_u64_Global [@inline:trivial] (self: t_Vec_u64_Global) (ix: int) : UInt64.t =
+  [%#svec'2] Seq.get (view_Vec_u64_Global self) ix
+
+meta "rewrite_def" function index_Vec_u64_Global
+
+function index_Vec_tup2_u64_u64_Global [@inline:trivial] (self: t_Vec_tup2_u64_u64_Global) (ix: int) : tup2_u64_u64 =
+  [%#svec'2] Seq.get (view_Vec_tup2_u64_u64_Global self) ix
+
+meta "rewrite_def" function index_Vec_tup2_u64_u64_Global
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_u64) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_u64) (out: tup2_u64_u64) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_tup2_u64_u64_Global'0 (self_: t_Vec_tup2_u64_u64_Global) (ix: UInt64.t) (return (x: tup2_u64_u64)) =
+{[@stop_split] [@expl:index requires] [%#svec'4] in_bounds_usize ix (view_Vec_tup2_u64_u64_Global self_)}
+  any
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'5] has_value_usize ix (view_Vec_tup2_u64_u64_Global self_) result}
+    (! return {result}) ]
+
+let new_tup2_u64_u64 (return (x: t_Vec_tup2_u64_u64_Global)) = any
+  [ return (result: t_Vec_tup2_u64_u64_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec'0] Seq.length (view_Vec_tup2_u64_u64_Global result) = 0}
+    (! return {result}) ]
+
+predicate in_bounds_usize'0 [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt64.t) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize'0
+
+predicate has_value_usize'0 [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt64.t) (out: UInt64.t) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize'0
+
+let index_Vec_u64_Global'0 (self_: t_Vec_u64_Global) (ix: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:index requires] [%#svec'4] in_bounds_usize'0 ix (view_Vec_u64_Global self_)}
+  any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'5] has_value_usize'0 ix (view_Vec_u64_Global self_) result}
+    (! return {result}) ]
+
+let push_tup2_u64_u64 (self_: MutBorrow.t t_Vec_tup2_u64_u64_Global) (v: tup2_u64_u64) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'1] view_Vec_tup2_u64_u64_Global self_.final
+    = Seq.snoc (view_Vec_tup2_u64_u64_Global self_.current) v}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_wire_roundtrip_keyquery__mutant [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 733 0 733 94]
+  (op_id: UInt64.t) (entries: t_Vec_tup2_u64_u64_Global) (return (x: bool)) =
+{[@stop_split] [@expl:verify_rl_wire_roundtrip_keyquery__mutant requires] [%#slib'35] Seq.length (view_Vec_tup2_u64_u64_Global entries)
+  <= 1000000}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = len_tup2_u64_u64 [%#slib] {entries} (fun (_x: UInt64.t) -> [ &n <- _x ] s1)
+    | s1 = new_u64 [%#slib'0] (fun (_x: t_Vec_u64_Global) -> [ &stream <- _x ] s2)
+    | s2 = MutBorrow.borrow_mut <t_Vec_u64_Global> {stream}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_10 <- _bor ] [ &stream <- _bor.final ] s3)
+    | s3 = push_u64 [%#slib'1] {_10} {op_id} (fun (_x: ()) -> [ &_9 <- _x ] s4)
+    | s4 = [ &_14 <- UInt64.of_int (UInt64.t'int n) ] s5
+    | s5 = MutBorrow.borrow_mut <t_Vec_u64_Global> {stream}
+        (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_13 <- _bor ] [ &stream <- _bor.final ] s6)
+    | s6 = push_u64 [%#slib'2] {_13} {_14} (fun (_x: ()) -> [ &_12 <- _x ] s7)
+    | s7 = [ &i <- [%#slib'3] (0: UInt64.t) ] s8
+    | s8 = bb5 ]
+  | bb5 = bb5
+    [ bb5 = {[@expl:loop invariant #0] [%#slib'7] UInt64.t'int i <= UInt64.t'int n}
+      {[@expl:loop invariant #1] [%#slib'6] Seq.length (view_Vec_u64_Global stream) = 2 + 2 * UInt64.t'int i}
+      {[@expl:loop invariant #2] [%#slib'5] index_Vec_u64_Global stream 0 = op_id}
+      {[@expl:loop invariant #3] [%#slib'4] forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> index_Vec_u64_Global stream (2 + 2 * j) = (index_Vec_tup2_u64_u64_Global entries j).f1
+        /\ index_Vec_u64_Global stream (3 + 2 * j) = (index_Vec_tup2_u64_u64_Global entries j).f0}
+      (! s0)
+      [ s0 = [ &_33 <- UInt64.lt i n ] s1 | s1 = any [ br0 -> {_33 = false} (! bb12) | br1 -> {_33} (! bb7) ] ]
+      [ bb7 = s0
+        [ s0 = index_Vec_tup2_u64_u64_Global'0 [%#slib'8] {entries} {i} (fun (_x: tup2_u64_u64) -> [ &_39 <- _x ] s1)
+        | s1 = MutBorrow.borrow_mut <t_Vec_u64_Global> {stream}
+            (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_37 <- _bor ] [ &stream <- _bor.final ] s2)
+        | s2 = push_u64 [%#slib'9] {_37} {_39.f1} (fun (_x: ()) -> [ &_36 <- _x ] s3)
+        | s3 = index_Vec_tup2_u64_u64_Global'0 [%#slib'10] {entries} {i} (fun (_x: tup2_u64_u64) -> [ &_45 <- _x ] s4)
+        | s4 = MutBorrow.borrow_mut <t_Vec_u64_Global> {stream}
+            (fun (_bor: MutBorrow.t t_Vec_u64_Global) -> [ &_43 <- _bor ] [ &stream <- _bor.final ] s5)
+        | s5 = push_u64 [%#slib'11] {_43} {_45.f0} (fun (_x: ()) -> [ &_42 <- _x ] s6)
+        | s6 = UInt64.add [%#slib'13] {i} {[%#slib'12] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s7)
+        | s7 = bb5 ] ] ]
+  | bb12 = s0
+    [ s0 = new_tup2_u64_u64 [%#slib'14] (fun (_x: t_Vec_tup2_u64_u64_Global) -> [ &out <- _x ] s1)
+    | s1 = [ &k <- [%#slib'15] (0: UInt64.t) ] s2
+    | s2 = bb14 ]
+  | bb14 = bb14
+    [ bb14 = {[@expl:loop invariant #0] [%#slib'19] UInt64.t'int k <= UInt64.t'int n}
+      {[@expl:loop invariant #1] [%#slib'18] Seq.length (view_Vec_u64_Global stream) = 2 + 2 * UInt64.t'int n}
+      {[@expl:loop invariant #2] [%#slib'17] Seq.length (view_Vec_tup2_u64_u64_Global out) = UInt64.t'int k}
+      {[@expl:loop invariant #3] [%#slib'16] forall j: int. 0 <= j /\ j < UInt64.t'int k
+        -> (index_Vec_tup2_u64_u64_Global out j).f0 = (index_Vec_tup2_u64_u64_Global entries j).f1
+        /\ (index_Vec_tup2_u64_u64_Global out j).f1 = (index_Vec_tup2_u64_u64_Global entries j).f0}
+      (! s0)
+      [ s0 = [ &_66 <- UInt64.lt k n ] s1 | s1 = any [ br0 -> {_66 = false} (! bb20) | br1 -> {_66} (! bb16) ] ]
+      [ bb16 = s0
+        [ s0 = UInt64.mul [%#slib'21] {[%#slib'20] (2: UInt64.t)} {k} (fun (_x: UInt64.t) -> [ &_73 <- _x ] s1)
+        | s1 = UInt64.add [%#slib'23] {[%#slib'22] (2: UInt64.t)} {_73} (fun (_x: UInt64.t) -> [ &_72 <- _x ] s2)
+        | s2 = index_Vec_u64_Global'0 [%#slib'24] {stream} {_72} (fun (_x: UInt64.t) -> [ &_70 <- _x ] s3)
+        | s3 = [ &key <- _70 ] s4
+        | s4 = UInt64.mul [%#slib'26] {[%#slib'25] (2: UInt64.t)} {k} (fun (_x: UInt64.t) -> [ &_79 <- _x ] s5)
+        | s5 = UInt64.add [%#slib'28] {[%#slib'27] (3: UInt64.t)} {_79} (fun (_x: UInt64.t) -> [ &_78 <- _x ] s6)
+        | s6 = index_Vec_u64_Global'0 [%#slib'29] {stream} {_78} (fun (_x: UInt64.t) -> [ &_76 <- _x ] s7)
+        | s7 = [ &size <- _76 ] s8
+        | s8 = [ &_83 <- { f0 = key; f1 = size } ] s9
+        | s9 = MutBorrow.borrow_mut <t_Vec_tup2_u64_u64_Global> {out}
+            (fun (_bor: MutBorrow.t t_Vec_tup2_u64_u64_Global) -> [ &_82 <- _bor ] [ &out <- _bor.final ] s10)
+        | s10 = push_tup2_u64_u64 [%#slib'30] {_82} {_83} (fun (_x: ()) -> [ &_81 <- _x ] s11)
+        | s11 = UInt64.add [%#slib'32] {k} {[%#slib'31] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &k <- _x ] s12)
+        | s12 = bb14 ] ] ]
+  | bb20 = s0
+    [ s0 = {[@expl:assertion] [%#slib'33] forall j: int. 0 <= j /\ j < Seq.length (view_Vec_tup2_u64_u64_Global entries)
+        -> (index_Vec_tup2_u64_u64_Global out j).f0 = (index_Vec_tup2_u64_u64_Global entries j).f0
+        /\ (index_Vec_tup2_u64_u64_Global out j).f1 = (index_Vec_tup2_u64_u64_Global entries j).f1}
+      s1
+    | s1 = [ &_ret <- [%#slib'34] true ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & op_id: UInt64.t = op_id
+  | & entries: t_Vec_tup2_u64_u64_Global = entries
+  | & n: UInt64.t = Any.any_l ()
+  | & stream: t_Vec_u64_Global = Any.any_l ()
+  | & _9: () = Any.any_l ()
+  | & _10: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _12: () = Any.any_l ()
+  | & _13: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _14: UInt64.t = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _33: bool = Any.any_l ()
+  | & _36: () = Any.any_l ()
+  | & _37: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _39: tup2_u64_u64 = Any.any_l ()
+  | & _42: () = Any.any_l ()
+  | & _43: MutBorrow.t t_Vec_u64_Global = Any.any_l ()
+  | & _45: tup2_u64_u64 = Any.any_l ()
+  | & out: t_Vec_tup2_u64_u64_Global = Any.any_l ()
+  | & k: UInt64.t = Any.any_l ()
+  | & _66: bool = Any.any_l ()
+  | & key: UInt64.t = Any.any_l ()
+  | & _70: UInt64.t = Any.any_l ()
+  | & _72: UInt64.t = Any.any_l ()
+  | & _73: UInt64.t = Any.any_l ()
+  | & size: UInt64.t = Any.any_l ()
+  | & _76: UInt64.t = Any.any_l ()
+  | & _78: UInt64.t = Any.any_l ()
+  | & _79: UInt64.t = Any.any_l ()
+  | & _81: () = Any.any_l ()
+  | & _82: MutBorrow.t t_Vec_tup2_u64_u64_Global = Any.any_l ()
+  | & _83: tup2_u64_u64 = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_rl_wire_roundtrip_keyquery__mutant ensures] [%#slib'36] result
+    = true}
+    (! return {result}) ]

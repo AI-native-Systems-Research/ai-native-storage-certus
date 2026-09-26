@@ -1,0 +1,127 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 130 0 130 71 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 134 48 134 49
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 133 43 133 44
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 132 35 132 36
+let%span slib'2 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 142 18 142 32
+let%span slib'3 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 149 18 149 60
+let%span slib'4 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 150 4 150 8
+let%span slib'5 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 129 10 129 24
+let%span sord = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
+let%span sord'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
+let%span sord'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
+let%span sord'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 180 41 180 102
+let%span sord'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 186 41 186 83
+let%span sord'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 192 42 192 59
+let%span sord'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 193 42 193 59
+let%span sord'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 194 41 194 58
+let%span sord'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 200 42 200 83
+let%span sord'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 201 41 201 85
+let%span sord'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 207 42 207 86
+let%span sord'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 208 41 208 82
+let%span sord'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 214 41 214 97
+let%span sord'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 296 16 302 17
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_RdmaStatusCode = Success | UnableToConnect | KeyNoLongerAvailable
+
+type t_Option_RdmaStatusCode = None | Some t_RdmaStatusCode
+
+type t_Ordering = Less | Equal | Greater
+
+function cmp_log_u8 (self: UInt8.t) (o: UInt8.t) : t_Ordering = [%#sord'12] if UInt8.lt self o then
+    Less
+  else
+    if self = o then Equal else Greater
+
+
+function eq_cmp_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom eq_cmp_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord'11] (x = y) = (cmp_log_u8 x y = Equal)
+
+function antisym2_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom antisym2_u8_spec: forall x: UInt8.t, y: UInt8.t. ([%#sord'9] cmp_log_u8 x y = Greater)
+    -> ([%#sord'10] cmp_log_u8 y x = Less)
+
+function antisym1_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom antisym1_u8_spec: forall x: UInt8.t, y: UInt8.t. ([%#sord'7] cmp_log_u8 x y = Less)
+    -> ([%#sord'8] cmp_log_u8 y x = Greater)
+
+function trans_u8 (x: UInt8.t) (y: UInt8.t) (z: UInt8.t) (o: t_Ordering) : ()
+
+axiom trans_u8_spec: forall x: UInt8.t, y: UInt8.t, z: UInt8.t, o: t_Ordering. ([%#sord'4] cmp_log_u8 x y = o)
+    -> ([%#sord'5] cmp_log_u8 y z = o) -> ([%#sord'6] cmp_log_u8 x z = o)
+
+function refl_u8 (x: UInt8.t) : ()
+
+axiom refl_u8_spec: forall x: UInt8.t. [%#sord'3] cmp_log_u8 x x = Equal
+
+function cmp_gt_log_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom cmp_gt_log_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord'2] UInt8.gt x y = (cmp_log_u8 x y = Greater)
+
+function cmp_ge_log_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom cmp_ge_log_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord'1] UInt8.ge x y = (cmp_log_u8 x y <> Less)
+
+function cmp_lt_log_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom cmp_lt_log_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord'0] UInt8.lt x y = (cmp_log_u8 x y = Less)
+
+function cmp_le_log_u8 (x: UInt8.t) (y: UInt8.t) : ()
+
+axiom cmp_le_log_u8_spec: forall x: UInt8.t, y: UInt8.t. [%#sord] UInt8.le x y = (cmp_log_u8 x y <> Greater)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_status_tag_bijection [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 130 0 130 71]
+  (s: t_RdmaStatusCode) (b: UInt8.t) (return (x: bool)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {s = Success} (! bb6) | br1 -> {s = UnableToConnect} (! bb5) | br2 -> {s = KeyNoLongerAvailable} (! bb4) ]
+  | bb4 = s0 [ s0 = [ &enc <- [%#slib] (2: UInt8.t) ] s1 | s1 = bb7 ]
+  | bb5 = s0 [ s0 = [ &enc <- [%#slib'0] (1: UInt8.t) ] s1 | s1 = bb7 ]
+  | bb6 = s0 [ s0 = [ &enc <- [%#slib'1] (0: UInt8.t) ] s1 | s1 = bb7 ]
+  | bb7 = any
+    [ br0 -> {enc = (0: UInt8.t)} (! bb14)
+    | br1 -> {enc = (1: UInt8.t)} (! bb13)
+    | br2 -> {enc = (2: UInt8.t)} (! bb12)
+    | default -> -{enc <> (0: UInt8.t) /\ enc <> (1: UInt8.t) /\ enc <> (2: UInt8.t)}- (! bb8) ]
+  | bb8 = s0 [ s0 = [ &dec <- None ] s1 | s1 = bb15 ]
+  | bb12 = s0 [ s0 = [ &_9 <- KeyNoLongerAvailable ] s1 | s1 = [ &dec <- Some _9 ] s2 | s2 = bb15 ]
+  | bb13 = s0 [ s0 = [ &_8 <- UnableToConnect ] s1 | s1 = [ &dec <- Some _8 ] s2 | s2 = bb15 ]
+  | bb14 = s0 [ s0 = [ &_7 <- Success ] s1 | s1 = [ &dec <- Some _7 ] s2 | s2 = bb15 ]
+  | bb15 = s0
+    [ s0 = {[@expl:assertion] [%#slib'2] dec = Some s} s1
+    | s1 = any
+      [ br0 -> {b = (0: UInt8.t)} (! bb22)
+      | br1 -> {b = (1: UInt8.t)} (! bb21)
+      | br2 -> {b = (2: UInt8.t)} (! bb20)
+      | default -> -{b <> (0: UInt8.t) /\ b <> (1: UInt8.t) /\ b <> (2: UInt8.t)}- (! bb16) ] ]
+  | bb16 = s0 [ s0 = [ &dec2 <- None ] s1 | s1 = bb23 ]
+  | bb20 = s0 [ s0 = [ &_17 <- KeyNoLongerAvailable ] s1 | s1 = [ &dec2 <- Some _17 ] s2 | s2 = bb23 ]
+  | bb21 = s0 [ s0 = [ &_16 <- UnableToConnect ] s1 | s1 = [ &dec2 <- Some _16 ] s2 | s2 = bb23 ]
+  | bb22 = s0 [ s0 = [ &_15 <- Success ] s1 | s1 = [ &dec2 <- Some _15 ] s2 | s2 = bb23 ]
+  | bb23 = s0
+    [ s0 = {[@expl:assertion] [%#slib'3] UInt8.gt b (2: UInt8.t) -> dec2 = None} s1
+    | s1 = [ &_ret <- [%#slib'4] true ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & s: t_RdmaStatusCode = s
+  | & b: UInt8.t = b
+  | & enc: UInt8.t = Any.any_l ()
+  | & dec: t_Option_RdmaStatusCode = Any.any_l ()
+  | & _7: t_RdmaStatusCode = Any.any_l ()
+  | & _8: t_RdmaStatusCode = Any.any_l ()
+  | & _9: t_RdmaStatusCode = Any.any_l ()
+  | & dec2: t_Option_RdmaStatusCode = Any.any_l ()
+  | & _15: t_RdmaStatusCode = Any.any_l ()
+  | & _16: t_RdmaStatusCode = Any.any_l ()
+  | & _17: t_RdmaStatusCode = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_rl_status_tag_bijection ensures] [%#slib'5] result = true}
+    (! return {result}) ]

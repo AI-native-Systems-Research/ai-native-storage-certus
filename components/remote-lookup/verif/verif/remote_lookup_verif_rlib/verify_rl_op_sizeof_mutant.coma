@@ -1,0 +1,41 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 381 0 381 95 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 380 10 380 102
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 42 20 42 29
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use seq.Seq
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_Vec_tup2_u64_u64_Global
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_u64_Global (self: t_Vec_tup2_u64_u64_Global) : Seq.seq tup2_u64_u64
+
+axiom view_Vec_tup2_u64_u64_Global_spec:
+  forall self: t_Vec_tup2_u64_u64_Global [view_Vec_tup2_u64_u64_Global self]. [%#svec] Seq.length (view_Vec_tup2_u64_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+function index_Vec_tup2_u64_u64_Global [@inline:trivial] (self: t_Vec_tup2_u64_u64_Global) (ix: int) : tup2_u64_u64 =
+  [%#svec'0] Seq.get (view_Vec_tup2_u64_u64_Global self) ix
+
+meta "rewrite_def" function index_Vec_tup2_u64_u64_Global
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_op_sizeof__mutant [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 381 0 381 95]
+  (entries: t_Vec_tup2_u64_u64_Global) (key: UInt64.t) (return (x: t_Option_u64)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ] ] [ & _ret: t_Option_u64 = Any.any_l () ])
+  [ return (result: t_Option_u64) -> {[@stop_split] [@expl:verify_rl_op_sizeof__mutant ensures] [%#slib] result = None
+    -> (forall j: int. 0 <= j /\ j < Seq.length (view_Vec_tup2_u64_u64_Global entries)
+      -> (index_Vec_tup2_u64_u64_Global entries j).f0 <> key)}
+    (! return {result}) ]

@@ -1,0 +1,48 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 63 22 63 31 *)
+
+(* <LookupErr as std::cmp::PartialEq> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 63 22 63 31
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 63 37 63 46
+let%span smodel = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/model.rs" 36 8 36 28
+
+use creusot.prelude.Any
+
+type t_LookupErr = NotFound | TransportError
+
+type tup2_ref_LookupErr_ref_LookupErr = { f0: t_LookupErr; f1: t_LookupErr }
+
+type t_LookupErrDeepModel = NotFound'0 | TransportError'0
+
+function deep_model_LookupErr [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 63 37 63 46] (self: t_LookupErr) : t_LookupErrDeepModel
+ = [%#slib'0] match self with
+    | NotFound -> NotFound'0
+    | TransportError -> TransportError'0
+    end
+
+function deep_model_ref_LookupErr [@inline:trivial] (self: t_LookupErr) : t_LookupErrDeepModel =
+  [%#smodel] deep_model_LookupErr self
+
+meta "rewrite_def" function deep_model_ref_LookupErr
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let eq_LookupErr [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 63 22 63 31]
+  (self: t_LookupErr) (rhs: t_LookupErr) (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_6 <- { f0 = self; f1 = rhs } ] s1
+    | s1 = any [ br0 -> {_6.f0 = NotFound} (! bb2) | br1 -> {_6.f0 = TransportError} (! bb4) ] ]
+  | bb4 = any [ br0 -> {_6.f1 = NotFound} (! bb1) | br1 -> {_6.f1 = TransportError} (! bb6) ]
+  | bb6 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ]
+  | bb2 = any [ br0 -> {_6.f1 = NotFound} (! bb7) | br1 -> {_6.f1 = TransportError} (! bb1) ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib] false ] s1 | s1 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & self: t_LookupErr = self
+  | & rhs: t_LookupErr = rhs
+  | & _6: tup2_ref_LookupErr_ref_LookupErr = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:eq ensures] [%#slib] result
+    = (deep_model_ref_LookupErr self = deep_model_ref_LookupErr rhs)}
+    (! return {result}) ]

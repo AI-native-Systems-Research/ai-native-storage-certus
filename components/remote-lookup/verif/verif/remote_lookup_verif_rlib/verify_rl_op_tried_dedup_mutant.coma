@@ -1,0 +1,41 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 530 0 530 118 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 529 10 529 96
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 42 20 42 29
+
+use creusot.prelude.Any
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type t_Vec_tup2_u64_u64_Global
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_u64_Global (self: t_Vec_tup2_u64_u64_Global) : Seq.seq tup2_u64_u64
+
+axiom view_Vec_tup2_u64_u64_Global_spec:
+  forall self: t_Vec_tup2_u64_u64_Global [view_Vec_tup2_u64_u64_Global self]. [%#svec] Seq.length (view_Vec_tup2_u64_u64_Global self)
+    <= UInt64.t'int const_MAX
+
+function index_Vec_tup2_u64_u64_Global [@inline:trivial] (self: t_Vec_tup2_u64_u64_Global) (ix: int) : tup2_u64_u64 =
+  [%#svec'0] Seq.get (view_Vec_tup2_u64_u64_Global self) ix
+
+meta "rewrite_def" function index_Vec_tup2_u64_u64_Global
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_op_tried_dedup__mutant [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 530 0 530 118]
+  (tried: t_Vec_tup2_u64_u64_Global) (key: UInt64.t) (peer: UInt64.t) (return (x: t_Vec_tup2_u64_u64_Global)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- tried ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_tup2_u64_u64_Global = Any.any_l () | & tried: t_Vec_tup2_u64_u64_Global = tried ])
+  [ return (result: t_Vec_tup2_u64_u64_Global) ->
+  {[@stop_split] [@expl:verify_rl_op_tried_dedup__mutant ensures] [%#slib] exists j: int. 0 <= j
+      /\ j < Seq.length (view_Vec_tup2_u64_u64_Global result)
+      /\ (index_Vec_tup2_u64_u64_Global result j).f0 = key /\ (index_Vec_tup2_u64_u64_Global result j).f1 = peer}
+    (! return {result}) ]

@@ -1,0 +1,34 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 36 9 36 14 *)
+
+(* <RdmaStatusCode as std::clone::Clone> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 36 9 36 14
+
+use creusot.prelude.Any
+
+type t_RdmaStatusCode = Success | UnableToConnect | KeyNoLongerAvailable
+
+type tup2_RdmaStatusCode_RdmaStatusCode = { f0: t_RdmaStatusCode; f1: t_RdmaStatusCode }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_RdmaStatusCode [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 36 9 36 14]
+  (self: t_RdmaStatusCode) (return (x: t_RdmaStatusCode)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {self = Success} (! bb6)
+    | br1 -> {self = UnableToConnect} (! bb5)
+    | br2 -> {self = KeyNoLongerAvailable} (! bb4) ]
+  | bb4 = s0 [ s0 = [ &_ret <- KeyNoLongerAvailable ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- UnableToConnect ] s1 | s1 = return {_ret} ]
+  | bb6 = s0 [ s0 = [ &_ret <- Success ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_RdmaStatusCode = Any.any_l () | & self: t_RdmaStatusCode = self ])
+  [ return (result: t_RdmaStatusCode) -> {[@stop_split] [@expl:clone ensures] [%#slib] match { f0 = self;
+                                                                                               f1 = result } with
+      | {f0 = Success; f1 = Success} -> true
+      | {f0 = UnableToConnect; f1 = UnableToConnect} -> true
+      | {f0 = KeyNoLongerAvailable; f1 = KeyNoLongerAvailable} -> true
+      | _ -> false
+      end}
+    (! return {result}) ]

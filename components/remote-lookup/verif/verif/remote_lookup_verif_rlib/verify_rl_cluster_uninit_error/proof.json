@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_rl_cluster_uninit_error": {
+        "prover": "alt-ergo",
+        "time": 0.014
+      }
+    }
+  }
+}

@@ -1,0 +1,115 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 394 0 394 93 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 395 23 395 24
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 398 14 398 22
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 397 16 397 63
+let%span slib'2 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 396 16 396 31
+let%span slib'3 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 399 13 399 16
+let%span slib'4 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 402 13 402 14
+let%span slib'5 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 402 8 402 14
+let%span slib'6 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 400 21 400 24
+let%span slib'7 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 391 10 391 102
+let%span slib'8 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 392 10 393 98
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 42 20 42 29
+let%span svec'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span sslice = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_tup2_u64_KeyState_Global
+
+type t_KeyState = Unsatisfied | InProgress | Satisfied
+
+type tup2_u64_KeyState = { f0: UInt64.t; f1: t_KeyState }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_KeyState_Global (self: t_Vec_tup2_u64_KeyState_Global) : Seq.seq tup2_u64_KeyState
+
+axiom view_Vec_tup2_u64_KeyState_Global_spec:
+  forall self: t_Vec_tup2_u64_KeyState_Global [view_Vec_tup2_u64_KeyState_Global self]. [%#svec'1] Seq.length (view_Vec_tup2_u64_KeyState_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_tup2_u64_KeyState (self_: t_Vec_tup2_u64_KeyState_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_tup2_u64_KeyState_Global self_)}
+    (! return {result}) ]
+
+function index_Vec_tup2_u64_KeyState_Global [@inline:trivial] (self: t_Vec_tup2_u64_KeyState_Global) (ix: int) : tup2_u64_KeyState
+ = [%#svec'0] Seq.get (view_Vec_tup2_u64_KeyState_Global self) ix
+
+meta "rewrite_def" function index_Vec_tup2_u64_KeyState_Global
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_KeyState) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_KeyState) (out: tup2_u64_KeyState) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_tup2_u64_KeyState_Global'0 (self_: t_Vec_tup2_u64_KeyState_Global) (ix: UInt64.t)
+  (return (x: tup2_u64_KeyState)) =
+{[@stop_split] [@expl:index requires] [%#svec'2] in_bounds_usize ix (view_Vec_tup2_u64_KeyState_Global self_)}
+  any
+  [ return (result: tup2_u64_KeyState) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'3] has_value_usize ix (view_Vec_tup2_u64_KeyState_Global self_) result}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_op_stateof_default [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 394 0 394 93]
+  (st: t_Vec_tup2_u64_KeyState_Global) (key: UInt64.t) (return (x: t_KeyState)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &i <- [%#slib] (0: UInt64.t) ] s1 | s1 = bb1 ]
+  | bb1 = bb1
+    [ bb1 = {[@expl:loop invariant #0] [%#slib'2] UInt64.t'int i <= Seq.length (view_Vec_tup2_u64_KeyState_Global st)}
+      {[@expl:loop invariant #1] [%#slib'1] forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> (index_Vec_tup2_u64_KeyState_Global st j).f0 <> key}
+      (! s0)
+      [ s0 = len_tup2_u64_KeyState [%#slib'0] {st} (fun (_x: UInt64.t) -> [ &_22 <- _x ] s1)
+      | s1 = [ &_20 <- UInt64.lt i _22 ] s2
+      | s2 = any [ br0 -> {_20 = false} (! bb9) | br1 -> {_20} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = index_Vec_tup2_u64_KeyState_Global'0 [%#slib'3] {st} {i}
+            (fun (_x: tup2_u64_KeyState) -> [ &_27 <- _x ] s1)
+        | s1 = [ &_25 <- _27.f0 = key ] s2
+        | s2 = any [ br0 -> {_25 = false} (! bb8) | br1 -> {_25} (! bb6) ] ]
+      | bb8 = s0
+        [ s0 = UInt64.add [%#slib'5] {i} {[%#slib'4] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
+        | s1 = bb1 ] ] ]
+  | bb6 = s0
+    [ s0 = index_Vec_tup2_u64_KeyState_Global'0 [%#slib'6] {st} {i} (fun (_x: tup2_u64_KeyState) -> [ &_32 <- _x ] s1)
+    | s1 = [ &_ret <- _32.f1 ] s2
+    | s2 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- Unsatisfied ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_KeyState = Any.any_l ()
+  | & st: t_Vec_tup2_u64_KeyState_Global = st
+  | & key: UInt64.t = key
+  | & i: UInt64.t = Any.any_l ()
+  | & _20: bool = Any.any_l ()
+  | & _22: UInt64.t = Any.any_l ()
+  | & _25: bool = Any.any_l ()
+  | & _27: tup2_u64_KeyState = Any.any_l ()
+  | & _32: tup2_u64_KeyState = Any.any_l () ])
+  [ return (result: t_KeyState) ->
+  {[@stop_split] [@expl:verify_rl_op_stateof_default ensures] ([@stop_split] [@expl:verify_rl_op_stateof_default ensures #0] [%#slib'7] (forall j: int. 0
+              <= j
+            /\ j < Seq.length (view_Vec_tup2_u64_KeyState_Global st)
+          -> (index_Vec_tup2_u64_KeyState_Global st j).f0 <> key) -> result = Unsatisfied)
+    /\ ([@stop_split] [@expl:verify_rl_op_stateof_default ensures #1] [%#slib'8] forall j: int. 0 <= j
+        /\ j < Seq.length (view_Vec_tup2_u64_KeyState_Global st)
+      -> (index_Vec_tup2_u64_KeyState_Global st j).f0 = key
+        /\ (forall k: int. 0 <= k /\ k < j -> (index_Vec_tup2_u64_KeyState_Global st k).f0 <> key)
+      -> result = (index_Vec_tup2_u64_KeyState_Global st j).f1)}
+    (! return {result}) ]

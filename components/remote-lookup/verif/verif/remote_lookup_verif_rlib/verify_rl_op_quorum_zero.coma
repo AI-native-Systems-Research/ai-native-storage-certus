@@ -1,0 +1,47 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 196 0 196 70 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 197 10 197 11
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 197 4 197 46
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 197 20 197 23
+let%span slib'2 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 197 15 197 23
+let%span slib'3 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 197 27 197 46
+let%span slib'4 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 194 11 194 66
+let%span slib'5 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 195 10 195 41
+
+use creusot.int.UInt64
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_op_quorum_zero [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 196 0 196 70]
+  (pe: UInt64.t) (pr: UInt64.t) (pct: UInt8.t) (return (x: bool)) =
+{[@stop_split] [@expl:verify_rl_op_quorum_zero requires] [%#slib'4] UInt64.t'int pr * 100 <= UInt64.t'int const_MAX
+  /\ UInt64.t'int pe * UInt8.t'int pct <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_10 <- pe = ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_10 = false} (! bb2) | br1 -> {_10} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib'0] true ] s1 | s1 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = UInt64.mul [%#slib'2] {pr} {[%#slib'1] (100: UInt64.t)} (fun (_x: UInt64.t) -> [ &_12 <- _x ] s1)
+    | s1 = [ &_16 <- UInt64.of_int (UInt8.t'int pct) ] s2
+    | s2 = UInt64.mul [%#slib'3] {pe} {_16} (fun (_x: UInt64.t) -> [ &_14 <- _x ] s3)
+    | s3 = [ &_ret <- UInt64.ge _12 _14 ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & pe: UInt64.t = pe
+  | & pr: UInt64.t = pr
+  | & pct: UInt8.t = pct
+  | & _10: bool = Any.any_l ()
+  | & _12: UInt64.t = Any.any_l ()
+  | & _14: UInt64.t = Any.any_l ()
+  | & _16: UInt64.t = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_rl_op_quorum_zero ensures] [%#slib'5] pe = (0: UInt64.t)
+    -> result = true}
+    (! return {result}) ]

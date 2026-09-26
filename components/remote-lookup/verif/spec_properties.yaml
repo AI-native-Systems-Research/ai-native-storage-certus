@@ -1,0 +1,159 @@
+# spec_properties.yaml — BLIND spec extraction for remote-lookup.
+# Extracted from components/remote-lookup/specs/002-remote-lookup-rdma/spec.md
+# ALONE (Status: Synced; supersedes the 001 placeholder), before looking at code.
+# This is the spec side of the Role-1 reconciliation; the operative artifact is
+# unified_properties.yaml. Each entry records the FR/US/SC it derives from and a
+# full plain-English statement of the obligation the spec imposes.
+component: remote-lookup
+interface: IRemoteLookup
+source: components/remote-lookup/specs/002-remote-lookup-rdma/spec.md
+extraction: blind-from-spec
+counts:
+  functional_requirements: 34
+  user_stories: 7
+  success_criteria: 8
+  derived_properties: 26
+properties:
+- id: SP-BATCH-POSITIONAL
+  from: [FR-001, FR-012, US1-AS1, US1-AS3]
+  verifiable: true
+  statement: A batch lookup returns exactly one result per requested (key, size) entry, in
+    the same order as the request, each result reporting whether that key was resolved.
+- id: SP-ACTOR-THREAD
+  from: [FR-002, FR-023]
+  verifiable: true
+  delegated: concurrency-model
+  statement: The component runs as an actor on a dedicated thread that exclusively owns the
+    zyre node and all operation state, so operation state is never shared across threads.
+- id: SP-JOIN-LEAVE
+  from: [FR-003]
+  verifiable: true
+  statement: The component joins the configured zyre group on activation and leaves it on
+    deactivation; join_cluster/leave_cluster are only meaningful once initialized.
+- id: SP-KEY-SIZE-IDENTITY
+  from: [FR-004]
+  verifiable: true
+  statement: A key is always qualified by its requested size on the wire and in every lookup;
+    (key, size) is the identity used throughout the protocol.
+- id: SP-TWO-PHASE
+  from: [FR-005, FR-010, US6]
+  verifiable: true
+  delegated: actor-timing-model
+  statement: A lookup runs memory-first (Phase 1) and falls back to disk holders (Phase 2)
+    only after a quorum of expected peers reply or the Phase-1 timeout elapses.
+- id: SP-PUBLISH-ON-SUCCESS
+  from: [FR-006, FR-008, US1-AS1]
+  verifiable: true
+  delegated: dispatch-map + memory-tier components
+  statement: A fetched value is published to the local memory tier / dispatch-map only after
+    the RDMA transfer succeeds; a failed transfer publishes nothing and leaks no slot; a size
+    collision on an existing entry never evicts or overwrites the resident entry.
+- id: SP-ONE-SIDED-RDMA
+  from: [FR-007, FR-024, US3]
+  verifiable: true
+  delegated: RDMA initiator/responder components + transport model
+  statement: The value data path is a one-sided RDMA write from the holder into the requester's
+    pre-reserved landing slot; the component itself marshals descriptors and delegates transport.
+- id: SP-QUORUM
+  from: [FR-010, US6-AS1]
+  verifiable: true
+  statement: Phase 2 begins once the fraction of expected peers that have replied reaches the
+    configured quorum percentage, or immediately if there are no expected peers.
+- id: SP-RETRY-ALTERNATE
+  from: [FR-011, US5-AS1]
+  verifiable: true
+  statement: On a failed fetch the operation retries the key against a peer not already tried
+    for that key, up to a bounded number of retry rounds.
+- id: SP-COMPLETION
+  from: [FR-012, US6, SC-002]
+  verifiable: true
+  delegated: actor-timing-model
+  statement: An operation completes at the first of all-keys-satisfied, no-remaining-holder,
+    retry-cap-reached, or op-deadline; on deadline with no result all keys report not-found.
+- id: SP-PEER-EXIT
+  from: [FR-013, US7-AS1, SC-006]
+  verifiable: true
+  delegated: actor event-ordering model
+  statement: When a peer exits mid-operation its cached reply is dropped, its in-progress keys
+    are returned to unsatisfied, and completion is re-evaluated so the operation cannot hang.
+- id: SP-TEARDOWN-BEFORE-RECLAIM
+  from: [FR-014, SC-005, US7-AS2]
+  verifiable: true
+  delegated: RDMA responder component + ordering model
+  statement: A landing slot exposed to a departing/severed peer is reclaimed only after a
+    Disconnect/DisconnectAck handshake (bounded by a fixed timeout) confirms the peer QP is torn
+    down, so no late one-sided write can land in the reclaimed slot.
+- id: SP-AVAIL-REPORT
+  from: [FR-015]
+  verifiable: true
+  statement: A KEY_RESPONSE reports, per key, whether the peer holds it in memory, on disk, or
+    not at all.
+- id: SP-STATUS-MAP
+  from: [FR-016]
+  verifiable: true
+  statement: An RDMA_STATUS reports, per key, a defensively-mapped outcome code (success,
+    unable-to-connect, or key-no-longer-available) derived from the initiator push status.
+- id: SP-PIN-LIFETIME
+  from: [FR-016a, SC-005]
+  verifiable: false
+  statement: Every read reference pinned to serve a value is released when its completion runs
+    or is dropped; no pin is leaked (no leak detector exists).
+- id: SP-MALFORMED-FRAME
+  from: [FR-018]
+  verifiable: true
+  statement: A malformed, truncated, unknown-type, or unsupported-version frame is logged and
+    dropped (or decoded to a benign Unknown sentinel), never misinterpreted or fatal.
+- id: SP-CONCURRENT-OPS
+  from: [FR-020, FR-030]
+  verifiable: true
+  delegated: concurrency-model
+  statement: Multiple lookups run concurrently, each keyed by a unique op id, without one
+    operation blocking or corrupting another.
+- id: SP-SELF-FILTER
+  from: [FR-021, FR-027, FR-028]
+  verifiable: true
+  delegated: zyre component + network model
+  statement: The node ignores its own SHOUTs and proactively warms an RDMA connection to a peer
+    discovered advertising a responder endpoint.
+- id: SP-CONFIG-DEFAULTS
+  from: [FR-022, FR-033]
+  verifiable: false
+  statement: The lookup configuration has documented, sensible defaults (group, quorum, timeouts,
+    retry cap, max keys per query, bind ip).
+- id: SP-SINGLE-FLIGHT
+  from: [FR-026, SC-008]
+  verifiable: true
+  delegated: concurrency-model
+  statement: Concurrent lookups of the same unsatisfied (key, size) coalesce onto a single
+    in-flight remote fetch rather than issuing duplicate fetches.
+- id: SP-OUT-OF-INTERFACE-HOOKS
+  from: [FR-029]
+  verifiable: true
+  statement: The component exposes out-of-interface lifecycle hooks (peers_seen, signal_shutdown,
+    shutdown) for orchestrated teardown and test barriers.
+- id: SP-DISK-PROMOTION
+  from: [FR-017, US4]
+  verifiable: true
+  delegated: dispatcher component
+  statement: A disk-tier holder serves a key by promoting it (via the dispatcher) before the
+    one-sided write, so Phase-2 disk fallback still delivers memory-resident values.
+- id: SP-INTEGRITY-FEATURE
+  from: [FR-034]
+  verifiable: false
+  statement: An integrity-check build feature can be enabled; it is build configuration with no
+    independent runtime obligation.
+- id: SP-EMPTY-INPUT
+  from: ['Edge Cases: empty entry list']
+  verifiable: true
+  statement: An empty batch lookup returns an empty result set immediately with no protocol
+    activity.
+- id: SP-UNINITIALIZED
+  from: ['Edge Cases: uninitialized / no peers']
+  verifiable: true
+  statement: A lookup on an uninitialized component reports not-found for every entry rather than
+    failing; cluster join/leave on an uninitialized component reports an error.
+- id: SP-LATENCY
+  from: [SC-001, SC-003, SC-004]
+  verifiable: false
+  statement: Added lookup latency is dominated by RDMA transfer time, greedy same-event dispatch
+    is used, and first-attempt retry success is high — quantitative performance targets.

@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_rl_wire_header_layout": { "prover": "z3", "time": 0.04 }
+    }
+  }
+}

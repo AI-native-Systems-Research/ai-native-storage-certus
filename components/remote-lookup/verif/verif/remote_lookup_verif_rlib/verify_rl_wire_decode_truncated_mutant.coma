@@ -1,0 +1,51 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 351 0 351 110 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 352 7 352 14
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 352 27 352 28
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 352 17 352 28
+let%span slib'2 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 355 11 355 18
+let%span slib'3 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 349 11 349 35
+let%span slib'4 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 350 10 350 68
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_WireErr = Truncated | BadTag
+
+type t_Result_usize_WireErr = Ok UInt64.t | Err t_WireErr
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_wire_decode_truncated__mutant [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 351 0 351 110]
+  (buf_len: UInt64.t) (pos: UInt64.t) (n: UInt64.t) (return (x: t_Result_usize_WireErr)) =
+{[@stop_split] [@expl:verify_rl_wire_decode_truncated__mutant requires] [%#slib'3] UInt64.t'int pos + UInt64.t'int n
+  <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib] {pos} {n} (fun (_x: UInt64.t) -> [ &_12 <- _x ] s1)
+    | s1 = UInt64.add [%#slib'1] {buf_len} {[%#slib'0] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_15 <- _x ] s2)
+    | s2 = [ &_11 <- UInt64.gt _12 _15 ] s3
+    | s3 = any [ br0 -> {_11 = false} (! bb2) | br1 -> {_11} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_17 <- Truncated ] s1 | s1 = [ &_ret <- Err _17 ] s2 | s2 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = UInt64.add [%#slib'2] {pos} {n} (fun (_x: UInt64.t) -> [ &_18 <- _x ] s1)
+    | s1 = [ &_ret <- Ok _18 ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_usize_WireErr = Any.any_l ()
+  | & buf_len: UInt64.t = buf_len
+  | & pos: UInt64.t = pos
+  | & n: UInt64.t = n
+  | & _11: bool = Any.any_l ()
+  | & _12: UInt64.t = Any.any_l ()
+  | & _15: UInt64.t = Any.any_l ()
+  | & _17: t_WireErr = Any.any_l ()
+  | & _18: UInt64.t = Any.any_l () ])
+  [ return (result: t_Result_usize_WireErr) ->
+  {[@stop_split] [@expl:verify_rl_wire_decode_truncated__mutant ensures] [%#slib'4] UInt64.t'int pos + UInt64.t'int n
+      > UInt64.t'int buf_len -> result = Err (Truncated)}
+    (! return {result}) ]

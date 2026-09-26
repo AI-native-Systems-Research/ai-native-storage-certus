@@ -1,0 +1,48 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 70 22 70 31 *)
+
+(* <WireErr as std::cmp::PartialEq> *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 70 22 70 31
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 70 37 70 46
+let%span smodel = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/model.rs" 36 8 36 28
+
+use creusot.prelude.Any
+
+type t_WireErr = Truncated | BadTag
+
+type tup2_ref_WireErr_ref_WireErr = { f0: t_WireErr; f1: t_WireErr }
+
+type t_WireErrDeepModel = Truncated'0 | BadTag'0
+
+function deep_model_WireErr [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 70 37 70 46] (self: t_WireErr) : t_WireErrDeepModel
+ = [%#slib'0] match self with
+    | Truncated -> Truncated'0
+    | BadTag -> BadTag'0
+    end
+
+function deep_model_ref_WireErr [@inline:trivial] (self: t_WireErr) : t_WireErrDeepModel =
+  [%#smodel] deep_model_WireErr self
+
+meta "rewrite_def" function deep_model_ref_WireErr
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let eq_WireErr [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 70 22 70 31]
+  (self: t_WireErr) (rhs: t_WireErr) (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_6 <- { f0 = self; f1 = rhs } ] s1
+    | s1 = any [ br0 -> {_6.f0 = Truncated} (! bb2) | br1 -> {_6.f0 = BadTag} (! bb4) ] ]
+  | bb4 = any [ br0 -> {_6.f1 = Truncated} (! bb1) | br1 -> {_6.f1 = BadTag} (! bb6) ]
+  | bb6 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ]
+  | bb2 = any [ br0 -> {_6.f1 = Truncated} (! bb7) | br1 -> {_6.f1 = BadTag} (! bb1) ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib] false ] s1 | s1 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & self: t_WireErr = self
+  | & rhs: t_WireErr = rhs
+  | & _6: tup2_ref_WireErr_ref_WireErr = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:eq ensures] [%#slib] result
+    = (deep_model_ref_WireErr self = deep_model_ref_WireErr rhs)}
+    (! return {result}) ]

@@ -1,0 +1,339 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 660 0 660 72 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 663 28 663 37
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 663 29 663 32
+let%span slib'1 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 664 8 664 9
+let%span slib'2 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 664 4 664 10
+let%span slib'3 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 664 13 664 25
+let%span slib'4 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 664 4 664 25
+let%span slib'5 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 665 8 665 9
+let%span slib'6 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 665 4 665 10
+let%span slib'7 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 665 4 665 16
+let%span slib'8 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 666 24 666 25
+let%span slib'9 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 666 14 666 26
+let%span slib'10 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 666 29 666 33
+let%span slib'11 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 666 8 666 9
+let%span slib'12 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 666 4 666 10
+let%span slib'13 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 666 4 666 40
+let%span slib'14 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 667 24 667 25
+let%span slib'15 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 667 14 667 26
+let%span slib'16 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 667 29 667 33
+let%span slib'17 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 667 8 667 9
+let%span slib'18 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 667 4 667 10
+let%span slib'19 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 667 4 667 40
+let%span slib'20 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 668 24 668 26
+let%span slib'21 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 668 14 668 27
+let%span slib'22 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 668 30 668 34
+let%span slib'23 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 668 8 668 9
+let%span slib'24 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 668 4 668 10
+let%span slib'25 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 668 4 668 41
+let%span slib'26 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 669 24 669 26
+let%span slib'27 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 669 14 669 27
+let%span slib'28 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 669 30 669 34
+let%span slib'29 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 669 8 669 9
+let%span slib'30 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 669 4 669 10
+let%span slib'31 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 669 4 669 41
+let%span slib'32 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 670 24 670 26
+let%span slib'33 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 670 14 670 27
+let%span slib'34 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 670 30 670 34
+let%span slib'35 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 670 8 670 9
+let%span slib'36 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 670 4 670 10
+let%span slib'37 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 670 4 670 41
+let%span slib'38 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 671 24 671 26
+let%span slib'39 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 671 14 671 27
+let%span slib'40 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 671 30 671 34
+let%span slib'41 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 671 8 671 9
+let%span slib'42 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 671 4 671 10
+let%span slib'43 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 671 4 671 41
+let%span slib'44 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 672 24 672 26
+let%span slib'45 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 672 14 672 27
+let%span slib'46 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 672 30 672 34
+let%span slib'47 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 672 8 672 9
+let%span slib'48 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 672 4 672 10
+let%span slib'49 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 672 4 672 41
+let%span slib'50 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 673 24 673 26
+let%span slib'51 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 673 14 673 27
+let%span slib'52 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 673 30 673 34
+let%span slib'53 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 673 8 673 9
+let%span slib'54 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 673 4 673 10
+let%span slib'55 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 673 4 673 41
+let%span slib'56 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 674 24 674 25
+let%span slib'57 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 674 20 674 26
+let%span slib'58 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 675 16 675 17
+let%span slib'59 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 675 12 675 18
+let%span slib'60 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 675 30 675 31
+let%span slib'61 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 675 10 675 32
+let%span slib'62 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 676 16 676 17
+let%span slib'63 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 676 12 676 18
+let%span slib'64 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 676 30 676 32
+let%span slib'65 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 676 10 676 33
+let%span slib'66 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 677 16 677 17
+let%span slib'67 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 677 12 677 18
+let%span slib'68 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 677 30 677 32
+let%span slib'69 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 677 10 677 33
+let%span slib'70 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 678 16 678 17
+let%span slib'71 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 678 12 678 18
+let%span slib'72 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 678 30 678 32
+let%span slib'73 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 678 10 678 33
+let%span slib'74 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 679 16 679 17
+let%span slib'75 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 679 12 679 18
+let%span slib'76 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 679 30 679 32
+let%span slib'77 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 679 10 679 33
+let%span slib'78 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 680 16 680 17
+let%span slib'79 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 680 12 680 18
+let%span slib'80 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 680 30 680 32
+let%span slib'81 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 680 10 680 33
+let%span slib'82 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 681 16 681 17
+let%span slib'83 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 681 12 681 18
+let%span slib'84 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 681 30 681 32
+let%span slib'85 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 681 10 681 33
+let%span slib'86 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 682 18 682 30
+let%span slib'87 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 683 4 683 8
+let%span slib'88 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 659 10 659 24
+let%span slib'89 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 76 0 76 26
+
+use creusot.int.UInt8BW
+use creusot.int.UInt64BW
+use creusot.slice.Slice64
+use creusot.slice.Slice64OpsBW
+use creusot.int.Int32BW
+use creusot.prelude.Any
+
+constant const_WIRE_VERSION: UInt8BW.t = [%#slib'89] (1: UInt8BW.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_wire_header_layout__mutant [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 660 0 660 72]
+  (tag: UInt8BW.t) (op_id: UInt64BW.t) (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = Slice64OpsBW.create [%#slib] <UInt8BW.t> {[%#slib] (10: UInt64BW.t)}
+        {fun (_: int) -> [%#slib'0] (0: UInt8BW.t)} (fun (_res: Slice64.array UInt8BW.t) -> [ &buf <- _res ] s1)
+    | s1 = [ &_5 <- [%#slib'1] (0: UInt64BW.t) ] s2
+    | s2 = [ &_6 <- UInt64BW.lt _5 ([%#slib'2] (10: UInt64BW.t)) ] s3
+    | s3 = {[@expl:index in bounds] [%#slib'2] _6} s4
+    | s4 = Slice64OpsBW.set [%#slib'4] <UInt8BW.t> {buf} {_5} {[%#slib'3] const_WIRE_VERSION}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s5)
+    | s5 = [ &_8 <- [%#slib'5] (1: UInt64BW.t) ] s6
+    | s6 = [ &_9 <- UInt64BW.lt _8 ([%#slib'6] (10: UInt64BW.t)) ] s7
+    | s7 = {[@expl:index in bounds] [%#slib'6] _9} s8
+    | s8 = Slice64OpsBW.set [%#slib'7] <UInt8BW.t> {buf} {_8} {tag}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s9)
+    | s9 = UInt64BW.shr [%#slib'9] {op_id} {Int32BW.to_BV256 ([%#slib'8] (8: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_11 <- _x ] s10)
+    | s10 = [ &_10 <- UInt64BW.bw_and _11 ([%#slib'10] (255: UInt64BW.t)) ] s11
+    | s11 = [ &_13 <- [%#slib'11] (2: UInt64BW.t) ] s12
+    | s12 = [ &_14 <- UInt64BW.lt _13 ([%#slib'12] (10: UInt64BW.t)) ] s13
+    | s13 = {[@expl:index in bounds] [%#slib'12] _14} s14
+    | s14 = Slice64OpsBW.set [%#slib'13] <UInt8BW.t> {buf} {_13} {UInt8BW.of_BV256 (UInt64BW.to_BV256 _10)}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s15)
+    | s15 = UInt64BW.shr [%#slib'15] {op_id} {Int32BW.to_BV256 ([%#slib'14] (8: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_16 <- _x ] s16)
+    | s16 = [ &_15 <- UInt64BW.bw_and _16 ([%#slib'16] (255: UInt64BW.t)) ] s17
+    | s17 = [ &_18 <- [%#slib'17] (3: UInt64BW.t) ] s18
+    | s18 = [ &_19 <- UInt64BW.lt _18 ([%#slib'18] (10: UInt64BW.t)) ] s19
+    | s19 = {[@expl:index in bounds] [%#slib'18] _19} s20
+    | s20 = Slice64OpsBW.set [%#slib'19] <UInt8BW.t> {buf} {_18} {UInt8BW.of_BV256 (UInt64BW.to_BV256 _15)}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s21)
+    | s21 = UInt64BW.shr [%#slib'21] {op_id} {Int32BW.to_BV256 ([%#slib'20] (16: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_21 <- _x ] s22)
+    | s22 = [ &_20 <- UInt64BW.bw_and _21 ([%#slib'22] (255: UInt64BW.t)) ] s23
+    | s23 = [ &_23 <- [%#slib'23] (4: UInt64BW.t) ] s24
+    | s24 = [ &_24 <- UInt64BW.lt _23 ([%#slib'24] (10: UInt64BW.t)) ] s25
+    | s25 = {[@expl:index in bounds] [%#slib'24] _24} s26
+    | s26 = Slice64OpsBW.set [%#slib'25] <UInt8BW.t> {buf} {_23} {UInt8BW.of_BV256 (UInt64BW.to_BV256 _20)}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s27)
+    | s27 = UInt64BW.shr [%#slib'27] {op_id} {Int32BW.to_BV256 ([%#slib'26] (24: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_26 <- _x ] s28)
+    | s28 = [ &_25 <- UInt64BW.bw_and _26 ([%#slib'28] (255: UInt64BW.t)) ] s29
+    | s29 = [ &_28 <- [%#slib'29] (5: UInt64BW.t) ] s30
+    | s30 = [ &_29 <- UInt64BW.lt _28 ([%#slib'30] (10: UInt64BW.t)) ] s31
+    | s31 = {[@expl:index in bounds] [%#slib'30] _29} s32
+    | s32 = Slice64OpsBW.set [%#slib'31] <UInt8BW.t> {buf} {_28} {UInt8BW.of_BV256 (UInt64BW.to_BV256 _25)}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s33)
+    | s33 = UInt64BW.shr [%#slib'33] {op_id} {Int32BW.to_BV256 ([%#slib'32] (32: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_31 <- _x ] s34)
+    | s34 = [ &_30 <- UInt64BW.bw_and _31 ([%#slib'34] (255: UInt64BW.t)) ] s35
+    | s35 = [ &_33 <- [%#slib'35] (6: UInt64BW.t) ] s36
+    | s36 = [ &_34 <- UInt64BW.lt _33 ([%#slib'36] (10: UInt64BW.t)) ] s37
+    | s37 = {[@expl:index in bounds] [%#slib'36] _34} s38
+    | s38 = Slice64OpsBW.set [%#slib'37] <UInt8BW.t> {buf} {_33} {UInt8BW.of_BV256 (UInt64BW.to_BV256 _30)}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s39)
+    | s39 = UInt64BW.shr [%#slib'39] {op_id} {Int32BW.to_BV256 ([%#slib'38] (40: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_36 <- _x ] s40)
+    | s40 = [ &_35 <- UInt64BW.bw_and _36 ([%#slib'40] (255: UInt64BW.t)) ] s41
+    | s41 = [ &_38 <- [%#slib'41] (7: UInt64BW.t) ] s42
+    | s42 = [ &_39 <- UInt64BW.lt _38 ([%#slib'42] (10: UInt64BW.t)) ] s43
+    | s43 = {[@expl:index in bounds] [%#slib'42] _39} s44
+    | s44 = Slice64OpsBW.set [%#slib'43] <UInt8BW.t> {buf} {_38} {UInt8BW.of_BV256 (UInt64BW.to_BV256 _35)}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s45)
+    | s45 = UInt64BW.shr [%#slib'45] {op_id} {Int32BW.to_BV256 ([%#slib'44] (48: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_41 <- _x ] s46)
+    | s46 = [ &_40 <- UInt64BW.bw_and _41 ([%#slib'46] (255: UInt64BW.t)) ] s47
+    | s47 = [ &_43 <- [%#slib'47] (8: UInt64BW.t) ] s48
+    | s48 = [ &_44 <- UInt64BW.lt _43 ([%#slib'48] (10: UInt64BW.t)) ] s49
+    | s49 = {[@expl:index in bounds] [%#slib'48] _44} s50
+    | s50 = Slice64OpsBW.set [%#slib'49] <UInt8BW.t> {buf} {_43} {UInt8BW.of_BV256 (UInt64BW.to_BV256 _40)}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s51)
+    | s51 = UInt64BW.shr [%#slib'51] {op_id} {Int32BW.to_BV256 ([%#slib'50] (56: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_46 <- _x ] s52)
+    | s52 = [ &_45 <- UInt64BW.bw_and _46 ([%#slib'52] (255: UInt64BW.t)) ] s53
+    | s53 = [ &_48 <- [%#slib'53] (9: UInt64BW.t) ] s54
+    | s54 = [ &_49 <- UInt64BW.lt _48 ([%#slib'54] (10: UInt64BW.t)) ] s55
+    | s55 = {[@expl:index in bounds] [%#slib'54] _49} s56
+    | s56 = Slice64OpsBW.set [%#slib'55] <UInt8BW.t> {buf} {_48} {UInt8BW.of_BV256 (UInt64BW.to_BV256 _45)}
+        (fun (r: Slice64.array UInt8BW.t) -> [ &buf <- r ] s57)
+    | s57 = [ &_59 <- [%#slib'56] (2: UInt64BW.t) ] s58
+    | s58 = [ &_60 <- UInt64BW.lt _59 ([%#slib'57] (10: UInt64BW.t)) ] s59
+    | s59 = {[@expl:index in bounds] [%#slib'57] _60} s60
+    | s60 = Slice64OpsBW.get [%#slib'57] <UInt8BW.t> {buf} {_59} (fun (r: UInt8BW.t) -> [ &_58 <- r ] s61)
+    | s61 = [ &_57 <- UInt64BW.of_BV256 (UInt8BW.to_BV256 _58) ] s62
+    | s62 = [ &_64 <- [%#slib'58] (3: UInt64BW.t) ] s63
+    | s63 = [ &_65 <- UInt64BW.lt _64 ([%#slib'59] (10: UInt64BW.t)) ] s64
+    | s64 = {[@expl:index in bounds] [%#slib'59] _65} s65
+    | s65 = Slice64OpsBW.get [%#slib'59] <UInt8BW.t> {buf} {_64} (fun (r: UInt8BW.t) -> [ &_63 <- r ] s66)
+    | s66 = [ &_62 <- UInt64BW.of_BV256 (UInt8BW.to_BV256 _63) ] s67
+    | s67 = UInt64BW.shl [%#slib'61] {_62} {Int32BW.to_BV256 ([%#slib'60] (8: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_61 <- _x ] s68)
+    | s68 = [ &_56 <- UInt64BW.bw_or _57 _61 ] s69
+    | s69 = [ &_69 <- [%#slib'62] (4: UInt64BW.t) ] s70
+    | s70 = [ &_70 <- UInt64BW.lt _69 ([%#slib'63] (10: UInt64BW.t)) ] s71
+    | s71 = {[@expl:index in bounds] [%#slib'63] _70} s72
+    | s72 = Slice64OpsBW.get [%#slib'63] <UInt8BW.t> {buf} {_69} (fun (r: UInt8BW.t) -> [ &_68 <- r ] s73)
+    | s73 = [ &_67 <- UInt64BW.of_BV256 (UInt8BW.to_BV256 _68) ] s74
+    | s74 = UInt64BW.shl [%#slib'65] {_67} {Int32BW.to_BV256 ([%#slib'64] (16: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_66 <- _x ] s75)
+    | s75 = [ &_55 <- UInt64BW.bw_or _56 _66 ] s76
+    | s76 = [ &_74 <- [%#slib'66] (5: UInt64BW.t) ] s77
+    | s77 = [ &_75 <- UInt64BW.lt _74 ([%#slib'67] (10: UInt64BW.t)) ] s78
+    | s78 = {[@expl:index in bounds] [%#slib'67] _75} s79
+    | s79 = Slice64OpsBW.get [%#slib'67] <UInt8BW.t> {buf} {_74} (fun (r: UInt8BW.t) -> [ &_73 <- r ] s80)
+    | s80 = [ &_72 <- UInt64BW.of_BV256 (UInt8BW.to_BV256 _73) ] s81
+    | s81 = UInt64BW.shl [%#slib'69] {_72} {Int32BW.to_BV256 ([%#slib'68] (24: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_71 <- _x ] s82)
+    | s82 = [ &_54 <- UInt64BW.bw_or _55 _71 ] s83
+    | s83 = [ &_79 <- [%#slib'70] (6: UInt64BW.t) ] s84
+    | s84 = [ &_80 <- UInt64BW.lt _79 ([%#slib'71] (10: UInt64BW.t)) ] s85
+    | s85 = {[@expl:index in bounds] [%#slib'71] _80} s86
+    | s86 = Slice64OpsBW.get [%#slib'71] <UInt8BW.t> {buf} {_79} (fun (r: UInt8BW.t) -> [ &_78 <- r ] s87)
+    | s87 = [ &_77 <- UInt64BW.of_BV256 (UInt8BW.to_BV256 _78) ] s88
+    | s88 = UInt64BW.shl [%#slib'73] {_77} {Int32BW.to_BV256 ([%#slib'72] (32: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_76 <- _x ] s89)
+    | s89 = [ &_53 <- UInt64BW.bw_or _54 _76 ] s90
+    | s90 = [ &_84 <- [%#slib'74] (7: UInt64BW.t) ] s91
+    | s91 = [ &_85 <- UInt64BW.lt _84 ([%#slib'75] (10: UInt64BW.t)) ] s92
+    | s92 = {[@expl:index in bounds] [%#slib'75] _85} s93
+    | s93 = Slice64OpsBW.get [%#slib'75] <UInt8BW.t> {buf} {_84} (fun (r: UInt8BW.t) -> [ &_83 <- r ] s94)
+    | s94 = [ &_82 <- UInt64BW.of_BV256 (UInt8BW.to_BV256 _83) ] s95
+    | s95 = UInt64BW.shl [%#slib'77] {_82} {Int32BW.to_BV256 ([%#slib'76] (40: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_81 <- _x ] s96)
+    | s96 = [ &_52 <- UInt64BW.bw_or _53 _81 ] s97
+    | s97 = [ &_89 <- [%#slib'78] (8: UInt64BW.t) ] s98
+    | s98 = [ &_90 <- UInt64BW.lt _89 ([%#slib'79] (10: UInt64BW.t)) ] s99
+    | s99 = {[@expl:index in bounds] [%#slib'79] _90} s100
+    | s100 = Slice64OpsBW.get [%#slib'79] <UInt8BW.t> {buf} {_89} (fun (r: UInt8BW.t) -> [ &_88 <- r ] s101)
+    | s101 = [ &_87 <- UInt64BW.of_BV256 (UInt8BW.to_BV256 _88) ] s102
+    | s102 = UInt64BW.shl [%#slib'81] {_87} {Int32BW.to_BV256 ([%#slib'80] (48: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_86 <- _x ] s103)
+    | s103 = [ &_51 <- UInt64BW.bw_or _52 _86 ] s104
+    | s104 = [ &_94 <- [%#slib'82] (9: UInt64BW.t) ] s105
+    | s105 = [ &_95 <- UInt64BW.lt _94 ([%#slib'83] (10: UInt64BW.t)) ] s106
+    | s106 = {[@expl:index in bounds] [%#slib'83] _95} s107
+    | s107 = Slice64OpsBW.get [%#slib'83] <UInt8BW.t> {buf} {_94} (fun (r: UInt8BW.t) -> [ &_93 <- r ] s108)
+    | s108 = [ &_92 <- UInt64BW.of_BV256 (UInt8BW.to_BV256 _93) ] s109
+    | s109 = UInt64BW.shl [%#slib'85] {_92} {Int32BW.to_BV256 ([%#slib'84] (56: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_91 <- _x ] s110)
+    | s110 = [ &rid <- UInt64BW.bw_or _51 _91 ] s111
+    | s111 = {[@expl:assertion] [%#slib'86] rid = op_id} s112
+    | s112 = [ &_ret <- [%#slib'87] true ] s113
+    | s113 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & tag: UInt8BW.t = tag
+  | & op_id: UInt64BW.t = op_id
+  | & buf: Slice64.array UInt8BW.t = Any.any_l ()
+  | & _5: UInt64BW.t = Any.any_l ()
+  | & _6: bool = Any.any_l ()
+  | & _8: UInt64BW.t = Any.any_l ()
+  | & _9: bool = Any.any_l ()
+  | & _10: UInt64BW.t = Any.any_l ()
+  | & _11: UInt64BW.t = Any.any_l ()
+  | & _13: UInt64BW.t = Any.any_l ()
+  | & _14: bool = Any.any_l ()
+  | & _15: UInt64BW.t = Any.any_l ()
+  | & _16: UInt64BW.t = Any.any_l ()
+  | & _18: UInt64BW.t = Any.any_l ()
+  | & _19: bool = Any.any_l ()
+  | & _20: UInt64BW.t = Any.any_l ()
+  | & _21: UInt64BW.t = Any.any_l ()
+  | & _23: UInt64BW.t = Any.any_l ()
+  | & _24: bool = Any.any_l ()
+  | & _25: UInt64BW.t = Any.any_l ()
+  | & _26: UInt64BW.t = Any.any_l ()
+  | & _28: UInt64BW.t = Any.any_l ()
+  | & _29: bool = Any.any_l ()
+  | & _30: UInt64BW.t = Any.any_l ()
+  | & _31: UInt64BW.t = Any.any_l ()
+  | & _33: UInt64BW.t = Any.any_l ()
+  | & _34: bool = Any.any_l ()
+  | & _35: UInt64BW.t = Any.any_l ()
+  | & _36: UInt64BW.t = Any.any_l ()
+  | & _38: UInt64BW.t = Any.any_l ()
+  | & _39: bool = Any.any_l ()
+  | & _40: UInt64BW.t = Any.any_l ()
+  | & _41: UInt64BW.t = Any.any_l ()
+  | & _43: UInt64BW.t = Any.any_l ()
+  | & _44: bool = Any.any_l ()
+  | & _45: UInt64BW.t = Any.any_l ()
+  | & _46: UInt64BW.t = Any.any_l ()
+  | & _48: UInt64BW.t = Any.any_l ()
+  | & _49: bool = Any.any_l ()
+  | & rid: UInt64BW.t = Any.any_l ()
+  | & _51: UInt64BW.t = Any.any_l ()
+  | & _52: UInt64BW.t = Any.any_l ()
+  | & _53: UInt64BW.t = Any.any_l ()
+  | & _54: UInt64BW.t = Any.any_l ()
+  | & _55: UInt64BW.t = Any.any_l ()
+  | & _56: UInt64BW.t = Any.any_l ()
+  | & _57: UInt64BW.t = Any.any_l ()
+  | & _58: UInt8BW.t = Any.any_l ()
+  | & _59: UInt64BW.t = Any.any_l ()
+  | & _60: bool = Any.any_l ()
+  | & _61: UInt64BW.t = Any.any_l ()
+  | & _62: UInt64BW.t = Any.any_l ()
+  | & _63: UInt8BW.t = Any.any_l ()
+  | & _64: UInt64BW.t = Any.any_l ()
+  | & _65: bool = Any.any_l ()
+  | & _66: UInt64BW.t = Any.any_l ()
+  | & _67: UInt64BW.t = Any.any_l ()
+  | & _68: UInt8BW.t = Any.any_l ()
+  | & _69: UInt64BW.t = Any.any_l ()
+  | & _70: bool = Any.any_l ()
+  | & _71: UInt64BW.t = Any.any_l ()
+  | & _72: UInt64BW.t = Any.any_l ()
+  | & _73: UInt8BW.t = Any.any_l ()
+  | & _74: UInt64BW.t = Any.any_l ()
+  | & _75: bool = Any.any_l ()
+  | & _76: UInt64BW.t = Any.any_l ()
+  | & _77: UInt64BW.t = Any.any_l ()
+  | & _78: UInt8BW.t = Any.any_l ()
+  | & _79: UInt64BW.t = Any.any_l ()
+  | & _80: bool = Any.any_l ()
+  | & _81: UInt64BW.t = Any.any_l ()
+  | & _82: UInt64BW.t = Any.any_l ()
+  | & _83: UInt8BW.t = Any.any_l ()
+  | & _84: UInt64BW.t = Any.any_l ()
+  | & _85: bool = Any.any_l ()
+  | & _86: UInt64BW.t = Any.any_l ()
+  | & _87: UInt64BW.t = Any.any_l ()
+  | & _88: UInt8BW.t = Any.any_l ()
+  | & _89: UInt64BW.t = Any.any_l ()
+  | & _90: bool = Any.any_l ()
+  | & _91: UInt64BW.t = Any.any_l ()
+  | & _92: UInt64BW.t = Any.any_l ()
+  | & _93: UInt8BW.t = Any.any_l ()
+  | & _94: UInt64BW.t = Any.any_l ()
+  | & _95: bool = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_rl_wire_header_layout__mutant ensures] [%#slib'88] result
+    = true}
+    (! return {result}) ]

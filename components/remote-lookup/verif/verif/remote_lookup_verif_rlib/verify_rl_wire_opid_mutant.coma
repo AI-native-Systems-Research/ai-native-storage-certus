@@ -1,0 +1,27 @@
+(* #"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 183 0 183 71 *)
+
+let%span slib = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 185 31 185 32
+let%span slib'0 = "/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 182 10 182 25
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_DecodeKind = KeyQuery | KeyResponse | RdmaRequest | RdmaStatus | Unknown
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_rl_wire_opid__mutant [#"/home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif/src/lib.rs" 183 0 183 71]
+  (kind: t_DecodeKind) (op_id: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {kind = KeyQuery} (! bb1)
+    | br1 -> {kind = KeyResponse} (! bb1)
+    | br2 -> {kind = RdmaRequest} (! bb1)
+    | br3 -> {kind = RdmaStatus} (! bb1)
+    | br4 -> {kind = Unknown} (! bb3) ]
+  | bb1 = s0 [ s0 = [ &_ret <- op_id ] s1 | s1 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_ret <- [%#slib] (0: UInt64.t) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & kind: t_DecodeKind = kind | & op_id: UInt64.t = op_id ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:verify_rl_wire_opid__mutant ensures] [%#slib'0] result = op_id}
+    (! return {result}) ]
