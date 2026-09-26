@@ -1,0 +1,31 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 339 0 339 84 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 340 16 340 17
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 338 10 338 50
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Result_u64_unit = Ok UInt64.t | Err ()
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_numsectors__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 339 0 339 84]
+  (num_blocks: UInt64.t) (ns_id: UInt32.t) (return (x: t_Result_u64_unit)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_6 <- ns_id = ([%#slib] (1: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_6 = false} (! bb2) | br1 -> {_6} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- Ok num_blocks ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- Err _9 ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_u64_unit = Any.any_l ()
+  | & num_blocks: UInt64.t = num_blocks
+  | & ns_id: UInt32.t = ns_id
+  | & _6: bool = Any.any_l ()
+  | & _9: () = Any.any_l () ])
+  [ return (result: t_Result_u64_unit) ->
+  {[@stop_split] [@expl:verify_bdf_numsectors__mutant ensures] [%#slib'0] UInt32.t'int ns_id <> 1
+    -> result = Ok num_blocks}
+    (! return {result}) ]

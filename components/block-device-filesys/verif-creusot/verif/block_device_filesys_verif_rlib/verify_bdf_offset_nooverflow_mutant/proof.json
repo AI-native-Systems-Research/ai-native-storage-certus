@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_offset_for_lba": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_bdf_offset_nooverflow__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.018 },
+          { "prover": "alt-ergo", "time": 0.016 },
+          null
+        ]
+      }
+    }
+  }
+}

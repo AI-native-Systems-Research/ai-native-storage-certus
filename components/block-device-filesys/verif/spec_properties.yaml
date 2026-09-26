@@ -1,0 +1,559 @@
+# Blind spec-only extraction for block-device-filesys.
+# Header prose avoids the literal record tokens so a plain Cmd+F counts only real records.
+# Source artifact: the component spec-of-record ONLY (spec.md + contracts/iblock-device-contract.md
+# + checklists/requirements.md). This pass did NOT read the source code.
+component:  block-device-filesys
+source:     spec
+artifact:   components/block-device-filesys/specs/001-block-device-filesys/{spec.md, contracts/iblock-device-contract.md, checklists/requirements.md}
+pin:        e87bafd8 (2026-09-15) working tree; spec Last Synced 2026-09-03
+method:     blind-extraction
+generated:  2026-09-22
+counts: {total: 66, methods: 17, verifiable: 51, not_verifiable: 15}
+properties:
+  # ---- DeviceConfig construction / geometry (FR-006) ----
+  - id:         BDF-CONFIG-BLKSZ-MIN
+    subject:    DeviceConfig::new
+    kind:       precondition
+    verifiable: true
+    statement: >
+      Creating a device configuration must reject a block size smaller than 512 bytes: the
+      constructor returns a configuration error and no configuration object is produced.
+    traces:     [FR-006]
+  - id:         BDF-CONFIG-BLKSZ-POW2
+    subject:    DeviceConfig::new
+    kind:       precondition
+    verifiable: true
+    statement: >
+      Creating a device configuration must reject a block size that is not a power of two: the
+      constructor returns a configuration error.
+    traces:     [FR-006]
+  - id:         BDF-CONFIG-NBLK-NONZERO
+    subject:    DeviceConfig::new
+    kind:       precondition
+    verifiable: true
+    statement: >
+      Creating a device configuration must reject a device with zero blocks: the constructor returns
+      a configuration error.
+    traces:     [FR-006]
+  - id:         BDF-CONFIG-TOTALBYTES-OVERFLOW
+    subject:    DeviceConfig::new
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the block size multiplied by the number of blocks would exceed the largest representable
+      64-bit value, the constructor must reject the configuration with an overflow error rather than
+      producing a wrapped total size.
+    traces:     [FR-006]
+  - id:         BDF-CONFIG-TOTALBYTES-EQ
+    subject:    DeviceConfig::new
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When a device configuration is created successfully, its reported total capacity in bytes equals
+      the block size multiplied by the number of blocks.
+    traces:     [FR-006, contract:DeviceConfig]
+  # ---- Backing file lifecycle (FR-016, US1-AS1, Edge Cases) ----
+  - id:         BDF-FILE-CREATE-FALLOCATE
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When the backing file does not yet exist, initialization creates it and pre-allocates it to
+      exactly the configured total size (block size times number of blocks) before the device becomes
+      operational.
+    traces:     [FR-016, US1, AS1]
+  - id:         BDF-FILE-SIZE-MATCH
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the backing file already exists but its size differs from the configured total size,
+      initialization must fail with a size-mismatch error and must never silently resize the file.
+    traces:     [FR-016, US1, AS1, Edge-Cases]
+  - id:         BDF-FILE-PARENT-EXISTS
+    subject:    initialize
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the backing file path is invalid or its parent directory does not exist, initialization
+      must return a typed error rather than panicking.
+    traces:     [Edge-Cases]
+  - id:         BDF-FILE-ODIRECT-FALLBACK
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The backing file is opened with direct, write-through IO; on a filesystem that does not support
+      direct IO the component falls back to buffered IO with per-write flush-to-disk durability rather
+      than failing.
+    traces:     [FR-007]
+  - id:         BDF-INIT-CONFIG-GATE
+    subject:    initialize
+    kind:       precondition
+    verifiable: true
+    statement: >
+      Initialization validates the block size, block count, and capacity through the same
+      configuration checks before opening the backing file or starting the worker thread; an invalid
+      configuration causes initialization to fail without side effects.
+    traces:     [FR-006, FR-016]
+  - id:         BDF-INIT-ACTOR-START
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Successful initialization starts the dedicated worker thread and transitions the component to an
+      operational state in which clients can connect and issue commands.
+    traces:     [US1, AS1, FR-013]
+  # ---- Client connection / lifecycle ----
+  - id:         BDF-CONNECT-NOTINIT
+    subject:    connect_client
+    kind:       error-case
+    verifiable: true
+    statement: >
+      Attempting to connect a client before the component has been initialized returns a
+      not-initialized error instead of channels.
+    traces:     [contract:connect_client]
+  - id:         BDF-CONNECT-CHANNELS
+    subject:    connect_client
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Connecting a client creates a fresh pair of per-client single-producer single-consumer channels
+      (a command channel and a completion channel, each of capacity 64) and registers the client with
+      the worker.
+    traces:     [contract:connect_client, FR-013]
+  - id:         BDF-CONNECT-INDEPENDENT
+    subject:    connect_client
+    kind:       invariant
+    verifiable: true
+    statement: >
+      When multiple clients connect, each client receives its own independent pair of channels and its
+      operations are serialized by the single worker; no client shares another client's channels.
+    traces:     [Edge-Cases, FR-013]
+  - id:         BDF-SHUTDOWN
+    subject:    shutdown
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Shutting down the component stops the worker thread and joins it, after which the component is no
+      longer operational.
+    traces:     [FR-013]
+  # ---- Device-info query surface (FR-021, US2-AS1, contract) ----
+  - id:         BDF-SECTORSIZE
+    subject:    sector_size
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Asking for the sector size of namespace 1 returns the configured block size; asking for any
+      other namespace id returns an invalid-namespace error.
+    traces:     [contract:sector_size, US2, AS1]
+  - id:         BDF-NUMSECTORS
+    subject:    num_sectors
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Asking for the sector count of namespace 1 returns the configured number of blocks; any other
+      namespace id returns an invalid-namespace error.
+    traces:     [contract:num_sectors]
+  - id:         BDF-MAXQUEUEDEPTH
+    subject:    max_queue_depth
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The reported maximum queue depth is the fixed submission-queue size of 128.
+    traces:     [contract:max_queue_depth]
+  - id:         BDF-NUMIOQUEUES
+    subject:    num_io_queues
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The reported number of IO queues is exactly 1, because there is a single worker thread with a
+      single event loop.
+    traces:     [FR-021, US2, AS1]
+  - id:         BDF-MAXTRANSFER
+    subject:    max_transfer_size
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The reported maximum transfer size in bytes equals the configured block size multiplied by 256.
+    traces:     [FR-021, US2, AS1, contract:max_transfer_size]
+  - id:         BDF-BLOCKSIZE
+    subject:    block_size
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The reported block size equals the configured block size.
+    traces:     [contract:block_size, US2, AS1]
+  - id:         BDF-NUMANODE
+    subject:    numa_node
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The reported NUMA node is the fixed placeholder value -1, because a file-backed device models no
+      device-to-NUMA affinity.
+    traces:     [FR-021, US2, AS1]
+  - id:         BDF-NVMEVERSION
+    subject:    nvme_version
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The reported NVMe version is the fixed placeholder string "N/A (file-backed)", because there is
+      no NVMe controller.
+    traces:     [FR-021, US2, AS1]
+  - id:         BDF-READWRITESTATS
+    subject:    read_write_stats
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The per-direction read/write statistics query returns a well-formed, zero-initialized statistics
+      structure, because per-direction counters are not separately tracked.
+    traces:     [FR-021]
+  # ---- Telemetry (FR-019) ----
+  - id:         BDF-TELEMETRY-FEATUREGATE
+    subject:    telemetry
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the component is built without the telemetry feature, requesting telemetry returns a
+      feature-not-enabled error.
+    traces:     [FR-019, contract:telemetry]
+  - id:         BDF-TELEMETRY-MEAN-LATENCY
+    subject:    telemetry
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The mean per-operation latency reported in a telemetry snapshot equals the total accumulated
+      latency divided by the total operation count, and is reported as zero when no operations have
+      been recorded.
+    traces:     [FR-019]
+  - id:         BDF-TELEMETRY-MEAN-THROUGHPUT
+    subject:    telemetry
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The mean throughput reported in a telemetry snapshot equals the total bytes transferred divided
+      by the wall-clock seconds elapsed since the collector was created (expressed in megabytes per
+      second), and is reported as zero when no time has elapsed.
+    traces:     [FR-019]
+  - id:         BDF-TELEMETRY-MINMAX
+    subject:    telemetry
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A telemetry snapshot reports the true minimum and maximum single-operation latencies observed,
+      with the minimum reported as zero when no operations have been recorded.
+    traces:     [FR-019]
+  # ---- LBA validation and offset arithmetic (contract, Edge Cases) ----
+  - id:         BDF-LBA-NS
+    subject:    validate_lba
+    kind:       error-case
+    verifiable: true
+    statement: >
+      Any read or write command targeting a namespace other than 1 is rejected with an
+      invalid-namespace error and performs no IO.
+    traces:     [contract:ReadSync, contract:WriteSync, Assumptions]
+  - id:         BDF-LBA-OVERFLOW
+    subject:    validate_lba
+    kind:       error-case
+    verifiable: true
+    statement: >
+      A read or write whose starting block plus block count would exceed the largest representable
+      64-bit value is rejected with an out-of-range error rather than wrapping around.
+    traces:     [contract:ReadSync, contract:WriteSync]
+  - id:         BDF-LBA-INRANGE
+    subject:    validate_lba
+    kind:       precondition
+    verifiable: true
+    statement: >
+      A read or write is accepted only when its starting block plus its block count stays within the
+      configured number of blocks; a request that runs past the end of the device is rejected with an
+      out-of-range error.
+    traces:     [Edge-Cases, contract:ReadSync, contract:WriteSync]
+  - id:         BDF-OFFSET-EQ
+    subject:    offset_for_lba
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The byte offset used for a read or write is the starting block number multiplied by the block
+      size, so IO lands at the intended byte position in the backing file.
+    traces:     [contract:ReadSync, contract:WriteSync]
+  - id:         BDF-SAFETY-NO-OOB
+    subject:    device-bounds-safety
+    kind:       invariant
+    verifiable: true
+    statement: >
+      Every read and write path is gated by the range check before any byte offset is computed, so no
+      IO is ever issued outside the configured device capacity.
+    traces:     [Edge-Cases, FR-007, FR-008, FR-009]
+  # ---- IO command behaviors ----
+  - id:         BDF-WRITESYNC-DURABLE
+    subject:    WriteSync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A synchronous write stores the client's data at the target block and flushes it to stable storage
+      before the write completion is returned, so a subsequent read of the same block returns exactly
+      the data written.
+    traces:     [US1, AS2, FR-007, SC-001]
+  - id:         BDF-READSYNC-RAW
+    subject:    ReadSync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A synchronous read returns the current contents of the target block range to the client's buffer
+      and reports success, or reports a read-failure error if the underlying read fails.
+    traces:     [contract:ReadSync, SC-001]
+  - id:         BDF-READASYNC-SUBMIT
+    subject:    ReadAsync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      An asynchronous read is submitted to the kernel async-IO ring and its completion is later
+      delivered on the completion channel carrying the correct operation handle and result.
+    traces:     [US1, AS3, FR-008, contract:ReadAsync]
+  - id:         BDF-WRITEASYNC-LINK
+    subject:    WriteAsync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      An asynchronous write is submitted as a write chained to a data-sync so the data is durably
+      flushed as part of the same completion, and its completion carries the correct operation handle.
+    traces:     [US1, AS3, FR-008, contract:WriteAsync]
+  - id:         BDF-ASYNC-SQFULL
+    subject:    async-submit
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the async submission queue is full, the worker returns an error completion to the calling
+      client rather than blocking, so one client's queue pressure never stalls completion delivery to
+      the other clients.
+    traces:     [FR-002, Edge-Cases]
+  - id:         BDF-ASYNC-FALLBACK
+    subject:    async-submit
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When the kernel async-IO facility is unavailable, asynchronous reads and writes fall back to
+      synchronous read/write with a data-sync flush and still complete correctly.
+    traces:     [FR-008]
+  - id:         BDF-WRITEZEROS
+    subject:    WriteZeros
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A write-zeros command writes zero-filled blocks to the target range and flushes them to stable
+      storage, so a subsequent read of that range returns all-zero data.
+    traces:     [FR-009, US1, AS4]
+  - id:         BDF-BATCH-SEQ
+    subject:    BatchSubmit
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A batch of operations is executed one after another; each operation produces its own completion
+      and the failure of one operation does not abort the remaining operations in the batch.
+    traces:     [FR-010, contract:BatchSubmit]
+  - id:         BDF-ABORT
+    subject:    AbortOp
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      An abort command requests cancellation of the identified in-flight operation and replies with an
+      abort acknowledgement whether or not the operation had already completed.
+    traces:     [FR-011, contract:AbortOp]
+  - id:         BDF-NSPROBE
+    subject:    NsProbe
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A namespace-probe command returns exactly one namespace whose id is 1 and whose sector count and
+      sector size match the configured geometry.
+    traces:     [FR-012, contract:NsProbe]
+  - id:         BDF-FLUSHSYNC-OK
+    subject:    FlushSync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A flush command on namespace 1 issues a full data-sync of the backing file and replies with a
+      flush-done completion, providing an explicit durability barrier for callers that need one.
+    traces:     [FR-022]
+  - id:         BDF-FLUSHSYNC-NS
+    subject:    FlushSync
+    kind:       error-case
+    verifiable: true
+    statement: >
+      A flush command for any namespace other than 1 returns an invalid-namespace error without
+      touching the backing file.
+    traces:     [FR-022]
+  - id:         BDF-FLUSHSYNC-ERR
+    subject:    FlushSync
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the data-sync issued by a flush command fails, the failure is surfaced to the client as a
+      write-failed error.
+    traces:     [FR-022]
+  - id:         BDF-UNSUPPORTED
+    subject:    unsupported-admin
+    kind:       error-case
+    verifiable: true
+    statement: >
+      NVMe-specific admin commands (create-namespace, delete-namespace, format-namespace, and
+      controller-reset) return a not-supported error, because they have no meaningful file-backed
+      equivalent.
+    traces:     [Assumptions, contract:NsCreate]
+  # ---- Non-blocking completion delivery (FR-020) ----
+  - id:         BDF-DELIVERY-NONBLOCK
+    subject:    completion-delivery
+    kind:       invariant
+    verifiable: true
+    statement: >
+      The worker never blocks when delivering a completion; if a client's completion channel is full,
+      the completion is buffered in that client's backlog instead of stalling the worker.
+    traces:     [FR-020]
+  - id:         BDF-DELIVERY-FIFO
+    subject:    completion-delivery
+    kind:       invariant
+    verifiable: true
+    statement: >
+      Buffered completions for a client are retried in first-in-first-out order (oldest first) and
+      retrying stops at the first completion that still cannot be delivered, preserving completion
+      order.
+    traces:     [FR-020]
+  - id:         BDF-DELIVERY-ISOLATION
+    subject:    completion-delivery
+    kind:       invariant
+    verifiable: true
+    statement: >
+      A client whose completion channel is full and whose completions are backlogged does not block or
+      delay completion delivery to the other connected clients.
+    traces:     [FR-020, Edge-Cases]
+  - id:         BDF-TIMEOUT
+    subject:    async-timeout
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      An asynchronous operation that has not completed by its deadline is reported to the client as a
+      timeout completion and its cancellation is requested.
+    traces:     [contract:ReadAsync, contract:WriteAsync]
+  # ---- Not-verifiable ledger ----
+  - id:         NV-1
+    scope:      "SC-002: 100 concurrent operations per second without corruption"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      This is a throughput/rate target measured on running hardware; the rate itself is a wall-clock
+      timing quantity, not a machine-checkable behavioral obligation.
+    traces:     [SC-002]
+  - id:         NV-2
+    scope:      "SC-003: 4KB sync IO latency under 1ms"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Wall-clock latency depends on the runtime environment and is a timing measurement, not a
+      falsifiable behavioral property.
+    traces:     [SC-003]
+  - id:         NV-3
+    scope:      "SC-005: benchmark coefficient of variation under 15%"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      This is a statistical stability target over timed benchmark runs; it is a measurement outcome,
+      not a checkable state or behavior of the component.
+    traces:     [SC-005]
+  - id:         NV-4
+    scope:      "SC-004: all unit tests pass without special hardware"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      This is a property of the test suite and build environment, not an observable behavioral
+      obligation of the component itself.
+    traces:     [SC-004]
+  - id:         NV-5
+    scope:      "SC-006 / US2-AS2: drop-in behavioral equivalence to block-device-spdk-nvme"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Equivalence to a separate component's runtime behavior across all consumers is not a single
+      falsifiable obligation of this component and cannot be machine-checked here.
+    traces:     [SC-006, US2, AS2]
+  - id:         NV-6
+    scope:      "FR-003: uses define_component!/define_interface! macros"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      This is a compile-time structural/architectural requirement, not an observable runtime behavior
+      with a possible counterexample.
+    traces:     [FR-003]
+  - id:         NV-7
+    scope:      "FR-005: uses a regular Linux file as backing store"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      This is an environment/implementation-substrate requirement, not a falsifiable behavioral
+      obligation.
+    traces:     [FR-005]
+  - id:         NV-8
+    scope:      "FR-013: actor model on a dedicated thread with lock-free channels"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      The threading/architecture choice is structural; the observable consequence (non-blocking,
+      serialized delivery) is captured separately as verifiable delivery invariants.
+    traces:     [FR-013]
+  - id:         NV-9
+    scope:      "FR-014 / US3: Criterion benchmarks provided and execute"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      The existence and execution of benchmarks is a build-artifact property, not a behavioral
+      obligation of the component under test.
+    traces:     [FR-014, US3]
+  - id:         NV-10
+    scope:      "FR-017: DmaBuffer byte slices accessed directly with no intermediate copies"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Absence of an intermediate copy is an implementation-strategy property that is not observable as
+      a falsifiable input/output behavior.
+    traces:     [FR-017]
+  - id:         NV-11
+    scope:      "FR-018: depends on the io-uring crate, minimum kernel 5.6"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      A dependency and minimum-kernel requirement is an environment/build fact, not a checkable
+      runtime behavior.
+    traces:     [FR-018]
+  - id:         NV-12
+    scope:      "FR-015: documentation examples exist and compile"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Presence and compilation of doc examples is a documentation/build property, not a behavioral
+      obligation.
+    traces:     [FR-015]
+  - id:         NV-13
+    scope:      "FR-023: reserved crate-private config mutators set_file_path/set_block_size/set_num_blocks"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      These helpers are explicitly not public API, are currently unused, and impose no observable
+      external behavior, so they carry no verifiable obligation.
+    traces:     [FR-023]
+  - id:         NV-14
+    scope:      "FR-002: logging levels for connect/disconnect/init/fallback events"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Which log level is emitted for routine lifecycle and degradation events is a logging-side-effect
+      concern that is not a falsifiable behavioral obligation on the IO path.
+    traces:     [FR-002]
+  - id:         NV-15
+    scope:      "Edge case: backing file deleted while running must not panic"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      The trigger is a runtime environment event (external file deletion) whose IO-error surfacing is
+      environment-dependent; the general error-return-not-panic behavior is covered by the per-command
+      error-case properties instead.
+    traces:     [Edge-Cases]

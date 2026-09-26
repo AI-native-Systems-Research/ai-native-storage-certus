@@ -1,0 +1,18 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 355 0 355 38 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 356 4 356 5
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 354 10 354 22
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_numioqueues [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 355 0 355 38]
+  (return (x: UInt32.t)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- [%#slib] (1: UInt32.t) ] s1 | s1 = return {_ret} ] ] [ & _ret: UInt32.t = Any.any_l () ])
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:verify_bdf_numioqueues ensures] [%#slib'0] UInt32.t'int result
+    = 1}
+    (! return {result}) ]

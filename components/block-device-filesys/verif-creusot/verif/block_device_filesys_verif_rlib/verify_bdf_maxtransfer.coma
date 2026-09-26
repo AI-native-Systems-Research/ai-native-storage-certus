@@ -1,0 +1,47 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 368 0 368 53 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 369 30 369 33
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 369 4 369 34
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 366 10 366 73
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 367 10 367 64
+let%span snum = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/creusot/creusot-std/src/std/num.rs" 325 20 326 51
+let%span snum'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/creusot/creusot-std/src/std/num.rs" 329 26 329 83
+let%span snum'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/creusot/creusot-std/src/std/num.rs" 330 26 330 83
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+constant const_MIN: UInt32.t = (0: UInt32.t)
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+let saturating_mul (self_: UInt32.t) (rhs: UInt32.t) (return (x: UInt32.t)) = any
+  [ return (result: UInt32.t) ->
+  {[@stop_split] [@expl:saturating_mul ensures] ([@stop_split] [@expl:saturating_mul ensures #0] [%#snum] UInt32.t'int self_
+            * UInt32.t'int rhs
+          >= UInt32.t'int const_MIN
+        /\ UInt32.t'int self_ * UInt32.t'int rhs <= UInt32.t'int const_MAX
+      -> UInt32.t'int result = UInt32.t'int self_ * UInt32.t'int rhs)
+    /\ ([@stop_split] [@expl:saturating_mul ensures #1] [%#snum'0] UInt32.t'int self_ * UInt32.t'int rhs
+        < UInt32.t'int const_MIN -> UInt32.t'int result = UInt32.t'int const_MIN)
+    /\ ([@stop_split] [@expl:saturating_mul ensures #2] [%#snum'1] UInt32.t'int self_ * UInt32.t'int rhs
+      > UInt32.t'int const_MAX -> UInt32.t'int result = UInt32.t'int const_MAX)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_maxtransfer [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 368 0 368 53]
+  (block_size: UInt32.t) (return (x: UInt32.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = saturating_mul [%#slib'0] {block_size} {[%#slib] (256: UInt32.t)} (fun (_x: UInt32.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: UInt32.t = Any.any_l () | & block_size: UInt32.t = block_size ])
+  [ return (result: UInt32.t) ->
+  {[@stop_split] [@expl:verify_bdf_maxtransfer ensures] ([@stop_split] [@expl:verify_bdf_maxtransfer ensures #0] [%#slib'1] UInt32.t'int block_size
+          * 256
+        <= UInt32.t'int const_MAX -> UInt32.t'int result = UInt32.t'int block_size * 256)
+    /\ ([@stop_split] [@expl:verify_bdf_maxtransfer ensures #1] [%#slib'2] UInt32.t'int block_size * 256
+      > UInt32.t'int const_MAX -> UInt32.t'int result = UInt32.t'int const_MAX)}
+    (! return {result}) ]

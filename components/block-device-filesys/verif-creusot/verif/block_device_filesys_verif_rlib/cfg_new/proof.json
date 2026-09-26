@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_cfg_new": { "prover": "z3", "time": 0.012 },
+      "vc_checked_mul": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_is_power_of_two": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

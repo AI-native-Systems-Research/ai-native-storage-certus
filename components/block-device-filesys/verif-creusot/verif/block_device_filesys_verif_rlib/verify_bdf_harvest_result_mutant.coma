@@ -1,0 +1,29 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 640 0 640 76 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 641 13 641 14
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 639 10 639 53
+
+use creusot.int.Int64
+use creusot.prelude.Any
+use int.Int
+
+type t_HResult = Ok | ReadErr | WriteErr
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_harvest_result__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 640 0 640 76]
+  (res: Int64.t) (is_read: bool) (return (x: t_HResult)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_5 <- Int64.lt res ([%#slib] (0: Int64.t)) ] s1
+    | s1 = any [ br0 -> {_5 = false} (! bb5) | br1 -> {_5} (! bb1) ] ]
+  | bb1 = any [ br0 -> {is_read = false} (! bb3) | br1 -> {is_read} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- ReadErr ] s1 | s1 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_ret <- WriteErr ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- Ok ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_HResult = Any.any_l () | & res: Int64.t = res | & is_read: bool = is_read | & _5: bool = Any.any_l () ])
+  [ return (result: t_HResult) ->
+  {[@stop_split] [@expl:verify_bdf_harvest_result__mutant ensures] [%#slib'0] (Int64.to_int res >= 0)
+    = (result = ReadErr)}
+    (! return {result}) ]

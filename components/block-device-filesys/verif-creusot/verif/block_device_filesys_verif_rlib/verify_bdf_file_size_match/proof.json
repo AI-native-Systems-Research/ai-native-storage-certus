@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_bdf_file_size_match": { "prover": "z3", "time": 0.005 }
+    }
+  }
+}

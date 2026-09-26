@@ -1,0 +1,23 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 453 0 453 60 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 454 16 454 40
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 454 44 454 45
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 452 10 452 66
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_harvest_fsync_skip [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 453 0 453 60]
+  (user_data: UInt64.t) (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_4 <- UInt64.bw_and user_data ([%#slib] (9223372036854775808: UInt64.t)) ] s1
+    | s1 = [ &_ret <- _4 <> ([%#slib'0] (0: UInt64.t)) ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & user_data: UInt64.t = user_data | & _4: UInt64.t = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_bdf_harvest_fsync_skip ensures] [%#slib'1] result
+    = (UInt64.bw_and user_data (9223372036854775808: UInt64.t) <> (0: UInt64.t))}
+    (! return {result}) ]

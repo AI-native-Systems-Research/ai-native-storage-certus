@@ -1,0 +1,31 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 520 0 520 78 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 521 5 521 6
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 517 10 517 24
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 518 10 518 34
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 519 10 519 34
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type tup3_u32_u64_u32 = { f0: UInt32.t; f1: UInt64.t; f2: UInt32.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_nsprobe [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 520 0 520 78]
+  (num_blocks: UInt64.t) (block_size: UInt32.t) (return (x: tup3_u32_u64_u32)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_ret <- { f0 = ([%#slib] (1: UInt32.t)); f1 = num_blocks; f2 = block_size } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup3_u32_u64_u32 = Any.any_l ()
+  | & num_blocks: UInt64.t = num_blocks
+  | & block_size: UInt32.t = block_size ])
+  [ return (result: tup3_u32_u64_u32) ->
+  {[@stop_split] [@expl:verify_bdf_nsprobe ensures] ([@stop_split] [@expl:verify_bdf_nsprobe ensures #0] [%#slib'0] UInt32.t'int result.f0
+      = 1)
+    /\ ([@stop_split] [@expl:verify_bdf_nsprobe ensures #1] [%#slib'1] UInt64.t'int result.f1 = UInt64.t'int num_blocks)
+    /\ ([@stop_split] [@expl:verify_bdf_nsprobe ensures #2] [%#slib'2] UInt32.t'int result.f2
+    = UInt32.t'int block_size)}
+    (! return {result}) ]

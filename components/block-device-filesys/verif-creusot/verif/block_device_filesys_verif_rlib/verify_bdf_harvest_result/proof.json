@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_bdf_harvest_result": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

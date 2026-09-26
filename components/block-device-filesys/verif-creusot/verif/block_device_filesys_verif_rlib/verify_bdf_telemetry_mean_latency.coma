@@ -1,0 +1,41 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 536 0 536 83 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 537 19 537 20
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 538 8 538 33
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 540 8 540 9
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 534 10 534 42
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 535 10 535 67
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.ComputerDivision
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_telemetry_mean_latency [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 536 0 536 83]
+  (total_ops: UInt64.t) (total_latency: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_8 <- UInt64.gt total_ops ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_8 = false} (! bb3) | br1 -> {_8} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &_11 <- total_ops ] s1
+    | s1 = [ &_12 <- _11 = ([%#slib'0] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:division by zero] [%#slib'0] not _12} s3
+    | s3 = UInt64.div [%#slib'0] {total_latency} {_11} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s4)
+    | s4 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_ret <- [%#slib'1] (0: UInt64.t) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & total_ops: UInt64.t = total_ops
+  | & total_latency: UInt64.t = total_latency
+  | & _8: bool = Any.any_l ()
+  | & _11: UInt64.t = Any.any_l ()
+  | & _12: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_bdf_telemetry_mean_latency ensures] ([@stop_split] [@expl:verify_bdf_telemetry_mean_latency ensures #0] [%#slib'2] UInt64.t'int total_ops
+        = 0 -> UInt64.t'int result = 0)
+    /\ ([@stop_split] [@expl:verify_bdf_telemetry_mean_latency ensures #1] [%#slib'3] UInt64.t'int total_ops > 0
+    -> UInt64.t'int result = ComputerDivision.div (UInt64.t'int total_latency) (UInt64.t'int total_ops))}
+    (! return {result}) ]

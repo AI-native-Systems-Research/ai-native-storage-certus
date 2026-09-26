@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_bdf_telemetry_mean_latency__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          null,
+          { "prover": "alt-ergo", "time": 0.016 },
+          { "prover": "alt-ergo", "time": 0.014 },
+          { "prover": "alt-ergo", "time": 0.019 }
+        ]
+      }
+    }
+  }
+}

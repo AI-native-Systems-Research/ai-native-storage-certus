@@ -1,0 +1,24 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 398 0 398 48 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 399 5 399 6
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 399 8 399 9
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 397 10 397 42
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_readwritestats [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 398 0 398 48]
+  (return (x: tup2_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_ret <- { f0 = ([%#slib] (0: UInt64.t)); f1 = ([%#slib'0] (0: UInt64.t)) } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup2_u64_u64 = Any.any_l () ])
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:verify_bdf_readwritestats ensures] [%#slib'1] UInt64.t'int result.f0 = 0
+    /\ UInt64.t'int result.f1 = 0}
+    (! return {result}) ]

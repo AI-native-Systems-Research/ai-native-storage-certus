@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_verify_bdf_numsectors": { "prover": "z3", "time": 0.008 } }
+  }
+}

@@ -1,0 +1,28 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 586 0 586 76 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 585 10 585 52
+
+use creusot.prelude.Any
+use creusot.int.UInt64
+
+type t_Result_unit_unit = Ok () | Err ()
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_file_size_match [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 586 0 586 76]
+  (actual: UInt64.t) (total: UInt64.t) (return (x: t_Result_unit_unit)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_6 <- actual <> total ] s1 | s1 = any [ br0 -> {_6 = false} (! bb2) | br1 -> {_6} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- Err _9 ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- Ok _10 ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_unit = Any.any_l ()
+  | & actual: UInt64.t = actual
+  | & total: UInt64.t = total
+  | & _6: bool = Any.any_l ()
+  | & _9: () = Any.any_l ()
+  | & _10: () = Any.any_l () ])
+  [ return (result: t_Result_unit_unit) ->
+  {[@stop_split] [@expl:verify_bdf_file_size_match ensures] [%#slib] (UInt64.t'int actual <> UInt64.t'int total)
+    = (result = Err ())}
+    (! return {result}) ]

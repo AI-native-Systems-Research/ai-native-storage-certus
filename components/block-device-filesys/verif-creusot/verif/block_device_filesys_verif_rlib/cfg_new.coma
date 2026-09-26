@@ -1,0 +1,113 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 49 0 49 67 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 50 20 50 23
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 53 8 53 36
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 56 21 56 22
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 60 18 60 36
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 61 10 61 36
+let%span slib'4 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 33 10 33 49
+let%span slib'5 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 34 10 34 96
+let%span slib'6 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 35 10 37 53
+let%span slib'7 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 38 10 41 74
+let%span slib'8 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 43 10 43 76
+let%span slib'9 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 45 10 48 88
+let%span snum = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/creusot/creusot-std/src/std/num.rs" 261 30 261 88
+let%span snum'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/creusot/creusot-std/src/std/num.rs" 306 20 307 89
+let%span snum'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/creusot/creusot-std/src/std/num.rs" 310 26 310 87
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Result_u64_unit = Ok UInt64.t | Err ()
+
+let is_power_of_two (self_: UInt32.t) (return (x: bool)) = any
+  [ return (result: bool) -> {[@stop_split] [@expl:is_power_of_two ensures] [%#snum] result
+    = (self_ <> (0: UInt32.t) /\ UInt32.bw_and self_ (UInt32.sub self_ (1: UInt32.t)) = (0: UInt32.t))}
+    (! return {result}) ]
+
+type t_Option_u64 = None | Some UInt64.t
+
+constant const_MIN: UInt64.t = (0: UInt64.t)
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let checked_mul (self_: UInt64.t) (rhs: UInt64.t) (return (x: t_Option_u64)) = any
+  [ return (result: t_Option_u64) ->
+  {[@stop_split] [@expl:checked_mul ensures] ([@stop_split] [@expl:checked_mul ensures #0] [%#snum'0] (result = None)
+      = (UInt64.t'int self_ * UInt64.t'int rhs < UInt64.t'int const_MIN
+      \/ UInt64.t'int self_ * UInt64.t'int rhs > UInt64.t'int const_MAX))
+    /\ ([@stop_split] [@expl:checked_mul ensures #1] [%#snum'1] forall r: UInt64.t. result = Some r
+      -> UInt64.t'int r = UInt64.t'int self_ * UInt64.t'int rhs)}
+    (! return {result}) ]
+
+let elim_Some (_x: t_Option_u64) (return (f0: UInt64.t)) = any
+  [ _k (f0: UInt64.t) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let cfg_new [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 49 0 49 67]
+  (block_size: UInt32.t) (num_blocks: UInt64.t) (return (x: t_Result_u64_unit)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_20 <- UInt32.lt block_size ([%#slib] (512: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_20 = false} (! bb2) | br1 -> {_20} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- Err _23 ] s1 | s1 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = is_power_of_two [%#slib'0] {block_size} (fun (_x: bool) -> [ &_25 <- _x ] s1)
+    | s1 = any [ br0 -> {_25 = false} (! bb5) | br1 -> {_25} (! bb4) ] ]
+  | bb4 = s0
+    [ s0 = [ &_30 <- num_blocks = ([%#slib'1] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_30 = false} (! bb7) | br1 -> {_30} (! bb6) ] ]
+  | bb6 = s0 [ s0 = [ &_ret <- Err _33 ] s1 | s1 = return {_ret} ]
+  | bb7 = s0
+    [ s0 = [ &bs <- UInt64.of_int (UInt32.t'int block_size) ] s1
+    | s1 = {[@expl:assertion] [%#slib'2] UInt64.t'int bs = UInt32.t'int block_size} s2
+    | s2 = checked_mul [%#slib'3] {bs} {num_blocks} (fun (_x: t_Option_u64) -> [ &_40 <- _x ] s3)
+    | s3 = any [ br0 -> {_40 = None} (! bb11) | br1 (x0: UInt64.t) -> {_40 = Some x0} (! bb12) ] ]
+  | bb12 = s0
+    [ s0 = elim_Some {_40} (fun (r0: UInt64.t) -> [ &tb <- r0 ] s1) | s1 = [ &_ret <- Ok tb ] s2 | s2 = return {_ret} ]
+  | bb11 = s0 [ s0 = [ &_ret <- Err _46 ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- Err _28 ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_u64_unit = Any.any_l ()
+  | & block_size: UInt32.t = block_size
+  | & num_blocks: UInt64.t = num_blocks
+  | & _20: bool = Any.any_l ()
+  | & _23: () = Any.any_l ()
+  | & _25: bool = Any.any_l ()
+  | & _28: () = Any.any_l ()
+  | & _30: bool = Any.any_l ()
+  | & _33: () = Any.any_l ()
+  | & bs: UInt64.t = Any.any_l ()
+  | & _40: t_Option_u64 = Any.any_l ()
+  | & tb: UInt64.t = Any.any_l ()
+  | & _46: () = Any.any_l () ])
+  [ return (result: t_Result_u64_unit) ->
+  {[@stop_split] [@expl:cfg_new ensures] ([@stop_split] [@expl:cfg_new ensures #0] [%#slib'4] UInt32.t'int block_size
+        < 512 -> result = Err ())
+    /\ ([@stop_split] [@expl:cfg_new ensures #1] [%#slib'5] UInt32.t'int block_size >= 512
+        /\ UInt32.bw_and block_size (UInt32.sub block_size (1: UInt32.t)) <> (0: UInt32.t) -> result = Err ())
+    /\ ([@stop_split] [@expl:cfg_new ensures #2] [%#slib'6] UInt32.t'int block_size >= 512
+        /\ block_size <> (0: UInt32.t)
+        /\ UInt32.bw_and block_size (UInt32.sub block_size (1: UInt32.t)) = (0: UInt32.t) /\ UInt64.t'int num_blocks = 0
+      -> result = Err ())
+    /\ ([@stop_split] [@expl:cfg_new ensures #3] [%#slib'7] UInt32.t'int block_size >= 512
+        /\ block_size <> (0: UInt32.t)
+        /\ UInt32.bw_and block_size (UInt32.sub block_size (1: UInt32.t)) = (0: UInt32.t)
+        /\ UInt64.t'int num_blocks <> 0 /\ UInt32.t'int block_size * UInt64.t'int num_blocks > UInt64.t'int const_MAX
+      -> result = Err ())
+    /\ ([@stop_split] [@expl:cfg_new ensures #4] [%#slib'8] forall v: UInt64.t. result = Ok v
+        -> UInt64.t'int v = UInt32.t'int block_size * UInt64.t'int num_blocks)
+    /\ ([@stop_split] [@expl:cfg_new ensures #5] [%#slib'9] UInt32.t'int block_size >= 512
+      /\ block_size <> (0: UInt32.t)
+      /\ UInt32.bw_and block_size (UInt32.sub block_size (1: UInt32.t)) = (0: UInt32.t)
+      /\ UInt64.t'int num_blocks <> 0 /\ UInt32.t'int block_size * UInt64.t'int num_blocks <= UInt64.t'int const_MAX
+    -> (exists v: UInt64.t. result = Ok v))}
+    (! return {result}) ]

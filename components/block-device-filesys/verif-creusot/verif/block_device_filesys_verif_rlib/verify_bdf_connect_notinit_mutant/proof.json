@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_bdf_connect_notinit__mutant": {
+        "tactic": "split_vc",
+        "children": [ null, { "prover": "alt-ergo", "time": 0.016 } ]
+      }
+    }
+  }
+}

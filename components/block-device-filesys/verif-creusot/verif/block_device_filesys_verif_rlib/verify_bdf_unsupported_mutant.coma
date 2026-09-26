@@ -1,0 +1,34 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 510 0 510 57 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 512 4 512 21
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 509 10 509 24
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 488 10 488 42
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 489 10 489 42
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 490 10 490 42
+let%span slib'4 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 491 10 491 49
+let%span slib'5 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 492 10 492 44
+
+use creusot.prelude.Any
+
+type t_CmdKind = NsCreate | NsDelete | NsFormat | ControllerReset | Supported
+
+let is_unsupported (k: t_CmdKind) (return (x: bool)) = any
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:is_unsupported ensures] ([@stop_split] [@expl:is_unsupported ensures #0] [%#slib'1] k = NsCreate
+      -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #1] [%#slib'2] k = NsDelete -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #2] [%#slib'3] k = NsFormat -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #3] [%#slib'4] k = ControllerReset -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #4] [%#slib'5] k = Supported -> result = false)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_unsupported__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 510 0 510 57]
+  (k: t_CmdKind) (return (x: bool)) = (! bb0
+  [ bb0 = s0 [ s0 = is_unsupported [%#slib] {k} (fun (_x: bool) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & k: t_CmdKind = k ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_bdf_unsupported__mutant ensures] [%#slib'0] result = true}
+    (! return {result}) ]

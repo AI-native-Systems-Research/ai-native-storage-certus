@@ -1,0 +1,72 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 119 0 122 20 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 123 4 123 35
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 115 11 115 95
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 116 11 116 27
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 117 11 117 48
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 118 10 118 40
+let%span slib'4 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 33 10 33 49
+let%span slib'5 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 34 10 34 96
+let%span slib'6 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 35 10 37 53
+let%span slib'7 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 38 10 41 74
+let%span slib'8 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 43 10 43 76
+let%span slib'9 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 45 10 48 88
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Result_u64_unit = Ok UInt64.t | Err ()
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let cfg_new (block_size: UInt32.t) (num_blocks: UInt64.t) (return (x: t_Result_u64_unit)) = any
+  [ return (result: t_Result_u64_unit) ->
+  {[@stop_split] [@expl:cfg_new ensures] ([@stop_split] [@expl:cfg_new ensures #0] [%#slib'4] UInt32.t'int block_size
+        < 512 -> result = Err ())
+    /\ ([@stop_split] [@expl:cfg_new ensures #1] [%#slib'5] UInt32.t'int block_size >= 512
+        /\ UInt32.bw_and block_size (UInt32.sub block_size (1: UInt32.t)) <> (0: UInt32.t) -> result = Err ())
+    /\ ([@stop_split] [@expl:cfg_new ensures #2] [%#slib'6] UInt32.t'int block_size >= 512
+        /\ block_size <> (0: UInt32.t)
+        /\ UInt32.bw_and block_size (UInt32.sub block_size (1: UInt32.t)) = (0: UInt32.t) /\ UInt64.t'int num_blocks = 0
+      -> result = Err ())
+    /\ ([@stop_split] [@expl:cfg_new ensures #3] [%#slib'7] UInt32.t'int block_size >= 512
+        /\ block_size <> (0: UInt32.t)
+        /\ UInt32.bw_and block_size (UInt32.sub block_size (1: UInt32.t)) = (0: UInt32.t)
+        /\ UInt64.t'int num_blocks <> 0 /\ UInt32.t'int block_size * UInt64.t'int num_blocks > UInt64.t'int const_MAX
+      -> result = Err ())
+    /\ ([@stop_split] [@expl:cfg_new ensures #4] [%#slib'8] forall v: UInt64.t. result = Ok v
+        -> UInt64.t'int v = UInt32.t'int block_size * UInt64.t'int num_blocks)
+    /\ ([@stop_split] [@expl:cfg_new ensures #5] [%#slib'9] UInt32.t'int block_size >= 512
+      /\ block_size <> (0: UInt32.t)
+      /\ UInt32.bw_and block_size (UInt32.sub block_size (1: UInt32.t)) = (0: UInt32.t)
+      /\ UInt64.t'int num_blocks <> 0 /\ UInt32.t'int block_size * UInt64.t'int num_blocks <= UInt64.t'int const_MAX
+    -> (exists v: UInt64.t. result = Ok v))}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_config_totalbytes_overflow__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 119 0 122 20]
+  (block_size: UInt32.t) (num_blocks: UInt64.t) (return (x: t_Result_u64_unit)) =
+{[@stop_split] [@expl:verify_bdf_config_totalbytes_overflow__mutant requires] ([@stop_split] [@expl:verify_bdf_config_totalbytes_overflow__mutant requires #0] [%#slib'0] UInt32.t'int block_size
+      >= 512
+    /\ block_size <> (0: UInt32.t) /\ UInt32.bw_and block_size (UInt32.sub block_size (1: UInt32.t)) = (0: UInt32.t))
+  /\ ([@stop_split] [@expl:verify_bdf_config_totalbytes_overflow__mutant requires #1] [%#slib'1] UInt64.t'int num_blocks
+    <> 0)
+  /\ ([@stop_split] [@expl:verify_bdf_config_totalbytes_overflow__mutant requires #2] [%#slib'2] UInt32.t'int block_size
+    * UInt64.t'int num_blocks
+  > UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = cfg_new [%#slib] {block_size} {num_blocks} (fun (_x: t_Result_u64_unit) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_u64_unit = Any.any_l ()
+  | & block_size: UInt32.t = block_size
+  | & num_blocks: UInt64.t = num_blocks ])
+  [ return (result: t_Result_u64_unit) ->
+  {[@stop_split] [@expl:verify_bdf_config_totalbytes_overflow__mutant ensures] [%#slib'3] exists v: UInt64.t. result
+      = Ok v}
+    (! return {result}) ]

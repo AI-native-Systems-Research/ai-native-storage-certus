@@ -1,0 +1,24 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 418 0 418 78 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 417 10 417 43
+
+use creusot.prelude.Any
+
+type t_Result_unit_unit = Ok () | Err ()
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_connect_notinit__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 418 0 418 78]
+  (initialized: bool) (return (x: t_Result_unit_unit)) = (! bb0
+  [ bb0 = any [ br0 -> {initialized = false} (! bb1) | br1 -> {initialized} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- Ok _6 ] s1 | s1 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_ret <- Err _5 ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_unit = Any.any_l ()
+  | & initialized: bool = initialized
+  | & _5: () = Any.any_l ()
+  | & _6: () = Any.any_l () ])
+  [ return (result: t_Result_unit_unit) ->
+  {[@stop_split] [@expl:verify_bdf_connect_notinit__mutant ensures] [%#slib] not initialized -> result = Ok ()}
+    (! return {result}) ]

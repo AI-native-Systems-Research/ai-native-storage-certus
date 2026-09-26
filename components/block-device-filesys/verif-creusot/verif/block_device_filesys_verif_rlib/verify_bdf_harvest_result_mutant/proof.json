@@ -1,0 +1,18 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_bdf_harvest_result__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              null, { "prover": "alt-ergo", "time": 0.021 }, null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 437 0 437 61 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 438 35 438 36
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 438 14 438 37
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 435 10 435 29
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 436 10 436 60
+let%span snum = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/creusot/creusot-std/src/std/num.rs" 316 26 316 48
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+let wrapping_add (self_: UInt64.t) (rhs: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:wrapping_add ensures] [%#snum] result = UInt64.add self_ rhs}
+    (! return {result}) ]
+
+type tup2_u64_u64 = { f0: UInt64.t; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_ophandle_unique [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 437 0 437 61]
+  (counter: UInt64.t) (return (x: tup2_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = wrapping_add [%#slib'0] {counter} {[%#slib] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_7 <- _x ] s1)
+    | s1 = [ &_ret <- { f0 = counter; f1 = _7 } ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: tup2_u64_u64 = Any.any_l () | & counter: UInt64.t = counter | & _7: UInt64.t = Any.any_l () ])
+  [ return (result: tup2_u64_u64) ->
+  {[@stop_split] [@expl:verify_bdf_ophandle_unique ensures] ([@stop_split] [@expl:verify_bdf_ophandle_unique ensures #0] [%#slib'1] result.f0
+      = counter)
+    /\ ([@stop_split] [@expl:verify_bdf_ophandle_unique ensures #1] [%#slib'2] UInt64.t'int counter
+      < UInt64.t'int const_MAX -> UInt64.t'int result.f1 = UInt64.t'int counter + 1)}
+    (! return {result}) ]

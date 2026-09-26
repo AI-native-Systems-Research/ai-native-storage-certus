@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_bdf_numioqueues": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

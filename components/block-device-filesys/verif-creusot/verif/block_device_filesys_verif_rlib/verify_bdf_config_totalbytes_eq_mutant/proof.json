@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_cfg_new": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_bdf_config_totalbytes_eq__mutant": null
+    }
+  }
+}

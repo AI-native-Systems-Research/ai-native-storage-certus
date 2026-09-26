@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_saturating_mul": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_bdf_maxtransfer": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

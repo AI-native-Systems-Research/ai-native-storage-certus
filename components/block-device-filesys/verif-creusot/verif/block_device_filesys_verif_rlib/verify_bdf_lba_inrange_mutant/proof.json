@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_validate_lba": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_bdf_lba_inrange__mutant": null
+    }
+  }
+}

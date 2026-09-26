@@ -1,0 +1,19 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 345 0 345 40 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 346 4 346 7
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 344 10 344 24
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_maxqueuedepth [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 345 0 345 40]
+  (return (x: UInt32.t)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- [%#slib] (128: UInt32.t) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l () ])
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:verify_bdf_maxqueuedepth ensures] [%#slib'0] UInt32.t'int result
+    = 128}
+    (! return {result}) ]

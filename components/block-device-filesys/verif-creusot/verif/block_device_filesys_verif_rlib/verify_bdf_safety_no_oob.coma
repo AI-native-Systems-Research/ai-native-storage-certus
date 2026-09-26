@@ -1,0 +1,96 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 279 0 285 16 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 286 10 286 62
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 289 26 289 63
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 290 26 290 77
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 291 22 291 53
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 292 26 293 53
+let%span slib'4 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 294 26 294 93
+let%span slib'5 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 275 11 275 53
+let%span slib'6 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 276 11 276 42
+let%span slib'7 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 277 10 278 69
+let%span slib'8 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 174 10 174 43
+let%span slib'9 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 175 10 175 79
+let%span slib'10 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 176 10 177 31
+let%span slib'11 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 178 10 178 85
+let%span slib'12 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 234 11 234 42
+let%span slib'13 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 235 10 235 39
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Result_unit_unit = Ok () | Err ()
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let validate_lba (cfg_num_blocks: UInt64.t) (ns_id: UInt32.t) (lba: UInt64.t) (num_blocks: UInt64.t)
+  (return (x: t_Result_unit_unit)) = any
+  [ return (result: t_Result_unit_unit) ->
+  {[@stop_split] [@expl:validate_lba ensures] ([@stop_split] [@expl:validate_lba ensures #0] [%#slib'8] UInt32.t'int ns_id
+        <> 1 -> result = Err ())
+    /\ ([@stop_split] [@expl:validate_lba ensures #1] [%#slib'9] UInt32.t'int ns_id = 1
+        /\ UInt64.t'int lba + UInt64.t'int num_blocks > UInt64.t'int const_MAX -> result = Err ())
+    /\ ([@stop_split] [@expl:validate_lba ensures #2] [%#slib'10] UInt32.t'int ns_id = 1
+        /\ UInt64.t'int lba + UInt64.t'int num_blocks <= UInt64.t'int const_MAX
+        /\ UInt64.t'int lba + UInt64.t'int num_blocks > UInt64.t'int cfg_num_blocks -> result = Err ())
+    /\ ([@stop_split] [@expl:validate_lba ensures #3] [%#slib'11] result = Ok ()
+    -> UInt32.t'int ns_id = 1 /\ UInt64.t'int lba + UInt64.t'int num_blocks <= UInt64.t'int cfg_num_blocks)}
+    (! return {result}) ]
+
+type t_Option_u64 = None | Some UInt64.t
+
+let offset_for_lba (block_size: UInt32.t) (lba: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:offset_for_lba requires] [%#slib'12] UInt64.t'int lba * UInt32.t'int block_size
+  <= UInt64.t'int const_MAX}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:offset_for_lba ensures] [%#slib'13] UInt64.t'int result
+    = UInt64.t'int lba * UInt32.t'int block_size}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_safety_no_oob [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 279 0 285 16]
+  (block_size: UInt32.t) (cfg_num_blocks: UInt64.t) (ns_id: UInt32.t) (lba: UInt64.t) (num_blocks: UInt64.t)
+  (return (x: t_Option_u64)) =
+{[@stop_split] [@expl:verify_bdf_safety_no_oob requires] ([@stop_split] [@expl:verify_bdf_safety_no_oob requires #0] [%#slib'5] UInt64.t'int cfg_num_blocks
+      * UInt32.t'int block_size
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:verify_bdf_safety_no_oob requires #1] [%#slib'6] UInt64.t'int lba + UInt64.t'int num_blocks
+  <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = validate_lba [%#slib] {cfg_num_blocks} {ns_id} {lba} {num_blocks}
+        (fun (_x: t_Result_unit_unit) -> [ &_16 <- _x ] s1)
+    | s1 = any [ br0 (x0: ()) -> {_16 = Ok x0} (! bb5) | br1 (x0: ()) -> {_16 = Err x0} (! bb4) ] ]
+  | bb4 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ]
+  | bb5 = s0
+    [ s0 = {[@expl:assertion] [%#slib'0] UInt64.t'int lba + UInt64.t'int num_blocks <= UInt64.t'int cfg_num_blocks} s1
+    | s1 = {[@expl:assertion] [%#slib'1] UInt64.t'int lba * UInt32.t'int block_size
+      <= UInt64.t'int cfg_num_blocks * UInt32.t'int block_size}
+      s2
+    | s2 = offset_for_lba [%#slib'2] {block_size} {lba} (fun (_x: UInt64.t) -> [ &off <- _x ] s3)
+    | s3 = {[@expl:assertion] [%#slib'3] UInt64.t'int off + UInt64.t'int num_blocks * UInt32.t'int block_size
+      = (UInt64.t'int lba + UInt64.t'int num_blocks) * UInt32.t'int block_size}
+      s4
+    | s4 = {[@expl:assertion] [%#slib'4] (UInt64.t'int lba + UInt64.t'int num_blocks) * UInt32.t'int block_size
+      <= UInt64.t'int cfg_num_blocks * UInt32.t'int block_size}
+      s5
+    | s5 = [ &_ret <- Some off ] s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: t_Option_u64 = Any.any_l ()
+  | & block_size: UInt32.t = block_size
+  | & cfg_num_blocks: UInt64.t = cfg_num_blocks
+  | & ns_id: UInt32.t = ns_id
+  | & lba: UInt64.t = lba
+  | & num_blocks: UInt64.t = num_blocks
+  | & _16: t_Result_unit_unit = Any.any_l ()
+  | & off: UInt64.t = Any.any_l () ])
+  [ return (result: t_Option_u64) ->
+  {[@stop_split] [@expl:verify_bdf_safety_no_oob ensures] [%#slib'7] forall off: UInt64.t. result = Some off
+      -> UInt64.t'int off + UInt64.t'int num_blocks * UInt32.t'int block_size
+      <= UInt64.t'int cfg_num_blocks * UInt32.t'int block_size}
+    (! return {result}) ]

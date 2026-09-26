@@ -1,0 +1,36 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 544 0 544 91 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 545 19 545 20
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 546 8 546 33
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 548 8 548 9
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 543 10 543 42
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_telemetry_mean_latency__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 544 0 544 91]
+  (total_ops: UInt64.t) (total_latency: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_5 <- UInt64.gt total_ops ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_5 = false} (! bb3) | br1 -> {_5} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &_8 <- total_ops ] s1
+    | s1 = [ &_9 <- _8 = ([%#slib'0] (0: UInt64.t)) ] s2
+    | s2 = {[@expl:division by zero] [%#slib'0] not _9} s3
+    | s3 = UInt64.div [%#slib'0] {total_latency} {_8} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s4)
+    | s4 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_ret <- [%#slib'1] (0: UInt64.t) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & total_ops: UInt64.t = total_ops
+  | & total_latency: UInt64.t = total_latency
+  | & _5: bool = Any.any_l ()
+  | & _8: UInt64.t = Any.any_l ()
+  | & _9: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_bdf_telemetry_mean_latency__mutant ensures] [%#slib'2] UInt64.t'int total_ops = 0
+    -> UInt64.t'int result = 1}
+    (! return {result}) ]

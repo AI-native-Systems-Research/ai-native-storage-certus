@@ -1,0 +1,37 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 493 0 493 37 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 496 21 496 26
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 495 60 495 64
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 488 10 488 42
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 489 10 489 42
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 490 10 490 42
+let%span slib'4 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 491 10 491 49
+let%span slib'5 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 492 10 492 44
+
+use creusot.prelude.Any
+
+type t_CmdKind = NsCreate | NsDelete | NsFormat | ControllerReset | Supported
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let is_unsupported [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 493 0 493 37]
+  (k: t_CmdKind) (return (x: bool)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {k = NsCreate} (! bb4)
+    | br1 -> {k = NsDelete} (! bb4)
+    | br2 -> {k = NsFormat} (! bb4)
+    | br3 -> {k = ControllerReset} (! bb4)
+    | br4 -> {k = Supported} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- [%#slib] false ] s1 | s1 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_ret <- [%#slib'0] true ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & k: t_CmdKind = k ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:is_unsupported ensures] ([@stop_split] [@expl:is_unsupported ensures #0] [%#slib'1] k = NsCreate
+      -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #1] [%#slib'2] k = NsDelete -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #2] [%#slib'3] k = NsFormat -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #3] [%#slib'4] k = ControllerReset -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #4] [%#slib'5] k = Supported -> result = false)}
+    (! return {result}) ]

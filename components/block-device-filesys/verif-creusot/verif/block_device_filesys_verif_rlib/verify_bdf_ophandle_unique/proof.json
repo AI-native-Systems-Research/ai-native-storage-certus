@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_bdf_ophandle_unique": {
+        "prover": "alt-ergo",
+        "time": 0.018
+      },
+      "vc_wrapping_add": { "prover": "alt-ergo", "time": 0.013 }
+    }
+  }
+}

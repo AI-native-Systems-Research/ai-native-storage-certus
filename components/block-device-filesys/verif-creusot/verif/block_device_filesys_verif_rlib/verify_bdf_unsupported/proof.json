@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_is_unsupported": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_bdf_unsupported": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

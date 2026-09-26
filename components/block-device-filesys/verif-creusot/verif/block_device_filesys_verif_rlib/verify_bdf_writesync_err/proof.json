@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_bdf_writesync_err": { "prover": "z3", "time": 0.004 }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 392 0 392 43 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 393 4 393 6
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 391 10 391 22
+
+use creusot.int.Int32
+use creusot.prelude.Any
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_numanode__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 392 0 392 43]
+  (return (x: Int32.t)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- [%#slib] (-1: Int32.t) ] s1 | s1 = return {_ret} ] ] [ & _ret: Int32.t = Any.any_l () ])
+  [ return (result: Int32.t) ->
+  {[@stop_split] [@expl:verify_bdf_numanode__mutant ensures] [%#slib'0] Int32.to_int result = 0}
+    (! return {result}) ]

@@ -1,0 +1,40 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 248 0 248 69 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 249 4 249 35
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 246 11 246 42
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 247 10 247 43
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 234 11 234 42
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 235 10 235 39
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let offset_for_lba (block_size: UInt32.t) (lba: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:offset_for_lba requires] [%#slib'2] UInt64.t'int lba * UInt32.t'int block_size
+  <= UInt64.t'int const_MAX}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:offset_for_lba ensures] [%#slib'3] UInt64.t'int result
+    = UInt64.t'int lba * UInt32.t'int block_size}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_offset_eq__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 248 0 248 69]
+  (block_size: UInt32.t) (lba: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_bdf_offset_eq__mutant requires] [%#slib'0] UInt64.t'int lba * UInt32.t'int block_size
+  <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = offset_for_lba [%#slib] {block_size} {lba} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & block_size: UInt32.t = block_size | & lba: UInt64.t = lba ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_bdf_offset_eq__mutant ensures] [%#slib'1] UInt64.t'int result
+    = UInt64.t'int lba * UInt32.t'int block_size + 1}
+    (! return {result}) ]

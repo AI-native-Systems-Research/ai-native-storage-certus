@@ -1,0 +1,32 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 324 0 324 76 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 325 16 325 17
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 322 10 322 50
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 323 10 323 43
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Result_u32_unit = Ok UInt32.t | Err ()
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_sectorsize [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 324 0 324 76]
+  (block_size: UInt32.t) (ns_id: UInt32.t) (return (x: t_Result_u32_unit)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_8 <- ns_id = ([%#slib] (1: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_8 = false} (! bb2) | br1 -> {_8} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- Ok block_size ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- Err _11 ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_u32_unit = Any.any_l ()
+  | & block_size: UInt32.t = block_size
+  | & ns_id: UInt32.t = ns_id
+  | & _8: bool = Any.any_l ()
+  | & _11: () = Any.any_l () ])
+  [ return (result: t_Result_u32_unit) ->
+  {[@stop_split] [@expl:verify_bdf_sectorsize ensures] ([@stop_split] [@expl:verify_bdf_sectorsize ensures #0] [%#slib'0] UInt32.t'int ns_id
+        = 1 -> result = Ok block_size)
+    /\ ([@stop_split] [@expl:verify_bdf_sectorsize ensures #1] [%#slib'1] UInt32.t'int ns_id <> 1 -> result = Err ())}
+    (! return {result}) ]

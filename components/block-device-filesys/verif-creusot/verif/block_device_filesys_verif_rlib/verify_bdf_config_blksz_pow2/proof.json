@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_cfg_new": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_bdf_config_blksz_pow2": {
+        "prover": "alt-ergo",
+        "time": 0.018
+      }
+    }
+  }
+}

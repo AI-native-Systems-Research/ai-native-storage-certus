@@ -1,0 +1,30 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 601 0 601 67 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 602 13 602 14
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 600 10 600 42
+
+use creusot.int.Int64
+use creusot.prelude.Any
+use int.Int
+
+type t_Result_unit_unit = Ok () | Err ()
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_writesync_err__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 601 0 601 67]
+  (ret: Int64.t) (return (x: t_Result_unit_unit)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_4 <- Int64.lt ret ([%#slib] (0: Int64.t)) ] s1
+    | s1 = any [ br0 -> {_4 = false} (! bb2) | br1 -> {_4} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- Err _6 ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- Ok _7 ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_unit = Any.any_l ()
+  | & ret: Int64.t = ret
+  | & _4: bool = Any.any_l ()
+  | & _6: () = Any.any_l ()
+  | & _7: () = Any.any_l () ])
+  [ return (result: t_Result_unit_unit) ->
+  {[@stop_split] [@expl:verify_bdf_writesync_err__mutant ensures] [%#slib'0] (Int64.to_int ret < 0) = (result = Ok ())}
+    (! return {result}) ]

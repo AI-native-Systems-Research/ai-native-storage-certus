@@ -1,0 +1,36 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 628 0 628 68 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 629 13 629 14
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 625 10 625 48
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 626 10 626 63
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 627 10 627 65
+
+use creusot.int.Int64
+use creusot.prelude.Any
+use int.Int
+
+type t_HResult = Ok | ReadErr | WriteErr
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_harvest_result [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 628 0 628 68]
+  (res: Int64.t) (is_read: bool) (return (x: t_HResult)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_11 <- Int64.lt res ([%#slib] (0: Int64.t)) ] s1
+    | s1 = any [ br0 -> {_11 = false} (! bb5) | br1 -> {_11} (! bb1) ] ]
+  | bb1 = any [ br0 -> {is_read = false} (! bb3) | br1 -> {is_read} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- ReadErr ] s1 | s1 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_ret <- WriteErr ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- Ok ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_HResult = Any.any_l () | & res: Int64.t = res | & is_read: bool = is_read | & _11: bool = Any.any_l () ])
+  [ return (result: t_HResult) ->
+  {[@stop_split] [@expl:verify_bdf_harvest_result ensures] ([@stop_split] [@expl:verify_bdf_harvest_result ensures #0] [%#slib'0] (Int64.to_int res
+        >= 0)
+      = (result = Ok))
+    /\ ([@stop_split] [@expl:verify_bdf_harvest_result ensures #1] [%#slib'1] (Int64.to_int res < 0 /\ is_read)
+      = (result = ReadErr))
+    /\ ([@stop_split] [@expl:verify_bdf_harvest_result ensures #2] [%#slib'2] (Int64.to_int res < 0 /\ not is_read)
+    = (result = WriteErr))}
+    (! return {result}) ]

@@ -1,0 +1,44 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 153 0 153 96 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 154 12 154 46
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 152 10 152 82
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 146 10 146 43
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 147 10 147 43
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 148 10 148 36
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_DeviceConfigM = { block_size: UInt32.t; num_blocks: UInt64.t; total_bytes: UInt64.t }
+
+let dc_new (block_size'0: UInt32.t) (num_blocks'0: UInt64.t) (tb: UInt64.t) (return (x: t_DeviceConfigM)) = any
+  [ return (result: t_DeviceConfigM) ->
+  {[@stop_split] [@expl:dc_new ensures] ([@stop_split] [@expl:dc_new ensures #0] [%#slib'1] UInt32.t'int result.block_size
+      = UInt32.t'int block_size'0)
+    /\ ([@stop_split] [@expl:dc_new ensures #1] [%#slib'2] UInt64.t'int result.num_blocks = UInt64.t'int num_blocks'0)
+    /\ ([@stop_split] [@expl:dc_new ensures #2] [%#slib'3] UInt64.t'int result.total_bytes = UInt64.t'int tb)}
+    (! return {result}) ]
+
+type tup3_u32_u64_u64 = { f0: UInt32.t; f1: UInt64.t; f2: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_config_accessors [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 153 0 153 96]
+  (block_size'0: UInt32.t) (num_blocks'0: UInt64.t) (tb: UInt64.t) (return (x: tup3_u32_u64_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = dc_new [%#slib] {block_size'0} {num_blocks'0} {tb} (fun (_x: t_DeviceConfigM) -> [ &c <- _x ] s1)
+    | s1 = [ &_ret <- { f0 = c.block_size; f1 = c.num_blocks; f2 = c.total_bytes } ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: tup3_u32_u64_u64 = Any.any_l ()
+  | & block_size'0: UInt32.t = block_size'0
+  | & num_blocks'0: UInt64.t = num_blocks'0
+  | & tb: UInt64.t = tb
+  | & c: t_DeviceConfigM = Any.any_l () ])
+  [ return (result: tup3_u32_u64_u64) ->
+  {[@stop_split] [@expl:verify_bdf_config_accessors ensures] [%#slib'0] UInt32.t'int result.f0
+      = UInt32.t'int block_size'0
+    /\ UInt64.t'int result.f1 = UInt64.t'int num_blocks'0 /\ UInt64.t'int result.f2 = UInt64.t'int tb}
+    (! return {result}) ]

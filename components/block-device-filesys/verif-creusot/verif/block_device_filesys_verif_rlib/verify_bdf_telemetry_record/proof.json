@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_bdf_telemetry_record": {
+        "prover": "alt-ergo",
+        "time": 0.021
+      }
+    }
+  }
+}

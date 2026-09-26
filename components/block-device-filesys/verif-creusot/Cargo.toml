@@ -1,0 +1,23 @@
+[package]
+name = "block-device-filesys-verif"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+creusot-std = "0.12.0-dev"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }
+
+# creusot-std is not vendored on this branch. Point the patch at the toolchain through the
+# gitignored `components/<component>/creusot` symlink (-> tools/creusot/creusot), so this
+# path is checkout-relative rather than tied to one machine. This patch lives HERE, in the
+# Creusot crate, and NOT in components/<component>/.cargo/config.toml: at component scope it
+# applied to every cargo command in the component, including `cargo kani`, which does not
+# need creusot-std at all and failed to resolve it.
+# checkout that ships it. Build-time dependency reference only.
+[patch.crates-io]
+creusot-std = { path = "../creusot/creusot-std" }

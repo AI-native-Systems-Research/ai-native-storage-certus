@@ -1,0 +1,52 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 568 0 574 20 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 575 11 575 12
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 575 5 575 12
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 575 14 575 21
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 575 23 575 30
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 564 11 564 32
+let%span slib'4 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 565 11 565 33
+let%span slib'5 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 566 11 566 33
+let%span slib'6 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 567 10 567 31
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type tup3_u64_u64_u64 = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_telemetry_record__mutant [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 568 0 574 20]
+  (ops: UInt64.t) (lat: UInt64.t) (byt: UInt64.t) (l: UInt64.t) (b: UInt64.t) (return (x: tup3_u64_u64_u64)) =
+{[@stop_split] [@expl:verify_bdf_telemetry_record__mutant requires] ([@stop_split] [@expl:verify_bdf_telemetry_record__mutant requires #0] [%#slib'3] UInt64.t'int ops
+      + 1
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:verify_bdf_telemetry_record__mutant requires #1] [%#slib'4] UInt64.t'int lat + UInt64.t'int l
+    <= UInt64.t'int const_MAX)
+  /\ ([@stop_split] [@expl:verify_bdf_telemetry_record__mutant requires #2] [%#slib'5] UInt64.t'int byt + UInt64.t'int b
+  <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib'0] {ops} {[%#slib] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &_16 <- _x ] s1)
+    | s1 = UInt64.add [%#slib'1] {lat} {l} (fun (_x: UInt64.t) -> [ &_18 <- _x ] s2)
+    | s2 = UInt64.add [%#slib'2] {byt} {b} (fun (_x: UInt64.t) -> [ &_21 <- _x ] s3)
+    | s3 = [ &_ret <- { f0 = _16; f1 = _18; f2 = _21 } ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: tup3_u64_u64_u64 = Any.any_l ()
+  | & ops: UInt64.t = ops
+  | & lat: UInt64.t = lat
+  | & byt: UInt64.t = byt
+  | & l: UInt64.t = l
+  | & b: UInt64.t = b
+  | & _16: UInt64.t = Any.any_l ()
+  | & _18: UInt64.t = Any.any_l ()
+  | & _21: UInt64.t = Any.any_l () ])
+  [ return (result: tup3_u64_u64_u64) ->
+  {[@stop_split] [@expl:verify_bdf_telemetry_record__mutant ensures] [%#slib'6] UInt64.t'int result.f0
+    = UInt64.t'int ops + 2}
+    (! return {result}) ]

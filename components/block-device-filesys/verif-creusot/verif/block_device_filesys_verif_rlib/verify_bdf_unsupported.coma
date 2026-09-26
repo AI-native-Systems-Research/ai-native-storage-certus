@@ -1,0 +1,65 @@
+(* #"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 500 0 500 49 *)
+
+let%span slib = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 506 21 506 25
+let%span slib'0 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 505 27 505 58
+let%span slib'1 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 504 20 504 44
+let%span slib'2 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 503 20 503 44
+let%span slib'3 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 502 20 502 44
+let%span slib'4 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 499 10 499 24
+let%span slib'5 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 488 10 488 42
+let%span slib'6 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 489 10 489 42
+let%span slib'7 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 490 10 490 42
+let%span slib'8 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 491 10 491 49
+let%span slib'9 = "/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 492 10 492 44
+
+use creusot.prelude.Any
+
+type t_CmdKind = NsCreate | NsDelete | NsFormat | ControllerReset | Supported
+
+let is_unsupported (k: t_CmdKind) (return (x: bool)) = any
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:is_unsupported ensures] ([@stop_split] [@expl:is_unsupported ensures #0] [%#slib'5] k = NsCreate
+      -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #1] [%#slib'6] k = NsDelete -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #2] [%#slib'7] k = NsFormat -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #3] [%#slib'8] k = ControllerReset -> result = true)
+    /\ ([@stop_split] [@expl:is_unsupported ensures #4] [%#slib'9] k = Supported -> result = false)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_bdf_unsupported [#"/home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot/src/lib.rs" 500 0 500 49]
+  (k: t_CmdKind) (return (x: bool)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {k = NsCreate} (! bb10)
+    | br1 -> {k = NsDelete} (! bb9)
+    | br2 -> {k = NsFormat} (! bb8)
+    | br3 -> {k = ControllerReset} (! bb7)
+    | br4 -> {k = Supported} (! bb6) ]
+  | bb6 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ]
+  | bb7 = s0
+    [ s0 = [ &_7 <- ControllerReset ] s1
+    | s1 = is_unsupported [%#slib'0] {_7} (fun (_x: bool) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ]
+  | bb8 = s0
+    [ s0 = [ &_6 <- NsFormat ] s1
+    | s1 = is_unsupported [%#slib'1] {_6} (fun (_x: bool) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ]
+  | bb9 = s0
+    [ s0 = [ &_5 <- NsDelete ] s1
+    | s1 = is_unsupported [%#slib'2] {_5} (fun (_x: bool) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ]
+  | bb10 = s0
+    [ s0 = [ &_4 <- NsCreate ] s1
+    | s1 = is_unsupported [%#slib'3] {_4} (fun (_x: bool) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & k: t_CmdKind = k
+  | & _4: t_CmdKind = Any.any_l ()
+  | & _5: t_CmdKind = Any.any_l ()
+  | & _6: t_CmdKind = Any.any_l ()
+  | & _7: t_CmdKind = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_bdf_unsupported ensures] [%#slib'4] result = true}
+    (! return {result}) ]
