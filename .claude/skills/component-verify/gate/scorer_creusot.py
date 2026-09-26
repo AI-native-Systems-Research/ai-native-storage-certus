@@ -567,13 +567,24 @@ def score_property(p, ctx):
         worst = (m, out, wall, rss, timed_out, oomed)   # first failing module drives the verdict
         break
     if worst is None:
-        # all proved — anti-vacuity on the base id's mutant twin
-        mut = module_id(pid) + "__mutant"
-        if mut in present:
+        # All proved — now the anti-vacuity check on the base id's mutant twin.
+        #
+        # NAME COLLAPSE: `cargo creusot` renders a source module `verify_x__mutant` into
+        # `verify_x_mutant.coma` — the double underscore becomes a SINGLE one. This scorer used to
+        # look only for the double-underscore form, so the lookup never matched, `mut in present`
+        # was always false, and the vacuity check was SILENTLY SKIPPED for every Creusot property.
+        # Measured when this was found: four already-scored components shipped 34/20/29/23 mutant
+        # modules whose .coma were all emitted and never once executed by the gate. A check that
+        # silently does nothing is worse than no check, because it is reported as enforced.
+        # Accept either spelling, and require the FIRST one that exists to fail.
+        base = module_id(pid)
+        mut = next((m for m in (base + "_mutant", base + "__mutant") if m in present), None)
+        if mut:
             mok, _, _, _, _, _ = run_creusot(
                 mut, ctx["crate_dir"], ctx["cap"], mem_mb=ctx["mem_mb"], escalate=False)
             if mok:
-                return "UNRESOLVED", {"modules": mods}, "VACUOUS: mutant module also proved — strengthen the property"
+                return "UNRESOLVED", {"modules": mods}, (
+                    f"VACUOUS: mutant module {mut} also proved — strengthen the property")
         ev = {"modules": mods, "result": "Proved", "wall_clock_s": wall, "peak_rss_mb": rss, "lever": None}
         return "proved", ev, "scorer re-ran `cargo creusot` from source -> Proved"
 
