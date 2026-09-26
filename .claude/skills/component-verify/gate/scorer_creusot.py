@@ -608,6 +608,7 @@ def score_property(p, ctx):
 
     required = ctx["battery"]["failure_classes"][cls]["required_levers"]
     missing = []
+    lemma_only = []          # lemmas that proved while the property's own goal did not close
     for lever in required:
         lv = ctx["battery"]["levers"][lever]
         if lv.get("scorer_applied"):
@@ -631,12 +632,30 @@ def score_property(p, ctx):
         vok, _, vwall, vrss, _, _ = run_creusot(
             variant, ctx["crate_dir"], ctx["cap"], mem_mb=ctx["mem_mb"], cap_max=ctx["cap_max"])
         if vok:
+            # A lemma is NOT an alternative proof of the property — it is an auxiliary fact a proof
+            # may cite. The other code levers (__fmap, __trusted, __inv) re-prove the SAME obligation
+            # under a different model, so they legitimately discharge it; `lemma_<ID>` does not.
+            # Crediting one over-credits: measured here, verify_epo_inv_len_matches_chain reports
+            # `Goal ...: ✘ (1/2)` — 1 unproved file — while lemma_epo_inv_len_matches_chain reports
+            # Proved, and the property was being scored `proved` on the lemma's strength alone. A
+            # proved lemma only counts once the BASE module closes while citing it.
+            if variant.startswith("lemma_"):
+                lemma_only.append(variant)
+                continue
             ev = {"modules": [variant], "result": "Proved", "wall_clock_s": vwall, "peak_rss_mb": vrss, "lever": lever}
             return "proved", ev, f"lever '{lever}' variant '{variant}' discharged the obligation -> Proved"
     if missing:
         return "UNRESOLVED", {"modules": mods}, (
             f"tool-boundary INADMISSIBLE for failure class '{cls}': missing required lever artifacts {missing}. "
             f"Write every one as a runnable proof module before any boundary claim.")
+    if lemma_only:
+        # The auxiliary lemma discharges, the property's own goal does not. That is unfinished work,
+        # not a tool limit: the lemma exists precisely to be cited by the base proof, so the base
+        # must be made to close while citing it.
+        return "UNRESOLVED", {"modules": mods, "lemma_proved": lemma_only}, (
+            f"lemma(s) {lemma_only} proved but the property's own module did not close — a lemma is an "
+            f"auxiliary fact, not a proof of the obligation. Cite it from the base proof and make that "
+            f"close; do not credit the property on the lemma alone.")
     # every required lever applied/present and each still failed, signature not a known defeat
     sig = (re.search(r"(Goal \S+: ✘|unproved file|TIMEOUT after \d+s|OOM-KILLED at \d+M[^\n]*)", out) or [""])
     sig = sig.group(0) if hasattr(sig, "group") else "unclassified"
