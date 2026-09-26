@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_pop_front": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_arena_remove": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.013 }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_clear": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_index_mut_Vec_LruList_Global": {
+        "prover": "alt-ergo",
+        "time": 0.015
+      },
+      "vc_verify_lru_clear_empty": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

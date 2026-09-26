@@ -1,0 +1,20 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 246 0 246 68 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 245 10 245 29
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Handle = { pool: UInt32.t; index: UInt32.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_lru_track_handle_pool [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 246 0 246 68]
+  (pool'0: UInt32.t) (index'0: UInt32.t) (return (x: t_Handle)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- { pool = pool'0; index = index'0 } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Handle = Any.any_l () | & pool'0: UInt32.t = pool'0 | & index'0: UInt32.t = index'0 ])
+  [ return (result: t_Handle) -> {[@stop_split] [@expl:verify_lru_track_handle_pool ensures] [%#slib] result.pool
+    = pool'0}
+    (! return {result}) ]

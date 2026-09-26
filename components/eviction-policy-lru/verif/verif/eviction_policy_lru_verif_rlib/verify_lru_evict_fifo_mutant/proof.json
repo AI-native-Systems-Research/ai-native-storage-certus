@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_pop_front": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_lru_evict_fifo__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

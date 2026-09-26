@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_remove": { "prover": "z3", "time": 0.051 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_index_mut_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_push_u32": { "prover": "alt-ergo", "time": 0.014 }
+    }
+  }
+}

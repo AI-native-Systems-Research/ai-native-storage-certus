@@ -1,0 +1,41 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 522 0 522 79 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 523 22 523 23
+let%span slib'0 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 524 15 524 19
+let%span slib'1 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 526 4 526 8
+let%span slib'2 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 520 10 520 26
+let%span slib'3 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 521 10 521 16
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Vec_LruList_Global
+
+type t_Pools = { pools: t_Vec_LruList_Global }
+
+predicate resolve_refmut_Pools [@inline:trivial] (_1: MutBorrow.t t_Pools) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Pools
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_lru_batch_empty_ok [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 522 0 522 79]
+  (self_: MutBorrow.t t_Pools) (handles_len: UInt64.t) (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = -{resolve_refmut_Pools self_}- s1
+    | s1 = [ &_7 <- handles_len = ([%#slib] (0: UInt64.t)) ] s2
+    | s2 = any [ br0 -> {_7 = false} (! bb2) | br1 -> {_7} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib'0] true ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- [%#slib'1] true ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & self_: MutBorrow.t t_Pools = self_
+  | & handles_len: UInt64.t = handles_len
+  | & _7: bool = Any.any_l () ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:verify_lru_batch_empty_ok ensures] ([@stop_split] [@expl:verify_lru_batch_empty_ok ensures #0] [%#slib'2] self_.final
+      = self_.current)
+    /\ ([@stop_split] [@expl:verify_lru_batch_empty_ok ensures #1] [%#slib'3] result)}
+    (! return {result}) ]

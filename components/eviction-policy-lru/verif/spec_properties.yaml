@@ -1,0 +1,260 @@
+# Blind spec extraction for eviction-policy-lru.
+# Source artifact: the component spec ONLY (no code, no interface, no prior inventory seen).
+# One record per obligation; NV ledger at the end. Avoid the literal tokens that a plain
+# editor Cmd+F would miscount in prose here.
+component:  eviction-policy-lru
+source:     spec
+artifact:   components/eviction-policy-lru/specs/001-lru-eviction-policy/spec.md
+pin:        f3de84aa
+method:     blind-extraction
+generated:  2026-09-22
+counts: {total: 30, methods: 9, verifiable: 24, not_verifiable: 6}
+properties:
+  - id:         SPEC-CREATEPOOL-SEQ
+    subject:    create_pool
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling create_pool returns a brand-new pool identifier, and identifiers are handed out in
+      sequence starting at zero: the first call returns 0, the second 1, and so on, each pool
+      distinct from every other.
+    traces:     [FR-001]
+  - id:         SPEC-TRACK-REGISTER
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling track(pool, key, semantics) on an existing pool registers the key as the
+      most-recently-used entry in that pool and returns an opaque handle that can later be used to
+      touch or remove that exact entry.
+    traces:     [FR-002]
+  - id:         SPEC-TRACK-NONIDEMPOTENT
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Tracking a key that is already tracked in the same pool is NOT idempotent for this LRU
+      policy: it creates a second, independent entry and returns a new handle rather than
+      refreshing the existing entry, so the pool's entry count rises by one on every track call.
+    traces:     [FR-002]
+  - id:         SPEC-TRACK-IGNORES-SEMANTICS
+    subject:    track
+    kind:       frame
+    verifiable: true
+    statement:  >
+      The BlockSemantics hint passed to track (for example its session_id) has no effect on this
+      LRU policy's behavior or ordering: two track calls that differ only in their semantics
+      argument produce the same resulting order and entry count.
+    traces:     [FR-002]
+  - id:         SPEC-TOUCH-MRU
+    subject:    touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling touch on a live handle moves the referenced entry to the most-recently-used position
+      in its pool, so that after the touch it is the last, not the first, of the pool's entries to
+      be chosen for eviction.
+    traces:     [FR-003, US1-AS2]
+  - id:         SPEC-REMOVE-UNLINK
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling remove on a live handle unlinks the referenced entry from its pool's ordering, so
+      that entry no longer counts toward the pool and is never subsequently returned for eviction.
+    traces:     [FR-004, US1-AS3]
+  - id:         SPEC-EVICT-LRU
+    subject:    identify_next_to_evict
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling identify_next_to_evict on a non-empty pool removes and returns the least-recently-used
+      key of that pool, and after entries are tracked without any touch this is exactly the
+      first-tracked (oldest) key, giving first-in-first-out eviction order.
+    traces:     [FR-005, US1-AS1]
+  - id:         SPEC-EVICT-EMPTY-NONE
+    subject:    identify_next_to_evict
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling identify_next_to_evict on an empty pool returns None (there is nothing to evict) and
+      leaves the pool empty.
+    traces:     [FR-005]
+  - id:         SPEC-CANDIDATES-NONDESTRUCTIVE
+    subject:    get_eviction_candidates
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Calling get_eviction_candidates returns candidate keys for inspection WITHOUT removing any of
+      them: the pool's entries and their count are exactly the same after the call as before.
+    traces:     [FR-006]
+  - id:         SPEC-CANDIDATES-UPTO-N
+    subject:    get_eviction_candidates
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling get_eviction_candidates(pool, n) returns up to n of the least-recently-used keys of
+      the pool, ordered oldest first, and never more than n or more than the pool actually holds.
+    traces:     [FR-006]
+  - id:         SPEC-LEN-COUNT
+    subject:    len
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling len(pool) returns the number of entries currently active in that pool.
+    traces:     [FR-007]
+  - id:         SPEC-CLEAR-EMPTY
+    subject:    clear_pool
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling clear_pool removes every entry from the pool, resetting it to empty so that its
+      length is zero and eviction returns None afterwards.
+    traces:     [FR-008]
+  - id:         SPEC-TRACK-INVALIDPOOL
+    subject:    track
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Calling track with a pool identifier that does not name an existing pool returns an
+      InvalidPool error carrying that identifier, and changes nothing.
+    traces:     [FR-009]
+  - id:         SPEC-TOUCH-INVALIDPOOL
+    subject:    touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Calling touch with a handle that names a non-existent pool returns an InvalidPool error and
+      changes nothing.
+    traces:     [FR-009]
+  - id:         SPEC-REMOVE-INVALIDPOOL
+    subject:    remove
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Calling remove with a handle that names a non-existent pool returns an InvalidPool error and
+      changes nothing.
+    traces:     [FR-009]
+  - id:         SPEC-EVICT-DEGRADE
+    subject:    identify_next_to_evict
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Calling identify_next_to_evict with a pool identifier that does not name an existing pool
+      degrades gracefully by returning None rather than signalling an error.
+    traces:     [FR-009]
+  - id:         SPEC-CANDIDATES-DEGRADE
+    subject:    get_eviction_candidates
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Calling get_eviction_candidates with a pool identifier that does not name an existing pool
+      degrades gracefully by returning an empty list rather than signalling an error.
+    traces:     [FR-009]
+  - id:         SPEC-LEN-DEGRADE
+    subject:    len
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Calling len with a pool identifier that does not name an existing pool degrades gracefully by
+      returning 0 rather than signalling an error.
+    traces:     [FR-009]
+  - id:         SPEC-CLEAR-DEGRADE
+    subject:    clear_pool
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Calling clear_pool with a pool identifier that does not name an existing pool degrades
+      gracefully by doing nothing rather than signalling an error or panicking.
+    traces:     [FR-009]
+  - id:         SPEC-TOUCH-STALE-IDEMPOTENT
+    subject:    touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling touch on a handle whose entry has already been removed is idempotent: it returns
+      success, does nothing, and never panics.
+    traces:     [FR-010]
+  - id:         SPEC-REMOVE-STALE-IDEMPOTENT
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling remove on a handle whose entry has already been removed is idempotent: it returns
+      success, does nothing (the count does not drop below zero), and never panics.
+    traces:     [FR-010]
+  - id:         SPEC-FREELIST-RECYCLE
+    subject:    track
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Slots freed by removing entries are recycled by later track calls, so a long-lived pool with
+      equal numbers of tracks and removes does not grow its backing storage without bound.
+    traces:     [FR-011]
+  - id:         SPEC-BATCH-MRU
+    subject:    batch_touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Calling batch_touch with a list of handles marks every referenced entry as most-recently-used,
+      as if each had been touched individually, and an empty list is accepted as a successful no-op.
+    traces:     [FR-012]
+  - id:         SPEC-POOL-ISOLATION
+    subject:    pool-isolation
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Pools are independent eviction domains: any operation performed on one pool (tracking,
+      touching, removing, evicting, or clearing) leaves the entries and ordering of every other pool
+      completely unchanged.
+    traces:     [US2-AS1, US2-AS2, NFR-003]
+  # ---- not-verifiable ledger ----
+  - id:         NV-SPEC-1
+    scope:      "O(1) time complexity of single-entry operations"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Wall-clock time complexity (that track, touch, remove, and identify_next_to_evict are
+      constant-time) is a performance characteristic, not a machine-checkable functional assertion.
+    traces:     [NFR-001, FR-003, FR-004, FR-005]
+  - id:         NV-SPEC-2
+    scope:      "concurrent access without corruption (thread-safety)"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Absence of data corruption under genuine multi-threaded concurrency is not decidable by a
+      single-threaded functional verifier; it requires a dedicated concurrency model checker (Loom)
+      and is delegated there rather than proved in this component's own harnesses.
+    traces:     [US3-AS1, NFR-002, SC-002]
+  - id:         NV-SPEC-3
+    scope:      "per-pool lock granularity / no cross-pool contention"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      That operations on different pools do not contend for the same lock is a performance and
+      scheduling property, not a functional assertion with an observable counterexample.
+    traces:     [NFR-003]
+  - id:         NV-SPEC-4
+    scope:      "Certus component-model conformance"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Conformance to the component model (define_component!, provides IEvictionPolicy, ILogger
+      receptacle) is a structural/build-time fact enforced by the framework and compiler, not a
+      runtime behavioral property with a counterexample.
+    traces:     [NFR-004, SC-004]
+  - id:         NV-SPEC-5
+    scope:      "existing unit and integration tests pass"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      That the crate's own tests pass is a meta-claim about a test suite, not a component-behavior
+      obligation extracted for verification.
+    traces:     [SC-001]
+  - id:         NV-SPEC-6
+    scope:      "clippy and rustfmt are clean"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Lint and formatting cleanliness are static style checks, not behavioral properties.
+    traces:     [SC-003]

@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_push_back": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_lru_freelist_recycle": {
+        "prover": "alt-ergo",
+        "time": 0.021
+      }
+    }
+  }
+}

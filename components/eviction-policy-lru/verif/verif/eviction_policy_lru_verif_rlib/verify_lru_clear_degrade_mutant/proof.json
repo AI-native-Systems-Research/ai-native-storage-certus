@@ -1,0 +1,26 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_clear": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_index_mut_Vec_LruList_Global": {
+        "prover": "alt-ergo",
+        "time": 0.015
+      },
+      "vc_len_LruList": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_lru_clear_degrade__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              null,
+              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.027 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

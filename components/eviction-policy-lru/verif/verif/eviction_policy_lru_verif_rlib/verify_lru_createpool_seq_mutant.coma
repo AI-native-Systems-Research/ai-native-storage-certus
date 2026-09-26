@@ -1,0 +1,85 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 224 0 224 68 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 225 13 225 30
+let%span slib'0 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 226 21 226 34
+let%span slib'1 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 226 4 226 35
+let%span slib'2 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 223 10 223 46
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt32
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_LruList_Global
+
+type t_Pools = { pools: t_Vec_LruList_Global }
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Vec_u32_Global
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_LruList_Global (self: t_Vec_LruList_Global) : Seq.seq t_LruList
+
+axiom view_Vec_LruList_Global_spec:
+  forall self: t_Vec_LruList_Global [view_Vec_LruList_Global self]. [%#svec'1] Seq.length (view_Vec_LruList_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_LruList (self_: t_Vec_LruList_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_LruList_Global self_)}
+    (! return {result}) ]
+
+let arena_fresh (return (x: t_LruList)) = any [ return (result: t_LruList) -> (! return {result}) ]
+
+let push_LruList (self_: MutBorrow.t t_Vec_LruList_Global) (v: t_LruList) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'0] view_Vec_LruList_Global self_.final
+    = Seq.snoc (view_Vec_LruList_Global self_.current) v}
+    (! return {result}) ]
+
+predicate resolve_refmut_Pools [@inline:trivial] (_1: MutBorrow.t t_Pools) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Pools
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_lru_createpool_seq__mutant [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 224 0 224 68]
+  (self_: MutBorrow.t t_Pools) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = len_LruList [%#slib] {self_.current.pools} (fun (_x: UInt64.t) -> [ &id <- _x ] s1)
+    | s1 = arena_fresh [%#slib'0] (fun (_x: t_LruList) -> [ &_8 <- _x ] s2)
+    | s2 = MutBorrow.borrow_final <t_Vec_LruList_Global> {self_.current.pools}
+        {MutBorrow.inherit_id (MutBorrow.get_id self_) 0}
+        (fun (_bor: MutBorrow.t t_Vec_LruList_Global) ->
+          [ &_7 <- _bor ] [ &self_ <- { self_ with current = { pools = _bor.final } } ] s3)
+    | s3 = push_LruList [%#slib'1] {_7} {_8} (fun (_x: ()) -> [ &_6 <- _x ] s4)
+    | s4 = -{resolve_refmut_Pools self_}- s5
+    | s5 = [ &_ret <- id ] s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & self_: MutBorrow.t t_Pools = self_
+  | & id: UInt64.t = Any.any_l ()
+  | & _6: () = Any.any_l ()
+  | & _7: MutBorrow.t t_Vec_LruList_Global = Any.any_l ()
+  | & _8: t_LruList = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_lru_createpool_seq__mutant ensures] [%#slib'2] UInt64.t'int result
+    = Seq.length (view_Vec_LruList_Global self_.current.pools) + 1}
+    (! return {result}) ]

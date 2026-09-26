@@ -1,0 +1,51 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 431 0 431 83 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 432 4 432 30
+let%span slib'0 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 429 10 429 40
+let%span slib'1 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 430 10 430 26
+let%span slib'2 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 206 10 206 67
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Vec_u32_Global
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+predicate resolve_refmut_LruList [@inline:trivial] (_1: MutBorrow.t t_LruList) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_LruList
+
+let arena_peek_count (self_: t_LruList) (n: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:arena_peek_count ensures] [%#slib'2] UInt64.t'int result
+    = (if UInt64.t'int n <= UInt64.t'int self_.len then UInt64.t'int n else UInt64.t'int self_.len)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_lru_candidates_nondestructive [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 431 0 431 83]
+  (self_: MutBorrow.t t_LruList) (n: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = -{resolve_refmut_LruList self_}- s1
+    | s1 = arena_peek_count [%#slib] {self_.current} {n} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & self_: MutBorrow.t t_LruList = self_ | & n: UInt64.t = n ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_lru_candidates_nondestructive ensures] ([@stop_split] [@expl:verify_lru_candidates_nondestructive ensures #0] [%#slib'0] UInt64.t'int self_.final.len
+      = UInt64.t'int self_.current.len)
+    /\ ([@stop_split] [@expl:verify_lru_candidates_nondestructive ensures #1] [%#slib'1] self_.final = self_.current)}
+    (! return {result}) ]

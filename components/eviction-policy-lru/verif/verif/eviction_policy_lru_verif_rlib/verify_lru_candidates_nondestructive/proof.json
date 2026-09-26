@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_peek_count": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_lru_candidates_nondestructive": {
+        "prover": "alt-ergo",
+        "time": 0.019
+      }
+    }
+  }
+}

@@ -1,0 +1,1549 @@
+component: eviction-policy-lru
+interface: IEvictionPolicy
+pin: f3de84aa
+generated: 2026-09-22
+spec_source: components/eviction-policy-lru/specs/001-lru-eviction-policy/spec.md
+code_source: components/eviction-policy-lru/src/**
+tools:
+- creusot
+- kani
+counts:
+  methods: 9
+  spec_total: 24
+  code_total: 34
+  unified: 28
+  attachments: 61
+  not_verifiable: 6
+reconciliation:
+  spec_only:
+  - id: SPEC-TRACK-IGNORES-SEMANTICS
+    note: 'The spec''s requirement that the BlockSemantics hint is ignored was folded into LRU-TRACK-OK-INC
+      rather than kept as a separate id: semantics is a dead parameter in the code (bound as _semantics
+      and never read), so "track behaves identically regardless of the semantics value" is subsumed by
+      every track postcondition being stated without reference to it. Recorded here so the spec obligation
+      is accounted for, not dropped.
+
+      '
+  code_only:
+  - id: LRU-BATCH-INVALIDPOOL
+    note: 'The batch_touch InvalidPool error path is present in the code (lib.rs:98-101, 108-112) but
+      FR-012 does not mention it; kept as a code-only observable error-case.
+
+      '
+  - id: LRU-INV-LINK
+    note: 'The full doubly-linked-list structural invariant (len equals active count; head/tail/prev/
+      next in range) is a code-level obligation; the spec only alludes to the active flag in its Implementation
+      Notes. Kept as a code-only global invariant that every mutator preserves.
+
+      '
+  divergent:
+  - id: LRU-TRACK-NONIDEMPOTENT
+    note: 'The shared IEvictionPolicy interface doc states re-registration is idempotent, but this LRU
+      policy deliberately diverges (FR-002, interfaces commit 1da4e777): track always push_backs. The
+      property is stated to match the CODE''s actual non-idempotent behavior, which the spec endorses.
+
+      '
+  refinement_gaps: []
+  implementing_obligation_map:
+    LRU-TRACK-OK-INC:
+    - CODE-TRACK-OK-INC
+    - CODE-PUSHBACK-LEN-INC
+    LRU-TRACK-HANDLE-POOL:
+    - CODE-TRACK-HANDLE-POOL
+    LRU-TRACK-NONIDEMPOTENT:
+    - CODE-TRACK-PUSHBACK-NEW
+    LRU-EVICT-FIFO:
+    - CODE-EVICT-POPFRONT
+    - CODE-POP-HEAD
+    - CODE-PUSHBACK-TAIL
+    LRU-EVICT-EMPTY-NONE:
+    - CODE-EVICT-POPFRONT
+    - CODE-EVICT-DEGRADE
+    LRU-TOUCH-MRU:
+    - CODE-TOUCH-OK
+    - CODE-MOVE-TO-TAIL
+    - CODE-MOVE-TAIL-NOOP
+    LRU-TOUCH-STALE-IDEMPOTENT:
+    - CODE-MOVE-INACTIVE-NOOP
+    LRU-BATCH-MRU:
+    - CODE-BATCH-MOVESALL
+    LRU-REMOVE-OK-DEC:
+    - CODE-REMOVE-OK-DEC
+    - CODE-REMOVE-DEC
+    LRU-REMOVE-STALE-IDEMPOTENT:
+    - CODE-REMOVE-INACTIVE-NOOP
+    LRU-REMOVE-NEVER-EVICTED:
+    - CODE-REMOVE-DEC
+    - CODE-REMOVE-DEACTIVATE
+    LRU-CANDIDATES-NONDESTRUCTIVE:
+    - CODE-CANDIDATES-PEEK
+    - CODE-PEEK-NONDESTRUCTIVE
+    LRU-CANDIDATES-COUNT-ORDER:
+    - CODE-PEEK-COUNT-ORDER
+    LRU-CLEAR-EMPTY:
+    - CODE-CLEAR-RESETS
+    - CODE-CLEAR-EMPTY
+    LRU-FREELIST-RECYCLE:
+    - CODE-PUSHBACK-RECYCLE
+    LRU-INV-LINK:
+    - CODE-LEN-EQ-ACTIVE
+    LRU-POOL-ISOLATION:
+    - CODE-POOL-ISOLATION
+  method_ledger:
+    create_pool:
+    - LRU-CREATEPOOL-SEQ
+    - LRU-POOL-ISOLATION
+    track:
+    - LRU-TRACK-OK-INC
+    - LRU-TRACK-HANDLE-POOL
+    - LRU-TRACK-NONIDEMPOTENT
+    - LRU-TRACK-INVALIDPOOL
+    - LRU-EVICT-FIFO
+    - LRU-FREELIST-RECYCLE
+    - LRU-INV-LINK
+    - LRU-POOL-ISOLATION
+    - LRU-CONCURRENT-INTEGRITY
+    touch:
+    - LRU-TOUCH-MRU
+    - LRU-TOUCH-INVALIDPOOL
+    - LRU-TOUCH-STALE-IDEMPOTENT
+    - LRU-INV-LINK
+    - LRU-POOL-ISOLATION
+    - LRU-CONCURRENT-INTEGRITY
+    batch_touch:
+    - LRU-BATCH-EMPTY-OK
+    - LRU-BATCH-MRU
+    - LRU-BATCH-INVALIDPOOL
+    - LRU-INV-LINK
+    - LRU-POOL-ISOLATION
+    - LRU-CONCURRENT-INTEGRITY
+    remove:
+    - LRU-REMOVE-OK-DEC
+    - LRU-REMOVE-NEVER-EVICTED
+    - LRU-REMOVE-INVALIDPOOL
+    - LRU-REMOVE-STALE-IDEMPOTENT
+    - LRU-FREELIST-RECYCLE
+    - LRU-INV-LINK
+    - LRU-POOL-ISOLATION
+    - LRU-CONCURRENT-INTEGRITY
+    identify_next_to_evict:
+    - LRU-EVICT-FIFO
+    - LRU-EVICT-EMPTY-NONE
+    - LRU-TOUCH-MRU
+    - LRU-REMOVE-NEVER-EVICTED
+    - LRU-BATCH-MRU
+    - LRU-CLEAR-EMPTY
+    - LRU-INV-LINK
+    - LRU-POOL-ISOLATION
+    - LRU-CONCURRENT-INTEGRITY
+    get_eviction_candidates:
+    - LRU-CANDIDATES-NONDESTRUCTIVE
+    - LRU-CANDIDATES-COUNT-ORDER
+    - LRU-CANDIDATES-DEGRADE
+    - LRU-POOL-ISOLATION
+    - LRU-CONCURRENT-INTEGRITY
+    len:
+    - LRU-LEN-COUNT
+    - LRU-LEN-DEGRADE
+    - LRU-TRACK-OK-INC
+    - LRU-REMOVE-OK-DEC
+    - LRU-REMOVE-STALE-IDEMPOTENT
+    - LRU-EVICT-FIFO
+    - LRU-CANDIDATES-NONDESTRUCTIVE
+    - LRU-CLEAR-EMPTY
+    - LRU-POOL-ISOLATION
+    - LRU-CONCURRENT-INTEGRITY
+    clear_pool:
+    - LRU-CLEAR-EMPTY
+    - LRU-CLEAR-DEGRADE
+    - LRU-INV-LINK
+    - LRU-POOL-ISOLATION
+    - LRU-CONCURRENT-INTEGRITY
+run:
+  gate_commit: 7757ae4b
+  gate_branch: skills/verify-methodology-to-unstable
+  creusot:
+    scored_by: scorer_creusot
+    command: scorer_creusot.py /home/cornel/rescore-20260925/eviction-policy-lru/verif --crate-dir /home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif
+      --cap-seconds 60 --cap-max 300
+    started: '2026-09-25T18:09:52-07:00'
+    finished: '2026-09-25T18:10:08-07:00'
+    creusot: v0.11.0-169-g9cf662ce6
+    why3: Why3 platform, version 1.8.2+git
+    provers:
+    - Alt-Ergo 2.6.2
+    - CVC4 1.8
+    - CVC5 1.3.1
+    - Coq 8.20.1
+    - Z3 4.16.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+  kani:
+    scored_by: scorer_kani
+    command: scorer_kani.py /home/cornel/rescore-20260925/eviction-policy-lru/verif --component-dir /home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru
+      --cap-seconds 60 --cap-max 300
+    started: '2026-09-25T18:10:08-07:00'
+    finished: '2026-09-25T18:13:25-07:00'
+    kani_version: cargo-kani 0.67.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+properties:
+- id: LRU-CREATEPOOL-SEQ
+  subject: create_pool
+  methods:
+  - create_pool
+  object_fn: EvictionPolicyLruComponent::create_pool -> Vec::push (id = pools.len())
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-001
+    code:
+    - lib.rs:44-54
+  statement: 'create_pool hands out pool identifiers in sequence starting at zero (0, 1, 2, ...), each
+    new pool distinct from every existing one, and each newly created pool starts empty.
+
+    '
+  traces:
+  - FR-001
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_createpool_seq
+      result: Proved
+      wall_clock_s: 1.17
+      peak_rss_mb: 145
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_createpool_seq
+      result: SUCCESS
+      wall_clock_s: 2.63
+      peak_rss_mb: 70
+    _scored_by: scorer_kani
+- id: LRU-TRACK-OK-INC
+  subject: track
+  methods:
+  - track
+  - len
+  object_fn: EvictionPolicyLruComponent::track -> LruList::push_back
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-002
+    code:
+    - lib.rs:56-74
+    - lru_list.rs:37-67
+  statement: 'Calling track on an existing pool registers the key and returns a success handle, and the
+    pool''s active-entry count (reported by len) increases by exactly one. The behavior does not depend
+    on the BlockSemantics hint, which this policy ignores.
+
+    '
+  traces:
+  - FR-002
+  - FR-007
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_track_ok_inc
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_track_ok_inc
+      result: SUCCESS
+      wall_clock_s: 2.4
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LRU-TRACK-HANDLE-POOL
+  subject: track
+  methods:
+  - track
+  object_fn: EvictionPolicyLruComponent::track -> EvictionHandle::new
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-002
+    code:
+    - lib.rs:72-73
+  statement: 'The handle returned by a successful track carries the same pool identifier that was passed
+    in, so a later touch or remove through that handle is directed at the correct pool.
+
+    '
+  traces:
+  - FR-002
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_track_handle_pool
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_track_handle_pool
+      result: SUCCESS
+      wall_clock_s: 0.57
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LRU-TRACK-NONIDEMPOTENT
+  subject: track
+  methods:
+  - track
+  - len
+  object_fn: EvictionPolicyLruComponent::track -> LruList::push_back (unconditional)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-002
+    code:
+    - lib.rs:72
+  statement: 'Tracking a key that is already tracked in the same pool is deliberately NOT idempotent for
+    this LRU policy: it creates a second independent entry and returns a new handle, so tracking the same
+    key twice raises the pool''s entry count by two, not one.
+
+    '
+  traces:
+  - FR-002
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_track_nonidempotent
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_track_nonidempotent
+      result: SUCCESS
+      wall_clock_s: 2.55
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LRU-TRACK-INVALIDPOOL
+  subject: track
+  methods:
+  - track
+  object_fn: EvictionPolicyLruComponent::track -> Vec::get / EvictionPolicyError::InvalidPool
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-009
+    code:
+    - lib.rs:63-70
+  statement: 'Calling track with a pool identifier that names no existing pool returns an InvalidPool
+    error carrying that identifier and changes no pool.
+
+    '
+  traces:
+  - FR-009
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_track_invalidpool
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_track_invalidpool
+      result: SUCCESS
+      wall_clock_s: 2.86
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LRU-TOUCH-MRU
+  subject: touch
+  methods:
+  - touch
+  - identify_next_to_evict
+  object_fn: EvictionPolicyLruComponent::touch -> LruList::move_to_back
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-003
+    - US1-AS2
+    code:
+    - lib.rs:76-90
+    - lru_list.rs:70-96
+  statement: 'Calling touch on a live handle moves that entry to the most-recently-used position, so a
+    subsequent eviction returns some other, older entry first and the touched entry is deferred; the pool''s
+    entry count does not change.
+
+    '
+  traces:
+  - FR-003
+  - US1-AS2
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_touch_mru
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_touch_mru
+      result: SUCCESS
+      wall_clock_s: 8.1
+      peak_rss_mb: 275
+    _scored_by: scorer_kani
+- id: LRU-TOUCH-INVALIDPOOL
+  subject: touch
+  methods:
+  - touch
+  object_fn: EvictionPolicyLruComponent::touch -> Vec::get / EvictionPolicyError::InvalidPool
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-009
+    code:
+    - lib.rs:78-86
+  statement: 'Calling touch with a handle whose pool identifier names no existing pool returns an InvalidPool
+    error and changes no pool.
+
+    '
+  traces:
+  - FR-009
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_touch_invalidpool
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_touch_invalidpool
+      result: SUCCESS
+      wall_clock_s: 2.71
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LRU-TOUCH-STALE-IDEMPOTENT
+  subject: touch
+  methods:
+  - touch
+  object_fn: EvictionPolicyLruComponent::touch -> LruList::move_to_back (inactive guard)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-010
+    code:
+    - lru_list.rs:70-73
+  statement: 'Calling touch on a handle whose entry has already been removed is idempotent: it returns
+    success, leaves the pool unchanged, and never panics.
+
+    '
+  traces:
+  - FR-010
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_touch_stale_idempotent
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_touch_stale_idempotent
+      result: SUCCESS
+      wall_clock_s: 6.65
+      peak_rss_mb: 212
+    _scored_by: scorer_kani
+- id: LRU-REMOVE-OK-DEC
+  subject: remove
+  methods:
+  - remove
+  - len
+  object_fn: EvictionPolicyLruComponent::remove -> LruList::remove
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-004
+    code:
+    - lib.rs:120-134
+    - lru_list.rs:121-145
+  statement: 'Calling remove on a live handle unlinks that entry and returns success, and the pool''s
+    active-entry count (reported by len) decreases by exactly one.
+
+    '
+  traces:
+  - FR-004
+  - FR-007
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_remove_ok_dec
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_remove_ok_dec
+      result: SUCCESS
+      wall_clock_s: 3.88
+      peak_rss_mb: 66
+    _scored_by: scorer_kani
+- id: LRU-REMOVE-NEVER-EVICTED
+  subject: remove
+  methods:
+  - remove
+  - identify_next_to_evict
+  object_fn: EvictionPolicyLruComponent::remove -> LruList::remove; identify_next_to_evict -> pop_front
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - US1-AS3
+    - FR-004
+    code:
+    - lru_list.rs:121-145
+  statement: 'Once an entry has been removed, it is never returned by any later eviction from its pool.
+
+    '
+  traces:
+  - US1-AS3
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_remove_never_evicted
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_remove_never_evicted
+      result: SUCCESS
+      wall_clock_s: 9.49
+      peak_rss_mb: 308
+    _scored_by: scorer_kani
+- id: LRU-REMOVE-INVALIDPOOL
+  subject: remove
+  methods:
+  - remove
+  object_fn: EvictionPolicyLruComponent::remove -> Vec::get / EvictionPolicyError::InvalidPool
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-009
+    code:
+    - lib.rs:122-130
+  statement: 'Calling remove with a handle whose pool identifier names no existing pool returns an InvalidPool
+    error and changes no pool.
+
+    '
+  traces:
+  - FR-009
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_remove_invalidpool
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_remove_invalidpool
+      result: SUCCESS
+      wall_clock_s: 2.7
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LRU-REMOVE-STALE-IDEMPOTENT
+  subject: remove
+  methods:
+  - remove
+  - len
+  object_fn: EvictionPolicyLruComponent::remove -> LruList::remove (inactive guard)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-010
+    code:
+    - lru_list.rs:121-124
+  statement: 'Calling remove on a handle whose entry has already been removed is idempotent: it returns
+    success, the count does not change (and never drops below zero), and it never panics.
+
+    '
+  traces:
+  - FR-010
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_remove_stale_idempotent
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_remove_stale_idempotent
+      result: SUCCESS
+      wall_clock_s: 6.35
+      peak_rss_mb: 180
+    _scored_by: scorer_kani
+- id: LRU-EVICT-FIFO
+  subject: identify_next_to_evict
+  methods:
+  - identify_next_to_evict
+  - track
+  - len
+  object_fn: EvictionPolicyLruComponent::identify_next_to_evict -> LruList::pop_front
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: spec+code
+  source:
+    spec:
+    - FR-005
+    - US1-AS1
+    code:
+    - lib.rs:136-141
+    - lru_list.rs:99-104
+  statement: 'When entries are tracked without any intervening touch, identify_next_to_evict returns and
+    removes them in the exact order they were tracked (first-in-first-out / least-recently-used first),
+    decreasing the pool''s entry count by one each time.
+
+    '
+  traces:
+  - FR-005
+  - US1-AS1
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_evict_fifo
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_evict_fifo
+      result: SUCCESS
+      wall_clock_s: 8.65
+      peak_rss_mb: 309
+    _scored_by: scorer_kani
+- id: LRU-EVICT-EMPTY-NONE
+  subject: identify_next_to_evict
+  methods:
+  - identify_next_to_evict
+  object_fn: EvictionPolicyLruComponent::identify_next_to_evict -> Vec::get? / pop_front
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-005
+    - FR-009
+    code:
+    - lib.rs:136-141
+  statement: 'Calling identify_next_to_evict on a pool that is empty, or on a pool identifier that names
+    no existing pool, returns None and removes nothing.
+
+    '
+  traces:
+  - FR-005
+  - FR-009
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_evict_empty_none
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_evict_empty_none
+      result: SUCCESS
+      wall_clock_s: 1.89
+      peak_rss_mb: 61
+    _scored_by: scorer_kani
+- id: LRU-CANDIDATES-NONDESTRUCTIVE
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  - len
+  object_fn: EvictionPolicyLruComponent::get_eviction_candidates -> LruList::peek_front_n
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-006
+    code:
+    - lib.rs:143-152
+    - lru_list.rs:107-118
+  statement: 'Calling get_eviction_candidates returns candidate keys for inspection without removing any
+    of them: the pool''s entries and its count are exactly the same after the call as before.
+
+    '
+  traces:
+  - FR-006
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_candidates_nondestructive
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_candidates_nondestructive
+      result: SUCCESS
+      wall_clock_s: 3.83
+      peak_rss_mb: 66
+    _scored_by: scorer_kani
+- id: LRU-CANDIDATES-COUNT-ORDER
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  object_fn: EvictionPolicyLruComponent::get_eviction_candidates -> LruList::peek_front_n
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-006
+    code:
+    - lru_list.rs:107-118
+  statement: 'Calling get_eviction_candidates(pool, n) returns the least-recently-used keys of the pool,
+    oldest first, and never returns more than n keys or more than the pool actually holds.
+
+    '
+  traces:
+  - FR-006
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_candidates_count_order
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_candidates_count_order
+      result: SUCCESS
+      wall_clock_s: 5.9
+      peak_rss_mb: 158
+    _scored_by: scorer_kani
+- id: LRU-CANDIDATES-DEGRADE
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  object_fn: EvictionPolicyLruComponent::get_eviction_candidates -> Vec::get (None arm)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-009
+    code:
+    - lib.rs:150
+  statement: 'Calling get_eviction_candidates with a pool identifier that names no existing pool degrades
+    gracefully by returning an empty list.
+
+    '
+  traces:
+  - FR-009
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_candidates_degrade
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_candidates_degrade
+      result: SUCCESS
+      wall_clock_s: 18.32
+      peak_rss_mb: 1229
+    _scored_by: scorer_kani
+- id: LRU-LEN-COUNT
+  subject: len
+  methods:
+  - len
+  object_fn: EvictionPolicyLruComponent::len -> LruList::len
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-007
+    code:
+    - lib.rs:154-163
+    - lru_list.rs:157-159
+  statement: 'Calling len(pool) returns the number of entries currently active in that pool.
+
+    '
+  traces:
+  - FR-007
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_len_count
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_len_count
+      result: SUCCESS
+      wall_clock_s: 4.06
+      peak_rss_mb: 69
+    _scored_by: scorer_kani
+- id: LRU-LEN-DEGRADE
+  subject: len
+  methods:
+  - len
+  object_fn: EvictionPolicyLruComponent::len -> Vec::get (None arm)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-009
+    code:
+    - lib.rs:160-161
+  statement: 'Calling len with a pool identifier that names no existing pool degrades gracefully by returning
+    0.
+
+    '
+  traces:
+  - FR-009
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_len_degrade
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_len_degrade
+      result: SUCCESS
+      wall_clock_s: 2.63
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LRU-CLEAR-EMPTY
+  subject: clear_pool
+  methods:
+  - clear_pool
+  - len
+  - identify_next_to_evict
+  object_fn: EvictionPolicyLruComponent::clear_pool -> LruList::clear
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: spec+code
+  source:
+    spec:
+    - FR-008
+    code:
+    - lib.rs:165-171
+    - lru_list.rs:148-154
+  statement: 'Calling clear_pool removes every entry from the pool, so afterwards its length is zero,
+    eviction returns None, and the pool can still be tracked into again.
+
+    '
+  traces:
+  - FR-008
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_clear_empty
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_clear_empty
+      result: SUCCESS
+      wall_clock_s: 2.9
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LRU-CLEAR-DEGRADE
+  subject: clear_pool
+  methods:
+  - clear_pool
+  object_fn: EvictionPolicyLruComponent::clear_pool -> Vec::get (if-let guard)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-009
+    code:
+    - lib.rs:166-170
+  statement: 'Calling clear_pool with a pool identifier that names no existing pool degrades gracefully
+    by doing nothing and never panicking.
+
+    '
+  traces:
+  - FR-009
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_clear_degrade
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_clear_degrade
+      result: SUCCESS
+      wall_clock_s: 6.16
+      peak_rss_mb: 240
+    _scored_by: scorer_kani
+- id: LRU-BATCH-EMPTY-OK
+  subject: batch_touch
+  methods:
+  - batch_touch
+  object_fn: EvictionPolicyLruComponent::batch_touch (empty-slice fast path)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-012
+    code:
+    - lib.rs:92-95
+  statement: 'Calling batch_touch with an empty list of handles returns success immediately and changes
+    nothing.
+
+    '
+  traces:
+  - FR-012
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_batch_empty_ok
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_batch_empty_ok
+      result: SUCCESS
+      wall_clock_s: 5.15
+      peak_rss_mb: 130
+    _scored_by: scorer_kani
+- id: LRU-BATCH-MRU
+  subject: batch_touch
+  methods:
+  - batch_touch
+  - identify_next_to_evict
+  object_fn: EvictionPolicyLruComponent::batch_touch -> LruList::move_to_back (per handle)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-012
+    code:
+    - lib.rs:96-117
+  statement: 'Calling batch_touch with a list of handles marks every referenced entry as most-recently-used,
+    with the same effect as touching each one individually, in a single pass.
+
+    '
+  traces:
+  - FR-012
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_batch_mru
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_batch_mru
+      result: SUCCESS
+      wall_clock_s: 8.56
+      peak_rss_mb: 285
+    _scored_by: scorer_kani
+- id: LRU-BATCH-INVALIDPOOL
+  subject: batch_touch
+  methods:
+  - batch_touch
+  object_fn: EvictionPolicyLruComponent::batch_touch -> Vec::get / EvictionPolicyError::InvalidPool
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:98-101
+    - lib.rs:108-112
+  statement: 'Calling batch_touch where any handle names a pool identifier with no existing pool returns
+    an InvalidPool error for that identifier.
+
+    '
+  traces:
+  - FR-012
+  - FR-009
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_batch_invalidpool
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-routing
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_batch_invalidpool
+      result: SUCCESS
+      wall_clock_s: 2.62
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LRU-FREELIST-RECYCLE
+  subject: track
+  methods:
+  - track
+  - remove
+  object_fn: LruList::push_back (free.pop reuse) / LruList::remove (free.push)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-011
+    code:
+    - lru_list.rs:38-55
+    - lru_list.rs:143
+  statement: 'Slots freed by removing entries are recycled by later track calls, so a pool that alternates
+    tracking and removing does not grow its backing storage without bound: after a remove followed by
+    a track, the backing vector does not grow.
+
+    '
+  traces:
+  - FR-011
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_freelist_recycle
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_freelist_recycle
+      result: SUCCESS
+      wall_clock_s: 4.32
+      peak_rss_mb: 73
+    _scored_by: scorer_kani
+- id: LRU-INV-LINK
+  subject: lru-list-invariant
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: LruList (nodes/head/tail/free/len) structural invariant
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 6
+  origin: code-only
+  source:
+    code:
+    - lru_list.rs:17-23
+    - lru_list.rs:65
+    - lru_list.rs:144
+  statement: 'The list''s stored length always equals the number of active entries, and the head, tail,
+    and every node''s previous/next reference are either absent or a valid in-range node index; every
+    mutating operation preserves this so the structure never becomes corrupted or dangling.
+
+    '
+  traces:
+  - FR-011
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_inv_link
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_inv_link
+      result: SUCCESS
+      wall_clock_s: 9.07
+      peak_rss_mb: 212
+    _scored_by: scorer_kani
+- id: LRU-POOL-ISOLATION
+  subject: pool-isolation
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  object_fn: 'EvictionState.pools: Vec<Mutex<Pool>> (per-pool independence)'
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 9
+  origin: spec+code
+  source:
+    spec:
+    - US2-AS1
+    - US2-AS2
+    code:
+    - lib.rs:26-28
+  statement: 'Pools are independent eviction domains: any operation on one pool (create, track, touch,
+    remove, evict, inspect, measure, or clear) leaves the entries, ordering, and count of every other
+    pool completely unchanged.
+
+    '
+  traces:
+  - US2-AS1
+  - US2-AS2
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_lru_pool_isolation
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: bounded-arena
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_lru_pool_isolation
+      result: SUCCESS
+      wall_clock_s: 2.79
+      peak_rss_mb: 61
+    _scored_by: scorer_kani
+- id: LRU-CONCURRENT-INTEGRITY
+  subject: concurrent-integrity
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  object_fn: RwLock<EvictionState> + Mutex<Pool> under concurrent callers
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 8
+  origin: spec+code
+  source:
+    spec:
+    - US3-AS1
+    - NFR-002
+    code:
+    - lib.rs:26-27
+    - lib.rs:45
+    - lib.rs:62
+  statement: 'Under concurrent access from many threads (for example four threads each tracking one hundred
+    entries into one pool), the component never corrupts its state and the final entry count is exactly
+    the total tracked. This is a concurrency property proved by a model checker (Loom), not by single-threaded
+    functional verification.
+
+    '
+  traces:
+  - US3-AS1
+  - NFR-002
+  - SC-002
+  creusot:
+    fidelity: trusted-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'loom (concurrency model checker): interleaved track/touch/remove/evict across the RwLock<Vec<Mutex<Pool>>>
+      preserve per-pool state integrity (no lost/corrupted entries)'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: trusted-boundary
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    delegate_to: 'loom (concurrency model checker): interleaved track/touch/remove/evict across RwLock<Vec<Mutex<Pool>>>
+      preserve per-pool integrity and the final count equals the total tracked'
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: NV-1
+  scope: O(1) time complexity of single-entry operations
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Constant-time complexity of track, touch, remove, and identify_next_to_evict is a performance
+    characteristic, not a machine-checkable functional assertion with a counterexample.
+
+    '
+  traces:
+  - NFR-001
+- id: NV-2
+  scope: per-pool lock granularity / no cross-pool contention
+  kind: not-verifiable
+  verifiable: false
+  reason: 'That operations on different pools do not contend for the same lock is a scheduling and performance
+    property, not a functional assertion with an observable counterexample.
+
+    '
+  traces:
+  - NFR-003
+- id: NV-3
+  scope: Certus component-model conformance
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Conformance to the component model (define_component!, provides IEvictionPolicy, ILogger receptacle)
+    is a structural/build-time fact enforced by the compiler, not a runtime property.
+
+    '
+  traces:
+  - NFR-004
+  - SC-004
+- id: NV-4
+  scope: existing unit and integration tests pass
+  kind: not-verifiable
+  verifiable: false
+  reason: 'That the crate''s own test suite passes is a meta-claim about tests, not a component-behavior
+    obligation.
+
+    '
+  traces:
+  - SC-001
+- id: NV-5
+  scope: clippy and rustfmt are clean
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Lint and formatting cleanliness are static style checks, not behavioral properties.
+
+    '
+  traces:
+  - SC-003
+- id: NV-6
+  scope: logger receptacle side effects
+  kind: not-verifiable
+  verifiable: false
+  reason: 'The best-effort debug/warn logging calls have no observable effect on eviction state, so there
+    is no behavioral counterexample to check.
+
+    '
+  traces:
+  - lib.rs:50-52
+historical_notes:
+  source: components/eviction-policy-lru/verif/PROPERTIES.md @ 35ce4a3a (2026-08-24), the .md-era properties
+    record that this YAML pipeline replaced. Preserved here so the branch update does not lose it. It
+    describes an EARLIER, NARROWER verification — 5 modules (len, clear, push_back, remove, move_to_back),
+    21 VCs, 0 admits — NOT the current proof set, and it is not evidence for any status in this file.
+  why_ordering_was_not_proved: 'LRU ordering correctness — FR-005 (pop_front/identify_next_to_evict returns
+    the genuinely oldest key), the ordering half of FR-003 (touch makes a node most-recent in traversal
+    order), and FR-006 (peek_front_n/get_eviction_candidates returns the n oldest, in order) — each require
+    a reachability/acyclicity invariant relating the head->next->...->tail chain to the abstract insertion
+    order. That is a quantified, inductive structural invariant, judged out of practical scope for the
+    SMT backend at this depth. pop_front and peek_front_n were unproved for the same reason: both traverse
+    the next chain, whose termination needs that acyclicity invariant.'
+  arena_invariant_caveat: '`inv` (head, tail, every prev/next and every free-list slot is None or in-bounds;
+    len <= nodes.len()) was ASSUMED as a precondition, not re-established in postconditions. Those proofs
+    were therefore conditional on a well-formed arena and did not themselves show the arena stays well-formed
+    across a sequence of operations.'
+  mirror_caveat: All of that ran on a standalone line-faithful copy of src/lru_list.rs, because the shipped
+    policy wraps LruList in RwLock<Vec<Mutex<Pool>>> which cannot compile under Creusot. Injecting a fault
+    into the SHIPPED function would not have failed those proofs.
+  fault_injection_log:
+    method: 'Manual anti-vacuity check from the 2026-08-24 run: each proof was perturbed in the mirror
+      body and the verification condition observed to go red; all five were reverted. This is the manual
+      predecessor of the __mutant twins the gate now requires and scores automatically, and it is retained
+      as history, not as current evidence.'
+    faults:
+    - injected: 'len: return self.len + 1 (wrong count)'
+      observed: vc_len red — exact-count postcondition load-bearing
+    - injected: 'clear: set len = 1 instead of 0'
+      observed: vc_clear red (2/3) — reset-to-empty postcondition load-bearing
+    - injected: 'push_back: drop self.len += 1'
+      observed: vc_push_back red (10/12) — +1 cardinality postcondition load-bearing
+    - injected: 'remove: drop self.len -= 1'
+      observed: vc_remove red (13/14) — -1 cardinality postcondition load-bearing
+    - injected: 'move_to_back: drop self.tail = Some(idx)'
+      observed: vc_move_to_back red (19/21) — tail-update postcondition load-bearing

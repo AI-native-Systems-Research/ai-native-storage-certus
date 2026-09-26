@@ -1,0 +1,71 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 72 0 72 27 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 73 21 73 31
+let%span slib'0 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 73 63 73 73
+let%span slib'1 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 73 80 73 81
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Node = { key: UInt64.t; prev: t_Option_u32; next: t_Option_u32; active: bool }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Node_Global (self: t_Vec_Node_Global) : Seq.seq t_Node
+
+axiom view_Vec_Node_Global_spec:
+  forall self: t_Vec_Node_Global [view_Vec_Node_Global self]. [%#svec'0] Seq.length (view_Vec_Node_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_Node (return (x: t_Vec_Node_Global)) = any
+  [ return (result: t_Vec_Node_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_Node_Global result) = 0}
+    (! return {result}) ]
+
+type t_Vec_u32_Global
+
+function view_Vec_u32_Global (self: t_Vec_u32_Global) : Seq.seq UInt32.t
+
+axiom view_Vec_u32_Global_spec:
+  forall self: t_Vec_u32_Global [view_Vec_u32_Global self]. [%#svec'0] Seq.length (view_Vec_u32_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_u32 (return (x: t_Vec_u32_Global)) = any
+  [ return (result: t_Vec_u32_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_u32_Global result) = 0}
+    (! return {result}) ]
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let arena_fresh [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 72 0 72 27]
+  (return (x: t_LruList)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_Node [%#slib] (fun (_x: t_Vec_Node_Global) -> [ &_1 <- _x ] s1)
+    | s1 = [ &_2 <- None ] s2
+    | s2 = [ &_3 <- None ] s3
+    | s3 = new_u32 [%#slib'0] (fun (_x: t_Vec_u32_Global) -> [ &_4 <- _x ] s4)
+    | s4 = [ &_ret <- { nodes = _1; head = _2; tail = _3; free = _4; len = ([%#slib'1] (0: UInt64.t)) } ] s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: t_LruList = Any.any_l ()
+  | & _1: t_Vec_Node_Global = Any.any_l ()
+  | & _2: t_Option_u32 = Any.any_l ()
+  | & _3: t_Option_u32 = Any.any_l ()
+  | & _4: t_Vec_u32_Global = Any.any_l () ]) [ return (result: t_LruList) -> (! return {result}) ]

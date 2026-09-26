@@ -1,0 +1,79 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 459 0 459 93 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 460 25 460 42
+let%span slib'0 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 460 56 460 57
+let%span slib'1 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 456 11 456 41
+let%span slib'2 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 457 11 457 18
+let%span slib'3 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 458 10 458 23
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_LruList_Global
+
+type t_Pools = { pools: t_Vec_LruList_Global }
+
+predicate resolve_refmut_Pools [@inline:trivial] (_1: MutBorrow.t t_Pools) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Pools
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Vec_u32_Global
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_LruList_Global (self: t_Vec_LruList_Global) : Seq.seq t_LruList
+
+axiom view_Vec_LruList_Global_spec:
+  forall self: t_Vec_LruList_Global [view_Vec_LruList_Global self]. [%#svec'0] Seq.length (view_Vec_LruList_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_LruList (self_: t_Vec_LruList_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_LruList_Global self_)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_lru_candidates_degrade__mutant [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 459 0 459 93]
+  (self_: MutBorrow.t t_Pools) (pool: UInt32.t) (n: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_lru_candidates_degrade__mutant requires] ([@stop_split] [@expl:verify_lru_candidates_degrade__mutant requires #0] [%#slib'1] UInt32.t'int pool
+    >= Seq.length (view_Vec_LruList_Global self_.current.pools))
+  /\ ([@stop_split] [@expl:verify_lru_candidates_degrade__mutant requires #1] [%#slib'2] UInt64.t'int n >= 1)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_12 <- UInt64.of_int (UInt32.t'int pool) ] s1
+    | s1 = -{resolve_refmut_Pools self_}- s2
+    | s2 = len_LruList [%#slib] {self_.current.pools} (fun (_x: UInt64.t) -> [ &_14 <- _x ] s3)
+    | s3 = [ &_11 <- UInt64.lt _12 _14 ] s4
+    | s4 = any [ br0 -> {_11 = false} (! bb3) | br1 -> {_11} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &_ret <- n ] s1 | s1 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_ret <- [%#slib'0] (0: UInt64.t) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & self_: MutBorrow.t t_Pools = self_
+  | & pool: UInt32.t = pool
+  | & n: UInt64.t = n
+  | & _11: bool = Any.any_l ()
+  | & _12: UInt64.t = Any.any_l ()
+  | & _14: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_lru_candidates_degrade__mutant ensures] [%#slib'3] UInt64.t'int result = UInt64.t'int n}
+    (! return {result}) ]

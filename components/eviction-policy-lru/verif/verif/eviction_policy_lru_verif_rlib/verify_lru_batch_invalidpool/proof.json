@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_len_LruList": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_verify_lru_batch_invalidpool": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      }
+    }
+  }
+}

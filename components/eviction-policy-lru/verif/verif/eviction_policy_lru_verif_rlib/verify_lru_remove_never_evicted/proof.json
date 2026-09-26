@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_remove": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_lru_remove_never_evicted": {
+        "prover": "alt-ergo",
+        "time": 0.019
+      }
+    }
+  }
+}

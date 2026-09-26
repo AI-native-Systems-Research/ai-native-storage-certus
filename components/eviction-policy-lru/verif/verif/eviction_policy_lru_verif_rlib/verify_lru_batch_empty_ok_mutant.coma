@@ -1,0 +1,30 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 530 0 530 87 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 533 4 533 8
+let%span slib'0 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 528 11 528 28
+let%span slib'1 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 529 10 529 17
+
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use creusot.int.UInt64
+
+type t_Vec_LruList_Global
+
+type t_Pools = { pools: t_Vec_LruList_Global }
+
+predicate resolve_refmut_Pools [@inline:trivial] (_1: MutBorrow.t t_Pools) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Pools
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_lru_batch_empty_ok__mutant [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 530 0 530 87]
+  (self_: MutBorrow.t t_Pools) (handles_len: UInt64.t) (return (x: bool)) =
+{[@stop_split] [@expl:verify_lru_batch_empty_ok__mutant requires] [%#slib'0] UInt64.t'int handles_len = 0}
+  (! bb0
+  [ bb0 = s0 [ s0 = -{resolve_refmut_Pools self_}- s1 | s1 = [ &_ret <- [%#slib] true ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & self_: MutBorrow.t t_Pools = self_ ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_lru_batch_empty_ok__mutant ensures] [%#slib'1] not result}
+    (! return {result}) ]

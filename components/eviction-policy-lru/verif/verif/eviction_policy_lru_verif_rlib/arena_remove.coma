@@ -1,0 +1,268 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 134 0 134 50 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 135 19 135 33
+let%span slib'0 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 138 26 138 40
+let%span slib'1 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 139 26 139 40
+let%span slib'2 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 141 19 141 31
+let%span slib'3 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 146 19 146 31
+let%span slib'4 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 150 15 150 29
+let%span slib'5 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 150 39 150 44
+let%span slib'6 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 151 15 151 29
+let%span slib'7 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 152 15 152 29
+let%span slib'8 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 153 4 153 24
+let%span slib'9 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 154 17 154 18
+let%span slib'10 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 154 4 154 18
+let%span slib'11 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 128 11 128 21
+let%span slib'12 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 129 11 129 39
+let%span slib'13 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 130 11 130 62
+let%span slib'14 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 131 10 131 60
+let%span slib'15 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 132 10 132 77
+let%span slib'16 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 133 10 133 39
+let%span slib'17 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 61 8 68 90
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 183 19 183 38
+let%span svec'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 184 18 184 46
+let%span svec'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 185 18 185 49
+let%span svec'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 186 18 186 54
+let%span svec'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 187 18 187 47
+let%span svec'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sslice'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 158 20 158 88
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Vec_u32_Global
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+type t_Node = { key: UInt64.t; prev: t_Option_u32; next: t_Option_u32; active: bool }
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Node) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Node_Global (self: t_Vec_Node_Global) : Seq.seq t_Node
+
+axiom view_Vec_Node_Global_spec:
+  forall self: t_Vec_Node_Global [view_Vec_Node_Global self]. [%#svec'7] Seq.length (view_Vec_Node_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Node) (out: t_Node) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_Node_Global (self_: t_Vec_Node_Global) (ix: UInt64.t) (return (x: t_Node)) =
+{[@stop_split] [@expl:index requires] [%#svec] in_bounds_usize ix (view_Vec_Node_Global self_)}
+  any
+  [ return (result: t_Node) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'0] has_value_usize ix (view_Vec_Node_Global self_) result}
+    (! return {result}) ]
+
+let elim_Some (_x: t_Option_u32) (return (f0: UInt32.t)) = any
+  [ _k (f0: UInt32.t) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+predicate resolve_elswhere_usize [@inline:trivial] (self: UInt64.t) (old': Seq.seq t_Node) (fin: Seq.seq t_Node) =
+  [%#sslice'1] forall i: int. 0 <= i /\ i <> UInt64.t'int self /\ i < Seq.length old' -> Seq.get old' i = Seq.get fin i
+
+meta "rewrite_def" predicate resolve_elswhere_usize
+
+let index_mut_Vec_Node_Global (self_: MutBorrow.t t_Vec_Node_Global) (ix: UInt64.t) (return (x: MutBorrow.t t_Node)) =
+{[@stop_split] [@expl:index_mut requires] [%#svec'1] in_bounds_usize ix (view_Vec_Node_Global self_.current)}
+  any
+  [ return (result: MutBorrow.t t_Node) ->
+  {[@stop_split] [@expl:index_mut_Vec_Node_Global ensures] ([@stop_split] [@expl:index_mut ensures #0] [%#svec'2] has_value_usize ix (view_Vec_Node_Global self_.current) result.current)
+    /\ ([@stop_split] [@expl:index_mut ensures #1] [%#svec'3] has_value_usize ix (view_Vec_Node_Global self_.final) result.final)
+    /\ ([@stop_split] [@expl:index_mut ensures #2] [%#svec'4] resolve_elswhere_usize ix (view_Vec_Node_Global self_.current) (view_Vec_Node_Global self_.final))
+    /\ ([@stop_split] [@expl:index_mut ensures #3] [%#svec'5] Seq.length (view_Vec_Node_Global self_.final)
+    = Seq.length (view_Vec_Node_Global self_.current))}
+    (! return {result}) ]
+
+predicate resolve_refmut_Node [@inline:trivial] (_1: MutBorrow.t t_Node) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Node
+
+function view_Vec_u32_Global (self: t_Vec_u32_Global) : Seq.seq UInt32.t
+
+axiom view_Vec_u32_Global_spec:
+  forall self: t_Vec_u32_Global [view_Vec_u32_Global self]. [%#svec'7] Seq.length (view_Vec_u32_Global self)
+    <= UInt64.t'int const_MAX
+
+let push_u32 (self_: MutBorrow.t t_Vec_u32_Global) (v: UInt32.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'6] view_Vec_u32_Global self_.final
+    = Seq.snoc (view_Vec_u32_Global self_.current) v}
+    (! return {result}) ]
+
+predicate resolve_refmut_LruList [@inline:trivial] (_1: MutBorrow.t t_LruList) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_LruList
+
+predicate inv [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 59 0 59 31] (l: t_LruList) =
+  [%#slib'17] UInt64.t'int l.len <= Seq.length (view_Vec_Node_Global l.nodes)
+  /\ match l.head with
+      | Some h -> UInt32.t'int h < Seq.length (view_Vec_Node_Global l.nodes)
+      | None -> true
+      end
+  /\ match l.tail with
+      | Some t -> UInt32.t'int t < Seq.length (view_Vec_Node_Global l.nodes)
+      | None -> true
+      end
+  /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_Node_Global l.nodes)
+      -> match (Seq.get (view_Vec_Node_Global l.nodes) i).next with
+        | Some n -> UInt32.t'int n < Seq.length (view_Vec_Node_Global l.nodes)
+        | None -> true
+        end)
+  /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_Node_Global l.nodes)
+      -> match (Seq.get (view_Vec_Node_Global l.nodes) i).prev with
+        | Some p -> UInt32.t'int p < Seq.length (view_Vec_Node_Global l.nodes)
+        | None -> true
+        end)
+  /\ (forall k: int. 0 <= k /\ k < Seq.length (view_Vec_u32_Global l.free)
+    -> UInt32.t'int (Seq.get (view_Vec_u32_Global l.free) k) < Seq.length (view_Vec_Node_Global l.nodes))
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let arena_remove [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 134 0 134 50]
+  (self_: MutBorrow.t t_LruList) (idx: UInt32.t) (return (x: ())) =
+{[@stop_split] [@expl:arena_remove requires] ([@stop_split] [@expl:arena_remove requires #0] [%#slib'11] inv self_.current)
+  /\ ([@stop_split] [@expl:arena_remove requires #1] [%#slib'12] UInt32.t'int idx
+    < Seq.length (view_Vec_Node_Global self_.current.nodes))
+  /\ ([@stop_split] [@expl:arena_remove requires #2] [%#slib'13] (Seq.get (view_Vec_Node_Global self_.current.nodes) (UInt32.t'int idx)).active
+  -> UInt64.t'int self_.current.len >= 1)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_25 <- UInt64.of_int (UInt32.t'int idx) ] s1
+    | s1 = index_Vec_Node_Global [%#slib] {self_.current.nodes} {_25} (fun (_x: t_Node) -> [ &_23 <- _x ] s2)
+    | s2 = any [ br0 -> {_23.active = false} (! bb2) | br1 -> {_23.active} (! bb3) ] ]
+  | bb3 = s0
+    [ s0 = [ &_31 <- UInt64.of_int (UInt32.t'int idx) ] s1
+    | s1 = index_Vec_Node_Global [%#slib'0] {self_.current.nodes} {_31} (fun (_x: t_Node) -> [ &_29 <- _x ] s2)
+    | s2 = [ &prev'0 <- _29.prev ] s3
+    | s3 = [ &_36 <- UInt64.of_int (UInt32.t'int idx) ] s4
+    | s4 = index_Vec_Node_Global [%#slib'1] {self_.current.nodes} {_36} (fun (_x: t_Node) -> [ &_34 <- _x ] s5)
+    | s5 = [ &next'0 <- _34.next ] s6
+    | s6 = any [ br0 -> {prev'0 = None} (! bb9) | br1 (x0: UInt32.t) -> {prev'0 = Some x0} (! bb7) ] ]
+  | bb9 = s0 [ s0 = [ &self_ <- { self_ with current = { self_.current with head = next'0 } } ] s1 | s1 = bb10 ]
+  | bb7 = s0
+    [ s0 = elim_Some {prev'0} (fun (r0: UInt32.t) -> [ &p <- r0 ] s1)
+    | s1 = MutBorrow.borrow_mut <t_Vec_Node_Global> {self_.current.nodes}
+        (fun (_bor: MutBorrow.t t_Vec_Node_Global) ->
+          [ &_43 <- _bor ] [ &self_ <- { self_ with current = { self_.current with nodes = _bor.final } } ] s2)
+    | s2 = [ &_44 <- UInt64.of_int (UInt32.t'int p) ] s3
+    | s3 = index_mut_Vec_Node_Global [%#slib'2] {_43} {_44} (fun (_x: MutBorrow.t t_Node) -> [ &_42 <- _x ] s4)
+    | s4 = [ &_42 <- { _42 with current = { _42.current with next = next'0 } } ] s5
+    | s5 = -{resolve_refmut_Node _42}- s6
+    | s6 = bb10 ]
+  | bb10 = any [ br0 -> {next'0 = None} (! bb14) | br1 (x0: UInt32.t) -> {next'0 = Some x0} (! bb12) ]
+  | bb14 = s0 [ s0 = [ &self_ <- { self_ with current = { self_.current with tail = prev'0 } } ] s1 | s1 = bb15 ]
+  | bb12 = s0
+    [ s0 = elim_Some {next'0} (fun (r0: UInt32.t) -> [ &n <- r0 ] s1)
+    | s1 = MutBorrow.borrow_mut <t_Vec_Node_Global> {self_.current.nodes}
+        (fun (_bor: MutBorrow.t t_Vec_Node_Global) ->
+          [ &_52 <- _bor ] [ &self_ <- { self_ with current = { self_.current with nodes = _bor.final } } ] s2)
+    | s2 = [ &_53 <- UInt64.of_int (UInt32.t'int n) ] s3
+    | s3 = index_mut_Vec_Node_Global [%#slib'3] {_52} {_53} (fun (_x: MutBorrow.t t_Node) -> [ &_51 <- _x ] s4)
+    | s4 = [ &_51 <- { _51 with current = { _51.current with prev = prev'0 } } ] s5
+    | s5 = -{resolve_refmut_Node _51}- s6
+    | s6 = bb15 ]
+  | bb15 = s0
+    [ s0 = MutBorrow.borrow_mut <t_Vec_Node_Global> {self_.current.nodes}
+        (fun (_bor: MutBorrow.t t_Vec_Node_Global) ->
+          [ &_57 <- _bor ] [ &self_ <- { self_ with current = { self_.current with nodes = _bor.final } } ] s1)
+    | s1 = [ &_58 <- UInt64.of_int (UInt32.t'int idx) ] s2
+    | s2 = index_mut_Vec_Node_Global [%#slib'4] {_57} {_58} (fun (_x: MutBorrow.t t_Node) -> [ &_56 <- _x ] s3)
+    | s3 = [ &_56 <- { _56 with current = { _56.current with active = ([%#slib'5] false) } } ] s4
+    | s4 = -{resolve_refmut_Node _56}- s5
+    | s5 = [ &_60 <- None ] s6
+    | s6 = MutBorrow.borrow_mut <t_Vec_Node_Global> {self_.current.nodes}
+        (fun (_bor: MutBorrow.t t_Vec_Node_Global) ->
+          [ &_62 <- _bor ] [ &self_ <- { self_ with current = { self_.current with nodes = _bor.final } } ] s7)
+    | s7 = [ &_63 <- UInt64.of_int (UInt32.t'int idx) ] s8
+    | s8 = index_mut_Vec_Node_Global [%#slib'6] {_62} {_63} (fun (_x: MutBorrow.t t_Node) -> [ &_61 <- _x ] s9)
+    | s9 = [ &_61 <- { _61 with current = { _61.current with prev = _60 } } ] s10
+    | s10 = -{resolve_refmut_Node _61}- s11
+    | s11 = [ &_65 <- None ] s12
+    | s12 = MutBorrow.borrow_final <t_Vec_Node_Global> {self_.current.nodes}
+        {MutBorrow.inherit_id (MutBorrow.get_id self_) 0}
+        (fun (_bor: MutBorrow.t t_Vec_Node_Global) ->
+          [ &_67 <- _bor ] [ &self_ <- { self_ with current = { self_.current with nodes = _bor.final } } ] s13)
+    | s13 = [ &_68 <- UInt64.of_int (UInt32.t'int idx) ] s14
+    | s14 = index_mut_Vec_Node_Global [%#slib'7] {_67} {_68} (fun (_x: MutBorrow.t t_Node) -> [ &_66 <- _x ] s15)
+    | s15 = [ &_66 <- { _66 with current = { _66.current with next = _65 } } ] s16
+    | s16 = -{resolve_refmut_Node _66}- s17
+    | s17 = MutBorrow.borrow_final <t_Vec_u32_Global> {self_.current.free}
+        {MutBorrow.inherit_id (MutBorrow.get_id self_) 3}
+        (fun (_bor: MutBorrow.t t_Vec_u32_Global) ->
+          [ &_71 <- _bor ] [ &self_ <- { self_ with current = { self_.current with free = _bor.final } } ] s18)
+    | s18 = push_u32 [%#slib'8] {_71} {idx} (fun (_x: ()) -> [ &_70 <- _x ] s19)
+    | s19 = UInt64.sub [%#slib'10] {self_.current.len} {[%#slib'9] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &self_ <- { self_ with current = { self_.current with len = _x } } ] s20)
+    | s20 = -{resolve_refmut_LruList self_}- s21
+    | s21 = return {_ret} ]
+  | bb2 = s0 [ s0 = -{resolve_refmut_LruList self_}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & self_: MutBorrow.t t_LruList = self_
+  | & idx: UInt32.t = idx
+  | & _23: t_Node = Any.any_l ()
+  | & _25: UInt64.t = Any.any_l ()
+  | & prev'0: t_Option_u32 = Any.any_l ()
+  | & _29: t_Node = Any.any_l ()
+  | & _31: UInt64.t = Any.any_l ()
+  | & next'0: t_Option_u32 = Any.any_l ()
+  | & _34: t_Node = Any.any_l ()
+  | & _36: UInt64.t = Any.any_l ()
+  | & p: UInt32.t = Any.any_l ()
+  | & _42: MutBorrow.t t_Node = Any.any_l ()
+  | & _43: MutBorrow.t t_Vec_Node_Global = Any.any_l ()
+  | & _44: UInt64.t = Any.any_l ()
+  | & n: UInt32.t = Any.any_l ()
+  | & _51: MutBorrow.t t_Node = Any.any_l ()
+  | & _52: MutBorrow.t t_Vec_Node_Global = Any.any_l ()
+  | & _53: UInt64.t = Any.any_l ()
+  | & _56: MutBorrow.t t_Node = Any.any_l ()
+  | & _57: MutBorrow.t t_Vec_Node_Global = Any.any_l ()
+  | & _58: UInt64.t = Any.any_l ()
+  | & _60: t_Option_u32 = Any.any_l ()
+  | & _61: MutBorrow.t t_Node = Any.any_l ()
+  | & _62: MutBorrow.t t_Vec_Node_Global = Any.any_l ()
+  | & _63: UInt64.t = Any.any_l ()
+  | & _65: t_Option_u32 = Any.any_l ()
+  | & _66: MutBorrow.t t_Node = Any.any_l ()
+  | & _67: MutBorrow.t t_Vec_Node_Global = Any.any_l ()
+  | & _68: UInt64.t = Any.any_l ()
+  | & _70: () = Any.any_l ()
+  | & _71: MutBorrow.t t_Vec_u32_Global = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:arena_remove ensures] ([@stop_split] [@expl:arena_remove ensures #0] [%#slib'14] not (Seq.get (view_Vec_Node_Global self_.current.nodes) (UInt32.t'int idx)).active
+      -> self_.final = self_.current)
+    /\ ([@stop_split] [@expl:arena_remove ensures #1] [%#slib'15] (Seq.get (view_Vec_Node_Global self_.current.nodes) (UInt32.t'int idx)).active
+      -> UInt64.t'int self_.final.len = UInt64.t'int self_.current.len - 1)
+    /\ ([@stop_split] [@expl:arena_remove ensures #2] [%#slib'16] not (Seq.get (view_Vec_Node_Global self_.final.nodes) (UInt32.t'int idx)).active)}
+    (! return {result}) ]

@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_fresh": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_len_LruList": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_push_LruList": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_lru_createpool_seq": { "prover": "alt-ergo", "time": 0.02 }
+    }
+  }
+}

@@ -1,0 +1,98 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 483 0 483 72 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 484 25 484 42
+let%span slib'0 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 484 56 484 71
+let%span slib'1 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 484 85 484 86
+let%span slib'2 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 481 11 481 38
+let%span slib'3 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 482 10 482 22
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_LruList_Global
+
+type t_Pools = { pools: t_Vec_LruList_Global }
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Vec_u32_Global
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_LruList_Global (self: t_Vec_LruList_Global) : Seq.seq t_LruList
+
+axiom view_Vec_LruList_Global_spec:
+  forall self: t_Vec_LruList_Global [view_Vec_LruList_Global self]. [%#svec'2] Seq.length (view_Vec_LruList_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_LruList (self_: t_Vec_LruList_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_LruList_Global self_)}
+    (! return {result}) ]
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_LruList) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_LruList) (out: t_LruList) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_LruList_Global (self_: t_Vec_LruList_Global) (ix: UInt64.t) (return (x: t_LruList)) =
+{[@stop_split] [@expl:index requires] [%#svec'0] in_bounds_usize ix (view_Vec_LruList_Global self_)}
+  any
+  [ return (result: t_LruList) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'1] has_value_usize ix (view_Vec_LruList_Global self_) result}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_lru_len_degrade__mutant [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 483 0 483 72]
+  (self_: t_Pools) (pool: UInt32.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_lru_len_degrade__mutant requires] [%#slib'2] UInt32.t'int pool
+  >= Seq.length (view_Vec_LruList_Global self_.pools)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_8 <- UInt64.of_int (UInt32.t'int pool) ] s1
+    | s1 = len_LruList [%#slib] {self_.pools} (fun (_x: UInt64.t) -> [ &_10 <- _x ] s2)
+    | s2 = [ &_7 <- UInt64.lt _8 _10 ] s3
+    | s3 = any [ br0 -> {_7 = false} (! bb4) | br1 -> {_7} (! bb2) ] ]
+  | bb2 = s0
+    [ s0 = [ &_14 <- UInt64.of_int (UInt32.t'int pool) ] s1
+    | s1 = index_Vec_LruList_Global [%#slib'0] {self_.pools} {_14} (fun (_x: t_LruList) -> [ &_12 <- _x ] s2)
+    | s2 = [ &_ret <- _12.len ] s3
+    | s3 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_ret <- [%#slib'1] (0: UInt64.t) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & self_: t_Pools = self_
+  | & pool: UInt32.t = pool
+  | & _7: bool = Any.any_l ()
+  | & _8: UInt64.t = Any.any_l ()
+  | & _10: UInt64.t = Any.any_l ()
+  | & _12: t_LruList = Any.any_l ()
+  | & _14: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_lru_len_degrade__mutant ensures] [%#slib'3] UInt64.t'int result = 1}
+    (! return {result}) ]

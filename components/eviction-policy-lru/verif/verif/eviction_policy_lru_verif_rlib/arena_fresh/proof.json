@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_fresh": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_new_Node": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_new_u32": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

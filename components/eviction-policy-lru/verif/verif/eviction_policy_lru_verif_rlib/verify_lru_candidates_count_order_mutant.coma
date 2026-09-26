@@ -1,0 +1,42 @@
+(* #"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 445 0 445 84 *)
+
+let%span slib = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 446 4 446 30
+let%span slib'0 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 444 10 444 23
+let%span slib'1 = "/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 206 10 206 67
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Vec_u32_Global
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+let arena_peek_count (self_: t_LruList) (n: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:arena_peek_count ensures] [%#slib'1] UInt64.t'int result
+    = (if UInt64.t'int n <= UInt64.t'int self_.len then UInt64.t'int n else UInt64.t'int self_.len)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_lru_candidates_count_order__mutant [#"/home/cornel/eviction-policy-lru-verify-20260922/components/eviction-policy-lru/verif/src/lib.rs" 445 0 445 84]
+  (self_: t_LruList) (n: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = arena_peek_count [%#slib] {self_} {n} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & self_: t_LruList = self_ | & n: UInt64.t = n ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_lru_candidates_count_order__mutant ensures] [%#slib'0] UInt64.t'int result
+    = UInt64.t'int n}
+    (! return {result}) ]
