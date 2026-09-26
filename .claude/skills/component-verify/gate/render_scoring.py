@@ -534,6 +534,29 @@ def main():
     # page is self-describing — a reader can tell exactly which code and toolchain scored it,
     # and whether a re-score today would be running the same gate.
     run = d.get("run") or {}
+
+    # UNVERIFIED COLUMN WARNING. A tool column can be fully populated with scorer-owned statuses
+    # and still be unreproducible — the proof artifacts may no longer exist. `--require-complete`
+    # cannot catch that: it checks that a status is PRESENT, not that it could be re-derived. The
+    # signal is a tool with scored cells but no `run.<tool>` provenance block, meaning no recorded
+    # run of this gate ever produced it. Observed for real: a component whose Creusot crate was
+    # deleted still rendered as a complete deliverable, its 16 "proved" cells unsupported by any
+    # artifact. Say so on the page, loudly, so a reader cannot cite it unaware.
+    unverified = []
+    for tool in tools:
+        scored = sum(1 for p in props if (p.get(tool) or {}).get("_scored_by"))
+        if scored and not isinstance(run.get(tool), dict):
+            unverified.append((tool, scored))
+    if unverified:
+        warn = "; ".join(f"<b>{esc(t)}</b>: {n} scored cells" for t, n in unverified)
+        P.append(
+            "<p class='foot' style='border:2px solid #b00;padding:8px'>"
+            "⚠ <b>UNVERIFIED COLUMN — do not cite without re-verifying.</b> "
+            f"{warn} carry scorer-owned statuses but NO run provenance, so no recorded run of the "
+            "gate produced them and they could not be reproduced now. This usually means the proof "
+            "artifacts no longer exist. Completeness checks cannot detect this: they confirm a "
+            "status is present, not that it can be re-derived.</p>")
+
     if isinstance(run, dict) and run:
         bits = []
         gc, gb = run.get("gate_commit"), run.get("gate_branch")
