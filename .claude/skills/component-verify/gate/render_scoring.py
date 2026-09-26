@@ -515,8 +515,27 @@ def main():
         disc = f"{A['artifacts']} {'proof modules (.coma)' if t=='creusot' else 'harnesses'}, {A['proved']} properties proved"
         P.append(f"<tr><td>{TOOL_LABEL.get(t,t)}</td><td>{A['wall']}s</td><td>{A['rss']}MB</td><td>{disc}</td></tr>")
     P.append("</table></div>")
-    P.append("<p class='foot'>Wall-clock is the sum over per-property scorer runs (each re-runs the artifact from "
-             "source); peak RSS is the max single-run resident set.</p>")
+    # Say EXACTLY what this number is. The earlier wording ("the sum over per-property scorer runs")
+    # read as total machine cost and was not: it omits the anti-vacuity and lever invocations, and it
+    # bundles toolchain build time into each figure. Measured on remote-lookup, the honest total was
+    # 2874s against a 1031s reported sum — a 2.8x understatement in a page meant to be citable.
+    P.append(
+        "<p class='foot'><b>What these times include.</b> Each figure is the sum of the "
+        "<i>first</i> proof attempt per property, as measured by the scorer around one whole "
+        "toolchain invocation (<code>/usr/bin/time -v cargo kani --harness &lt;h&gt;</code> or "
+        "<code>cargo creusot &lt;module&gt;</code>). So it is <b>build + proof</b>, not solver time: "
+        "a sub-second proof still shows seconds because compilation is counted with it, and Kani "
+        "re-invokes the toolchain per harness while Creusot's runs are largely incremental — which is "
+        "most of why Kani's per-property figures sit well above Creusot's. A figure at or near the cap "
+        "(<code>--cap-seconds</code>, escalating once to <code>--cap-max</code>) is a <b>timeout, not "
+        "solving</b>.<br>"
+        "<b>What they exclude.</b> The scorer also runs an anti-vacuity <code>__mutant</code> twin for "
+        "each proved property and the full lever battery for each tool-boundary; those invocations are "
+        "<b>not</b> counted here, so one property can cost 2–5 runs while only the first is timed. "
+        "Total machine cost per tool is the stage wall-clock in "
+        "<code>verif/.run/&lt;stage&gt;.done</code>, which is larger than the sum above. Peak RSS is "
+        "the largest single timed run, not a total. Agent time to author the proofs is not measured "
+        "anywhere on this page.</p>")
 
     # ---- Anti-vacuity / provenance ----
     P.append(f"<h2>{sec} · Anti-vacuity & provenance</h2>")
