@@ -1,0 +1,1795 @@
+component: logger
+interface: ILogger
+pin: f3de84aa (2026-09-21)
+generated: 2026-09-21
+spec_source: components/logger/specs/001-logger-component/{spec.md, data-model.md, contracts/ilogger.md}
+code_source: components/logger/src/lib.rs (+ components/interfaces/src/ilogger.rs)
+tools:
+- creusot
+- kani
+counts:
+  methods: 4
+  spec_total: 31
+  code_total: 32
+  unified: 29
+  attachments: 104
+  not_verifiable: 7
+reconciliation:
+  method: 'Two blind extractions (spec_properties.yaml, code_properties.yaml) were merged by obligation
+    identity (subject x kind x statement), not by source file. Matches became one id with origin spec+code;
+    unmatched obligations were kept and flagged (never dropped, never silently merged); implementation-internal
+    obligations from the code pass were collapsed up to the observable property they serve (recorded in
+    the implementing_obligation_map below and NOT emitted as extra ids).
+
+    '
+  spec_only:
+  - id: LOG-INTERFACE-DISCOVERY
+    note: 'FR-003 / US3-AS1 / SC-006 require runtime ILogger discovery, but the behavior lives in the
+      define_component! macro expansion and the component_framework, not in logger''s lib.rs, so the code
+      pass did not surface it. It is framework territory; a Role-2 attempt would likely delegate to the
+      component framework rather than prove it in-crate.
+
+      '
+  - id: LOG-RECEPTACLE-BIND
+    note: 'US3-AS2 / US3-AS3 / SC-006 require receptacle binding to hand back the implementation; this
+      is component_framework behavior invoked from outside logger''s source. Same framework/delegation
+      caveat as LOG-INTERFACE-DISCOVERY.
+
+      '
+  code_only:
+  - id: LOG-WRITE-ERROR-IGNORED
+    note: 'The code deliberately discards write/flush errors (`let _ = ...`). The spec never states what
+      happens on a failed write; this is real, undocumented observable behavior worth recording.
+
+      '
+  - id: LOG-FLUSH-EACH-LINE
+    note: 'The code flushes after every line. The spec does not mention flushing/buffering; surfaced from
+      the code.
+
+      '
+  divergent: []
+  refinement_gap: []
+  wording_deltas:
+  - ids:
+    - LOG-LINE-FORMAT
+    - LOG-CONSOLE-COLOR-CODES
+    - LOG-FILE-NO-ANSI
+    note: 'The spec states one generic line format (FR-009); the code splits into a color branch and a
+      no-color branch (lib.rs:204-215). The single spec obligation reconciles to three observable ids:
+      the common structure (LOG-LINE-FORMAT), the color-on content (LOG-CONSOLE-COLOR-CODES), and the
+      color-off content (LOG-FILE-NO-ANSI).
+
+      '
+  - ids:
+    - LOG-FILTER-SUPPRESS
+    - LOG-FILTER-EMIT
+    note: 'The single code guard `if level > self.state.level { return; }` (lib.rs:200-202) realizes both
+      the suppress-above-threshold and the emit-at-or-below-threshold observable obligations.
+
+      '
+  implementing_obligation_map:
+  - code_ids:
+    - CODE-ASSTR-MAPPING
+    - CODE-DISPLAY-WRITES-ASSTR
+    serves: LOG-LEVEL-DISPLAY-STRING
+  - code_ids:
+    - CODE-ANSICOLOR-MAPPING
+    - CODE-LOG-FORMAT-COLOR
+    serves: LOG-CONSOLE-COLOR-CODES
+  - code_ids:
+    - CODE-LOG-FORMAT-NOCOLOR
+    - CODE-NEWFILE-NO-COLOR
+    serves: LOG-FILE-NO-ANSI
+  - code_ids:
+    - CODE-LOG-FORMAT-COLOR
+    - CODE-LOG-FORMAT-NOCOLOR
+    serves: LOG-LINE-FORMAT
+  - code_ids:
+    - CODE-LOG-TIMESTAMP-RFC3339
+    serves: LOG-TIMESTAMP-ISO8601
+  - code_ids:
+    - CODE-LOG-NEWLINE-TERMINATED
+    serves: LOG-NEWLINE-TERMINATED
+  - code_ids:
+    - CODE-LOG-FILTER-GUARD
+    serves:
+    - LOG-FILTER-SUPPRESS
+    - LOG-FILTER-EMIT
+  - code_ids:
+    - CODE-FROMENV-RUSTLOG-DEFAULT
+    serves: LOG-DEFAULT-LEVEL-INFO
+  - code_ids:
+    - CODE-FROMENVSTR-MAPPING
+    serves: LOG-LEVEL-PARSE-MAPPING
+  - code_ids:
+    - CODE-FROMENVSTR-CASE-INSENSITIVE
+    serves: LOG-LEVEL-PARSE-CASE-INSENSITIVE
+  - code_ids:
+    - CODE-FROMENVSTR-TRACE-DEBUG
+    serves: LOG-LEVEL-PARSE-TRACE-DEBUG
+  - code_ids:
+    - CODE-FROMENVSTR-INVALID-DEFAULT
+    serves: LOG-LEVEL-PARSE-INVALID-DEFAULT
+  - code_ids:
+    - CODE-LEVEL-ORD-DISCRIMINANTS
+    serves: LOG-LEVEL-ORDER
+  - code_ids:
+    - CODE-DEFAULT-STATE-STDERR
+    serves: LOG-CONSOLE-DEFAULT-STDERR
+  - code_ids:
+    - CODE-DEFAULT-STATE-COLOR-ISATTY
+    serves: LOG-CONSOLE-COLOR-AUTODETECT
+  - code_ids:
+    - CODE-DEFAULT-STATE-LEVEL-FROMENV
+    - CODE-NEWFILE-LEVEL-FROMENV
+    serves: LOG-DEFAULT-LEVEL-INFO
+  - code_ids:
+    - CODE-NEWFILE-CREATE-APPEND
+    serves: LOG-FILE-CREATE
+  - code_ids:
+    - CODE-NEWFILE-OPEN-ERROR
+    serves: LOG-FILE-OPEN-ERROR
+  - code_ids:
+    - CODE-NEWFILE-NO-COLOR
+    serves: LOG-FILE-COLOR-DISABLED
+  - code_ids:
+    - CODE-NEWWRITER-CONSTRUCT
+    serves: construction plumbing for FR-012 (see NV-5); exercised via the format/filter/color properties
+  - code_ids:
+    - CODE-LOG-WRITE-UNDER-LOCK
+    serves: LOG-THREAD-SAFE-NO-INTERLEAVE
+  - code_ids:
+    - CODE-LOG-FLUSH-EACH-LINE
+    serves: LOG-FLUSH-EACH-LINE
+  - code_ids:
+    - CODE-ERROR-DELEGATES
+    - CODE-WARN-DELEGATES
+    - CODE-INFO-DELEGATES
+    - CODE-DEBUG-DELEGATES
+    serves:
+    - LOG-ERROR-LEVEL-TAG
+    - LOG-WARN-LEVEL-TAG
+    - LOG-INFO-LEVEL-TAG
+    - LOG-DEBUG-LEVEL-TAG
+  creusot_string_content_watchlist:
+    ids:
+    - LOG-LINE-FORMAT
+    - LOG-TIMESTAMP-ISO8601
+    - LOG-NEWLINE-TERMINATED
+    - LOG-LEVEL-DISPLAY-STRING
+    - LOG-CONSOLE-COLOR-CODES
+    - LOG-FILE-NO-ANSI
+    - LOG-LEVEL-PARSE-MAPPING
+    - LOG-LEVEL-PARSE-CASE-INSENSITIVE
+    - LOG-LEVEL-PARSE-TRACE-DEBUG
+    - LOG-LEVEL-PARSE-INVALID-DEFAULT
+    note: 'logger is fundamentally a string-formatting component, so a large share of its observable obligations
+      assert concrete string/character content (exact level tokens, ANSI escape literals, timestamp text,
+      the trailing newline, absence of an escape substring, and matching on RUST_LOG text). These are
+      expected to hit the Creusot string-content boundary; length/structure/enum facts (e.g. LOG-LEVEL-ORDER,
+      the level-tag routing, filter emit-vs-suppress as output-present vs absent) are expected to be expressible.
+      This is advisory for Role 2; no lane is chosen here.
+
+      '
+run:
+  gate_commit: 7757ae4b
+  gate_branch: skills/verify-methodology-to-unstable
+  kani:
+    scored_by: scorer_kani
+    command: scorer_kani.py /home/cornel/rescore-20260925/logger/verif --component-dir /home/cornel/logger-verify-20260921/components/logger
+      --cap-seconds 60 --cap-max 300
+    started: '2026-09-25T19:22:27-07:00'
+    finished: '2026-09-25T19:24:03-07:00'
+    kani_version: cargo-kani 0.67.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+properties:
+- id: LOG-ERROR-LEVEL-TAG
+  subject: error
+  methods:
+  - error
+  object_fn: LoggerComponent::error -> LoggerComponent::log(LogLevel::Error, msg)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - US1-AS3
+    - SC-001
+    code:
+    - lib.rs:223-225
+  statement: 'Calling error(msg) logs the message at the Error severity level (it forwards to the internal
+    log routine with the Error level), so the resulting line is an ERROR line.
+
+    '
+  traces:
+  - US1-AS3
+  - SC-001
+  - lib.rs:223-225
+  creusot:
+    evidence:
+      modules:
+      - verify_log_error_level_tag
+      result: Proved
+      wall_clock_s: 0.74
+      peak_rss_mb: 122
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_error_level_tag
+      result: SUCCESS
+      wall_clock_s: 2.1
+      peak_rss_mb: 61
+    _scored_by: scorer_kani
+- id: LOG-WARN-LEVEL-TAG
+  subject: warn
+  methods:
+  - warn
+  object_fn: LoggerComponent::warn -> LoggerComponent::log(LogLevel::Warn, msg)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - US1-AS5
+    - US2-AS1
+    - SC-001
+    code:
+    - lib.rs:227-229
+  statement: 'Calling warn(msg) logs the message at the Warn severity level (it forwards to the internal
+    log routine with the Warn level), so the resulting line is a WARN line.
+
+    '
+  traces:
+  - US1-AS5
+  - US2-AS1
+  - SC-001
+  - lib.rs:227-229
+  creusot:
+    evidence:
+      modules:
+      - verify_log_warn_level_tag
+      result: Proved
+      wall_clock_s: 0.62
+      peak_rss_mb: 51
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_warn_level_tag
+      result: SUCCESS
+      wall_clock_s: 2.07
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-INFO-LEVEL-TAG
+  subject: info
+  methods:
+  - info
+  object_fn: LoggerComponent::info -> LoggerComponent::log(LogLevel::Info, msg)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - US1-AS1
+    - SC-001
+    code:
+    - lib.rs:231-233
+  statement: 'Calling info(msg) logs the message at the Info severity level (it forwards to the internal
+    log routine with the Info level), so the resulting line is an INFO line.
+
+    '
+  traces:
+  - US1-AS1
+  - SC-001
+  - lib.rs:231-233
+  creusot:
+    evidence:
+      modules:
+      - verify_log_info_level_tag
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_info_level_tag
+      result: SUCCESS
+      wall_clock_s: 2.08
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-DEBUG-LEVEL-TAG
+  subject: debug
+  methods:
+  - debug
+  object_fn: LoggerComponent::debug -> LoggerComponent::log(LogLevel::Debug, msg)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - US2-AS2
+    - SC-001
+    code:
+    - lib.rs:235-237
+  statement: 'Calling debug(msg) logs the message at the Debug severity level (it forwards to the internal
+    log routine with the Debug level), so the resulting line is a DEBUG line.
+
+    '
+  traces:
+  - US2-AS2
+  - SC-001
+  - lib.rs:235-237
+  creusot:
+    evidence:
+      modules:
+      - verify_log_debug_level_tag
+      result: Proved
+      wall_clock_s: 0.64
+      peak_rss_mb: 50
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_debug_level_tag
+      result: SUCCESS
+      wall_clock_s: 2.09
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-LINE-FORMAT
+  subject: log-line
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::log (format! at lib.rs:204-215)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-009
+    - SC-001
+    - US1-AS1
+    code:
+    - lib.rs:204-215
+  statement: 'Every emitted log line is composed, in order, of a timestamp, the log level, and the exact
+    message text the caller passed, separated by spaces.
+
+    '
+  traces:
+  - FR-009
+  - SC-001
+  - lib.rs:204-215
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_line_format
+      result: SUCCESS
+      wall_clock_s: 2.75
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-TIMESTAMP-ISO8601
+  subject: log-line
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::log -> Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true) (lib.rs:203)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-009
+    - 'assumption: ISO 8601 timestamp'
+    code:
+    - lib.rs:203
+  statement: 'The timestamp beginning each log line is the current UTC time in ISO 8601 / RFC 3339 form
+    with millisecond precision and a trailing Z, for example 2026-04-17T14:30:00.123Z.
+
+    '
+  traces:
+  - FR-009
+  - lib.rs:203
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_timestamp_iso8601
+      result: SUCCESS
+      wall_clock_s: 27.38
+      peak_rss_mb: 507
+    _scored_by: scorer_kani
+- id: LOG-NEWLINE-TERMINATED
+  subject: log-line
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::log (trailing \n in both format branches, lib.rs:207,214)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - 'contract: writes {..}\n'
+    code:
+    - lib.rs:207
+    - lib.rs:214
+  statement: 'Every emitted log line ends with a single newline character.
+
+    '
+  traces:
+  - contract ilogger.md output format
+  - lib.rs:207
+  - lib.rs:214
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_newline_terminated
+      result: SUCCESS
+      wall_clock_s: 2.34
+      peak_rss_mb: 65
+    _scored_by: scorer_kani
+- id: LOG-LEVEL-DISPLAY-STRING
+  subject: log-line
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LogLevel::as_str (lib.rs:75-82) & Display::fmt (lib.rs:94-98)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-014
+    - 'data-model: LogLevel Display'
+    code:
+    - lib.rs:75-82
+    - lib.rs:94-98
+  statement: 'The level shown in each line is the uppercase name padded to five characters — "ERROR",
+    "WARN ", "INFO ", "DEBUG" — and the Display formatting of a level produces exactly that string.
+
+    '
+  traces:
+  - FR-014
+  - lib.rs:75-82
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_level_display_string
+      result: SUCCESS
+      wall_clock_s: 0.77
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-FILTER-SUPPRESS
+  subject: log-filter
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::log (guard `if level > self.state.level { return; }`, lib.rs:200-202)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-004
+    - US1-AS2
+    - SC-002
+    code:
+    - lib.rs:200-202
+  statement: 'A message whose severity is more verbose than the configured threshold produces no output
+    at all (for example, with the threshold at Warn, info and debug calls write nothing).
+
+    '
+  traces:
+  - FR-004
+  - US1-AS2
+  - SC-002
+  - lib.rs:200-202
+  creusot:
+    evidence:
+      modules:
+      - verify_log_filter_suppress
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_filter_suppress
+      result: SUCCESS
+      wall_clock_s: 0.81
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-FILTER-EMIT
+  subject: log-filter
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::log (falls through the guard when level <= threshold, lib.rs:200-217)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - SC-002
+    - US1-AS1
+    - US1-AS3
+    code:
+    - lib.rs:200-217
+  statement: 'A message whose severity is at or above the configured threshold (equal or more severe)
+    is emitted (for example, with the threshold at Warn, both warn and error calls produce output).
+
+    '
+  traces:
+  - SC-002
+  - US1-AS1
+  - lib.rs:200-217
+  creusot:
+    evidence:
+      modules:
+      - verify_log_filter_emit
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_filter_emit
+      result: SUCCESS
+      wall_clock_s: 0.81
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-DEFAULT-LEVEL-INFO
+  subject: log-filter
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LogLevel::from_env (Err(_) => LogLevel::Info, lib.rs:68-73)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-011
+    - US1-AS4
+    code:
+    - lib.rs:68-73
+  statement: 'When the RUST_LOG environment variable is not set, the logger uses Info as its default threshold.
+
+    '
+  traces:
+  - FR-011
+  - US1-AS4
+  - lib.rs:71
+  creusot:
+    evidence:
+      modules:
+      - verify_log_default_level_info
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_default_level_info
+      result: SUCCESS
+      wall_clock_s: 1.55
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-CONSOLE-COLOR-CODES
+  subject: color
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LogLevel::ansi_color (lib.rs:84-91) + color branch of LoggerComponent::log (lib.rs:204-212)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-006
+    - US1-AS1
+    - US1-AS5
+    - SC-003
+    code:
+    - lib.rs:84-91
+    - lib.rs:204-212
+  statement: 'When color is enabled, the level word in a console line is wrapped in the level''s ANSI
+    color code — red for error, 256-color orange for warn, green for info, cyan for debug — and closed
+    with the reset code.
+
+    '
+  traces:
+  - FR-006
+  - US1-AS5
+  - SC-003
+  - lib.rs:84-91
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_console_color_codes
+      result: SUCCESS
+      wall_clock_s: 2.57
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-FILE-NO-ANSI
+  subject: color
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: no-color branch of LoggerComponent::log (lib.rs:213-215) driven by use_color=false
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-008
+    - US2-AS1
+    - SC-004
+    code:
+    - lib.rs:163
+    - lib.rs:213-215
+  statement: 'Log lines written to a file contain no ANSI color escape sequences whatsoever.
+
+    '
+  traces:
+  - FR-008
+  - SC-004
+  - lib.rs:213-215
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_file_no_ansi
+      result: SUCCESS
+      wall_clock_s: 1.98
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-FILE-COLOR-DISABLED
+  subject: color
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: 'LoggerComponent::new_with_file (use_color: false, lib.rs:163)'
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-013
+    - FR-008
+    code:
+    - lib.rs:163
+  statement: 'A logger configured for file output always has color disabled, no matter the environment.
+
+    '
+  traces:
+  - FR-013
+  - lib.rs:163
+  creusot:
+    evidence:
+      modules:
+      - verify_log_file_color_disabled
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_file_color_disabled
+      result: SUCCESS
+      wall_clock_s: 2.07
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-CONSOLE-COLOR-AUTODETECT
+  subject: color
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerState::default (use_color from libc::isatty(STDERR_FILENO), lib.rs:114-118)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-013
+    - SC-003
+    code:
+    - lib.rs:114
+    - lib.rs:118
+  statement: 'For console output, color is enabled exactly when standard error is a terminal and disabled
+    otherwise, decided automatically at construction time.
+
+    '
+  traces:
+  - FR-013
+  - lib.rs:114-118
+  creusot:
+    evidence:
+      modules:
+      - verify_log_console_color_autodetect
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    delegate_to: libc::isatty(STDERR_FILENO) FFI (terminal detection is a foreign function / OS-hardware
+      boundary CBMC models as an unsupported foreign call)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: LOG-CONSOLE-DEFAULT-STDERR
+  subject: destination
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerState::default (writer = io::stderr(), lib.rs:116)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-005
+    - 'assumption: console targets stderr'
+    code:
+    - lib.rs:116
+  statement: 'By default, with no file configured, log output is written to the standard error stream.
+
+    '
+  traces:
+  - FR-005
+  - lib.rs:116
+  creusot:
+    evidence:
+      modules:
+      - verify_log_console_default_stderr
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    delegate_to: std::io::stderr() stream identity (which OS file descriptor the default writer targets
+      is an I/O boundary, not a CBMC-expressible value)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: LOG-FILE-OUTPUT-MODE
+  subject: destination
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::new_with_file (writer = File, lib.rs:155-165)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-007
+    - US2
+    code:
+    - lib.rs:155-165
+  statement: 'The logger can be configured to write its output to a named file path instead of the console.
+
+    '
+  traces:
+  - FR-007
+  - US2
+  - lib.rs:155-165
+  creusot:
+    evidence:
+      modules:
+      - verify_log_file_output_mode
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 51
+      lever: null
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    delegate_to: std::fs filesystem I/O (real File writer via OpenOptions; foreign filesystem calls, intractable/foreign
+      under CBMC)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: LOG-FILE-CREATE
+  subject: destination
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::new_with_file (OpenOptions.create(true).append(true), lib.rs:156-159)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - US2-AS3
+    - 'assumption: append mode, create if absent'
+    code:
+    - lib.rs:156-159
+  statement: 'When a logger is configured for a file path that does not yet exist, the file is created
+    automatically and opened in append mode.
+
+    '
+  traces:
+  - US2-AS3
+  - lib.rs:156-159
+  creusot:
+    evidence:
+      modules:
+      - verify_log_file_create
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    delegate_to: std::fs::OpenOptions create(true).append(true) filesystem semantics (foreign filesystem
+      call outside CBMC)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: LOG-FILE-OPEN-ERROR
+  subject: destination
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::new_with_file (`?` on open failure returns Err, lib.rs:155-159)
+  kind: error-case
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - 'edge case: file cannot be opened'
+    - FR-007
+    code:
+    - lib.rs:155-159
+  statement: 'When the log file cannot be opened or created (for example, permission denied), configuring
+    the file logger returns the underlying I/O error rather than a logger.
+
+    '
+  traces:
+  - 'edge case: file cannot be opened'
+  - lib.rs:155-159
+  creusot:
+    evidence:
+      modules:
+      - verify_log_file_open_error
+      result: Proved
+      wall_clock_s: 0.55
+      peak_rss_mb: 51
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    delegate_to: std::fs::OpenOptions::open error path (? propagation of a real io::Error; foreign filesystem
+      call outside CBMC)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: LOG-LEVEL-ORDER
+  subject: LogLevel-order
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LogLevel enum discriminants + derived Ord (lib.rs:35-41)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - 'data-model: LogLevel ordering'
+    code:
+    - lib.rs:35-41
+  statement: 'The severity levels are totally ordered from most to least severe as Error (0), then Warn
+    (1), then Info (2), then Debug (3), and this ordering is what the level filter compares against.
+
+    '
+  traces:
+  - data-model
+  - lib.rs:35-41
+  creusot:
+    evidence:
+      modules:
+      - verify_log_level_order
+      result: Proved
+      wall_clock_s: 0.59
+      peak_rss_mb: 51
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_level_order
+      result: SUCCESS
+      wall_clock_s: 0.66
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-LEVEL-PARSE-MAPPING
+  subject: from_env_str
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LogLevel::from_env_str (match arms, lib.rs:57-66)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-014
+    - FR-004
+    - 'data-model: parsing'
+    code:
+    - lib.rs:57-66
+  statement: 'Parsing a level name maps "error" to Error, "warn" and "warning" to Warn, "info" to Info,
+    and "debug" to Debug.
+
+    '
+  traces:
+  - FR-014
+  - lib.rs:59-62
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_level_parse_mapping
+      result: SUCCESS
+      wall_clock_s: 3.3
+      peak_rss_mb: 91
+    _scored_by: scorer_kani
+- id: LOG-LEVEL-PARSE-CASE-INSENSITIVE
+  subject: from_env_str
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LogLevel::from_env_str (s.to_ascii_lowercase(), lib.rs:58)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-014
+    - 'assumption: case-insensitive level names'
+    code:
+    - lib.rs:58
+  statement: 'Level-name parsing is case-insensitive, so "ERROR", "Error", and "error" all parse to the
+    same Error level.
+
+    '
+  traces:
+  - FR-014
+  - lib.rs:58
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_level_parse_case_insensitive
+      result: SUCCESS
+      wall_clock_s: 3.7
+      peak_rss_mb: 104
+    _scored_by: scorer_kani
+- id: LOG-LEVEL-PARSE-TRACE-DEBUG
+  subject: from_env_str
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LogLevel::from_env_str ("trace" => LogLevel::Debug, lib.rs:63)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - 'edge case: RUST_LOG=trace'
+    - 'assumption: trace maps to debug'
+    code:
+    - lib.rs:63
+  statement: 'The level name "trace" is recognized and treated as the Debug level, even though the interface
+    exposes no separate trace method.
+
+    '
+  traces:
+  - 'edge case: RUST_LOG=trace'
+  - lib.rs:63
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_level_parse_trace_debug
+      result: SUCCESS
+      wall_clock_s: 2.85
+      peak_rss_mb: 80
+    _scored_by: scorer_kani
+- id: LOG-LEVEL-PARSE-INVALID-DEFAULT
+  subject: from_env_str
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LogLevel::from_env_str (_ => LogLevel::Info, lib.rs:64)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - 'edge case: invalid RUST_LOG value'
+    - FR-004
+    code:
+    - lib.rs:64
+  statement: 'Any unrecognized or invalid level name parses to the Info level as a safe default.
+
+    '
+  traces:
+  - 'edge case: invalid RUST_LOG value'
+  - lib.rs:64
+  creusot:
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    fidelity: not-expressible
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: real-type-bounded
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_level_parse_invalid_default
+      result: SUCCESS
+      wall_clock_s: 2.98
+      peak_rss_mb: 84
+    _scored_by: scorer_kani
+- id: LOG-THREAD-SAFE-NO-INTERLEAVE
+  subject: thread-safety
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::log (writer.lock() held across write_all+flush, lib.rs:216-218)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-010
+    - 'edge case: concurrent logging'
+    - SC-005
+    code:
+    - lib.rs:105
+    - lib.rs:216-218
+  statement: 'When multiple threads log at the same time, each log line is written whole while its thread
+    holds the writer''s lock, so lines are never interleaved or corrupted with one another.
+
+    '
+  traces:
+  - FR-010
+  - SC-005
+  - lib.rs:216-218
+  creusot:
+    evidence: {}
+    fidelity: null
+    delegate_to: Loom concurrency model (a different verification model; thread interleaving is not a
+      Creusot expressibility question)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    delegate_to: Loom concurrency model (Kani/CBMC treats atomics/locks as sequential and does not explore
+      thread interleavings; non-interleaved writes under the held writer lock is a concurrency property)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: LOG-INTERFACE-DISCOVERY
+  subject: integration
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: define_component! expansion of LoggerComponent (IUnknown/query_interface machinery)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec-only
+  source:
+    spec:
+    - FR-003
+    - US3-AS1
+    - SC-006
+    code: []
+  statement: 'Querying the component for the ILogger interface at runtime returns a valid ILogger reference.
+
+    '
+  traces:
+  - FR-003
+  - US3-AS1
+  - SC-006
+  creusot:
+    evidence: {}
+    fidelity: null
+    delegate_to: component_framework crate (define_component!/query_interface / IUnknown machinery, outside
+      logger src)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    delegate_to: component_framework crate (define_component!/query_interface / IUnknown vtable machinery,
+      outside logger src)
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: LOG-RECEPTACLE-BIND
+  subject: integration
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: component_framework receptacle binding (connect_receptacle_raw -> get())
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec-only
+  source:
+    spec:
+    - US3-AS2
+    - US3-AS3
+    - SC-006
+    code: []
+  statement: 'When the logger is bound into another component''s ILogger receptacle, that receptacle then
+    hands back the logger implementation when it is asked for it.
+
+    '
+  traces:
+  - US3-AS2
+  - US3-AS3
+  - SC-006
+  creusot:
+    evidence: {}
+    fidelity: null
+    delegate_to: 'component_framework crate (receptacle binding: connect_receptacle_raw -> get())'
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: null
+    delegate_to: 'component_framework crate (receptacle binding: connect_receptacle_raw -> get())'
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: LOG-WRITE-ERROR-IGNORED
+  subject: log
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::log (`let _ = writer.write_all(...)`; `let _ = writer.flush()`, lib.rs:217-218)
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: code-only
+  source:
+    spec: []
+    code:
+    - lib.rs:217-218
+  statement: 'Errors from writing or flushing the output are deliberately ignored, so a failed write never
+    panics or propagates out of a log call. (Undocumented in the spec — surfaced from the code.)
+
+    '
+  traces:
+  - lib.rs:217-218
+  creusot:
+    evidence:
+      modules:
+      - verify_log_write_error_ignored
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    fidelity: real-type
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_write_error_ignored
+      result: SUCCESS
+      wall_clock_s: 0.56
+      peak_rss_mb: 62
+    _scored_by: scorer_kani
+- id: LOG-FLUSH-EACH-LINE
+  subject: log
+  methods:
+  - error
+  - warn
+  - info
+  - debug
+  object_fn: LoggerComponent::log (writer.flush() after each write_all, lib.rs:218)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: code-only
+  source:
+    spec: []
+    code:
+    - lib.rs:218
+  statement: 'After writing a line, the logger flushes the writer, so each emitted line is pushed out
+    immediately rather than being buffered. (Undocumented in the spec — surfaced from the code.)
+
+    '
+  traces:
+  - lib.rs:218
+  creusot:
+    evidence:
+      modules:
+      - verify_log_flush_each_line
+      result: Proved
+      wall_clock_s: 0.64
+      peak_rss_mb: 51
+      lever: null
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    _scored_by: scorer_creusot
+  kani:
+    fidelity: representative
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_log_flush_each_line
+      result: SUCCESS
+      wall_clock_s: 2.27
+      peak_rss_mb: 61
+    _scored_by: scorer_kani
+- id: NV-1
+  scope: 'FR-001/FR-002: LoggerComponent named and ILogger declared via the framework macros'
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Being named a certain way and being declared through define_component!/define_interface! are
+    structural build-time facts about the source, not observable runtime behavior with a possible counterexample.
+
+    '
+  traces:
+  - FR-001
+  - FR-002
+- id: NV-2
+  scope: FR-014 / LoggerState field layout and visibility
+  kind: not-verifiable
+  verifiable: false
+  reason: 'The LoggerState type''s fields and their visibility are a type/layout fact about the code shape,
+    not a runtime behavior an execution could contradict.
+
+    '
+  traces:
+  - FR-014
+  - lib.rs:104-108
+- id: NV-3
+  scope: 'SC-007: doc tests and Criterion benchmarks exist for public APIs'
+  kind: not-verifiable
+  verifiable: false
+  reason: 'The existence of documentation tests and benchmark harnesses is a process/tooling requirement
+    about the repository, not a runtime correctness obligation a verifier can check.
+
+    '
+  traces:
+  - SC-007
+- id: NV-4
+  scope: 'performance: log formatting and emission throughput'
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Throughput and emission speed are wall-clock timing quantities; their magnitude is not machine-checkable
+    (only functional outcomes are).
+
+    '
+  traces:
+  - SC-007
+  - 'assumption: benchmarks target formatting/emission throughput'
+- id: NV-5
+  scope: 'FR-012: new_with_writer constructor is provided for custom output targets'
+  kind: not-verifiable
+  verifiable: false
+  reason: 'That a particular constructor with a particular signature exists is a structural API-shape
+    fact; the behavior it enables (setting writer, level, and color) is exercised through the format,
+    filter, and color properties rather than as a standalone runtime obligation.
+
+    '
+  traces:
+  - FR-012
+  - lib.rs:187-197
+- id: NV-6
+  scope: lib.rs:114 libc::isatty foreign call
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Whether standard error is a terminal is decided by a foreign OS call whose result reflects
+    the runtime environment; that answer is an external assumption, not a property of this code a verifier
+    can falsify. (The mapping from that answer to use_color is captured verifiably in LOG-CONSOLE-COLOR-AUTODETECT.)
+
+    '
+  traces:
+  - lib.rs:112-118
+- id: NV-7
+  scope: lib.rs:203 Utc::now() wall-clock value
+  kind: not-verifiable
+  verifiable: false
+  reason: 'The actual instant returned by the system clock is non-deterministic environment input; only
+    the format applied to it is checkable (LOG-TIMESTAMP-ISO8601), not the time value itself.
+
+    '
+  traces:
+  - lib.rs:203
+coverage:
+  method_ledger:
+    error: 26
+    warn: 26
+    info: 26
+    debug: 26
+  spec_ledger:
+    FR-001: NV-1
+    FR-002: NV-1
+    FR-003:
+    - LOG-INTERFACE-DISCOVERY
+    FR-004:
+    - LOG-FILTER-SUPPRESS
+    - LOG-LEVEL-PARSE-MAPPING
+    - LOG-LEVEL-PARSE-INVALID-DEFAULT
+    FR-005:
+    - LOG-CONSOLE-DEFAULT-STDERR
+    FR-006:
+    - LOG-CONSOLE-COLOR-CODES
+    FR-007:
+    - LOG-FILE-OUTPUT-MODE
+    - LOG-FILE-OPEN-ERROR
+    FR-008:
+    - LOG-FILE-NO-ANSI
+    - LOG-FILE-COLOR-DISABLED
+    FR-009:
+    - LOG-LINE-FORMAT
+    - LOG-TIMESTAMP-ISO8601
+    FR-010:
+    - LOG-THREAD-SAFE-NO-INTERLEAVE
+    FR-011:
+    - LOG-DEFAULT-LEVEL-INFO
+    FR-012: NV-5
+    FR-013:
+    - LOG-CONSOLE-COLOR-AUTODETECT
+    - LOG-FILE-COLOR-DISABLED
+    FR-014:
+    - LOG-LEVEL-DISPLAY-STRING
+    - LOG-LEVEL-PARSE-MAPPING
+    - LOG-LEVEL-PARSE-CASE-INSENSITIVE
+    US1:
+    - LOG-INFO-LEVEL-TAG
+    - LOG-ERROR-LEVEL-TAG
+    - LOG-FILTER-SUPPRESS
+    - LOG-FILTER-EMIT
+    - LOG-CONSOLE-COLOR-CODES
+    - LOG-DEFAULT-LEVEL-INFO
+    US2:
+    - LOG-FILE-OUTPUT-MODE
+    - LOG-FILE-NO-ANSI
+    - LOG-FILE-CREATE
+    - LOG-WARN-LEVEL-TAG
+    - LOG-DEBUG-LEVEL-TAG
+    US3:
+    - LOG-INTERFACE-DISCOVERY
+    - LOG-RECEPTACLE-BIND
+    'edge: invalid RUST_LOG':
+    - LOG-LEVEL-PARSE-INVALID-DEFAULT
+    'edge: file cannot be opened':
+    - LOG-FILE-OPEN-ERROR
+    'edge: concurrent logging':
+    - LOG-THREAD-SAFE-NO-INTERLEAVE
+    'edge: RUST_LOG=trace':
+    - LOG-LEVEL-PARSE-TRACE-DEBUG
+    SC-001:
+    - LOG-LINE-FORMAT
+    - LOG-ERROR-LEVEL-TAG
+    - LOG-WARN-LEVEL-TAG
+    - LOG-INFO-LEVEL-TAG
+    - LOG-DEBUG-LEVEL-TAG
+    SC-002:
+    - LOG-FILTER-SUPPRESS
+    - LOG-FILTER-EMIT
+    SC-003:
+    - LOG-CONSOLE-COLOR-CODES
+    - LOG-CONSOLE-COLOR-AUTODETECT
+    SC-004:
+    - LOG-FILE-NO-ANSI
+    SC-005:
+    - LOG-THREAD-SAFE-NO-INTERLEAVE
+    SC-006:
+    - LOG-INTERFACE-DISCOVERY
+    - LOG-RECEPTACLE-BIND
+    SC-007:
+    - NV-3
+    - NV-4
+  code_ledger:
+    LogLevel::from_env_str (lib.rs:57-66):
+    - LOG-LEVEL-PARSE-MAPPING
+    - LOG-LEVEL-PARSE-CASE-INSENSITIVE
+    - LOG-LEVEL-PARSE-TRACE-DEBUG
+    - LOG-LEVEL-PARSE-INVALID-DEFAULT
+    LogLevel::from_env (lib.rs:68-73):
+    - LOG-DEFAULT-LEVEL-INFO
+    LogLevel::as_str (lib.rs:75-82):
+    - LOG-LEVEL-DISPLAY-STRING
+    LogLevel::ansi_color (lib.rs:84-91):
+    - LOG-CONSOLE-COLOR-CODES
+    LogLevel Ord (lib.rs:35-41):
+    - LOG-LEVEL-ORDER
+    Display::fmt for LogLevel (lib.rs:94-98):
+    - LOG-LEVEL-DISPLAY-STRING
+    LoggerState::default (lib.rs:110-121):
+    - LOG-CONSOLE-DEFAULT-STDERR
+    - LOG-CONSOLE-COLOR-AUTODETECT
+    - LOG-DEFAULT-LEVEL-INFO
+    LoggerComponent::new_with_file (lib.rs:155-165):
+    - LOG-FILE-OUTPUT-MODE
+    - LOG-FILE-CREATE
+    - LOG-FILE-COLOR-DISABLED
+    - LOG-FILE-OPEN-ERROR
+    LoggerComponent::new_with_writer (lib.rs:187-197): NV-5
+    LoggerComponent::log guard (lib.rs:200-202):
+    - LOG-FILTER-SUPPRESS
+    - LOG-FILTER-EMIT
+    LoggerComponent::log format (lib.rs:203-215):
+    - LOG-LINE-FORMAT
+    - LOG-TIMESTAMP-ISO8601
+    - LOG-LEVEL-DISPLAY-STRING
+    - LOG-CONSOLE-COLOR-CODES
+    - LOG-FILE-NO-ANSI
+    - LOG-NEWLINE-TERMINATED
+    LoggerComponent::log write/flush (lib.rs:216-218):
+    - LOG-THREAD-SAFE-NO-INTERLEAVE
+    - LOG-FLUSH-EACH-LINE
+    - LOG-WRITE-ERROR-IGNORED
+    ILogger::error/warn/info/debug (lib.rs:222-238):
+    - LOG-ERROR-LEVEL-TAG
+    - LOG-WARN-LEVEL-TAG
+    - LOG-INFO-LEVEL-TAG
+    - LOG-DEBUG-LEVEL-TAG
+    libc::isatty (lib.rs:114): NV-6
+    Utc::now (lib.rs:203): NV-7
+    LoggerState fields (lib.rs:104-108): NV-2
