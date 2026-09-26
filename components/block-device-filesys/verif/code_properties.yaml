@@ -1,0 +1,614 @@
+# Blind code-only extraction for block-device-filesys.
+# Header prose avoids the literal record tokens so a plain Cmd+F counts only real records.
+# Source artifact: the component source ONLY (src/config.rs, src/actor.rs, src/lib.rs,
+# src/telemetry.rs) plus the IBlockDevice/IBlockDeviceAdmin trait definitions it implements.
+# This pass did NOT read the spec.
+component:  block-device-filesys
+source:     code
+artifact:   components/block-device-filesys/src/{config.rs, actor.rs, lib.rs, telemetry.rs}
+pin:        e87bafd8 (2026-09-15)
+method:     blind-extraction
+generated:  2026-09-22
+counts: {total: 73, methods: 17, verifiable: 64, not_verifiable: 9}
+properties:
+  # ---- config.rs: DeviceConfig::new ----
+  - id:         BDF-CONFIG-BLKSZ-MIN
+    subject:    DeviceConfig::new
+    kind:       precondition
+    verifiable: true
+    statement: >
+      DeviceConfig::new returns an error whenever the block size is below 512, before any other check.
+    traces:     [config.rs:59-61]
+  - id:         BDF-CONFIG-BLKSZ-POW2
+    subject:    DeviceConfig::new
+    kind:       precondition
+    verifiable: true
+    statement: >
+      DeviceConfig::new returns an error whenever the block size is not a power of two.
+    traces:     [config.rs:62-64]
+  - id:         BDF-CONFIG-NBLK-NONZERO
+    subject:    DeviceConfig::new
+    kind:       precondition
+    verifiable: true
+    statement: >
+      DeviceConfig::new returns an error whenever the number of blocks is zero.
+    traces:     [config.rs:65-67]
+  - id:         BDF-CONFIG-TOTALBYTES-OVERFLOW
+    subject:    DeviceConfig::new
+    kind:       error-case
+    verifiable: true
+    statement: >
+      DeviceConfig::new computes the total size using a checked multiply of block size by block count
+      and returns an overflow error instead of a wrapped value when that product does not fit in 64
+      bits.
+    traces:     [config.rs:69-72]
+  - id:         BDF-CONFIG-TOTALBYTES-EQ
+    subject:    DeviceConfig::new
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      On success DeviceConfig::new stores a total-bytes value exactly equal to block size times number
+      of blocks, and total_bytes() returns that stored value.
+    traces:     [config.rs:69-79, config.rs:101-103]
+  - id:         BDF-CONFIG-ACCESSORS
+    subject:    DeviceConfig-accessors
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The block_size(), num_blocks(), and file_path() accessors return exactly the values supplied at
+      construction, unchanged.
+    traces:     [config.rs:82-103]
+  # ---- config.rs: open_or_create_backing_file / try_open_direct ----
+  - id:         BDF-FILE-SIZE-MATCH
+    subject:    open_or_create_backing_file
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the backing file already exists, its measured size must equal the configured total bytes,
+      otherwise the function returns a size-mismatch error and never resizes the file.
+    traces:     [config.rs:118-132]
+  - id:         BDF-FILE-CREATE-FALLOCATE
+    subject:    open_or_create_backing_file
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When the backing file does not exist, the function creates it and pre-allocates it to exactly the
+      configured total bytes via fallocate.
+    traces:     [config.rs:137-165]
+  - id:         BDF-FILE-PARENT-EXISTS
+    subject:    open_or_create_backing_file
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the backing file does not exist and its parent directory is missing (or the path has no
+      parent), the function returns a typed error and does not create anything.
+    traces:     [config.rs:138-149]
+  - id:         BDF-FILE-FALLOCATE-CLEANUP
+    subject:    open_or_create_backing_file
+    kind:       frame
+    verifiable: true
+    statement: >
+      If pre-allocation of a newly created backing file fails, the function closes and removes the
+      just-created file before returning an error, leaving no partially initialized file behind.
+    traces:     [config.rs:155-162]
+  - id:         BDF-FILE-ODIRECT-FALLBACK
+    subject:    open_or_create_backing_file
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The file is first opened with direct and synchronous IO flags; if the filesystem rejects direct
+      IO with an invalid-argument error, the function retries without those flags (buffered IO) rather
+      than failing.
+    traces:     [config.rs:171-198]
+  # ---- lib.rs: lifecycle ----
+  - id:         BDF-INIT-CONFIG-GATE
+    subject:    initialize
+    kind:       precondition
+    verifiable: true
+    statement: >
+      initialize reconstructs and validates the device configuration through DeviceConfig::new before
+      opening the backing file or starting the worker; an invalid configuration yields a
+      not-initialized error and no worker is started.
+    traces:     [lib.rs:113-139]
+  - id:         BDF-INIT-ACTOR-START
+    subject:    initialize
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      On success, initialize opens the backing file, constructs the IO handler, activates the worker
+      actor, and stores the resulting actor handle so clients can subsequently connect.
+    traces:     [lib.rs:138-183]
+  - id:         BDF-SHUTDOWN
+    subject:    shutdown
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      shutdown takes the stored actor handle (leaving none), sends the worker a shutdown message, and
+      deactivates it; when no handle is present it returns success without side effects.
+    traces:     [lib.rs:187-203]
+  - id:         BDF-CONNECT-NOTINIT
+    subject:    connect_client
+    kind:       error-case
+    verifiable: true
+    statement: >
+      connect_client returns a not-initialized error when no actor handle has been stored (initialize
+      has not run).
+    traces:     [lib.rs:225-233]
+  - id:         BDF-CONNECT-CHANNELS
+    subject:    connect_client
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      connect_client creates a command channel and a completion channel, each of capacity 64, builds a
+      client session from their endpoints, registers it with the worker, and returns the client's ends.
+    traces:     [lib.rs:234-263, lib.rs:49]
+  - id:         BDF-CONNECT-INDEPENDENT
+    subject:    connect_client
+    kind:       invariant
+    verifiable: true
+    statement: >
+      Each call to connect_client obtains a distinct client id via an atomic fetch-and-increment and
+      builds a fresh independent channel pair, so no two connected clients share channels or ids.
+    traces:     [lib.rs:234-250]
+  # ---- lib.rs: device-info surface ----
+  - id:         BDF-SECTORSIZE
+    subject:    sector_size
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      sector_size returns an invalid-namespace error for any namespace id other than 1, and otherwise
+      returns the currently configured block size.
+    traces:     [lib.rs:266-273]
+  - id:         BDF-NUMSECTORS
+    subject:    num_sectors
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      num_sectors returns an invalid-namespace error for any namespace id other than 1, and otherwise
+      returns the currently configured number of blocks.
+    traces:     [lib.rs:275-282]
+  - id:         BDF-MAXQUEUEDEPTH
+    subject:    max_queue_depth
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      max_queue_depth returns the fixed submission-queue depth constant of 128.
+    traces:     [lib.rs:284-286, lib.rs:52]
+  - id:         BDF-NUMIOQUEUES
+    subject:    num_io_queues
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      num_io_queues returns 1.
+    traces:     [lib.rs:288-290]
+  - id:         BDF-MAXTRANSFER
+    subject:    max_transfer_size
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      max_transfer_size returns the configured block size multiplied by 256, using a saturating
+      multiply so the result caps at the maximum 32-bit value instead of wrapping.
+    traces:     [lib.rs:292-294]
+  - id:         BDF-BLOCKSIZE
+    subject:    block_size
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      block_size returns the currently configured block size.
+    traces:     [lib.rs:296-298]
+  - id:         BDF-NUMANODE
+    subject:    numa_node
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      numa_node returns -1.
+    traces:     [lib.rs:300-302]
+  - id:         BDF-NVMEVERSION
+    subject:    nvme_version
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      nvme_version returns the fixed string "N/A (file-backed)".
+    traces:     [lib.rs:304-306]
+  - id:         BDF-READWRITESTATS
+    subject:    read_write_stats
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      read_write_stats returns a default (zero-initialized) read/write statistics structure.
+    traces:     [lib.rs:340-342]
+  # ---- lib.rs + telemetry.rs: telemetry ----
+  - id:         BDF-TELEMETRY-FEATUREGATE
+    subject:    telemetry
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When built without the telemetry feature, telemetry() returns a feature-not-enabled error.
+    traces:     [lib.rs:330-335]
+  - id:         BDF-TELEMETRY-UNINIT
+    subject:    telemetry
+    kind:       error-case
+    verifiable: true
+    statement: >
+      With the telemetry feature enabled but before initialize has populated the collector, telemetry()
+      returns a not-initialized error.
+    traces:     [lib.rs:308-328]
+  - id:         BDF-TELEMETRY-MEAN-LATENCY
+    subject:    telemetry
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A telemetry snapshot's mean latency equals total accumulated latency divided by total operation
+      count when at least one operation was recorded, and is zero when no operations were recorded.
+    traces:     [telemetry.rs:82-86]
+  - id:         BDF-TELEMETRY-MEAN-THROUGHPUT
+    subject:    telemetry
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A telemetry snapshot's mean throughput equals total bytes divided by one mebibyte divided by the
+      elapsed seconds when elapsed time is positive, and is zero otherwise.
+    traces:     [telemetry.rs:88-92]
+  - id:         BDF-TELEMETRY-MINMAX
+    subject:    telemetry
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      record_op maintains the minimum and maximum single-operation latency via compare-and-swap loops,
+      and a snapshot reports the minimum as zero when no operations have been recorded.
+    traces:     [telemetry.rs:35-66, telemetry.rs:73-78]
+  - id:         BDF-TELEMETRY-RECORD
+    subject:    telemetry
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Each recorded operation increases the total operation count by one and adds its latency and byte
+      count to the running totals.
+    traces:     [telemetry.rs:35-39]
+  # ---- actor.rs: validate_lba / offset_for_lba (the arithmetic nucleus) ----
+  - id:         BDF-LBA-NS
+    subject:    validate_lba
+    kind:       error-case
+    verifiable: true
+    statement: >
+      validate_lba returns an invalid-namespace error for any namespace id other than 1.
+    traces:     [actor.rs:180-184]
+  - id:         BDF-LBA-OVERFLOW
+    subject:    validate_lba
+    kind:       error-case
+    verifiable: true
+    statement: >
+      validate_lba computes the end block with a checked addition of starting block plus block count,
+      returning an out-of-range error instead of wrapping when that sum overflows 64 bits.
+    traces:     [actor.rs:185-187]
+  - id:         BDF-LBA-INRANGE
+    subject:    validate_lba
+    kind:       precondition
+    verifiable: true
+    statement: >
+      validate_lba returns success only when the end block (start plus count) is less than or equal to
+      the configured number of blocks; a range that extends past the device end is rejected with an
+      out-of-range error.
+    traces:     [actor.rs:188-194]
+  - id:         BDF-OFFSET-EQ
+    subject:    offset_for_lba
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      offset_for_lba returns the starting block number multiplied by the block size as the byte offset
+      for the operation.
+    traces:     [actor.rs:197-199]
+  - id:         BDF-OFFSET-NOOVERFLOW
+    subject:    offset_for_lba
+    kind:       invariant
+    verifiable: true
+    statement: >
+      Because validate_lba has already guaranteed the starting block is within the configured block
+      count and construction guaranteed block count times block size fits in 64 bits, the byte offset
+      computed as start times block size never overflows and never exceeds the total device size.
+    traces:     [actor.rs:185-199, config.rs:69-79]
+  - id:         BDF-SAFETY-NO-OOB
+    subject:    device-bounds-safety
+    kind:       invariant
+    verifiable: true
+    statement: >
+      Every command handler that performs file IO (synchronous read/write, asynchronous read/write, and
+      write-zeros) first calls validate_lba and returns early on error, so no read or write is ever
+      issued at a byte offset outside the configured device capacity.
+    traces:     [actor.rs:305-317, actor.rs:367-379, actor.rs:450-462, actor.rs:573-585, actor.rs:707-718]
+  # ---- actor.rs: IO command handlers ----
+  - id:         BDF-READSYNC-RAW
+    subject:    ReadSync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A synchronous read validates the range, reads into the client buffer at the byte offset for the
+      block via pread, and reports success or, on a negative return, a read-failed error.
+    traces:     [actor.rs:290-360]
+  - id:         BDF-WRITESYNC-DURABLE
+    subject:    WriteSync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A synchronous write validates the range, writes the buffer at the byte offset via pwrite, then
+      issues a data-sync so the data is durable before the write-done completion is sent.
+    traces:     [actor.rs:362-432]
+  - id:         BDF-WRITESYNC-ERR
+    subject:    WriteSync
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the underlying pwrite or the following data-sync fails, the synchronous write reports a
+      write-failed error to the client.
+    traces:     [actor.rs:396-416]
+  - id:         BDF-READASYNC-SUBMIT
+    subject:    ReadAsync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      An asynchronous read validates the range, pushes a read submission at the computed offset onto
+      the ring, submits it, and records an in-flight operation with an optional deadline whose eventual
+      completion carries the correct operation handle.
+    traces:     [actor.rs:434-514]
+  - id:         BDF-WRITEASYNC-LINK
+    subject:    WriteAsync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      An asynchronous write validates the range, pushes a write submission linked (IO-link flag) to a
+      data-sync submission so they complete as a durable unit, submits, and records an in-flight
+      operation.
+    traces:     [actor.rs:560-647]
+  - id:         BDF-ASYNC-SQFULL
+    subject:    async-submit
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When pushing the read or write submission onto a full submission queue fails, the handler sends
+      the client an error completion carrying a submission-queue-full message and returns, never
+      blocking the worker.
+    traces:     [actor.rs:478-491, actor.rs:605-618]
+  - id:         BDF-ASYNC-FALLBACK
+    subject:    async-submit
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When no async-IO ring is available, asynchronous reads and writes fall back to synchronous pread
+      or pwrite-with-data-sync and deliver a completion inline.
+    traces:     [actor.rs:515-557, actor.rs:648-701]
+  - id:         BDF-WRITEASYNC-FSYNCPUSH-WARN
+    subject:    WriteAsync
+    kind:       frame
+    verifiable: true
+    statement: >
+      If the data-sync submission cannot be pushed after the write submission, the handler logs a
+      warning that the write may not be durable but still proceeds with the submitted write.
+    traces:     [actor.rs:619-623]
+  - id:         BDF-WRITEZEROS
+    subject:    WriteZeros
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A write-zeros command validates the range, writes a zero-filled buffer covering the requested
+      blocks at the computed offset, and issues a data-sync before reporting completion.
+    traces:     [actor.rs:704-780]
+  - id:         BDF-WRITEZEROS-ALIGN
+    subject:    WriteZeros
+    kind:       error-case
+    verifiable: true
+    statement: >
+      The zero buffer for a write-zeros command is allocated 512-byte aligned so it is valid for direct
+      IO; if that aligned allocation fails, the command reports a write-failed error instead of writing.
+    traces:     [actor.rs:719-742]
+  - id:         BDF-BATCH-SEQ
+    subject:    BatchSubmit
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A batch command processes its contained operations one at a time in order by recursively
+      dispatching each; each contained operation produces its own completion and a failing one does not
+      stop the others.
+    traces:     [actor.rs:234-238]
+  - id:         BDF-ABORT
+    subject:    AbortOp
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      An abort command pushes an async-cancel submission for the target handle when a ring exists,
+      removes the target from the in-flight set, and always replies with an abort acknowledgement.
+    traces:     [actor.rs:783-796]
+  - id:         BDF-NSPROBE
+    subject:    NsProbe
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A namespace-probe command replies with a single namespace whose id is 1 and whose sector count
+      and sector size are the configured number of blocks and block size.
+    traces:     [actor.rs:798-810]
+  - id:         BDF-FLUSHSYNC-OK
+    subject:    FlushSync
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A flush command on namespace 1 issues a data-sync on the backing file descriptor and replies with
+      a flush-done completion carrying the result.
+    traces:     [actor.rs:245-271]
+  - id:         BDF-FLUSHSYNC-NS
+    subject:    FlushSync
+    kind:       error-case
+    verifiable: true
+    statement: >
+      A flush command for any namespace other than 1 produces an invalid-namespace result without
+      issuing any data-sync on the file.
+    traces:     [actor.rs:252-256]
+  - id:         BDF-FLUSHSYNC-ERR
+    subject:    FlushSync
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the data-sync of a flush command returns a negative result, the command reports a
+      write-failed error.
+    traces:     [actor.rs:260-269]
+  - id:         BDF-UNSUPPORTED
+    subject:    unsupported-admin
+    kind:       error-case
+    verifiable: true
+    statement: >
+      The create-namespace, delete-namespace, format-namespace, and controller-reset commands each
+      reply with a not-supported error completion.
+    traces:     [actor.rs:273-286]
+  # ---- actor.rs: completion delivery + async harvest/timeout ----
+  - id:         BDF-DELIVERY-NONBLOCK
+    subject:    completion-delivery
+    kind:       invariant
+    verifiable: true
+    statement: >
+      Delivering a completion to a client uses a single non-blocking try-send on the fast path, and on
+      a full channel (or a non-empty existing backlog) the completion is pushed onto that client's
+      backlog instead of blocking the worker.
+    traces:     [actor.rs:56-61, actor.rs:917-921]
+  - id:         BDF-DELIVERY-FIFO
+    subject:    completion-delivery
+    kind:       invariant
+    verifiable: true
+    statement: >
+      Retrying a client's backlog delivers buffered completions oldest-first and stops at the first
+      completion that still cannot be sent, so completion order for that client is preserved.
+    traces:     [actor.rs:66-77]
+  - id:         BDF-DELIVERY-ISOLATION
+    subject:    completion-delivery
+    kind:       invariant
+    verifiable: true
+    statement: >
+      Because delivery never blocks and each client owns its own backlog that is flushed independently
+      each poll cycle, a client with a full channel cannot delay completion delivery to the other
+      connected clients.
+    traces:     [actor.rs:917-921, actor.rs:923-930]
+  - id:         BDF-COMPLETION-UNKNOWN-CLIENT
+    subject:    completion-delivery
+    kind:       frame
+    verifiable: true
+    statement: >
+      Sending a completion addressed to a client id that is not currently registered is silently
+      dropped and never panics.
+    traces:     [actor.rs:917-921]
+  - id:         BDF-HARVEST-RESULT
+    subject:    async-harvest
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When harvesting ring completions, a negative result becomes a read-failed or write-failed error
+      (matching the operation direction) and a non-negative result becomes success; the in-flight entry
+      is removed and the completion is delivered to the owning client.
+    traces:     [actor.rs:812-868]
+  - id:         BDF-HARVEST-FSYNC-SKIP
+    subject:    async-harvest
+    kind:       frame
+    verifiable: true
+    statement: >
+      The completion event of the chained data-sync submission (identified by its high user-data bit)
+      is ignored during harvesting and never turned into a client completion.
+    traces:     [actor.rs:823-826]
+  - id:         BDF-TIMEOUT
+    subject:    async-timeout
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Any in-flight operation whose deadline has passed is removed, reported to its client as a timeout
+      completion, and has an async-cancel submission pushed for it.
+    traces:     [actor.rs:870-908]
+  - id:         BDF-OPHANDLE-UNIQUE
+    subject:    op-handle
+    kind:       invariant
+    verifiable: true
+    statement: >
+      Each operation is assigned the next handle from a counter that starts at 1 and advances by a
+      wrapping add, so successive operations receive successive handle values.
+    traces:     [actor.rs:173-177]
+  - id:         BDF-ADMIN-NOOPS
+    subject:    admin-noops
+    kind:       frame
+    verifiable: true
+    statement: >
+      The set-PCI-address, set-actor-CPU, signal-stop, and detach-controller admin methods perform no
+      action and change no observable component state.
+    traces:     [lib.rs:207-221]
+  # ---- Not-verifiable ledger ----
+  - id:         NV-1
+    scope:      "FR-002/logging side-effects on lifecycle and degradation paths"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Whether and at what level lifecycle and fallback events are logged is a logging side effect, not
+      a falsifiable input/output behavior of the component.
+    traces:     [lib.rs:129-181, actor.rs:122-129]
+  - id:         NV-2
+    scope:      "Direct pointer/DMA-buffer access with no intermediate copy"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Passing the buffer's raw byte slice straight to the syscall is an implementation strategy
+      (zero-copy) that is not observable as a falsifiable behavior.
+    traces:     [actor.rs:325-334, actor.rs:381-394]
+  - id:         NV-3
+    scope:      "posix_memalign / fallocate / pread / pwrite / fdatasync syscall correctness"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      The correctness of the underlying kernel syscalls and the C allocator is an environment
+      assumption outside the component; only the component's handling of their return codes is
+      verifiable and is captured in the IO error-case properties.
+    traces:     [actor.rs:723-751, config.rs:155-165]
+  - id:         NV-4
+    scope:      "unsafe Send impls for ControlMessage and FilesysHandler"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      The thread-safety justification for the unsafe Send implementations is a manual soundness
+      argument about how the type is used, not a machine-checkable functional obligation.
+    traces:     [actor.rs:87-88, actor.rs:983-985]
+  - id:         NV-5
+    scope:      "on_idle poll/harvest/timeout scheduling loop liveness"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      That the idle loop eventually makes progress and drains work is a liveness property; the
+      individual steps it invokes are captured as verifiable properties, but overall liveness is not
+      machine-checkable here.
+    traces:     [actor.rs:970-980]
+  - id:         NV-6
+    scope:      "io_uring ring construction and fallback to sync IO"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Whether ring creation succeeds depends on the runtime kernel; the resulting behavioral fork
+      (async vs sync-fallback) is captured by the async-fallback property, but ring availability itself
+      is an environment fact.
+    traces:     [actor.rs:119-131]
+  - id:         NV-7
+    scope:      "pub(crate) dead-code config mutators set_file_path/set_block_size/set_num_blocks"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      These crate-private setters are marked unused, are not part of the public interface, and impose
+      no observable external behavior.
+    traces:     [lib.rs:94-109]
+  - id:         NV-8
+    scope:      "AbortOp cancel actually stops an in-flight kernel operation"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Whether the kernel honours an async-cancel for an already-submitted operation is environment- and
+      timing-dependent; only the component's local bookkeeping and acknowledgement are verifiable and
+      are captured by the abort property.
+    traces:     [actor.rs:783-796]
+  - id:         NV-9
+    scope:      "read-after-write data equality end to end"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Reading back exactly what was written is a round trip through the real filesystem and kernel page
+      handling; from the code alone only the individual read and write handlers are verifiable (the
+      end-to-end round trip is asserted by the spec and integration tests, not by a single code
+      obligation).
+    traces:     [actor.rs:290-432]

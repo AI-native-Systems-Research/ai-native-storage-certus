@@ -1,0 +1,3058 @@
+component: block-device-filesys
+interface: IBlockDevice, IBlockDeviceAdmin
+pin: e87bafd8 (2026-09-15)
+generated: '2026-09-22'
+spec_source: components/block-device-filesys/specs/001-block-device-filesys/{spec.md, contracts/iblock-device-contract.md,
+  checklists/requirements.md}
+code_source: components/block-device-filesys/src/**
+tools:
+- creusot
+- kani
+counts:
+  methods_N: 17
+  spec_total: 51
+  code_total: 64
+  unified_M: 64
+  attachments: 148
+  not_verifiable: 21
+  globals: 24
+  record_total: 85
+reconciliation:
+  summary: Two blind extractions (spec_properties.yaml over the spec-of-record; code_properties.yaml over
+    src/). Merge is a union of distinct observable obligations, deduped by subject x kind x statement.
+    51 obligations matched in both artifacts, 0 are spec-only, 13 are code-only, 1 diverges in detail.
+  spec_only: []
+  spec_only_note: 'No spec-only obligation: every verifiable requirement in the spec has an implementing
+    obligation in the code (a clean refinement; no documented requirement is left unimplemented).'
+  code_only:
+  - BDF-CONFIG-ACCESSORS
+  - BDF-FILE-FALLOCATE-CLEANUP
+  - BDF-TELEMETRY-UNINIT
+  - BDF-TELEMETRY-RECORD
+  - BDF-OFFSET-NOOVERFLOW
+  - BDF-WRITESYNC-ERR
+  - BDF-WRITEASYNC-FSYNCPUSH-WARN
+  - BDF-WRITEZEROS-ALIGN
+  - BDF-COMPLETION-UNKNOWN-CLIENT
+  - BDF-HARVEST-RESULT
+  - BDF-HARVEST-FSYNC-SKIP
+  - BDF-OPHANDLE-UNIQUE
+  - BDF-ADMIN-NOOPS
+  code_only_note: 'Behaviors implemented but not (or only implicitly) documented in the spec: config-field
+    accessors; fallocate-failure cleanup; telemetry not-initialized error; per-op record accounting; the
+    offset non-overflow argument; the sync-write error path; the fsync-SQE-push-failure warn path; the
+    512-aligned zero-buffer allocation; silent drop of a completion to an unregistered client; ring-completion
+    result mapping; the chained-fsync completion skip; monotonic op-handle assignment; and the four no-op
+    admin methods. Each is a real observable obligation kept with origin code-only.'
+  divergent:
+  - BDF-MAXTRANSFER
+  divergent_note: 'BDF-MAXTRANSFER: spec (FR-021 / contract) states block_size * 256; code uses saturating_mul(256),
+    which caps at u32::MAX on overflow instead of wrapping. Behaviourally identical for all in-range block
+    sizes; the divergence only shows for block sizes above ~16.7M, which the config invariants already
+    bound well below.'
+  refinement_gap: 'None checked in this Role-1 pass: no harness/verif artifact was fed to extraction (tool-contamination
+    guard). A one-way refinement-gap cross-check can be run later; it may only flag a missing obligation
+    for spec/code confirmation, never seed ids here.'
+  implementing_obligation_map:
+  - validate_lba (internal helper) implements the observable bounds obligations BDF-LBA-NS / -OVERFLOW
+    / -INRANGE and underpins BDF-SAFETY-NO-OOB; kept as one subject, not split per branch.
+  - offset_for_lba (internal helper) implements BDF-OFFSET-EQ and the derived non-overflow invariant BDF-OFFSET-NOOVERFLOW.
+  - ClientSession::deliver + flush_pending + send_completion + poll_clients (internal machinery) collapse
+    into the observable delivery invariants BDF-DELIVERY-NONBLOCK / -FIFO / -ISOLATION / BDF-COMPLETION-UNKNOWN-CLIENT.
+  - TelemetryStats::record_op atomic increments and min/max CAS loops (internal) collapse up into the
+    snapshot-observable postconditions BDF-TELEMETRY-RECORD / -MINMAX / -MEAN-LATENCY / -MEAN-THROUGHPUT.
+  - harvest_completions + check_timeouts + next_op_handle (internal) collapse into BDF-HARVEST-RESULT
+    / -FSYNC-SKIP, BDF-TIMEOUT, BDF-OPHANDLE-UNIQUE.
+  - try_open_direct (internal) implements the observable open behavior BDF-FILE-ODIRECT-FALLBACK.
+  - process_command dispatch + BatchSubmit recursion (internal) route each Command variant to its per-command
+    observable property; the dispatch itself is not a separate id.
+  aggregation_unit_note: 'N = 17 public trait methods across the two define_interface! blocks this component
+    provides (IBlockDevice: 11, IBlockDeviceAdmin: 6). The observable IO surface, however, is the Command
+    enum processed by the actor and reachable only through connect_client''s channels; per the contract
+    document''s Command Processing Contract these command operations (ReadSync, WriteSync, ReadAsync,
+    WriteAsync, WriteZeros, BatchSubmit, AbortOp, NsProbe, FlushSync, and the unsupported admin commands)
+    plus the public config functions (DeviceConfig::new, accessors, open_or_create_backing_file) are treated
+    as additional named subjects/mutators in the bundle namespace, since the strong arithmetic nucleus
+    (LBA validation, offset arithmetic, config geometry) lives there. Bundle sizes below are counted over
+    that full subject namespace.'
+not_verifiable:
+- id: NV-1
+  scope: 'SC-002: 100 concurrent operations per second without corruption'
+  kind: not-verifiable
+  verifiable: false
+  reason: A throughput/rate target measured on running hardware; the rate is a wall-clock timing quantity,
+    not a machine-checkable behavioral obligation.
+  traces:
+  - SC-002
+- id: NV-2
+  scope: 'SC-003: 4KB synchronous IO latency under 1ms'
+  kind: not-verifiable
+  verifiable: false
+  reason: Wall-clock latency depends on the runtime environment and is a timing measurement, not a falsifiable
+    behavioral property.
+  traces:
+  - SC-003
+- id: NV-3
+  scope: 'SC-005: benchmark coefficient of variation under 15%'
+  kind: not-verifiable
+  verifiable: false
+  reason: A statistical stability target over timed benchmark runs; a measurement outcome, not a checkable
+    state or behavior.
+  traces:
+  - SC-005
+- id: NV-4
+  scope: 'SC-004: all unit tests pass without special hardware'
+  kind: not-verifiable
+  verifiable: false
+  reason: A property of the test suite and build environment, not an observable behavioral obligation
+    of the component.
+  traces:
+  - SC-004
+- id: NV-5
+  scope: 'SC-006 / US2-AS2: drop-in behavioral equivalence to block-device-spdk-nvme'
+  kind: not-verifiable
+  verifiable: false
+  reason: Equivalence to a separate component's runtime behavior across all consumers is not a single
+    falsifiable obligation and cannot be machine-checked here.
+  traces:
+  - SC-006
+  - US2
+  - AS2
+- id: NV-6
+  scope: 'FR-003: uses define_component!/define_interface! macros'
+  kind: not-verifiable
+  verifiable: false
+  reason: A compile-time structural/architectural requirement, not an observable runtime behavior with
+    a possible counterexample.
+  traces:
+  - FR-003
+- id: NV-7
+  scope: 'FR-005: uses a regular Linux file as backing store'
+  kind: not-verifiable
+  verifiable: false
+  reason: An environment/implementation-substrate requirement, not a falsifiable behavioral obligation.
+  traces:
+  - FR-005
+- id: NV-8
+  scope: 'FR-013: actor model on a dedicated thread with lock-free channels'
+  kind: not-verifiable
+  verifiable: false
+  reason: The threading/architecture choice is structural; its observable consequence (non-blocking, serialized
+    delivery) is captured separately as verifiable delivery invariants.
+  traces:
+  - FR-013
+- id: NV-9
+  scope: 'FR-014 / US3: Criterion benchmarks provided and execute'
+  kind: not-verifiable
+  verifiable: false
+  reason: The existence and execution of benchmarks is a build-artifact property, not a behavioral obligation
+    of the component under test.
+  traces:
+  - FR-014
+  - US3
+- id: NV-10
+  scope: 'FR-017: DmaBuffer byte slices accessed directly with no intermediate copies'
+  kind: not-verifiable
+  verifiable: false
+  reason: Absence of an intermediate copy is an implementation-strategy property, not observable as a
+    falsifiable input/output behavior.
+  traces:
+  - FR-017
+- id: NV-11
+  scope: 'FR-018: depends on the io-uring crate, minimum kernel 5.6'
+  kind: not-verifiable
+  verifiable: false
+  reason: A dependency and minimum-kernel requirement is an environment/build fact, not a checkable runtime
+    behavior.
+  traces:
+  - FR-018
+- id: NV-12
+  scope: 'FR-015: documentation examples exist and compile'
+  kind: not-verifiable
+  verifiable: false
+  reason: Presence and compilation of doc examples is a documentation/build property, not a behavioral
+    obligation.
+  traces:
+  - FR-015
+- id: NV-13
+  scope: 'FR-023: reserved crate-private config mutators set_file_path/set_block_size/set_num_blocks'
+  kind: not-verifiable
+  verifiable: false
+  reason: These helpers are explicitly not public API, are currently unused, and impose no observable
+    external behavior.
+  traces:
+  - FR-023
+- id: NV-14
+  scope: 'FR-002: logging levels for connect/disconnect/init/fallback events'
+  kind: not-verifiable
+  verifiable: false
+  reason: Which log level is emitted for routine lifecycle and degradation events is a logging side effect,
+    not a falsifiable behavioral obligation.
+  traces:
+  - FR-002
+- id: NV-15
+  scope: 'Edge case: backing file deleted while running must not panic'
+  kind: not-verifiable
+  verifiable: false
+  reason: The trigger is a runtime environment event (external deletion) whose IO-error surfacing is environment-dependent;
+    the general error-return-not-panic behavior is covered by the per-command error-case properties instead.
+  traces:
+  - Edge-Cases
+- id: NV-16
+  scope: Underlying syscall/allocator correctness (fallocate/pread/pwrite/fdatasync/posix_memalign)
+  kind: not-verifiable
+  verifiable: false
+  reason: The correctness of the kernel syscalls and the C allocator is an environment assumption outside
+    the component; only the component's handling of their return codes is verifiable and is captured in
+    the IO error-case properties.
+  traces:
+  - actor.rs
+  - config.rs
+- id: NV-17
+  scope: unsafe Send impls for ControlMessage and FilesysHandler
+  kind: not-verifiable
+  verifiable: false
+  reason: The thread-safety justification for the unsafe Send implementations is a manual soundness argument
+    about how the type is used, not a machine-checkable functional obligation.
+  traces:
+  - actor.rs:87-88
+  - actor.rs:983-985
+- id: NV-18
+  scope: on_idle poll/harvest/timeout scheduling loop liveness
+  kind: not-verifiable
+  verifiable: false
+  reason: That the idle loop eventually makes progress and drains work is a liveness property; the individual
+    steps it invokes are captured as verifiable properties, but overall liveness is not machine-checkable
+    here.
+  traces:
+  - actor.rs:970-980
+- id: NV-19
+  scope: io_uring ring construction availability
+  kind: not-verifiable
+  verifiable: false
+  reason: Whether ring creation succeeds depends on the runtime kernel; the resulting behavioral fork
+    (async vs sync fallback) is captured by BDF-ASYNC-FALLBACK, but ring availability itself is an environment
+    fact.
+  traces:
+  - actor.rs:119-131
+- id: NV-20
+  scope: AbortOp cancel actually stops an in-flight kernel operation
+  kind: not-verifiable
+  verifiable: false
+  reason: Whether the kernel honours an async-cancel for an already-submitted operation is environment-
+    and timing-dependent; only the component's local bookkeeping and acknowledgement are verifiable and
+    are captured by BDF-ABORT.
+  traces:
+  - actor.rs:783-796
+- id: NV-21
+  scope: Read-after-write data equality end to end
+  kind: not-verifiable
+  verifiable: false
+  reason: Reading back exactly what was written is a round trip through the real filesystem and kernel;
+    from the component alone only the individual read and write handlers are verifiable (BDF-READSYNC-RAW,
+    BDF-WRITESYNC-DURABLE). The end-to-end round trip is asserted by the spec and integration tests, not
+    by a single component obligation.
+  traces:
+  - SC-001
+  - actor.rs:290-432
+run:
+  gate_commit: 22b8cd01
+  gate_branch: skills/verify-methodology-to-unstable
+  creusot:
+    scored_by: scorer_creusot
+    command: scorer_creusot.py /home/cornel/rescore-20260925/block-device-filesys/verif --crate-dir /home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot
+      --cap-seconds 60 --cap-max 300
+    started: '2026-09-25T22:06:51-07:00'
+    finished: '2026-09-25T22:07:41-07:00'
+    creusot: v0.11.0-169-g9cf662ce6
+    why3: Why3 platform, version 1.8.2+git
+    provers:
+    - Alt-Ergo 2.6.2
+    - CVC4 1.8
+    - CVC5 1.3.1
+    - Coq 8.20.1
+    - Z3 4.16.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+  kani:
+    scored_by: scorer_kani
+    command: scorer_kani.py /home/cornel/rescore-20260925/block-device-filesys/verif --component-dir /home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-kani
+      --cap-seconds 60 --cap-max 300
+    started: '2026-09-25T22:07:41-07:00'
+    finished: '2026-09-25T22:08:30-07:00'
+    kani_version: cargo-kani 0.67.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+properties:
+- id: BDF-CONFIG-BLKSZ-MIN
+  subject: DeviceConfig::new
+  methods:
+  - DeviceConfig::new
+  - initialize
+  object_fn: DeviceConfig::new (config.rs)
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: FR-006'
+  - 'code: config.rs:59-61'
+  statement: 'Creating a device configuration must reject a block size smaller than 512 bytes: the constructor
+    returns a configuration error and no configuration object is produced.
+
+    '
+  traces:
+  - FR-006
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_config_blksz_min
+      result: Proved
+      wall_clock_s: 1.03
+      peak_rss_mb: 134
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_config_blksz_min
+      result: SUCCESS
+      wall_clock_s: 0.62
+      peak_rss_mb: 50
+    _scored_by: scorer_kani
+- id: BDF-CONFIG-BLKSZ-POW2
+  subject: DeviceConfig::new
+  methods:
+  - DeviceConfig::new
+  - initialize
+  object_fn: DeviceConfig::new (config.rs)
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: FR-006'
+  - 'code: config.rs:62-64'
+  statement: 'Creating a device configuration must reject a block size that is not a power of two: the
+    constructor returns a configuration error.
+
+    '
+  traces:
+  - FR-006
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_config_blksz_pow2
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_config_blksz_pow2
+      result: SUCCESS
+      wall_clock_s: 0.56
+      peak_rss_mb: 24
+    _scored_by: scorer_kani
+- id: BDF-CONFIG-NBLK-NONZERO
+  subject: DeviceConfig::new
+  methods:
+  - DeviceConfig::new
+  - initialize
+  object_fn: DeviceConfig::new (config.rs)
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: FR-006'
+  - 'code: config.rs:65-67'
+  statement: 'Creating a device configuration must reject a device with zero blocks: the constructor returns
+    a configuration error.
+
+    '
+  traces:
+  - FR-006
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_config_nblk_nonzero
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_config_nblk_nonzero
+      result: SUCCESS
+      wall_clock_s: 0.48
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-CONFIG-TOTALBYTES-OVERFLOW
+  subject: DeviceConfig::new
+  methods:
+  - DeviceConfig::new
+  - initialize
+  object_fn: DeviceConfig::new checked_mul (config.rs)
+  kind: error-case
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: FR-006'
+  - 'code: config.rs:69-72'
+  statement: 'When the block size multiplied by the number of blocks would exceed the largest representable
+    64-bit value, the constructor must reject the configuration with an overflow error rather than producing
+    a wrapped total size.
+
+    '
+  traces:
+  - FR-006
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_config_totalbytes_overflow
+      result: Proved
+      wall_clock_s: 0.63
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_config_totalbytes_overflow
+      result: SUCCESS
+      wall_clock_s: 0.76
+      peak_rss_mb: 29
+    _scored_by: scorer_kani
+- id: BDF-CONFIG-TOTALBYTES-EQ
+  subject: DeviceConfig::new
+  methods:
+  - DeviceConfig::new
+  - initialize
+  object_fn: DeviceConfig::new -> total_bytes (config.rs)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: FR-006, contract:DeviceConfig'
+  - 'code: config.rs:69-79, config.rs:101-103'
+  statement: 'When a device configuration is created successfully, its reported total capacity in bytes
+    equals the block size multiplied by the number of blocks.
+
+    '
+  traces:
+  - FR-006
+  - contract:DeviceConfig
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_config_totalbytes_eq
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_config_totalbytes_eq
+      result: SUCCESS
+      wall_clock_s: 1.63
+      peak_rss_mb: 34
+    _scored_by: scorer_kani
+- id: BDF-CONFIG-ACCESSORS
+  subject: DeviceConfig-accessors
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  - NsProbe
+  object_fn: DeviceConfig::{block_size,num_blocks,file_path} (config.rs)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 6
+  origin: code-only
+  source:
+  - 'code: config.rs:82-103'
+  statement: 'The block_size(), num_blocks(), and file_path() accessors return exactly the values supplied
+    at construction, unchanged.
+
+    '
+  traces:
+  - FR-006
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_config_accessors
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_config_accessors
+      result: SUCCESS
+      wall_clock_s: 0.97
+      peak_rss_mb: 28
+    _scored_by: scorer_kani
+- id: BDF-FILE-CREATE-FALLOCATE
+  subject: open_or_create_backing_file
+  methods:
+  - initialize
+  object_fn: open_or_create_backing_file + libc::fallocate (config.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-016, US1, AS1'
+  - 'code: config.rs:137-165'
+  statement: 'When the backing file does not yet exist, initialization creates it and pre-allocates it
+    to exactly the configured total size (block size times number of blocks) before the device becomes
+    operational.
+
+    '
+  traces:
+  - FR-016
+  - US1
+  - AS1
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (libc::fallocate on a real file)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (real filesystem + libc::fallocate)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-FILE-SIZE-MATCH
+  subject: open_or_create_backing_file
+  methods:
+  - initialize
+  object_fn: open_or_create_backing_file (config.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-016, US1, AS1, Edge-Cases'
+  - 'code: config.rs:118-132'
+  statement: 'When the backing file already exists but its size differs from the configured total size,
+    initialization must fail with a size-mismatch error and must never silently resize the file.
+
+    '
+  traces:
+  - FR-016
+  - US1
+  - AS1
+  - Edge-Cases
+  creusot:
+    symbol: ✓
+    fidelity: trusted-boundary
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_file_size_match
+      result: Proved
+      wall_clock_s: 0.65
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (filesystem metadata)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-FILE-PARENT-EXISTS
+  subject: open_or_create_backing_file
+  methods:
+  - initialize
+  object_fn: open_or_create_backing_file (config.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: Edge-Cases'
+  - 'code: config.rs:138-149'
+  statement: 'When the backing file path is invalid or its parent directory does not exist, initialization
+    must return a typed error rather than panicking.
+
+    '
+  traces:
+  - Edge-Cases
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (filesystem path checks)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (filesystem)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-FILE-FALLOCATE-CLEANUP
+  subject: open_or_create_backing_file
+  methods:
+  - initialize
+  object_fn: open_or_create_backing_file (config.rs)
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+  - 'code: config.rs:155-162'
+  statement: 'If pre-allocation of a newly created backing file fails, the function closes and removes
+    the just-created file before returning an error, leaving no partially initialized file behind.
+
+    '
+  traces:
+  - FR-016
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (libc + filesystem)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (libc + filesystem)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-FILE-ODIRECT-FALLBACK
+  subject: open_or_create_backing_file
+  methods:
+  - initialize
+  object_fn: try_open_direct (config.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-007'
+  - 'code: config.rs:171-198'
+  statement: 'The backing file is opened with direct, write-through IO; on a filesystem that does not
+    support direct IO the component falls back to buffered IO with per-write flush-to-disk durability
+    rather than failing.
+
+    '
+  traces:
+  - FR-007
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (open with O_DIRECT, EINVAL fallback)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (filesystem open with O_DIRECT)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-INIT-CONFIG-GATE
+  subject: initialize
+  methods:
+  - initialize
+  - connect_client
+  object_fn: BlockDeviceFilesysComponent::initialize -> DeviceConfig::new (lib.rs)
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: FR-006, FR-016'
+  - 'code: lib.rs:113-139'
+  statement: 'Initialization validates the block size, block count, and capacity through the same configuration
+    checks before opening the backing file or starting the worker thread; an invalid configuration causes
+    initialization to fail without side effects.
+
+    '
+  traces:
+  - FR-006
+  - FR-016
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: component_framework / code review (init ordering); arithmetic gate proved here
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Creusot / component_framework (init ordering); arithmetic gate covered by Kani
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-INIT-ACTOR-START
+  subject: initialize
+  methods:
+  - initialize
+  - connect_client
+  object_fn: BlockDeviceFilesysComponent::initialize (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: US1, AS1, FR-013'
+  - 'code: lib.rs:138-183'
+  statement: 'Successful initialization starts the dedicated worker thread and transitions the component
+    to an operational state in which clients can connect and issue commands.
+
+    '
+  traces:
+  - US1
+  - AS1
+  - FR-013
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (thread lifecycle)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (thread lifecycle)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-CONNECT-NOTINIT
+  subject: connect_client
+  methods:
+  - connect_client
+  object_fn: BlockDeviceFilesysComponent::connect_client (lib.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: contract:connect_client'
+  - 'code: lib.rs:225-233'
+  statement: 'Attempting to connect a client before the component has been initialized returns a not-initialized
+    error instead of channels.
+
+    '
+  traces:
+  - contract:connect_client
+  creusot:
+    symbol: ★
+    fidelity: ghost-mirror
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_connect_notinit
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (component lifecycle state)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-CONNECT-CHANNELS
+  subject: connect_client
+  methods:
+  - connect_client
+  object_fn: connect_client -> SpscChannel::new/split (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: contract:connect_client, FR-013'
+  - 'code: lib.rs:234-263, lib.rs:49'
+  statement: 'Connecting a client creates a fresh pair of per-client single-producer single-consumer channels
+    (a command channel and a completion channel, each of capacity 64) and registers the client with the
+    worker.
+
+    '
+  traces:
+  - contract:connect_client
+  - FR-013
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: component_framework / integration tests (SPSC channels)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests / component_framework (SPSC channels)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-CONNECT-INDEPENDENT
+  subject: connect_client
+  methods:
+  - connect_client
+  object_fn: connect_client -> next_client_id.fetch_add (lib.rs)
+  kind: invariant
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: Edge-Cases, FR-013'
+  - 'code: lib.rs:234-250'
+  statement: 'When multiple clients connect, each client receives its own independent pair of channels
+    and its operations are serialized by the single worker; no client shares another client''s channels.
+
+    '
+  traces:
+  - Edge-Cases
+  - FR-013
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Loom (concurrency)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Loom (concurrency)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-SHUTDOWN
+  subject: shutdown
+  methods:
+  - shutdown
+  object_fn: BlockDeviceFilesysComponent::shutdown (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-013'
+  - 'code: lib.rs:187-203'
+  statement: 'Shutting down the component stops the worker thread and joins it, after which the component
+    is no longer operational.
+
+    '
+  traces:
+  - FR-013
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (thread join)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (thread join)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-SECTORSIZE
+  subject: sector_size
+  methods:
+  - sector_size
+  object_fn: IBlockDevice::sector_size (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: contract:sector_size, US2, AS1'
+  - 'code: lib.rs:266-273'
+  statement: 'Asking for the sector size of namespace 1 returns the configured block size; asking for
+    any other namespace id returns an invalid-namespace error.
+
+    '
+  traces:
+  - contract:sector_size
+  - US2
+  - AS1
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_sectorsize
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_sectorsize
+      result: SUCCESS
+      wall_clock_s: 0.45
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-NUMSECTORS
+  subject: num_sectors
+  methods:
+  - num_sectors
+  object_fn: IBlockDevice::num_sectors (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: contract:num_sectors'
+  - 'code: lib.rs:275-282'
+  statement: 'Asking for the sector count of namespace 1 returns the configured number of blocks; any
+    other namespace id returns an invalid-namespace error.
+
+    '
+  traces:
+  - contract:num_sectors
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_numsectors
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_numsectors
+      result: SUCCESS
+      wall_clock_s: 0.46
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-MAXQUEUEDEPTH
+  subject: max_queue_depth
+  methods:
+  - max_queue_depth
+  object_fn: IBlockDevice::max_queue_depth (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: contract:max_queue_depth'
+  - 'code: lib.rs:284-286, lib.rs:52'
+  statement: 'The reported maximum queue depth is the fixed submission-queue size of 128.
+
+    '
+  traces:
+  - contract:max_queue_depth
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_maxqueuedepth
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_maxqueuedepth
+      result: SUCCESS
+      wall_clock_s: 0.37
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-NUMIOQUEUES
+  subject: num_io_queues
+  methods:
+  - num_io_queues
+  object_fn: IBlockDevice::num_io_queues (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-021, US2, AS1'
+  - 'code: lib.rs:288-290'
+  statement: 'The reported number of IO queues is exactly 1, because there is a single worker thread with
+    a single event loop.
+
+    '
+  traces:
+  - FR-021
+  - US2
+  - AS1
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_numioqueues
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_numioqueues
+      result: SUCCESS
+      wall_clock_s: 0.38
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-MAXTRANSFER
+  subject: max_transfer_size
+  methods:
+  - max_transfer_size
+  object_fn: IBlockDevice::max_transfer_size -> saturating_mul (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: divergent
+  source:
+  - 'spec: FR-021, US2, AS1, contract:max_transfer_size'
+  - 'code: lib.rs:292-294'
+  statement: 'The reported maximum transfer size in bytes equals the configured block size multiplied
+    by 256.
+
+    '
+  traces:
+  - FR-021
+  - US2
+  - AS1
+  - contract:max_transfer_size
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_maxtransfer
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 50
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_maxtransfer
+      result: SUCCESS
+      wall_clock_s: 0.43
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+  divergence_note: spec (FR-021/contract) says block_size*256; code uses saturating_mul(256), which caps
+    at u32::MAX on overflow instead of wrapping.
+- id: BDF-BLOCKSIZE
+  subject: block_size
+  methods:
+  - block_size
+  object_fn: IBlockDevice::block_size (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: contract:block_size, US2, AS1'
+  - 'code: lib.rs:296-298'
+  statement: 'The reported block size equals the configured block size.
+
+    '
+  traces:
+  - contract:block_size
+  - US2
+  - AS1
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_blocksize
+      result: Proved
+      wall_clock_s: 0.64
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_blocksize
+      result: SUCCESS
+      wall_clock_s: 0.38
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-NUMANODE
+  subject: numa_node
+  methods:
+  - numa_node
+  object_fn: IBlockDevice::numa_node (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-021, US2, AS1'
+  - 'code: lib.rs:300-302'
+  statement: 'The reported NUMA node is the fixed placeholder value -1, because a file-backed device models
+    no device-to-NUMA affinity.
+
+    '
+  traces:
+  - FR-021
+  - US2
+  - AS1
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_numanode
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_numanode
+      result: SUCCESS
+      wall_clock_s: 0.37
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-NVMEVERSION
+  subject: nvme_version
+  methods:
+  - nvme_version
+  object_fn: IBlockDevice::nvme_version (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-021, US2, AS1'
+  - 'code: lib.rs:304-306'
+  statement: 'The reported NVMe version is the fixed placeholder string "N/A (file-backed)", because there
+    is no NVMe controller.
+
+    '
+  traces:
+  - FR-021
+  - US2
+  - AS1
+  creusot:
+    claims_inexpressible: IX-CREUSOT-STRING-CONTENT
+    symbol: ⊘
+    fidelity: trusted-boundary
+    miss_class: not-expressible
+    note: 'EARNED not-expressible: construct IX-CREUSOT-STRING-CONTENT confirmed — canonical probe aborted
+      with model-predicted signature /Unsupported constant value: Scalar.*\[u8;/; documented authority
+      creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21); covered_by kani'
+    status: tool-boundary
+    evidence:
+      fidelity: not-expressible
+      construct: IX-CREUSOT-STRING-CONTENT
+      authority: creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)
+      covered_by: kani
+      result: translate-abort
+      signature: 'Unsupported constant value: Scalar.*\[u8;'
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_nvmeversion
+      result: SUCCESS
+      wall_clock_s: 0.52
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-READWRITESTATS
+  subject: read_write_stats
+  methods:
+  - read_write_stats
+  object_fn: IBlockDevice::read_write_stats (lib.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-021'
+  - 'code: lib.rs:340-342'
+  statement: 'The per-direction read/write statistics query returns a well-formed, zero-initialized statistics
+    structure, because per-direction counters are not separately tracked.
+
+    '
+  traces:
+  - FR-021
+  creusot:
+    symbol: ★
+    fidelity: ghost-mirror
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_readwritestats
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: interfaces crate / integration tests (Default impl)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-TELEMETRY-FEATUREGATE
+  subject: telemetry
+  methods:
+  - telemetry
+  object_fn: IBlockDevice::telemetry (lib.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-019, contract:telemetry'
+  - 'code: lib.rs:330-335'
+  statement: 'When the component is built without the telemetry feature, requesting telemetry returns
+    a feature-not-enabled error.
+
+    '
+  traces:
+  - FR-019
+  - contract:telemetry
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: build / compile-time cfg check
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: build/compile-time cfg check
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-TELEMETRY-UNINIT
+  subject: telemetry
+  methods:
+  - telemetry
+  object_fn: IBlockDevice::telemetry (lib.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+  - 'code: lib.rs:308-328'
+  statement: 'With the telemetry feature enabled but before initialize has populated the collector, telemetry()
+    returns a not-initialized error.
+
+    '
+  traces:
+  - FR-019
+  creusot:
+    symbol: ★
+    fidelity: ghost-mirror
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_telemetry_uninit
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (component state)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-TELEMETRY-MEAN-LATENCY
+  subject: telemetry
+  methods:
+  - telemetry
+  object_fn: TelemetryStats::snapshot (telemetry.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-019'
+  - 'code: telemetry.rs:82-86'
+  statement: 'The mean per-operation latency reported in a telemetry snapshot equals the total accumulated
+    latency divided by the total operation count, and is reported as zero when no operations have been
+    recorded.
+
+    '
+  traces:
+  - FR-019
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_telemetry_mean_latency
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_telemetry_mean_latency
+      result: SUCCESS
+      wall_clock_s: 0.99
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-TELEMETRY-MEAN-THROUGHPUT
+  subject: telemetry
+  methods:
+  - telemetry
+  object_fn: TelemetryStats::snapshot (telemetry.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-019'
+  - 'code: telemetry.rs:88-92'
+  statement: 'The mean throughput reported in a telemetry snapshot equals the total bytes transferred
+    divided by the wall-clock seconds elapsed since the collector was created (expressed in megabytes
+    per second), and is reported as zero when no time has elapsed.
+
+    '
+  traces:
+  - FR-019
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Kani (proved, partial) / real-IO
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: partial
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_telemetry_mean_throughput
+      result: SUCCESS
+      wall_clock_s: 0.55
+      peak_rss_mb: 28
+    _scored_by: scorer_kani
+- id: BDF-TELEMETRY-MINMAX
+  subject: telemetry
+  methods:
+  - telemetry
+  object_fn: TelemetryStats::{record_op,snapshot} (telemetry.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-019'
+  - 'code: telemetry.rs:35-66, telemetry.rs:73-78'
+  statement: 'A telemetry snapshot reports the true minimum and maximum single-operation latencies observed,
+    with the minimum reported as zero when no operations have been recorded.
+
+    '
+  traces:
+  - FR-019
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Kani (proved) / Loom (CAS linearization)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_telemetry_minmax
+      result: SUCCESS
+      wall_clock_s: 0.98
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-TELEMETRY-RECORD
+  subject: telemetry
+  methods:
+  - telemetry
+  object_fn: TelemetryStats::record_op (telemetry.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+  - 'code: telemetry.rs:35-39'
+  statement: 'Each recorded operation increases the total operation count by one and adds its latency
+    and byte count to the running totals.
+
+    '
+  traces:
+  - FR-019
+  creusot:
+    symbol: ★
+    fidelity: ghost-mirror
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_telemetry_record
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_telemetry_record
+      result: SUCCESS
+      wall_clock_s: 0.48
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-LBA-NS
+  subject: validate_lba
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  object_fn: FilesysHandler::validate_lba (actor.rs)
+  kind: error-case
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: spec+code
+  source:
+  - 'spec: contract:ReadSync, contract:WriteSync, Assumptions'
+  - 'code: actor.rs:180-184'
+  statement: 'Any read or write command targeting a namespace other than 1 is rejected with an invalid-namespace
+    error and performs no IO.
+
+    '
+  traces:
+  - contract:ReadSync
+  - contract:WriteSync
+  - Assumptions
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_lba_ns
+      result: Proved
+      wall_clock_s: 0.63
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_lba_ns
+      result: SUCCESS
+      wall_clock_s: 0.51
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-LBA-OVERFLOW
+  subject: validate_lba
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  object_fn: FilesysHandler::validate_lba checked_add (actor.rs)
+  kind: error-case
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: spec+code
+  source:
+  - 'spec: contract:ReadSync, contract:WriteSync'
+  - 'code: actor.rs:185-187'
+  statement: 'A read or write whose starting block plus block count would exceed the largest representable
+    64-bit value is rejected with an out-of-range error rather than wrapping around.
+
+    '
+  traces:
+  - contract:ReadSync
+  - contract:WriteSync
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_lba_overflow
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_lba_overflow
+      result: SUCCESS
+      wall_clock_s: 0.55
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-LBA-INRANGE
+  subject: validate_lba
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  object_fn: FilesysHandler::validate_lba (actor.rs)
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: spec+code
+  source:
+  - 'spec: Edge-Cases, contract:ReadSync, contract:WriteSync'
+  - 'code: actor.rs:188-194'
+  statement: 'A read or write is accepted only when its starting block plus its block count stays within
+    the configured number of blocks; a request that runs past the end of the device is rejected with an
+    out-of-range error.
+
+    '
+  traces:
+  - Edge-Cases
+  - contract:ReadSync
+  - contract:WriteSync
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_lba_inrange
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_lba_inrange
+      result: SUCCESS
+      wall_clock_s: 0.63
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-OFFSET-EQ
+  subject: offset_for_lba
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  object_fn: FilesysHandler::offset_for_lba (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: spec+code
+  source:
+  - 'spec: contract:ReadSync, contract:WriteSync'
+  - 'code: actor.rs:197-199'
+  statement: 'The byte offset used for a read or write is the starting block number multiplied by the
+    block size, so IO lands at the intended byte position in the backing file.
+
+    '
+  traces:
+  - contract:ReadSync
+  - contract:WriteSync
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_offset_eq
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_offset_eq
+      result: SUCCESS
+      wall_clock_s: 1.85
+      peak_rss_mb: 50
+    _scored_by: scorer_kani
+- id: BDF-OFFSET-NOOVERFLOW
+  subject: offset_for_lba
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  object_fn: FilesysHandler::offset_for_lba (actor.rs)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: code-only
+  source:
+  - 'code: actor.rs:185-199, config.rs:69-79'
+  statement: 'Because validate_lba has already guaranteed the starting block is within the configured
+    block count and construction guaranteed block count times block size fits in 64 bits, the byte offset
+    computed as start times block size never overflows and never exceeds the total device size.
+
+    '
+  traces:
+  - FR-006
+  - FR-007
+  - FR-008
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_offset_nooverflow
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_offset_nooverflow
+      result: SUCCESS
+      wall_clock_s: 2.89
+      peak_rss_mb: 39
+    _scored_by: scorer_kani
+- id: BDF-SAFETY-NO-OOB
+  subject: device-bounds-safety
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  object_fn: validate_lba gate on all IO handlers (actor.rs)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: spec+code
+  source:
+  - 'spec: Edge-Cases, FR-007, FR-008, FR-009'
+  - 'code: actor.rs:305-317, actor.rs:367-379, actor.rs:450-462, actor.rs:573-585, actor.rs:707-718'
+  statement: 'Every read and write path is gated by the range check before any byte offset is computed,
+    so no IO is ever issued outside the configured device capacity.
+
+    '
+  traces:
+  - Edge-Cases
+  - FR-007
+  - FR-008
+  - FR-009
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_safety_no_oob
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: partial
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_safety_no_oob
+      result: SUCCESS
+      wall_clock_s: 9.25
+      peak_rss_mb: 53
+    _scored_by: scorer_kani
+- id: BDF-READSYNC-RAW
+  subject: ReadSync
+  methods:
+  - ReadSync
+  object_fn: FilesysHandler::handle_read_sync (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: contract:ReadSync, SC-001'
+  - 'code: actor.rs:290-360'
+  statement: 'A synchronous read returns the current contents of the target block range to the client''s
+    buffer and reports success, or reports a read-failure error if the underlying read fails.
+
+    '
+  traces:
+  - contract:ReadSync
+  - SC-001
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (pread)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (pread/filesystem)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-WRITESYNC-DURABLE
+  subject: WriteSync
+  methods:
+  - WriteSync
+  object_fn: FilesysHandler::handle_write_sync (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: US1, AS2, FR-007, SC-001'
+  - 'code: actor.rs:362-432'
+  statement: 'A synchronous write stores the client''s data at the target block and flushes it to stable
+    storage before the write completion is returned, so a subsequent read of the same block returns exactly
+    the data written.
+
+    '
+  traces:
+  - US1
+  - AS2
+  - FR-007
+  - SC-001
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (pwrite + fdatasync)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (pwrite + fdatasync)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-WRITESYNC-ERR
+  subject: WriteSync
+  methods:
+  - WriteSync
+  object_fn: FilesysHandler::handle_write_sync (actor.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+  - 'code: actor.rs:396-416'
+  statement: 'When the underlying pwrite or the following data-sync fails, the synchronous write reports
+    a write-failed error to the client.
+
+    '
+  traces:
+  - FR-007
+  creusot:
+    symbol: ✓
+    fidelity: trusted-boundary
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_writesync_err
+      result: Proved
+      wall_clock_s: 0.49
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (pwrite error path)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-READASYNC-SUBMIT
+  subject: ReadAsync
+  methods:
+  - ReadAsync
+  object_fn: FilesysHandler::handle_read_async (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: US1, AS3, FR-008, contract:ReadAsync'
+  - 'code: actor.rs:434-514'
+  statement: 'An asynchronous read is submitted to the kernel async-IO ring and its completion is later
+    delivered on the completion channel carrying the correct operation handle and result.
+
+    '
+  traces:
+  - US1
+  - AS3
+  - FR-008
+  - contract:ReadAsync
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (io_uring)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (io_uring)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-WRITEASYNC-LINK
+  subject: WriteAsync
+  methods:
+  - WriteAsync
+  object_fn: FilesysHandler::handle_write_async (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: US1, AS3, FR-008, contract:WriteAsync'
+  - 'code: actor.rs:560-647'
+  statement: 'An asynchronous write is submitted as a write chained to a data-sync so the data is durably
+    flushed as part of the same completion, and its completion carries the correct operation handle.
+
+    '
+  traces:
+  - US1
+  - AS3
+  - FR-008
+  - contract:WriteAsync
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (io_uring linked SQEs)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (io_uring linked SQEs)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-WRITEASYNC-FSYNCPUSH-WARN
+  subject: WriteAsync
+  methods:
+  - WriteAsync
+  object_fn: FilesysHandler::handle_write_async (actor.rs)
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+  - 'code: actor.rs:619-623'
+  statement: 'If the data-sync submission cannot be pushed after the write submission, the handler logs
+    a warning that the write may not be durable but still proceeds with the submitted write.
+
+    '
+  traces:
+  - FR-002
+  - FR-008
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (io_uring SQ push)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (io_uring submission-queue push)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-ASYNC-SQFULL
+  subject: async-submit
+  methods:
+  - ReadAsync
+  - WriteAsync
+  object_fn: handle_read_async/handle_write_async SQ push (actor.rs)
+  kind: error-case
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: FR-002, Edge-Cases'
+  - 'code: actor.rs:478-491, actor.rs:605-618'
+  statement: 'When the async submission queue is full, the worker returns an error completion to the calling
+    client rather than blocking, so one client''s queue pressure never stalls completion delivery to the
+    other clients.
+
+    '
+  traces:
+  - FR-002
+  - Edge-Cases
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (io_uring submission queue)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (io_uring submission queue)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-ASYNC-FALLBACK
+  subject: async-submit
+  methods:
+  - ReadAsync
+  - WriteAsync
+  object_fn: handle_read_async/handle_write_async sync fallback (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: FR-008'
+  - 'code: actor.rs:515-557, actor.rs:648-701'
+  statement: 'When the kernel async-IO facility is unavailable, asynchronous reads and writes fall back
+    to synchronous read/write with a data-sync flush and still complete correctly.
+
+    '
+  traces:
+  - FR-008
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (io_uring unavailable + filesystem)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (io_uring unavailable + filesystem)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-WRITEZEROS
+  subject: WriteZeros
+  methods:
+  - WriteZeros
+  object_fn: FilesysHandler::handle_write_zeros (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-009, US1, AS4'
+  - 'code: actor.rs:704-780'
+  statement: 'A write-zeros command writes zero-filled blocks to the target range and flushes them to
+    stable storage, so a subsequent read of that range returns all-zero data.
+
+    '
+  traces:
+  - FR-009
+  - US1
+  - AS4
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (pwrite)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (pwrite/filesystem)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-WRITEZEROS-ALIGN
+  subject: WriteZeros
+  methods:
+  - WriteZeros
+  object_fn: handle_write_zeros posix_memalign (actor.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+  - 'code: actor.rs:719-742'
+  statement: 'The zero buffer for a write-zeros command is allocated 512-byte aligned so it is valid for
+    direct IO; if that aligned allocation fails, the command reports a write-failed error instead of writing.
+
+    '
+  traces:
+  - FR-007
+  - FR-009
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (posix_memalign)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (posix_memalign)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-BATCH-SEQ
+  subject: BatchSubmit
+  methods:
+  - BatchSubmit
+  object_fn: FilesysHandler::process_command BatchSubmit arm (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-010, contract:BatchSubmit'
+  - 'code: actor.rs:234-238'
+  statement: 'A batch of operations is executed one after another; each operation produces its own completion
+    and the failure of one operation does not abort the remaining operations in the batch.
+
+    '
+  traces:
+  - FR-010
+  - contract:BatchSubmit
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (command dispatch over IO)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (command dispatch over IO)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-ABORT
+  subject: AbortOp
+  methods:
+  - AbortOp
+  object_fn: FilesysHandler::handle_abort (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-011, contract:AbortOp'
+  - 'code: actor.rs:783-796'
+  statement: 'An abort command requests cancellation of the identified in-flight operation and replies
+    with an abort acknowledgement whether or not the operation had already completed.
+
+    '
+  traces:
+  - FR-011
+  - contract:AbortOp
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (io_uring async-cancel)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (io_uring async-cancel)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-NSPROBE
+  subject: NsProbe
+  methods:
+  - NsProbe
+  object_fn: FilesysHandler::handle_ns_probe (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-012, contract:NsProbe'
+  - 'code: actor.rs:798-810'
+  statement: 'A namespace-probe command returns exactly one namespace whose id is 1 and whose sector count
+    and sector size match the configured geometry.
+
+    '
+  traces:
+  - FR-012
+  - contract:NsProbe
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_nsprobe
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (completion delivery)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-FLUSHSYNC-OK
+  subject: FlushSync
+  methods:
+  - FlushSync
+  object_fn: process_command FlushSync arm (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-022'
+  - 'code: actor.rs:245-271'
+  statement: 'A flush command on namespace 1 issues a full data-sync of the backing file and replies with
+    a flush-done completion, providing an explicit durability barrier for callers that need one.
+
+    '
+  traces:
+  - FR-022
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (fdatasync)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (fdatasync)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-FLUSHSYNC-NS
+  subject: FlushSync
+  methods:
+  - FlushSync
+  object_fn: process_command FlushSync arm (actor.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-022'
+  - 'code: actor.rs:252-256'
+  statement: 'A flush command for any namespace other than 1 returns an invalid-namespace error without
+    touching the backing file.
+
+    '
+  traces:
+  - FR-022
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_flushsync_ns
+      result: Proved
+      wall_clock_s: 0.48
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_flushsync_ns
+      result: SUCCESS
+      wall_clock_s: 0.4
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-FLUSHSYNC-ERR
+  subject: FlushSync
+  methods:
+  - FlushSync
+  object_fn: process_command FlushSync arm (actor.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: FR-022'
+  - 'code: actor.rs:260-269'
+  statement: 'When the data-sync issued by a flush command fails, the failure is surfaced to the client
+    as a write-failed error.
+
+    '
+  traces:
+  - FR-022
+  creusot:
+    symbol: ✓
+    fidelity: trusted-boundary
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_flushsync_err
+      result: Proved
+      wall_clock_s: 0.63
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (fdatasync error path)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-UNSUPPORTED
+  subject: unsupported-admin
+  methods:
+  - UnsupportedAdminCmd
+  object_fn: process_command Ns*/ControllerReset arm (actor.rs)
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+  - 'spec: Assumptions, contract:NsCreate'
+  - 'code: actor.rs:273-286'
+  statement: 'NVMe-specific admin commands (create-namespace, delete-namespace, format-namespace, and
+    controller-reset) return a not-supported error, because they have no meaningful file-backed equivalent.
+
+    '
+  traces:
+  - Assumptions
+  - contract:NsCreate
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_unsupported
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_unsupported
+      result: SUCCESS
+      wall_clock_s: 0.59
+      peak_rss_mb: 24
+    _scored_by: scorer_kani
+- id: BDF-DELIVERY-NONBLOCK
+  subject: completion-delivery
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  - BatchSubmit
+  - AbortOp
+  - NsProbe
+  - FlushSync
+  - UnsupportedAdminCmd
+  object_fn: ClientSession::deliver + send_completion (actor.rs)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 10
+  origin: spec+code
+  source:
+  - 'spec: FR-020'
+  - 'code: actor.rs:56-61, actor.rs:917-921'
+  statement: 'The worker never blocks when delivering a completion; if a client''s completion channel
+    is full, the completion is buffered in that client''s backlog instead of stalling the worker.
+
+    '
+  traces:
+  - FR-020
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Loom (concurrency / channels)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Loom (concurrency / channels)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-DELIVERY-FIFO
+  subject: completion-delivery
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  - BatchSubmit
+  - AbortOp
+  - NsProbe
+  - FlushSync
+  - UnsupportedAdminCmd
+  object_fn: ClientSession::flush_pending (actor.rs)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 10
+  origin: spec+code
+  source:
+  - 'spec: FR-020'
+  - 'code: actor.rs:66-77'
+  statement: 'Buffered completions for a client are retried in first-in-first-out order (oldest first)
+    and retrying stops at the first completion that still cannot be delivered, preserving completion order.
+
+    '
+  traces:
+  - FR-020
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Loom (concurrency / channels)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Loom (concurrency / channels)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-DELIVERY-ISOLATION
+  subject: completion-delivery
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  - BatchSubmit
+  - AbortOp
+  - NsProbe
+  - FlushSync
+  - UnsupportedAdminCmd
+  object_fn: send_completion + poll_clients (actor.rs)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 10
+  origin: spec+code
+  source:
+  - 'spec: FR-020, Edge-Cases'
+  - 'code: actor.rs:917-921, actor.rs:923-930'
+  statement: 'A client whose completion channel is full and whose completions are backlogged does not
+    block or delay completion delivery to the other connected clients.
+
+    '
+  traces:
+  - FR-020
+  - Edge-Cases
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Loom (concurrency / channels)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Loom (concurrency / channels)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-COMPLETION-UNKNOWN-CLIENT
+  subject: completion-delivery
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  - BatchSubmit
+  - AbortOp
+  - NsProbe
+  - FlushSync
+  - UnsupportedAdminCmd
+  object_fn: FilesysHandler::send_completion (actor.rs)
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 10
+  origin: code-only
+  source:
+  - 'code: actor.rs:917-921'
+  statement: 'Sending a completion addressed to a client id that is not currently registered is silently
+    dropped and never panics.
+
+    '
+  traces:
+  - FR-020
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: component_framework / integration tests (HashMap client registry)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (HashMap client registry)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-HARVEST-RESULT
+  subject: async-harvest
+  methods:
+  - ReadAsync
+  - WriteAsync
+  object_fn: FilesysHandler::harvest_completions (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: code-only
+  source:
+  - 'code: actor.rs:812-868'
+  statement: 'When harvesting ring completions, a negative result becomes a read-failed or write-failed
+    error (matching the operation direction) and a non-negative result becomes success; the in-flight
+    entry is removed and the completion is delivered to the owning client.
+
+    '
+  traces:
+  - FR-008
+  creusot:
+    symbol: ✓
+    fidelity: trusted-boundary
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_harvest_result
+      result: Proved
+      wall_clock_s: 0.57
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (io_uring completion queue)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-HARVEST-FSYNC-SKIP
+  subject: async-harvest
+  methods:
+  - WriteAsync
+  object_fn: FilesysHandler::harvest_completions (actor.rs)
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+  - 'code: actor.rs:823-826'
+  statement: 'The completion event of the chained data-sync submission (identified by its high user-data
+    bit) is ignored during harvesting and never turned into a client completion.
+
+    '
+  traces:
+  - FR-008
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_harvest_fsync_skip
+      result: Proved
+      wall_clock_s: 0.55
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_harvest_fsync_skip
+      result: SUCCESS
+      wall_clock_s: 0.38
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-TIMEOUT
+  subject: async-timeout
+  methods:
+  - ReadAsync
+  - WriteAsync
+  object_fn: FilesysHandler::check_timeouts (actor.rs)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+  - 'spec: contract:ReadAsync, contract:WriteAsync'
+  - 'code: actor.rs:870-908'
+  statement: 'An asynchronous operation that has not completed by its deadline is reported to the client
+    as a timeout completion and its cancellation is requested.
+
+    '
+  traces:
+  - contract:ReadAsync
+  - contract:WriteAsync
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: real-IO / integration tests (Instant deadlines)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: integration tests (Instant deadlines)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+- id: BDF-OPHANDLE-UNIQUE
+  subject: op-handle
+  methods:
+  - ReadSync
+  - WriteSync
+  - ReadAsync
+  - WriteAsync
+  - WriteZeros
+  - FlushSync
+  object_fn: FilesysHandler::next_op_handle (actor.rs)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 6
+  origin: code-only
+  source:
+  - 'code: actor.rs:173-177'
+  statement: 'Each operation is assigned the next handle from a counter that starts at 1 and advances
+    by a wrapping add, so successive operations receive successive handle values.
+
+    '
+  traces:
+  - FR-008
+  creusot:
+    symbol: ✓
+    fidelity: real-type
+    miss_class: null
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    status: proved
+    evidence:
+      modules:
+      - verify_bdf_ophandle_unique
+      result: Proved
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
+      lever: null
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ✓
+    fidelity: full
+    miss_class: null
+    note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
+    status: proved
+    evidence:
+      harness: verify_bdf_ophandle_unique
+      result: SUCCESS
+      wall_clock_s: 0.4
+      peak_rss_mb: 22
+    _scored_by: scorer_kani
+- id: BDF-ADMIN-NOOPS
+  subject: admin-noops
+  methods:
+  - set_pci_address
+  - set_actor_cpu
+  - signal_stop
+  - detach_controller
+  object_fn: IBlockDeviceAdmin no-op methods (lib.rs)
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: code-only
+  source:
+  - 'code: lib.rs:207-221'
+  statement: 'The set-PCI-address, set-actor-CPU, signal-stop, and detach-controller admin methods perform
+    no action and change no observable component state.
+
+    '
+  traces:
+  - FR-004
+  creusot:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: component_framework / code review (frame condition)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_creusot
+  kani:
+    symbol: ⤴
+    fidelity: null
+    delegate_to: Creusot / code review (frame condition)
+    miss_class: capability
+    note: delegated to a named referent (scorer did not re-derive; refuter audits)
+    status: delegated
+    evidence: {}
+    _scored_by: scorer_kani
+role: Role 1 inventory (tool-independent). No prover named; no status recorded. Per-tool blocks are null
+  placeholders filled downstream by the scorer.
+reconciliation_inputs:
+- verif/spec_properties.yaml
+- verif/code_properties.yaml

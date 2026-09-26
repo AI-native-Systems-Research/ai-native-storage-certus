@@ -1,0 +1,19 @@
+[package]
+name = "block-device-filesys-verif-kani"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone: opt out of the repo root workspace. The real block-device-filesys
+# crate pulls io-uring, libc, crossbeam-channel, and interfaces (feature "spdk"
+# -> spdk-sys, needs a built SPDK), none of which build under Kani. This mirror
+# crate depends on NO real component crates; it verifies faithful in-crate
+# mirrors of the pure arithmetic/logic cores: config geometry (config.rs), LBA
+# validation + offset arithmetic (actor.rs), the IBlockDevice accessors (lib.rs),
+# telemetry snapshot arithmetic (telemetry.rs), and the small pure command-path
+# guards (op-handle counter, fsync-skip bit test, unsupported/flush ns guards).
+[workspace]
+
+[lib]
+name = "bdf_verif_kani"
+path = "src/lib.rs"
