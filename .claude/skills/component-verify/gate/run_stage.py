@@ -71,8 +71,15 @@ def main():
 
     t0 = time.time()
     print(f"SENTINEL: {a.name} START {_iso()}", flush=True)
+    # PYTHONUNBUFFERED: a child writing to a PIPE (not a tty) block-buffers its stdout, so its
+    # progress lines sit in an 8 KB buffer and are LOST when the watchdog SIGKILLs it — precisely
+    # the run whose log you need. Observed for real: a wedged 30-minute stage was killed and left
+    # a log containing only this header, with no clue as to where it hung. `bufsize=1` below only
+    # governs OUR read side, so it cannot fix this; the child must be told not to buffer.
+    child_env = dict(os.environ)
+    child_env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, bufsize=1, start_new_session=True)
+                            text=True, bufsize=1, start_new_session=True, env=child_env)
 
     fired = {"watchdog": False}
 
