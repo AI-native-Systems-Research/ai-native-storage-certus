@@ -262,6 +262,31 @@ def kani_doctor(component_dir):
     return False, f"{sig} :: {first[:300]}"
 
 
+def wall_signature(out):
+    """A coarse, STABLE fingerprint of a structural failure, or None.
+
+    Purpose: recognise that many properties are failing for the SAME structural reason so the
+    scorer can stop re-paying the expensive cap escalation to rediscover it. Measured on
+    eviction-policy-optimized: 62 component-level properties all died at the same
+    `define_component!` construction, and the stage spent 3280s (43% of 2.1h) on attempts that
+    never resolved.
+
+    Deliberately coarse — it groups by failure SHAPE, not by property — but never by property
+    identity, so it cannot mask a genuine per-property result. Note a bare timeout IS included:
+    that is the shape the construction wall takes here. The escalation budget below is what keeps
+    that safe, because a timeout is also what a merely-slow-but-provable property looks like."""
+    o = out or ""
+    m = re.search(r"unwinding assertion loop \d+", o, re.I)
+    if m:
+        fn = re.search(r"in function ([\w:<>]+)", o)
+        return f"unwinding-assertion:{fn.group(1) if fn else 'unknown'}"
+    if re.search(r"TIMEOUT after \d+s", o):
+        return "timeout"
+    if re.search(r"OOM-KILLED", o):
+        return "oom"
+    return None
+
+
 def known_defeat(stderr, registry):
     for d in registry.get("defeats", []):
         for sig in d.get("signatures", []):
@@ -362,8 +387,30 @@ def score_property(p, ctx):
         return "DRY", {"harness": named}, "dry-run: harness present, not executed"
 
     # ---- execute the base harness; the exit is the truth ----
+    # The cap escalation (base -> cap_max) is driven from HERE rather than inside run_kani, so a
+    # recurring structural wall can be recognised between the two attempts. Escalation exists to
+    # rescue a merely-SLOW proof; once the same failure shape has consumed its budget without ever
+    # yielding a pass, paying cap_max again only rediscovers the same wall. Measured: 43% of a
+    # 2.1h stage went to attempts that never resolved, nearly all the same construction wall.
+    seen = ctx.setdefault("wall_seen", {})
+    budget = ctx.get("wall_budget", 3)
     ok, out, wall, rss, timed_out, oomed = run_kani(
-        named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], ctx["cap_max"])
+        named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False)
+    skipped_escalation = None
+    if not ok and timed_out and ctx["cap_max"] > ctx["cap"]:
+        sig = wall_signature(out)
+        spent = seen.get(sig, 0) if sig else 0
+        if sig and spent >= budget:
+            # Budget exhausted for this shape: record WHY we stopped, so the decision is visible
+            # and a re-run with a raised budget can revisit it. Never silently give up.
+            skipped_escalation = (sig, spent)
+        else:
+            ok2, out2, wall2, rss2, t2, o2 = run_kani(
+                named, ctx["component_dir"], ctx["cap_max"], ctx["mem_mb"], escalate=False)
+            wall += wall2
+            ok, out, rss, timed_out, oomed = ok2, out2, max(rss or 0, rss2 or 0), t2, o2
+            if not ok2 and sig:
+                seen[sig] = spent + 1          # only a FAILED escalation consumes budget
     if ok:
         # anti-vacuity: a __mutant harness, if present, MUST fail (fast, no cap escalation)
         mut = harness_id(pid) + "__mutant"
@@ -394,6 +441,18 @@ def score_property(p, ctx):
     cls = "sat-timeout" if (timed_out or oomed) else classify(out, ctx["battery"])
     if cls is None:
         return "UNRESOLVED", {"harness": named}, "unclassifiable failure — the harness is broken, not the tool; fix it"
+
+    if skipped_escalation:
+        # Stop here rather than spending the lever battery too: the battery's runs cost as much as
+        # the escalation we just declined, and this property is failing for a shape already shown
+        # not to yield. Reported explicitly, with the knob to revisit, so it is a bounded decision
+        # and not a silent surrender. Still UNRESOLVED — never tool-boundary on an unexhausted battery.
+        wsig, wspent = skipped_escalation
+        return "UNRESOLVED", {"harness": named, "wall_signature": wsig}, (
+            f"RECURRING WALL '{wsig}': {wspent} earlier properties escalated to {ctx['cap_max']}s on this "
+            f"same failure shape and none passed, so escalation and the lever battery were SKIPPED here "
+            f"to avoid re-paying a known cost. This is unfinished work, not a tool limit. Raise "
+            f"--wall-budget (or fix the root cause) to revisit.")
 
     required = ctx["battery"]["failure_classes"][cls]["required_levers"]
     missing, ran_all_fail = [], True
@@ -446,6 +505,14 @@ def main():
                     help="BASE per-harness time cap in seconds (default 60). A harness that only "
                          "TIMES OUT here is retried once at --cap-max before being classed a "
                          "sat-timeout tool-boundary; a real failure is decisive at the base cap.")
+    ap.add_argument("--wall-budget", type=int, default=3,
+                    help="How many properties may escalate to --cap-max on the SAME structural "
+                         "failure shape before the scorer stops escalating for that shape. "
+                         "Escalation rescues a merely-slow proof; once N properties have spent it "
+                         "on one shape without a single pass, further escalation only re-buys the "
+                         "same wall. Measured: 43%% of a 2.1h stage went to attempts that never "
+                         "resolved, nearly all one construction wall. Raise it to revisit a shape; "
+                         "0 disables escalation entirely.")
     ap.add_argument("--cap-max", type=int, default=300,
                     help="escalated per-harness time cap in seconds for the one timeout retry "
                          "(default 300). Set <= --cap-seconds to disable escalation.")
@@ -476,6 +543,7 @@ def main():
         "component_dir": component_dir,
         "battery": battery, "registry": registry,
         "dry_run": a.dry_run, "cap": a.cap_seconds, "cap_max": a.cap_max, "mem_mb": mem_mb,
+        "wall_budget": a.wall_budget, "wall_seen": {},
     }
     only = set(a.only.split(",")) if a.only else None
 
