@@ -25,13 +25,16 @@ tool: kani
 # ---------------------------------------------------------------------------
 levers:
   unwind_sweep:
+    scorer_applied: true          # scorer re-runs the base harness at --unwind 4/8/16/32 with unwinding CHECKS ON; a pass is full-strength proved
     desc: "Raise --unwind across a range; a too-low bound gives a spurious 'unwinding assertion loop 0'."
     variants_required: ">=2 distinct unwind values, at least one at the cap"
     probe: "cargo kani --harness <h> --unwind <k>   # for each k in the sweep"
     defeats: [unwinding-assertion]
   nounwindcheck:
+    scorer_applied: true          # scorer re-runs at --unwind 4/8 WITH --no-unwinding-checks; tried LAST because a pass is a narrower claim, recorded as fidelity bounded-shallow
     desc: "Bounded-shallow: --no-unwinding-checks cuts hashbrown's probe loop at N and verifies the bounded prefix."
-    variant: "verify_<ID>__nounwindcheck"
+    # no variant: --no-unwinding-checks is a CLI flag with no source form, so the scorer
+    # applies it directly. Demanding an artifact here made the lever unsatisfiable.
     probe: "cargo kani --harness <h> --unwind 2 --no-unwinding-checks"
     defeats: [unwinding-assertion, sat-timeout]
     fidelity_if_used: bounded-shallow   # sound ONLY for executions where every loop runs <= N
@@ -41,6 +44,7 @@ levers:
     probe: "cargo kani --harness <h> -Z stubbing"
     defeats: [construction-wall, getrandom-syscall]
   solver_swap:
+    scorer_applied: true          # scorer re-runs the base harness under --solver cadical then minisat; a pass is full-strength proved
     desc: "Swap the SAT/SMT backend; minisat and cadical have very different timeout profiles."
     variants_required: "both minisat AND cadical attempted"
     probe: "cargo kani --harness <h> --solver minisat ; cargo kani --harness <h> --solver cadical"

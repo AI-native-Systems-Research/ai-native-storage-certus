@@ -295,7 +295,7 @@ def known_defeat(stderr, registry):
     return None
 
 
-def run_kani(harness, component_dir, cap, mem_mb=None, cap_max=None, escalate=True):
+def run_kani(harness, component_dir, cap, mem_mb=None, cap_max=None, escalate=True, extra=None):
     """Run one harness under /usr/bin/time -v, in its own session and (when mem_mb is set) a
     NAMED transient systemd --user scope; return (ok, out, wall_s, rss_mb, timed_out, oomed).
 
@@ -309,14 +309,22 @@ def run_kani(harness, component_dir, cap, mem_mb=None, cap_max=None, escalate=Tr
     (cbmc/solvers included) — not just the `cargo` parent. Adaptive: on a TIMEOUT only (a real
     failure is decisive at the base cap), if escalate and cap_max>cap we retry the SAME harness
     once at cap_max before classing it a sat-timeout, so a merely-slow proof is not mislabelled a
-    tool-boundary. Mutant/probe runs pass escalate=False (they are meant to be fast/decisive)."""
+    tool-boundary. Mutant/probe runs pass escalate=False (they are meant to be fast/decisive).
+
+    `extra` appends CLI flags, which is what lets the SCORER apply the CLI-only levers itself
+    (--unwind N, --no-unwinding-checks, --solver X) instead of demanding a source artifact that
+    cannot express them. Before this existed, `nounwindcheck` was a required lever nobody could
+    ever supply, so its failure classes could never reach tool-boundary; and `unwind_sweep` /
+    `solver_swap` were silently skipped, so a boundary could be awarded without either ever
+    being tried. Keeping the flags HERE, in the gate, also keeps the resulting fidelity label
+    gate-owned: an agent cannot quietly grant itself bounded-shallow via global Cargo flags."""
     env = kani_env()
     time_bin = shutil.which("time") or "/usr/bin/time"
 
     def once(c):
         unit = _new_unit("kani") if mem_mb else None
         kani_cmd = [time_bin, "-v", "cargo", "kani", "--harness", harness,
-                    "-Z", "stubbing", "--output-format", "terse"]
+                    "-Z", "stubbing", "--output-format", "terse"] + list(extra or [])
         if mem_mb:
             cmd = ["systemd-run", "--user", "--scope", "--quiet", f"--unit={unit}",
                    "-p", f"MemoryMax={mem_mb}M", "-p", "MemorySwapMax=0"] + kani_cmd
@@ -459,10 +467,52 @@ def score_property(p, ctx):
     for lever in required:
         lv = ctx["battery"]["levers"][lever]
         variant = lv.get("variant", "").replace("<ID>", pid.lower().replace("-", "_"))
-        # unwind_sweep / solver_swap require multiple runs of the base harness, not a named variant
-        if lever in ("unwind_sweep", "solver_swap"):
-            # scorer would sweep here; in this reference build we require the agent to have
-            # left the sweep evidence and we re-run the base harness under the variant flags.
+        # CLI-only levers: the SCORER applies these itself by re-running the base harness under
+        # flags. They cannot be expressed as source artifacts, which is why demanding one was
+        # unsatisfiable, and why skipping them silently (as this did before) let a tool-boundary be
+        # awarded without a single alternative bound or solver ever being tried.
+        #
+        # ORDER MATTERS, and it is strongest-claim-first. The sweep keeps unwinding checks ON, so
+        # anything it proves is a full-strength `proved`. Only nounwindcheck weakens the claim —
+        # it deletes the assertion that the bound was large enough — so it runs LAST and its pass
+        # is recorded as `bounded-shallow` fidelity. Fidelity is assigned HERE, by the gate, so an
+        # agent cannot quietly award itself the weaker label via global Cargo flags.
+        if lever == "unwind_sweep":
+            for n in (4, 8, 16, 32):
+                sok, _, swall, srss, _, _ = run_kani(
+                    named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"],
+                    escalate=False, extra=["--unwind", str(n)])
+                if sok:
+                    return "proved", {"harness": named, "result": "SUCCESS", "unwind": n,
+                                      "wall_clock_s": swall, "peak_rss_mb": srss,
+                                      "lever": "unwind_sweep"}, (
+                        f"scorer-applied unwind sweep: PROVED at --unwind {n} with unwinding checks "
+                        f"ON (full strength; the agent's own bound did not close)")
+            continue
+        if lever == "solver_swap":
+            for slv in ("cadical", "minisat"):
+                sok, _, swall, srss, _, _ = run_kani(
+                    named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"],
+                    escalate=False, extra=["--solver", slv])
+                if sok:
+                    return "proved", {"harness": named, "result": "SUCCESS", "solver": slv,
+                                      "wall_clock_s": swall, "peak_rss_mb": srss,
+                                      "lever": "solver_swap"}, (
+                        f"scorer-applied solver swap: PROVED under '{slv}' (full strength)")
+            continue
+        if lever == "nounwindcheck":
+            # Weakest admissible lever, tried only after the full-strength options failed.
+            for n in (4, 8):
+                sok, _, swall, srss, _, _ = run_kani(
+                    named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False,
+                    extra=["--unwind", str(n), "--no-unwinding-checks"])
+                if sok:
+                    return "proved", {"harness": named, "result": "SUCCESS", "unwind": n,
+                                      "unwinding_checks": False, "wall_clock_s": swall,
+                                      "peak_rss_mb": srss, "lever": "nounwindcheck"}, (
+                        f"scorer-applied --unwind {n} --no-unwinding-checks: PROVED, but this is a "
+                        f"NARROWER claim — it holds for executions within {n} loop iterations and "
+                        f"says nothing about longer ones (fidelity bounded-shallow)")
             continue
         # A variant may be declared as a glob (e.g. split_harness's
         # `verify_<ID>__split_*`) so the agent can name the decomposition freely.
@@ -617,6 +667,11 @@ def main():
             blk["evidence"] = ev
             blk["note"] = note
             blk["_scored_by"] = "scorer_kani"   # provenance: this status is scorer-owned
+            # Fidelity is normally the agent's advisory field, but when the GATE itself reached the
+            # verdict with unwinding checks disabled, the weaker claim is a fact about the run and
+            # the gate owns saying so — an agent must not be able to under-report it.
+            if isinstance(ev, dict) and ev.get("unwinding_checks") is False:
+                blk["fidelity"] = "bounded-shallow"
             _save_yaml(d, yaml_path)   # atomic checkpoint after EACH scored property -> resumable
         tag = {"proved": "✓", "tool-boundary": "⤴", "delegated": "→", "UNRESOLVED": "✗", "DRY": "·"}[status]
         print(f"  {tag} {p['id']:32s} {status:13s} {note}")
