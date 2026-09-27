@@ -1,13 +1,13 @@
 component: block-device-filesys
-interface: IBlockDevice, IBlockDeviceAdmin
+role: Role 1 inventory (tool-independent). No prover named; no status recorded. Per-tool blocks are null
+  placeholders filled downstream by the scorer.
+artifacts_reconciled:
+- verif/spec_properties.yaml
+- verif/code_properties.yaml
+spec_of_record: components/block-device-filesys/specs/001-block-device-filesys/{spec.md, contracts/iblock-device-contract.md,
+  checklists/requirements.md}
 pin: e87bafd8 (2026-09-15)
 generated: '2026-09-22'
-spec_source: components/block-device-filesys/specs/001-block-device-filesys/{spec.md, contracts/iblock-device-contract.md,
-  checklists/requirements.md}
-code_source: components/block-device-filesys/src/**
-tools:
-- creusot
-- kani
 counts:
   methods_N: 17
   spec_total: 51
@@ -75,216 +75,6 @@ reconciliation:
     as additional named subjects/mutators in the bundle namespace, since the strong arithmetic nucleus
     (LBA validation, offset arithmetic, config geometry) lives there. Bundle sizes below are counted over
     that full subject namespace.'
-not_verifiable:
-- id: NV-1
-  scope: 'SC-002: 100 concurrent operations per second without corruption'
-  kind: not-verifiable
-  verifiable: false
-  reason: A throughput/rate target measured on running hardware; the rate is a wall-clock timing quantity,
-    not a machine-checkable behavioral obligation.
-  traces:
-  - SC-002
-- id: NV-2
-  scope: 'SC-003: 4KB synchronous IO latency under 1ms'
-  kind: not-verifiable
-  verifiable: false
-  reason: Wall-clock latency depends on the runtime environment and is a timing measurement, not a falsifiable
-    behavioral property.
-  traces:
-  - SC-003
-- id: NV-3
-  scope: 'SC-005: benchmark coefficient of variation under 15%'
-  kind: not-verifiable
-  verifiable: false
-  reason: A statistical stability target over timed benchmark runs; a measurement outcome, not a checkable
-    state or behavior.
-  traces:
-  - SC-005
-- id: NV-4
-  scope: 'SC-004: all unit tests pass without special hardware'
-  kind: not-verifiable
-  verifiable: false
-  reason: A property of the test suite and build environment, not an observable behavioral obligation
-    of the component.
-  traces:
-  - SC-004
-- id: NV-5
-  scope: 'SC-006 / US2-AS2: drop-in behavioral equivalence to block-device-spdk-nvme'
-  kind: not-verifiable
-  verifiable: false
-  reason: Equivalence to a separate component's runtime behavior across all consumers is not a single
-    falsifiable obligation and cannot be machine-checked here.
-  traces:
-  - SC-006
-  - US2
-  - AS2
-- id: NV-6
-  scope: 'FR-003: uses define_component!/define_interface! macros'
-  kind: not-verifiable
-  verifiable: false
-  reason: A compile-time structural/architectural requirement, not an observable runtime behavior with
-    a possible counterexample.
-  traces:
-  - FR-003
-- id: NV-7
-  scope: 'FR-005: uses a regular Linux file as backing store'
-  kind: not-verifiable
-  verifiable: false
-  reason: An environment/implementation-substrate requirement, not a falsifiable behavioral obligation.
-  traces:
-  - FR-005
-- id: NV-8
-  scope: 'FR-013: actor model on a dedicated thread with lock-free channels'
-  kind: not-verifiable
-  verifiable: false
-  reason: The threading/architecture choice is structural; its observable consequence (non-blocking, serialized
-    delivery) is captured separately as verifiable delivery invariants.
-  traces:
-  - FR-013
-- id: NV-9
-  scope: 'FR-014 / US3: Criterion benchmarks provided and execute'
-  kind: not-verifiable
-  verifiable: false
-  reason: The existence and execution of benchmarks is a build-artifact property, not a behavioral obligation
-    of the component under test.
-  traces:
-  - FR-014
-  - US3
-- id: NV-10
-  scope: 'FR-017: DmaBuffer byte slices accessed directly with no intermediate copies'
-  kind: not-verifiable
-  verifiable: false
-  reason: Absence of an intermediate copy is an implementation-strategy property, not observable as a
-    falsifiable input/output behavior.
-  traces:
-  - FR-017
-- id: NV-11
-  scope: 'FR-018: depends on the io-uring crate, minimum kernel 5.6'
-  kind: not-verifiable
-  verifiable: false
-  reason: A dependency and minimum-kernel requirement is an environment/build fact, not a checkable runtime
-    behavior.
-  traces:
-  - FR-018
-- id: NV-12
-  scope: 'FR-015: documentation examples exist and compile'
-  kind: not-verifiable
-  verifiable: false
-  reason: Presence and compilation of doc examples is a documentation/build property, not a behavioral
-    obligation.
-  traces:
-  - FR-015
-- id: NV-13
-  scope: 'FR-023: reserved crate-private config mutators set_file_path/set_block_size/set_num_blocks'
-  kind: not-verifiable
-  verifiable: false
-  reason: These helpers are explicitly not public API, are currently unused, and impose no observable
-    external behavior.
-  traces:
-  - FR-023
-- id: NV-14
-  scope: 'FR-002: logging levels for connect/disconnect/init/fallback events'
-  kind: not-verifiable
-  verifiable: false
-  reason: Which log level is emitted for routine lifecycle and degradation events is a logging side effect,
-    not a falsifiable behavioral obligation.
-  traces:
-  - FR-002
-- id: NV-15
-  scope: 'Edge case: backing file deleted while running must not panic'
-  kind: not-verifiable
-  verifiable: false
-  reason: The trigger is a runtime environment event (external deletion) whose IO-error surfacing is environment-dependent;
-    the general error-return-not-panic behavior is covered by the per-command error-case properties instead.
-  traces:
-  - Edge-Cases
-- id: NV-16
-  scope: Underlying syscall/allocator correctness (fallocate/pread/pwrite/fdatasync/posix_memalign)
-  kind: not-verifiable
-  verifiable: false
-  reason: The correctness of the kernel syscalls and the C allocator is an environment assumption outside
-    the component; only the component's handling of their return codes is verifiable and is captured in
-    the IO error-case properties.
-  traces:
-  - actor.rs
-  - config.rs
-- id: NV-17
-  scope: unsafe Send impls for ControlMessage and FilesysHandler
-  kind: not-verifiable
-  verifiable: false
-  reason: The thread-safety justification for the unsafe Send implementations is a manual soundness argument
-    about how the type is used, not a machine-checkable functional obligation.
-  traces:
-  - actor.rs:87-88
-  - actor.rs:983-985
-- id: NV-18
-  scope: on_idle poll/harvest/timeout scheduling loop liveness
-  kind: not-verifiable
-  verifiable: false
-  reason: That the idle loop eventually makes progress and drains work is a liveness property; the individual
-    steps it invokes are captured as verifiable properties, but overall liveness is not machine-checkable
-    here.
-  traces:
-  - actor.rs:970-980
-- id: NV-19
-  scope: io_uring ring construction availability
-  kind: not-verifiable
-  verifiable: false
-  reason: Whether ring creation succeeds depends on the runtime kernel; the resulting behavioral fork
-    (async vs sync fallback) is captured by BDF-ASYNC-FALLBACK, but ring availability itself is an environment
-    fact.
-  traces:
-  - actor.rs:119-131
-- id: NV-20
-  scope: AbortOp cancel actually stops an in-flight kernel operation
-  kind: not-verifiable
-  verifiable: false
-  reason: Whether the kernel honours an async-cancel for an already-submitted operation is environment-
-    and timing-dependent; only the component's local bookkeeping and acknowledgement are verifiable and
-    are captured by BDF-ABORT.
-  traces:
-  - actor.rs:783-796
-- id: NV-21
-  scope: Read-after-write data equality end to end
-  kind: not-verifiable
-  verifiable: false
-  reason: Reading back exactly what was written is a round trip through the real filesystem and kernel;
-    from the component alone only the individual read and write handlers are verifiable (BDF-READSYNC-RAW,
-    BDF-WRITESYNC-DURABLE). The end-to-end round trip is asserted by the spec and integration tests, not
-    by a single component obligation.
-  traces:
-  - SC-001
-  - actor.rs:290-432
-run:
-  gate_commit: 22b8cd01
-  gate_branch: skills/verify-methodology-to-unstable
-  creusot:
-    scored_by: scorer_creusot
-    command: scorer_creusot.py /home/cornel/rescore-20260925/block-device-filesys/verif --crate-dir /home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot
-      --cap-seconds 60 --cap-max 300
-    started: '2026-09-25T22:06:51-07:00'
-    finished: '2026-09-25T22:07:41-07:00'
-    creusot: v0.11.0-169-g9cf662ce6
-    why3: Why3 platform, version 1.8.2+git
-    provers:
-    - Alt-Ergo 2.6.2
-    - CVC4 1.8
-    - CVC5 1.3.1
-    - Coq 8.20.1
-    - Z3 4.16.0
-    cap_seconds: 60
-    cap_max: 300
-    mem_max_mb: 16384
-  kani:
-    scored_by: scorer_kani
-    command: scorer_kani.py /home/cornel/rescore-20260925/block-device-filesys/verif --component-dir /home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-kani
-      --cap-seconds 60 --cap-max 300
-    started: '2026-09-25T22:07:41-07:00'
-    finished: '2026-09-25T22:08:30-07:00'
-    kani_version: cargo-kani 0.67.0
-    cap_seconds: 60
-    cap_max: 300
-    mem_max_mb: 16384
 properties:
 - id: BDF-CONFIG-BLKSZ-MIN
   subject: DeviceConfig::new
@@ -316,7 +106,7 @@ properties:
       modules:
       - verify_bdf_config_blksz_min
       result: Proved
-      wall_clock_s: 1.03
+      wall_clock_s: 1.12
       peak_rss_mb: 134
       lever: null
     _scored_by: scorer_creusot
@@ -421,7 +211,7 @@ properties:
     evidence:
       harness: verify_bdf_config_nblk_nonzero
       result: SUCCESS
-      wall_clock_s: 0.48
+      wall_clock_s: 0.49
       peak_rss_mb: 22
     _scored_by: scorer_kani
 - id: BDF-CONFIG-TOTALBYTES-OVERFLOW
@@ -455,7 +245,7 @@ properties:
       modules:
       - verify_bdf_config_totalbytes_overflow
       result: Proved
-      wall_clock_s: 0.63
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -639,7 +429,7 @@ properties:
       modules:
       - verify_bdf_file_size_match
       result: Proved
-      wall_clock_s: 0.65
+      wall_clock_s: 0.48
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -872,7 +662,7 @@ properties:
       modules:
       - verify_bdf_connect_notinit
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1075,7 +865,7 @@ properties:
       modules:
       - verify_bdf_numsectors
       result: Proved
-      wall_clock_s: 0.49
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1119,7 +909,7 @@ properties:
       modules:
       - verify_bdf_maxqueuedepth
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1132,7 +922,7 @@ properties:
     evidence:
       harness: verify_bdf_maxqueuedepth
       result: SUCCESS
-      wall_clock_s: 0.37
+      wall_clock_s: 0.38
       peak_rss_mb: 22
     _scored_by: scorer_kani
 - id: BDF-NUMIOQUEUES
@@ -1166,7 +956,7 @@ properties:
       modules:
       - verify_bdf_numioqueues
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1179,7 +969,7 @@ properties:
     evidence:
       harness: verify_bdf_numioqueues
       result: SUCCESS
-      wall_clock_s: 0.38
+      wall_clock_s: 0.37
       peak_rss_mb: 22
     _scored_by: scorer_kani
 - id: BDF-MAXTRANSFER
@@ -1214,8 +1004,8 @@ properties:
       modules:
       - verify_bdf_maxtransfer
       result: Proved
-      wall_clock_s: 0.48
-      peak_rss_mb: 50
+      wall_clock_s: 0.47
+      peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
   kani:
@@ -1262,7 +1052,7 @@ properties:
       modules:
       - verify_bdf_blocksize
       result: Proved
-      wall_clock_s: 0.64
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1275,7 +1065,7 @@ properties:
     evidence:
       harness: verify_bdf_blocksize
       result: SUCCESS
-      wall_clock_s: 0.38
+      wall_clock_s: 0.37
       peak_rss_mb: 22
     _scored_by: scorer_kani
 - id: BDF-NUMANODE
@@ -1372,7 +1162,7 @@ properties:
     evidence:
       harness: verify_bdf_nvmeversion
       result: SUCCESS
-      wall_clock_s: 0.52
+      wall_clock_s: 0.53
       peak_rss_mb: 22
     _scored_by: scorer_kani
 - id: BDF-READWRITESTATS
@@ -1404,7 +1194,7 @@ properties:
       modules:
       - verify_bdf_readwritestats
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1483,7 +1273,7 @@ properties:
       modules:
       - verify_bdf_telemetry_uninit
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1580,7 +1370,7 @@ properties:
     evidence:
       harness: verify_bdf_telemetry_mean_throughput
       result: SUCCESS
-      wall_clock_s: 0.55
+      wall_clock_s: 0.54
       peak_rss_mb: 28
     _scored_by: scorer_kani
 - id: BDF-TELEMETRY-MINMAX
@@ -1620,7 +1410,7 @@ properties:
     evidence:
       harness: verify_bdf_telemetry_minmax
       result: SUCCESS
-      wall_clock_s: 0.98
+      wall_clock_s: 0.96
       peak_rss_mb: 22
     _scored_by: scorer_kani
 - id: BDF-TELEMETRY-RECORD
@@ -1664,7 +1454,7 @@ properties:
     evidence:
       harness: verify_bdf_telemetry_record
       result: SUCCESS
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 22
     _scored_by: scorer_kani
 - id: BDF-LBA-NS
@@ -1702,7 +1492,7 @@ properties:
       modules:
       - verify_bdf_lba_ns
       result: Proved
-      wall_clock_s: 0.63
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1765,7 +1555,7 @@ properties:
     evidence:
       harness: verify_bdf_lba_overflow
       result: SUCCESS
-      wall_clock_s: 0.55
+      wall_clock_s: 0.54
       peak_rss_mb: 22
     _scored_by: scorer_kani
 - id: BDF-LBA-INRANGE
@@ -1804,7 +1594,7 @@ properties:
       modules:
       - verify_bdf_lba_inrange
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1817,7 +1607,7 @@ properties:
     evidence:
       harness: verify_bdf_lba_inrange
       result: SUCCESS
-      wall_clock_s: 0.63
+      wall_clock_s: 0.61
       peak_rss_mb: 22
     _scored_by: scorer_kani
 - id: BDF-OFFSET-EQ
@@ -1854,7 +1644,7 @@ properties:
       modules:
       - verify_bdf_offset_eq
       result: Proved
-      wall_clock_s: 0.47
+      wall_clock_s: 0.49
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1867,8 +1657,8 @@ properties:
     evidence:
       harness: verify_bdf_offset_eq
       result: SUCCESS
-      wall_clock_s: 1.85
-      peak_rss_mb: 50
+      wall_clock_s: 1.88
+      peak_rss_mb: 51
     _scored_by: scorer_kani
 - id: BDF-OFFSET-NOOVERFLOW
   subject: offset_for_lba
@@ -1918,7 +1708,7 @@ properties:
     evidence:
       harness: verify_bdf_offset_nooverflow
       result: SUCCESS
-      wall_clock_s: 2.89
+      wall_clock_s: 2.86
       peak_rss_mb: 39
     _scored_by: scorer_kani
 - id: BDF-SAFETY-NO-OOB
@@ -1957,7 +1747,7 @@ properties:
       modules:
       - verify_bdf_safety_no_oob
       result: Proved
-      wall_clock_s: 0.49
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1970,8 +1760,8 @@ properties:
     evidence:
       harness: verify_bdf_safety_no_oob
       result: SUCCESS
-      wall_clock_s: 9.25
-      peak_rss_mb: 53
+      wall_clock_s: 9.56
+      peak_rss_mb: 54
     _scored_by: scorer_kani
 - id: BDF-READSYNC-RAW
   subject: ReadSync
@@ -2080,7 +1870,7 @@ properties:
       modules:
       - verify_bdf_writesync_err
       result: Proved
-      wall_clock_s: 0.49
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -2470,7 +2260,7 @@ properties:
       modules:
       - verify_bdf_nsprobe
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -2549,7 +2339,7 @@ properties:
       modules:
       - verify_bdf_flushsync_ns
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -2594,7 +2384,7 @@ properties:
       modules:
       - verify_bdf_flushsync_err
       result: Proved
-      wall_clock_s: 0.63
+      wall_clock_s: 0.52
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -2651,7 +2441,7 @@ properties:
       harness: verify_bdf_unsupported
       result: SUCCESS
       wall_clock_s: 0.59
-      peak_rss_mb: 24
+      peak_rss_mb: 23
     _scored_by: scorer_kani
 - id: BDF-DELIVERY-NONBLOCK
   subject: completion-delivery
@@ -2867,7 +2657,7 @@ properties:
       modules:
       - verify_bdf_harvest_result
       result: Proved
-      wall_clock_s: 0.57
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -2908,7 +2698,7 @@ properties:
       modules:
       - verify_bdf_harvest_fsync_skip
       result: Proved
-      wall_clock_s: 0.55
+      wall_clock_s: 0.48
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -3051,8 +2841,215 @@ properties:
     status: delegated
     evidence: {}
     _scored_by: scorer_kani
-role: Role 1 inventory (tool-independent). No prover named; no status recorded. Per-tool blocks are null
-  placeholders filled downstream by the scorer.
-reconciliation_inputs:
-- verif/spec_properties.yaml
-- verif/code_properties.yaml
+not_verifiable:
+- id: NV-1
+  scope: 'SC-002: 100 concurrent operations per second without corruption'
+  kind: not-verifiable
+  verifiable: false
+  reason: A throughput/rate target measured on running hardware; the rate is a wall-clock timing quantity,
+    not a machine-checkable behavioral obligation.
+  traces:
+  - SC-002
+- id: NV-2
+  scope: 'SC-003: 4KB synchronous IO latency under 1ms'
+  kind: not-verifiable
+  verifiable: false
+  reason: Wall-clock latency depends on the runtime environment and is a timing measurement, not a falsifiable
+    behavioral property.
+  traces:
+  - SC-003
+- id: NV-3
+  scope: 'SC-005: benchmark coefficient of variation under 15%'
+  kind: not-verifiable
+  verifiable: false
+  reason: A statistical stability target over timed benchmark runs; a measurement outcome, not a checkable
+    state or behavior.
+  traces:
+  - SC-005
+- id: NV-4
+  scope: 'SC-004: all unit tests pass without special hardware'
+  kind: not-verifiable
+  verifiable: false
+  reason: A property of the test suite and build environment, not an observable behavioral obligation
+    of the component.
+  traces:
+  - SC-004
+- id: NV-5
+  scope: 'SC-006 / US2-AS2: drop-in behavioral equivalence to block-device-spdk-nvme'
+  kind: not-verifiable
+  verifiable: false
+  reason: Equivalence to a separate component's runtime behavior across all consumers is not a single
+    falsifiable obligation and cannot be machine-checked here.
+  traces:
+  - SC-006
+  - US2
+  - AS2
+- id: NV-6
+  scope: 'FR-003: uses define_component!/define_interface! macros'
+  kind: not-verifiable
+  verifiable: false
+  reason: A compile-time structural/architectural requirement, not an observable runtime behavior with
+    a possible counterexample.
+  traces:
+  - FR-003
+- id: NV-7
+  scope: 'FR-005: uses a regular Linux file as backing store'
+  kind: not-verifiable
+  verifiable: false
+  reason: An environment/implementation-substrate requirement, not a falsifiable behavioral obligation.
+  traces:
+  - FR-005
+- id: NV-8
+  scope: 'FR-013: actor model on a dedicated thread with lock-free channels'
+  kind: not-verifiable
+  verifiable: false
+  reason: The threading/architecture choice is structural; its observable consequence (non-blocking, serialized
+    delivery) is captured separately as verifiable delivery invariants.
+  traces:
+  - FR-013
+- id: NV-9
+  scope: 'FR-014 / US3: Criterion benchmarks provided and execute'
+  kind: not-verifiable
+  verifiable: false
+  reason: The existence and execution of benchmarks is a build-artifact property, not a behavioral obligation
+    of the component under test.
+  traces:
+  - FR-014
+  - US3
+- id: NV-10
+  scope: 'FR-017: DmaBuffer byte slices accessed directly with no intermediate copies'
+  kind: not-verifiable
+  verifiable: false
+  reason: Absence of an intermediate copy is an implementation-strategy property, not observable as a
+    falsifiable input/output behavior.
+  traces:
+  - FR-017
+- id: NV-11
+  scope: 'FR-018: depends on the io-uring crate, minimum kernel 5.6'
+  kind: not-verifiable
+  verifiable: false
+  reason: A dependency and minimum-kernel requirement is an environment/build fact, not a checkable runtime
+    behavior.
+  traces:
+  - FR-018
+- id: NV-12
+  scope: 'FR-015: documentation examples exist and compile'
+  kind: not-verifiable
+  verifiable: false
+  reason: Presence and compilation of doc examples is a documentation/build property, not a behavioral
+    obligation.
+  traces:
+  - FR-015
+- id: NV-13
+  scope: 'FR-023: reserved crate-private config mutators set_file_path/set_block_size/set_num_blocks'
+  kind: not-verifiable
+  verifiable: false
+  reason: These helpers are explicitly not public API, are currently unused, and impose no observable
+    external behavior.
+  traces:
+  - FR-023
+- id: NV-14
+  scope: 'FR-002: logging levels for connect/disconnect/init/fallback events'
+  kind: not-verifiable
+  verifiable: false
+  reason: Which log level is emitted for routine lifecycle and degradation events is a logging side effect,
+    not a falsifiable behavioral obligation.
+  traces:
+  - FR-002
+- id: NV-15
+  scope: 'Edge case: backing file deleted while running must not panic'
+  kind: not-verifiable
+  verifiable: false
+  reason: The trigger is a runtime environment event (external deletion) whose IO-error surfacing is environment-dependent;
+    the general error-return-not-panic behavior is covered by the per-command error-case properties instead.
+  traces:
+  - Edge-Cases
+- id: NV-16
+  scope: Underlying syscall/allocator correctness (fallocate/pread/pwrite/fdatasync/posix_memalign)
+  kind: not-verifiable
+  verifiable: false
+  reason: The correctness of the kernel syscalls and the C allocator is an environment assumption outside
+    the component; only the component's handling of their return codes is verifiable and is captured in
+    the IO error-case properties.
+  traces:
+  - actor.rs
+  - config.rs
+- id: NV-17
+  scope: unsafe Send impls for ControlMessage and FilesysHandler
+  kind: not-verifiable
+  verifiable: false
+  reason: The thread-safety justification for the unsafe Send implementations is a manual soundness argument
+    about how the type is used, not a machine-checkable functional obligation.
+  traces:
+  - actor.rs:87-88
+  - actor.rs:983-985
+- id: NV-18
+  scope: on_idle poll/harvest/timeout scheduling loop liveness
+  kind: not-verifiable
+  verifiable: false
+  reason: That the idle loop eventually makes progress and drains work is a liveness property; the individual
+    steps it invokes are captured as verifiable properties, but overall liveness is not machine-checkable
+    here.
+  traces:
+  - actor.rs:970-980
+- id: NV-19
+  scope: io_uring ring construction availability
+  kind: not-verifiable
+  verifiable: false
+  reason: Whether ring creation succeeds depends on the runtime kernel; the resulting behavioral fork
+    (async vs sync fallback) is captured by BDF-ASYNC-FALLBACK, but ring availability itself is an environment
+    fact.
+  traces:
+  - actor.rs:119-131
+- id: NV-20
+  scope: AbortOp cancel actually stops an in-flight kernel operation
+  kind: not-verifiable
+  verifiable: false
+  reason: Whether the kernel honours an async-cancel for an already-submitted operation is environment-
+    and timing-dependent; only the component's local bookkeeping and acknowledgement are verifiable and
+    are captured by BDF-ABORT.
+  traces:
+  - actor.rs:783-796
+- id: NV-21
+  scope: Read-after-write data equality end to end
+  kind: not-verifiable
+  verifiable: false
+  reason: Reading back exactly what was written is a round trip through the real filesystem and kernel;
+    from the component alone only the individual read and write handlers are verifiable (BDF-READSYNC-RAW,
+    BDF-WRITESYNC-DURABLE). The end-to-end round trip is asserted by the spec and integration tests, not
+    by a single component obligation.
+  traces:
+  - SC-001
+  - actor.rs:290-432
+run:
+  gate_commit: 1f15a320
+  gate_branch: skills/verify-methodology-to-unstable
+  creusot:
+    scored_by: scorer_creusot
+    command: scorer_creusot.py /home/cornel/rescore-overnight-20260926/block-device-filesys/verif --crate-dir
+      /home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-creusot
+      --cap-seconds 60 --cap-max 300
+    started: '2026-09-27T03:23:48-07:00'
+    finished: '2026-09-27T03:24:54-07:00'
+    creusot: v0.11.0-169-g9cf662ce6
+    why3: Why3 platform, version 1.8.2+git
+    provers:
+    - Alt-Ergo 2.6.2
+    - CVC4 1.8
+    - CVC5 1.3.1
+    - Coq 8.20.1
+    - Z3 4.16.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+  kani:
+    scored_by: scorer_kani
+    command: scorer_kani.py /home/cornel/rescore-overnight-20260926/block-device-filesys/verif --component-dir
+      /home/cornel/block-device-filesys-verify-20260922/components/block-device-filesys/verif-kani --cap-seconds
+      120 --cap-max 300
+    started: '2026-09-27T03:24:55-07:00'
+    finished: '2026-09-27T03:25:44-07:00'
+    kani_version: cargo-kani 0.67.0
+    cap_seconds: 120
+    cap_max: 300
+    mem_max_mb: 16384
