@@ -32,7 +32,12 @@ try:
 except ImportError:
     sys.exit("scorer_kani: PyYAML required (python3 -c 'import yaml')")
 
-ACCEPT = {"proved", "tool-boundary", "delegated"}
+ACCEPT = {"proved", "tool-boundary", "delegated", "refuted"}
+# `refuted` = the obligation is FALSE, machine-checked. It is ACCEPTED, not a gate
+# failure: the verification did its job and found a real defect. Per Cornel 2026-09-26 —
+# "when we find an error in verifying a property that is very good, this is what rewards
+# our verification effort" — it is shown red in the HTML with the spec and code locations
+# and the run continues. Only UNRESOLVED (unfinished work) fails the gate.
 _UNIT_SEQ = 0
 
 
@@ -387,6 +392,36 @@ def score_property(p, ctx):
             return "delegated", proposed.get("evidence", {}), "delegated to a named referent (scorer did not re-derive; refuter audits)"
         return "UNRESOLVED", {}, "delegated with no resolvable referent (name the owning component + obligation)"
 
+    # ---- REFUTATION: the obligation is FALSE and here is the machine-checked reason ----
+    # Finding a real violation is what verifying is FOR, so it gets a first-class status rather than
+    # being filed as UNRESOLVED ("produce the harness"), which made a genuine defect look identical
+    # to unfinished work.
+    #
+    # A refutation must be DEMONSTRATED, never inferred from a failing proof: `verify_<id>` failing
+    # can equally mean a bad bound, a wrong harness or a solver limit. So the agent writes a
+    # separate `refute_<id>` harness that asserts the violation is REACHABLE (typically
+    # #[kani::should_panic], or asserting the negated postcondition), and it must PASS. A passing
+    # refutation is positive evidence: Kani found the execution.
+    refute = "refute_" + pid.lower().replace("-", "_")
+    if refute in present and not ctx["dry_run"]:
+        rok, _, rwall, rrss, _, _ = run_kani(
+            refute, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], ctx["cap_max"])
+        if rok:
+            base_ok = False
+            if named in present:
+                base_ok, _, _, _, _, _ = run_kani(
+                    named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False)
+            if base_ok:
+                return "UNRESOLVED", {"harness": named, "refutation": refute}, (
+                    f"CONTRADICTION: '{named}' verified AND its refutation '{refute}' also passed. "
+                    f"One of them is vacuous (check the refutation actually reaches the violation) — "
+                    f"fix that before any verdict; a defect claim on this footing is not trustworthy.")
+            return "refuted", {"refutation": refute, "result": "violation demonstrated",
+                               "wall_clock_s": rwall, "peak_rss_mb": rrss}, (
+                f"REFUTED — '{refute}' demonstrates a reachable violation, so the code breaks this "
+                f"obligation. This is a finding, not a gap: see the spec and code locations on the "
+                f"property record.")
+
     # ---- no base artifact at all -> cannot climb out of the default ----
     if named not in present:
         return "UNRESOLVED", {}, f"no runnable harness '{named}' (nor '{harness_id(pid)}'): produce it — absence is not a tool limit"
@@ -633,7 +668,7 @@ def main():
         print("  resume: skipping properties already carrying a scorer-owned kani status")
     print()
 
-    counts = {"proved": 0, "tool-boundary": 0, "delegated": 0, "UNRESOLVED": 0, "DRY": 0, "resumed": 0}
+    counts = {"proved": 0, "refuted": 0, "tool-boundary": 0, "delegated": 0, "UNRESOLVED": 0, "DRY": 0, "resumed": 0}
     unresolved = []
     for p in d["properties"]:
         if not p.get("verifiable"):
@@ -673,7 +708,8 @@ def main():
             if isinstance(ev, dict) and ev.get("unwinding_checks") is False:
                 blk["fidelity"] = "bounded-shallow"
             _save_yaml(d, yaml_path)   # atomic checkpoint after EACH scored property -> resumable
-        tag = {"proved": "✓", "tool-boundary": "⤴", "delegated": "→", "UNRESOLVED": "✗", "DRY": "·"}[status]
+        tag = {"proved": "✓", "refuted": "‼", "tool-boundary": "⤴", "delegated": "→",
+               "UNRESOLVED": "✗", "DRY": "·"}[status]
         print(f"  {tag} {p['id']:32s} {status:13s} {note}")
 
     if not a.dry_run:

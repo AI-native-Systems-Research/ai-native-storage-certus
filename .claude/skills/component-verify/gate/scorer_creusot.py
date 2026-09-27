@@ -49,7 +49,12 @@ try:
 except ImportError:
     sys.exit("scorer_creusot: PyYAML required (python3 -c 'import yaml')")
 
-ACCEPT = {"proved", "tool-boundary", "delegated"}
+ACCEPT = {"proved", "tool-boundary", "delegated", "refuted"}
+# `refuted` = the obligation is FALSE, machine-checked. It is ACCEPTED, not a gate
+# failure: the verification did its job and found a real defect. Per Cornel 2026-09-26 —
+# "when we find an error in verifying a property that is very good, this is what rewards
+# our verification effort" — it is shown red in the HTML with the spec and code locations
+# and the run continues. Only UNRESOLVED (unfinished work) fails the gate.
 CREUSOT_BIN = os.path.expanduser("~/.local/share/creusot/bin") + ":" + os.path.expanduser("~/.cargo/bin")
 _UNIT_SEQ = 0
 
@@ -549,6 +554,36 @@ def score_property(p, ctx):
     if claim:
         return score_inexpressible(p, ctx, claim)
 
+    # ---- REFUTATION: the obligation is FALSE and here is the machine-checked reason ----
+    # Finding a real violation is the point of verifying, not a failure to verify, so it gets a
+    # first-class status instead of being filed as UNRESOLVED ("you didn't write the proof"), which
+    # is what happened before and made a genuine defect indistinguishable from unfinished work.
+    #
+    # In Creusot a refutation is sound and constructive: a `refute_<id>` module states the NEGATION
+    # of the property, so if it PROVES, the property is false. That is a proof, not a failed proof —
+    # which is exactly why a merely-failing `verify_<id>` can never be read as a refutation.
+    # Guard against the contradictory case: if the property AND its negation both prove, something
+    # is wrong with the model, and claiming a defect would be unsound.
+    refute = "refute_" + module_id(pid)
+    if refute in present and not ctx["dry_run"]:
+        rok, rout, rwall, rrss, _, _ = run_creusot(
+            refute, ctx["crate_dir"], ctx["cap"], mem_mb=ctx["mem_mb"], cap_max=ctx["cap_max"])
+        if rok:
+            base_ok = False
+            if all(m in present for m in mods):
+                base_ok, _, _, _, _, _ = run_creusot(
+                    mods[0], ctx["crate_dir"], ctx["cap"], mem_mb=ctx["mem_mb"], escalate=False)
+            if base_ok:
+                return "UNRESOLVED", {"modules": mods, "refutation": refute}, (
+                    f"CONTRADICTION: both '{mods[0]}' and its negation '{refute}' proved. The model "
+                    f"is unsound (a vacuous precondition or a mis-stated negation) — fix it before "
+                    f"any verdict; a defect claim on this footing would not be trustworthy.")
+            return "refuted", {"refutation": refute, "result": "Proved (negation)",
+                               "wall_clock_s": rwall, "peak_rss_mb": rrss}, (
+                f"REFUTED — the negation '{refute}' is machine-proved, so the code violates this "
+                f"obligation. This is a finding, not a gap: see the spec and code locations on the "
+                f"property record.")
+
     # ---- every named module must exist as a generated .coma ----
     missing_mods = [m for m in mods if m not in present]
     if missing_mods:
@@ -747,7 +782,7 @@ def main():
         print("  resume: skipping properties already carrying a scorer-owned creusot status")
     print()
 
-    counts = {"proved": 0, "tool-boundary": 0, "delegated": 0, "UNRESOLVED": 0, "DRY": 0, "resumed": 0}
+    counts = {"proved": 0, "refuted": 0, "tool-boundary": 0, "delegated": 0, "UNRESOLVED": 0, "DRY": 0, "resumed": 0}
     unresolved = []
     for p in d["properties"]:
         if not p.get("verifiable"):
@@ -771,7 +806,8 @@ def main():
             blk["note"] = note
             blk["_scored_by"] = "scorer_creusot"   # provenance: this status is scorer-owned
             _save_yaml(d, yaml_path)   # atomic checkpoint after EACH scored property -> resumable
-        tag = {"proved": "✓", "tool-boundary": "⤴", "delegated": "→", "UNRESOLVED": "✗", "DRY": "·"}[status]
+        tag = {"proved": "✓", "refuted": "‼", "tool-boundary": "⤴", "delegated": "→",
+               "UNRESOLVED": "✗", "DRY": "·"}[status]
         print(f"  {tag} {p['id']:32s} {status:13s} {note}")
 
     if not a.dry_run:

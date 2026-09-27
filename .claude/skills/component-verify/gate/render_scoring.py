@@ -50,6 +50,10 @@ def psym(block):
         return "⤴"
     if st == "tool-boundary":
         return "⊘"
+    if st == "refuted":
+        # The obligation is FALSE and that was machine-checked. Distinct from every other symbol
+        # because it is a statement about the CODE, not about how far verification got.
+        return "‼"
     return "·"
 
 
@@ -156,6 +160,9 @@ def main():
         proved = sum(1 for p in props if (p.get(t) or {}).get("status") == "proved")
         deleg = sum(1 for p in props if (p.get(t) or {}).get("status") == "delegated")
         tb = sum(1 for p in props if (p.get(t) or {}).get("status") == "tool-boundary")
+        # Refuted belongs in the headline: a found defect is the most consequential thing a run can
+        # report, and burying it below the fold would understate exactly what the effort bought.
+        refd = sum(1 for p in props if (p.get(t) or {}).get("status") == "refuted")
         pend = sum(1 for p in props if "status" not in (p.get(t) or {}))
         wall = 0.0
         rss = 0
@@ -180,7 +187,7 @@ def main():
         deleg_methods = sum(1 for m in methods if mm[m]["rating"] == "delegated")
         covered = sum(1 for m in methods if mm[m]["gap"] == 0)                  # union across both tools
         true_partial = sum(1 for m in methods if mm[m]["gap"] > 0)              # a real open gap
-        agg[t] = dict(proved=proved, deleg=deleg, tb=tb, pend=pend, wall=round(wall, 2),
+        agg[t] = dict(proved=proved, deleg=deleg, tb=tb, refuted=refd, pend=pend, wall=round(wall, 2),
                       rss=rss, artifacts=len(artifacts), fully=fully, partial=partial,
                       deleg_methods=deleg_methods, covered=covered, true_partial=true_partial)
 
@@ -487,6 +494,37 @@ def main():
         P.append("<tr><td colspan='4' class='foot'>No delegations.</td></tr>")
     P.append("</table></div>")
 
+    # ---- DEFECTS FOUND (refuted obligations) ----
+    # The headline result when it happens: verification did its job and the CODE failed. Given its
+    # own prominent section, above the tool-boundary discussion, with the spec place and the code
+    # lines a reader needs in order to act — the point of the exercise is a fix, not a score.
+    refs = [p for p in props if any((p.get(t) or {}).get("status") == "refuted" for t in tools)]
+    if refs:
+        P.append(f"<h2>{sec} · ‼ Defects found — obligations the code violates</h2>")
+        sec += 1
+        P.append("<div class='note' style='border-left:4px solid #b00;padding-left:10px'>"
+                 "Each row is a property that was <b>machine-checked to be FALSE</b>: the implementation "
+                 "breaks it. These are findings, not gaps in the verification — they are the return on "
+                 "the verification effort, and each needs a decision in the spec, the code, or both.</div>")
+        P.append("<div class='scroll'><table><tr><th>property</th><th>by</th><th>spec</th>"
+                 "<th>code location</th><th>what is violated</th><th>witness</th></tr>")
+        for p in refs:
+            src = p.get("source") or {}
+            spec_loc = ", ".join(str(x) for x in (src.get("spec") or p.get("traces") or [])) or "—"
+            code_loc = ", ".join(str(x) for x in (src.get("code") or [])) or "—"
+            for t in tools:
+                b = p.get(t) or {}
+                if b.get("status") != "refuted":
+                    continue
+                ev = b.get("evidence") or {}
+                wit = ev.get("refutation", "") if isinstance(ev, dict) else ""
+                P.append(
+                    f"<tr><td class='mono'>{esc(p['id'])}</td><td>{TOOL_LABEL.get(t,t)}</td>"
+                    f"<td class='mono'>{esc(spec_loc)}</td><td class='mono'>{esc(code_loc)}</td>"
+                    f"<td>{esc(str(p.get('statement','')).strip())}</td>"
+                    f"<td class='mono'>{esc(str(wit))}</td></tr>")
+        P.append("</table></div>")
+
     # ---- Tool-boundary ----
     tbs = [p for p in props if any((p.get(t) or {}).get("status") == "tool-boundary" for t in tools)]
     P.append(f"<h2>{sec} · Tool-boundary rows and their causes</h2>")
@@ -629,7 +667,8 @@ def main():
         print(f"  {TOOL_LABEL.get(t,t):8s}: {A['fully']}/{N} methods proved outright "
               f"({A['partial']} partial, {A['deleg_methods']} delegated, {A['true_partial']} open; "
               f"{A['covered']}/{N} covered union) | "
-              f"props {A['proved']} proved / {A['deleg']} delegated / {A['tb']} tb / {A['pend']} pending")
+              f"props {A['proved']} proved / {A['deleg']} delegated / {A['tb']} tb / "
+              f"{A['pend']} pending" + (f" / ‼ {A['refuted']} REFUTED (defects found)" if A.get('refuted') else ""))
 
 
 if __name__ == "__main__":
