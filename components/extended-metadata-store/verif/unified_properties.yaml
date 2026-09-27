@@ -1,49 +1,18 @@
 component: extended-metadata-store
-interface: IExtendedMetadataStore
 pin: f3de84aa
-spec_source: components/extended-metadata-store/specs/001-extended-metadata-store/spec.md
-code_source: components/extended-metadata-store/src/**
-tools:
-- creusot
-- kani
+interface: IExtendedMetadataStore
+interface_methods:
+- put
+- get
+- delete
+- iterate_all
+- force_flush
 counts:
   N_methods: 5
   spec_total: 26
   code_total: 34
   unified_verifiable: 39
   unified_nv: 7
-run:
-  gate_commit: 7757ae4b
-  gate_branch: skills/verify-methodology-to-unstable
-  creusot:
-    scored_by: scorer_creusot
-    command: scorer_creusot.py /home/cornel/rescore-20260925/extended-metadata-store/verif --crate-dir
-      /home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif --cap-seconds
-      60 --cap-max 300
-    started: '2026-09-25T18:13:25-07:00'
-    finished: '2026-09-25T18:14:03-07:00'
-    creusot: v0.11.0-169-g9cf662ce6
-    why3: Why3 platform, version 1.8.2+git
-    provers:
-    - Alt-Ergo 2.6.2
-    - CVC4 1.8
-    - CVC5 1.3.1
-    - Coq 8.20.1
-    - Z3 4.16.0
-    cap_seconds: 60
-    cap_max: 300
-    mem_max_mb: 16384
-  kani:
-    scored_by: scorer_kani
-    command: scorer_kani.py /home/cornel/rescore-20260925/extended-metadata-store/verif --component-dir
-      /home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store --cap-seconds
-      60 --cap-max 300
-    started: '2026-09-25T18:14:03-07:00'
-    finished: '2026-09-25T18:31:25-07:00'
-    kani_version: cargo-kani 0.67.0
-    cap_seconds: 60
-    cap_max: 300
-    mem_max_mb: 16384
 properties:
 - id: PUT-GET-ROUNDTRIP
   statement: After put(key, value) succeeds (value length 0..=131072), a subsequent get(key) returns Ok
@@ -113,7 +82,7 @@ properties:
       modules:
       - verify_put_size_limit
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -124,7 +93,7 @@ properties:
     evidence:
       harness: verify_put_size_limit
       result: SUCCESS
-      wall_clock_s: 13.42
+      wall_clock_s: 13.38
       peak_rss_mb: 557
     _scored_by: scorer_kani
 - id: PUT-OVERWRITE
@@ -191,7 +160,7 @@ properties:
       - verify_get_notfound
       result: Proved
       wall_clock_s: 0.47
-      peak_rss_mb: 50
+      peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
   kani:
@@ -201,7 +170,7 @@ properties:
     evidence:
       harness: verify_get_notfound
       result: SUCCESS
-      wall_clock_s: 5.81
+      wall_clock_s: 5.79
       peak_rss_mb: 68
     _scored_by: scorer_kani
 - id: DELETE-REMOVES
@@ -232,7 +201,7 @@ properties:
       modules:
       - verify_delete_removes
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -268,7 +237,7 @@ properties:
       modules:
       - verify_delete_idempotent
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -343,7 +312,7 @@ properties:
       modules:
       - verify_dirty_count_increment
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.46
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -378,7 +347,7 @@ properties:
       modules:
       - verify_force_flush_noop
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -417,7 +386,7 @@ properties:
       modules:
       - verify_pad_sector_align
       result: Proved
-      wall_clock_s: 0.47
+      wall_clock_s: 0.48
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -428,7 +397,7 @@ properties:
     evidence:
       harness: verify_pad_sector_align
       result: SUCCESS
-      wall_clock_s: 0.64
+      wall_clock_s: 0.63
       peak_rss_mb: 62
     _scored_by: scorer_kani
 - id: BYTES-TO-SECTORS
@@ -455,7 +424,7 @@ properties:
       modules:
       - verify_bytes_to_sectors
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -466,7 +435,7 @@ properties:
     evidence:
       harness: verify_bytes_to_sectors
       result: SUCCESS
-      wall_clock_s: 0.67
+      wall_clock_s: 0.66
       peak_rss_mb: 62
     _scored_by: scorer_kani
 - id: ENTRY-SIZE-ALIGNED
@@ -505,8 +474,8 @@ properties:
     evidence:
       harness: verify_entry_size_aligned
       result: SUCCESS
-      wall_clock_s: 10.45
-      peak_rss_mb: 152
+      wall_clock_s: 10.48
+      peak_rss_mb: 150
     _scored_by: scorer_kani
 - id: SB-GEOMETRY
   statement: Superblock::new(ss, ps) with ps > 1 yields region_a_offset=1, region_a_size=region_b_size=(ps-1)/2,
@@ -573,7 +542,7 @@ properties:
       modules:
       - verify_region_offset_swap
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -584,7 +553,7 @@ properties:
     evidence:
       harness: verify_region_offset_swap
       result: SUCCESS
-      wall_clock_s: 0.63
+      wall_clock_s: 0.64
       peak_rss_mb: 62
     _scored_by: scorer_kani
 - id: REGION-CAPACITY-BYTES
@@ -611,7 +580,7 @@ properties:
       modules:
       - verify_region_capacity_bytes
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -622,8 +591,8 @@ properties:
     evidence:
       harness: verify_region_capacity_bytes
       result: SUCCESS
-      wall_clock_s: 0.59
-      peak_rss_mb: 62
+      wall_clock_s: 0.58
+      peak_rss_mb: 61
     _scored_by: scorer_kani
 - id: LE-BYTEORDER
   statement: 'The little-endian integer helpers round-trip: read_u64(write_u64(buf,x)) == x (and u32/u16),
@@ -650,7 +619,7 @@ properties:
       modules:
       - verify_le_byteorder
       result: Proved
-      wall_clock_s: 0.49
+      wall_clock_s: 0.48
       peak_rss_mb: 53
       lever: null
     _scored_by: scorer_creusot
@@ -661,7 +630,7 @@ properties:
     evidence:
       harness: verify_le_byteorder
       result: SUCCESS
-      wall_clock_s: 3.5
+      wall_clock_s: 3.52
       peak_rss_mb: 62
     _scored_by: scorer_kani
 - id: CRC32-DETERMINISTIC
@@ -703,7 +672,7 @@ properties:
     evidence:
       harness: verify_crc32_deterministic
       result: SUCCESS
-      wall_clock_s: 8.5
+      wall_clock_s: 8.49
       peak_rss_mb: 241
     _scored_by: scorer_kani
 - id: SB-ROUNDTRIP
@@ -732,7 +701,7 @@ properties:
       modules:
       - verify_sb_roundtrip
       result: Proved
-      wall_clock_s: 0.52
+      wall_clock_s: 0.51
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -743,8 +712,8 @@ properties:
     evidence:
       harness: verify_sb_roundtrip
       result: SUCCESS
-      wall_clock_s: 35.14
-      peak_rss_mb: 703
+      wall_clock_s: 35.1
+      peak_rss_mb: 701
     _scored_by: scorer_kani
 - id: SB-CRC-REJECT
   statement: 'A serialized superblock whose CRC-covered prefix is altered (recomputed CRC != stored CRC)
@@ -782,8 +751,8 @@ properties:
     evidence:
       harness: verify_sb_crc_reject
       result: SUCCESS
-      wall_clock_s: 29.89
-      peak_rss_mb: 357
+      wall_clock_s: 29.88
+      peak_rss_mb: 358
     _scored_by: scorer_kani
 - id: SB-MAGIC-REJECT
   statement: Superblock::deserialize returns None when the leading magic != SUPERBLOCK_MAGIC, the version
@@ -810,7 +779,7 @@ properties:
       modules:
       - verify_sb_magic_reject
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -821,8 +790,8 @@ properties:
     evidence:
       harness: verify_sb_magic_reject
       result: SUCCESS
-      wall_clock_s: 17.13
-      peak_rss_mb: 263
+      wall_clock_s: 17.06
+      peak_rss_mb: 264
     _scored_by: scorer_kani
 - id: REGIONHEADER-ROUNDTRIP
   statement: RegionHeader::serialize then deserialize reproduces flush_seq, entry_count, and total_data_bytes
@@ -849,7 +818,7 @@ properties:
       modules:
       - verify_regionheader_roundtrip
       result: Proved
-      wall_clock_s: 0.47
+      wall_clock_s: 0.48
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -905,8 +874,8 @@ properties:
     evidence:
       harness: verify_entry_roundtrip
       result: SUCCESS
-      wall_clock_s: 249.26
-      peak_rss_mb: 1218
+      wall_clock_s: 312.83000000000004
+      peak_rss_mb: 1219
     _scored_by: scorer_kani
 - id: ENTRY-CRC-REJECT
   statement: Altering a byte within the CRC-covered portion of a serialized EntryRecord (recomputed CRC
@@ -947,8 +916,8 @@ properties:
     evidence:
       harness: verify_entry_crc_reject
       result: SUCCESS
-      wall_clock_s: 160.96
-      peak_rss_mb: 1205
+      wall_clock_s: 99.4
+      peak_rss_mb: 1209
     _scored_by: scorer_kani
 - id: REGION-ROUNDTRIP
   statement: serialize_region(entries, seq, ss) then deserialize_region reproduces the header (flush_seq==seq,
@@ -992,8 +961,8 @@ properties:
     evidence:
       harness: verify_region_roundtrip
       result: SUCCESS
-      wall_clock_s: 302.27
-      peak_rss_mb: 1713
+      wall_clock_s: 362.63
+      peak_rss_mb: 1717
     _scored_by: scorer_kani
 - id: FLUSH-SEQ-MONOTONE
   statement: A flush computes new_seq = flush_seq + 1 (strictly greater than the previous flush_seq) and
@@ -1033,7 +1002,7 @@ properties:
       harness: verify_flush_seq_monotone
       result: SUCCESS
       wall_clock_s: 0.56
-      peak_rss_mb: 61
+      peak_rss_mb: 62
     _scored_by: scorer_kani
 - id: FLUSH-PINGPONG-ATOMIC
   statement: Flush writes the serialized state to the inactive region and only then flips active_region
@@ -1098,7 +1067,7 @@ properties:
       modules:
       - verify_flush_capacity_check
       result: Proved
-      wall_clock_s: 0.49
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -1642,9 +1611,35 @@ properties:
     - SC-6
     - SC-7
     code: []
-interface_methods:
-- put
-- get
-- delete
-- iterate_all
-- force_flush
+run:
+  gate_commit: c4f19575
+  gate_branch: skills/verify-methodology-to-unstable
+  creusot:
+    scored_by: scorer_creusot
+    command: scorer_creusot.py /home/cornel/rescore-overnight-20260926/extended-metadata-store/verif --crate-dir
+      /home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store/verif --cap-seconds
+      60 --cap-max 300
+    started: '2026-09-27T04:33:49-07:00'
+    finished: '2026-09-27T04:34:39-07:00'
+    creusot: v0.11.0-169-g9cf662ce6
+    why3: Why3 platform, version 1.8.2+git
+    provers:
+    - Alt-Ergo 2.6.2
+    - CVC4 1.8
+    - CVC5 1.3.1
+    - Coq 8.20.1
+    - Z3 4.16.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+  kani:
+    scored_by: scorer_kani
+    command: scorer_kani.py /home/cornel/rescore-overnight-20260926/extended-metadata-store/verif --component-dir
+      /home/cornel/extended-metadata-store-verify-20260922/components/extended-metadata-store --cap-seconds
+      120 --cap-max 300
+    started: '2026-09-27T04:34:39-07:00'
+    finished: '2026-09-27T04:54:22-07:00'
+    kani_version: cargo-kani 0.67.0
+    cap_seconds: 120
+    cap_max: 300
+    mem_max_mb: 16384
