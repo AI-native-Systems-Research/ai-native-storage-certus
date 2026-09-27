@@ -69,6 +69,15 @@ python3 gate/run_stage.py --name kani-scorer    --log components/<component>/ver
 python3 gate/run_stage.py --name creusot-scorer --log components/<component>/verif/.run/creusot.log --watchdog <W> -- \
     python3 gate/scorer_creusot.py components/<component>/verif  --crate-dir     components/<component>/verif-creusot  --cap-seconds 60 --cap-max 300 --resume
 ```
+**Run the gate from the SKILLS checkout, not from the run worktree's copy.** The fresh worktree
+Step 0 creates contains its own `.claude/skills/component-verify/gate/`, frozen at whatever commit the
+worktree was made from — so invoking `gate/…` relative to the worktree silently runs a STALE gate.
+Measured: a run worktree cut at an earlier commit still carried a gate without the lemma-crediting fix,
+and a reviewer inspecting it concluded the fix was missing. Invoke the scorers by absolute path from the
+skills-branch checkout (the same tree this SKILL.md lives in), and sanity-check the `run:` block
+afterwards — `gate_commit` records which gate actually scored, so a stale one is visible in the
+deliverable rather than silent.
+
 **Get these three directories right — two of them are NOT `verif/`.** The metadata bundle (the YAML the scorers read and write) lives in **`verif/`**, but each tool's *proof artifacts* live in its **own sibling crate**: Kani harnesses in **`verif-kani/`**, the Creusot proof crate in **`verif-creusot/`**. Pointing a scorer at `verif/` instead of its tool crate is a silent, expensive mistake: the scorer still *finds* harness/module names (it searches recursively) and then runs `cargo` in a directory where they are not part of the crate, so every property fails with `no harnesses matched the harness filter` or `no generated proof module(s)` and the gate reports mass UNRESOLVED that says nothing about the proofs. This has now been mis-invoked once per tool during bring-up; copy the paths above rather than retyping them.
 The stage-runner exists so this run is **safe to leave unattended and legible to a colleague afterwards**: it prints `SENTINEL: <stage> START/DONE exit=<n>` (a `Monitor` or a human sees exactly when each stage begins and ends and with what code), **tees the full transcript** to `verif/.run/<stage>.log` for audit, drops a `verif/.run/<stage>.done` completion marker, and enforces a **watchdog** wall budget that SIGKILLs the whole process tree (cbmc/why3/solvers included) if the scorer itself wedges. Set the watchdog `<W>` to `max(1800, harness_count × 300 × 1.5)` seconds (the per-property caps below are the fine-grained control; the watchdog is the coarse backstop). The two scorer flags do the per-property work:
 - **Adaptive cap** (`--cap-seconds 60 --cap-max 300`): a property runs at the 60 s base; only if it *times out* (not a real failure) is it retried once at 300 s before the scorer may class it a sat-timeout/goal-unproved boundary — so a merely-slow proof is never mislabelled a tool-boundary, and a fast failure is still decided in seconds. On timeout the scorer tree-kills that run's own systemd scope by cgroup (no orphaned solvers).

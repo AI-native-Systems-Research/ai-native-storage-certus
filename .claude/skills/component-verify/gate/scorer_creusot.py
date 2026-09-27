@@ -652,9 +652,16 @@ def score_property(p, ctx):
         if lv.get("scorer_applied"):
             # the scorer applies CLI/tactic levers ITSELF and re-runs the module
             flags = {
-                "prover_portfolio": ["-P", "alt-ergo,z3,cvc5,cvc4"],
-                "raise_budget": ["--time", "5", "--depth", "12"],
-                "split_vc": ["-T", "split_vc,compute_specified"],
+                # These go to WHY3FIND, not to creusot-rustc. Passed bare, `cargo creusot`
+                # rejects them outright — measured: `-T split_vc` gives
+                # "error: unexpected argument '-T' found" and a usage dump, so the run fails
+                # BEFORE any prover is consulted. Every one of the three scorer-applied Creusot
+                # levers was therefore inert, and a tool-boundary could be awarded without a
+                # single escalation having run. Each token needs its own --why3find-arg=.
+                "prover_portfolio": ["--why3find-arg=-P", "--why3find-arg=alt-ergo,z3,cvc5,cvc4"],
+                "raise_budget": ["--why3find-arg=-t", "--why3find-arg=30",
+                                 "--why3find-arg=-d", "--why3find-arg=14"],
+                "split_vc": ["--why3find-arg=-T", "--why3find-arg=split_vc,compute_specified"],
             }.get(lever, [])
             vok, _, vwall, vrss, _, _ = run_creusot(
                 m, ctx["crate_dir"], ctx["cap"], extra=flags, mem_mb=ctx["mem_mb"], cap_max=ctx["cap_max"])
@@ -664,6 +671,15 @@ def score_property(p, ctx):
             continue
         # code lever: require the agent's named variant module, then re-run it
         variant = lv.get("variant", "").replace("<ID>", pid.lower().replace("-", "_"))
+        # creusot's ComaNames::insert applies trim_underscores unconditionally
+        # (creusot/src/naming.rs), so NO emitted .coma basename can contain '__'. A battery that
+        # declares verify_<ID>__inv / __fmap / __trusted therefore demands artifacts that cannot
+        # exist, and every code lever was unsatisfiable — the same defect already found for
+        # __mutant, which had only been patched on the mutant path. Resolve either spelling.
+        if variant and variant not in present:
+            collapsed = re.sub(r"__+", "_", variant)
+            if collapsed in present:
+                variant = collapsed
         if variant not in present:
             missing.append(lever + (f" ({variant})" if variant else ""))
             continue
