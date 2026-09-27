@@ -16,52 +16,6 @@ counts:
   unified: 31
   attachments: 47
   not_verifiable: 4
-reconciliation:
-  method: Blind spec-extraction (from specs/002-remote-lookup-rdma/spec.md alone) and blind code-extraction
-    (from src/{wire,operation,lib}.rs + interfaces) were performed separately, then reconciled by an explicit
-    FR/US/SC <-> code-symbol table rather than by string similarity.
-  spec_only:
-  - SC-001
-  - SC-003
-  - SC-004
-  - FR-016a (pin-leak, no detector)
-  notes: Spec-only items are the quantitative success criteria (SC-001/003/004) and the non-detectable
-    pin-leak liveness (FR-016a), all captured in the not-verifiable ledger. Code-only items are the internal
-    pure helpers with no direct FR (Avail/RdmaStatusCode tag bijections, size_of, state_of default), captured
-    as verifiable properties RL-AVAIL-TAG-BIJECTION, RL-STATUS-TAG-BIJECTION, RL-OP-SIZEOF, RL-OP-STATEOF-DEFAULT.
-    Every FR maps to at least one unified property or a delegated referent; concurrency/network/RDMA FRs
-    (FR-002, FR-006/008, FR-013/014, FR-016/024, FR-020, FR-026, FR-027/028) are delegated to named referents
-    (Loom, zyre, the two RDMA components, dispatch-map, memory-tier).
-run:
-  gate_commit: 7757ae4b
-  gate_branch: skills/verify-methodology-to-unstable
-  creusot:
-    scored_by: scorer_creusot
-    command: scorer_creusot.py /home/cornel/rescore-20260925/remote-lookup/verif --crate-dir /home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif
-      --cap-seconds 60 --cap-max 300
-    started: '2026-09-25T18:31:26-07:00'
-    finished: '2026-09-25T18:32:02-07:00'
-    creusot: v0.11.0-169-g9cf662ce6
-    why3: Why3 platform, version 1.8.2+git
-    provers:
-    - Alt-Ergo 2.6.2
-    - CVC4 1.8
-    - CVC5 1.3.1
-    - Coq 8.20.1
-    - Z3 4.16.0
-    cap_seconds: 60
-    cap_max: 300
-    mem_max_mb: 16384
-  kani:
-    scored_by: scorer_kani
-    command: scorer_kani.py /home/cornel/rescore-20260925/remote-lookup/verif --component-dir /home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif-kani
-      --cap-seconds 60 --cap-max 300
-    started: '2026-09-25T18:32:02-07:00'
-    finished: '2026-09-25T19:19:56-07:00'
-    kani_version: cargo-kani 0.67.0
-    cap_seconds: 60
-    cap_max: 300
-    mem_max_mb: 16384
 properties:
 - id: RL-WIRE-OPID
   subject: WireMessage::op_id
@@ -95,7 +49,7 @@ properties:
       modules:
       - verify_rl_wire_opid
       result: Proved
-      wall_clock_s: 1.03
+      wall_clock_s: 0.88
       peak_rss_mb: 160
       lever: null
     _scored_by: scorer_creusot
@@ -106,7 +60,7 @@ properties:
     evidence:
       harness: verify_rl_wire_opid
       result: SUCCESS
-      wall_clock_s: 1.77
+      wall_clock_s: 1.78
       peak_rss_mb: 55
     _scored_by: scorer_kani
 - id: RL-AVAIL-TAG-BIJECTION
@@ -141,7 +95,7 @@ properties:
       modules:
       - verify_rl_avail_tag_bijection
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -152,7 +106,7 @@ properties:
     evidence:
       harness: verify_rl_avail_tag_bijection
       result: SUCCESS
-      wall_clock_s: 0.66
+      wall_clock_s: 0.65
       peak_rss_mb: 25
     _scored_by: scorer_kani
 - id: RL-STATUS-TAG-BIJECTION
@@ -187,7 +141,7 @@ properties:
       modules:
       - verify_rl_status_tag_bijection
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -233,8 +187,8 @@ properties:
       modules:
       - verify_rl_wire_header_layout
       result: Proved
-      wall_clock_s: 0.54
-      peak_rss_mb: 57
+      wall_clock_s: 0.55
+      peak_rss_mb: 58
       lever: null
     _scored_by: scorer_creusot
   kani:
@@ -244,7 +198,7 @@ properties:
     evidence:
       harness: verify_rl_wire_header_layout
       result: SUCCESS
-      wall_clock_s: 4.21
+      wall_clock_s: 4.25
       peak_rss_mb: 70
     _scored_by: scorer_kani
 - id: RL-WIRE-ROUNDTRIP-KEYQUERY
@@ -280,8 +234,8 @@ properties:
       modules:
       - verify_rl_wire_roundtrip_keyquery
       result: Proved
-      wall_clock_s: 0.5
-      peak_rss_mb: 53
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
       lever: null
     _scored_by: scorer_creusot
   kani:
@@ -291,8 +245,8 @@ properties:
     evidence:
       harness: verify_rl_wire_roundtrip_keyquery
       result: SUCCESS
-      wall_clock_s: 26.13
-      peak_rss_mb: 401
+      wall_clock_s: 26.36
+      peak_rss_mb: 402
     _scored_by: scorer_kani
 - id: RL-WIRE-ROUNDTRIP-RDMASTATUS
   subject: WireMessage encode/decode
@@ -338,8 +292,8 @@ properties:
     evidence:
       harness: verify_rl_wire_roundtrip_rdmastatus
       result: SUCCESS
-      wall_clock_s: 28.38
-      peak_rss_mb: 472
+      wall_clock_s: 29.16
+      peak_rss_mb: 471
     _scored_by: scorer_kani
 - id: RL-WIRE-ROUNDTRIP-KEYRESPONSE
   subject: WireMessage encode/decode
@@ -389,8 +343,8 @@ properties:
     evidence:
       harness: verify_rl_wire_roundtrip_keyresponse
       result: FAILED
-      wall_clock_s: 360.66
-      peak_rss_mb: null
+      wall_clock_s: 420.81
+      peak_rss_mb: 0
       signature: TIMEOUT after 300s
     _scored_by: scorer_kani
 - id: RL-WIRE-ROUNDTRIP-RDMAREQUEST
@@ -441,8 +395,8 @@ properties:
     evidence:
       harness: verify_rl_wire_roundtrip_rdmarequest
       result: FAILED
-      wall_clock_s: 360.32
-      peak_rss_mb: null
+      wall_clock_s: 420.41
+      peak_rss_mb: 0
       signature: TIMEOUT after 300s
     _scored_by: scorer_kani
 - id: RL-WIRE-DECODE-TRUNCATED
@@ -479,7 +433,7 @@ properties:
       modules:
       - verify_rl_wire_decode_truncated
       result: Proved
-      wall_clock_s: 0.52
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -490,8 +444,8 @@ properties:
     evidence:
       harness: verify_rl_wire_decode_truncated
       result: SUCCESS
-      wall_clock_s: 23.0
-      peak_rss_mb: 734
+      wall_clock_s: 22.93
+      peak_rss_mb: 733
     _scored_by: scorer_kani
 - id: RL-WIRE-DECODE-BADTAG
   subject: WireMessage::decode
@@ -526,7 +480,7 @@ properties:
       modules:
       - verify_rl_wire_decode_badtag
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -537,7 +491,7 @@ properties:
     evidence:
       harness: verify_rl_wire_decode_badtag
       result: SUCCESS
-      wall_clock_s: 13.35
+      wall_clock_s: 13.32
       peak_rss_mb: 161
     _scored_by: scorer_kani
 - id: RL-WIRE-DECODE-UNKNOWN-TYPE
@@ -572,7 +526,7 @@ properties:
       modules:
       - verify_rl_wire_decode_unknown_type
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -583,7 +537,7 @@ properties:
     evidence:
       harness: verify_rl_wire_decode_unknown_type
       result: SUCCESS
-      wall_clock_s: 10.46
+      wall_clock_s: 10.49
       peak_rss_mb: 130
     _scored_by: scorer_kani
 - id: RL-WIRE-DECODE-BAD-VERSION
@@ -617,7 +571,7 @@ properties:
       modules:
       - verify_rl_wire_decode_bad_version
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -628,7 +582,7 @@ properties:
     evidence:
       harness: verify_rl_wire_decode_bad_version
       result: SUCCESS
-      wall_clock_s: 10.67
+      wall_clock_s: 10.73
       peak_rss_mb: 141
     _scored_by: scorer_kani
 - id: RL-OP-QUORUM-ZERO
@@ -674,7 +628,7 @@ properties:
     evidence:
       harness: verify_rl_op_quorum_zero
       result: SUCCESS
-      wall_clock_s: 2.04
+      wall_clock_s: 2.05
       peak_rss_mb: 32
     _scored_by: scorer_kani
 - id: RL-OP-QUORUM-ARITH
@@ -711,7 +665,7 @@ properties:
       modules:
       - verify_rl_op_quorum_arith
       result: Proved
-      wall_clock_s: 0.48
+      wall_clock_s: 0.47
       peak_rss_mb: 51
       lever: null
     _scored_by: scorer_creusot
@@ -722,8 +676,8 @@ properties:
     evidence:
       harness: verify_rl_op_quorum_arith
       result: SUCCESS
-      wall_clock_s: 124.74
-      peak_rss_mb: 49
+      wall_clock_s: 64.32
+      peak_rss_mb: 50
     _scored_by: scorer_kani
 - id: RL-OP-RESULTS-LEN
   subject: Operation::results
@@ -770,8 +724,8 @@ properties:
     evidence:
       harness: verify_rl_op_results_len
       result: SUCCESS
-      wall_clock_s: 10.39
-      peak_rss_mb: 233
+      wall_clock_s: 10.26
+      peak_rss_mb: 232
     _scored_by: scorer_kani
 - id: RL-OP-RESULTS-POSITIONAL
   subject: Operation::results
@@ -808,7 +762,7 @@ properties:
       modules:
       - verify_rl_op_results_positional
       result: Proved
-      wall_clock_s: 0.52
+      wall_clock_s: 0.51
       peak_rss_mb: 54
       lever: null
     _scored_by: scorer_creusot
@@ -819,7 +773,7 @@ properties:
     evidence:
       harness: verify_rl_op_results_positional
       result: SUCCESS
-      wall_clock_s: 13.2
+      wall_clock_s: 13.28
       peak_rss_mb: 302
     _scored_by: scorer_kani
 - id: RL-OP-SIZEOF
@@ -908,8 +862,8 @@ properties:
     evidence:
       harness: verify_rl_op_stateof_default
       result: SUCCESS
-      wall_clock_s: 5.9
-      peak_rss_mb: 178
+      wall_clock_s: 5.91
+      peak_rss_mb: 177
     _scored_by: scorer_kani
 - id: RL-OP-TRIED-DEDUP
   subject: Operation tried-peer set
@@ -945,7 +899,7 @@ properties:
       modules:
       - verify_rl_op_tried_dedup
       result: Proved
-      wall_clock_s: 0.5
+      wall_clock_s: 0.49
       peak_rss_mb: 53
       lever: null
     _scored_by: scorer_creusot
@@ -956,8 +910,8 @@ properties:
     evidence:
       harness: verify_rl_op_tried_dedup
       result: SUCCESS
-      wall_clock_s: 20.67
-      peak_rss_mb: 1314
+      wall_clock_s: 20.55
+      peak_rss_mb: 1313
     _scored_by: scorer_kani
 - id: RL-BL-EMPTY
   subject: batch_lookup
@@ -999,7 +953,7 @@ properties:
     evidence:
       harness: verify_rl_bl_empty
       result: SUCCESS
-      wall_clock_s: 1.94
+      wall_clock_s: 1.92
       peak_rss_mb: 29
     _scored_by: scorer_kani
 - id: RL-BL-UNINIT-NOTFOUND
@@ -1032,7 +986,7 @@ properties:
       modules:
       - verify_rl_bl_uninit_notfound
       result: Proved
-      wall_clock_s: 0.5
+      wall_clock_s: 0.49
       peak_rss_mb: 53
       lever: null
     _scored_by: scorer_creusot
@@ -1043,8 +997,8 @@ properties:
     evidence:
       harness: verify_rl_bl_uninit_notfound
       result: SUCCESS
-      wall_clock_s: 4.29
-      peak_rss_mb: 102
+      wall_clock_s: 4.31
+      peak_rss_mb: 103
     _scored_by: scorer_kani
 - id: RL-CLUSTER-UNINIT-ERROR
   subject: join_cluster / leave_cluster
@@ -1089,7 +1043,7 @@ properties:
     evidence:
       harness: verify_rl_cluster_uninit_error
       result: SUCCESS
-      wall_clock_s: 2.04
+      wall_clock_s: 2.03
       peak_rss_mb: 45
     _scored_by: scorer_kani
 - id: RL-ACTOR-DEDICATED-THREAD
@@ -1549,3 +1503,51 @@ properties:
     '
   not_verifiable_reason: fixed default data constants defined in the interfaces crate; a constant-equality
     check, not a behavioral proof obligation for remote-lookup.
+reconciliation:
+  method: Blind spec-extraction (from specs/002-remote-lookup-rdma/spec.md alone) and blind code-extraction
+    (from src/{wire,operation,lib}.rs + interfaces) were performed separately, then reconciled by an explicit
+    FR/US/SC <-> code-symbol table rather than by string similarity.
+  spec_only:
+  - SC-001
+  - SC-003
+  - SC-004
+  - FR-016a (pin-leak, no detector)
+  notes: Spec-only items are the quantitative success criteria (SC-001/003/004) and the non-detectable
+    pin-leak liveness (FR-016a), all captured in the not-verifiable ledger. Code-only items are the internal
+    pure helpers with no direct FR (Avail/RdmaStatusCode tag bijections, size_of, state_of default), captured
+    as verifiable properties RL-AVAIL-TAG-BIJECTION, RL-STATUS-TAG-BIJECTION, RL-OP-SIZEOF, RL-OP-STATEOF-DEFAULT.
+    Every FR maps to at least one unified property or a delegated referent; concurrency/network/RDMA FRs
+    (FR-002, FR-006/008, FR-013/014, FR-016/024, FR-020, FR-026, FR-027/028) are delegated to named referents
+    (Loom, zyre, the two RDMA components, dispatch-map, memory-tier).
+run:
+  gate_commit: c4f19575
+  gate_branch: skills/verify-methodology-to-unstable
+  creusot:
+    scored_by: scorer_creusot
+    command: scorer_creusot.py /home/cornel/rescore-overnight-20260926/remote-lookup/verif --crate-dir
+      /home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif --cap-seconds 60 --cap-max
+      300
+    started: '2026-09-27T03:25:45-07:00'
+    finished: '2026-09-27T03:26:32-07:00'
+    creusot: v0.11.0-169-g9cf662ce6
+    why3: Why3 platform, version 1.8.2+git
+    provers:
+    - Alt-Ergo 2.6.2
+    - CVC4 1.8
+    - CVC5 1.3.1
+    - Coq 8.20.1
+    - Z3 4.16.0
+    cap_seconds: 60
+    cap_max: 300
+    mem_max_mb: 16384
+  kani:
+    scored_by: scorer_kani
+    command: scorer_kani.py /home/cornel/rescore-overnight-20260926/remote-lookup/verif --component-dir
+      /home/cornel/remote-lookup-verify-20260922/components/remote-lookup/verif-kani --cap-seconds 120
+      --cap-max 300
+    started: '2026-09-27T03:26:33-07:00'
+    finished: '2026-09-27T04:29:58-07:00'
+    kani_version: cargo-kani 0.67.0
+    cap_seconds: 120
+    cap_max: 300
+    mem_max_mb: 16384
