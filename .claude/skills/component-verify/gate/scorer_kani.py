@@ -517,9 +517,31 @@ def score_property(p, ctx):
     # ---- registry next (a beaten wall is never a boundary) ----
     kd = known_defeat(out, ctx["registry"])
     if kd:
-        return "UNRESOLVED", {"harness": named}, (
-            f"signature matches known defeat {kd['id']} — apply lever '{kd['mandated_lever']}'; "
-            f"claiming a tool-boundary on a beaten wall is rejected")
+        # The registry says "apply lever X" — so APPLY IT, rather than returning and telling
+        # someone else to. Until the scorer could run CLI levers itself, this branch had no choice
+        # but to bail; now it does, and bailing wastes the very lever the registry mandates.
+        # MEASURED on eviction-policy-optimized: all 57 remaining UNRESOLVED carried this one
+        # reason — "known defeat KD-MULTIMAP-UNWIND-TIMEOUT — apply lever 'nounwindcheck'" — while
+        # a different property proved through exactly that lever in the same run, and the proving
+        # agent had measured `--unwind 4 --no-unwinding-checks` succeeding on this component.
+        mand = kd.get("mandated_lever")
+        if mand == "nounwindcheck":
+            for n in (4, 8):
+                sok, _, swall, srss, _, _ = run_kani(
+                    named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False,
+                    extra=["--unwind", str(n), "--no-unwinding-checks"])
+                if sok:
+                    return "proved", {"harness": named, "result": "SUCCESS", "unwind": n,
+                                      "unwinding_checks": False, "wall_clock_s": swall,
+                                      "peak_rss_mb": srss, "lever": "nounwindcheck",
+                                      "known_defeat": kd["id"]}, (
+                        f"known defeat {kd['id']}: its mandated lever 'nounwindcheck' was applied by "
+                        f"the scorer and PROVED at --unwind {n} — a NARROWER claim, holding within {n} "
+                        f"loop iterations and silent beyond (fidelity bounded-shallow)")
+        return "UNRESOLVED", {"harness": named, "known_defeat": kd["id"]}, (
+            f"signature matches known defeat {kd['id']} and its mandated lever "
+            f"'{mand}' did not discharge it either; claiming a tool-boundary on a beaten wall is "
+            f"rejected")
     # a hard timeout or a cgroup OOM is decisively resource exhaustion (sat-timeout class),
     # regardless of incidental trace text
     cls = "sat-timeout" if (timed_out or oomed) else classify(out, ctx["battery"])
