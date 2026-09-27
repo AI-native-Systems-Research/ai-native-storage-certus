@@ -181,8 +181,16 @@ def find_harness_names(component_dir):
                 txt = open(os.path.join(root, fn), errors="ignore").read()
             except OSError:
                 continue
-            # a proof fn is `fn NAME(` on a line following a #[kani::proof]
-            for m in re.finditer(r"#\[kani::proof\][^\n]*\n(?:\s*#\[[^\n]*\]\s*\n)*\s*(?:pub\s+)?fn\s+([A-Za-z0-9_]+)", txt):
+            # A proof fn is `fn NAME(` somewhere after a #[kani::proof]. Intervening lines may be
+            # further attributes (#[kani::unwind(n)], #[kani::stub(...)], #[kani::should_panic])
+            # AND comments — a `//` line between the attribute and the fn used to break the match,
+            # so the harness became INVISIBLE to the gate and scored "no runnable harness" while
+            # sitting in the file. A silently invisible harness looks exactly like a missing one,
+            # which is the worst kind of false negative, so tolerate comments and blank lines too.
+            for m in re.finditer(
+                    r"#\[kani::proof\][^\n]*\n"
+                    r"(?:\s*(?:#\[[^\n]*\]|//[^\n]*|/\*.*?\*/)?\s*\n)*"
+                    r"\s*(?:pub\s+)?fn\s+([A-Za-z0-9_]+)", txt, re.S):
                 names.add(m.group(1))
     return names
 
@@ -351,8 +359,41 @@ def run_kani(harness, component_dir, cap, mem_mb=None, cap_max=None, escalate=Tr
     m = re.search(r"Maximum resident set size \(kbytes\):\s*(\d+)", out)
     if m:
         rss_mb = round(int(m.group(1)) / 1024)
-    ok = bool("VERIFICATION SUCCESSFUL" in out or re.search(r"VERIFICATION:- SUCCESSFUL", out))
+    ok = verdict_for(out, harness)
     return ok, out, wall, rss_mb, timed_out, oomed
+
+
+def verdict_for(out, harness):
+    """Did THIS harness verify? Not: did anything in the output verify?
+
+    `cargo kani --harness NAME` matches NAME as a SUBSTRING, so one flag can run several
+    harnesses and the output interleaves their verdicts. Scanning the whole blob for
+    "VERIFICATION SUCCESSFUL" therefore credits any one success to the harness we asked about.
+    MEASURED, and it was actively producing a FALSE RESULT: one
+    `--harness verify_epo_inv_stale_handle_never_crashes` ran three harnesses —
+    `__split_in_range` SUCCESSFUL, `__split_remove` FAILED, and the property itself FAILED — and
+    the property was scored `proved`. That obligation is provably false: its negation is
+    machine-proved in Creusot and its Kani refutation passes. So the gate was awarding `proved`
+    to a real defect, which is the worst failure this gate can have.
+
+    Kani's terse output brackets each run as `Checking harness <path>::<name>...` followed by that
+    harness's `VERIFICATION:- RESULT`. Attribute verdicts per harness and return only the one
+    belonging to `harness`, matched on the leaf since the printed name is module-qualified.
+    Fail closed: if this harness's own verdict never appears, that is not a pass."""
+    blocks = re.split(r"Checking harness\s+", out or "")
+    if len(blocks) > 1:
+        seen = {}
+        for b in blocks[1:]:
+            name = (b.split("...", 1)[0] or "").strip()
+            seen[name.rsplit("::", 1)[-1]] = bool(re.search(r"VERIFICATION:- SUCCESSFUL", b))
+        leaf_wanted = harness.rsplit("::", 1)[-1]
+        if leaf_wanted in seen:
+            return seen[leaf_wanted]
+        return False                  # ran, but never reported on the harness we asked about
+    # No per-harness framing (older output shape, or the run died before reporting any): fall back
+    # to the whole-output check — safe only because nothing could have been attributed anyway.
+    return bool("VERIFICATION SUCCESSFUL" in (out or "")
+                or re.search(r"VERIFICATION:- SUCCESSFUL", out or ""))
 
 
 def mem_cap_available(mem_mb):
