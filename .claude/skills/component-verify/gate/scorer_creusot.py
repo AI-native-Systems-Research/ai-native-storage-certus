@@ -564,7 +564,10 @@ def score_property(p, ctx):
     # which is exactly why a merely-failing `verify_<id>` can never be read as a refutation.
     # Guard against the contradictory case: if the property AND its negation both prove, something
     # is wrong with the model, and claiming a defect would be unsound.
-    refute = "refute_" + module_id(pid)
+    # `refute_<id>`, NOT refute_ prepended to module_id(): module_id already carries the `verify_`
+    # prefix, so that built `refute_verify_<id>` and matched nothing. Caught only because the first
+    # real run reported `refuted: 0` against two refutation modules known to be on disk.
+    refute = "refute_" + pid.lower().replace("-", "_")
     if refute in present and not ctx["dry_run"]:
         rok, rout, rwall, rrss, _, _ = run_creusot(
             refute, ctx["crate_dir"], ctx["cap"], mem_mb=ctx["mem_mb"], cap_max=ctx["cap_max"])
