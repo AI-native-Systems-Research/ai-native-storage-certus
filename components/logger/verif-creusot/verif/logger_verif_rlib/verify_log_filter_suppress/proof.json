@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_log_core": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_verify_log_filter_suppress": {
+        "prover": "alt-ergo",
+        "time": 0.013
+      }
+    }
+  }
+}

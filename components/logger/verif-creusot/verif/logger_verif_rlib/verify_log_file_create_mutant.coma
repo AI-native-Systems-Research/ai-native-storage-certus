@@ -1,0 +1,34 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 344 0 344 61 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 345 12 345 28
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 343 10 343 27
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 324 10 324 56
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 325 10 325 34
+
+use creusot.prelude.Any
+
+type t_OpenOptionsM = { create: bool; append: bool; truncate: bool; write: bool }
+
+let open_options_m (return (x: t_OpenOptionsM)) = any
+  [ return (result: t_OpenOptionsM) ->
+  {[@stop_split] [@expl:open_options_m ensures] ([@stop_split] [@expl:open_options_m ensures #0] [%#slib'1] result.create
+        = true
+      /\ result.append = true)
+    /\ ([@stop_split] [@expl:open_options_m ensures #1] [%#slib'2] result.truncate = false)}
+    (! return {result}) ]
+
+type tup3_bool_bool_bool = { f0: bool; f1: bool; f2: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_log_file_create__mutant [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 344 0 344 61]
+  (return (x: tup3_bool_bool_bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = open_options_m [%#slib] (fun (_x: t_OpenOptionsM) -> [ &o <- _x ] s1)
+    | s1 = [ &_ret <- { f0 = o.create; f1 = o.append; f2 = o.truncate } ] s2
+    | s2 = return {_ret} ] ] [ & _ret: tup3_bool_bool_bool = Any.any_l () | & o: t_OpenOptionsM = Any.any_l () ])
+  [ return (result: tup3_bool_bool_bool) ->
+  {[@stop_split] [@expl:verify_log_file_create__mutant ensures] [%#slib'0] result.f0 = false}
+    (! return {result}) ]

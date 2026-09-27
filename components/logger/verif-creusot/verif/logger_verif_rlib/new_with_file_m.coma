@@ -1,0 +1,83 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 365 0 365 85 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 372 15 372 30
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 373 19 373 24
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 361 10 361 59
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 362 10 362 64
+let%span slib'3 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 363 10 363 68
+let%span slib'4 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 364 10 364 75
+let%span slib'5 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 202 10 202 40
+let%span slib'6 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 203 10 203 60
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Result_u8_u8 = Ok UInt8.t | Err UInt8.t
+
+let elim_Err (_x: t_Result_u8_u8) (return (f0: UInt8.t)) = any
+  [ _k (f0: UInt8.t) -> {Err f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_WriterKind = Stderr | File
+
+type t_LogLevel = Error | Warn | Info | Debug
+
+type t_StateM = { writer: t_WriterKind; level: t_LogLevel; use_color: bool }
+
+type t_Result_StateM_u8 = Ok'0 t_StateM | Err'0 UInt8.t
+
+let elim_Ok (_x: t_Result_u8_u8) (return (f0: UInt8.t)) = any
+  [ _k (f0: UInt8.t) -> {Ok f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Ok] match _x with
+      | Ok _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_Option_LogLevel = None | Some t_LogLevel
+
+let from_env_m (var': t_Option_LogLevel) (return (x: t_LogLevel)) = any
+  [ return (result: t_LogLevel) ->
+  {[@stop_split] [@expl:from_env_m ensures] ([@stop_split] [@expl:from_env_m ensures #0] [%#slib'5] var' = None
+      -> result = Info)
+    /\ ([@stop_split] [@expl:from_env_m ensures #1] [%#slib'6] forall l: t_LogLevel. var' = Some l -> result = l)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let new_with_file_m [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 365 0 365 85]
+  (open: t_Result_u8_u8) (var': t_Option_LogLevel) (return (x: t_Result_StateM_u8)) = (! bb0
+  [ bb0 = any [ br0 (x0: UInt8.t) -> {open = Ok x0} (! bb4) | br1 (x0: UInt8.t) -> {open = Err x0} (! bb3) ]
+  | bb3 = s0
+    [ s0 = elim_Err {open} (fun (r0: UInt8.t) -> [ &e <- r0 ] s1) | s1 = [ &_ret <- Err'0 e ] s2 | s2 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = elim_Ok {open} (fun (r0: UInt8.t) -> [ &f <- r0 ] s1)
+    | s1 = [ &_16 <- File ] s2
+    | s2 = from_env_m [%#slib] {var'} (fun (_x: t_LogLevel) -> [ &_17 <- _x ] s3)
+    | s3 = [ &_15 <- { writer = _16; level = _17; use_color = ([%#slib'0] false) } ] s4
+    | s4 = [ &_ret <- Ok'0 _15 ] s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: t_Result_StateM_u8 = Any.any_l ()
+  | & open: t_Result_u8_u8 = open
+  | & var': t_Option_LogLevel = var'
+  | & f: UInt8.t = Any.any_l ()
+  | & e: UInt8.t = Any.any_l ()
+  | & _15: t_StateM = Any.any_l ()
+  | & _16: t_WriterKind = Any.any_l ()
+  | & _17: t_LogLevel = Any.any_l () ])
+  [ return (result: t_Result_StateM_u8) ->
+  {[@stop_split] [@expl:new_with_file_m ensures] ([@stop_split] [@expl:new_with_file_m ensures #0] [%#slib'1] forall e: UInt8.t. open
+          = Err e -> result = Err'0 e)
+    /\ ([@stop_split] [@expl:new_with_file_m ensures #1] [%#slib'2] forall s: t_StateM. result = Ok'0 s
+        -> s.writer = File)
+    /\ ([@stop_split] [@expl:new_with_file_m ensures #2] [%#slib'3] forall s: t_StateM. result = Ok'0 s
+        -> s.use_color = false)
+    /\ ([@stop_split] [@expl:new_with_file_m ensures #3] [%#slib'4] forall f: UInt8.t. open = Ok f
+      -> (exists s: t_StateM. result = Ok'0 s))}
+    (! return {result}) ]

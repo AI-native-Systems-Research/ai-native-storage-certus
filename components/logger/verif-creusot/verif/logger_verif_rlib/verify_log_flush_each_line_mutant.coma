@@ -1,0 +1,37 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 504 0 504 79 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 502 11 502 21
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 503 10 503 27
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Phase = Start | Wrote | Flushed
+
+type t_Result_u8_u8 = Ok UInt8.t | Err UInt8.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_log_flush_each_line__mutant [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 504 0 504 79]
+  (p: t_Phase) (w: t_Result_u8_u8) (return (x: t_Phase)) =
+{[@stop_split] [@expl:verify_log_flush_each_line__mutant requires] [%#slib] p = Start}
+  (! bb0
+  [ bb0 = any [ br0 -> {p = Start} (! bb3) | br1 -> {p = Wrote} (! bb1) | br2 -> {p = Flushed} (! bb1) ]
+  | bb1 = s0 [ s0 = [ &other <- p ] s1 | s1 = [ &p'0 <- other ] s2 | s2 = bb4 ]
+  | bb3 = s0 [ s0 = [ &p'0 <- Wrote ] s1 | s1 = bb4 ]
+  | bb4 = any [ br0 (x0: UInt8.t) -> {w = Ok x0} (! bb8) | br1 (x0: UInt8.t) -> {w = Err x0} (! bb7) ]
+  | bb7 = s0 [ s0 = [ &_ret <- p'0 ] s1 | s1 = return {_ret} ]
+  | bb8 = any [ br0 -> {p'0 = Start} (! bb9) | br1 -> {p'0 = Wrote} (! bb11) | br2 -> {p'0 = Flushed} (! bb9) ]
+  | bb9 = s0 [ s0 = [ &other'0 <- p'0 ] s1 | s1 = [ &_ret <- other'0 ] s2 | s2 = return {_ret} ]
+  | bb11 = s0 [ s0 = [ &_ret <- Flushed ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Phase = Any.any_l ()
+  | & p: t_Phase = p
+  | & w: t_Result_u8_u8 = w
+  | & p'0: t_Phase = Any.any_l ()
+  | & other: t_Phase = Any.any_l ()
+  | & other'0: t_Phase = Any.any_l () ])
+  [ return (result: t_Phase) -> {[@stop_split] [@expl:verify_log_flush_each_line__mutant ensures] [%#slib'0] result
+    = Flushed}
+    (! return {result}) ]

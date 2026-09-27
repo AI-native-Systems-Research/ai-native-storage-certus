@@ -1,0 +1,39 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 338 0 338 53 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 339 12 339 28
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 335 10 335 26
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 336 10 336 26
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 337 10 337 27
+let%span slib'3 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 324 10 324 56
+let%span slib'4 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 325 10 325 34
+
+use creusot.prelude.Any
+
+type t_OpenOptionsM = { create: bool; append: bool; truncate: bool; write: bool }
+
+let open_options_m (return (x: t_OpenOptionsM)) = any
+  [ return (result: t_OpenOptionsM) ->
+  {[@stop_split] [@expl:open_options_m ensures] ([@stop_split] [@expl:open_options_m ensures #0] [%#slib'3] result.create
+        = true
+      /\ result.append = true)
+    /\ ([@stop_split] [@expl:open_options_m ensures #1] [%#slib'4] result.truncate = false)}
+    (! return {result}) ]
+
+type tup3_bool_bool_bool = { f0: bool; f1: bool; f2: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_log_file_create [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 338 0 338 53]
+  (return (x: tup3_bool_bool_bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = open_options_m [%#slib] (fun (_x: t_OpenOptionsM) -> [ &o <- _x ] s1)
+    | s1 = [ &_ret <- { f0 = o.create; f1 = o.append; f2 = o.truncate } ] s2
+    | s2 = return {_ret} ] ] [ & _ret: tup3_bool_bool_bool = Any.any_l () | & o: t_OpenOptionsM = Any.any_l () ])
+  [ return (result: tup3_bool_bool_bool) ->
+  {[@stop_split] [@expl:verify_log_file_create ensures] ([@stop_split] [@expl:verify_log_file_create ensures #0] [%#slib'0] result.f0
+      = true)
+    /\ ([@stop_split] [@expl:verify_log_file_create ensures #1] [%#slib'1] result.f1 = true)
+    /\ ([@stop_split] [@expl:verify_log_file_create ensures #2] [%#slib'2] result.f2 = false)}
+    (! return {result}) ]

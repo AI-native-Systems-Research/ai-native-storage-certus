@@ -1,0 +1,32 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 463 0 463 91 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 464 13 464 23
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 466 4 466 8
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 462 10 462 24
+let%span sresult = "/home/cornel/logger-verify-20260921/components/logger/creusot/creusot-std/src/std/result.rs" 50 19 50 45
+let%span sresult'0 = "/home/cornel/logger-verify-20260921/components/logger/creusot/creusot-std/src/std/result.rs" 51 18 51 36
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Result_u8_u8 = Ok UInt8.t | Err UInt8.t
+
+let unwrap_u8 (self_: t_Result_u8_u8) (return (x: UInt8.t)) =
+{[@stop_split] [@expl:unwrap requires] [%#sresult] exists t: UInt8.t. self_ = Ok t}
+  any
+  [ return (result: UInt8.t) -> {[@stop_split] [@expl:unwrap ensures] [%#sresult'0] Ok result = self_}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_log_write_error_ignored__mutant [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 463 0 463 91]
+  (w: t_Result_u8_u8) (f: t_Result_u8_u8) (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = unwrap_u8 [%#slib] {w} (fun (_x: UInt8.t) -> [ &_v <- _x ] s1)
+    | s1 = [ &_ret <- [%#slib'0] true ] s2
+    | s2 = return {_ret} ] ] [ & _ret: bool = Any.any_l () | & w: t_Result_u8_u8 = w | & _v: UInt8.t = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:verify_log_write_error_ignored__mutant ensures] [%#slib'1] result
+    = true}
+    (! return {result}) ]

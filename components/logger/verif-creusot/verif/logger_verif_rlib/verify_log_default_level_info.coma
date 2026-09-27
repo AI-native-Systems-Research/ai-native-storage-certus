@@ -1,0 +1,34 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 214 0 214 71 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 215 4 215 19
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 212 11 212 22
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 213 10 213 24
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 202 10 202 40
+let%span slib'3 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 203 10 203 60
+
+use creusot.prelude.Any
+
+type t_LogLevel = Error | Warn | Info | Debug
+
+type t_Option_LogLevel = None | Some t_LogLevel
+
+let from_env_m (var': t_Option_LogLevel) (return (x: t_LogLevel)) = any
+  [ return (result: t_LogLevel) ->
+  {[@stop_split] [@expl:from_env_m ensures] ([@stop_split] [@expl:from_env_m ensures #0] [%#slib'2] var' = None
+      -> result = Info)
+    /\ ([@stop_split] [@expl:from_env_m ensures #1] [%#slib'3] forall l: t_LogLevel. var' = Some l -> result = l)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_log_default_level_info [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 214 0 214 71]
+  (var': t_Option_LogLevel) (return (x: t_LogLevel)) =
+{[@stop_split] [@expl:verify_log_default_level_info requires] [%#slib'0] var' = None}
+  (! bb0
+  [ bb0 = s0 [ s0 = from_env_m [%#slib] {var'} (fun (_x: t_LogLevel) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: t_LogLevel = Any.any_l () | & var': t_Option_LogLevel = var' ])
+  [ return (result: t_LogLevel) -> {[@stop_split] [@expl:verify_log_default_level_info ensures] [%#slib'1] result
+    = Info}
+    (! return {result}) ]

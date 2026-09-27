@@ -1,0 +1,46 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 83 0 83 48 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 84 4 84 11
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 77 10 77 76
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 78 10 78 77
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 80 10 80 68
+let%span slib'3 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 82 10 82 26
+let%span slib'4 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 65 10 65 26
+let%span slib'5 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 55 8 60 9
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_LogLevel = Error | Warn | Info | Debug
+
+function rk [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 53 0 53 29] (l: t_LogLevel) : int
+ = [%#slib'5] match l with
+    | Error -> 0
+    | Warn -> 1
+    | Info -> 2
+    | Debug -> 3
+    end
+
+let rank (l: t_LogLevel) (return (x: UInt8.t)) = any
+  [ return (result: UInt8.t) -> {[@stop_split] [@expl:rank ensures] [%#slib'4] UInt8.t'int result = rk l}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_log_level_order [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 83 0 83 48]
+  (l: t_LogLevel) (return (x: UInt8.t)) = (! bb0
+  [ bb0 = s0 [ s0 = rank [%#slib] {l} (fun (_x: UInt8.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: UInt8.t = Any.any_l () | & l: t_LogLevel = l ])
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:verify_log_level_order ensures] ([@stop_split] [@expl:verify_log_level_order ensures #0] [%#slib'0] rk (Error)
+        = 0
+      /\ rk (Warn) = 1 /\ rk (Info) = 2 /\ rk (Debug) = 3)
+    /\ ([@stop_split] [@expl:verify_log_level_order ensures #1] [%#slib'1] rk (Error) < rk (Warn)
+      /\ rk (Warn) < rk (Info) /\ rk (Info) < rk (Debug))
+    /\ ([@stop_split] [@expl:verify_log_level_order ensures #2] [%#slib'2] forall a: t_LogLevel, b: t_LogLevel. rk a
+          = rk b -> a = b)
+    /\ ([@stop_split] [@expl:verify_log_level_order ensures #3] [%#slib'3] UInt8.t'int result = rk l)}
+    (! return {result}) ]

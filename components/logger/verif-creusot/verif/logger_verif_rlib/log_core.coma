@@ -1,0 +1,53 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 106 0 106 69 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 107 7 107 18
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 107 21 107 36
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 104 10 104 54
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 105 10 105 62
+let%span slib'3 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 65 10 65 26
+let%span slib'4 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 55 8 60 9
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_LogLevel = Error | Warn | Info | Debug
+
+function rk [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 53 0 53 29] (l: t_LogLevel) : int
+ = [%#slib'4] match l with
+    | Error -> 0
+    | Warn -> 1
+    | Info -> 2
+    | Debug -> 3
+    end
+
+let rank (l: t_LogLevel) (return (x: UInt8.t)) = any
+  [ return (result: UInt8.t) -> {[@stop_split] [@expl:rank ensures] [%#slib'3] UInt8.t'int result = rk l}
+    (! return {result}) ]
+
+type t_Option_LogLevel = None | Some t_LogLevel
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let log_core [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 106 0 106 69]
+  (level: t_LogLevel) (threshold: t_LogLevel) (return (x: t_Option_LogLevel)) = (! bb0
+  [ bb0 = s0
+    [ s0 = rank [%#slib] {level} (fun (_x: UInt8.t) -> [ &_11 <- _x ] s1)
+    | s1 = rank [%#slib'0] {threshold} (fun (_x: UInt8.t) -> [ &_13 <- _x ] s2)
+    | s2 = [ &_10 <- UInt8.gt _11 _13 ] s3
+    | s3 = any [ br0 -> {_10 = false} (! bb4) | br1 -> {_10} (! bb3) ] ]
+  | bb3 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_ret <- Some level ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Option_LogLevel = Any.any_l ()
+  | & level: t_LogLevel = level
+  | & threshold: t_LogLevel = threshold
+  | & _10: bool = Any.any_l ()
+  | & _11: UInt8.t = Any.any_l ()
+  | & _13: UInt8.t = Any.any_l () ])
+  [ return (result: t_Option_LogLevel) ->
+  {[@stop_split] [@expl:log_core ensures] ([@stop_split] [@expl:log_core ensures #0] [%#slib'1] rk level > rk threshold
+      -> result = None)
+    /\ ([@stop_split] [@expl:log_core ensures #1] [%#slib'2] rk level <= rk threshold -> result = Some level)}
+    (! return {result}) ]

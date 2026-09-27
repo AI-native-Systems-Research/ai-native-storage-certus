@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_oo_append": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_oo_create": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_oo_new": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_open_options_m": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

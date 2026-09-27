@@ -1,0 +1,46 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 271 0 274 15 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 275 4 275 32
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 270 10 270 24
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 252 10 252 33
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 253 10 253 36
+let%span slib'3 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 254 10 254 46
+let%span slib'4 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 255 10 255 66
+
+use creusot.prelude.Any
+
+type t_LogLevel = Error | Warn | Info | Debug
+
+type t_Option_LogLevel = None | Some t_LogLevel
+
+type t_WriterKind = Stderr | File
+
+type t_StateM = { writer: t_WriterKind; level: t_LogLevel; use_color: bool }
+
+let state_default_m (is_tty: bool) (var': t_Option_LogLevel) (return (x: t_StateM)) = any
+  [ return (result: t_StateM) ->
+  {[@stop_split] [@expl:state_default_m ensures] ([@stop_split] [@expl:state_default_m ensures #0] [%#slib'1] result.writer
+      = Stderr)
+    /\ ([@stop_split] [@expl:state_default_m ensures #1] [%#slib'2] result.use_color = is_tty)
+    /\ ([@stop_split] [@expl:state_default_m ensures #2] [%#slib'3] var' = None -> result.level = Info)
+    /\ ([@stop_split] [@expl:state_default_m ensures #3] [%#slib'4] forall l: t_LogLevel. var' = Some l
+      -> result.level = l)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_log_console_default_stderr__mutant [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 271 0 274 15]
+  (is_tty: bool) (var': t_Option_LogLevel) (return (x: t_WriterKind)) = (! bb0
+  [ bb0 = s0
+    [ s0 = state_default_m [%#slib] {is_tty} {var'} (fun (_x: t_StateM) -> [ &_4 <- _x ] s1)
+    | s1 = [ &_ret <- _4.writer ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: t_WriterKind = Any.any_l ()
+  | & is_tty: bool = is_tty
+  | & var': t_Option_LogLevel = var'
+  | & _4: t_StateM = Any.any_l () ])
+  [ return (result: t_WriterKind) ->
+  {[@stop_split] [@expl:verify_log_console_default_stderr__mutant ensures] [%#slib'0] result = File}
+    (! return {result}) ]

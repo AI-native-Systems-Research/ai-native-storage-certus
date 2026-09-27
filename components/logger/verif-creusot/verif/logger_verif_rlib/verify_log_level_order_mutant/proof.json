@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_rank": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_log_level_order__mutant": {
+        "tactic": "split_vc",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ null, { "prover": "alt-ergo", "time": 0.015 } ]
+          }
+        ]
+      }
+    }
+  }
+}

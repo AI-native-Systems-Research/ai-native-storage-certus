@@ -1,0 +1,269 @@
+# code_properties.yaml — BLIND extraction from the logger SOURCE CODE only.
+# Source artifacts read: components/logger/src/lib.rs  (+ the ILogger trait in
+#   components/interfaces/src/ilogger.rs for the public method signatures).
+# This is ONE blind pass over the code; it did NOT see the spec or any prior inventory.
+# Header prose deliberately avoids the literal record tokens so a plain Cmd+F counts only real records.
+component: logger
+source:    code
+artifact:  components/logger/src/lib.rs (+ components/interfaces/src/ilogger.rs)
+pin:       f3de84aa (2026-09-21)
+method:    blind-extraction
+generated: 2026-09-21
+counts: {total: 32, methods: 4, verifiable: 29, not_verifiable: 3}
+properties:
+  # ---- LogLevel::from_env_str (lib.rs:57-66) ----
+  - id:         CODE-FROMENVSTR-MAPPING
+    subject:    from_env_str
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      from_env_str returns Error for "error", Warn for "warn" and "warning", Info for "info", and
+      Debug for "debug".
+    traces:     ["lib.rs:57-66"]
+  - id:         CODE-FROMENVSTR-CASE-INSENSITIVE
+    subject:    from_env_str
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      from_env_str lowercases the input before matching, so it treats level names case-insensitively
+      (for example "ERROR" and "error" both yield Error).
+    traces:     ["lib.rs:58"]
+  - id:         CODE-FROMENVSTR-TRACE-DEBUG
+    subject:    from_env_str
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      from_env_str maps the name "trace" to the Debug level.
+    traces:     ["lib.rs:63"]
+  - id:         CODE-FROMENVSTR-INVALID-DEFAULT
+    subject:    from_env_str
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      For any input string that is not one of the recognized level names, from_env_str returns Info
+      as the default.
+    traces:     ["lib.rs:64"]
+  # ---- LogLevel::from_env (lib.rs:68-73) ----
+  - id:         CODE-FROMENV-RUSTLOG-DEFAULT
+    subject:    from_env
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      from_env reads the RUST_LOG environment variable; if it is set it parses that value, and if it
+      is unset it falls back to the Info level.
+    traces:     ["lib.rs:68-73"]
+  # ---- LogLevel::as_str and Display (lib.rs:75-98) ----
+  - id:         CODE-ASSTR-MAPPING
+    subject:    as_str
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      as_str renders each level as a five-character token: "ERROR", "WARN ", "INFO ", and "DEBUG"
+      (Warn and Info are padded with a trailing space).
+    traces:     ["lib.rs:75-82"]
+  - id:         CODE-DISPLAY-WRITES-ASSTR
+    subject:    Display
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The Display formatting of a level writes exactly the string produced by as_str for that level.
+    traces:     ["lib.rs:94-98"]
+  - id:         CODE-ANSICOLOR-MAPPING
+    subject:    ansi_color
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      ansi_color returns the level's color escape: red (ESC[31m) for Error, orange (ESC[38;5;208m)
+      for Warn, green (ESC[32m) for Info, and cyan (ESC[36m) for Debug.
+    traces:     ["lib.rs:84-91"]
+  - id:         CODE-LEVEL-ORD-DISCRIMINANTS
+    subject:    LogLevel-order
+    kind:       invariant
+    verifiable: true
+    statement: >
+      The level enum has discriminants Error=0, Warn=1, Info=2, Debug=3 and derives ordering, so it
+      compares as Error < Warn < Info < Debug.
+    traces:     ["lib.rs:35-41"]
+  # ---- LoggerState::default (lib.rs:110-121) ----
+  - id:         CODE-DEFAULT-STATE-STDERR
+    subject:    LoggerState-default
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A default logger state writes to the standard error stream.
+    traces:     ["lib.rs:116"]
+  - id:         CODE-DEFAULT-STATE-LEVEL-FROMENV
+    subject:    LoggerState-default
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A default logger state takes its level threshold from the RUST_LOG environment variable
+      (defaulting to Info when unset).
+    traces:     ["lib.rs:117"]
+  - id:         CODE-DEFAULT-STATE-COLOR-ISATTY
+    subject:    LoggerState-default
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A default logger state enables color only when standard error is a terminal, as reported by
+      isatty on file descriptor 2.
+    traces:     ["lib.rs:114", "lib.rs:118"]
+  # ---- LoggerComponent::new_with_file (lib.rs:155-165) ----
+  - id:         CODE-NEWFILE-CREATE-APPEND
+    subject:    new_with_file
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      new_with_file opens the target path in create-and-append mode, so the file is created if it is
+      absent and existing content is preserved and appended to.
+    traces:     ["lib.rs:156-159"]
+  - id:         CODE-NEWFILE-NO-COLOR
+    subject:    new_with_file
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A logger created with new_with_file has color disabled.
+    traces:     ["lib.rs:163"]
+  - id:         CODE-NEWFILE-LEVEL-FROMENV
+    subject:    new_with_file
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A logger created with new_with_file takes its level threshold from the RUST_LOG environment
+      variable.
+    traces:     ["lib.rs:162"]
+  - id:         CODE-NEWFILE-OPEN-ERROR
+    subject:    new_with_file
+    kind:       error-case
+    verifiable: true
+    statement: >
+      If the file cannot be opened or created, new_with_file returns the underlying I/O error instead
+      of a logger.
+    traces:     ["lib.rs:155-159"]
+  # ---- LoggerComponent::new_with_writer (lib.rs:187-197) ----
+  - id:         CODE-NEWWRITER-CONSTRUCT
+    subject:    new_with_writer
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      new_with_writer builds a logger that uses exactly the writer, level threshold, and color flag
+      passed to it.
+    traces:     ["lib.rs:187-197"]
+  # ---- LoggerComponent::log (lib.rs:199-219) ----
+  - id:         CODE-LOG-FILTER-GUARD
+    subject:    log
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      log emits nothing and returns immediately when the message level is more verbose (numerically
+      greater) than the configured threshold; otherwise it proceeds to write.
+    traces:     ["lib.rs:200-202"]
+  - id:         CODE-LOG-FORMAT-COLOR
+    subject:    log
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When color is enabled, the emitted line is timestamp, space, the level's color code, the level
+      token, the reset code, space, the message, and a trailing newline.
+    traces:     ["lib.rs:204-212"]
+  - id:         CODE-LOG-FORMAT-NOCOLOR
+    subject:    log
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When color is disabled, the emitted line is timestamp, space, the level token, space, the
+      message, and a trailing newline, with no color codes.
+    traces:     ["lib.rs:213-215"]
+  - id:         CODE-LOG-NEWLINE-TERMINATED
+    subject:    log
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Every emitted log line ends with a single newline character.
+    traces:     ["lib.rs:207", "lib.rs:214"]
+  - id:         CODE-LOG-TIMESTAMP-RFC3339
+    subject:    log
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The timestamp at the start of each line is the current UTC time formatted as RFC 3339 with
+      millisecond precision and a Z suffix.
+    traces:     ["lib.rs:203"]
+  - id:         CODE-LOG-WRITE-UNDER-LOCK
+    subject:    log
+    kind:       invariant
+    verifiable: true
+    statement: >
+      log takes the writer's mutex lock before writing a line, so the whole line is written while
+      holding exclusive access to the writer.
+    traces:     ["lib.rs:216-217"]
+  - id:         CODE-LOG-FLUSH-EACH-LINE
+    subject:    log
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      After writing a line, log flushes the writer, so each emitted line is pushed out immediately.
+    traces:     ["lib.rs:218"]
+  - id:         CODE-LOG-WRITE-ERROR-IGNORED
+    subject:    log
+    kind:       frame
+    verifiable: true
+    statement: >
+      Errors from writing or flushing the output are deliberately ignored, so a failed write does not
+      panic or propagate out of the log call.
+    traces:     ["lib.rs:217-218"]
+  # ---- ILogger impl delegation (lib.rs:222-238) ----
+  - id:         CODE-ERROR-DELEGATES
+    subject:    error
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      error(msg) forwards to the internal log routine with the Error level.
+    traces:     ["lib.rs:223-225"]
+  - id:         CODE-WARN-DELEGATES
+    subject:    warn
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      warn(msg) forwards to the internal log routine with the Warn level.
+    traces:     ["lib.rs:227-229"]
+  - id:         CODE-INFO-DELEGATES
+    subject:    info
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      info(msg) forwards to the internal log routine with the Info level.
+    traces:     ["lib.rs:231-233"]
+  - id:         CODE-DEBUG-DELEGATES
+    subject:    debug
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      debug(msg) forwards to the internal log routine with the Debug level.
+    traces:     ["lib.rs:235-237"]
+  # ---- not-verifiable ledger ----
+  - id:         NV-CODE-1
+    scope:      "lib.rs:114 libc::isatty foreign call"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Whether standard error is a terminal is decided by a foreign OS call whose result reflects the
+      runtime environment; the environment's answer is an external assumption, not a property of this
+      code that a verifier can falsify.
+    traces:     ["lib.rs:112-118"]
+  - id:         NV-CODE-2
+    scope:      "lib.rs:203 Utc::now() wall-clock value"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      The actual instant returned by the system clock is non-deterministic environment input; only
+      the format applied to it is checkable, not the time value itself.
+    traces:     ["lib.rs:203"]
+  - id:         NV-CODE-3
+    scope:      "lib.rs:104-108 LoggerState field layout and visibility"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      The struct's fields and their visibility are a type/layout fact about the code shape, not a
+      runtime behavior that an execution could contradict.
+    traces:     ["lib.rs:104-108"]

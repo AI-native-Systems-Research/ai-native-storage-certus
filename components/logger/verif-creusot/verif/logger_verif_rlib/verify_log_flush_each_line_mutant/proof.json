@@ -1,0 +1,26 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_log_flush_each_line__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.014 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  null,
+                  { "prover": "alt-ergo", "time": 0.017 },
+                  { "prover": "alt-ergo", "time": 0.016 }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

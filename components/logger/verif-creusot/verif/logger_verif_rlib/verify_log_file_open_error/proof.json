@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_new_with_file_m": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_verify_log_file_open_error": { "prover": "alt-ergo", "time": 0.02 }
+    }
+  }
+}

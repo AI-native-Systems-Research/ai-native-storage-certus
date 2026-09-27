@@ -1,0 +1,33 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 497 0 497 71 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 498 4 498 20
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 495 11 495 21
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 496 10 496 27
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 481 11 481 21
+let%span slib'3 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 482 10 482 27
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+
+type t_Phase = Start | Wrote | Flushed
+
+type t_Result_u8_u8 = Ok UInt8.t | Err UInt8.t
+
+let emit_seq_m (p: t_Phase) (w: t_Result_u8_u8) (return (x: t_Phase)) =
+{[@stop_split] [@expl:emit_seq_m requires] [%#slib'2] p = Start}
+  any
+  [ return (result: t_Phase) -> {[@stop_split] [@expl:emit_seq_m ensures] [%#slib'3] result = Flushed}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_log_flush_each_line [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 497 0 497 71]
+  (p: t_Phase) (w: t_Result_u8_u8) (return (x: t_Phase)) =
+{[@stop_split] [@expl:verify_log_flush_each_line requires] [%#slib'0] p = Start}
+  (! bb0
+  [ bb0 = s0 [ s0 = emit_seq_m [%#slib] {p} {w} (fun (_x: t_Phase) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: t_Phase = Any.any_l () | & p: t_Phase = p | & w: t_Result_u8_u8 = w ])
+  [ return (result: t_Phase) -> {[@stop_split] [@expl:verify_log_flush_each_line ensures] [%#slib'1] result = Flushed}
+    (! return {result}) ]

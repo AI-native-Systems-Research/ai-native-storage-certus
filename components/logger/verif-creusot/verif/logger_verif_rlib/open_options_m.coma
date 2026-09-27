@@ -1,0 +1,59 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 326 0 326 35 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 327 24 327 32
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 327 34 327 38
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 327 14 327 39
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 327 41 327 45
+let%span slib'3 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 327 4 327 46
+let%span slib'4 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 324 10 324 56
+let%span slib'5 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 325 10 325 34
+let%span slib'6 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 304 10 304 58
+let%span slib'7 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 305 10 305 59
+let%span slib'8 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 310 10 310 28
+let%span slib'9 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 311 10 311 95
+let%span slib'10 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 316 10 316 28
+let%span slib'11 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 317 10 317 95
+
+use creusot.prelude.Any
+
+type t_OpenOptionsM = { create: bool; append: bool; truncate: bool; write: bool }
+
+let oo_new (return (x: t_OpenOptionsM)) = any
+  [ return (result: t_OpenOptionsM) ->
+  {[@stop_split] [@expl:oo_new ensures] ([@stop_split] [@expl:oo_new ensures #0] [%#slib'6] result.create = false
+      /\ result.append = false)
+    /\ ([@stop_split] [@expl:oo_new ensures #1] [%#slib'7] result.truncate = false /\ result.write = false)}
+    (! return {result}) ]
+
+let oo_create (o: t_OpenOptionsM) (v: bool) (return (x: t_OpenOptionsM)) = any
+  [ return (result: t_OpenOptionsM) ->
+  {[@stop_split] [@expl:oo_create ensures] ([@stop_split] [@expl:oo_create ensures #0] [%#slib'8] result.create = v)
+    /\ ([@stop_split] [@expl:oo_create ensures #1] [%#slib'9] result.append = o.append
+    /\ result.truncate = o.truncate /\ result.write = o.write)}
+    (! return {result}) ]
+
+let oo_append (o: t_OpenOptionsM) (v: bool) (return (x: t_OpenOptionsM)) = any
+  [ return (result: t_OpenOptionsM) ->
+  {[@stop_split] [@expl:oo_append ensures] ([@stop_split] [@expl:oo_append ensures #0] [%#slib'10] result.append = v)
+    /\ ([@stop_split] [@expl:oo_append ensures #1] [%#slib'11] result.create = o.create
+    /\ result.truncate = o.truncate /\ result.write = o.write)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let open_options_m [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 326 0 326 35]
+  (return (x: t_OpenOptionsM)) = (! bb0
+  [ bb0 = s0
+    [ s0 = oo_new [%#slib] (fun (_x: t_OpenOptionsM) -> [ &_4 <- _x ] s1)
+    | s1 = oo_create [%#slib'1] {_4} {[%#slib'0] true} (fun (_x: t_OpenOptionsM) -> [ &_3 <- _x ] s2)
+    | s2 = oo_append [%#slib'3] {_3} {[%#slib'2] true} (fun (_x: t_OpenOptionsM) -> [ &_ret <- _x ] s3)
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_OpenOptionsM = Any.any_l () | & _3: t_OpenOptionsM = Any.any_l () | & _4: t_OpenOptionsM = Any.any_l () ])
+  [ return (result: t_OpenOptionsM) ->
+  {[@stop_split] [@expl:open_options_m ensures] ([@stop_split] [@expl:open_options_m ensures #0] [%#slib'4] result.create
+        = true
+      /\ result.append = true)
+    /\ ([@stop_split] [@expl:open_options_m ensures #1] [%#slib'5] result.truncate = false)}
+    (! return {result}) ]

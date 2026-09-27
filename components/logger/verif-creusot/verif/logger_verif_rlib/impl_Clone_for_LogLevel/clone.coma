@@ -1,0 +1,17 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 39 9 39 29 *)
+
+(* <LogLevel as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_LogLevel = Error | Warn | Info | Debug
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_LogLevel [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 39 9 39 29]
+  (self: t_LogLevel) (return (x: t_LogLevel)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_LogLevel = Any.any_l () | & self: t_LogLevel = self ])
+  [ return (result: t_LogLevel) -> (! return {result}) ]

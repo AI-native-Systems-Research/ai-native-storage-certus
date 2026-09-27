@@ -1,0 +1,23 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 312 0 312 54 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 310 10 310 28
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 311 10 311 95
+
+use creusot.prelude.Any
+
+type t_OpenOptionsM = { create: bool; append: bool; truncate: bool; write: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let oo_create [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 312 0 312 54]
+  (o: t_OpenOptionsM) (v: bool) (return (x: t_OpenOptionsM)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_ret <- { create = v; append = o.append; truncate = o.truncate; write = o.write } ] s1
+    | s1 = return {_ret} ] ] [ & _ret: t_OpenOptionsM = Any.any_l () | & o: t_OpenOptionsM = o | & v: bool = v ])
+  [ return (result: t_OpenOptionsM) ->
+  {[@stop_split] [@expl:oo_create ensures] ([@stop_split] [@expl:oo_create ensures #0] [%#slib] result.create = v)
+    /\ ([@stop_split] [@expl:oo_create ensures #1] [%#slib'0] result.append = o.append
+    /\ result.truncate = o.truncate /\ result.write = o.write)}
+    (! return {result}) ]

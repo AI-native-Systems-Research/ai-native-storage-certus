@@ -1,0 +1,18 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 449 0 449 60 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 452 4 452 8
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 448 10 448 24
+
+use creusot.prelude.Any
+use creusot.int.UInt8
+
+type t_Result_u8_u8 = Ok UInt8.t | Err UInt8.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let emit_tail_m [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 449 0 449 60]
+  (w: t_Result_u8_u8) (f: t_Result_u8_u8) (return (x: bool)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ] ] [ & _ret: bool = Any.any_l () ])
+  [ return (result: bool) -> {[@stop_split] [@expl:emit_tail_m ensures] [%#slib'0] result = true} (! return {result}) ]

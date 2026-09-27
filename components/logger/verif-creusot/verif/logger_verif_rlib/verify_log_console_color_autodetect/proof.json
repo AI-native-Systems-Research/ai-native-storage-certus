@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_default_m": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_log_console_color_autodetect": {
+        "prover": "alt-ergo",
+        "time": 0.016
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+(* #"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 256 0 256 65 *)
+
+let%span slib = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 259 15 259 30
+let%span slib'0 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 252 10 252 33
+let%span slib'1 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 253 10 253 36
+let%span slib'2 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 254 10 254 46
+let%span slib'3 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 255 10 255 66
+let%span slib'4 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 202 10 202 40
+let%span slib'5 = "/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 203 10 203 60
+
+use creusot.prelude.Any
+
+type t_WriterKind = Stderr | File
+
+type t_LogLevel = Error | Warn | Info | Debug
+
+type t_Option_LogLevel = None | Some t_LogLevel
+
+let from_env_m (var': t_Option_LogLevel) (return (x: t_LogLevel)) = any
+  [ return (result: t_LogLevel) ->
+  {[@stop_split] [@expl:from_env_m ensures] ([@stop_split] [@expl:from_env_m ensures #0] [%#slib'4] var' = None
+      -> result = Info)
+    /\ ([@stop_split] [@expl:from_env_m ensures #1] [%#slib'5] forall l: t_LogLevel. var' = Some l -> result = l)}
+    (! return {result}) ]
+
+type t_StateM = { writer: t_WriterKind; level: t_LogLevel; use_color: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let state_default_m [#"/home/cornel/logger-verify-20260921/components/logger/verif-creusot/src/lib.rs" 256 0 256 65]
+  (is_tty: bool) (var': t_Option_LogLevel) (return (x: t_StateM)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_10 <- Stderr ] s1
+    | s1 = from_env_m [%#slib] {var'} (fun (_x: t_LogLevel) -> [ &_11 <- _x ] s2)
+    | s2 = [ &_ret <- { writer = _10; level = _11; use_color = is_tty } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_StateM = Any.any_l ()
+  | & is_tty: bool = is_tty
+  | & var': t_Option_LogLevel = var'
+  | & _10: t_WriterKind = Any.any_l ()
+  | & _11: t_LogLevel = Any.any_l () ])
+  [ return (result: t_StateM) ->
+  {[@stop_split] [@expl:state_default_m ensures] ([@stop_split] [@expl:state_default_m ensures #0] [%#slib'0] result.writer
+      = Stderr)
+    /\ ([@stop_split] [@expl:state_default_m ensures #1] [%#slib'1] result.use_color = is_tty)
+    /\ ([@stop_split] [@expl:state_default_m ensures #2] [%#slib'2] var' = None -> result.level = Info)
+    /\ ([@stop_split] [@expl:state_default_m ensures #3] [%#slib'3] forall l: t_LogLevel. var' = Some l
+      -> result.level = l)}
+    (! return {result}) ]

@@ -1,0 +1,267 @@
+# spec_properties.yaml — BLIND extraction from the logger SPECIFICATION only.
+# Source artifacts read: components/logger/specs/001-logger-component/{spec.md,data-model.md}
+#   and components/logger/specs/001-logger-component/contracts/ilogger.md
+# This is ONE blind pass over the spec; it did NOT see the code or any prior inventory.
+# Header prose deliberately avoids the literal record tokens so a plain Cmd+F counts only real records.
+component: logger
+source:    spec
+artifact:  components/logger/specs/001-logger-component/{spec.md, data-model.md, contracts/ilogger.md}
+pin:       f3de84aa (2026-09-21)
+method:    blind-extraction
+generated: 2026-09-21
+counts: {total: 31, methods: 4, verifiable: 26, not_verifiable: 5}
+properties:
+  # ---- per-method level tagging (US1/US2 acceptance scenarios) ----
+  - id:         LOG-ERROR-LEVEL-TAG
+    subject:    error
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Calling error(msg) records the message at the Error severity level, so the emitted line is
+      labelled as an ERROR line (subject to the level-filter and format rules).
+    traces:     [US1-AS3, SC-001]
+  - id:         LOG-WARN-LEVEL-TAG
+    subject:    warn
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Calling warn(msg) records the message at the Warn severity level, so the emitted line is
+      labelled as a WARN line (subject to the level-filter and format rules).
+    traces:     [US1-AS5, US2-AS1, SC-001]
+  - id:         LOG-INFO-LEVEL-TAG
+    subject:    info
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Calling info(msg) records the message at the Info severity level, so the emitted line is
+      labelled as an INFO line (subject to the level-filter and format rules).
+    traces:     [US1-AS1, SC-001]
+  - id:         LOG-DEBUG-LEVEL-TAG
+    subject:    debug
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Calling debug(msg) records the message at the Debug severity level, so the emitted line is
+      labelled as a DEBUG line (subject to the level-filter and format rules).
+    traces:     [US2-AS2, SC-001]
+  # ---- log-line format (cross-cutting behaviour of all four log methods) ----
+  - id:         LOG-LINE-FORMAT
+    subject:    log-line
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Every emitted log line contains three parts in order: a timestamp, the log level, and the
+      exact message text the caller passed in.
+    traces:     [FR-009, SC-001, US1-AS1]
+  - id:         LOG-TIMESTAMP-ISO8601
+    subject:    log-line
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The timestamp in every log line is written in ISO 8601 / RFC 3339 form with millisecond
+      precision and a trailing Z for UTC, for example 2026-04-17T14:30:00.123Z.
+    traces:     [FR-009, "assumption: ISO 8601 timestamp"]
+  - id:         LOG-LEVEL-DISPLAY-STRING
+    subject:    log-line
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The level shown in each line uses the uppercase name padded to five characters for alignment,
+      namely "ERROR", "WARN ", "INFO ", and "DEBUG".
+    traces:     [FR-014, "data-model: LogLevel Display"]
+  # ---- level filtering ----
+  - id:         LOG-FILTER-SUPPRESS
+    subject:    log-filter
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A message whose severity is more verbose than the configured threshold is not emitted at all
+      (for example, with the threshold set to Warn, an info or debug call produces no output).
+    traces:     [FR-004, US1-AS2, SC-002]
+  - id:         LOG-FILTER-EMIT
+    subject:    log-filter
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A message whose severity is at or above the configured threshold (equal or more severe) is
+      emitted (for example, with the threshold set to Warn, warn and error calls both produce output).
+    traces:     [SC-002, US1-AS1, US1-AS3]
+  - id:         LOG-DEFAULT-LEVEL-INFO
+    subject:    log-filter
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When the RUST_LOG environment variable is not set, the logger uses Info as its default
+      threshold.
+    traces:     [FR-011, US1-AS4]
+  # ---- colorization ----
+  - id:         LOG-CONSOLE-COLOR-CODES
+    subject:    color
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When color is enabled, the level word in a console line is wrapped in the level's ANSI color
+      code — red for error, the 256-color orange for warn, green for info, cyan for debug — and
+      closed with the reset code.
+    traces:     [FR-006, US1-AS1, US1-AS5, SC-003]
+  - id:         LOG-FILE-NO-ANSI
+    subject:    color
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Log lines written to a file contain no ANSI color escape sequences whatsoever.
+    traces:     [FR-008, US2-AS1, SC-004]
+  - id:         LOG-FILE-COLOR-DISABLED
+    subject:    color
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      A logger configured for file output always has color disabled, regardless of any other setting.
+    traces:     [FR-013, FR-008]
+  - id:         LOG-CONSOLE-COLOR-AUTODETECT
+    subject:    color
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      For console output, color is enabled only when standard error is attached to a terminal and is
+      disabled otherwise; this is decided automatically at construction time.
+    traces:     [FR-013, SC-003]
+  # ---- output destination ----
+  - id:         LOG-CONSOLE-DEFAULT-STDERR
+    subject:    destination
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      By default, with no file configured, log output is written to the standard error stream.
+    traces:     [FR-005, "assumption: console targets stderr"]
+  - id:         LOG-FILE-OUTPUT-MODE
+    subject:    destination
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The logger can be configured to write its output to a named file path instead of the console.
+    traces:     [FR-007, US2]
+  - id:         LOG-FILE-CREATE
+    subject:    destination
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When a logger is configured for a file path that does not yet exist, the file is created
+      automatically.
+    traces:     [US2-AS3, "assumption: append mode, create if absent"]
+  - id:         LOG-FILE-OPEN-ERROR
+    subject:    destination
+    kind:       error-case
+    verifiable: true
+    statement: >
+      When the log file cannot be opened (for example, permission denied), configuring the file
+      logger returns an error rather than succeeding.
+    traces:     ["edge case: file cannot be opened", FR-007]
+  # ---- LogLevel semantics ----
+  - id:         LOG-LEVEL-ORDER
+    subject:    LogLevel-order
+    kind:       invariant
+    verifiable: true
+    statement: >
+      The severity levels are totally ordered from most to least severe as Error, then Warn, then
+      Info, then Debug.
+    traces:     ["data-model: LogLevel ordering", "key entity: LogLevel"]
+  - id:         LOG-LEVEL-PARSE-MAPPING
+    subject:    from_env_str
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Parsing a level name maps "error" to Error, "warn" and "warning" to Warn, "info" to Info, and
+      "debug" to Debug.
+    traces:     [FR-014, FR-004, "data-model: parsing"]
+  - id:         LOG-LEVEL-PARSE-CASE-INSENSITIVE
+    subject:    from_env_str
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Level-name parsing is case-insensitive, so "ERROR", "Error", and "error" all parse to the same
+      Error level.
+    traces:     [FR-014, "assumption: case-insensitive level names"]
+  - id:         LOG-LEVEL-PARSE-TRACE-DEBUG
+    subject:    from_env_str
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      The level name "trace" is recognized and treated as the Debug level, even though the interface
+      does not expose a separate trace method.
+    traces:     ["edge case: RUST_LOG=trace", "assumption: trace maps to debug"]
+  - id:         LOG-LEVEL-PARSE-INVALID-DEFAULT
+    subject:    from_env_str
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Any unrecognized or invalid level name parses to the Info level as a safe default.
+    traces:     ["edge case: invalid RUST_LOG value", FR-004]
+  # ---- concurrency ----
+  - id:         LOG-THREAD-SAFE-NO-INTERLEAVE
+    subject:    thread-safety
+    kind:       invariant
+    verifiable: true
+    statement: >
+      When multiple threads log at the same time, individual log lines are written whole and are
+      never interleaved or corrupted with one another.
+    traces:     [FR-010, "edge case: concurrent logging", SC-005]
+  # ---- component integration (framework) ----
+  - id:         LOG-INTERFACE-DISCOVERY
+    subject:    integration
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      Querying the component for the ILogger interface at runtime returns a valid ILogger reference.
+    traces:     [FR-003, US3-AS1, SC-006]
+  - id:         LOG-RECEPTACLE-BIND
+    subject:    integration
+    kind:       postcondition
+    verifiable: true
+    statement: >
+      When the logger is bound into another component's ILogger receptacle, that receptacle then
+      hands back the logger implementation when asked.
+    traces:     [US3-AS2, US3-AS3, SC-006]
+  # ---- not-verifiable ledger ----
+  - id:         NV-SPEC-1
+    scope:      "FR-001/FR-002: component named LoggerComponent, ILogger defined via the framework macros"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Being named a certain way and being declared through the define_component!/define_interface!
+      macros are structural build-time facts about the source, not observable runtime behavior with a
+      possible counterexample, so they are not machine-checkable properties.
+    traces:     [FR-001, FR-002]
+  - id:         NV-SPEC-2
+    scope:      "FR-014: LoggerState is a public implementation-detail type"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      The visibility of the LoggerState type is a type/layout fact about the code shape, not a
+      runtime behavior that could be falsified by an execution.
+    traces:     [FR-014]
+  - id:         NV-SPEC-3
+    scope:      "SC-007: doc tests and Criterion benchmarks exist for public APIs"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      The existence of documentation tests and benchmark harnesses is a process/tooling requirement
+      about the repository, not a runtime correctness obligation a verifier can check.
+    traces:     [SC-007]
+  - id:         NV-SPEC-4
+    scope:      "performance: log formatting and emission throughput"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      Throughput and emission speed are wall-clock timing quantities; their magnitude is not
+      machine-checkable (only functional outcomes are).
+    traces:     [SC-007, "assumption: benchmarks target formatting/emission throughput"]
+  - id:         NV-SPEC-5
+    scope:      "FR-012: new_with_writer constructor is provided for custom output targets"
+    kind:       not-verifiable
+    verifiable: false
+    reason: >
+      That a particular constructor with a particular signature is provided is a structural API-shape
+      fact; the behavior it enables (setting writer, level, and color) is exercised through the
+      format, filter, and color properties rather than as a standalone runtime obligation.
+    traces:     [FR-012]
