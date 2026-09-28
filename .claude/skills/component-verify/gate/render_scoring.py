@@ -117,7 +117,7 @@ def main():
     # ---- per (tool, method) native fraction + disposition of the remainder ----
     # returns dict: nat, B, rating, leftovers=[(pid, disp)]
     def method_row(tool, ids):
-        nat = deleg = tb = pend = handed = 0
+        nat = deleg = tb = pend = handed = refd = 0
         left = []          # non-native bundle properties (the delegation/gap detail)
         for pid in ids:
             b = props_by_id[pid].get(tool) or {}
@@ -140,11 +140,21 @@ def main():
                 else:
                     tb += 1
                     left.append((pid, "⊘ tool-boundary — open (neither tool proves it)"))
+            elif s == "‼":
+                # A refuted property is DECIDED — we know the answer and the answer is that the
+                # code is wrong. It must never fall through to `pending`, which is what happened
+                # before: the two machine-proved defects on eviction-policy-optimized were listed
+                # as "· pending" and counted toward the open gap, reading as unfinished
+                # verification when they are its most valuable output. Counted as covered (nothing
+                # more to verify) but reported as a defect, never as a proof.
+                refd += 1
+                left.append((pid, "‼ REFUTED — the code violates this obligation (a defect to fix, "
+                                  "not a verification gap)"))
             else:
                 pend += 1
                 left.append((pid, "· pending"))
         B = len(ids)
-        covered = nat + deleg + handed      # proved here, soundly delegated, or proved by the other tool
+        covered = nat + deleg + handed + refd      # proved here, soundly delegated, or proved by the other tool
         gap = B - covered                   # genuinely open: pending, or a wall no tool clears
         # rating is FAIR / per-tool: a method is `proved` for a tool ONLY when that tool
         # proves EVERY bundle property itself (proved == B). If it proves some and leaves
@@ -157,7 +167,7 @@ def main():
                       else ("needs other tool" if tb else "pending"))
         else:
             rating = "partially proved"
-        return dict(nat=nat, B=B, deleg=deleg, tb=tb, pend=pend,
+        return dict(nat=nat, B=B, deleg=deleg, tb=tb, pend=pend, refuted=refd,
                     covered=covered, gap=gap, rating=rating, left=left)
 
     per_tool_methods = {t: {m: method_row(t, ids) for m, ids in methods.items()} for t in tools}
@@ -299,6 +309,11 @@ def main():
         sts = [(p.get(t) or {}).get("status") for t in tools]
         if any(s == "proved" for s in sts):
             return "proved"                       # at least one tool proved it (incl. a cross-tool handoff)
+        if any(s == "refuted" for s in sts):
+            # DECIDED, and the answer is that the code is wrong. Must not be folded into "open":
+            # a reader asking "what is still open?" is asking what verification has not settled,
+            # and this is settled. Reported as a defect in its own right.
+            return "refuted"
         if any(s == "delegated" for s in sts) and all(
                 s in ("delegated", "tool-boundary", None) for s in sts):
             return "delegated"                    # no tool proves it, but it is soundly handed to a named referent
@@ -308,6 +323,7 @@ def main():
     c_proved = comb.count("proved")
     c_deleg = comb.count("delegated")
     c_open = comb.count("open")
+    c_refuted = comb.count("refuted")
 
     # KPI cards — LEAD with the method-level result. Methods are the unit a reader anchors
     # on ("which of the interface's public methods are verified?"), so the headline is in
@@ -338,11 +354,15 @@ def main():
              f"verifiable properties; here is the same result counted at that finer level, "
              f"including how much each tool proves on its own.</p>")
     P.append("<div class='cards'>")
-    head_cls = "ok" if c_open == 0 else "warn"
+    head_cls = "ok" if c_open == 0 else "warn"   # refuted is settled, so it does not warn here
     combfoot = []
     if c_deleg:
         combfoot.append(f"<b>{c_deleg}</b> soundly delegated to a named external referent")
-    combfoot.append(f"<b>{c_open}</b> open" if c_open else "<b>0</b> open (nothing left unproved)")
+    if c_refuted:
+        combfoot.append(f"<b>‼ {c_refuted} REFUTED — machine-proved DEFECTS in the implementation</b> "
+                        f"(decided, not open: see the Defects section)")
+    combfoot.append(f"<b>{c_open}</b> open (no tool settles these)" if c_open
+                    else "<b>0</b> open (nothing left unsettled)")
     P.append(f"<div class='kpi {head_cls}' style='flex:1 1 100%'>"
              f"<div class='big'>{c_proved} / {M} properties proved</div>"
              f"<div class='lbl'>proved by Creusot and/or Kani &mdash; the combined result across both tools</div>"
@@ -373,8 +393,10 @@ def main():
              f"A <b>property</b> is one precise, checkable claim about how the component behaves "
              f"(for example: <i>every emitted log line ends with a single newline</i>). This component has "
              f"<b>{M}</b> such verifiable properties, and <b>{c_proved}</b> of them carry a machine-checked proof "
-             f"from Creusot and/or Kani; the remaining <b>{c_deleg}</b> are soundly delegated to a named external "
-             f"tool, and <b>{c_open}</b> are left open.</p>"
+             f"from Creusot and/or Kani; <b>{c_deleg}</b> are soundly delegated to a named external "
+             f"tool" + (f"; <b>{c_refuted}</b> were <b>REFUTED</b> — verification proved the implementation "
+             f"VIOLATES them, which is a defect to fix rather than a gap in the verification" if c_refuted else "")
+             + f"; and <b>{c_open}</b> are left open (nothing settles them).</p>"
              f"<p style='margin:0 0 10px'><b>“Proved” means a tool proved the property itself.</b> Each tool's "
              f"scorer re-runs that tool's own artifact from source and checks it passes — Creusot: "
              f"<code>cargo creusot</code> reports every goal <i>Proved</i>; Kani: <code>cargo kani</code> reports "
