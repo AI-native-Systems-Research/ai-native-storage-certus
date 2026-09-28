@@ -60,7 +60,7 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 VLLM_DIR="${VLLM_DIR:-${REPO_ROOT}/apps/vllm-serve}"
-CLIENT_SCRIPT="${CLIENT_SCRIPT:-${VLLM_DIR}/run-guidellm-synthetic.sh}"
+CLIENT_SCRIPT="${CLIENT_SCRIPT:-${VLLM_DIR}/run-guidellm-synthetic-moe.sh}"
 if [[ "$BACKEND" == "certus" ]]; then
   SERVE_SCRIPT="${SERVE_SCRIPT:-${VLLM_DIR}/run-serve-certus-shmq-mixtral-2gpu.sh}"
 else
@@ -91,7 +91,7 @@ SKIP_BUILD="${SKIP_BUILD:-0}"
 # ── Workload knobs (passed through to the client) ──────────────────────────────
 RATE_TYPE="${RATE_TYPE:-concurrent}"            # closed-loop by default
 CONCURRENT_STREAMS="${CONCURRENT_STREAMS:-32}"  # fixed in-flight streams
-DATA="${DATA:-kind=synthetic_text,prompt_tokens=512,output_tokens=128,turns=30}"
+DATA="${DATA:-kind=synthetic_text,prompt_tokens=512,output_tokens=128,turns=49}"
 MAX_SECONDS="${MAX_SECONDS:-180}"               # short pass by default
 
 # ── Endpoint ─────────────────────────────────────────────────────────────────
