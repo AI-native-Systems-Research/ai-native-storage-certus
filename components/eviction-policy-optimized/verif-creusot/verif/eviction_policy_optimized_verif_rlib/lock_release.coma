@@ -1,0 +1,37 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 621 0 621 38 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 622 14 622 15
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 622 4 622 15
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 618 11 618 26
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 619 10 619 38
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 620 10 620 32
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_LockTrace = { held: UInt64.t; peak: UInt64.t }
+
+predicate resolve_refmut_LockTrace [@inline:trivial] (_1: MutBorrow.t t_LockTrace) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_LockTrace
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lock_release [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 621 0 621 38]
+  (t: MutBorrow.t t_LockTrace) (return (x: ())) =
+{[@stop_split] [@expl:lock_release requires] [%#slib'1] UInt64.t'int t.current.held >= 1}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.sub [%#slib'0] {t.current.held} {[%#slib] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &t <- { t with current = { t.current with held = _x } } ] s1)
+    | s1 = -{resolve_refmut_LockTrace t}- s2
+    | s2 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & t: MutBorrow.t t_LockTrace = t ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:lock_release ensures] ([@stop_split] [@expl:lock_release ensures #0] [%#slib'2] UInt64.t'int t.final.held
+      = UInt64.t'int t.current.held - 1)
+    /\ ([@stop_split] [@expl:lock_release ensures #1] [%#slib'3] t.final.peak = t.current.peak)}
+    (! return {result}) ]

@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_peek_front_n": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_arena_pop_front": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epo_inv_preview_agrees_with_eviction": {
+        "prover": "alt-ergo",
+        "time": 0.038
+      }
+    }
+  }
+}

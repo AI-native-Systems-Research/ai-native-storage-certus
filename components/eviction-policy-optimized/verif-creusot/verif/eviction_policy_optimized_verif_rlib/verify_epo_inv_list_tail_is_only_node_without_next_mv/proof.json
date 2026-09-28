@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_epo_inv_list_tail_is_only_node_without_next_mv": {
+        "prover": "alt-ergo",
+        "time": 0.026
+      },
+      "vc_wf_move_to_back": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

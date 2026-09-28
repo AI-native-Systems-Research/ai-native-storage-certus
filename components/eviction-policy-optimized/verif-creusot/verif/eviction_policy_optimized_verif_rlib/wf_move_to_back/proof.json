@@ -1,0 +1,108 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_eq_Option_u32": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_index_mut_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_wf_move_to_back": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.059 },
+              { "prover": "alt-ergo", "time": 0.026 },
+              { "prover": "alt-ergo", "time": 0.057 },
+              { "prover": "alt-ergo", "time": 0.061 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.088 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "z3", "time": 0.018 },
+                              { "prover": "z3", "time": 0.019 }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.088 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "z3", "time": 0.018 },
+                              { "prover": "z3", "time": 0.021 }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  { "prover": "z3", "time": 0.042 }
+                ]
+              },
+              { "prover": "z3", "time": 0.047 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.1 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "z3", "time": 0.118 },
+                              { "prover": "z3", "time": 0.341 }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.11 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "z3", "time": 0.438 },
+                              { "prover": "z3", "time": 0.438 }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  { "prover": "z3", "time": 0.042 }
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.029 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

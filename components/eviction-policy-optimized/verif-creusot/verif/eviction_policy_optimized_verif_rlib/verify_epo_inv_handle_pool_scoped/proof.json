@@ -1,0 +1,33 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epo_inv_handle_pool_scoped": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.017 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.025 },
+                  { "prover": "alt-ergo", "time": 0.023 }
+                ]
+              },
+              { "prover": "z3", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.02 },
+              { "prover": "alt-ergo", "time": 0.022 },
+              { "prover": "alt-ergo", "time": 0.021 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

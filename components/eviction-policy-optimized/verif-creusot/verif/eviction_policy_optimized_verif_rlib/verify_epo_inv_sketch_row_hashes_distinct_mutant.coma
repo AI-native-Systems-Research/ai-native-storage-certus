@@ -1,0 +1,64 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4129 0 4129 66 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 4 4130 6
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 10 4130 12
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 16 4130 18
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 22 4130 24
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 28 4130 30
+let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 34 4130 36
+let%span slib'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 40 4130 42
+let%span slib'6 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 46 4130 48
+let%span slib'7 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 52 4130 54
+let%span slib'8 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 58 4130 60
+let%span slib'9 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 64 4130 66
+let%span slib'10 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 70 4130 72
+let%span slib'11 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4130 4 4130 72
+let%span slib'12 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4128 10 4128 17
+let%span slib'13 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 75 0 75 17
+let%span slib'14 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 76 0 76 17
+let%span slib'15 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 77 0 77 17
+let%span slib'16 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 78 0 78 17
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+constant const_P0: UInt64.t = [%#slib'13] (11400714819323198485: UInt64.t)
+
+constant const_P1: UInt64.t = [%#slib'14] (5871781006564002453: UInt64.t)
+
+constant const_P2: UInt64.t = [%#slib'15] (7809847782465536323: UInt64.t)
+
+constant const_P3: UInt64.t = [%#slib'16] (15302401860877482369: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_epo_inv_sketch_row_hashes_distinct__mutant [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4129 0 4129 66]
+  (return (x: bool)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_2 <- ([%#slib] const_P0) <> ([%#slib'0] const_P1) ] s1
+    | s1 = any [ br0 -> {_2 = false} (! bb6) | br1 -> {_2} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &_3 <- ([%#slib'1] const_P0) <> ([%#slib'2] const_P2) ] s1
+    | s1 = any [ br0 -> {_3 = false} (! bb6) | br1 -> {_3} (! bb2) ] ]
+  | bb2 = s0
+    [ s0 = [ &_4 <- ([%#slib'3] const_P0) <> ([%#slib'4] const_P3) ] s1
+    | s1 = any [ br0 -> {_4 = false} (! bb6) | br1 -> {_4} (! bb3) ] ]
+  | bb3 = s0
+    [ s0 = [ &_5 <- ([%#slib'5] const_P1) <> ([%#slib'6] const_P2) ] s1
+    | s1 = any [ br0 -> {_5 = false} (! bb6) | br1 -> {_5} (! bb4) ] ]
+  | bb4 = s0
+    [ s0 = [ &_6 <- ([%#slib'7] const_P1) <> ([%#slib'8] const_P3) ] s1
+    | s1 = any [ br0 -> {_6 = false} (! bb6) | br1 -> {_6} (! bb5) ] ]
+  | bb5 = s0 [ s0 = [ &_ret <- ([%#slib'9] const_P2) <> ([%#slib'10] const_P3) ] s1 | s1 = return {_ret} ]
+  | bb6 = s0 [ s0 = [ &_ret <- [%#slib'11] false ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & _2: bool = Any.any_l ()
+  | & _3: bool = Any.any_l ()
+  | & _4: bool = Any.any_l ()
+  | & _5: bool = Any.any_l ()
+  | & _6: bool = Any.any_l () ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:verify_epo_inv_sketch_row_hashes_distinct__mutant ensures] [%#slib'12] not result}
+    (! return {result}) ]

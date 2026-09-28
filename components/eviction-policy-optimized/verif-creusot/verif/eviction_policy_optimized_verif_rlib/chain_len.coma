@@ -1,0 +1,46 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2877 0 2877 70 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2875 10 2875 14
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2876 11 2876 20
+let%span swell_founded = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Node = { key: UInt64.t; prev: t_Option_u32; next: t_Option_u32; active: bool }
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant nodes : Seq.seq t_Node
+
+constant cur : t_Option_u32
+
+constant fuel : int
+
+function chain_len [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2877 0 2877 70] (nodes: Seq.seq t_Node) (cur: t_Option_u32) (fuel: int) : int
+
+goal vc_chain_len: ([%#slib'0] fuel >= 0)
+  -> (if fuel <= 0 then
+    true
+  else
+    match cur with
+      | None -> true
+      | Some c -> if UInt32.t'int c < Seq.length nodes then
+        ([@stop_split] [@expl:chain_len requires] [%#slib'0] fuel - 1 >= 0)
+        /\ ([@expl:variant decreases] well_founded_relation_Int ([%#slib] fuel) ([%#slib] fuel - 1))
+      else
+        true
+      
+      end
+  )

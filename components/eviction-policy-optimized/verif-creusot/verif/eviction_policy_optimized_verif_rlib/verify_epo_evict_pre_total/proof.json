@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_epo_evict_pre_total": { "prover": "alt-ergo", "time": 0.03 }
+    }
+  }
+}

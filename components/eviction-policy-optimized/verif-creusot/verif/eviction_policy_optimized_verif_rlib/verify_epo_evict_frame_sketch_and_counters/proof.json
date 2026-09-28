@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_pop_front": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epo_evict_frame_sketch_and_counters": {
+        "prover": "alt-ergo",
+        "time": 0.034
+      }
+    }
+  }
+}

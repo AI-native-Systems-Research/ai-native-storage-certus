@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_sketch_halve": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_epo_inv_sketch_halve_non_increasing": {
+        "prover": "alt-ergo",
+        "time": 0.017
+      }
+    }
+  }
+}

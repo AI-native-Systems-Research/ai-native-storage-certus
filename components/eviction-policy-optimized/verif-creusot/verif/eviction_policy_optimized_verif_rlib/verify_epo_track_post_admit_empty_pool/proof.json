@@ -1,0 +1,27 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_track": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_verify_epo_track_post_admit_empty_pool": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.017 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.021 },
+                  { "prover": "alt-ergo", "time": 0.023 },
+                  { "prover": "alt-ergo", "time": 0.022 }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

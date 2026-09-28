@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_len_Pool": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_pool_fresh": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_push_Pool": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.044 }
+    }
+  }
+}

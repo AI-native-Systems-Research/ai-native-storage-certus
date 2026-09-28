@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_push_back": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_arena_push_front": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epo_inv_admission_decided_only_by_victim_comparison": {
+        "prover": "alt-ergo",
+        "time": 0.033
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_state_len": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epo_inv_pool_ids_unique_sequential": {
+        "prover": "alt-ergo",
+        "time": 0.024
+      }
+    }
+  }
+}

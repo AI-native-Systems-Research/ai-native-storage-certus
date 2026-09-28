@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_peek_front_n": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_index_Vec_Pool_Global": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_len_Pool": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_new_u64": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.075 }
+    }
+  }
+}

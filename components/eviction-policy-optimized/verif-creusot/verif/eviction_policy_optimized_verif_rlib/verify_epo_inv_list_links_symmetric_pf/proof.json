@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_epo_inv_list_links_symmetric_pf": {
+        "prover": "alt-ergo",
+        "time": 0.025
+      },
+      "vc_wf_push_front": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

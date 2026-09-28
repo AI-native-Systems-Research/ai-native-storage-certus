@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_clear": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epo_clear_degrade_invalid_pool": {
+        "prover": "alt-ergo",
+        "time": 0.021
+      }
+    }
+  }
+}

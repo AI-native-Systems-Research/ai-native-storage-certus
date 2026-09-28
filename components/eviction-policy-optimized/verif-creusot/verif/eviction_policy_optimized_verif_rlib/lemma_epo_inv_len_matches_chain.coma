@@ -1,0 +1,87 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3228 0 3228 95 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3223 10 3223 14
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3224 11 3224 20
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3225 11 3225 29
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3226 11 3226 78
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3227 10 3227 60
+let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2875 10 2875 14
+let%span slib'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2876 11 2876 20
+let%span slib'6 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2879 8 2885 9
+let%span swell_founded = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Node = { key: UInt64.t; prev: t_Option_u32; next: t_Option_u32; active: bool }
+
+function chain_len [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2877 0 2877 70] (nodes: Seq.seq t_Node) (cur: t_Option_u32) (fuel: int) : int
+
+axiom chain_len_def:
+  forall nodes: Seq.seq t_Node, cur: t_Option_u32, fuel: int [chain_len nodes cur fuel]. ([%#slib'5] fuel >= 0)
+    -> chain_len nodes cur fuel
+    = ([%#slib'6] if fuel <= 0 then
+      0
+    else
+      match cur with
+        | None -> 0
+        | Some c -> if UInt32.t'int c < Seq.length nodes then
+          1 + chain_len nodes (Seq.get nodes (UInt32.t'int c)).next (fuel - 1)
+        else
+          0
+        
+        end
+    )
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : Seq.seq t_Node
+
+constant b : Seq.seq t_Node
+
+constant cur : t_Option_u32
+
+constant fuel : int
+
+function lemma_epo_inv_len_matches_chain [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3228 0 3228 95] (a: Seq.seq t_Node) (b: Seq.seq t_Node) (cur: t_Option_u32) (fuel: int) : ()
+
+goal vc_lemma_epo_inv_len_matches_chain: ([%#slib'0] fuel >= 0)
+  -> ([%#slib'1] Seq.length a = Seq.length b)
+  -> ([%#slib'2] forall i: int. 0 <= i /\ i < Seq.length a -> (Seq.get a i).next = (Seq.get b i).next)
+  -> (if fuel <= 0 then
+    [@stop_split] [@expl:lemma_epo_inv_len_matches_chain ensures] [%#slib'3] chain_len a cur fuel = chain_len b cur fuel
+  else
+    match cur with
+      | None -> [@stop_split] [@expl:lemma_epo_inv_len_matches_chain ensures] [%#slib'3] chain_len a cur fuel
+      = chain_len b cur fuel
+      | Some c -> if UInt32.t'int c < Seq.length a then
+        (([@stop_split] [@expl:lemma_epo_inv_len_matches_chain requires] ([@stop_split] [@expl:lemma_epo_inv_len_matches_chain requires #0] [%#slib'0] fuel
+                - 1
+              >= 0)
+            /\ ([@stop_split] [@expl:lemma_epo_inv_len_matches_chain requires #1] [%#slib'1] Seq.length a
+              = Seq.length b)
+            /\ ([@stop_split] [@expl:lemma_epo_inv_len_matches_chain requires #2] [%#slib'2] forall i: int. 0 <= i
+                /\ i < Seq.length a -> (Seq.get a i).next = (Seq.get b i).next))
+          /\ ([@expl:variant decreases] well_founded_relation_Int ([%#slib] fuel) ([%#slib] fuel - 1)))
+        /\ (([@stop_split] [@expl:lemma_epo_inv_len_matches_chain ensures] [%#slib'3] chain_len a (Seq.get a (UInt32.t'int c)).next (fuel
+            - 1)
+          = chain_len b (Seq.get a (UInt32.t'int c)).next (fuel - 1))
+        -> ([@stop_split] [@expl:lemma_epo_inv_len_matches_chain ensures] [%#slib'3] chain_len a cur fuel
+        = chain_len b cur fuel))
+      else
+        [@stop_split] [@expl:lemma_epo_inv_len_matches_chain ensures] [%#slib'3] chain_len a cur fuel
+        = chain_len b cur fuel
+      
+      end
+  )

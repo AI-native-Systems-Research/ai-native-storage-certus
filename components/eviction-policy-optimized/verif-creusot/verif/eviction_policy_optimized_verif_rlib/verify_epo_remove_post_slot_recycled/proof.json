@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_push_back": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_arena_remove": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_verify_epo_remove_post_slot_recycled": {
+        "prover": "alt-ergo",
+        "time": 0.042
+      }
+    }
+  }
+}

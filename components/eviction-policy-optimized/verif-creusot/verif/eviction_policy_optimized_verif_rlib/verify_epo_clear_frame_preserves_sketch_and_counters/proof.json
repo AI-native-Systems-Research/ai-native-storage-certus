@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_clear": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_epo_clear_frame_preserves_sketch_and_counters": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 627 0 627 39 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 628 4 628 19
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 625 11 625 43
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 626 10 626 47
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Work = { accesses: UInt64.t }
+
+predicate resolve_refmut_Work [@inline:trivial] (_1: MutBorrow.t t_Work) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Work
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let work_add [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 627 0 627 39]
+  (w: MutBorrow.t t_Work) (k: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:work_add requires] [%#slib'0] UInt64.t'int w.current.accesses < 4294967295 - UInt64.t'int k}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib] {w.current.accesses} {k}
+        (fun (_x: UInt64.t) -> [ &w <- { w with current = { accesses = _x } } ] s1)
+    | s1 = -{resolve_refmut_Work w}- s2
+    | s2 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & w: MutBorrow.t t_Work = w | & k: UInt64.t = k ])
+  [ return (result: ()) -> {[@stop_split] [@expl:work_add ensures] [%#slib'1] UInt64.t'int w.final.accesses
+    = UInt64.t'int w.current.accesses + UInt64.t'int k}
+    (! return {result}) ]

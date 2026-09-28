@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_epo_inv_list_empty_iff_no_ends": {
+        "prover": "alt-ergo",
+        "time": 0.031
+      }
+    }
+  }
+}

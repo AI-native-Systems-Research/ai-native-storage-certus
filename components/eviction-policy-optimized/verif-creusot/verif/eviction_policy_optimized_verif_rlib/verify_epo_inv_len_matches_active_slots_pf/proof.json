@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_epo_inv_len_matches_active_slots_pf": {
+        "prover": "alt-ergo",
+        "time": 0.033
+      },
+      "vc_wf_push_front": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

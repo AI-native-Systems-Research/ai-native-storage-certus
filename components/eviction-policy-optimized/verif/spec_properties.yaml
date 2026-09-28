@@ -1,0 +1,1050 @@
+# Verifiable-property extraction for eviction-policy-optimized (TinyLFU admission + O(1) LRU).
+# BLIND SPEC PASS. The only artifacts read were the three files in
+# specs/001-optimized-eviction-policy/ (spec.md, plan.md, tasks.md). No Rust source, no
+# interface crate, no sibling component, no prior verification artifact was opened.
+# One record per obligation, plus one ledger record per spec unit that is not machine-checkable.
+# Record count equals counts.total; the true-flag record count equals counts.verifiable.
+component:  eviction-policy-optimized
+source:     spec
+artifact:   "components/eviction-policy-optimized/specs/001-optimized-eviction-policy/ (spec.md primary; plan.md and tasks.md as siblings)"
+pin:        "spec.md created 2026-09-23, Status Backfilled; worktree cv-e2e-eviction-policy-optimized-20260925, read 2026-09-25"
+method:     blind-extraction
+generated:  2026-09-25
+counts: {total: 102, methods: 9, verifiable: 85, not_verifiable: 17}
+
+properties:
+
+  # ------------------------------------------------------------------
+  # create_pool()
+  # ------------------------------------------------------------------
+  - id:         EPO-CREATE-POOL-POST-UNIQUE-SEQUENTIAL
+    subject:    create_pool()
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every call to create_pool hands back a pool identifier that has never been handed back
+      before, and the identifiers are issued in order starting at zero, so the first pool created
+      is pool 0, the second is pool 1, and so on with no gaps and no repeats.
+    traces:     [FR-001]
+
+  - id:         EPO-CREATE-POOL-POST-FRESH-STATE
+    subject:    create_pool()
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A pool that has just been created is completely empty and has its own private bookkeeping:
+      it holds no entries, its access counter and its recorded largest-ever size are both zero,
+      and its frequency estimator reports an estimate of zero for every possible key.
+    traces:     [FR-001, KE-Pool, KE-CountMinSketch]
+
+  - id:         EPO-CREATE-POOL-FRAME-EXISTING-POOLS
+    subject:    create_pool()
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Creating a new pool changes nothing about pools that already exist: their entries, the order
+      those entries would be evicted in, their frequency estimates, and their counters are all
+      exactly as they were before the call.
+    traces:     [FR-001, US3, US3-AS1]
+
+  # ------------------------------------------------------------------
+  # track(pool, key, semantics)
+  # ------------------------------------------------------------------
+  - id:         EPO-TRACK-PRE-POOL-EXISTS
+    subject:    track(pool, key, semantics)
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      For track to succeed, the pool identifier passed in must be one that create_pool actually
+      handed out earlier; any other identifier is not a valid pool to track a key into.
+    traces:     [FR-002, FR-010]
+
+  - id:         EPO-TRACK-POST-HANDLE
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When track succeeds it returns a handle that stands for the entry it just created for that
+      key in that pool, and using that handle later to touch or remove an entry affects exactly
+      that entry and no other.
+    traces:     [FR-002, KE-EvictionHandle]
+
+  - id:         EPO-TRACK-POST-LEN-INCREMENT
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A successful track adds exactly one entry to the pool, so the pool's reported number of
+      entries afterwards is one more than it was before the call.
+    traces:     [FR-002, FR-008, US4-AS1]
+
+  - id:         EPO-TRACK-POST-SKETCH-INCREMENT
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every successful track raises the pool's frequency record for the tracked key by one, in each
+      of the estimator's four rows, except that a row counter already at its maximum value of 255
+      stays at 255 instead of wrapping around to a small number.
+    traces:     [FR-002, KE-CountMinSketch]
+
+  - id:         EPO-TRACK-POST-ACCESS-COUNT
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Each successful track increases the pool's running count of accesses by exactly one; this
+      counter is what the periodic ageing of the frequency estimator is scheduled against.
+    traces:     [FR-013, KE-Pool]
+
+  - id:         EPO-TRACK-POST-MAXLEN-HIGHWATER
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      On each track the pool updates its record of the largest size it has ever reached to be the
+      larger of the previous record and the pool's size at that moment, so the record is always at
+      least as big as the pool's current size.
+    traces:     [FR-013, IN-4]
+
+  - id:         EPO-TRACK-POST-AGING-TRIGGER
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Ageing happens on exactly the right tracks and no others: when the pool has ever held at
+      least one entry and the running access count is an exact multiple of ten times the pool's
+      largest-ever size, every counter in the frequency estimator is halved (each is shifted right
+      by one bit); on every other track the estimator's counters keep their values.
+    traces:     [FR-013, IN-3]
+
+  - id:         EPO-TRACK-POST-AGING-NO-DIVISION-BY-ZERO
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Tracking into a pool that has never held an entry must not attempt the remainder calculation
+      that schedules ageing, because that calculation would divide by zero and crash; the check for
+      a non-zero largest-ever size has to guard it.
+    traces:     [FR-013]
+
+  - id:         EPO-TRACK-POST-AGING-PERIOD-NO-OVERFLOW
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Working out the ageing period by multiplying the pool's largest-ever size by ten must never
+      overflow into a wrong or crashing result, no matter how large the pool has grown.
+    note:       >
+      Derived obligation, not stated in the spec. The spec guards the ageing arithmetic against a
+      zero divisor but says nothing about the multiplication overflowing; flagged as a spec gap.
+    traces:     [FR-013, IN-4]
+
+  - id:         EPO-TRACK-POST-ADMIT-EMPTY-POOL
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Tracking a key into a pool that currently holds no entries always places that key at the
+      protected, most-recently-used end, because there is no existing eviction victim to compare
+      its estimated popularity against.
+    traces:     [FR-011, US2-AS3]
+
+  - id:         EPO-TRACK-POST-ADMIT-MORE-FREQUENT
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When a key is tracked into a pool that already holds entries and the estimator says the new
+      key has been seen strictly more often than the entry currently first in line to be evicted,
+      the new key is placed at the protected, most-recently-used end, so it is not the next entry
+      to be evicted.
+    traces:     [FR-011, US2, US2-AS1]
+
+  - id:         EPO-TRACK-POST-ADMIT-NOT-MORE-FREQUENT
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When a key is tracked into a pool that already holds entries and the estimator says the new
+      key has been seen no more often than the entry currently first in line to be evicted (fewer
+      times or exactly the same number of times), the new key is placed at the least-recently-used
+      end and becomes the very next entry that will be evicted.
+    traces:     [FR-011, US2-AS2, IN-2]
+
+  - id:         EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION
+    subject:    track(pool, key, semantics)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Tracking a key that is already being tracked in the same pool does not refresh the existing
+      entry: it deliberately creates a second, separate entry for that key and returns a new
+      handle that differs from the one returned the first time, so the pool then holds two entries
+      for the same key.
+    traces:     [FR-002]
+
+  - id:         EPO-TRACK-FRAME-SEMANTICS-IGNORED
+    subject:    track(pool, key, semantics)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      The per-block hint argument passed to track has no effect at all on this policy: two tracks
+      that differ only in that hint leave the pool in exactly the same state, with the same entry
+      order and the same frequency estimates.
+    traces:     [FR-002, KE-BlockSemantics]
+
+  - id:         EPO-TRACK-FRAME-EXISTING-ENTRIES
+    subject:    track(pool, key, semantics)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      A successful track only inserts; it never drops an entry the pool already held, and the
+      entries that were already there keep their order relative to one another, whichever end the
+      new key was inserted at.
+    traces:     [FR-002, FR-011]
+
+  - id:         EPO-TRACK-FRAME-OTHER-POOLS
+    subject:    track(pool, key, semantics)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Tracking a key in one pool leaves every other pool untouched: no other pool's entries, entry
+      order, frequency estimates, or counters change.
+    traces:     [US3, US3-AS1, NFR-003]
+
+  - id:         EPO-TRACK-ERROR-INVALID-POOL
+    subject:    track(pool, key, semantics)
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Calling track with a pool identifier that was never created fails with the invalid-pool
+      error naming that identifier, rather than succeeding, panicking, or silently doing nothing.
+    traces:     [FR-010, KE-EvictionPolicyError]
+
+  - id:         EPO-TRACK-ERROR-FRAME-NO-MUTATION
+    subject:    track(pool, key, semantics)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      A track that fails because the pool does not exist changes nothing anywhere: no entry is
+      added to any pool, no frequency estimate is raised, and no access counter moves.
+    traces:     [FR-010]
+
+  # ------------------------------------------------------------------
+  # touch(handle)
+  # ------------------------------------------------------------------
+  - id:         EPO-TOUCH-PRE-POOL-EXISTS
+    subject:    touch(handle)
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      For touch to succeed, the pool that the handle refers to must be a pool that was actually
+      created; a handle naming a pool that does not exist cannot be touched successfully.
+    traces:     [FR-003, FR-010]
+
+  - id:         EPO-TOUCH-POST-MOVE-TO-MRU
+    subject:    touch(handle)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Touching a live entry moves it to the protected, most-recently-used end of its pool's order,
+      so it sits behind every other entry in the eviction queue.
+    traces:     [FR-003, US1-AS2]
+
+  - id:         EPO-TOUCH-POST-NOT-NEXT-VICTIM
+    subject:    touch(handle)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      After an entry is touched, asking the pool for the next entry to evict does not return that
+      touched entry, as long as the pool holds at least one other entry.
+    traces:     [US1-AS2, FR-003, FR-006]
+
+  - id:         EPO-TOUCH-FRAME-SKETCH-UNCHANGED
+    subject:    touch(handle)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Touching an entry does not change the pool's frequency estimates at all; only tracking a key
+      raises how often the policy thinks that key has been seen.
+    traces:     [FR-003]
+
+  - id:         EPO-TOUCH-FRAME-MEMBERSHIP
+    subject:    touch(handle)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Touching neither adds nor removes entries: the pool holds exactly the same entries and the
+      same number of entries before and after the call.
+    traces:     [FR-003, FR-008]
+
+  - id:         EPO-TOUCH-FRAME-RELATIVE-ORDER-OTHERS
+    subject:    touch(handle)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Apart from moving the touched entry to the protected end, touch leaves the other entries in
+      the same order relative to one another as they were before.
+    traces:     [FR-003, US1-AS2]
+
+  - id:         EPO-TOUCH-POST-IDEMPOTENT-REMOVED-HANDLE
+    subject:    touch(handle)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Touching a handle whose entry has already been removed, or already evicted, quietly succeeds
+      and changes nothing: it does not crash, does not resurrect the entry, and does not disturb
+      any other entry's position.
+    traces:     [FR-012]
+
+  - id:         EPO-TOUCH-ERROR-INVALID-POOL
+    subject:    touch(handle)
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Touching a handle that names a pool which was never created fails with the invalid-pool
+      error and leaves every pool unchanged.
+    traces:     [FR-010, KE-EvictionPolicyError]
+
+  # ------------------------------------------------------------------
+  # batch_touch(handles)
+  # ------------------------------------------------------------------
+  - id:         EPO-BATCH-TOUCH-PRE-POOLS-EXIST
+    subject:    batch_touch(handles)
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      For a batch touch to succeed, every handle in the batch must name a pool that was actually
+      created.
+    traces:     [FR-004, FR-010]
+
+  - id:         EPO-BATCH-TOUCH-POST-EQUIVALENT-TO-SEQUENTIAL
+    subject:    batch_touch(handles)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Touching a list of handles in one batch leaves the pools in exactly the state they would be
+      in had each handle been touched one at a time in the order given, so the last handle in the
+      batch ends up as the most protected entry of its pool.
+    traces:     [FR-004, FR-003]
+
+  - id:         EPO-BATCH-TOUCH-POST-EMPTY-NOOP
+    subject:    batch_touch(handles)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A batch touch with an empty list of handles succeeds and does nothing at all.
+    traces:     [FR-004]
+
+  - id:         EPO-BATCH-TOUCH-FRAME-MEMBERSHIP-AND-SKETCH
+    subject:    batch_touch(handles)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      A batch touch never adds or removes entries and never changes any frequency estimate; it
+      only reorders the entries it was given.
+    traces:     [FR-004, FR-003, FR-008]
+
+  - id:         EPO-BATCH-TOUCH-POST-IDEMPOTENT-REMOVED-HANDLES
+    subject:    batch_touch(handles)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A batch that contains handles for entries already removed or evicted still succeeds: the
+      stale handles are skipped without crashing, and the remaining live handles are still moved
+      to the protected end.
+    traces:     [FR-012, FR-004]
+
+  - id:         EPO-BATCH-TOUCH-ERROR-INVALID-POOL
+    subject:    batch_touch(handles)
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If any handle in the batch names a pool that was never created, the batch touch fails with
+      the invalid-pool error naming that pool.
+    traces:     [FR-010, FR-004]
+
+  # ------------------------------------------------------------------
+  # remove(handle)
+  # ------------------------------------------------------------------
+  - id:         EPO-REMOVE-PRE-POOL-EXISTS
+    subject:    remove(handle)
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      For remove to succeed, the pool that the handle refers to must be a pool that was actually
+      created.
+    traces:     [FR-005, FR-010]
+
+  - id:         EPO-REMOVE-POST-UNLINK
+    subject:    remove(handle)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Removing a live entry takes it out of the pool's eviction order, so it is no longer one of
+      the pool's entries and no longer appears among the pool's eviction candidates.
+    traces:     [FR-005, US1-AS3]
+
+  - id:         EPO-REMOVE-POST-LEN-DECREMENT
+    subject:    remove(handle)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Removing a live entry reduces the pool's reported number of entries by exactly one.
+    traces:     [FR-005, FR-008]
+
+  - id:         EPO-REMOVE-POST-NEVER-EVICTED
+    subject:    remove(handle)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Once an entry has been removed, no later request for the next entry to evict ever returns
+      that removed entry again.
+    traces:     [US1-AS3, FR-005, FR-006]
+
+  - id:         EPO-REMOVE-POST-IDEMPOTENT-REMOVED-HANDLE
+    subject:    remove(handle)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Removing a handle whose entry is already gone quietly succeeds and changes nothing: it does
+      not crash, does not reduce the pool's entry count a second time, and does not disturb any
+      other entry.
+    traces:     [FR-012]
+
+  - id:         EPO-REMOVE-FRAME-SKETCH-UNCHANGED
+    subject:    remove(handle)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Removing an entry does not change the pool's frequency estimates or its counters; the policy
+      keeps remembering how often that key was seen.
+    traces:     [FR-005, FR-009, KE-CountMinSketch]
+
+  - id:         EPO-REMOVE-FRAME-RELATIVE-ORDER-OTHERS
+    subject:    remove(handle)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Removing one entry leaves all the remaining entries in the same order relative to one
+      another, whether the removed entry was at the front, in the middle, or at the back.
+    traces:     [FR-005, KE-LruList]
+
+  - id:         EPO-REMOVE-ERROR-INVALID-POOL
+    subject:    remove(handle)
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Removing with a handle that names a pool which was never created fails with the invalid-pool
+      error and leaves every pool unchanged.
+    traces:     [FR-010, KE-EvictionPolicyError]
+
+  # ------------------------------------------------------------------
+  # identify_next_to_evict(pool)
+  # ------------------------------------------------------------------
+  - id:         EPO-EVICT-POST-RETURNS-LRU-HEAD
+    subject:    identify_next_to_evict(pool)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Asking a non-empty pool for its next victim returns the key sitting at the
+      least-recently-used front of that pool's order, which is the entry the policy has chosen to
+      be evicted first.
+    traces:     [FR-006, KE-LruList]
+
+  - id:         EPO-EVICT-POST-REMOVES-RETURNED
+    subject:    identify_next_to_evict(pool)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The victim that this call returns is at the same time taken out of the pool, so the pool
+      holds one fewer entry afterwards and the same entry is not offered again.
+    traces:     [FR-006, FR-008]
+
+  - id:         EPO-EVICT-POST-EMPTY-POOL-NONE
+    subject:    identify_next_to_evict(pool)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Asking an existing but empty pool for its next victim returns nothing, and leaves the pool
+      exactly as it was.
+    traces:     [FR-006]
+
+  - id:         EPO-EVICT-POST-ORDER-FIRST-TIME-KEYS
+    subject:    identify_next_to_evict(pool)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      If several keys the policy has never seen before are tracked one after another into a fresh
+      pool, then repeatedly asking for the next victim gives them back in reverse order of
+      tracking, most recently tracked first, because every one of them looks exactly as cold as
+      the entry already at the front.
+    traces:     [US1, US1-AS1, FR-011, IN-2]
+
+  - id:         EPO-EVICT-FRAME-SKETCH-AND-COUNTERS
+    subject:    identify_next_to_evict(pool)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Evicting an entry does not change the pool's frequency estimates, its running access count,
+      or its record of the largest size it has reached.
+    traces:     [FR-006, FR-013, KE-Pool]
+
+  - id:         EPO-EVICT-FRAME-OTHER-POOLS
+    subject:    identify_next_to_evict(pool)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Taking a victim out of one pool leaves every other pool's entries and frequency estimates
+      completely unchanged.
+    traces:     [US3-AS1, US3]
+
+  - id:         EPO-EVICT-DEGRADE-INVALID-POOL
+    subject:    identify_next_to_evict(pool)
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for a victim from a pool identifier that was never created returns nothing rather
+      than reporting an error or crashing.
+    traces:     [FR-006, FR-010]
+
+  # ------------------------------------------------------------------
+  # get_eviction_candidates(pool, n)
+  # ------------------------------------------------------------------
+  - id:         EPO-CANDIDATES-POST-ORDERED-PREFIX
+    subject:    get_eviction_candidates(pool, n)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Asking for the next few eviction candidates returns the keys nearest the
+      least-recently-used front of the pool, listed in the order they would be evicted in, starting
+      with the one that would go first.
+    traces:     [FR-007, KE-LruList]
+
+  - id:         EPO-CANDIDATES-POST-COUNT-BOUND
+    subject:    get_eviction_candidates(pool, n)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The list of candidates returned never contains more keys than were asked for and never more
+      keys than the pool actually holds; asking for zero candidates returns an empty list.
+    traces:     [FR-007]
+
+  - id:         EPO-CANDIDATES-FRAME-NON-DESTRUCTIVE
+    subject:    get_eviction_candidates(pool, n)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Looking at the eviction candidates changes nothing: the pool still holds the same entries in
+      the same order, with the same frequency estimates and counters, after the call.
+    traces:     [FR-007]
+
+  - id:         EPO-CANDIDATES-POST-AGREES-WITH-EVICT
+    subject:    get_eviction_candidates(pool, n)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The candidates reported are exactly the keys that the same number of successive
+      next-victim requests would have returned, so peeking and actually evicting agree with each
+      other.
+    traces:     [FR-006, FR-007]
+
+  - id:         EPO-CANDIDATES-DEGRADE-INVALID-POOL
+    subject:    get_eviction_candidates(pool, n)
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for eviction candidates from a pool identifier that was never created returns an
+      empty list rather than reporting an error or crashing.
+    traces:     [FR-007, FR-010]
+
+  # ------------------------------------------------------------------
+  # len(pool)
+  # ------------------------------------------------------------------
+  - id:         EPO-LEN-POST-ACTIVE-COUNT
+    subject:    len(pool)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      The size reported for a pool is exactly the number of entries currently being tracked in it,
+      counting every entry that has been tracked and not yet removed, evicted, or cleared.
+    traces:     [FR-008]
+
+  - id:         EPO-LEN-FRAME-PURE
+    subject:    len(pool)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking for a pool's size does not change anything about the pool or about any other pool.
+    traces:     [FR-008]
+
+  - id:         EPO-LEN-DEGRADE-INVALID-POOL
+    subject:    len(pool)
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for the size of a pool identifier that was never created reports zero rather than
+      reporting an error or crashing.
+    traces:     [FR-008, FR-010]
+
+  # ------------------------------------------------------------------
+  # clear_pool(pool)
+  # ------------------------------------------------------------------
+  - id:         EPO-CLEAR-POST-EMPTY
+    subject:    clear_pool(pool)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Clearing a pool drops all of its entries at once, so afterwards its reported size is zero,
+      it offers no eviction candidates, and asking for its next victim returns nothing.
+    traces:     [FR-009, FR-006, FR-008]
+
+  - id:         EPO-CLEAR-FRAME-PRESERVES-SKETCH-AND-COUNTERS
+    subject:    clear_pool(pool)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Clearing a pool deliberately keeps everything the policy has learned about how often keys
+      were seen: the frequency estimates, the running access count, and the record of the largest
+      size the pool ever reached all survive the clear unchanged.
+    traces:     [FR-009, IN-5]
+
+  - id:         EPO-CLEAR-POST-RETRACK-ADMITTED-AT-MRU
+    subject:    clear_pool(pool)
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A cleared pool is immediately usable again, and because it is empty the very next key
+      tracked into it is admitted at the protected end no matter how often that key was seen
+      before the clear.
+    traces:     [FR-009, FR-011, US2-AS3]
+
+  - id:         EPO-CLEAR-FRAME-OTHER-POOLS
+    subject:    clear_pool(pool)
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Clearing one pool leaves every other pool's entries, order, and frequency estimates
+      untouched.
+    traces:     [FR-009, US3, US3-AS1]
+
+  - id:         EPO-CLEAR-DEGRADE-INVALID-POOL
+    subject:    clear_pool(pool)
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Clearing a pool identifier that was never created quietly does nothing rather than reporting
+      an error or crashing.
+    traces:     [FR-009, FR-010]
+
+  # ------------------------------------------------------------------
+  # Global invariants
+  # ------------------------------------------------------------------
+  - id:         EPO-INV-POOL-IDS-UNIQUE-SEQUENTIAL
+    subject:    "Global invariant: pool identifiers form a gapless sequence from zero"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      At any moment the pools that exist are exactly those numbered zero up to one less than the
+      number of pools ever created, so no identifier is reused and no identifier in that range is
+      missing.
+    traces:     [FR-001, KE-PoolId]
+
+  - id:         EPO-INV-POOL-ISOLATION
+    subject:    "Global invariant: pools are independent eviction domains"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Each pool keeps its own entries, its own ordering, its own frequency estimator, and its own
+      counters, so no operation on one pool can change what any other pool contains, what it would
+      evict next, or what it believes about key popularity.
+    traces:     [US3, US3-AS1, FR-001, NFR-003]
+
+  - id:         EPO-INV-LEN-MATCHES-ACTIVE-ENTRIES
+    subject:    "Global invariant: reported size equals the number of live entries"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A pool's reported size always equals the number of entries actually linked into its eviction
+      order, so the count can never drift away from the real contents after any mixture of
+      tracking, touching, removing, evicting, and clearing.
+    traces:     [FR-008, FR-005, FR-009, KE-LruList]
+
+  - id:         EPO-INV-LIST-WELL-FORMED
+    subject:    "Global invariant: the eviction order is a well-formed chain"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A pool's entries always form one unbroken chain from the front (first to be evicted) to the
+      back (protected): following the forward links from the front reaches the back and visits
+      every entry exactly once, the backward links mirror the forward ones, and an empty pool has
+      neither front nor back.
+    traces:     [KE-LruList, NFR-002, US4-AS1]
+
+  - id:         EPO-INV-VICTIM-IS-LIST-FRONT
+    subject:    "Global invariant: the victim is always the front of the order"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Whatever sequence of operations has happened, the entry the policy would evict next is
+      always the one at the least-recently-used front of the pool's chain, and that is the same
+      entry whose estimated popularity a newly tracked key is compared against.
+    traces:     [FR-006, FR-011, KE-LruList]
+
+  - id:         EPO-INV-SLOT-OWNERSHIP-DISJOINT
+    subject:    "Global invariant: each internal slot is either in use or free, never both"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The internal storage slots that hold entries are partitioned at all times: a slot is either
+      part of the live eviction chain or on the list of recycled free slots, never on both and
+      never on neither, so a freed slot cannot be handed out twice.
+    traces:     [KE-LruList, FR-005]
+
+  - id:         EPO-INV-HANDLE-POOL-SCOPED
+    subject:    "Global invariant: a handle is only ever interpreted inside its own pool"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Because a handle carries the pool it belongs to along with the position inside that pool, an
+      operation performed with a handle can only ever affect an entry in that same pool, and never
+      an entry that happens to sit at the same position in a different pool.
+    traces:     [KE-EvictionHandle, FR-002, US3]
+
+  - id:         EPO-INV-STALE-HANDLE-NO-CROSS-ENTRY-EFFECT
+    subject:    "Global invariant: a stale handle must not act on a different entry that reused its slot"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      After an entry has been removed and its internal slot has been recycled for a different key,
+      using the old handle from the removed entry must not move or remove that different key's
+      entry.
+    note:       >
+      Derived obligation, not stated in the spec, and the spec's own description makes it doubtful.
+      The spec says stale handles are made harmless by a per-entry live flag and that freed slots
+      are recycled, but a recycled slot is live again, so an old handle pointing at it would appear
+      valid. Flagged as a genuine spec gap for the code pass to settle.
+    traces:     [FR-012, KE-EvictionHandle, KE-LruList]
+
+  - id:         EPO-INV-INVALID-HANDLE-NEVER-RETURNED
+    subject:    "Global invariant: the invalid-handle error is never produced"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      No operation of this policy ever returns the invalid-handle error, even though that error
+      exists in the shared interface, because stale handles are handled silently instead of being
+      reported.
+    traces:     [FR-012, KE-EvictionPolicyError]
+
+  - id:         EPO-INV-MAXLEN-MONOTONE-UPPER-BOUND
+    subject:    "Global invariant: the largest-ever-size record only grows and is never exceeded"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A pool's record of the largest size it has ever reached never goes down, not even when
+      entries are removed, evicted, or the whole pool is cleared, and it is always at least as
+      large as the pool's current size.
+    traces:     [FR-013, IN-4, FR-009]
+
+  - id:         EPO-INV-ACCESS-COUNT-MONOTONE
+    subject:    "Global invariant: the running access count only grows"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A pool's running count of accesses only ever increases, by exactly one per successful track,
+      and no other operation, including clearing the pool, ever lowers or resets it.
+    traces:     [FR-013, FR-009, KE-Pool]
+
+  - id:         EPO-INV-AGING-PERIOD-NON-DECREASING
+    subject:    "Global invariant: the ageing interval never shortens"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Because the ageing interval is ten times the pool's largest-ever size and that record never
+      shrinks, the gap between two successive ageing events never gets shorter over a pool's
+      lifetime; it can only stay the same or grow.
+    traces:     [FR-013, IN-4]
+
+  - id:         EPO-INV-SKETCH-COUNTERS-SATURATE
+    subject:    "Global invariant: frequency counters saturate instead of wrapping"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every counter in a pool's frequency estimator always holds a value between zero and its
+      maximum of 255, and a counter already at the maximum stays there when incremented rather
+      than wrapping round to zero and making a hot key look cold.
+    traces:     [KE-CountMinSketch, NFR-004]
+
+  - id:         EPO-INV-SKETCH-ESTIMATE-IS-ROW-MINIMUM
+    subject:    "Global invariant: an estimate is the smallest of the rows' counters"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The popularity estimate reported for a key is always the smallest of the four row counters
+      that key maps to, which is what limits how much accidental sharing of counters between
+      different keys can inflate an estimate.
+    traces:     [KE-CountMinSketch]
+
+  - id:         EPO-INV-SKETCH-BUCKET-IN-RANGE
+    subject:    "Global invariant: every hashed counter position is inside the fixed table"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every possible key and every one of the four rows, the counter position computed for it
+      falls inside the fixed table of 1024 columns, so no key can ever read or write outside the
+      estimator's storage and the storage never has to grow with the number of keys.
+    traces:     [KE-CountMinSketch, NFR-004]
+
+  - id:         EPO-INV-SKETCH-HALVE-NON-INCREASING
+    subject:    "Global invariant: ageing never raises an estimate"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Halving the frequency estimator during ageing never makes any counter larger, so no key's
+      popularity estimate can go up as a result of ageing.
+    traces:     [FR-013, KE-CountMinSketch]
+
+  - id:         EPO-INV-SKETCH-ROW-HASHES-DISTINCT
+    subject:    "Global invariant: the four estimator rows use four different hash multipliers"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The four rows of the frequency estimator each use a different odd multiplier to pick their
+      counter position, so the rows are genuinely independent views of a key rather than four
+      identical copies of the same counter.
+    note:       >
+      This is a check over the fixed multiplier constants together with the position calculation;
+      it is decidable but it is a weak obligation compared with the behavioural rows.
+    traces:     [KE-CountMinSketch]
+
+  - id:         EPO-INV-SKETCH-OPS-BOUNDED-BY-FIXED-SIZE
+    subject:    "Global invariant: frequency-estimator work is bounded by the fixed table size"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Raising a key's count and reading its estimate each touch exactly four counters, and ageing
+      touches the whole fixed table once, so the amount of work never depends on how many keys are
+      tracked or how large the pool has grown.
+    traces:     [NFR-001, NFR-004, KE-CountMinSketch]
+
+  - id:         EPO-INV-ADMISSION-DECIDED-ONLY-BY-VICTIM-COMPARISON
+    subject:    "Global invariant: admission depends only on the comparison with the current victim"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Which end a newly tracked key is inserted at is decided solely by whether its estimated
+      popularity is greater than the current victim's; there is no fixed popularity threshold, so a
+      very hot key still enters at the eviction end if the victim looks just as hot, and a barely
+      warm key is protected if the victim looks colder still.
+    traces:     [FR-011, IN-1, IN-2, US2]
+
+  - id:         EPO-INV-NO-DATA-CORRUPTION-UNDER-CONCURRENCY
+    subject:    "Global invariant: concurrent use cannot corrupt the policy's state"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      When several threads track, touch, remove, and evict at the same time, every one of the
+      policy's structural guarantees still holds afterwards: the eviction chain stays unbroken, the
+      reported size matches the real contents, slots are never double-used, and no operation reads
+      a half-updated state.
+    traces:     [NFR-002, US4, US4-AS1]
+
+  - id:         EPO-INV-CONCURRENT-TRACK-TOTAL-COUNT
+    subject:    "Global invariant: concurrent tracks all land exactly once"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      If several threads together perform a known total number of successful tracks into the same
+      pool, the pool afterwards holds exactly that many entries: no track is lost and none is
+      counted twice.
+    traces:     [US4-AS1, SC-002, NFR-002]
+
+  - id:         EPO-INV-NO-STARTUP-BANNER
+    subject:    "Global invariant: bringing the component up logs no banner"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Starting this component up produces no banner or announcement log message, unlike components
+      that print a line about themselves when they initialise.
+    traces:     [IN-6]
+
+  # ------------------------------------------------------------------
+  # Not-verifiable ledger — every remaining unit of the three spec files
+  # ------------------------------------------------------------------
+  - id:         NV-1
+    scope:      "NFR-001 and the plan's operation and complexity table: single-entry operations MUST be O(1), candidate peek O(n)"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      An asymptotic cost claim is a statement about how running time grows, not a statement about
+      a single behaviour that a checker can find a counterexample to. The part of this claim that
+      can be checked, namely that the frequency-estimator work is bounded by a fixed table size
+      and does not grow with the pool, is captured as a separate property.
+    traces:     [NFR-001, PLAN-complexity-table]
+
+  - id:         NV-2
+    scope:      "NFR-003: per-pool locking granularity, operations on different pools MUST NOT contend"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Freedom from lock contention is a performance characteristic of how the component is locked
+      internally, not an observable result any single run can contradict. The behavioural
+      consequence that matters, namely that pools cannot influence one another, is captured as the
+      pool-independence property.
+    traces:     [NFR-003, PLAN-concurrency-model]
+
+  - id:         NV-3
+    scope:      "FR-004: batch_touch acquires each pool's lock once across a run of handles for the same pool to amortize lock overhead"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      How many times an internal lock is taken is an efficiency detail that leaves no trace in the
+      component's observable state, so no outcome can disprove it. The observable half of the
+      requirement, that a batch behaves like the equivalent sequence of individual touches, is
+      captured as a property.
+    traces:     [FR-004, PLAN-complexity-table]
+
+  - id:         NV-4
+    scope:      "NFR-005: conformance to the Certus component model, providing the eviction-policy interface with a single logger receptacle"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a structural and compile-time fact about how the component is declared and wired,
+      not a runtime behaviour with possible counterexamples; it is settled by the code building and
+      the component loading, not by a verifier.
+    traces:     [NFR-005, PLAN-component-layer]
+
+  - id:         NV-5
+    scope:      "Implementation note: the only logging is a debug message on pool creation and a warning on an invalid-pool track, touch, or remove"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Emitting a log line is a side effect on an external sink rather than part of the policy's
+      own state, and the spec attaches no behaviour to whether the line appears. The one negative
+      logging claim that is checkable, that starting up prints no banner, is kept as a property.
+    traces:     [IN-6]
+
+  - id:         NV-6
+    scope:      "SC-001: all tests in the crate pass"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a statement about the project's own test suite passing, which is a development
+      process outcome rather than a property of the component's behaviour.
+    traces:     [SC-001]
+
+  - id:         NV-7
+    scope:      "SC-003: the linter with warnings denied and the formatter check both pass cleanly"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Lint and formatting cleanliness are properties of the source text and its style, with no
+      bearing on what the component does at run time.
+    traces:     [SC-003]
+
+  - id:         NV-8
+    scope:      "SC-004: the component builds and wires into the full-optimized server profile and is selectable in place of the plain LRU policy with no other wiring changes"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is a build and deployment outcome spanning the server binary and its configuration
+      profiles, outside this component's own behaviour and not decidable by reasoning about it
+      alone.
+    traces:     [SC-004]
+
+  - id:         NV-9
+    scope:      "FR-002: consumers enforce an already-exists guard upstream and MUST NOT track a key that is still tracked in the pool"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      This is an obligation placed on the callers of the component rather than on the component
+      itself, so nothing the component does can violate it. What the component does when a caller
+      breaks the rule is captured separately as the deliberate non-idempotent re-registration
+      behaviour.
+    traces:     [FR-002]
+
+  - id:         NV-10
+    scope:      "Key Entities type and representation facts: the cache key is a 64-bit number, the pool identifier a 32-bit number, the handle is opaque and embeds pool and position, the per-block hint is passed by value"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These are declarations about the shapes and widths of data types, which the compiler already
+      guarantees and for which no misbehaving run can exist. Wherever such a fact does drive
+      behaviour, for example that a handle carries its pool, that behaviour is captured as its own
+      property.
+    traces:     [KE-CacheKey, KE-PoolId, KE-EvictionHandle, KE-BlockSemantics]
+
+  - id:         NV-11
+    scope:      "NFR-004 memory footprint claim: a fixed four-by-1024 array of single-byte counters per pool, independent of the number of tracked keys"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The size and layout of a fixed array is a static fact about the data structure rather than a
+      behaviour that can be contradicted at run time. Its behavioural consequences, that every
+      hashed position lands inside the fixed table and that estimator work does not grow with the
+      number of keys, are captured as properties.
+    traces:     [NFR-004, KE-CountMinSketch]
+
+  - id:         NV-12
+    scope:      "Implementation note: the ageing period of ten times the largest-ever pool size is a hard-coded constant of the current tuning and not yet configurable"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The absence of a configuration knob is a statement about what the component's surface does
+      not offer, and whether a particular tuning constant is the right one is a judgement call, so
+      neither can be settled by a checker. The rule the constant produces is captured as the
+      ageing-trigger property.
+    traces:     [IN-3, FR-013]
+
+  - id:         NV-13
+    scope:      "Backfill notice, the Backfilled document status, and the review checklist in tasks.md"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These are notes about the document itself, warning that it records what the code currently
+      does rather than what was intended, plus a list of open review questions for people to
+      settle. They describe no component behaviour, so there is nothing to check.
+    traces:     [BACKFILL-NOTICE, TASKS-review-checklist]
+
+  - id:         NV-14
+    scope:      "Future Considerations: making the ageing period configurable, adding an absolute admission threshold, adding direct admission-gate tests, revisiting whether clearing a pool should reset the estimator, and adding a doorkeeper filter"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These are proposals for work that has not been done, so they state no obligation the present
+      component could fail to meet.
+    traces:     [PLAN-future-considerations, TASKS-review-checklist]
+
+  - id:         NV-15
+    scope:      "Overview and Dependencies: this component is a drop-in alternative to the plain LRU policy, interchangeable at the same interface and selected by the full-optimized profile, and its consumers use sixteen pools and one pool respectively"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Interchangeability is a claim about two components and the system that wires them together,
+      and the pool counts describe how other components choose to use this one; neither is a
+      property of this component's own behaviour that could be checked in isolation.
+    traces:     [OVERVIEW, DEPENDENCIES]
+
+  - id:         NV-16
+    scope:      "The fidelity of the popularity estimate that the admission decision in FR-011 and User Story 2 rests on"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      How close the estimated popularity is to how often a key was really seen is a statistical
+      question about hash collisions, and the spec states no accuracy guarantee at all. Two
+      documented mechanisms also work against the usual guarantee that such an estimate is never
+      too low, namely periodic halving and counters that stop at 255, so there is no stated bound
+      to check. The structural facts that are checkable, the minimum over rows, saturation, and
+      non-increasing ageing, are captured as properties.
+    traces:     [FR-011, US2, KE-CountMinSketch, IN-2]
+
+  - id:         NV-17
+    scope:      "Plan document architecture diagrams, data-structure sketches, concurrency model description, and the five key design decisions"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      These sections explain the internal shape of the component and the reasoning behind the
+      choices made, which is background rather than promised behaviour; every behavioural claim
+      they contain, above all the admission flow and the ageing rule, is already captured as its
+      own property.
+    traces:     [PLAN-architecture, PLAN-design-decisions, PLAN-testing]

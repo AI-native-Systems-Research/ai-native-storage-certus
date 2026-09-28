@@ -1,0 +1,77 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4180 0 4180 88 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4183 19 4183 29
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4177 11 4177 29
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4178 11 4178 20
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4179 10 4179 28
+let%span svec = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Log = { lines: UInt64.t }
+
+predicate resolve_refmut_Log [@inline:trivial] (_1: MutBorrow.t t_Log) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Log
+
+type t_Vec_Pool_Global
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Vec_u32_Global
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+type t_Vec_u8_Global
+
+type t_Sketch = { counters: t_Vec_u8_Global }
+
+type t_Pool = { lru: t_LruList; sketch: t_Sketch; access_count: UInt64.t; max_len: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Pool_Global (self: t_Vec_Pool_Global) : Seq.seq t_Pool
+
+axiom view_Vec_Pool_Global_spec:
+  forall self: t_Vec_Pool_Global [view_Vec_Pool_Global self]. [%#svec'0] Seq.length (view_Vec_Pool_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_Pool (return (x: t_Vec_Pool_Global)) = any
+  [ return (result: t_Vec_Pool_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_Pool_Global result) = 0}
+    (! return {result}) ]
+
+type t_Pools = { pools: t_Vec_Pool_Global }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_epo_inv_no_startup_banner__mutant [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 4180 0 4180 88]
+  (log: MutBorrow.t t_Log) (connected: bool) (return (x: t_Pools)) =
+{[@stop_split] [@expl:verify_epo_inv_no_startup_banner__mutant requires] ([@stop_split] [@expl:verify_epo_inv_no_startup_banner__mutant requires #0] [%#slib'0] UInt64.t'int log.current.lines
+    = 0)
+  /\ ([@stop_split] [@expl:verify_epo_inv_no_startup_banner__mutant requires #1] [%#slib'1] connected)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = -{resolve_refmut_Log log}- s1
+    | s1 = new_Pool [%#slib] (fun (_x: t_Vec_Pool_Global) -> [ &_9 <- _x ] s2)
+    | s2 = [ &_ret <- { pools = _9 } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Pools = Any.any_l () | & log: MutBorrow.t t_Log = log | & _9: t_Vec_Pool_Global = Any.any_l () ])
+  [ return (result: t_Pools) ->
+  {[@stop_split] [@expl:verify_epo_inv_no_startup_banner__mutant ensures] [%#slib'2] UInt64.t'int log.final.lines = 1}
+    (! return {result}) ]

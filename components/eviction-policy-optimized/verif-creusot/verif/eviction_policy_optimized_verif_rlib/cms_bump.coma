@@ -1,0 +1,49 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 478 0 478 32 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 479 25 479 26
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 479 4 479 27
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 474 10 474 48
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 475 10 475 42
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 476 10 476 27
+let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 477 10 477 24
+let%span snum = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/num.rs" 325 20 326 51
+let%span snum'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/num.rs" 329 26 329 83
+let%span snum'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/num.rs" 330 26 330 83
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+constant const_MIN: UInt8.t = (0: UInt8.t)
+
+constant const_MAX: UInt8.t = (255: UInt8.t)
+
+let saturating_add (self_: UInt8.t) (rhs: UInt8.t) (return (x: UInt8.t)) = any
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:saturating_add ensures] ([@stop_split] [@expl:saturating_add ensures #0] [%#snum] UInt8.t'int self_
+            + UInt8.t'int rhs
+          >= UInt8.t'int const_MIN
+        /\ UInt8.t'int self_ + UInt8.t'int rhs <= UInt8.t'int const_MAX
+      -> UInt8.t'int result = UInt8.t'int self_ + UInt8.t'int rhs)
+    /\ ([@stop_split] [@expl:saturating_add ensures #1] [%#snum'0] UInt8.t'int self_ + UInt8.t'int rhs
+        < UInt8.t'int const_MIN -> UInt8.t'int result = UInt8.t'int const_MIN)
+    /\ ([@stop_split] [@expl:saturating_add ensures #2] [%#snum'1] UInt8.t'int self_ + UInt8.t'int rhs
+      > UInt8.t'int const_MAX -> UInt8.t'int result = UInt8.t'int const_MAX)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let cms_bump [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 478 0 478 32]
+  (self_: UInt8.t) (return (x: UInt8.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = saturating_add [%#slib'0] {self_} {[%#slib] (1: UInt8.t)} (fun (_x: UInt8.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: UInt8.t = Any.any_l () | & self_: UInt8.t = self_ ])
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:cms_bump ensures] ([@stop_split] [@expl:cms_bump ensures #0] [%#slib'1] UInt8.t'int self_ < 255
+      -> UInt8.t'int result = UInt8.t'int self_ + 1)
+    /\ ([@stop_split] [@expl:cms_bump ensures #1] [%#slib'2] UInt8.t'int self_ = 255 -> UInt8.t'int result = 255)
+    /\ ([@stop_split] [@expl:cms_bump ensures #2] [%#slib'3] UInt8.t'int result >= UInt8.t'int self_)
+    /\ ([@stop_split] [@expl:cms_bump ensures #3] [%#slib'4] UInt8.t'int result <= 255)}
+    (! return {result}) ]

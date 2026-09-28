@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_lock_acquire": { "prover": "alt-ergo", "time": 0.023 } }
+  }
+}

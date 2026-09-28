@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_epo_inv_list_acyclic_and_length": {
+        "prover": "alt-ergo",
+        "time": 0.031
+      }
+    }
+  }
+}

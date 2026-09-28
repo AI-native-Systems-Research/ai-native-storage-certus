@@ -1,0 +1,27 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lock_acquire": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_lock_release": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_epo_inv_at_most_one_pool_lock__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.04 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.032 }, null ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,77 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3927 0 3927 113 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3930 4 3930 26
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3923 11 3923 38
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3924 11 3924 20
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3925 11 3925 34
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3926 10 3926 21
+let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 975 10 975 54
+let%span slib'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 976 10 976 82
+let%span svec = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Pool_Global
+
+type t_Pools = { pools: t_Vec_Pool_Global }
+
+type t_Vec_Node_Global
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Vec_u32_Global
+
+type t_LruList = {
+  nodes: t_Vec_Node_Global;
+  head: t_Option_u32;
+  tail: t_Option_u32;
+  free: t_Vec_u32_Global;
+  len: UInt64.t }
+
+type t_Vec_u8_Global
+
+type t_Sketch = { counters: t_Vec_u8_Global }
+
+type t_Pool = { lru: t_LruList; sketch: t_Sketch; access_count: UInt64.t; max_len: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Pool_Global (self: t_Vec_Pool_Global) : Seq.seq t_Pool
+
+axiom view_Vec_Pool_Global_spec:
+  forall self: t_Vec_Pool_Global [view_Vec_Pool_Global self]. [%#svec] Seq.length (view_Vec_Pool_Global self)
+    <= UInt64.t'int const_MAX
+
+let state_len (self_: t_Pools) (pool: UInt32.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:state_len ensures] ([@stop_split] [@expl:state_len ensures #0] [%#slib'4] UInt32.t'int pool
+        >= Seq.length (view_Vec_Pool_Global self_.pools) -> UInt64.t'int result = 0)
+    /\ ([@stop_split] [@expl:state_len ensures #1] [%#slib'5] UInt32.t'int pool
+      < Seq.length (view_Vec_Pool_Global self_.pools)
+    -> UInt64.t'int result = UInt64.t'int (Seq.get (view_Vec_Pool_Global self_.pools) (UInt32.t'int pool)).lru.len)}
+    (! return {result}) ]
+
+type t_Log = { lines: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_epo_len_degrade_invalid_pool__mutant [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 3927 0 3927 113]
+  (self_: t_Pools) (log: t_Log) (connected: bool) (pool: UInt32.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_epo_len_degrade_invalid_pool__mutant requires] ([@stop_split] [@expl:verify_epo_len_degrade_invalid_pool__mutant requires #0] [%#slib'0] UInt32.t'int pool
+    >= Seq.length (view_Vec_Pool_Global self_.pools))
+  /\ ([@stop_split] [@expl:verify_epo_len_degrade_invalid_pool__mutant requires #1] [%#slib'1] connected)
+  /\ ([@stop_split] [@expl:verify_epo_len_degrade_invalid_pool__mutant requires #2] [%#slib'2] UInt64.t'int log.lines
+  < 4294967295)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = state_len [%#slib] {self_} {pool} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & self_: t_Pools = self_ | & pool: UInt32.t = pool ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_epo_len_degrade_invalid_pool__mutant ensures] [%#slib'3] UInt64.t'int result > 0}
+    (! return {result}) ]

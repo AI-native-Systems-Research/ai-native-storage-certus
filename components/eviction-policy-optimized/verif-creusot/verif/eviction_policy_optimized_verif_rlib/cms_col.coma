@@ -1,0 +1,36 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 452 0 452 45 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 453 5 453 28
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 453 32 453 34
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 453 4 453 35
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 451 10 451 24
+let%span snum = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/num.rs" 316 26 316 48
+
+use creusot.int.UInt64BW
+use creusot.int.Int32BW
+use creusot.prelude.Any
+use int.Int
+
+let wrapping_mul (self_: UInt64BW.t) (rhs: UInt64BW.t) (return (x: UInt64BW.t)) = any
+  [ return (result: UInt64BW.t) -> {[@stop_split] [@expl:wrapping_mul ensures] [%#snum] result = UInt64BW.mul self_ rhs}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let cms_col [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 452 0 452 45]
+  (key: UInt64BW.t) (prime: UInt64BW.t) (return (x: UInt64BW.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = wrapping_mul [%#slib] {key} {prime} (fun (_x: UInt64BW.t) -> [ &_5 <- _x ] s1)
+    | s1 = UInt64BW.shr [%#slib'1] {_5} {Int32BW.to_BV256 ([%#slib'0] (54: Int32BW.t))}
+        (fun (_x: UInt64BW.t) -> [ &_4 <- _x ] s2)
+    | s2 = [ &_ret <- UInt64BW.of_BV256 (UInt64BW.to_BV256 _4) ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: UInt64BW.t = Any.any_l ()
+  | & key: UInt64BW.t = key
+  | & prime: UInt64BW.t = prime
+  | & _4: UInt64BW.t = Any.any_l ()
+  | & _5: UInt64BW.t = Any.any_l () ])
+  [ return (result: UInt64BW.t) -> {[@stop_split] [@expl:cms_col ensures] [%#slib'2] UInt64BW.t'int result < 1024}
+    (! return {result}) ]

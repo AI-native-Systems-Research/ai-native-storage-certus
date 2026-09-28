@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epo_evict_degrade_invalid_pool__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.036 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

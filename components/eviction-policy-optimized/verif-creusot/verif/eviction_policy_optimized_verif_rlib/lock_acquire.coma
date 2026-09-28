@@ -1,0 +1,54 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 611 0 611 38 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 612 14 612 15
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 612 4 612 15
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 606 11 606 62
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 607 10 607 38
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 608 10 608 34
+let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 609 10 609 34
+let%span slib'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 610 10 610 93
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_LockTrace = { held: UInt64.t; peak: UInt64.t }
+
+predicate resolve_refmut_LockTrace [@inline:trivial] (_1: MutBorrow.t t_LockTrace) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_LockTrace
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lock_acquire [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 611 0 611 38]
+  (t: MutBorrow.t t_LockTrace) (return (x: ())) =
+{[@stop_split] [@expl:lock_acquire requires] [%#slib'1] UInt64.t'int t.current.held < 4294967295
+  /\ UInt64.t'int t.current.peak >= UInt64.t'int t.current.held}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib'0] {t.current.held} {[%#slib] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &t <- { t with current = { t.current with held = _x } } ] s1)
+    | s1 = [ &_13 <- UInt64.gt t.current.held t.current.peak ] s2
+    | s2 = any [ br0 -> {_13 = false} (! bb2) | br1 -> {_13} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &t <- { t with current = { t.current with peak = t.current.held } } ] s1
+    | s1 = -{resolve_refmut_LockTrace t}- s2
+    | s2 = return {_ret} ]
+  | bb2 = s0 [ s0 = -{resolve_refmut_LockTrace t}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & t: MutBorrow.t t_LockTrace = t | & _13: bool = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:lock_acquire ensures] ([@stop_split] [@expl:lock_acquire ensures #0] [%#slib'2] UInt64.t'int t.final.held
+      = UInt64.t'int t.current.held + 1)
+    /\ ([@stop_split] [@expl:lock_acquire ensures #1] [%#slib'3] UInt64.t'int t.final.peak >= UInt64.t'int t.final.held)
+    /\ ([@stop_split] [@expl:lock_acquire ensures #2] [%#slib'4] UInt64.t'int t.final.peak
+      >= UInt64.t'int t.current.peak)
+    /\ ([@stop_split] [@expl:lock_acquire ensures #3] [%#slib'5] UInt64.t'int t.final.peak
+    = (if UInt64.t'int t.current.held + 1 > UInt64.t'int t.current.peak then
+      UInt64.t'int t.current.held + 1
+    else
+      UInt64.t'int t.current.peak
+    ))}
+    (! return {result}) ]

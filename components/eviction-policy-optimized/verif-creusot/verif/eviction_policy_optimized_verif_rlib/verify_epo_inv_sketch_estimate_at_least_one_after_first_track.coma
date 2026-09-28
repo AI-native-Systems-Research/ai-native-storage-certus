@@ -1,0 +1,151 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2216 0 2216 100 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2217 12 2217 37
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2218 4 2218 45
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2214 11 2214 36
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2215 10 2215 22
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 682 11 682 40
+let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 683 10 683 42
+let%span slib'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 684 10 684 26
+let%span slib'6 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 685 10 685 47
+let%span slib'7 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 686 10 686 47
+let%span slib'8 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 687 10 687 47
+let%span slib'9 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 688 10 689 109
+let%span slib'10 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 690 10 691 109
+let%span slib'11 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 692 10 693 109
+let%span slib'12 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 694 10 695 109
+let%span slib'13 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 696 10 697 88
+let%span slib'14 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 698 10 700 62
+let%span slib'15 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 728 11 728 40
+let%span slib'16 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 729 11 729 63
+let%span slib'17 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 730 10 730 44
+let%span slib'18 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 731 10 731 44
+let%span slib'19 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 732 10 732 44
+let%span slib'20 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 733 10 733 44
+let%span slib'21 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 734 10 735 74
+let%span svec = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u8_Global
+
+type t_Sketch = { counters: t_Vec_u8_Global }
+
+type tup4_usize_usize_usize_usize = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t; f3: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+let sketch_increment4 (self_: MutBorrow.t t_Sketch) (key: UInt64.t) (return (x: tup4_usize_usize_usize_usize)) =
+{[@stop_split] [@expl:sketch_increment4 requires] [%#slib'3] Seq.length (view_Vec_u8_Global self_.current.counters)
+  = 4096}
+  any
+  [ return (result: tup4_usize_usize_usize_usize) ->
+  {[@stop_split] [@expl:sketch_increment4 ensures] ([@stop_split] [@expl:sketch_increment4 ensures #0] [%#slib'4] Seq.length (view_Vec_u8_Global self_.final.counters)
+      = 4096)
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #1] [%#slib'5] UInt64.t'int result.f0 < 1024)
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #2] [%#slib'6] 1024 <= UInt64.t'int result.f1
+      /\ UInt64.t'int result.f1 < 2048)
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #3] [%#slib'7] 2048 <= UInt64.t'int result.f2
+      /\ UInt64.t'int result.f2 < 3072)
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #4] [%#slib'8] 3072 <= UInt64.t'int result.f3
+      /\ UInt64.t'int result.f3 < 4096)
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #5] [%#slib'9] UInt8.t'int (Seq.get (view_Vec_u8_Global self_.final.counters) (UInt64.t'int result.f0))
+      = (if UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) (UInt64.t'int result.f0)) = 255 then
+        255
+      else
+        UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) (UInt64.t'int result.f0)) + 1
+      ))
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #6] [%#slib'10] UInt8.t'int (Seq.get (view_Vec_u8_Global self_.final.counters) (UInt64.t'int result.f1))
+      = (if UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) (UInt64.t'int result.f1)) = 255 then
+        255
+      else
+        UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) (UInt64.t'int result.f1)) + 1
+      ))
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #7] [%#slib'11] UInt8.t'int (Seq.get (view_Vec_u8_Global self_.final.counters) (UInt64.t'int result.f2))
+      = (if UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) (UInt64.t'int result.f2)) = 255 then
+        255
+      else
+        UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) (UInt64.t'int result.f2)) + 1
+      ))
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #8] [%#slib'12] UInt8.t'int (Seq.get (view_Vec_u8_Global self_.final.counters) (UInt64.t'int result.f3))
+      = (if UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) (UInt64.t'int result.f3)) = 255 then
+        255
+      else
+        UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) (UInt64.t'int result.f3)) + 1
+      ))
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #9] [%#slib'13] UInt8.t'int (Seq.get (view_Vec_u8_Global self_.final.counters) (UInt64.t'int result.f0))
+        >= 1
+      /\ UInt8.t'int (Seq.get (view_Vec_u8_Global self_.final.counters) (UInt64.t'int result.f1)) >= 1
+      /\ UInt8.t'int (Seq.get (view_Vec_u8_Global self_.final.counters) (UInt64.t'int result.f2)) >= 1
+      /\ UInt8.t'int (Seq.get (view_Vec_u8_Global self_.final.counters) (UInt64.t'int result.f3)) >= 1)
+    /\ ([@stop_split] [@expl:sketch_increment4 ensures #10] [%#slib'14] forall j: int. 0 <= j
+        /\ j < 4096
+        /\ j <> UInt64.t'int result.f0
+        /\ j <> UInt64.t'int result.f1 /\ j <> UInt64.t'int result.f2 /\ j <> UInt64.t'int result.f3
+      -> Seq.get (view_Vec_u8_Global self_.final.counters) j = Seq.get (view_Vec_u8_Global self_.current.counters) j)}
+    (! return {result}) ]
+
+predicate resolve_refmut_Sketch [@inline:trivial] (_1: MutBorrow.t t_Sketch) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Sketch
+
+let sketch_estimate_at (self_: t_Sketch) (i0: UInt64.t) (i1: UInt64.t) (i2: UInt64.t) (i3: UInt64.t)
+  (return (x: UInt8.t)) =
+{[@stop_split] [@expl:sketch_estimate_at requires] ([@stop_split] [@expl:sketch_estimate_at requires #0] [%#slib'15] Seq.length (view_Vec_u8_Global self_.counters)
+    = 4096)
+  /\ ([@stop_split] [@expl:sketch_estimate_at requires #1] [%#slib'16] UInt64.t'int i0 < 4096
+  /\ UInt64.t'int i1 < 4096 /\ UInt64.t'int i2 < 4096 /\ UInt64.t'int i3 < 4096)}
+  any
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:sketch_estimate_at ensures] ([@stop_split] [@expl:sketch_estimate_at ensures #0] [%#slib'17] UInt8.t'int result
+      <= UInt8.t'int (Seq.get (view_Vec_u8_Global self_.counters) (UInt64.t'int i0)))
+    /\ ([@stop_split] [@expl:sketch_estimate_at ensures #1] [%#slib'18] UInt8.t'int result
+      <= UInt8.t'int (Seq.get (view_Vec_u8_Global self_.counters) (UInt64.t'int i1)))
+    /\ ([@stop_split] [@expl:sketch_estimate_at ensures #2] [%#slib'19] UInt8.t'int result
+      <= UInt8.t'int (Seq.get (view_Vec_u8_Global self_.counters) (UInt64.t'int i2)))
+    /\ ([@stop_split] [@expl:sketch_estimate_at ensures #3] [%#slib'20] UInt8.t'int result
+      <= UInt8.t'int (Seq.get (view_Vec_u8_Global self_.counters) (UInt64.t'int i3)))
+    /\ ([@stop_split] [@expl:sketch_estimate_at ensures #4] [%#slib'21] result
+      = Seq.get (view_Vec_u8_Global self_.counters) (UInt64.t'int i0)
+    \/ result = Seq.get (view_Vec_u8_Global self_.counters) (UInt64.t'int i1)
+    \/ result = Seq.get (view_Vec_u8_Global self_.counters) (UInt64.t'int i2)
+    \/ result = Seq.get (view_Vec_u8_Global self_.counters) (UInt64.t'int i3))}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_epo_inv_sketch_estimate_at_least_one_after_first_track [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2216 0 2216 100]
+  (s: MutBorrow.t t_Sketch) (key: UInt64.t) (return (x: UInt8.t)) =
+{[@stop_split] [@expl:verify_epo_inv_sketch_estimate_at_least_one_after_first_track requires] [%#slib'1] Seq.length (view_Vec_u8_Global s.current.counters)
+  = 4096}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_Sketch> {s.current} {MutBorrow.get_id s}
+        (fun (_bor: MutBorrow.t t_Sketch) -> [ &_7 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = sketch_increment4 [%#slib] {_7} {key} (fun (_x: tup4_usize_usize_usize_usize) -> [ &c <- _x ] s2)
+    | s2 = -{resolve_refmut_Sketch s}- s3
+    | s3 = sketch_estimate_at [%#slib'0] {s.current} {c.f0} {c.f1} {c.f2} {c.f3}
+        (fun (_x: UInt8.t) -> [ &_ret <- _x ] s4)
+    | s4 = return {_ret} ] ]
+  [ & _ret: UInt8.t = Any.any_l ()
+  | & s: MutBorrow.t t_Sketch = s
+  | & key: UInt64.t = key
+  | & c: tup4_usize_usize_usize_usize = Any.any_l ()
+  | & _7: MutBorrow.t t_Sketch = Any.any_l () ])
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:verify_epo_inv_sketch_estimate_at_least_one_after_first_track ensures] [%#slib'2] UInt8.t'int result
+    >= 1}
+    (! return {result}) ]

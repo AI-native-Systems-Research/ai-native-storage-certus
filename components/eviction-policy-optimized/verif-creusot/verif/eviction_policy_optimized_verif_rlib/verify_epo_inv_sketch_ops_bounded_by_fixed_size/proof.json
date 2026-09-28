@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_verify_epo_inv_sketch_ops_bounded_by_fixed_size": {
+        "prover": "alt-ergo",
+        "time": 0.019
+      },
+      "vc_work_add": { "prover": "alt-ergo", "time": 0.013 }
+    }
+  }
+}

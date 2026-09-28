@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_push_back": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_arena_remove": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_push_u32": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_verify_epo_inv_slot_ownership_disjoint__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.034 },
+              { "prover": "alt-ergo", "time": 0.038 },
+              null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_epo_chain_fuel_stable": {
+        "prover": "alt-ergo",
+        "time": 0.031
+      }
+    }
+  }
+}

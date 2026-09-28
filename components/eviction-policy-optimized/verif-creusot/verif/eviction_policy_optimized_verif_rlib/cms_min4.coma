@@ -1,0 +1,46 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 536 0 536 53 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 537 22 537 27
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 534 10 534 78
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 535 10 535 70
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let cms_min4 [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 536 0 536 53]
+  (c0: UInt8.t) (c1: UInt8.t) (c2: UInt8.t) (c3: UInt8.t) (return (x: UInt8.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &min <- [%#slib] (255: UInt8.t) ] s1
+    | s1 = [ &_17 <- UInt8.lt c0 min ] s2
+    | s2 = any [ br0 -> {_17 = false} (! bb3) | br1 -> {_17} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &min <- c0 ] s1 | s1 = bb3 ]
+  | bb3 = s0 [ s0 = [ &_22 <- UInt8.lt c1 min ] s1 | s1 = any [ br0 -> {_22 = false} (! bb6) | br1 -> {_22} (! bb4) ] ]
+  | bb4 = s0 [ s0 = [ &min <- c1 ] s1 | s1 = bb6 ]
+  | bb6 = s0 [ s0 = [ &_27 <- UInt8.lt c2 min ] s1 | s1 = any [ br0 -> {_27 = false} (! bb9) | br1 -> {_27} (! bb7) ] ]
+  | bb7 = s0 [ s0 = [ &min <- c2 ] s1 | s1 = bb9 ]
+  | bb9 = s0
+    [ s0 = [ &_32 <- UInt8.lt c3 min ] s1 | s1 = any [ br0 -> {_32 = false} (! bb12) | br1 -> {_32} (! bb10) ] ]
+  | bb10 = s0 [ s0 = [ &min <- c3 ] s1 | s1 = bb12 ]
+  | bb12 = s0 [ s0 = [ &_ret <- min ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt8.t = Any.any_l ()
+  | & c0: UInt8.t = c0
+  | & c1: UInt8.t = c1
+  | & c2: UInt8.t = c2
+  | & c3: UInt8.t = c3
+  | & min: UInt8.t = Any.any_l ()
+  | & _17: bool = Any.any_l ()
+  | & _22: bool = Any.any_l ()
+  | & _27: bool = Any.any_l ()
+  | & _32: bool = Any.any_l () ])
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:cms_min4 ensures] ([@stop_split] [@expl:cms_min4 ensures #0] [%#slib'0] UInt8.t'int result
+        <= UInt8.t'int c0
+      /\ UInt8.t'int result <= UInt8.t'int c1
+      /\ UInt8.t'int result <= UInt8.t'int c2 /\ UInt8.t'int result <= UInt8.t'int c3)
+    /\ ([@stop_split] [@expl:cms_min4 ensures #1] [%#slib'1] result = c0 \/ result = c1 \/ result = c2 \/ result = c3)}
+    (! return {result}) ]

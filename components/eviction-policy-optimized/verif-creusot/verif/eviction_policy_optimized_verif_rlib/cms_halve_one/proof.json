@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_cms_halve_one": { "prover": "z3", "time": 0.008 } }
+  }
+}

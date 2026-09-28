@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_track": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_verify_epo_track_post_maxlen_highwater__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.02 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

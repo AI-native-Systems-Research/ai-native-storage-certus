@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epo_touch_error_invalid_pool": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      }
+    }
+  }
+}

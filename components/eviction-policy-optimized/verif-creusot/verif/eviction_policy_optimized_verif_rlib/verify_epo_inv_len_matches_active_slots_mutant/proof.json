@@ -1,0 +1,22 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_mut_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_epo_inv_len_matches_active_slots__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.038 },
+              { "prover": "alt-ergo", "time": 0.052 },
+              null
+            ]
+          }
+        ]
+      },
+      "vc_wf_push_back": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

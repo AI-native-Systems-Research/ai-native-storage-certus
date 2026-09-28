@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_peek_front_key": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_arena_push_back": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_arena_push_front": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_cms_cols4": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_pool_age_step": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_pool_track": { "prover": "z3", "time": 0.06 },
+      "vc_sketch_estimate_at": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_sketch_increment4": { "prover": "alt-ergo", "time": 0.02 }
+    }
+  }
+}

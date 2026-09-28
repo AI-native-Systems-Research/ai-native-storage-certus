@@ -1,0 +1,18 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_clear": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_pool_track": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epo_inv_access_count_monotone__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.047 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

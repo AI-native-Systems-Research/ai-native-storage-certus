@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_len": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_pool_age_step": { "prover": "z3", "time": 0.077 },
+      "vc_sketch_halve": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

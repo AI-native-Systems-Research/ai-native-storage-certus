@@ -1,0 +1,1122 @@
+# Blind CODE extraction for eviction-policy-optimized.
+#
+# Inputs read (nothing else): the Rust implementation
+#   components/eviction-policy-optimized/src/lib.rs
+#   components/eviction-policy-optimized/src/lru_list.rs
+# and the interface declaration
+#   components/interfaces/src/ieviction_policy.rs
+#
+# The component specification was deliberately NOT read. Every obligation below was derived
+# from what the implementation actually does, including the invariants it silently relies on
+# and the error paths it takes. Where the implementation appears to contradict the doc comment
+# on the interface method it implements, that is recorded in the obligation text as a surprise,
+# because the interface declaration was an allowed input.
+#
+# Implementation summary as understood from the code: one component instance owns a growable
+# vector of independent pools. Each pool holds an index-based doubly-linked recency list, a
+# 4-row by 1024-column Count-Min-Sketch of 8-bit saturating frequency counters, a running
+# access counter, and a high-water mark of observed list length. Registration consults the
+# sketch and admits a newcomer whose estimated frequency does not exceed that of the current
+# eviction victim at the victim end of the list, so cold newcomers are evicted first.
+#
+# Counting note for a plain editor search over this file: one record per obligation, one
+# record per not-verifiable unit; the record total equals the declared total below.
+component:  eviction-policy-optimized
+source:     code
+artifact:   "components/eviction-policy-optimized/src/lib.rs + components/eviction-policy-optimized/src/lru_list.rs + components/interfaces/src/ieviction_policy.rs"
+pin:        "2026-09-25 working tree of /home/cornel/cv-e2e-eviction-policy-optimized-20260925 (810 lines of implementation)"
+method:     blind-extraction
+generated:  2026-09-25
+counts: {total: 98, methods: 9, verifiable: 84, not_verifiable: 14}
+properties:
+
+  # ---------------------------------------------------------------- create_pool
+  - id:         EPO-CREATE-POOL-PRE
+    subject:    create_pool
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Creating a pool requires nothing of the caller. It can be called at any time, in any
+      state of the component, with or without a logger connected, and it always returns a
+      pool identifier rather than failing or reporting an error.
+    traces:     ["lib.rs:89-102 create_pool"]
+
+  - id:         EPO-CREATE-POOL-POST
+    subject:    create_pool
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Creating a pool returns a number equal to how many pools existed before the call, and
+      appends exactly one new pool to the component. So the very first call returns zero, the
+      second returns one, and so on, and the returned number is always a valid pool identifier
+      immediately afterwards.
+    traces:     ["lib.rs:90-101 create_pool"]
+
+  - id:         EPO-CREATE-POOL-POST-FRESH
+    subject:    create_pool
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A newly created pool starts completely empty and unused. It tracks zero entries, every
+      one of its frequency estimates reads zero, its running count of registrations is zero,
+      and its record of the largest length it has ever held is zero.
+    traces:     ["lib.rs:92-97 create_pool", "lru_list.rs:26-34 LruList::new", "lib.rs:32-36 CountMinSketch::new"]
+
+  - id:         EPO-CREATE-POOL-FRAME
+    subject:    create_pool
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Creating a pool leaves every pool that already existed exactly as it was. No previously
+      returned pool identifier changes meaning, no tracked entry moves, disappears, or appears,
+      and no frequency estimate or counter in any other pool is altered.
+    traces:     ["lib.rs:90-101 create_pool"]
+
+  # ---------------------------------------------------------------------- track
+  - id:         EPO-TRACK-PRE
+    subject:    track
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Registering a key for eviction tracking requires that the pool number given was actually
+      produced by an earlier call that created a pool. Any other pool number is rejected with an
+      error instead of registering anything. No requirement at all is placed on the key or on
+      the per-block hints, so every possible key value and every possible hint value is accepted.
+    traces:     ["lib.rs:110-118 track"]
+
+  - id:         EPO-TRACK-POST-HANDLE
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When registration succeeds it returns a handle that carries two things: the very same pool
+      number the caller passed in, and the internal slot number of the entry that was just
+      created. Passing that handle back to the operations that record an access or stop tracking
+      therefore refers to this newly registered entry and to no other.
+    traces:     ["lib.rs:139 track", "ieviction_policy.rs:14-26 EvictionHandle"]
+
+  - id:         EPO-TRACK-POST-LEN
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every successful registration increases the number of tracked entries in that pool by
+      exactly one, without exception. In particular, registering a key that the pool is already
+      tracking creates a second, independent entry for the same key rather than reusing the
+      existing one. This contradicts the interface documentation, which promises that
+      re-registering an already-tracked key is idempotent and returns the existing handle; the
+      implementation has no lookup from key to entry at all, so it cannot detect a repeat.
+    traces:     ["lib.rs:129-139 track", "lru_list.rs:37-67 push_front", "lru_list.rs:75-105 push_back", "ieviction_policy.rs:85-87 track doc comment"]
+
+  - id:         EPO-TRACK-POST-PLACEMENT
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Where a newly registered key is placed depends on how often the component believes it has
+      been seen. If the pool is empty the key becomes the only entry. Otherwise, if the key's
+      estimated access frequency is less than or equal to the estimated frequency of the key
+      currently first in line to be evicted, the newcomer is inserted at the front of the queue,
+      so it becomes the very next key that will be evicted; if its estimated frequency is
+      strictly higher, it is inserted at the back, so it will be evicted last. This means a
+      brand-new key, seen once, is normally admitted as the next victim rather than as the
+      freshest entry.
+    traces:     ["lib.rs:129-137 track", "lru_list.rs:70-72 peek_front_key", "lib.rs:45-52 CountMinSketch::estimate"]
+
+  - id:         EPO-TRACK-POST-SKETCH
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every successful registration bumps the key's frequency record upwards. Four counters
+      chosen by four different hash multipliers of the key are each increased by one, and each
+      counter stops at its maximum of 255 instead of wrapping around to zero, so a key's
+      recorded frequency never silently collapses because of counting.
+    traces:     ["lib.rs:121 track", "lib.rs:38-43 CountMinSketch::increment"]
+
+  - id:         EPO-TRACK-POST-ACCESS-COUNT
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every successful registration increases the pool's running count of registrations by
+      exactly one. No other operation in the component ever changes that count, so it is a
+      faithful tally of how many times keys have been registered in that pool since the
+      component started, and it is never reset.
+    traces:     ["lib.rs:123 track"]
+
+  - id:         EPO-TRACK-POST-MAXLEN
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Every successful registration updates the pool's record of the largest length it has ever
+      held, setting it to the larger of its old value and the pool's length as measured before
+      the new entry is inserted. Because the measurement happens before the insertion, the record
+      always lags the true maximum by one whenever the pool is at a new peak, and it never
+      decreases, not even when the pool is emptied.
+    traces:     ["lib.rs:122 track"]
+
+  - id:         EPO-TRACK-POST-HALVE
+    subject:    track
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Frequency records are aged during registration, and only during registration. Whenever the
+      pool's record of its largest observed length is greater than zero and the running count of
+      registrations has just become an exact multiple of ten times that record, every frequency
+      counter in the pool is halved, rounding down. No other condition and no other operation
+      ever ages the frequency records.
+    traces:     ["lib.rs:124-127 track", "lib.rs:54-60 CountMinSketch::halve"]
+
+  - id:         EPO-TRACK-ERR-INVALID-POOL
+    subject:    track
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Registering into a pool number that was never created fails with an error that names that
+      same pool number back to the caller, and nothing at all is changed: no entry is added, no
+      frequency counter is bumped, no registration count is increased, and no other pool is
+      touched. This is the only way registration can report failure.
+    traces:     ["lib.rs:111-118 track"]
+
+  - id:         EPO-TRACK-FRAME-SEMANTICS
+    subject:    track
+    kind:       frame
+    verifiable: true
+    statement:  >
+      The per-block hints supplied at registration have no effect whatsoever. Two registrations
+      that differ only in their hint value, including their session identifier, produce
+      identical results and leave the component in identical states. The implementation discards
+      the hints without reading them, so the lineage-aware placement that the interface
+      documentation describes as possible is simply absent here.
+    traces:     ["lib.rs:104-140 track (parameter bound as _semantics)", "ieviction_policy.rs:80-86 track doc comment"]
+
+  - id:         EPO-TRACK-FRAME-POOLS
+    subject:    track
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Registering a key into one pool changes only that pool. Every other pool keeps exactly the
+      same tracked entries in exactly the same eviction order, with the same frequency estimates,
+      the same registration count, and the same record of largest observed length.
+    traces:     ["lib.rs:110-139 track"]
+
+  - id:         EPO-TRACK-INV-NO-MOD-ZERO
+    subject:    track
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Registration never performs a division by zero and therefore never crashes on the
+      frequency-ageing test. The remainder calculation that decides whether to age the frequency
+      records is only reached when the pool's record of largest observed length is greater than
+      zero, which is exactly the case in which the divisor is non-zero.
+    traces:     ["lib.rs:124-127 track"]
+
+  # ---------------------------------------------------------------------- touch
+  - id:         EPO-TOUCH-PRE
+    subject:    touch
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Recording an access requires a handle that was genuinely produced by a successful earlier
+      registration on this component, and that has not been invalidated by emptying its pool.
+      The pool number inside the handle is checked, but the slot number inside it is not checked
+      at all, so the caller alone is responsible for never presenting a slot number that the
+      pool has never allocated.
+    traces:     ["lib.rs:143-154 touch", "lru_list.rs:108-111 move_to_back"]
+
+  - id:         EPO-TOUCH-POST-MRU
+    subject:    touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Recording an access to a tracked entry moves it to the very end of the eviction queue, so
+      it becomes the last entry that would be evicted, and leaves the relative order of every
+      other entry in that pool unchanged. The number of tracked entries does not change.
+    traces:     ["lib.rs:154 touch", "lru_list.rs:108-134 move_to_back"]
+
+  - id:         EPO-TOUCH-POST-TAIL-NOOP
+    subject:    touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Recording an access to the entry that is already last in the eviction queue changes
+      nothing. The eviction order, the number of tracked entries, and every internal link stay
+      exactly as they were, and the call still reports success.
+    traces:     ["lru_list.rs:112-114 move_to_back"]
+
+  - id:         EPO-TOUCH-POST-INACTIVE-NOOP
+    subject:    touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Recording an access through a handle whose entry has already been removed from tracking
+      does nothing and still reports success. The pool is unchanged and the removed entry is not
+      resurrected. The caller therefore cannot tell from the return value whether the entry it
+      named still exists.
+    traces:     ["lru_list.rs:109-111 move_to_back", "lib.rs:154-155 touch"]
+
+  - id:         EPO-TOUCH-ERR-INVALID-POOL
+    subject:    touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Recording an access through a handle whose pool number was never created fails with an
+      error naming that pool number, and changes nothing anywhere in the component. This is the
+      only error this operation can return.
+    traces:     ["lib.rs:144-152 touch"]
+
+  - id:         EPO-TOUCH-ERR-OOB-PANIC
+    subject:    touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Recording an access must never crash the process, whatever handle it is given. This
+      obligation is expected to be refuted: the implementation reads the entry slot named by the
+      handle without first checking that such a slot exists, so a handle whose slot number is at
+      or beyond the number of slots the pool has ever allocated causes an out-of-bounds crash
+      rather than the error the interface provides for exactly this case. Any handle issued
+      before its pool was emptied has this shape.
+    traces:     ["lru_list.rs:109 move_to_back", "lib.rs:154 touch", "ieviction_policy.rs:57-58 EvictionPolicyError::InvalidHandle"]
+
+  - id:         EPO-TOUCH-FRAME
+    subject:    touch
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Recording an access changes only the eviction order within one pool. It never adds or
+      removes a tracked entry, never changes any frequency estimate, never changes the pool's
+      registration count or its record of largest observed length, and never affects any other
+      pool.
+    traces:     ["lib.rs:143-155 touch"]
+
+  # ---------------------------------------------------------------- batch_touch
+  - id:         EPO-BATCH-TOUCH-PRE
+    subject:    batch_touch
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Recording accesses for a group of entries requires every handle in the group to be a
+      genuine, still-valid handle, exactly as for the single-entry version. Handles for different
+      pools may be freely mixed in one group and may appear in any order. An empty group is
+      always allowed.
+    traces:     ["lib.rs:158-184 batch_touch"]
+
+  - id:         EPO-BATCH-TOUCH-POST-EMPTY
+    subject:    batch_touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Recording accesses for an empty group succeeds immediately and changes nothing. It does
+      not take any lock and does not examine any pool, so an empty group is accepted even in a
+      component that has no pools at all.
+    traces:     ["lib.rs:159-161 batch_touch"]
+
+  - id:         EPO-BATCH-TOUCH-POST-EQUIV
+    subject:    batch_touch
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      When it succeeds, recording accesses for a group has exactly the same effect on every pool
+      as recording an access for each handle in the group one at a time, in the order the handles
+      were given. In particular the last handle naming a given pool ends up last in that pool's
+      eviction queue.
+    traces:     ["lib.rs:169-182 batch_touch", "lru_list.rs:108-134 move_to_back"]
+
+  - id:         EPO-BATCH-TOUCH-ERR-INVALID-POOL
+    subject:    batch_touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      If any handle in the group names a pool number that was never created, the operation fails
+      with an error naming that pool number. This is the only error it can return.
+    traces:     ["lib.rs:164-167 batch_touch", "lib.rs:175-178 batch_touch"]
+
+  - id:         EPO-BATCH-TOUCH-ERR-PARTIAL
+    subject:    batch_touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Recording accesses for a group is not all-or-nothing. If a bad pool number appears part
+      way through the group, the accesses for all the earlier handles have already been applied
+      and are kept, and the operation then returns an error without applying the remaining
+      handles. A caller that sees the error therefore cannot assume the pools are unchanged, and
+      cannot tell from the error how much of the group took effect.
+    traces:     ["lib.rs:169-182 batch_touch"]
+
+  - id:         EPO-BATCH-TOUCH-ERR-NO-LOG
+    subject:    batch_touch
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      When recording accesses for a group fails because of a bad pool number, nothing is written
+      to the log, unlike the single-entry registration, access and removal operations, which all
+      emit a warning in the same situation. A bad pool number arriving through the batch path is
+      therefore invisible to an operator reading the logs.
+    traces:     ["lib.rs:164-178 batch_touch", "lib.rs:112-117 track", "lib.rs:145-151 touch", "lib.rs:189-195 remove"]
+
+  - id:         EPO-BATCH-TOUCH-FRAME
+    subject:    batch_touch
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Recording accesses for a group changes only eviction order. The number of tracked entries
+      in every pool is unchanged, no frequency estimate is touched, no registration count or
+      record of largest observed length changes, and a pool named by no handle in the group is
+      left completely alone.
+    traces:     ["lib.rs:158-184 batch_touch"]
+
+  - id:         EPO-BATCH-TOUCH-INV-LOCK
+    subject:    batch_touch
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      While recording accesses for a group, the component holds the exclusive lock of at most
+      one pool at any moment. When consecutive handles name different pools, the lock on the
+      current pool is released before the lock on the next pool is acquired, so two pool locks
+      are never held together. A group whose handles alternate between pools therefore takes and
+      releases a lock once per run of consecutive same-pool handles rather than once overall,
+      which is weaker than the single lock acquisition the interface documentation promises.
+    traces:     ["lib.rs:168-181 batch_touch", "ieviction_policy.rs:94-96 batch_touch doc comment"]
+
+  # --------------------------------------------------------------------- remove
+  - id:         EPO-REMOVE-PRE
+    subject:    remove
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Stopping the tracking of an entry requires a handle that was genuinely produced by a
+      successful earlier registration on this component and whose pool has not since been
+      emptied. As with recording an access, the pool number in the handle is checked but the
+      slot number is not.
+    traces:     ["lib.rs:187-198 remove", "lru_list.rs:159-161 LruList::remove"]
+
+  - id:         EPO-REMOVE-POST
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Stopping the tracking of an entry takes it out of the eviction queue, reduces the number of
+      tracked entries in its pool by exactly one, and leaves the relative order of all remaining
+      entries unchanged. The removed entry will never again be returned as an eviction candidate
+      or as the next key to evict.
+    traces:     ["lib.rs:198 remove", "lru_list.rs:159-183 LruList::remove"]
+
+  - id:         EPO-REMOVE-POST-IDEMPOTENT
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Stopping the tracking of an entry a second time through the same handle is harmless. The
+      second call changes nothing, does not reduce the count of tracked entries again, and still
+      reports success, so a caller cannot distinguish a real removal from a repeat.
+    traces:     ["lru_list.rs:160-162 LruList::remove", "lib.rs:198-199 remove"]
+
+  - id:         EPO-REMOVE-POST-SLOT-RECYCLED
+    subject:    remove
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Stopping the tracking of an entry puts its internal slot on a free list, and the next
+      registration into that pool reuses that slot before allocating a new one. As a consequence
+      a handle kept by a caller after removal can later come to name a completely different key
+      that happens to have been given the recycled slot, and recording an access or a removal
+      through that stale handle will then silently act on the wrong entry. Nothing in the code
+      detects this.
+    traces:     ["lru_list.rs:178-181 LruList::remove", "lru_list.rs:38-45 push_front", "lru_list.rs:76-83 push_back"]
+
+  - id:         EPO-REMOVE-ERR-INVALID-POOL
+    subject:    remove
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Stopping the tracking of an entry whose handle names a pool number that was never created
+      fails with an error naming that pool number, and changes nothing anywhere. This is the only
+      error this operation can return.
+    traces:     ["lib.rs:188-196 remove"]
+
+  - id:         EPO-REMOVE-ERR-OOB-PANIC
+    subject:    remove
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Stopping the tracking of an entry must never crash the process, whatever handle it is
+      given. This obligation is expected to be refuted for the same reason as for recording an
+      access: the slot named by the handle is read without any check that the slot exists, so a
+      handle whose slot number is beyond the slots the pool has allocated causes an out-of-bounds
+      crash instead of an error return.
+    traces:     ["lru_list.rs:160 LruList::remove", "lib.rs:198 remove", "ieviction_policy.rs:57-58 EvictionPolicyError::InvalidHandle"]
+
+  - id:         EPO-REMOVE-FRAME
+    subject:    remove
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Stopping the tracking of an entry changes only the membership and order of one pool's
+      eviction queue. It does not change any frequency estimate, the pool's registration count,
+      or its record of largest observed length, and it does not affect any other pool.
+    traces:     ["lib.rs:187-199 remove"]
+
+  # ----------------------------------------------- identify_next_to_evict
+  - id:         EPO-IDENTIFY-PRE
+    subject:    identify_next_to_evict
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Asking for the next key to evict requires nothing of the caller. Any pool number at all may
+      be passed, including one that was never created, and the call always returns rather than
+      failing.
+    traces:     ["lib.rs:202-207 identify_next_to_evict"]
+
+  - id:         EPO-IDENTIFY-POST
+    subject:    identify_next_to_evict
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Asking for the next key to evict from a non-empty pool returns the key at the front of the
+      eviction queue and simultaneously stops tracking it, reducing the pool's count of tracked
+      entries by exactly one. The entry that was second in line becomes the new front. This
+      operation both selects and consumes, so calling it twice returns two different entries.
+    traces:     ["lib.rs:206 identify_next_to_evict", "lru_list.rs:137-142 pop_front"]
+
+  - id:         EPO-IDENTIFY-POST-EMPTY
+    subject:    identify_next_to_evict
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Asking for the next key to evict from a pool that exists but tracks nothing returns no key
+      and changes nothing.
+    traces:     ["lru_list.rs:138 pop_front"]
+
+  - id:         EPO-IDENTIFY-ERR-INVALID-POOL
+    subject:    identify_next_to_evict
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking for the next key to evict from a pool number that was never created returns no key
+      and changes nothing, exactly as if the pool existed and were empty. No error is reported and
+      nothing is logged, so a caller using a wrong pool number sees a silently empty result
+      forever rather than a failure.
+    traces:     ["lib.rs:204 identify_next_to_evict"]
+
+  - id:         EPO-IDENTIFY-FRAME
+    subject:    identify_next_to_evict
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Evicting the next key changes only which entries one pool tracks and their order. It does
+      not change any frequency estimate, the pool's registration count, or its record of largest
+      observed length, and no other pool is affected. Notably the frequency record of the evicted
+      key is left in place, so if that key is registered again later its old estimated frequency
+      still counts towards the admission decision.
+    traces:     ["lib.rs:203-206 identify_next_to_evict"]
+
+  - id:         EPO-IDENTIFY-INV-AGREES-CANDIDATES
+    subject:    identify_next_to_evict
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The key that eviction returns is always the same key that the preview operation would have
+      named first. Asking for one eviction candidate without removing it, and then evicting,
+      yields the same key, so the preview is a truthful forecast of the next eviction.
+    traces:     ["lru_list.rs:137-142 pop_front", "lru_list.rs:145-156 peek_front_n"]
+
+  # ------------------------------------------------- get_eviction_candidates
+  - id:         EPO-CANDIDATES-PRE
+    subject:    get_eviction_candidates
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Previewing eviction candidates requires nothing of the caller. Any pool number and any
+      requested count, including zero and counts far larger than the pool holds, are accepted and
+      the call always returns a list.
+    traces:     ["lib.rs:209-218 get_eviction_candidates"]
+
+  - id:         EPO-CANDIDATES-POST
+    subject:    get_eviction_candidates
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Previewing eviction candidates returns the keys that would be evicted next, in the order
+      they would be evicted, starting from the front of the eviction queue. The list holds the
+      requested number of keys, or all tracked keys if fewer than that many exist, and never
+      more.
+    traces:     ["lib.rs:214 get_eviction_candidates", "lru_list.rs:145-156 peek_front_n"]
+
+  - id:         EPO-CANDIDATES-POST-ZERO
+    subject:    get_eviction_candidates
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Asking to preview zero eviction candidates returns an empty list, whatever the pool
+      contains, and changes nothing.
+    traces:     ["lru_list.rs:148-151 peek_front_n"]
+
+  - id:         EPO-CANDIDATES-ERR-INVALID-POOL
+    subject:    get_eviction_candidates
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Previewing eviction candidates for a pool number that was never created returns an empty
+      list, which is indistinguishable from the answer for a real but empty pool. No error is
+      reported and nothing is logged.
+    traces:     ["lib.rs:211-217 get_eviction_candidates"]
+
+  - id:         EPO-CANDIDATES-FRAME
+    subject:    get_eviction_candidates
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Previewing eviction candidates changes nothing at all. The keys it names remain tracked,
+      the eviction order is untouched, the count of tracked entries is unchanged, and no
+      frequency estimate or counter moves. Calling it repeatedly returns the same answer.
+    traces:     ["lib.rs:210-217 get_eviction_candidates", "lru_list.rs:145-156 peek_front_n"]
+
+  # ------------------------------------------------------------------------ len
+  - id:         EPO-LEN-PRE
+    subject:    len
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Asking how many entries a pool tracks requires nothing of the caller. Any pool number is
+      accepted and the call always returns a number.
+    traces:     ["lib.rs:220-229 len"]
+
+  - id:         EPO-LEN-POST
+    subject:    len
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Asking how many entries a pool tracks returns exactly the number of entries currently in
+      that pool's eviction queue, which equals the number of successful registrations into that
+      pool minus the number of entries since removed or evicted, and is zero after the pool is
+      emptied.
+    traces:     ["lib.rs:225 len", "lru_list.rs:195-197 LruList::len"]
+
+  - id:         EPO-LEN-ERR-INVALID-POOL
+    subject:    len
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Asking how many entries are tracked in a pool number that was never created returns zero.
+      The answer for a non-existent pool is therefore identical to the answer for a real empty
+      pool, and no error is reported and nothing is logged, so this operation gives a caller no
+      way to discover that its pool number is wrong.
+    traces:     ["lib.rs:222-228 len"]
+
+  - id:         EPO-LEN-FRAME
+    subject:    len
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Asking how many entries a pool tracks changes nothing anywhere in the component.
+    traces:     ["lib.rs:221-228 len"]
+
+  # ----------------------------------------------------------------- clear_pool
+  - id:         EPO-CLEAR-POOL-PRE
+    subject:    clear_pool
+    kind:       precondition
+    verifiable: true
+    statement:  >
+      Emptying a pool requires nothing of the caller and reports nothing back. Any pool number is
+      accepted, and it may be called on an already-empty pool.
+    traces:     ["lib.rs:231-237 clear_pool"]
+
+  - id:         EPO-CLEAR-POOL-POST
+    subject:    clear_pool
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Emptying an existing pool removes every tracked entry from it. Afterwards the pool reports
+      zero tracked entries, asking for the next key to evict returns no key, and previewing
+      eviction candidates returns an empty list.
+    traces:     ["lib.rs:235 clear_pool", "lru_list.rs:186-192 clear"]
+
+  - id:         EPO-CLEAR-POOL-POST-PARTIAL-RESET
+    subject:    clear_pool
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      Emptying a pool resets only its list of tracked entries. Its frequency estimates, its
+      running count of registrations, and its record of the largest length it ever held all
+      survive unchanged. So after emptying, the very first key registered again is still judged
+      against stale frequency figures from before the pool was emptied, and frequency ageing
+      continues on the old schedule. Emptying a pool is therefore not the same as creating a
+      fresh one.
+    traces:     ["lib.rs:233-236 clear_pool", "lib.rs:63-68 Pool fields", "lru_list.rs:186-192 clear"]
+
+  - id:         EPO-CLEAR-POOL-POST-REUSABLE
+    subject:    clear_pool
+    kind:       postcondition
+    verifiable: true
+    statement:  >
+      A pool that has been emptied remains a usable pool with the same pool number. Keys can be
+      registered into it again immediately and behave normally, and the internal slot numbers
+      handed out start again from the beginning.
+    traces:     ["lib.rs:233-236 clear_pool", "lru_list.rs:186-192 clear", "lru_list.rs:46-54 push_front"]
+
+  - id:         EPO-CLEAR-POOL-ERR-INVALID-POOL
+    subject:    clear_pool
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Emptying a pool number that was never created does nothing at all. No error is reported,
+      because the operation returns nothing, and nothing is written to the log, so a caller that
+      passes a wrong pool number gets no indication that its request was ignored.
+    traces:     ["lib.rs:233-236 clear_pool"]
+
+  - id:         EPO-CLEAR-POOL-ERR-STALE-HANDLES
+    subject:    clear_pool
+    kind:       error-case
+    verifiable: true
+    statement:  >
+      Emptying a pool must not leave the component in a state where a previously issued handle
+      can crash it or corrupt it. This obligation is expected to be refuted: emptying a pool
+      discards all its internal slots, so every handle the pool ever handed out now names a slot
+      that no longer exists, and using any such handle to record an access or to stop tracking
+      crashes the process with an out-of-bounds access. Worse, once new keys have been registered
+      into the emptied pool, an old handle can instead name a live slot belonging to an unrelated
+      key and quietly corrupt that key's position or remove it. No mechanism in the code marks old
+      handles as expired.
+    traces:     ["lru_list.rs:186-192 clear", "lib.rs:154 touch", "lib.rs:198 remove", "lru_list.rs:109 move_to_back", "lru_list.rs:160 LruList::remove"]
+
+  - id:         EPO-CLEAR-POOL-FRAME
+    subject:    clear_pool
+    kind:       frame
+    verifiable: true
+    statement:  >
+      Emptying one pool leaves every other pool exactly as it was, with the same tracked entries
+      in the same eviction order and the same counters, and it never removes the pool itself or
+      renumbers any pool.
+    traces:     ["lib.rs:233-236 clear_pool"]
+
+  # -------------------------------------------------------- global invariants
+  - id:         EPO-INV-POOLS-APPEND-ONLY
+    subject:    "Global invariant: pools are only ever added, never removed or reordered"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      The component's collection of pools only ever grows. No operation removes a pool or moves
+      one, so a pool number that has once been returned stays valid for the whole life of the
+      component, and a pool number that has never been returned stays invalid forever. Pool
+      numbers are never recycled.
+    traces:     ["lib.rs:72 EvictionState::pools", "lib.rs:90-93 create_pool"]
+
+  - id:         EPO-INV-POOL-ID-DENSE
+    subject:    "Global invariant: valid pool numbers are exactly the consecutive integers from zero"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      If the component has created some number of pools, the valid pool numbers are exactly the
+      whole numbers from zero up to one less than that count, with no gaps. Every larger number
+      is rejected or silently treated as an empty pool, depending on the operation.
+    traces:     ["lib.rs:91-93 create_pool", "lib.rs:111 track", "lib.rs:211 get_eviction_candidates"]
+
+  - id:         EPO-INV-LEN-MATCHES-CHAIN
+    subject:    "Global invariant: the stored count equals the length of the eviction queue"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every pool, the count of tracked entries that the component reports is exactly the
+      number of entries you find by walking the eviction queue from its front to its back. The
+      cached count can never drift from the real queue.
+    traces:     ["lru_list.rs:22 LruList::len field", "lru_list.rs:65 push_front", "lru_list.rs:103 push_back", "lru_list.rs:182 LruList::remove", "lru_list.rs:191 clear"]
+
+  - id:         EPO-INV-LEN-MATCHES-ACTIVE
+    subject:    "Global invariant: the stored count equals the number of live slots"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every pool, the count of tracked entries equals the number of internal slots marked as
+      live. A slot is marked live exactly while its entry is in the eviction queue, and marked
+      not-live the moment the entry stops being tracked.
+    traces:     ["lru_list.rs:10 Node::active", "lru_list.rs:43 push_front", "lru_list.rs:81 push_back", "lru_list.rs:178-182 LruList::remove"]
+
+  - id:         EPO-INV-EMPTY-IFF-NO-ENDS
+    subject:    "Global invariant: a pool has a front entry exactly when it has a back entry and a non-zero count"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every pool, either the eviction queue has both a front entry and a back entry and a
+      count greater than zero, or it has neither end and a count of zero. There is never a queue
+      with a front but no back, or a non-zero count with no ends.
+    traces:     ["lru_list.rs:19-22 LruList head/tail/len", "lru_list.rs:57-65 push_front", "lru_list.rs:95-103 push_back", "lru_list.rs:167-182 LruList::remove", "lru_list.rs:187-191 clear"]
+
+  - id:         EPO-INV-LINKS-SYMMETRIC
+    subject:    "Global invariant: the forward and backward links of the eviction queue agree"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every pool, the forward and backward links of the eviction queue are consistent with
+      each other. If one entry's forward link points at a second entry, that second entry's
+      backward link points back at the first. The front entry has no backward link and the back
+      entry has no forward link.
+    traces:     ["lru_list.rs:7-9 Node prev/next", "lru_list.rs:57-63 push_front", "lru_list.rs:95-101 push_back", "lru_list.rs:116-133 move_to_back", "lru_list.rs:164-180 LruList::remove"]
+
+  - id:         EPO-INV-TAIL-IS-LAST
+    subject:    "Global invariant: an entry has no forward link exactly when it is the back of the queue"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every pool, the only live entry with no forward link is the entry recorded as the back
+      of the eviction queue. Moving an entry to the back depends on this: it detects that it is
+      already at the back by comparing against the recorded back, and if that check and this
+      property ever disagreed the recorded back of the queue would be left pointing at an entry
+      that is no longer in the queue.
+    traces:     ["lru_list.rs:112-114 move_to_back", "lru_list.rs:119-126 move_to_back", "lru_list.rs:20 LruList::tail"]
+
+  - id:         EPO-INV-ACYCLIC
+    subject:    "Global invariant: the eviction queue is a finite chain with no cycle"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every pool, following forward links from the front of the eviction queue reaches the
+      back in exactly as many steps as the reported count of tracked entries and then stops. The
+      queue never contains a loop, so walking it always terminates and no entry appears twice.
+    traces:     ["lru_list.rs:145-156 peek_front_n", "lru_list.rs:116-133 move_to_back", "lru_list.rs:164-180 LruList::remove"]
+
+  - id:         EPO-INV-FREE-EXACT
+    subject:    "Global invariant: the free list holds exactly the not-live slots, each once"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every pool, the list of reusable slots contains exactly those internal slots that are
+      marked not-live, each appearing exactly once, and none of them is reachable by walking the
+      eviction queue. A live slot is therefore never handed out for reuse, and two registrations
+      can never be given the same slot.
+    traces:     ["lru_list.rs:21 LruList::free", "lru_list.rs:178-181 LruList::remove", "lru_list.rs:38-45 push_front", "lru_list.rs:76-83 push_back", "lru_list.rs:190 clear"]
+
+  - id:         EPO-INV-SLOTS-ACCOUNTED
+    subject:    "Global invariant: every allocated slot is either tracked or free"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every pool, the number of internal slots it has allocated equals its count of tracked
+      entries plus the number of slots on its reuse list. No slot is ever lost or double-counted,
+      so the memory a pool holds is bounded by the largest number of entries it has ever tracked
+      at once.
+    traces:     ["lru_list.rs:18-22 LruList fields", "lru_list.rs:46-54 push_front", "lru_list.rs:84-92 push_back", "lru_list.rs:178-182 LruList::remove"]
+
+  - id:         EPO-INV-INDEX-IN-RANGE
+    subject:    "Global invariant: every slot number the component stores refers to a slot that exists"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      For every pool, every slot number the component keeps internally — the front and back of
+      the eviction queue, every forward and backward link, and every entry on the reuse list —
+      refers to a slot that has actually been allocated. Slot numbers arriving from outside in a
+      caller's handle are not covered by this and are not checked.
+    traces:     ["lru_list.rs:19-21 LruList head/tail/free", "lru_list.rs:71 peek_front_key", "lru_list.rs:120-131 move_to_back", "lru_list.rs:167-176 LruList::remove"]
+
+  - id:         EPO-INV-LEN-NO-UNDERFLOW
+    subject:    "Global invariant: the count of tracked entries never goes below zero"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A pool's count of tracked entries is never decreased below zero. The count is only reduced
+      when an entry that was genuinely live is taken out of the queue, so repeated removals of an
+      already-removed entry cannot drive the count negative and cannot make it wrap round to a
+      huge number.
+    traces:     ["lru_list.rs:160-162 LruList::remove", "lru_list.rs:182 LruList::remove"]
+
+  - id:         EPO-INV-SKETCH-COL-IN-RANGE
+    subject:    "Global invariant: every frequency counter lookup lands inside the counter table"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every read or write of a frequency counter lands inside the fixed table of four rows by one
+      thousand and twenty-four columns, for every possible key. The column is obtained by
+      multiplying the key by a fixed odd constant and keeping only the top ten bits of the
+      sixty-four-bit result, which can only produce a number from zero to one thousand and
+      twenty-three. This safety depends on the shift amount and the table width being kept in
+      step; the code couples them only by convention, with no check, so widening the table
+      without changing the shift would silently read and write out of bounds.
+    traces:     ["lib.rs:18-25 CMS_ROWS/CMS_COLS/CMS_PRIMES", "lib.rs:40 CountMinSketch::increment", "lib.rs:48 CountMinSketch::estimate"]
+
+  - id:         EPO-INV-SKETCH-SATURATES
+    subject:    "Global invariant: frequency counters never wrap around"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every frequency counter always holds a value between zero and two hundred and fifty-five.
+      Incrementing a counter that is already at its maximum leaves it at the maximum instead of
+      wrapping round to zero, so a very hot key is never mistaken for a never-seen one.
+    traces:     ["lib.rs:28 CountMinSketch::counters", "lib.rs:41 CountMinSketch::increment", "lib.rs:56-58 CountMinSketch::halve"]
+
+  - id:         EPO-INV-ESTIMATE-IS-MIN
+    subject:    "Global invariant: an estimated frequency never exceeds any of the counters it is drawn from"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A key's estimated access frequency is the smallest of the four counters that key maps to,
+      so it is never larger than any one of them. Because a counter for a key is raised every
+      time that key is registered and only ever lowered by the halving step, a key's estimate is
+      at least one immediately after it is first registered and before any halving occurs.
+    traces:     ["lib.rs:45-52 CountMinSketch::estimate", "lib.rs:38-43 CountMinSketch::increment"]
+
+  - id:         EPO-INV-HALVE-MONOTONE
+    subject:    "Global invariant: ageing the frequency records never raises any estimate"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Ageing the frequency records can only lower or leave unchanged the estimated frequency of
+      every key, never raise it. Each counter is replaced by half its value rounded down, so a
+      counter of one becomes zero and a key seen only once is forgotten entirely by a single
+      ageing step.
+    traces:     ["lib.rs:54-60 CountMinSketch::halve"]
+
+  - id:         EPO-INV-ACCESS-COUNT-MONOTONE
+    subject:    "Global invariant: a pool's registration count only ever rises"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A pool's running count of registrations only ever increases, by exactly one per successful
+      registration. Nothing decreases it and nothing resets it, not even emptying the pool, so it
+      is a lifetime tally rather than a measure of current contents.
+    traces:     ["lib.rs:66 Pool::access_count", "lib.rs:123 track", "lib.rs:235 clear_pool"]
+
+  - id:         EPO-INV-MAXLEN-MONOTONE
+    subject:    "Global invariant: a pool's high-water mark only ever rises"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A pool's record of the largest number of entries it has held only ever increases. Removing
+      entries, evicting them, and emptying the pool all leave it untouched, so once it has grown
+      large it keeps the frequency-ageing interval long forever, even for a pool that has since
+      been emptied and is now tiny.
+    traces:     ["lib.rs:67 Pool::max_len", "lib.rs:122 track", "lib.rs:235 clear_pool"]
+
+  - id:         EPO-INV-LEN-LE-MAXLEN-PLUS-1
+    subject:    "Global invariant: the high-water mark is at most one short of the true peak length"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      A pool's current count of tracked entries is never more than one greater than its recorded
+      high-water mark, and the recorded mark is never greater than the true peak. The mark is
+      measured just before each new entry is inserted rather than after, so whenever the pool
+      reaches a new peak the recorded mark is one too low. This looks like an accidental
+      off-by-one: it means the frequency-ageing interval is computed from a slightly stale peak,
+      and a pool that has only ever held one entry records a mark of zero and so never ages its
+      frequency records at all.
+    traces:     ["lib.rs:122 track", "lib.rs:124-127 track"]
+
+  - id:         EPO-INV-HANDLE-POOL-MATCHES
+    subject:    "Global invariant: a handle always names the pool it was created for"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every handle the component returns carries the pool number that was passed to the
+      registration that produced it. The component never issues a handle naming a different pool,
+      so a handle used later is always interpreted against the pool its entry belongs to, unless
+      a caller fabricates a handle of its own.
+    traces:     ["lib.rs:139 track", "ieviction_policy.rs:15-25 EvictionHandle::new"]
+
+  - id:         EPO-INV-ONE-LOCK-AT-A-TIME
+    subject:    "Global invariant: at most one pool is locked at a time"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      No operation ever holds the exclusive lock of two pools at the same time. Every operation
+      takes a shared lock on the list of pools and then, at most, the exclusive lock of a single
+      pool, releasing it before locking any other. This removes the possibility of two threads
+      each holding one pool and waiting for the other's.
+    traces:     ["lib.rs:82-84 state field", "lib.rs:168-181 batch_touch", "lib.rs:110-119 track", "lib.rs:143-153 touch"]
+
+  - id:         EPO-INV-NO-INVALID-HANDLE-ERROR
+    subject:    "Global invariant: the invalid-handle error is never returned"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      No operation in this component ever returns the invalid-handle error, even though the
+      interface defines one precisely for a handle that is bad or already removed. The only error
+      the component ever produces is the invalid-pool error. A bad handle therefore either does
+      nothing silently, or acts on the wrong entry, or crashes the process, but is never reported
+      as an error.
+    traces:     ["lib.rs:117 track", "lib.rs:151 touch", "lib.rs:167 batch_touch", "lib.rs:195 remove", "ieviction_policy.rs:56-58 EvictionPolicyError variants"]
+
+  - id:         EPO-INV-LOGGER-OPTIONAL
+    subject:    "Global invariant: behaviour does not depend on whether a logger is connected"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Every operation produces exactly the same results and leaves the component in exactly the
+      same state whether or not a logger is connected. Each attempt to log first asks for the
+      logger and quietly skips logging if none is available, so a missing logger never turns into
+      a failure or a changed answer.
+    traces:     ["lib.rs:98-100 create_pool", "lib.rs:112-116 track", "lib.rs:145-150 touch", "lib.rs:189-194 remove"]
+
+  - id:         EPO-INV-POOL-ISOLATION
+    subject:    "Global invariant: pools are fully independent"
+    kind:       invariant
+    verifiable: true
+    statement:  >
+      Anything done to one pool is invisible in every other pool. Registering, recording an
+      access, removing, evicting, previewing, counting, and emptying all read and change only the
+      pool they were given, so pools never share entries, eviction order, frequency estimates or
+      counters, and two callers using different pools cannot interfere with each other's results.
+    traces:     ["lib.rs:72 EvictionState::pools", "lib.rs:110-139 track", "lib.rs:203-206 identify_next_to_evict", "lib.rs:233-236 clear_pool"]
+
+  # ---------------------------------------------------- not-verifiable ledger
+  - id:         NV-1
+    scope:      "Freedom from deadlock and from lock starvation under concurrent use"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Whether concurrent callers always eventually make progress is an unbounded liveness
+      question, not a single checkable assertion about a state. The structural fact that at most
+      one pool is locked at a time is captured separately as a checkable invariant; the liveness
+      conclusion drawn from it is not.
+    traces:     ["lib.rs:110 track", "lib.rs:168-181 batch_touch"]
+
+  - id:         NV-2
+    scope:      "The constant-time cost claimed for registration, access recording, removal and eviction"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The claim that these operations take constant time is about how long they run, not about
+      what state they leave behind, so no counterexample state exists to find. The structural
+      facts that make it plausible, such as the eviction queue being a doubly linked chain
+      addressed by slot number, are captured as invariants instead.
+    traces:     ["lib.rs:1-5 module documentation", "lru_list.rs:1 module documentation", "lru_list.rs:13-16 LruList documentation"]
+
+  - id:         NV-3
+    scope:      "The throughput benefit claimed for recording accesses in a group rather than one at a time"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Amortising lock overhead across a batch is a performance effect measured by timing, not a
+      behavioural guarantee. How many locks are actually taken is checkable and is recorded as an
+      invariant; the speed-up is not.
+    traces:     ["ieviction_policy.rs:94-96 batch_touch doc comment", "lib.rs:158-184 batch_touch"]
+
+  - id:         NV-4
+    scope:      "The accuracy of the estimated access frequencies"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The frequency table is a probabilistic sketch whose useful guarantee is a statistical error
+      bound over a family of hash functions. With four fixed multipliers chosen in the code there
+      is no per-execution assertion to check: for any given set of keys the estimate is simply
+      whatever the shared counters hold, and two unrelated keys colliding is normal behaviour
+      rather than a fault.
+    traces:     ["lib.rs:20-25 CMS_PRIMES", "lib.rs:45-52 CountMinSketch::estimate"]
+
+  - id:         NV-5
+    scope:      "Behaviour after a lock is poisoned by a panic in another thread"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Every lock in the component is taken with an unwrap that turns a poisoned lock into an
+      immediate crash. Whether a lock becomes poisoned depends on how the runtime unwinds a panic
+      raised elsewhere, which is an environment behaviour outside the component. The practical
+      consequence is worth stating for a reader even though it cannot be asserted: a single
+      out-of-bounds crash caused by a stale handle poisons that pool's lock, after which every
+      later operation on that pool crashes too.
+    traces:     ["lib.rs:90 create_pool", "lib.rs:110 track", "lib.rs:119 track", "lib.rs:153 touch", "lib.rs:168 batch_touch"]
+
+  - id:         NV-6
+    scope:      "The wording and formatting of log messages"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The exact text the component writes to the log, and the severity it chooses, are
+      presentation choices with no effect on observable behaviour. The one log-related fact that
+      does matter behaviourally, that the group access-recording path stays silent on its error
+      path while the single-entry paths do not, is recorded as a checkable obligation instead.
+    traces:     ["lib.rs:99 create_pool", "lib.rs:113-115 track", "lib.rs:146-149 touch", "lib.rs:190-193 remove"]
+
+  - id:         NV-7
+    scope:      "Numeric overflow in the pool number, the registration count, and the ageing interval"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Three places in the code can overflow only at magnitudes no real execution reaches. Pool
+      numbers are narrowed to a thirty-two-bit value, which would misbehave only after more than
+      four billion pools have been created; the registration count would need about eighteen
+      billion billion registrations to wrap; and the ageing interval multiplies the high-water
+      mark by ten, which overflows only for a pool holding more than a billion billion entries.
+      All three exceed any amount of memory or time available, so they are recorded here rather
+      than as reachable error cases.
+    traces:     ["lib.rs:91 create_pool", "lib.rs:123 track", "lib.rs:124 track"]
+
+  - id:         NV-8
+    scope:      "Failure to allocate memory when a pool or its slot storage grows"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Growing the list of pools or the storage of entry slots may fail if the system cannot
+      supply memory, which aborts the process. That is an environment assumption the component
+      neither controls nor checks, and is excluded by the usual convention of assuming allocation
+      succeeds.
+    traces:     ["lib.rs:92 create_pool", "lru_list.rs:48 push_front", "lru_list.rs:86 push_back"]
+
+  - id:         NV-9
+    scope:      "The fixed memory footprint of the per-pool frequency table"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Each pool carries a frequency table of four rows by one thousand and twenty-four
+      single-byte counters, so roughly four kilobytes per pool, stored inline rather than on the
+      heap. This is a layout and size fact that does not gate behaviour. The one part of the
+      table's shape that does gate behaviour, that lookups always land inside it, is recorded as
+      a checkable invariant.
+    traces:     ["lib.rs:18-19 CMS_ROWS/CMS_COLS", "lib.rs:27-29 CountMinSketch"]
+
+  - id:         NV-10
+    scope:      "Whether the admission rule actually improves cache effectiveness"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The point of admitting a newcomer at the victim end unless it looks hotter than the current
+      victim is to protect frequently used keys from being flushed by a burst of one-off keys.
+      Whether that raises the hit rate is a statistical question about real access patterns, not
+      a property of any single execution. What the rule does in each case is recorded as a
+      checkable obligation.
+    traces:     ["lib.rs:129-137 track"]
+
+  - id:         NV-11
+    scope:      "The caller's obligation never to present a stale, fabricated, or cross-pool handle"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The component relies completely on callers to present only handles it issued, that are
+      still valid, and that have not been kept across an emptying of their pool. It never checks
+      this, and no code in the component can establish it, because it is a constraint on the
+      environment. Its consequences inside the component are recorded as obligations that are
+      expected to be refuted, so the hazard is not lost by being listed here.
+    traces:     ["lru_list.rs:109 move_to_back", "lru_list.rs:160 LruList::remove", "ieviction_policy.rs:15-17 EvictionHandle::new is public"]
+
+  - id:         NV-12
+    scope:      "Session-aware, lineage-based placement of tracked blocks"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      The interface describes a policy that may read a block's session identifier and place the
+      block into that session's chain. This implementation holds no session state of any kind and
+      discards the hint, so there is no behaviour here to check. The observable consequence, that
+      results never depend on the hint, is recorded as a checkable obligation instead.
+    traces:     ["ieviction_policy.rs:35-50 BlockSemantics", "ieviction_policy.rs:80-86 track doc comment", "lib.rs:107 track parameter bound as _semantics"]
+
+  - id:         NV-13
+    scope:      "Which outcome results from a particular interleaving of concurrent operations"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      When several threads register keys into one pool at the same time, which thread gets which
+      slot number, the resulting order of the eviction queue, and which registration triggers the
+      frequency ageing all depend on the order the operating system grants the lock. These are
+      scheduling-dependent quantities with no single correct value. The properties that must hold
+      for every interleaving, such as the count matching the queue, are recorded as invariants.
+    traces:     ["lib.rs:119-137 track", "lib.rs:381-409 concurrent_access test"]
+
+  - id:         NV-14
+    scope:      "Whether an eviction candidate is actually evicted by the caller"
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      Selecting the next key to evict already stops tracking it, and previewing candidates does
+      not. Whether the caller then really discards the corresponding cached data, and whether it
+      keeps its own view consistent with this component's, is entirely outside the component and
+      cannot be observed from here.
+    traces:     ["lib.rs:202-207 identify_next_to_evict", "lib.rs:209-218 get_eviction_candidates"]

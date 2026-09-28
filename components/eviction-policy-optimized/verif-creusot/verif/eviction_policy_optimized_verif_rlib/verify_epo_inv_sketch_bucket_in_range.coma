@@ -1,0 +1,52 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2229 0 2229 86 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2230 4 2230 18
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2224 10 2224 26
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2225 10 2225 47
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2226 10 2226 47
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2227 10 2227 47
+let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2228 10 2228 86
+let%span slib'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 719 10 719 26
+let%span slib'6 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 720 10 720 47
+let%span slib'7 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 721 10 721 47
+let%span slib'8 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 722 10 722 47
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type tup4_usize_usize_usize_usize = { f0: UInt64.t; f1: UInt64.t; f2: UInt64.t; f3: UInt64.t }
+
+let cms_cols4 (key: UInt64.t) (return (x: tup4_usize_usize_usize_usize)) = any
+  [ return (result: tup4_usize_usize_usize_usize) ->
+  {[@stop_split] [@expl:cms_cols4 ensures] ([@stop_split] [@expl:cms_cols4 ensures #0] [%#slib'5] UInt64.t'int result.f0
+      < 1024)
+    /\ ([@stop_split] [@expl:cms_cols4 ensures #1] [%#slib'6] 1024 <= UInt64.t'int result.f1
+      /\ UInt64.t'int result.f1 < 2048)
+    /\ ([@stop_split] [@expl:cms_cols4 ensures #2] [%#slib'7] 2048 <= UInt64.t'int result.f2
+      /\ UInt64.t'int result.f2 < 3072)
+    /\ ([@stop_split] [@expl:cms_cols4 ensures #3] [%#slib'8] 3072 <= UInt64.t'int result.f3
+    /\ UInt64.t'int result.f3 < 4096)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_epo_inv_sketch_bucket_in_range [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 2229 0 2229 86]
+  (key: UInt64.t) (return (x: tup4_usize_usize_usize_usize)) = (! bb0
+  [ bb0 = s0
+    [ s0 = cms_cols4 [%#slib] {key} (fun (_x: tup4_usize_usize_usize_usize) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ] [ & _ret: tup4_usize_usize_usize_usize = Any.any_l () | & key: UInt64.t = key ])
+  [ return (result: tup4_usize_usize_usize_usize) ->
+  {[@stop_split] [@expl:verify_epo_inv_sketch_bucket_in_range ensures] ([@stop_split] [@expl:verify_epo_inv_sketch_bucket_in_range ensures #0] [%#slib'0] UInt64.t'int result.f0
+      < 1024)
+    /\ ([@stop_split] [@expl:verify_epo_inv_sketch_bucket_in_range ensures #1] [%#slib'1] 1024 <= UInt64.t'int result.f1
+      /\ UInt64.t'int result.f1 < 2048)
+    /\ ([@stop_split] [@expl:verify_epo_inv_sketch_bucket_in_range ensures #2] [%#slib'2] 2048 <= UInt64.t'int result.f2
+      /\ UInt64.t'int result.f2 < 3072)
+    /\ ([@stop_split] [@expl:verify_epo_inv_sketch_bucket_in_range ensures #3] [%#slib'3] 3072 <= UInt64.t'int result.f3
+      /\ UInt64.t'int result.f3 < 4096)
+    /\ ([@stop_split] [@expl:verify_epo_inv_sketch_bucket_in_range ensures #4] [%#slib'4] UInt64.t'int result.f0 < 4096
+    /\ UInt64.t'int result.f1 < 4096 /\ UInt64.t'int result.f2 < 4096 /\ UInt64.t'int result.f3 < 4096)}
+    (! return {result}) ]

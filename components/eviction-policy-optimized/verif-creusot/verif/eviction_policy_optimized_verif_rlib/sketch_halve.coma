@@ -1,0 +1,148 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 550 0 550 39 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 551 26 551 32
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 552 23 552 24
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 557 14 557 18
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 555 16 556 66
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 554 16 554 26
+let%span slib'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 553 16 553 45
+let%span slib'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 558 30 558 33
+let%span slib'6 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 559 28 559 44
+let%span slib'7 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 559 22 559 25
+let%span slib'8 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 560 13 560 14
+let%span slib'9 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 560 8 560 14
+let%span slib'10 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 546 11 546 40
+let%span slib'11 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 547 10 547 42
+let%span slib'12 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 548 10 549 65
+let%span slib'13 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 484 10 484 27
+let%span svec = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 183 19 183 38
+let%span svec'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 184 18 184 46
+let%span svec'4 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 185 18 185 49
+let%span svec'5 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 186 18 186 54
+let%span svec'6 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/vec.rs" 187 18 187 47
+let%span sslice = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sslice'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/creusot/creusot-std/src/std/slice.rs" 158 20 158 88
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt8
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_u8_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_u8_Global (self: t_Vec_u8_Global) : Seq.seq UInt8.t
+
+axiom view_Vec_u8_Global_spec:
+  forall self: t_Vec_u8_Global [view_Vec_u8_Global self]. [%#svec] Seq.length (view_Vec_u8_Global self)
+    <= UInt64.t'int const_MAX
+
+type t_Sketch = { counters: t_Vec_u8_Global }
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt8.t) (out: UInt8.t) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_u8_Global (self_: t_Vec_u8_Global) (ix: UInt64.t) (return (x: UInt8.t)) =
+{[@stop_split] [@expl:index requires] [%#svec'0] in_bounds_usize ix (view_Vec_u8_Global self_)}
+  any
+  [ return (result: UInt8.t) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'1] has_value_usize ix (view_Vec_u8_Global self_) result}
+    (! return {result}) ]
+
+let cms_halve_one (self_: UInt8.t) (return (x: UInt8.t)) = any
+  [ return (result: UInt8.t) -> {[@stop_split] [@expl:cms_halve_one ensures] [%#slib'13] UInt8.t'int result
+    <= UInt8.t'int self_}
+    (! return {result}) ]
+
+predicate resolve_elswhere_usize [@inline:trivial] (self: UInt64.t) (old': Seq.seq UInt8.t) (fin: Seq.seq UInt8.t) =
+  [%#sslice'1] forall i: int. 0 <= i /\ i <> UInt64.t'int self /\ i < Seq.length old' -> Seq.get old' i = Seq.get fin i
+
+meta "rewrite_def" predicate resolve_elswhere_usize
+
+let index_mut_Vec_u8_Global (self_: MutBorrow.t t_Vec_u8_Global) (ix: UInt64.t) (return (x: MutBorrow.t UInt8.t)) =
+{[@stop_split] [@expl:index_mut requires] [%#svec'2] in_bounds_usize ix (view_Vec_u8_Global self_.current)}
+  any
+  [ return (result: MutBorrow.t UInt8.t) ->
+  {[@stop_split] [@expl:index_mut_Vec_u8_Global ensures] ([@stop_split] [@expl:index_mut ensures #0] [%#svec'3] has_value_usize ix (view_Vec_u8_Global self_.current) result.current)
+    /\ ([@stop_split] [@expl:index_mut ensures #1] [%#svec'4] has_value_usize ix (view_Vec_u8_Global self_.final) result.final)
+    /\ ([@stop_split] [@expl:index_mut ensures #2] [%#svec'5] resolve_elswhere_usize ix (view_Vec_u8_Global self_.current) (view_Vec_u8_Global self_.final))
+    /\ ([@stop_split] [@expl:index_mut ensures #3] [%#svec'6] Seq.length (view_Vec_u8_Global self_.final)
+    = Seq.length (view_Vec_u8_Global self_.current))}
+    (! return {result}) ]
+
+predicate resolve_refmut_u8 [@inline:trivial] (_1: MutBorrow.t UInt8.t) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_u8
+
+predicate resolve_refmut_Sketch [@inline:trivial] (_1: MutBorrow.t t_Sketch) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Sketch
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let sketch_halve [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 550 0 550 39]
+  (self_: MutBorrow.t t_Sketch) (return (x: ())) =
+{[@stop_split] [@expl:sketch_halve requires] [%#slib'10] Seq.length (view_Vec_u8_Global self_.current.counters) = 4096}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &old' <- [%#slib] self_.current ] s1
+    | s1 = [ &i <- [%#slib'0] (0: UInt64.t) ] s2
+    | s2 = [ &_old <- self_.final ] s3
+    | s3 = bb2 ]
+  | bb2 = bb2
+    [ bb2 = {[@expl:inferred invariant: unchanged value] _old = self_.final}
+      {[@expl:loop invariant #0] [%#slib'4] Seq.length (view_Vec_u8_Global self_.current.counters) = 4096}
+      {[@expl:loop invariant #1] [%#slib'3] UInt64.t'int i <= 4096}
+      {[@expl:loop invariant #2] [%#slib'2] forall j: int. 0 <= j /\ j < 4096
+        -> UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) j)
+        <= UInt8.t'int (Seq.get (view_Vec_u8_Global old'.counters) j)}
+      (! s0)
+      [ s0 = [ &_21 <- UInt64.lt i ([%#slib'1] (4096: UInt64.t)) ] s1
+      | s1 = any [ br0 -> {_21 = false} (! bb8) | br1 -> {_21} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = index_Vec_u8_Global [%#slib'5] {self_.current.counters} {i} (fun (_x: UInt8.t) -> [ &_24 <- _x ] s1)
+        | s1 = [ &c <- _24 ] s2
+        | s2 = cms_halve_one [%#slib'6] {c} (fun (_x: UInt8.t) -> [ &_27 <- _x ] s3)
+        | s3 = MutBorrow.borrow_mut <t_Vec_u8_Global> {self_.current.counters}
+            (fun (_bor: MutBorrow.t t_Vec_u8_Global) ->
+              [ &_30 <- _bor ] [ &self_ <- { self_ with current = { counters = _bor.final } } ] s4)
+        | s4 = index_mut_Vec_u8_Global [%#slib'7] {_30} {i} (fun (_x: MutBorrow.t UInt8.t) -> [ &_29 <- _x ] s5)
+        | s5 = [ &_29 <- { _29 with current = _27 } ] s6
+        | s6 = -{resolve_refmut_u8 _29}- s7
+        | s7 = UInt64.add [%#slib'9] {i} {[%#slib'8] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s8)
+        | s8 = bb2 ] ] ]
+  | bb8 = s0 [ s0 = -{resolve_refmut_Sketch self_}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & self_: MutBorrow.t t_Sketch = self_
+  | & old': t_Sketch = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _21: bool = Any.any_l ()
+  | & c: UInt8.t = Any.any_l ()
+  | & _24: UInt8.t = Any.any_l ()
+  | & _27: UInt8.t = Any.any_l ()
+  | & _29: MutBorrow.t UInt8.t = Any.any_l ()
+  | & _30: MutBorrow.t t_Vec_u8_Global = Any.any_l ()
+  | & _old: t_Sketch = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:sketch_halve ensures] ([@stop_split] [@expl:sketch_halve ensures #0] [%#slib'11] Seq.length (view_Vec_u8_Global self_.final.counters)
+      = 4096)
+    /\ ([@stop_split] [@expl:sketch_halve ensures #1] [%#slib'12] forall i: int. 0 <= i /\ i < 4096
+      -> UInt8.t'int (Seq.get (view_Vec_u8_Global self_.final.counters) i)
+      <= UInt8.t'int (Seq.get (view_Vec_u8_Global self_.current.counters) i))}
+    (! return {result}) ]

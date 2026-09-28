@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_arena_clear": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_arena_remove": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_pool_track": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epo_inv_maxlen_monotone": {
+        "prover": "alt-ergo",
+        "time": 0.044
+      }
+    }
+  }
+}

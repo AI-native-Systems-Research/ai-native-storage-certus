@@ -1,0 +1,40 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 600 0 600 47 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 602 21 602 22
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 602 8 602 22
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 597 11 597 34
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 598 10 598 58
+let%span slib'3 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 599 10 599 37
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Log = { lines: UInt64.t }
+
+predicate resolve_refmut_Log [@inline:trivial] (_1: MutBorrow.t t_Log) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Log
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let log_site [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 600 0 600 47]
+  (log: MutBorrow.t t_Log) (connected: bool) (return (x: ())) =
+{[@stop_split] [@expl:log_site requires] [%#slib'1] UInt64.t'int log.current.lines < 4294967295}
+  (! bb0
+  [ bb0 = any [ br0 -> {connected = false} (! bb2) | br1 -> {connected} (! bb1) ]
+  | bb1 = s0
+    [ s0 = UInt64.add [%#slib'0] {log.current.lines} {[%#slib] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &log <- { log with current = { lines = _x } } ] s1)
+    | s1 = -{resolve_refmut_Log log}- s2
+    | s2 = return {_ret} ]
+  | bb2 = s0 [ s0 = -{resolve_refmut_Log log}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & log: MutBorrow.t t_Log = log | & connected: bool = connected ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:log_site ensures] ([@stop_split] [@expl:log_site ensures #0] [%#slib'2] connected
+      -> UInt64.t'int log.final.lines = UInt64.t'int log.current.lines + 1)
+    /\ ([@stop_split] [@expl:log_site ensures #1] [%#slib'3] not connected -> log.final = log.current)}
+    (! return {result}) ]

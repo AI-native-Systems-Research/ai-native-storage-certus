@@ -1,0 +1,29 @@
+(* #"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 1188 0 1188 75 *)
+
+let%span slib = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 1189 21 1189 23
+let%span slib'0 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 1189 4 1189 23
+let%span slib'1 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 1186 11 1186 33
+let%span slib'2 = "/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 1187 10 1187 34
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_epo_track_inv_aging_period_no_overflow [#"/home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-creusot/src/lib.rs" 1188 0 1188 75]
+  (max_len: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:verify_epo_track_inv_aging_period_no_overflow requires] [%#slib'1] UInt64.t'int max_len
+  <= 4294967295}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_6 <- UInt64.of_int (UInt64.t'int max_len) ] s1
+    | s1 = UInt64.mul [%#slib'0] {_6} {[%#slib] (10: UInt64.t)} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & max_len: UInt64.t = max_len | & _6: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:verify_epo_track_inv_aging_period_no_overflow ensures] [%#slib'2] UInt64.t'int result
+    = UInt64.t'int max_len * 10}
+    (! return {result}) ]
