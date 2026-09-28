@@ -123,6 +123,51 @@ Each scorer executes each property's artifact, captures wall-clock + peak RSS **
 
 **Bounded iterate (7th rail — do NOT loop forever).** Cap this UNRESOLVED → re-attempt cycle at **3 iterations**. If both scorers have not reached exit 0 after the 3rd, **stop and PAUSE** — do not commit, do not push, do not start a 4th round. Print `COMPONENT-VERIFY: PAUSED(iterate-cap)` followed by the still-outstanding property `id`s and their last UNRESOLVED notes, so the operator (or a colleague) picks up a bounded, legible work-list instead of an agent spinning on the same wall. A paused run is resumable: its per-property progress is already checkpointed in `unified_properties.yaml`, so a later supervised re-run with `--resume` continues from the outstanding ids only. Pausing is a first-class outcome, not a failure to hide.
 
+## Re-scoring an ALREADY-PUBLISHED component — change exactly ONE variable (mandatory protocol)
+
+Re-scoring is how correctness debt on public results gets paid: a gate defect is fixed, and the
+already-published cells that bypassed the fixed check are re-derived. It is **not** the same activity
+as scoring a fresh component, and it has its own failure mode — **a parameter difference that mimics
+the very finding you are testing for.**
+
+Measured on 2026-09-28, re-scoring `eviction-policy-optimized` to recheck 58 `bounded-shallow`
+proofs. Two separate misconfigurations EACH produced a large drop in `proved` that had nothing to do
+with the fix, and each would have supported the false headline "the proofs collapsed under the new
+check":
+
+1. **`--wall-budget` left at its default 3.** After 3 properties fail escalation with the same
+   timeout signature, later ones skip escalation. But the known-defeat registry matches against the
+   LAST output, so with no 300s escalation the signature never matched
+   `KD-MULTIMAP-UNWIND-TIMEOUT`, its mandated `nounwindcheck` lever was never applied, and properties
+   that legitimately prove at `--unwind 4` scored UNRESOLVED. 20 of the first 24 hit this; all 20 are
+   `proved` on the published branch, 17 via that exact lever.
+2. **`--cap-seconds 60` instead of the published 240.** The lever run inherits `--cap-seconds`, so the
+   lever itself timed out. 12 properties reported "its mandated lever did not discharge it either"
+   while being `proved` via that lever on the branch.
+
+### The protocol
+1. **Read the published `run:` block FIRST, before stripping anything.** It records the exact command,
+   caps and tool versions that produced the numbers you are comparing against:
+   ```
+   python3 -c "import yaml;print((yaml.safe_load(open('unified_properties.yaml'))['run']['kani'])['command'])"
+   ```
+   This is what the provenance stamp is FOR. One query replaced a guess-and-rerun loop here.
+2. **Reproduce its parameters exactly** — `--cap-seconds`, `--cap-max`, `--component-dir`, and a
+   `--wall-budget` high enough that escalation is never skipped (the budget is a cost heuristic, not a
+   verdict input, so it must not differ between the two runs being compared).
+3. **Strip only the tool being re-scored** (`status`, `_scored_by`, `evidence`, and that tool's `run`
+   entry), so the other tool's verified column is untouched and cannot be blamed for a change.
+4. **Change ONE thing: the fix under test.** If a count moves, the fix is the only candidate
+   explanation. If two things differ, the result is uninterpretable and worse than no result.
+5. **Record the baseline before you start** (per-status counts, and which cells the fix targets), so
+   the comparison is arithmetic rather than recollection.
+6. Expect a similar wall-clock to the original. EPO's published run took 5h17m; a re-score that
+   finishes far faster has probably skipped the expensive levers — treat that as a red flag, not a win.
+
+**A drop is a legitimate outcome** — it means a claim never had content. But it is only reportable
+when the parameters matched. Never publish a re-score number without saying which `run:` block you
+reproduced.
+
 ## Step 2.6 — Refuter: attack every surviving tool-boundary (separation of powers)
 For each property the scorer scored `tool-boundary`, spawn the **`refute-tool-boundary`** sub-skill as an *independent* subagent (a different agent than the one that produced the artifact). It re-attacks the wall with the full lever arsenal plus anything the battery has not yet encoded. Outcomes:
 - **Refuted** (the refuter lands a reproducible proof): the boundary was false. Adopt the refuter's artifact, re-run the scorer (it will now score `proved`), and **append the beaten signature + the lever that broke it to `known_defeats.yaml`** (only the orchestrator appends, only from this reproduced defeat) so the wall can never be claimed again.
