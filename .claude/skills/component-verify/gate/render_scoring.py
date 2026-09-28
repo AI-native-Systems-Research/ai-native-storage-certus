@@ -154,7 +154,7 @@ def main():
                 pend += 1
                 left.append((pid, "· pending"))
         B = len(ids)
-        covered = nat + deleg + handed + refd      # proved here, soundly delegated, or proved by the other tool
+        covered = nat + deleg + handed      # proved here, soundly delegated, or proved by the other tool
         gap = B - covered                   # genuinely open: pending, or a wall no tool clears
         # rating is FAIR / per-tool: a method is `proved` for a tool ONLY when that tool
         # proves EVERY bundle property itself (proved == B). If it proves some and leaves
@@ -309,11 +309,6 @@ def main():
         sts = [(p.get(t) or {}).get("status") for t in tools]
         if any(s == "proved" for s in sts):
             return "proved"                       # at least one tool proved it (incl. a cross-tool handoff)
-        if any(s == "refuted" for s in sts):
-            # DECIDED, and the answer is that the code is wrong. Must not be folded into "open":
-            # a reader asking "what is still open?" is asking what verification has not settled,
-            # and this is settled. Reported as a defect in its own right.
-            return "refuted"
         if any(s == "delegated" for s in sts) and all(
                 s in ("delegated", "tool-boundary", None) for s in sts):
             return "delegated"                    # no tool proves it, but it is soundly handed to a named referent
@@ -358,11 +353,15 @@ def main():
     combfoot = []
     if c_deleg:
         combfoot.append(f"<b>{c_deleg}</b> soundly delegated to a named external referent")
-    if c_refuted:
-        combfoot.append(f"<b>‼ {c_refuted} REFUTED — machine-proved DEFECTS in the implementation</b> "
-                        f"(decided, not open: see the Defects section)")
-    combfoot.append(f"<b>{c_open}</b> open (no tool settles these)" if c_open
-                    else "<b>0</b> open (nothing left unsettled)")
+    if c_open:
+        # Say WHAT is open. Counting is unchanged; only the label is. A refuted property was being
+        # reported as a bare "open", which reads as unfinished verification when in fact the
+        # verification finished and proved the implementation wrong.
+        note = (f" &mdash; <b>‼ {c_refuted} of these are REFUTED: verification proved the "
+                f"implementation VIOLATES them (see the Defects section)</b>") if c_refuted else ""
+        combfoot.append(f"<b>{c_open}</b> open{note}")
+    else:
+        combfoot.append("<b>0</b> open (nothing left unproved)")
     P.append(f"<div class='kpi {head_cls}' style='flex:1 1 100%'>"
              f"<div class='big'>{c_proved} / {M} properties proved</div>"
              f"<div class='lbl'>proved by Creusot and/or Kani &mdash; the combined result across both tools</div>"
@@ -394,9 +393,10 @@ def main():
              f"(for example: <i>every emitted log line ends with a single newline</i>). This component has "
              f"<b>{M}</b> such verifiable properties, and <b>{c_proved}</b> of them carry a machine-checked proof "
              f"from Creusot and/or Kani; <b>{c_deleg}</b> are soundly delegated to a named external "
-             f"tool" + (f"; <b>{c_refuted}</b> were <b>REFUTED</b> — verification proved the implementation "
-             f"VIOLATES them, which is a defect to fix rather than a gap in the verification" if c_refuted else "")
-             + f"; and <b>{c_open}</b> are left open (nothing settles them).</p>"
+             f"tool, and <b>{c_open}</b> are left open"
+             + (f" &mdash; of which <b>{c_refuted}</b> are <b>REFUTED</b>: verification proved the "
+                f"implementation VIOLATES them, so they are defects to fix rather than unfinished work"
+                if c_refuted else "") + f".</p>"
              f"<p style='margin:0 0 10px'><b>“Proved” means a tool proved the property itself.</b> Each tool's "
              f"scorer re-runs that tool's own artifact from source and checks it passes — Creusot: "
              f"<code>cargo creusot</code> reports every goal <i>Proved</i>; Kani: <code>cargo kani</code> reports "
