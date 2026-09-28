@@ -131,6 +131,10 @@ fn render_metrics(
     let used = mt.used();
     let free = mt.capacity().saturating_sub(used);
     let rw = dispatcher.read_write_stats();
+    // Remote-lookup attribution (spec 002 Phase 1). Comes from the dispatcher's own
+    // tier counters, not from `ServiceCounters`: the dispatcher is the only place that
+    // knows, per key, whether a peer served it.
+    let tier = dispatcher.tier_event_stats();
 
     format!(
         "# HELP certus_memory_tier_write_lock_contentions_total Write-lock contention events\n\
@@ -160,6 +164,12 @@ fn render_metrics(
          # HELP certus_lookup_errors_total Lookups neither served nor shown absent\n\
          # TYPE certus_lookup_errors_total counter\n\
          certus_lookup_errors_total {}\n\
+         # HELP certus_remote_lookup_hits_total Lookups a peer served (requester side)\n\
+         # TYPE certus_remote_lookup_hits_total counter\n\
+         certus_remote_lookup_hits_total {}\n\
+         # HELP certus_remote_lookup_misses_total Keys forwarded to a peer that no peer held\n\
+         # TYPE certus_remote_lookup_misses_total counter\n\
+         certus_remote_lookup_misses_total {}\n\
          # HELP certus_gpu_bytes_transferred_total Total bytes transferred to GPU\n\
          # TYPE certus_gpu_bytes_transferred_total counter\n\
          certus_gpu_bytes_transferred_total {}\n\
@@ -184,6 +194,8 @@ fn render_metrics(
         counters.lookup_hits.load(Ordering::Relaxed),
         counters.lookup_misses.load(Ordering::Relaxed),
         counters.lookup_errors.load(Ordering::Relaxed),
+        tier.remote_lookup_hits,
+        tier.remote_lookup_misses,
         counters.gpu_bytes_transferred.load(Ordering::Relaxed),
         rw.read_bytes,
         rw.write_bytes,

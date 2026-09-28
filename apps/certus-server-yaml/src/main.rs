@@ -44,11 +44,13 @@ extern "C" fn handle_signal(_sig: libc::c_int) {
 fn format_tier_stats(s: &interfaces::TierEventStats) -> String {
     format!(
         "promotions[->memory {pm}, ->gpu {pg}]  evictions[memory {em}, ssd {es}]  \
-         store[backpressure {sb}, drops-on-full {sd}]",
+         remote[hits {rh}, misses {rm}]  store[backpressure {sb}, drops-on-full {sd}]",
         pm = s.promotions_to_memory,
         pg = s.promotions_to_gpu,
         em = s.evictions_from_memory,
         es = s.evictions_from_ssd,
+        rh = s.remote_lookup_hits,
+        rm = s.remote_lookup_misses,
         sb = s.store_backpressure_events,
         sd = s.store_drops_on_full,
     )

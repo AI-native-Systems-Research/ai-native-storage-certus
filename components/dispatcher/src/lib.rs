@@ -121,6 +121,10 @@ pub struct TierEventCounters {
     evictions_from_memory: AtomicU64,
     /// Extents freed on SSD by the background extent evictor.
     evictions_from_ssd: AtomicU64,
+    /// Keys a peer served, via `IRemoteLookup`. Requester-side.
+    remote_lookup_hits: AtomicU64,
+    /// Keys forwarded to a peer that no peer held.
+    remote_lookup_misses: AtomicU64,
     /// Store-allocation retries taken while backpressuring on a momentarily
     /// full memory tier (see `reserve_memory`). Bumped once per retry sleep.
     store_backpressure_events: AtomicU64,
@@ -158,6 +162,23 @@ impl TierEventCounters {
         self.evictions_from_ssd.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record the outcome of one forwarded batch: `hits` keys a peer served and
+    /// `misses` keys no peer held.
+    ///
+    /// Taken per batch rather than per key because the remote path resolves a
+    /// batch at a time, and because a per-key call on this path would add an
+    /// atomic per key to a loop that already has one.
+    #[inline]
+    pub fn record_remote_lookup(&self, hits: u64, misses: u64) {
+        if hits > 0 {
+            self.remote_lookup_hits.fetch_add(hits, Ordering::Relaxed);
+        }
+        if misses > 0 {
+            self.remote_lookup_misses
+                .fetch_add(misses, Ordering::Relaxed);
+        }
+    }
+
     /// Record one store-backpressure retry. Returns the count *before* this
     /// call, so a caller can log a one-shot line on the first engagement
     /// (return value `0`).
@@ -182,6 +203,8 @@ impl TierEventCounters {
             promotions_to_gpu: self.promotions_to_gpu.load(Ordering::Relaxed),
             evictions_from_memory: self.evictions_from_memory.load(Ordering::Relaxed),
             evictions_from_ssd: self.evictions_from_ssd.load(Ordering::Relaxed),
+            remote_lookup_hits: self.remote_lookup_hits.load(Ordering::Relaxed),
+            remote_lookup_misses: self.remote_lookup_misses.load(Ordering::Relaxed),
             store_backpressure_events: self.store_backpressure_events.load(Ordering::Relaxed),
             store_drops_on_full: self.store_drops_on_full.load(Ordering::Relaxed),
         }
@@ -2617,10 +2640,23 @@ impl IDispatcher for DispatcherComponent {
                 let mut remote_pins = pins::PinnedKeys::new(Arc::clone(&dm));
                 let mut submitted: Vec<usize> = Vec::with_capacity(not_found.len());
 
+                // Requester-side tally for this batch (FR-011, spec 002 Phase 1).
+                // Counted here because this is the only place that knows, per key,
+                // whether a peer served it -- `batch_lookup`'s return type collapses
+                // that away, and widening it is a later phase.
+                let mut remote_hits: u64 = 0;
+                let mut remote_misses: u64 = 0;
+
                 for (&pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
                     let (key, regions) = &entries[pos];
                     let key = *key;
                     if let Err(e) = remote_res {
+                        // A NotFound is a remote miss; a TransportError is neither a
+                        // hit nor a miss -- the question "did a peer have it" was not
+                        // answered, and counting it either way would invent data.
+                        if matches!(e, interfaces::RemoteLookupError::NotFound) {
+                            remote_misses += 1;
+                        }
                         // A key no peer holds is a MISS, not an I/O failure. Collapsing
                         // both into `IoError` lost the distinction `IRemoteLookup` had
                         // already made, and the transport host counts only `KeyNotFound`
@@ -2639,6 +2675,10 @@ impl IDispatcher for DispatcherComponent {
                         }));
                         continue;
                     }
+                    // The peer answered with data: a remote hit, whatever happens
+                    // next locally. A failure below is a local delivery fault, not
+                    // evidence about whether the peer held the key.
+                    remote_hits += 1;
                     let t_lookup = probing.then(std::time::Instant::now);
                     let looked_up = dm.lookup(key);
                     if let Some(t) = t_lookup {
@@ -2710,6 +2750,11 @@ impl IDispatcher for DispatcherComponent {
                 }
                 // Every remote copy has completed: release the pins.
                 drop(remote_pins);
+
+                // One atomic pair per forwarded batch, after the walk, so the tally
+                // is whole even if a delivery failed partway.
+                self.tier_counters
+                    .record_remote_lookup(remote_hits, remote_misses);
 
                 if probing {
                     let sync_us = t_sync.map_or(0, |t| t.elapsed().as_micros() as u64);
@@ -5498,6 +5543,79 @@ mod tests {
              Reporting it as IoError is what makes it uncountable by the transport host, \
              which counts only KeyNotFound as a miss",
             results[0]
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// The remote counters must count REMOTE service only.
+    ///
+    /// The failure this guards is the one that would look most plausible: wiring the
+    /// tally to the general served-key path. `remote_lookup_hits` would then track
+    /// `promotions_to_gpu` closely, move whenever traffic moved, and read as a
+    /// healthy instrument while saying nothing about peers at all — which is exactly
+    /// the confusion this feature exists to end. So the assertion is not "the counter
+    /// increments" but "it stays at zero when no peer was involved".
+    #[test]
+    fn remote_counters_ignore_a_purely_local_hit() {
+        let fx = setup_initialized_with_remote(&[], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        // Resident locally, so these never reach remote lookup.
+        fx.install_warm_key(1, 0x11, 4096);
+        fx.install_warm_key(2, 0x22, 4096);
+
+        let (_bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+
+        let st = d.tier_event_stats();
+        assert_eq!(
+            (st.remote_lookup_hits, st.remote_lookup_misses),
+            (0, 0),
+            "two local hits must leave the remote counters untouched; got hits={} \
+             misses={}. A counter that moves on local traffic would track the overall \
+             hit rate and look plausible while measuring nothing about peers",
+            st.remote_lookup_hits,
+            st.remote_lookup_misses
+        );
+        // And the served keys were counted somewhere, so this is not a dead path.
+        assert_eq!(
+            st.promotions_to_gpu, 2,
+            "both local hits should still be counted"
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// A peer that serves is a remote hit; a peer that does not is a remote miss.
+    ///
+    /// Asserted in one batch so the two cannot be satisfied by a counter that simply
+    /// tallies batch size — a bug that would pass either assertion alone.
+    #[test]
+    fn remote_counters_split_peer_hits_from_peer_misses() {
+        // The peer holds 1 and 3, not 2.
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(results[0].is_ok(), "peer holds 1: {:?}", results[0]);
+        assert!(
+            matches!(results[1], Err(DispatcherError::KeyNotFound(2))),
+            "no peer holds 2, so it is a miss: {:?}",
+            results[1]
+        );
+        assert!(results[2].is_ok(), "peer holds 3: {:?}", results[2]);
+
+        let st = d.tier_event_stats();
+        assert_eq!(
+            (st.remote_lookup_hits, st.remote_lookup_misses),
+            (2, 1),
+            "two keys served by the peer and one held by nobody; got hits={} misses={}",
+            st.remote_lookup_hits,
+            st.remote_lookup_misses
         );
 
         d.shutdown().unwrap();

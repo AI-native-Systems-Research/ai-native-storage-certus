@@ -67,40 +67,59 @@ below states what it must be shown to fail against.
 
 ## Phase 1c: The remote-hit counter
 
-- [ ] **T006** Add `on_remote_lookup(&self, hits: u64, misses: u64)` to `TranslatorObserver`
-  (`lib/shmq-dispatcher/src/translate.rs:41-48`), **defaulted to a no-op**.
+- [~] **T006 NOT NEEDED — superseded.** No new `TranslatorObserver` method was added.
 
-  Defaulting is load-bearing, not politeness: the plain `certus-server` passes no observer and
-  every test host implements this trait, so a non-defaulted method breaks both (research.md
-  R5).
+  The observer is a per-op hook on the *translator*, but this counter does not travel that
+  way: `TierEventStats` is an existing struct on `IDispatcher::tier_event_stats()` that both
+  servers **already poll**, and it already carries exactly this class of counter
+  (`promotions_to_gpu`, `evictions_from_memory`, the store-retry counts). Two fields there
+  reach the servers through a path that already runs end to end.
 
-- [ ] **T007** Count per batch at `components/dispatcher/src/lib.rs:2575`, where the dispatcher
+  The plan assumed the observer because it assumed the server had to be *told*; it only had
+  to *ask*. Recorded rather than ticked, so the plan's wrong assumption stays visible.
+
+- [x] **T007** Count per batch at `components/dispatcher/src/lib.rs:2575`, where the dispatcher
   zips `remote_results` back and already knows each key's outcome. Requester-side: what this
   node *obtained from* peers.
 
   Do **not** count in `remote-lookup` — that measures what peers asked *of* this node, which
   is a different quantity under a name that would invite conflation (research.md R4).
 
-- [ ] **T008** Carry the counts to the observer. The dispatcher cannot call the observer
-  directly — it has no handle — so this is the one plumbing question in Phase 1. Resolve it
-  the cheapest way that does not touch `IDispatcher`: either a counter the translator reads
-  after `batch_lookup`, or an observer handle held by the dispatcher.
+- [x] **T008 RESOLVED, and the risk did not materialise.** `IDispatcher` was not widened and
+  Phase 1's independence claim (research.md R1) holds.
 
-  **Record the choice and why in plan.md's Complexity Tracking.** If neither is possible
-  without widening `IDispatcher`, **stop and report** — that would mean Phase 1's independence
-  claim (research.md R1) is wrong, and the phasing should be revisited rather than quietly
-  extended into Phase 2.
+  The dispatcher needs no observer handle: it records into its own `TierEventCounters`, and
+  the servers read the result through `tier_event_stats()`, which they already call. The only
+  `interfaces` change is **two fields on an existing struct** — not a signature change, and
+  emphatically not `batch_lookup`'s return type.
 
-- [ ] **T009** [P] `ServiceCounters` gains `remote_lookup_hits` and `remote_lookup_misses`
-  (`apps/certus-server-yaml/src/metrics.rs`), and `CountersObserver` implements
-  `on_remote_lookup`.
+  **One caveat that contradicts `contracts/idispatcher.md`.** That contract says this area is
+  "compiler-enforced; nothing silently keeps working". True of a signature change; **false of
+  a struct field.** The other three implementors build `TierEventStats::default()`, so the
+  workspace compiled with zero errors and nothing forced them to update. A future implementor
+  can therefore silently under-report. Fix the contract's claim in Phase 2.
 
-- [ ] **T010** [P] Export both as OTel observable counters
+- [x] **T009 done differently than written.** `ServiceCounters` was **not** extended and
+  `CountersObserver` gained nothing — both would have been the observer route T006 dropped.
+
+  Instead `serve_metrics` takes a `tier_event_stats()` snapshot beside the memory-tier and
+  NVMe snapshots it already takes, and renders the two counters from it.
+
+  **This cost a wasted hardware run, and the lesson is worth more than the task.** The
+  counters were first added only to `telemetry.rs`, because research R3 recorded "Export |
+  telemetry.rs — OTel observable counters". But there are **two** metrics paths: `telemetry.rs`
+  exports to an OTLP collector, while `/metrics` — the endpoint actually scraped — is
+  hand-rolled Prometheus text in `metrics.rs::serve_metrics`. `certus_lookup_hits_total`
+  appears there because it is rendered from `ServiceCounters`, not because OTel exports it. So
+  the first attempt exported correct numbers to a collector nobody reads, and the hardware
+  reading showed the counters simply absent. **Both export paths are now wired.**
+
+- [x] **T010** [P] Export both as OTel observable counters
   (`apps/certus-server-yaml/src/telemetry.rs:111-125`), named
   `certus.remote_lookup_hits_total` and `certus.remote_lookup_misses_total` — dots in the
   declaration, underscores in Prometheus, matching the existing pair.
 
-- [ ] **T011** Test that the counters move only on remote service, and are untouched by a
+- [x] **T011** Test that the counters move only on remote service, and are untouched by a
   purely local hit. **Must be shown to fail** if `on_remote_lookup` is wired to the local
   path — the failure mode that would make the counter agree with `lookup_hits` and look
   plausible while measuring nothing.
@@ -133,7 +152,7 @@ below states what it must be shown to fail against.
   `KeyNotFound`-versus-`IoError` behaviour change. T004 changes what `batch_lookup` returns for
   a remote miss, and that component's spec is the artifact describing its contract.
 
-- [ ] **T018** [P] Document the new observer method and the accounting rule beside their
+- [x] **T018** [P] Document the new observer method and the accounting rule beside their
   definitions in `lib/shmq-dispatcher/src/translate.rs` — it owns no `specs/`, so the site is
   the record (FR-031), following how `check_state` documents its own widening.
 

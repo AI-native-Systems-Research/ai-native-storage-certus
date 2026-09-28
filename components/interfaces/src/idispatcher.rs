@@ -209,6 +209,32 @@ pub struct TierEventStats {
     pub evictions_from_memory: u64,
     /// Extents freed on SSD by the background extent evictor.
     pub evictions_from_ssd: u64,
+    /// Lookups a **peer** served, one per key the dispatcher obtained through
+    /// `IRemoteLookup` rather than from its own tiers.
+    ///
+    /// A `RemoteLookupError::TransportError` counts as **neither** a hit nor a miss:
+    /// the question "did a peer hold this key" was never answered, so counting it
+    /// either way would invent data. Consequently
+    /// `remote_lookup_hits + remote_lookup_misses` is the number of keys that got an
+    /// *answer*, not the number forwarded.
+    ///
+    /// A hit is recorded when the peer returns data, not after local delivery
+    /// succeeds — a delivery fault on this node is not evidence about what the peer
+    /// held.
+    ///
+    /// Requester-side: what this node got *from* peers, not what peers asked *of*
+    /// it. Those are different quantities and must not share a name.
+    ///
+    /// This exists because `promotions_to_gpu` counts every served key without
+    /// distinguishing the source, so remote lookup's *benefit* was unmeasurable
+    /// while its cost was not — two cluster measurements established the cost and
+    /// neither could establish the benefit.
+    pub remote_lookup_hits: u64,
+    /// Keys forwarded to a peer that no peer held. Absent everywhere, so a miss.
+    ///
+    /// With `remote_lookup_hits` this gives the remote path's own hit rate, which
+    /// is the number that says whether forwarding earns what it costs.
+    pub remote_lookup_misses: u64,
     /// Store-allocation retries taken while backpressuring on a momentarily
     /// full memory tier (see `DispatcherConfig::store_backpressure_ms`). A
     /// nonzero value means the tier saturated and the store path waited for the

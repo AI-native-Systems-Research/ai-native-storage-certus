@@ -141,6 +141,29 @@ impl OtelMetrics {
             .with_description("Lookups neither served nor shown absent (FR-024)")
             .with_callback(move |counter| {
                 counter.observe(c.load(std::sync::atomic::Ordering::Relaxed), &[]);
+        // Remote-lookup attribution (spec 002 Phase 1). Requester-side: what this
+        // node obtained FROM peers, not what peers asked OF it.
+        //
+        // These are the numbers that say whether forwarding a local miss to a peer
+        // earns what it costs. `certus.lookup_hits_total` cannot answer that -- it
+        // counts every served key without distinguishing the source, which is why
+        // two cluster measurements established remote lookup's cost and neither
+        // could establish its benefit.
+        let d = Arc::clone(&dispatcher);
+        meter
+            .u64_observable_counter("certus.remote_lookup_hits_total")
+            .with_description("Lookups a peer served, via remote lookup (requester side)")
+            .with_callback(move |counter| {
+                counter.observe(d.tier_event_stats().remote_lookup_hits, &[]);
+            })
+            .build();
+
+        let d = Arc::clone(&dispatcher);
+        meter
+            .u64_observable_counter("certus.remote_lookup_misses_total")
+            .with_description("Keys forwarded to a peer that no peer held")
+            .with_callback(move |counter| {
+                counter.observe(d.tier_event_stats().remote_lookup_misses, &[]);
             })
             .build();
 

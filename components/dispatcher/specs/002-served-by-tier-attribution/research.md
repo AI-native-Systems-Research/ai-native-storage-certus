@@ -162,15 +162,24 @@ runs also differ in timing and cache state. Noted so it is not later mistaken fo
 | Counter storage | `apps/certus-server-yaml/src/metrics.rs` — `ServiceCounters`, `AtomicU64` each |
 | Observer trait | `lib/shmq-dispatcher/src/translate.rs:41-48` — `TranslatorObserver`, all methods defaulted to no-ops |
 | Increment site | `translate.rs:614` — `obs.on_lookup(hits, misses, gpu_bytes)` |
-| Export | `apps/certus-server-yaml/src/telemetry.rs:111-125` — OTel observable counters |
+| Export (OTLP) | `apps/certus-server-yaml/src/telemetry.rs:111-125` — OTel observable counters |
+| Export (`/metrics`) | `apps/certus-server-yaml/src/metrics.rs::serve_metrics` — **hand-rolled Prometheus text, and this is the one that gets scraped** |
 | Wiring | `apps/certus-server-yaml/src/main.rs:290` |
 
 The observer **is** wired in `certus-server-yaml`, so the zero reading is not unwired
 plumbing. The plain `certus-server` binary passes no observer by design, which is why the
 trait's methods default to no-ops — a new method therefore costs that binary nothing.
 
-Metric names are declared with dots (`certus.lookup_misses_total`) and render to Prometheus
-with underscores, which is why the name used on the cluster was correct.
+Metric names in the OTel path are declared with dots (`certus.lookup_misses_total`) and would
+render to Prometheus with underscores.
+
+**There are TWO export paths and conflating them costs a run.** An earlier version of this
+table listed only the OTel one, and a counter added there alone was invisible to
+`curl localhost:9400/metrics` — that endpoint is served by `metrics.rs::serve_metrics`, which
+writes Prometheus text by hand from `ServiceCounters` plus snapshots it takes itself.
+`certus_lookup_hits_total` appears on it because `serve_metrics` renders it, **not** because
+OTel exports it. A new counter must be added to whichever path will actually be read, and
+adding it to both is cheap.
 
 ## R4. Alternatives considered for the counter's source
 
