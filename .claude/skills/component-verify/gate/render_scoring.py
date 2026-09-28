@@ -456,9 +456,22 @@ def main():
     # ---- Section: the partial ones, drilled to properties (proved < B) ----
     P.append(f"<h2>{sec} · Where each tool leans on the other — the delegation detail</h2>")
     sec += 1
-    P.append("<p class='sub'>These methods are fully <b>covered</b>, but not every bundle property is proved by "
-             "this tool itself — the listed properties are soundly delegated to the other tool (⤴) or, if any, "
-             "still open (⊘ / ·). This is the detail behind the covered count above.</p>")
+    # The old wording opened "These methods are fully covered", then contradicted itself with
+    # "or, if any, still open". The table is selected by `mm[m]["left"]` — EVERY method with a
+    # leftover — not by gap == 0, so the claim was false for any method with an unsettled property:
+    # measured on eviction-policy-optimized, it listed all 9 methods while only 4 were covered.
+    # State what the rows are instead of asserting a coverage level the selection does not check.
+    P.append("<p class='sub'>Each row is a property this tool did <b>not</b> prove itself. That is not "
+             "automatically a gap — read the disposition. <b>⊘ tool-boundary</b>: this tool "
+             "<b>cannot prove it</b> — either the obligation is not expressible in its model, or the "
+             "full escalation battery was exhausted without a verdict. The arrow that follows names the "
+             "other tool, where that same obligation <i>is</i> proved, so the property stays covered. "
+             "<b>⤴ delegated</b> is a different thing, not a tool limit: the obligation is sound but "
+             "belongs to a named referent <i>outside</i> this pipeline (a concurrency model, the "
+             "component framework), so neither tool here claims it. <b>‼ refuted</b> — verification "
+             "proved the code <i>violates</i> the obligation; a defect to fix, not a verification gap. "
+             "<b>· still open</b> — nothing settles it yet. Only the last two leave the method short of "
+             "full coverage.</p>")
     any_partial = False
     for t in tools:
         mm = per_tool_methods[t]
