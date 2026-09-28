@@ -17,7 +17,7 @@ below states what it must be shown to fail against.
 
 ## Phase 1a: Establish the baseline before changing anything
 
-- [ ] **T001** Measure the zero reading against a stated prediction, on the existing build.
+- [x] **T001** Measure the zero reading against a stated prediction, on the existing build.
   Two runs of one workload that misses, `--until 10 --rate inf`, reading
   `curl localhost:9400/metrics` after each:
   - **solo** (one server, `SOLO=1`, no peers) — predict `certus_lookup_misses_total` > 0
@@ -31,13 +31,20 @@ below states what it must be shown to fail against.
   conclude we had understood it. Harness: `/tmp/stress-servers.sh`, `/tmp/stress-agents.sh`,
   `/tmp/rate-probe.sh` (cold-format per probe; see its header).
 
-- [ ] **T002** [P] Capture the current `hits + misses` versus entries-requested gap on the same
+- [x] **T002** [P] Capture the current `hits + misses` versus entries-requested gap on the same
   two runs, from the generator's own per-run counts against the server's counters. This is the
   FR-024 baseline: without it, "accounting is now complete" is unfalsifiable.
 
+  **Result**: before the fix the gap was the whole miss count — hits alone matched the
+  generator (354 023 and 301 240 exactly) while misses read 0. After T004 both sides agree
+  exactly and hits + misses = 959 167 = total references, in both arms, with zero errors.
+  **Consequence: the two accounting holes never fired in this workload** (nothing was held
+  back, no non-`KeyNotFound` error occurred), so T012..T016 are hardening and this result is
+  not evidence about them.
+
 ## Phase 1b: The classification fix — the confirmed cause
 
-- [ ] **T003** [P] Unit test in `components/dispatcher` proving a remote **miss** is reported
+- [x] **T003** [P] Unit test in `components/dispatcher` proving a remote **miss** is reported
   as `KeyNotFound`, not `IoError`, and that a remote **transport failure** is still `IoError`.
   Mock `IRemoteLookup` returning `RemoteLookupError::NotFound` for one key and
   `TransportError` for another in one batch.
@@ -45,7 +52,7 @@ below states what it must be shown to fail against.
   **Must be shown to fail** against today's code, which maps both to `IoError`. A test that
   passes before the fix is testing nothing.
 
-- [ ] **T004** Preserve the distinction at `components/dispatcher/src/lib.rs:2624-2627`: map
+- [x] **T004** Preserve the distinction at `components/dispatcher/src/lib.rs:2624-2627`: map
   `RemoteLookupError::NotFound` → `DispatcherError::KeyNotFound(key)` and leave
   `TransportError` → `IoError`. The interface already carries the distinction
   (`iremote_lookup.rs:102-106`); the dispatcher collapses it.
@@ -54,7 +61,7 @@ below states what it must be shown to fail against.
   node holds stops being reported as an I/O error. Any consumer reasoning about error rates
   currently sees transport failures that never happened.
 
-- [ ] **T005** Re-run T001's two readings. **Predicted outcome**: both now report non-zero
+- [x] **T005** Re-run T001's two readings. **Predicted outcome**: both now report non-zero
   misses, and the shared-versus-solo miss counts differ by roughly the number of keys a peer
   did serve. Record against the prediction, and say so plainly if it does not hold.
 
@@ -122,7 +129,7 @@ below states what it must be shown to fail against.
 
 ## Phase 1e: Documentation (FR-030, FR-031)
 
-- [ ] **T017** [P] Update `components/dispatcher/specs/001-dispatcher-cache-interface/` for the
+- [x] **T017** [P] Update `components/dispatcher/specs/001-dispatcher-cache-interface/` for the
   `KeyNotFound`-versus-`IoError` behaviour change. T004 changes what `batch_lookup` returns for
   a remote miss, and that component's spec is the artifact describing its contract.
 
@@ -133,7 +140,7 @@ below states what it must be shown to fail against.
 - [ ] **T019** [P] Record in this spec which of FR-024..FR-026 Phase 1 satisfies and which
   await later phases, so a reader is not left inferring it from the task list.
 
-- [ ] **T020** Update `research.md` R2 with T001's and T005's actual readings. A research
+- [x] **T020** Update `research.md` R2 with T001's and T005's actual readings. A research
   document asserting a prediction without its outcome is the failure this phase is structured
   to avoid.
 

@@ -102,11 +102,58 @@ failures that never happened.
 into `IoError` and throws the distinction away. Preserving it maps `NotFound` back to
 `KeyNotFound` and leaves `TransportError` as `IoError`.
 
-**Measure anyway, as confirmation with a prediction.** The reading is now a test of
-understanding rather than a search: a solo-group run should report **non-zero** misses and a
-shared-group run **zero**, on the same workload. If that does not hold, something else is
-also wrong and the fix would have masked it. The harness exists — it is the same
-solo-versus-shared comparison used for store declines.
+### Measured — T001 predicted wrongly, T005 confirmed the fix
+
+**T001 (before any change).** The prediction was solo > 0, shared == 0. **Both read 0.**
+
+| arm | generator: not served | `certus_lookup_misses_total` |
+| --- | --- | --- |
+| solo (own RDMA group) | 605 144 | **0** |
+| shared (peer reachable) | 657 927 | **0** |
+
+**The prediction failed because the experiment chose the wrong variable, not because the
+mechanism was wrong.** `--rl-group` selects which cluster a server joins; it does not decide
+whether remote lookup is *wired*. The `full-remote` profile connects the receptacle either
+way, so `remote_lookup.get()` succeeds and `lib.rs:2575` executes in both arms — the solo
+server's log even shows `remote-lookup-rdma-initiator: connected`. Only `minimal.yaml` leaves
+it unconnected, and that profile has neither SPDK nor GPU, so the generator cannot drive it.
+
+**Therefore the hardware measurement cannot isolate this cause at all, and a unit test can.**
+That is why the discriminator moved into `components/dispatcher`'s own tests, where the
+receptacle and the peer's contents are both controllable. The test fails against the old code
+with `Err(IoError("remote lookup: key not found"))` — the formatted string is itself the
+proof that `RemoteLookupError::NotFound` was collapsed.
+
+Recorded because it generalises: *a configuration flag that names a behaviour is not
+evidence that the behaviour is reachable.*
+
+**T005 (after the fix).** Prediction revised to: both arms report non-zero misses, because
+the relabelling affected both equally. Held, and more tightly than predicted —
+
+| arm | generator: returned / not served | counter: hits / misses | sum |
+| --- | --- | --- | --- |
+| solo | 353 532 / 605 635 | 353 532 / 605 635 | 959 167 |
+| shared | 303 128 / 656 039 | 303 128 / 656 039 | 959 167 |
+
+Both counters agree with the generator's independent count **exactly**, and hits + misses
+equals total key references in both arms. FR-024's identity closes with zero errors.
+
+### What this reveals about the other two holes: they did not fire
+
+Since hits + misses already accounts for *every* reference, the two confirmed holes above
+contributed **nothing** to these runs — no entry was held back (every handle resolved) and no
+error other than `KeyNotFound` occurred. They are real defects in the code and remain worth
+closing, but **they are latent, not active, and this fix is not evidence about them.** Saying
+so matters: it would be easy to let the hardening tasks ride on this success and imply they
+were verified, when the workload never exercised either path.
+
+### One observation for later phases, not yet a claim
+
+The shared arm has a *lower* hit rate than solo (31.6% versus 36.9%) and correspondingly more
+misses, which is the same direction as the earlier solo-versus-shared comparison. It is still
+not evidence about whether remote lookup serves anything, because `lookup_hits` does not
+distinguish local from remote — that is exactly what the counter in R1 is for, and these two
+runs also differ in timing and cache state. Noted so it is not later mistaken for a result.
 
 ## R3. Where the counters live, and what a new one costs
 
