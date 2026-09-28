@@ -210,6 +210,33 @@ Both branches carry the **identical full metadata bundle**; they differ only in 
 
 Both branches thus stand alone: each shows the complete scoring picture (the combined HTML + all three YAML) and carries its own tool's reproducible artifacts. There is **no third deliverables branch and nothing goes to `unstable`.**
 
+## Re-VERIFYING a component that already has verif branches (read before you start)
+
+Distinct from a re-score: a re-score keeps the artifacts and re-derives statuses; a re-verify
+regenerates the proofs from scratch. Three things behave differently and none is obvious.
+
+1. **The push CANNOT fast-forward — expect `--force-with-lease`, and expect it to be BLOCKED.**
+   Step 4 branches from fresh `origin/unstable`, but the existing branch tip is also
+   `origin/unstable` + commits, so the new commit is not its descendant. Measured: with
+   `origin/unstable` at 937838a9 and `verif/kani/eviction-policy-optimized` two commits ahead of it,
+   the existing tip is not an ancestor of `origin/unstable`, so a fresh one-commit branch diverges.
+   The agent's force-push is refused by the permission classifier, so **a human has to run it** — this
+   already happened for the two eviction-policy-lru branches. Plan for it: finish the run under
+   `--no-push` and hand the operator the exact `--force-with-lease` command.
+   **NEVER branch off the existing tip to avoid the force.** It looks like it works and it silently
+   carries the previous run's artifacts into the new commit — the opposite of a clean-slate re-run.
+2. **Property ids may not match the published run.** Role 1 re-extracts blind, so ids, the unified
+   count M, and the spec/code split can all legitimately differ. The new bundle is therefore NOT
+   cell-by-cell comparable with the old one. If you want a comparison, record the previous per-status
+   counts BEFORE starting (they are on the branch) and compare totals, not ids.
+3. **The previous page and YAML leave the branch tip** (git history keeps them). That is the intended
+   overwrite-in-place behaviour, but anyone asked "what changed?" needs the old tip's hash, so put it
+   in the commit message.
+
+Untested as of 2026-09-28: no full re-verify has been run end to end. The re-scores we have done
+exercise Step 2.5 onward only, so Steps 1, 2 and 4 on an already-verified component are unproven.
+Treat the first one as supervised.
+
 ## Step 5 — Done report
 Print a compact summary the operator can read at a glance:
 - run pin (origin/unstable commit), tools run, new-vs-existing;
