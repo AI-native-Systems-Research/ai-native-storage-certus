@@ -45,7 +45,15 @@ def psym(block):
     st = block.get("status")
     if st == "proved":
         fid = (block.get("fidelity") or "")
-        return "★" if fid in ("ghost-mirror", "trusted-boundary", "representative") else "✓"
+        # ★ marks a proof that holds under a WEAKER reading than the real, fully-checked thing.
+        # bounded-shallow and arithmetic-core belong here and were missing: the first comes from
+        # --no-unwinding-checks, so the claim holds only within n loop iterations and is silent
+        # beyond, and the second proves an arithmetic core rather than the real type. Measured when
+        # this was found: a component rendered 100 of 105 Kani proofs as ✓ while 58 were
+        # bounded-shallow — a citable page showing a narrower claim with the full-strength symbol.
+        WEAKER = ("ghost-mirror", "trusted-boundary", "representative",
+                  "bounded-shallow", "arithmetic-core")
+        return "★" if fid in WEAKER else "✓"
     if st == "delegated":
         return "⤴"
     if st == "tool-boundary":
