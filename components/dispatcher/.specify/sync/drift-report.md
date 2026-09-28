@@ -1,11 +1,12 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-09-21T23:54:58Z
-spec_sync_git_commit: e4b97a0b
-spec_sync_inputs_sha256: 439b2a8dd89946423e1fb3d38d34bed1e0c34c84701afa5da189e7700900e937
+spec_sync_synced_at: 2026-09-25T17:13:57Z
+spec_sync_git_commit: 13caf87e
+spec_sync_inputs_sha256: 9c0c88f545acf08a38390f88ea45d359ca6fb8300f8b1e39d00d4348019f1627
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-25 (SSD-evictor drive-selection bug fix; drift resolved by backfill).** Branch `fix/ssd-evictor-drive-index-hash`. The background SSD-utilization evictor (`background.rs`, `run_ssd_eviction`) selected the extent manager to free from with a raw `key % num_drives`, while placement/write-through and the inline `remove(key)` path use the splitmix64 `drive_index(key, num_drives)` (FR-039(4), FR-009). The two disagree for almost all keys when `num_drives > 1`, so the evictor freed the wrong extent manager — leaking the intended extent and potentially freeing a live extent for another key on the wrong drive. CODE (authoritative): both call sites now route through `drive_index` (made `pub(crate)`). SPEC BACKFILL: the Session Q&A "How does the SSD evictor determine drive ownership for extent removal?" previously answered `key % num_drives` "matching the write-through path" — a claim that was false pre-fix; it was rewritten to describe `drive_index` and record the prior drift. `src/lib.rs` + `src/background.rs` changed (moved the digest); `spec.md` Q&A changed (moved it again). Digest recomputed over a clean tree matching CI; drift status `clean`.
 > **Stamp provenance.** `spec_sync_git_commit` is the HEAD (`e4b97a0b`) the digest
 > was computed against; this report is committed together with the `spec.md`
 > backfill, the `src/lib.rs` edits, and the `src/cold_pool.rs` deletion it

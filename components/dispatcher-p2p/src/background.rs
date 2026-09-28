@@ -421,8 +421,11 @@ impl BackgroundEvictor {
                     EvictionReason::Removed,
                 );
 
-                // Free extent on the appropriate drive.
-                let drive_idx = key as usize % extent_mgrs.len().max(1);
+                // Free extent on the appropriate drive. Must use the same
+                // splitmix64 placement hash as the write path, or we free an
+                // extent on the wrong extent manager.
+                let drive_idx =
+                    crate::DispatcherP2pComponent::drive_index(key, extent_mgrs.len().max(1));
                 if let Some(em) = extent_mgrs.get(drive_idx) {
                     let _ = em.remove_extent(offset);
                 }

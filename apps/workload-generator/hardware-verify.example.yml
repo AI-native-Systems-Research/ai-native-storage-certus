@@ -1,0 +1,46 @@
+# T101 hardware verification: small, migrating, two instances.
+#
+# Deliberately tiny so it fits a 2 GiB memory tier and finishes in seconds. The
+# only thing it has to exercise is what FR-081 changed: sessions placed across
+# two *instances*, migrating between them often enough that a short run performs
+# several — so per-instance counters must differ and a migration must show as a
+# real cache miss when the two caches are independent.
+version: 1
+
+blocks:
+  tokens: 16
+  bytes: 65536      # 64 KiB, the size every recorded measurement here uses
+
+shared_classes:
+  # One immortal prompt every session pulls in: the cross-session hit source.
+  system_prompt:
+    length:   {constant: 8}
+    lifetime: {constant: inf}
+  # A small pool with exact size, because Poisson's cv is 32% at N=10 and this
+  # run is too short to average that out.
+  tool:
+    length:   {constant: 2}
+    lifetime: {constant: inf}
+    pool:
+      size: {exact: 8}
+      rank_by: slot
+      # Concentrated rather than uniform, so there is a working set smaller than
+      # the key space and the hit rate means something.
+      selection: {exponential: {mean: 3}}
+
+session_classes:
+  chat:
+    uses:
+      - class: system_prompt
+        count: {constant: 1}
+      - class: tool
+        count: {uniform: {min: 1, max: 3}}
+    pool:          {size: {exact: 16}}
+    turns:         {constant: 8}
+    input_growth:  {constant: 2}
+    output_growth: {constant: 1}
+    think_time:    {constant: 0.5}
+    # Short relative to a session's 8 turns at 0.5s think time (~4s of life), so
+    # most sessions migrate at least once and the run exercises the case rather
+    # than reporting zero migrations.
+    migration_interval: {constant: 1.0}

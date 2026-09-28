@@ -25,6 +25,12 @@ fn run_session_lists(trace: &Trace, cache_size: usize) -> SimStats {
     simulate(&*ep, trace, cache_size)
 }
 
+fn run_optimized(trace: &Trace, cache_size: usize) -> SimStats {
+    let comp = eviction_policy_optimized::EvictionPolicyOptimizedComponent::new_default();
+    let ep = query_interface!(comp, IEvictionPolicy).unwrap();
+    simulate(&*ep, trace, cache_size)
+}
+
 fn write_tmp(tag: &str, contents: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!("erb-test-{}-{}.jsonl", std::process::id(), tag));
@@ -90,7 +96,11 @@ fn no_eviction_when_cache_holds_working_set() {
         distinct_keys: 3,
         total_key_refs: 6,
     };
-    for stats in [run_lru(&trace, 3), run_session_lists(&trace, 3)] {
+    for stats in [
+        run_lru(&trace, 3),
+        run_session_lists(&trace, 3),
+        run_optimized(&trace, 3),
+    ] {
         assert_eq!(stats.accesses, 6);
         assert_eq!(stats.misses, 3);
         assert_eq!(stats.insertions, 3);
@@ -144,12 +154,73 @@ fn lru_hit_count_is_monotonic_in_cache_size() {
     }
 }
 
+/// `eviction-policy-optimized` layers a TinyLFU admission gate (a per-pool
+/// Count-Min Sketch) on top of the shared LRU list, so it deliberately no longer
+/// reproduces plain LRU's hit counts (commit "TinyLFU Admission Gate via
+/// Count-Min Sketch"; see FR-011 in the component spec).
+///
+/// Under this 5-way interleaved pressure trace the divergence is *beneficial*:
+/// plain LRU thrashes to zero hits at every sub-working-set size (each key is
+/// evicted before its next reference), while the admission gate protects the
+/// recurring keys and retains an ever-larger protected set as the cache grows.
+/// The gate must therefore never do worse than LRU, and must strictly beat it
+/// once the cache is large enough to hold a protected set — a future accidental
+/// revert to a verbatim LRU port would fail here.
+#[test]
+fn optimized_beats_lru_under_pressure() {
+    let t = synth_pressure_trace();
+
+    for w in [4usize, 8, 16, 32] {
+        let lru = run_lru(&t, w);
+        let opt = run_optimized(&t, w);
+
+        // Both policies obey the same simulator contract (see sim.rs).
+        assert_eq!(opt.accesses, lru.accesses, "accesses differ at size {w}");
+        assert_eq!(
+            opt.misses, opt.insertions,
+            "every miss inserts exactly once at size {w}"
+        );
+        assert_eq!(
+            opt.insertions - opt.evictions,
+            opt.resident as u64,
+            "insertions - evictions == resident at size {w}"
+        );
+        assert!(
+            opt.resident <= w,
+            "resident set never exceeds capacity at size {w}"
+        );
+
+        // The admission gate is never worse than plain LRU on this trace.
+        assert!(
+            opt.hits >= lru.hits,
+            "optimized must not underperform LRU at size {w}: opt {} < lru {}",
+            opt.hits,
+            lru.hits
+        );
+    }
+
+    // Once the cache can hold a protected set the gate strictly outperforms LRU,
+    // proving the divergence is a real frequency-admission effect and not noise.
+    for w in [8usize, 16, 32] {
+        let lru_hits = run_lru(&t, w).hits;
+        let opt_hits = run_optimized(&t, w).hits;
+        assert!(
+            opt_hits > lru_hits,
+            "TinyLFU gate must strictly beat LRU at size {w}: opt {opt_hits} <= lru {lru_hits}"
+        );
+    }
+}
+
 /// Core bookkeeping invariants hold for both policies under eviction pressure.
 #[test]
 fn simulation_invariants_hold_under_pressure() {
     let t = synth_pressure_trace();
     let cache_size = 16;
-    for stats in [run_lru(&t, cache_size), run_session_lists(&t, cache_size)] {
+    for stats in [
+        run_lru(&t, cache_size),
+        run_session_lists(&t, cache_size),
+        run_optimized(&t, cache_size),
+    ] {
         assert_eq!(stats.accesses, t.total_key_refs as u64);
         assert_eq!(
             stats.hits + stats.misses,
@@ -180,7 +251,11 @@ fn simulation_invariants_hold_under_pressure() {
 #[test]
 fn latency_metrics_are_recorded() {
     let t = synth_pressure_trace();
-    for stats in [run_lru(&t, 16), run_session_lists(&t, 16)] {
+    for stats in [
+        run_lru(&t, 16),
+        run_session_lists(&t, 16),
+        run_optimized(&t, 16),
+    ] {
         assert_eq!(stats.touch_calls, stats.hits, "one touch per hit");
         assert!(stats.evict_calls > 0, "eviction path exercised");
         assert!(stats.track_calls > 0, "track path exercised");

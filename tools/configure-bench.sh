@@ -328,6 +328,20 @@ show_status() {
         fail_certus "hugepages misconfigured ($hp_total total, $hp_node on node $RESOURCE_NUMA; need $CERTUS_HUGEPAGES on node $RESOURCE_NUMA)"
         [[ $hp_total -ne $SS_HUGEPAGES ]] && fail_ss "hugepages present ($hp_total × 1G; sharedstorage needs 0)"
     fi
+
+    # A reserved 1G pool is useless to DPDK/EAL without a pagesize=1G hugetlbfs
+    # mount to back the segment files. A fresh boot only mounts the default 2M
+    # /dev/hugepages, so flag a missing 1G mount here — certus setup creates it.
+    if [[ $CERTUS_HUGEPAGES -gt 0 ]]; then
+        local hp1g_mnt
+        hp1g_mnt=$(awk '$3=="hugetlbfs" && $4 ~ /pagesize=1024M/ {print $2; exit}' /proc/mounts)
+        if [[ -n "$hp1g_mnt" ]]; then
+            echo -e "  ${tag_certus} 1G hugetlbfs mounted at $hp1g_mnt"
+        else
+            echo -e "  ${tag_empty} no pagesize=1G hugetlbfs mount (EAL cannot use the 1G pool)"
+            fail_certus "no 1G hugetlbfs mount — run certus setup to create /dev/hugepages1G"
+        fi
+    fi
     echo
 
     header "Kernel (running)"
@@ -427,18 +441,30 @@ show_status() {
     fi
     echo
 
-    # RAID only matters for sharedstorage (needs the mounted XFS filesystem).
+    # The fs tier only matters for sharedstorage (needs the mounted XFS
+    # filesystem). One drive is a bare XFS mount (no md); 2+ is a RAID0 md.
     if [[ $nvme_count -gt 0 ]]; then
-        header "RAID"
-        if [[ -e "$MD_DEVICE" ]] && mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
-            echo -e "  ${tag_ss} $MD_DEVICE mounted at $MOUNT_POINT"
-            df -h "$MOUNT_POINT" | tail -1 | awk '{printf "  Usage: %s / %s (%s)\n", $3, $2, $5}'
-        elif [[ -e "$MD_DEVICE" ]]; then
-            echo -e "  ${tag_empty} $MD_DEVICE exists but NOT mounted"
-            fail_ss "RAID $MD_DEVICE not mounted"
+        if [[ ${#NVME_BDFS[@]} -le 1 ]]; then
+            header "Filesystem tier (single drive — no RAID)"
+            if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+                echo -e "  ${tag_ss} $(findmnt -no SOURCE "$MOUNT_POINT" 2>/dev/null) mounted at $MOUNT_POINT"
+                df -h "$MOUNT_POINT" | tail -1 | awk '{printf "  Usage: %s / %s (%s)\n", $3, $2, $5}'
+            else
+                echo -e "  ${tag_empty} nothing mounted at $MOUNT_POINT"
+                fail_ss "no filesystem mounted at $MOUNT_POINT"
+            fi
         else
-            echo -e "  ${tag_empty} no RAID configured"
-            fail_ss "no RAID configured at $MOUNT_POINT"
+            header "RAID"
+            if [[ -e "$MD_DEVICE" ]] && mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+                echo -e "  ${tag_ss} $MD_DEVICE mounted at $MOUNT_POINT"
+                df -h "$MOUNT_POINT" | tail -1 | awk '{printf "  Usage: %s / %s (%s)\n", $3, $2, $5}'
+            elif [[ -e "$MD_DEVICE" ]]; then
+                echo -e "  ${tag_empty} $MD_DEVICE exists but NOT mounted"
+                fail_ss "RAID $MD_DEVICE not mounted"
+            else
+                echo -e "  ${tag_empty} no RAID configured"
+                fail_ss "no RAID configured at $MOUNT_POINT"
+            fi
         fi
         echo
     fi
@@ -770,6 +796,28 @@ allocate_hugepages_node() {
         fi
     fi
 
+    # DPDK/EAL backs every 1G segment with a file under a hugetlbfs mounted at
+    # pagesize=1G. A fresh boot only auto-mounts the default /dev/hugepages at the
+    # system default page size (2M on this host), so the reserved 1G pool has NO
+    # mount and EAL cannot use it — the certus-server dies with "EAL: No free
+    # 1048576 kB hugepages reported ...". Reserving the pages (above) is not enough;
+    # the mount must exist too, and it does NOT survive a reboot. Create and mount a
+    # dedicated 1G hugetlbfs if one is not already present. Idempotent.
+    local hp_mnt
+    hp_mnt=$(awk '$3=="hugetlbfs" && $4 ~ /pagesize=1024M/ {print $2; exit}' /proc/mounts)
+    if [[ -z "$hp_mnt" ]]; then
+        hp_mnt=/dev/hugepages1G
+        mkdir -p "$hp_mnt"
+        if mount -t hugetlbfs -o pagesize=1G none "$hp_mnt"; then
+            echo -e "  ${GREEN}Mounted 1G hugetlbfs at $hp_mnt${NC}"
+        else
+            echo -e "  ${YELLOW}Failed to mount 1G hugetlbfs at $hp_mnt — SPDK/DPDK will not find the 1G pool${NC}"
+            hp_mnt=""
+        fi
+    else
+        echo "  1G hugetlbfs already mounted at $hp_mnt"
+    fi
+
     # The certus-server (SPDK/DPDK) runs as the invoking user, NOT root — its uid
     # must match the rootless container's vLLM process for CUDA IPC. DPDK creates a
     # per-segment file under the hugetlbfs mount, so that mount has to be writable
@@ -779,11 +827,8 @@ allocate_hugepages_node() {
     # note above about not returning early when the page count already matches.
     local hp_owner="${SUDO_USER:-}"
     if [[ -n "$hp_owner" && "$hp_owner" != "root" ]]; then
-        local hp_mnt
-        hp_mnt=$(awk '$3=="hugetlbfs" && $4 ~ /pagesize=1024M/ {print $2; exit}' /proc/mounts)
-        [[ -z "$hp_mnt" ]] && hp_mnt=$(awk '$3=="hugetlbfs" {print $2; exit}' /proc/mounts)
         if [[ -z "$hp_mnt" ]]; then
-            echo -e "  ${YELLOW}No hugetlbfs mount found — cannot chown for $hp_owner${NC}"
+            echo -e "  ${YELLOW}No 1G hugetlbfs mount — cannot chown for $hp_owner${NC}"
         elif chown "$hp_owner" "$hp_mnt"; then
             echo "  Owner of $hp_mnt: $hp_owner (SPDK runs as this user)"
         else
@@ -974,8 +1019,6 @@ reclaim_member_arrays() {
 }
 
 setup_raid() {
-    header "Setting up RAID0 + XFS"
-
     # Collect block device paths
     local blkdevs=()
     for bdf in "${NVME_BDFS[@]}"; do
@@ -988,59 +1031,82 @@ setup_raid() {
         blkdevs+=("/dev/$blk")
     done
 
-    # Check if RAID already exists and is assembled
-    if [[ -e "$MD_DEVICE" ]] && mdadm --detail "$MD_DEVICE" &>/dev/null; then
-        echo "  $MD_DEVICE already assembled"
-    else
-        # Try to assemble existing array first
-        if mdadm --assemble "$MD_DEVICE" "${blkdevs[@]}" 2>/dev/null; then
-            echo "  Assembled existing $MD_DEVICE"
+    # The fs-tier backend device: a RAID0 md across 2+ drives, or the bare block
+    # device when there is only one drive. A single-disk "stripe" is just the
+    # disk, and mdadm --level=0 refuses <2 devices anyway, so skip md entirely
+    # and put XFS directly on the drive. $fs_dev is what we mkfs + mount below.
+    local fs_dev
+    if [[ ${#blkdevs[@]} -le 1 ]]; then
+        header "Setting up XFS (single drive — no RAID)"
+        fs_dev="${blkdevs[0]}"
+        # Reclaim the drive from any stray leftover array before formatting it.
+        reclaim_member_arrays "$(basename "$fs_dev")"
+        if [[ "$(blkid -o value -s TYPE "$fs_dev" 2>/dev/null)" == "xfs" ]]; then
+            echo "  $fs_dev already has an XFS filesystem"
         else
-            # Create new RAID0
-            echo -e "  ${YELLOW}Creating new RAID0 — this will DESTROY data on ${blkdevs[*]}${NC}"
-            # Wipe stale partition-table / fs signatures first: otherwise mdadm
-            # detects them and STOPS at an interactive "partition table exists ...
-            # Continue creating array [y/N]?" prompt. profile_all.sh redirects this
-            # command's output to a log, so that prompt is invisible and the whole
-            # run looks hung. wipefs removes the trigger; the `<<<"y"` here-string is
-            # a harmless fallback that auto-confirms any residual prompt.
-            # NB: do NOT pipe `yes |` here — under `set -o pipefail`, `yes` dies with
-            # SIGPIPE (141) when mdadm closes the pipe, and that non-zero propagates
-            # through the pipeline, tripping `set -e` right after the array starts
-            # (before mkfs/mount). A here-string has no such pipe.
-            # Reclaim the member drives from any STRAY array first. A prior failed
-            # run can leave an array assembled on these drives under a DIFFERENT name
-            # (the upstream picker chooses the lowest free /dev/mdN, so md1 left over
-            # -> this run targets md2), and mdadm --create then fails "Device or
-            # resource busy". reclaim_member_arrays stops whatever md device holds
-            # each member, regardless of its name.
-            local _bases=() _d
-            for _d in "${blkdevs[@]}"; do _bases+=("$(basename "$_d")"); done
-            reclaim_member_arrays "${_bases[@]}"
-            # Now clear signatures on the (freed) members: wipefs for partition/fs
-            # signatures, --zero-superblock for any residual md metadata.
-            for _d in "${blkdevs[@]}"; do
-                wipefs -a "$_d" 2>/dev/null || true
-                mdadm --zero-superblock "$_d" 2>/dev/null || true
-            done
-            mdadm --create "$MD_DEVICE" \
-                --level=0 \
-                --raid-devices=${#blkdevs[@]} \
-                --chunk=512K \
-                "${blkdevs[@]}" <<<"y"
-            echo "  Created $MD_DEVICE (RAID0, 512K chunks, ${#blkdevs[@]} devices)"
+            echo -e "  ${YELLOW}Formatting $fs_dev with XFS — this will DESTROY data on it${NC}"
+            wipefs -a "$fs_dev" 2>/dev/null || true
+            mdadm --zero-superblock "$fs_dev" 2>/dev/null || true
+            mkfs.xfs -f -L "$XFS_LABEL" "$fs_dev"
+            echo "  Formatted $fs_dev (XFS, single drive)"
+        fi
+    else
+        header "Setting up RAID0 + XFS"
+        fs_dev="$MD_DEVICE"
+        # Check if RAID already exists and is assembled
+        if [[ -e "$MD_DEVICE" ]] && mdadm --detail "$MD_DEVICE" &>/dev/null; then
+            echo "  $MD_DEVICE already assembled"
+        else
+            # Try to assemble existing array first
+            if mdadm --assemble "$MD_DEVICE" "${blkdevs[@]}" 2>/dev/null; then
+                echo "  Assembled existing $MD_DEVICE"
+            else
+                # Create new RAID0
+                echo -e "  ${YELLOW}Creating new RAID0 — this will DESTROY data on ${blkdevs[*]}${NC}"
+                # Wipe stale partition-table / fs signatures first: otherwise mdadm
+                # detects them and STOPS at an interactive "partition table exists ...
+                # Continue creating array [y/N]?" prompt. profile_all.sh redirects this
+                # command's output to a log, so that prompt is invisible and the whole
+                # run looks hung. wipefs removes the trigger; the `<<<"y"` here-string is
+                # a harmless fallback that auto-confirms any residual prompt.
+                # NB: do NOT pipe `yes |` here — under `set -o pipefail`, `yes` dies with
+                # SIGPIPE (141) when mdadm closes the pipe, and that non-zero propagates
+                # through the pipeline, tripping `set -e` right after the array starts
+                # (before mkfs/mount). A here-string has no such pipe.
+                # Reclaim the member drives from any STRAY array first. A prior failed
+                # run can leave an array assembled on these drives under a DIFFERENT name
+                # (the upstream picker chooses the lowest free /dev/mdN, so md1 left over
+                # -> this run targets md2), and mdadm --create then fails "Device or
+                # resource busy". reclaim_member_arrays stops whatever md device holds
+                # each member, regardless of its name.
+                local _bases=() _d
+                for _d in "${blkdevs[@]}"; do _bases+=("$(basename "$_d")"); done
+                reclaim_member_arrays "${_bases[@]}"
+                # Now clear signatures on the (freed) members: wipefs for partition/fs
+                # signatures, --zero-superblock for any residual md metadata.
+                for _d in "${blkdevs[@]}"; do
+                    wipefs -a "$_d" 2>/dev/null || true
+                    mdadm --zero-superblock "$_d" 2>/dev/null || true
+                done
+                mdadm --create "$MD_DEVICE" \
+                    --level=0 \
+                    --raid-devices=${#blkdevs[@]} \
+                    --chunk=512K \
+                    "${blkdevs[@]}" <<<"y"
+                echo "  Created $MD_DEVICE (RAID0, 512K chunks, ${#blkdevs[@]} devices)"
 
-            # Format with XFS
-            echo "  Formatting with XFS..."
-            mkfs.xfs -f -L "$XFS_LABEL" "$MD_DEVICE"
+                # Format with XFS
+                echo "  Formatting with XFS..."
+                mkfs.xfs -f -L "$XFS_LABEL" "$MD_DEVICE"
+            fi
         fi
     fi
 
     # Mount
     mkdir -p "$MOUNT_POINT"
     if ! mountpoint -q "$MOUNT_POINT"; then
-        mount "$MD_DEVICE" "$MOUNT_POINT"
-        echo "  Mounted $MD_DEVICE at $MOUNT_POINT"
+        mount "$fs_dev" "$MOUNT_POINT"
+        echo "  Mounted $fs_dev at $MOUNT_POINT"
     else
         echo "  Already mounted at $MOUNT_POINT"
     fi
@@ -1162,7 +1228,7 @@ main() {
     echo
     if [[ "$mode" == "certus" ]]; then
         echo "  Certus server should use:"
-        echo "    --pci-allowlist ${NVME_BDFS[0]},${NVME_BDFS[1]},${NVME_BDFS[2]},${NVME_BDFS[3]}"
+        echo "    --pci-allowlist $(IFS=,; echo "${NVME_BDFS[*]}")"
         echo "    --memory-tier-size $((CERTUS_HUGEPAGES - DPDK_HUGEPAGE_OVERHEAD_GIB))G"
     else
         echo "  SharedStorage KV path:"

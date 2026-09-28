@@ -28,6 +28,7 @@ components:
     crate: eviction-policy-session-lists
     factory: "EvictionPolicySessionListsComponent::new_default"
     provides: [IEvictionPolicy]
+    algorithm: "session-lineage leaf LRU (evicts globally-oldest leaf per session chain)"
 
   dispatch_map:
     crate: dispatch-map

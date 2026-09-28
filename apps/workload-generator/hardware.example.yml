@@ -1,0 +1,38 @@
+# An example hardware file (FR-082). Copy to ./cluster.yml, or name it with
+# --hardware. A test parses this file, so it cannot rot.
+#
+# It says what to run a workload AGAINST. It never says what the workload is:
+# nothing about sessions, blocks, popularity or timing belongs here, and an
+# unknown field is refused rather than defaulted (FR-005).
+version: 1
+
+# Virtual seconds per wallclock second. `.inf` means work-conserving: issue as
+# fast as the transport allows, and measure the ceiling rather than the latency
+# under a given load. A large FINITE rate is not the same thing — it keeps a
+# schedule the machine may not meet, and the run is then correctly invalid.
+#
+# It lives here because it calibrates a description against this hardware's
+# speed. `--rate` overrides it.
+rate: 1.0
+
+# The Certus instances to drive. An instance is NOT a machine: a host routinely
+# runs one per NUMA domain, or one per NVMe device as deploy/multi-instance/
+# does, so two entries may share a host.
+#
+# Each needs its own `port`, because each needs its own agent, and its own
+# `mailbox`, because two agents on one mailbox are one cache under two names.
+# Both collisions are refused, naming the pair.
+#
+# `port` defaults to 7420 and `mailbox` to /dev/shm/certus-shmq, so a
+# homogeneous cluster is a list of hostnames.
+instances:
+  # Two co-resident instances, one per socket. Sessions are placed across them
+  # (FR-048) and a migration between them is a genuine cache miss.
+  - host: node5
+    port: 7420
+    mailbox: /dev/shm/certus-shmq-0
+  - host: node5
+    port: 7421
+    mailbox: /dev/shm/certus-shmq-1
+  # A second machine, taking the defaults.
+  - host: node2

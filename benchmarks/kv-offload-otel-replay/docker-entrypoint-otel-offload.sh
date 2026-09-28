@@ -66,8 +66,13 @@ if [ "${is_tiered}" -eq 1 ]; then
     fs_dir="${DISK_DIR:-${FS_ROOT_DIR:-}}"
     if [ -n "${fs_dir}" ]; then
         mkdir -p "${fs_dir}"
-        if ! mountpoint -q "${fs_dir}" 2>/dev/null; then
-            echo "[entrypoint] WARNING: ${fs_dir} is not a bind mount — the fs disk tier will" >&2
+        # fs_dir is typically a SUBDIR of the bind (e.g. /mnt/fs-tier/kv-tier under a
+        # -v host:/mnt/fs-tier bind), so it is never itself a mountpoint — test the
+        # ENCLOSING mount instead. If the path resolves to the container root ("/",
+        # the overlay/ephemeral layer) there is no bind; any deeper target is one.
+        enc="$(findmnt -no TARGET -T "${fs_dir}" 2>/dev/null || true)"
+        if [ -z "${enc}" ] || [ "${enc}" = "/" ]; then
+            echo "[entrypoint] WARNING: ${fs_dir} is not under a bind mount — the fs disk tier will" >&2
             echo "[entrypoint]          write to the container's ephemeral layer (lost on --rm)." >&2
         fi
     fi

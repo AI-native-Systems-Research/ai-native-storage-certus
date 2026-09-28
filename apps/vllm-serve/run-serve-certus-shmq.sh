@@ -51,6 +51,11 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-131072}"
 QWEN_NATIVE_CTX="${QWEN_NATIVE_CTX:-32768}"
 GPU="${GPU:-all}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
+# Shard the model across this many GPUs. TP>1 is REQUIRED for large windows on
+# 40G A100s: a 131K sequence's KV (~24G) plus the 14B weights (~29G) does not fit
+# one GPU and vLLM aborts at the startup KV-cache sizing check. GPU=all only makes
+# both devices visible — it does NOT enable sharding; that needs this flag.
+TENSOR_PARALLEL="${TENSOR_PARALLEL:-1}"
 # Directly cap the GPU-resident KV cache (per GPU). When set, vLLM IGNORES
 # gpu-memory-utilization and pins the KV pool to this size — accepts human-
 # readable sizes (4G, 512M). Shrinking it forces reused prefixes to spill from
@@ -129,6 +134,7 @@ SERVE_ARGS=(
   --served-model-name "$SERVED_MODEL_NAME"
   --dtype "$DTYPE"
   --max-model-len "$MAX_MODEL_LEN"
+  --tensor-parallel-size "$TENSOR_PARALLEL"
   --gpu-memory-utilization "$GPU_MEM_UTIL"
   --enable-prefix-caching
   --no-async-scheduling
@@ -139,6 +145,23 @@ SERVE_ARGS=(
 if [[ -n "$KV_CACHE_BYTES" ]]; then
   SERVE_ARGS+=(--kv-cache-memory-bytes "$KV_CACHE_BYTES")
   echo "[serve] GPU KV cache capped at ${KV_CACHE_BYTES} (ignores GPU_MEM_UTIL)"
+fi
+
+# Extra pass-through `vllm serve` flags for wrappers that need model-specific
+# options this generic script doesn't model (e.g. multimodal --limit-mm-per-prompt
+# / --mm-processor-kwargs for a VL model). Word-split, so quote per-shell rules;
+# for a JSON value with spaces set the flag and value as one element via an array
+# is not possible through env, so keep JSON compact (no spaces). Appended last so
+# it can also override earlier flags. Unset (default) = no extra args.
+if [[ -n "${EXTRA_SERVE_ARGS:-}" ]]; then
+  # Split on whitespace only. Disable brace expansion first so a JSON value like
+  # {"image":2,"video":0} (comma inside braces) is NOT expanded into two words.
+  set +B
+  # shellcheck disable=SC2206  # intentional word-split of caller-provided flags
+  EXTRA_ARR=(${EXTRA_SERVE_ARGS})
+  set -B
+  SERVE_ARGS+=("${EXTRA_ARR[@]}")
+  echo "[serve] extra serve args: ${EXTRA_SERVE_ARGS}"
 fi
 
 # YaRN rope-scaling: only when the requested window exceeds Qwen2.x's native

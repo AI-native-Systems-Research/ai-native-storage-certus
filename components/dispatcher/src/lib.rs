@@ -494,7 +494,7 @@ impl DispatcherComponent {
         }
     }
 
-    fn drive_index(key: CacheKey, num_drives: usize) -> usize {
+    pub(crate) fn drive_index(key: CacheKey, num_drives: usize) -> usize {
         // splitmix64 finalizer: distributes sequential keys uniformly.
         let mut h = key;
         h ^= h >> 30;

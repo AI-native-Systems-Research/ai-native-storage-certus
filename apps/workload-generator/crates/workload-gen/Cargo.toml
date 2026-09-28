@@ -1,0 +1,46 @@
+[package]
+name = "workload-gen"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# The generator binary, and a workspace **default member**: it links no CUDA and
+# attaches to no mailbox, so `cargo build` and `cargo test --all` reach it.
+#
+# That is a consequence of FR-079. Every node — including the local one — is driven
+# through `workload-node-agent` over TCP, so the mailbox-facing code (the executor,
+# the opcode mapping, the device buffer) lives in that crate. This one keeps the
+# simulation, the plan queue, the driver and the report, and depends on `shm-queue`
+# and on CUDA not at all — which is also what stops it enabling `interfaces/spdk`
+# transitively.
+
+[features]
+# `live` gates the `run` subcommand and the agent transport, so
+# `cargo build -p workload-gen --no-default-features` yields an emit-only tool with
+# no networking at all. It no longer gates an accelerator or a mailbox: since FR-079
+# there is nothing here to gate. Default-ON, because driving a run is the point.
+default = ["live"]
+live = []
+
+[dependencies]
+workload-model.workspace = true
+workload-trace.workspace = true
+workload-wire.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The hardware file (FR-082). YAML for extensibility, and the same reader the
+# description already uses, so an unknown field is a refusal in both.
+serde_yaml = "0.9"
+# Latency percentiles live in the binary only, never in the simulation core. The
+# agent ships back a histogram rather than percentiles, because quantiles do not
+# merge across nodes and histograms do (contracts/node-agent-wire.md).
+hdrhistogram = { version = "7", features = ["serialization"] }
+# `statvfs` for the emit path's free-space refusal (FR-073). Needed in the
+# emit-only build too, which is why it is not behind the `live` feature.
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

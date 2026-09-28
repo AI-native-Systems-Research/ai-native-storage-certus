@@ -11,6 +11,7 @@ select different storage backends without changing Rust source code.
 |---------|--------------|-------------|
 | `full` (default) | `spdk` | Production: SPDK userspace NVMe + GPU DMA |
 | `full-session-lists` | `spdk` | Same as `full`, but uses the session-lineage eviction policy instead of LRU |
+| `full-optimized` | `spdk` | Same as `full`, but uses the optimized eviction policy (O(1) LRU + TinyLFU admission) instead of plain LRU |
 | `full-fs-block` | `filesys` | Filesystem-backed block devices with O_DIRECT on `/ssd/`, SPDK for DMA allocation |
 | `minimal` | (none) | Logger only, no hardware dependencies |
 
@@ -34,6 +35,9 @@ CERTUS_PROFILE=full-fs-block cargo build -p certus-server-yaml \
 scripts/build-certus-session-lists.sh
 # equivalent to:
 CERTUS_PROFILE=full-session-lists cargo build -p certus-server-yaml --release
+
+# Optimized eviction policy (O(1) LRU + TinyLFU admission), drop-in for LRU:
+CERTUS_PROFILE=full-optimized cargo build -p certus-server-yaml --release
 ```
 
 ### Prerequisites
