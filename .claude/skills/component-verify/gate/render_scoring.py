@@ -318,7 +318,11 @@ def main():
     c_proved = comb.count("proved")
     c_deleg = comb.count("delegated")
     c_open = comb.count("open")
-    c_refuted = comb.count("refuted")
+    # Count refuted from the STATUSES, not from combined_state: combined_state deliberately still
+    # classes a refuted property as "open" so the headline counts stay exactly as they were, which
+    # means it never returns "refuted" and counting it there would always give 0.
+    c_refuted = sum(1 for p_ in props
+                    if any((p_.get(t) or {}).get("status") == "refuted" for t in tools))
 
     # KPI cards — LEAD with the method-level result. Methods are the unit a reader anchors
     # on ("which of the interface's public methods are verified?"), so the headline is in
