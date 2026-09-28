@@ -1,0 +1,46 @@
+// Kani verification crate for `eviction-policy-optimized`.
+//
+// Layout:
+//   lru_real.rs      the REAL src/lru_list.rs, compiled in situ (include!), plus an
+//                    `inspect` child module that can read its private representation.
+//   sketch_core.rs   the count-min-sketch arithmetic core, transcribed (see the file
+//                    header for exactly why, and what fidelity that earns).
+//   api.rs           helpers for driving the REAL component through IEvictionPolicy.
+//   proofs_*.rs      the harnesses. One `verify_<id>` per inventory property id,
+//                    lowercased with '-' -> '_', plus `__mutant` anti-vacuity twins
+//                    and `__<lever>` variants.
+//
+// Deliberately NOT an inner doc comment (`//!`) anywhere that precedes an `include!`
+// of a production file: those files open with their own `//!` header and inner
+// attributes are only accepted at the very start of a module body.
+
+// The scorer finds harnesses by convention: `verify_<id>`, plus `__mutant` /
+// `__split_*` / `__nounwindcheck` / `__concrete` / `__stub` suffixes. Those double
+// underscores are mandatory, so the lint has to go.
+#![allow(non_snake_case)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_mut)]
+#![allow(clippy::all)]
+
+pub mod lru_real;
+pub mod sketch_core;
+
+#[cfg(kani)]
+pub mod api;
+
+#[cfg(kani)]
+mod proofs_list;
+
+#[cfg(kani)]
+mod proofs_api;
+
+// The REAL component through the REAL IEvictionPolicy: one `verify_<id>` per
+// component-level inventory property. Reaching the component needs the construction lever
+// the GATE applies (`--no-unwinding-checks`); see the file header for the bound it buys and
+// for what is and is not observable through the interface.
+#[cfg(kani)]
+mod proofs_component;
+
+#[cfg(kani)]
+mod proofs_sketch;

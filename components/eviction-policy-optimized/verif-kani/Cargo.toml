@@ -1,0 +1,58 @@
+#  Kani verification crate for the `eviction-policy-optimized` component.
+#
+#  Separate crate on purpose: a Creusot agent works concurrently in `verif-creusot/`,
+#  and the scorer is invoked with
+#      --component-dir components/eviction-policy-optimized/verif-kani
+#  so `cargo kani` must resolve here.
+#
+#  TWO WAYS THE REAL CODE IS REACHED, both without any copy of it in this crate:
+#
+#   1. `eviction-policy-optimized` is a path dependency, so harnesses drive the REAL
+#      `EvictionPolicyOptimizedComponent` through the REAL `IEvictionPolicy` methods
+#      (`src/api.rs`). Everything behind the interface — the real `Pool`, the real
+#      `CountMinSketch`, the real `LruList`, the real `RwLock`/`Mutex` nesting — is the
+#      production article.
+#
+#   2. `src/lru_real.rs` pulls the production file `../../src/lru_list.rs` in
+#      textually with `include!`. That compiles the REAL `LruList` source inside this
+#      crate, which is what makes its private representation (`nodes`, `head`, `tail`,
+#      `free`, `len`, and `Node::prev/next/active`) visible to the harnesses. The
+#      structural global invariants (EPO-INV-LEN-MATCHES-CHAIN,
+#      EPO-INV-LIST-LINKS-SYMMETRIC, EPO-INV-SLOT-OWNERSHIP-DISJOINT, ...) are stated
+#      over exactly those fields, so they cannot be checked through the public
+#      interface alone. Because the file is included rather than copied, the proofs
+#      cannot drift from the production source: editing `src/lru_list.rs` changes what
+#      they check.
+#
+#  WHY THIS IS A STANDALONE WORKSPACE (the empty `[workspace]` table below) — the
+#  repository-root Cargo.toml must not be edited, so this crate cannot be a root
+#  workspace member and must detach. Note which dependencies that permits: path
+#  dependencies on `components/*` crates resolve their `.workspace = true` inheritance
+#  by walking up to the root workspace and are fine, but a DIRECT path dependency on
+#  any `lib/component-framework/crates/*` crate is not: the walk-up from there hits
+#  `lib/component-framework/Cargo.toml`, a comment-only stub with neither `[package]`
+#  nor `[workspace]`, and cargo fails to load the manifest. Hence no
+#  `component-core` / `component-macros` / `component-framework` dependency here —
+#  they arrive transitively through `eviction-policy-optimized` and `interfaces`
+#  instead, which is also why harnesses call the `IEvictionPolicy` methods directly on
+#  the concrete component type rather than through `component_core::query_interface!`.
+
+[package]
+name = "eviction-policy-optimized-verif-kani"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+publish = false
+
+[lib]
+# Distinct from the component crate name so both can coexist in the build graph.
+name = "epo_verif_kani"
+path = "src/lib.rs"
+
+[dependencies]
+eviction-policy-optimized = { path = ".." }
+interfaces = { path = "../../interfaces" }
+
+# Standalone workspace: detaches this crate from the repository-root workspace so the
+# root Cargo.toml needs no edit.
+[workspace]
