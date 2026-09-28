@@ -204,6 +204,15 @@ def classify(stderr, battery):
 
 
 _BUILD_FAILURE_SIGS = [
+    # WRONG --component-dir. The harnesses live in a sibling crate (verif-kani/ with its own
+    # Cargo.toml) but cargo was run somewhere they are not part of the crate, so the filter matches
+    # nothing. This is an INVOCATION fault, not a harness fault: `find_harness_names` searches
+    # recursively and happily finds the names, then every single property fails identically.
+    # Measured 2026-09-28 re-scoring eviction-policy-optimized: 168 harnesses found, and every
+    # property returned "unclassifiable failure — the harness is broken, fix it" — 168 accusations
+    # against innocent harnesses for one mistyped path. SKILL.md warns about exactly this in prose;
+    # the scorer should enforce it, so one accurate error replaces N misleading verdicts.
+    r"no harnesses matched the harness filter",
     r"Failed to get cargo metadata",
     r"`cargo metadata` exited with an error",
     r"failed to load source for dependency",
@@ -575,8 +584,13 @@ def score_property(p, ctx):
     # "fix your harness" verdicts against harnesses that were never compiled.
     bf = build_failure(out)
     if bf:
+        hint = ""
+        if "no harnesses matched" in bf.lower():
+            hint = (" — LIKELY A WRONG --component-dir: the harnesses were found by name but cargo ran "
+                    "where they are not part of the crate. If they live in a sibling crate, point "
+                    "--component-dir at THAT crate (e.g. components/<c>/verif-kani), not the component root.")
         return "BUILD-ERROR", {"harness": named}, (
-            f"BUILD/TOOLCHAIN failure, not a harness or tool limit — cargo never ran a proof: {bf}")
+            f"BUILD/TOOLCHAIN failure, not a harness or tool limit — cargo never ran a proof: {bf}{hint}")
     # ---- registry next (a beaten wall is never a boundary) ----
     kd = known_defeat(out, ctx["registry"])
     if kd:
