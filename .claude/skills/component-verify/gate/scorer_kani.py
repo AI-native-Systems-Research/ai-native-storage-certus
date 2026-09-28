@@ -409,6 +409,41 @@ def mem_cap_available(mem_mb):
         return False
 
 
+def vacuity_check(pid, present, ctx, extra=None):
+    """Anti-vacuity: the `__mutant` twin must FAIL. Returns None if the proof is honest (mutant
+    absent or failed), or a reason string if the proof is VACUOUS (mutant also passed).
+
+    TWO THINGS MADE THIS A FUNCTION RATHER THAN INLINE CODE, both found on
+    eviction-policy-session-lists (2026-09-28):
+
+    1. The check used to live only on the unwinding-checks-ON success path. The known-defeat branch
+       that applies `--no-unwinding-checks` returned "proved" directly and NEVER ran the mutant, so
+       EVERY `bounded-shallow` proof bypassed anti-vacuity entirely. Blast radius when found: 63
+       ALREADY-PUBLISHED proved cells (eviction-policy-optimized 58, extended-metadata-store 5).
+       Same class as the Creusot mutant-lookup defect — the check existed, a whole population never
+       reached it. One helper, called from every path that can return "proved", is the fix.
+
+    2. `extra` is not optional bookkeeping, it is the correctness of the comparison.
+       `--no-unwinding-checks` PRUNES paths, it does not merely truncate them, so a harness can pass
+       with no content: measured on that component, every `verify_*` passed AND 36 `__mutant` twins
+       passed too. If the base proved with `--unwind 4 --no-unwinding-checks` and the mutant is run
+       WITHOUT those flags, the mutant may fail on the unwinding assertion rather than because of the
+       mutation — which satisfies anti-vacuity for the wrong reason and hides exactly the vacuity
+       being hunted. The mutant must run under the SAME flags as the proof it is vouching for.
+    """
+    mut = harness_id(pid) + "__mutant"
+    if mut not in present:
+        return None
+    mok, _, _, _, _, _ = run_kani(
+        mut, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False, extra=extra)
+    if not mok:
+        return None
+    how = f" under the same flags as the proof ({' '.join(extra)})" if extra else ""
+    return (f"VACUOUS: mutant harness '{mut}' also passed{how} — the proof holds no content. "
+            f"Strengthen the property, or (if the proof used --no-unwinding-checks) the bound prunes "
+            f"away the paths the obligation is about.")
+
+
 def score_property(p, ctx):
     """Return (status, evidence_dict, note). status in ACCEPT or 'UNRESOLVED'."""
     pid = p["id"]
@@ -445,8 +480,33 @@ def score_property(p, ctx):
     # refutation is positive evidence: Kani found the execution.
     refute = "refute_" + pid.lower().replace("-", "_")
     if refute in present and not ctx["dry_run"]:
-        rok, _, rwall, rrss, _, _ = run_kani(
+        rok, rout, rwall, rrss, rtimed, _ = run_kani(
             refute, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], ctx["cap_max"])
+        rlever = None
+        if not rok:
+            # A REFUTATION GETS THE LEVER BATTERY TOO. It used to get none, and the consequence was
+            # the worst kind available: on eviction-policy-session-lists no refutation scenario closes
+            # inside 300s, so a GENUINE refutation failed here, the scorer fell through to the base
+            # harness, and the base's known-defeat branch awarded `proved` — publishing a
+            # machine-checkable defect as a proof.
+            #
+            # Applying `--no-unwinding-checks` to a refutation is sound in the SAFE direction:
+            # pruning REMOVES paths, so it can only make a violation harder to reach, never easier. A
+            # refutation that passes under the lever still exhibits a real execution reaching the
+            # violation, so pruning risks false negatives, not false defect claims. That is the exact
+            # reverse of the proof case, where pruning is what lets a vacuous pass through — which is
+            # why the same flag demands a mutant re-run for a proof but needs no such guard here.
+            rkd = known_defeat(rout, ctx["registry"])
+            if rtimed or (rkd and rkd.get("mandated_lever") == "nounwindcheck"):
+                for rn in (4, 8):
+                    rok, rout, rwall2, rrss2, _, _ = run_kani(
+                        refute, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False,
+                        extra=["--unwind", str(rn), "--no-unwinding-checks"])
+                    rwall = (rwall or 0) + (rwall2 or 0)
+                    rrss = max(rrss or 0, rrss2 or 0)
+                    if rok:
+                        rlever = f"nounwindcheck --unwind {rn}"
+                        break
         if rok:
             base_ok = False
             if named in present:
@@ -457,11 +517,16 @@ def score_property(p, ctx):
                     f"CONTRADICTION: '{named}' verified AND its refutation '{refute}' also passed. "
                     f"One of them is vacuous (check the refutation actually reaches the violation) — "
                     f"fix that before any verdict; a defect claim on this footing is not trustworthy.")
-            return "refuted", {"refutation": refute, "result": "violation demonstrated",
-                               "wall_clock_s": rwall, "peak_rss_mb": rrss}, (
+            rev = {"refutation": refute, "result": "violation demonstrated",
+                   "wall_clock_s": rwall, "peak_rss_mb": rrss}
+            if rlever:
+                rev["lever"] = rlever
+            return "refuted", rev, (
                 f"REFUTED — '{refute}' demonstrates a reachable violation, so the code breaks this "
                 f"obligation. This is a finding, not a gap: see the spec and code locations on the "
-                f"property record.")
+                f"property record."
+                + (f" The refutation needed lever '{rlever}'; pruning can only make a violation "
+                   f"harder to reach, so the witness stands." if rlever else ""))
 
     # ---- no base artifact at all -> cannot climb out of the default ----
     if named not in present:
@@ -496,13 +561,11 @@ def score_property(p, ctx):
             if not ok2 and sig:
                 seen[sig] = spent + 1          # only a FAILED escalation consumes budget
     if ok:
-        # anti-vacuity: a __mutant harness, if present, MUST fail (fast, no cap escalation)
-        mut = harness_id(pid) + "__mutant"
-        if mut in present:
-            mok, _, _, _, _, _ = run_kani(
-                mut, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False)
-            if mok:
-                return "UNRESOLVED", {"harness": named}, "VACUOUS: mutant harness also passed — strengthen the property"
+        # anti-vacuity: a __mutant harness, if present, MUST fail (fast, no cap escalation).
+        # Base proved with no extra flags, so the mutant runs with none either — same configuration.
+        vac = vacuity_check(pid, present, ctx, extra=None)
+        if vac:
+            return "UNRESOLVED", {"harness": named}, vac
         ev = {"harness": named, "result": "SUCCESS", "wall_clock_s": wall, "peak_rss_mb": rss}
         return "proved", ev, "scorer re-ran harness -> VERIFICATION SUCCESSFUL"
 
@@ -527,17 +590,34 @@ def score_property(p, ctx):
         mand = kd.get("mandated_lever")
         if mand == "nounwindcheck":
             for n in (4, 8):
+                lever_flags = ["--unwind", str(n), "--no-unwinding-checks"]
                 sok, _, swall, srss, _, _ = run_kani(
                     named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False,
-                    extra=["--unwind", str(n), "--no-unwinding-checks"])
+                    extra=lever_flags)
                 if sok:
+                    # ANTI-VACUITY IS MANDATORY HERE TOO — and this is the path where vacuity is most
+                    # likely, not least. `--no-unwinding-checks` prunes paths rather than truncating
+                    # them, so a harness can pass with no content: measured on
+                    # eviction-policy-session-lists, 36 mutants passed under this lever. This branch
+                    # used to `return "proved"` with no mutant check, which is how 63 published proved
+                    # cells came to rest on a check that never ran. The mutant runs under the SAME
+                    # flags or the comparison is meaningless — it would fail on the unwinding
+                    # assertion instead of on the mutation.
+                    vac = vacuity_check(pid, present, ctx, extra=lever_flags)
+                    if vac:
+                        return "UNRESOLVED", {"harness": named, "unwind": n,
+                                              "unwinding_checks": False,
+                                              "lever": "nounwindcheck"}, vac
                     return "proved", {"harness": named, "result": "SUCCESS", "unwind": n,
                                       "unwinding_checks": False, "wall_clock_s": swall,
                                       "peak_rss_mb": srss, "lever": "nounwindcheck",
-                                      "known_defeat": kd["id"]}, (
+                                      "known_defeat": kd["id"],
+                                      "vacuity_checked_under_lever": True}, (
                         f"known defeat {kd['id']}: its mandated lever 'nounwindcheck' was applied by "
                         f"the scorer and PROVED at --unwind {n} — a NARROWER claim, holding within {n} "
-                        f"loop iterations and silent beyond (fidelity bounded-shallow)")
+                        f"loop iterations and silent beyond (fidelity bounded-shallow). Its mutant twin "
+                        f"was re-run under the same flags and correctly FAILED, so the bounded claim has "
+                        f"content rather than passing because the bound pruned the paths away.")
         return "UNRESOLVED", {"harness": named, "known_defeat": kd["id"]}, (
             f"signature matches known defeat {kd['id']} and its mandated lever "
             f"'{mand}' did not discharge it either; claiming a tool-boundary on a beaten wall is "
@@ -790,6 +870,16 @@ def main():
         for pid, note in unresolved:
             print(f"    ✗ {pid}: {note}")
         sys.exit(1)
+    # A dry run scores NOTHING, so it must never print PASSED. Measured: on a 95-property bundle the
+    # dry run reported "KANI GATE: PASSED" with counts {'DRY': 95, 'proved': 0} because the verdict
+    # keyed only on `unresolved` being empty — a verdict line an operator could reasonably read as
+    # "this component passed". The blunt verdict line is the one thing a colleague skimming a log will
+    # trust, so it must never overstate what ran.
+    if counts.get("DRY"):
+        print(f"\nKANI GATE: DRY-RUN — nothing was executed or scored ({counts['DRY']} properties "
+              f"have an artifact present). This is NOT a pass: no status was written and no proof was "
+              f"reproduced. Re-run without --dry-run for a verdict.")
+        return
     print("\nKANI GATE: PASSED — every verifiable property is proved / tool-boundary / delegated, each scorer-reproduced")
 
 

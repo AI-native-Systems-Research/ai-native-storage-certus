@@ -207,10 +207,27 @@ def _save_yaml(d, path):
 
 
 def find_coma_modules(crate_dir):
-    """Every generated proof module: verif/<crate>_rlib/<module>.coma -> {module names}."""
+    """Every generated proof module, keyed by basename: {module names}.
+
+    RECURSIVE on purpose. The glob used to be `verif/*_rlib/*.coma`, i.e. exactly one level below
+    the _rlib dir. A version of this concern was raised during the eviction-policy-optimized run and
+    correctly REJECTED on the evidence then available: all 242 of that component's .coma sat at
+    exactly that depth. On eviction-policy-session-lists 2 of 230 do not —
+    `impl_Clone_for_Handle/clone.coma` and `impl_Clone_for_PolicyError/clone.coma` — which proves
+    Creusot nests VCs one level deeper for trait impls.
+
+    Those two are derived-impl VCs that no property names, so nothing was mis-scored. But the
+    failure mode if a property's proof module were ever authored inside an `impl` block is nasty and
+    silent: the module is on disk, the glob cannot see it, and the property scores UNRESOLVED with
+    "no generated proof module … absence is not a tool limit" — blaming the proving agent for a
+    glob's depth assumption. Walking the tree costs nothing and removes the trap.
+    """
     names = set()
-    for c in glob.glob(os.path.join(crate_dir, "verif", "*_rlib", "*.coma")):
-        names.add(os.path.splitext(os.path.basename(c))[0])
+    for root in glob.glob(os.path.join(crate_dir, "verif", "*_rlib")):
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for f in filenames:
+                if f.endswith(".coma"):
+                    names.add(os.path.splitext(f)[0])
     return names
 
 
@@ -852,6 +869,14 @@ def main():
         for pid, note in unresolved:
             print(f"    ✗ {pid}: {note}")
         sys.exit(1)
+    # A dry run scores NOTHING, so it must never print PASSED — the verdict keyed only on `unresolved`
+    # being empty, so a dry run reported a pass having reproduced no proof at all. The blunt verdict
+    # line is what a colleague skimming a log trusts, so it must never overstate what ran.
+    if counts.get("DRY"):
+        print(f"\nCREUSOT GATE: DRY-RUN — nothing was executed or scored ({counts['DRY']} properties "
+              f"have an artifact present). This is NOT a pass: no status was written and no proof was "
+              f"reproduced. Re-run without --dry-run for a verdict.")
+        return
     print("\nCREUSOT GATE: PASSED — every verifiable property is proved / tool-boundary / delegated, each scorer-reproduced")
 
 

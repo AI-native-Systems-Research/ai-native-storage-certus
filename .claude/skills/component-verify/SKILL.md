@@ -37,6 +37,26 @@ These rails exist because most of last week was lost to unclean/stale trees. The
 
    The filename is **not always** a literal transform of the component name (`block-device-filesys` is served by `iblock_device.rs`), and a component may implement an interface whose method count differs from its scoreboard denominator — so resolve the interface from the component's own `use interfaces::{…}` import and its `impl I<X> for …`, then confirm the `define_interface!` block. All 16 interface files in the repo follow this pattern; if you cannot locate the block for this component, stop rather than guess.
 
+5. **Write the run-local excludes (do this; do not rely on the repo's `.gitignore`).** Append to the
+   worktree's `$(git rev-parse --git-path info/exclude)`:
+   ```
+   components/*/creusot                       # machine-specific creusot-std symlink
+   components/*/verif/*_advisory.yaml         # Step 4 forbids committing these
+   components/*/verif/.run/                   # stage logs
+   components/*/verif-creusot/target/
+   components/*/verif-creusot/_creusot_erasure/
+   components/*/verif-creusot/.why3find/
+   components/*/verif-kani/target/
+   ```
+   Two reasons this is a pipeline step rather than operator lore. First, the repo `.gitignore` covers
+   only `tools/creusot/creusot`, **not** the per-component `components/<c>/creusot` symlink — a
+   machine-specific absolute path that the `git add -A components/<c>/` in Step 4 would happily commit.
+   The published branches are clean only because staging happened to be selective: luck, not a rail.
+   Second, `info/exclude` is run-local and uncommitted, so it can never become a *committed* ignore
+   rule that hides proof artifacts from a future commit — which is exactly how an agent-created
+   `.gitignore` nearly shipped a proof-free branch (see Step 4's artifact-presence gate). Never use a
+   committed `.gitignore` inside `components/<component>/` for this.
+
 Print a one-line precondition summary (`clean ✓ | base <pin> | provers alt-ergo/z3/cvc5/cvc4 ✓ | component ✓`) before continuing.
 
 ## Step 1 — Role 1: property inventory + YAML
@@ -56,6 +76,15 @@ Run the two Role-2 skills. They are independent, so **launch them in parallel** 
 - may emit only the *advisory* fields the scorer does not own — `fidelity`, a human `note`, and, for a genuine delegation, a **resolvable referent** (`delegate_to:` a named component + concrete obligation) — into its per-tool side-file `verif/<tool>_advisory.yaml`, keyed by property `id`. It must **not** write `status`, `symbol`, or `evidence`, and must **not** touch `unified_properties.yaml` directly (the orchestrator folds in the side-file; the scorer overwrites status/evidence and stamps `_scored_by`).
 
 Heavy runs: the **binding** per-property time budget is enforced downstream by the scorer in Step 2.5 (adaptive cap `--cap-seconds` → `--cap-max`, with a whole-process-tree kill on breach), so a hung solver can never stall the run — the subagents here need only self-limit their exploration and must not busy-wait on a wedged prover. Because both run in the one shared worktree and touch only disjoint artifact trees + their own advisory side-file, there is nothing to merge across trees.
+
+**Step 2 environment post-check (new rail, ~1s, do not skip).** Role 2 can break the component's
+build for the *other* tool. Measured on eviction-policy-session-lists: the Creusot agent wrote
+`[patch.crates-io]` into `components/<component>/.cargo/config.toml`, and because a cargo **config**
+at component scope applies to every cargo invocation whose cwd is inside the component, the Kani
+scorer's own preflight would have aborted the entire Kani gate before scoring one property. So after
+Role 2 returns, run **one full `cargo metadata` with cwd = `components/<component>/`** — deliberately
+NOT `--no-deps`, which returns 0 on exactly this fault while full resolution fails. If it fails, stop
+and report it as an environment fault; do not run the scorers and do not blame the harnesses.
 
 **Step 2 hard-stop (do not skip):** when both subagents return, count the proof artifacts actually present in the worktree for each requested tool (Kani `#[kani::proof]` fns; Creusot `verify_*` modules / `.coma`). If a requested tool produced **zero** artifacts, **stop** — do **not** run the scorer, do **not** write `unified_properties.yaml`, do **not** create any branch — and report the empty tool. This is precisely the failure that produced last night's all-pending dispatch-map YAML: the pipeline ran to the end over an empty tree instead of failing loudly.
 
@@ -117,9 +146,22 @@ Both branches carry the **identical full metadata bundle**; they differ only in 
    - **the full metadata bundle (identical on both branches):** `verif/spec_properties.yaml`, `verif/code_properties.yaml`, `verif/unified_properties.yaml`, and the combined `verif/<component>_scoring.html`;
    - **plus that one tool's proof artifacts:** Kani branch → the `#[cfg(kani)]` harnesses (under `src/`); Creusot branch → the `verif/` crate + its `.coma`.
    Do **not** stage the *other* tool's artifacts, and do **not** commit the scratch advisory side-files (`verif/<tool>_advisory.yaml`).
-3. **Contamination gate (HARD):** `git diff --cached --name-only` must be entirely under `components/<component>/`. If **any** staged path is outside that prefix, **abort the commit and print every stray path.** This is exactly the stale-base leak measured on the old `-rerun` branches (543 files on `verif/kani/dispatch-map-rerun`, 1,037 on `verif/kani/memory-tier-rerun` — apps/, Cargo.toml, scripts/, others' deleted `.coma`). A clean run touches only the component folder.
-4. Commit with a message naming the component, tool, run pin, and headline score (`X/N` methods, VCs/`.coma` or harness count, wall-clock/RSS).
-5. **Push** `verif/<tool>/<component>` unless `--no-push`/`--dry-run`.
+3. **Artifact-presence gate (HARD — absence is a contamination too).** Before committing, count that
+   tool's proof artifacts **on disk** and count them **in `git diff --cached --name-only`**. If the
+   staged count is lower, **abort and print the difference.** The contamination gate below checks only
+   for *stray* paths, and the Step 2 hard-stop counts artifacts on **disk**, not in the **commit** — so
+   nothing else in this pipeline can see an artifact that silently failed to stage. Measured on
+   eviction-policy-session-lists: an agent-created `components/<component>/.gitignore` containing
+   `*.coma` caused **230 of 230** emitted Creusot proof modules to be `git check-ignore`d. Every
+   existing rail passed; the branch would have shipped with zero proofs. (For reference, the published
+   `verif/creusot/eviction-policy-optimized` carries 242 `.coma` and no component `.gitignore`.)
+   **Do not "fix" a shortfall with `git add -f`** — that hides the cause. Fail loudly, find out why the
+   path was ignored, and remove the rule.
+
+4. **Contamination gate (HARD):** `git diff --cached --name-only` must be entirely under `components/<component>/`. If **any** staged path is outside that prefix, **abort the commit and print every stray path.** This is exactly the stale-base leak measured on the old `-rerun` branches (543 files on `verif/kani/dispatch-map-rerun`, 1,037 on `verif/kani/memory-tier-rerun` — apps/, Cargo.toml, scripts/, others' deleted `.coma`). A clean run touches only the component folder.
+   Gates 3 and 4 are the two halves of one question and you need **both**: gate 3 asks "is everything that should be here, here?", gate 4 asks "is anything here that should not be?". For years only gate 4 existed, which is why a run could ship an empty branch and still look clean.
+5. Commit with a message naming the component, tool, run pin, and headline score (`X/N` methods, VCs/`.coma` or harness count, wall-clock/RSS).
+6. **Push** `verif/<tool>/<component>` unless `--no-push`/`--dry-run`.
 
 Both branches thus stand alone: each shows the complete scoring picture (the combined HTML + all three YAML) and carries its own tool's reproducible artifacts. There is **no third deliverables branch and nothing goes to `unstable`.**
 
@@ -140,11 +182,11 @@ The pass condition is mechanical: **both scorers exited 0** (every verifiable pr
 
 ## Safety rails (summary — all non-negotiable)
 - **Fresh `origin/unstable` worktree every run.** No reusing month-old trees. Refuse dirty trees.
-- **Component-folder-only commit gate** on every verif-branch commit; abort + list strays on violation.
+- **Two commit gates, not one:** an **artifact-presence** gate (every artifact on disk is also staged — absence is a contamination) AND the **component-folder-only** gate (nothing staged outside `components/<component>/`); abort + print the difference or the strays. Only the second existed until 2026-09-28, which is why an agent-created `.gitignore` carrying `*.coma` could have shipped a Creusot branch with **zero** proofs past every rail.
 - **Overwrite-in-place** the two verif branches; never delete the prior verified branch history.
 - **Prover doctor** before any Creusot run; never mis-attribute a missing prover as a tool boundary.
 - **The scorer is the gate, not the prose.** Status is written only by `scorer_kani.py` / `scorer_creusot.py`, which *reproduce* every proof from source. The agent produces artifacts + lever variants; it never grades itself. Both scorers must exit 0 before commit.
-- **Four end-states** (Proved ✓ / Refuted ‼ with a machine-checked witness / Delegated ⤴ / Tool-boundary ⊘ with reproducible signature). "Harness/contract not written" ≠ a rating — it is a gate failure (UNRESOLVED).
+- **Four end-states** (Proved ✓ / Refuted ‼ with a machine-checked witness / Delegated ⤴ / Tool-boundary ⊘ with reproducible signature). **Anti-vacuity applies to EVERY `proved`, on every path** — including a proof earned through a scorer-applied lever, and the mutant must run under the SAME flags as the proof. `--no-unwinding-checks` prunes paths rather than truncating them, so a `bounded-shallow` pass is the *most* vacuity-prone, not the least: measured, 36 mutants passed under that lever on one component, and 63 already-published `proved` cells had bypassed the check entirely. **Refutations get the lever battery too** — a refutation that times out used to fall through to the base harness and be published as a proof. "Harness/contract not written" ≠ a rating — it is a gate failure (UNRESOLVED).
 - **Every tool-boundary survives the refuter.** An unproven wall is `⊘` only after an independent `refute-tool-boundary` agent also failed to break it; a broken wall's signature is appended to `known_defeats.yaml` so it can never be re-claimed.
 - **Report Creusot as VCs/goals + `.coma` count**, never "files"; capture wall-clock + peak RSS.
 - **Everything ships on the two verif branches** — each carries the full metadata bundle (all three YAML + combined HTML) plus its tool's artifacts. No PR, nothing to `unstable`, no Box, no scp.
@@ -223,5 +265,9 @@ properties:
 - ❌ Committing anything outside `components/<component>/` to a verif branch. (Contamination gate aborts.)
 - ❌ Re-extracting properties inside Role 2/3. (Inventory owns the set; attach by `id`.)
 - ❌ Reporting a missing prover as a tool boundary. (Prover doctor first.)
+- ❌ Putting `[patch.crates-io]` in `components/<component>/.cargo/config.toml`. A cargo *config* at component scope breaks every cargo invocation inside the component, including the Kani scorer's preflight. It belongs in `verif-creusot/Cargo.toml`.
+- ❌ A committed `.gitignore` inside `components/<component>/`. Use the run-local `info/exclude` (Step 0.5) so an ignore rule can never hide a proof artifact from a commit.
+- ❌ `git add -f` to get past an artifact-presence shortfall. Find out why the path was ignored.
+- ❌ Harnesses generated by `macro_rules!`. The gate discovers them by regex over source text, so they are invisible and score "no runnable harness".
 - ❌ Pushing a run while the scorer still returns UNRESOLVED / exits non-zero for any property. (Not done — the gate, not a YAML field, decides.)
 - ❌ Emitting the old three thin HTML slides or a hand-maintained `.md`. (One combined `<component>_scoring.html`; deliverables are the YAML + that HTML.)

@@ -207,6 +207,66 @@ boundary** — recording ⊘ without trying the lever is a false negative. In pa
   eviction-policy-session-lists component carries the full catalog (0.12 renames, `extern_spec!`
   HashMap→FMap recipe with copy-paste `get`/`remove`, the `Ghost<Perm>` FFI pattern, soundness costs).
 
+## Crate hygiene and proof engineering — measured, not theoretical (mandatory)
+
+### 🔴 NEVER put `[patch.crates-io]` in `components/<component>/.cargo/config.toml`
+Put the `creusot-std` patch in **`verif-creusot/Cargo.toml`**, as a manifest-level patch, with a
+checkout-relative path (`creusot-std = { path = "../creusot/creusot-std" }` via the gitignored
+`components/<component>/creusot` symlink).
+
+A cargo **config** at component scope applies to EVERY cargo invocation whose cwd is anywhere inside
+the component — including `cargo kani` and the Kani scorer's `cargo metadata` preflight, which then
+die in dependency resolution on a crate they have no reason to load. This has now happened TWICE
+(block-device-filesys, then eviction-policy-session-lists). The second time it would have aborted the
+entire Kani gate before it scored a single property; it was caught only because the Kani agent
+reported it. A manifest-level `[patch]` is scoped to the one crate and is always the right home.
+Note `cargo metadata --no-deps` does NOT reveal this fault (measured: it returns 0 while full
+resolution fails), which is why the Kani doctor deliberately omits that flag.
+
+### Splitting a multi-conjunct invariant is NECESSARY BUT NOT SUFFICIENT
+`split_vc` splits goal **structure**, not a predicate body. So N conjuncts hidden behind a single
+`#[ensures(pool_inv(&^p))]` collapse into ONE goal and fail, while each conjunct closes on its own.
+Therefore: give each mutator one `#[ensures]` per clause, and **define every composite predicate as
+the conjunction of its named halves**, so re-deriving the composite is a definitional unfolding.
+Measured: this took `pool_touch` from failing to proved, and `pool_register` from 3 open goals to 2.
+
+**But do not stop there.** With all 51 clauses separated, `pool_unlink` still failed 22 of 184 — yet
+every one of those 51 clauses proves when it is the ONLY clause on a function over the same body. So
+there is a second, independent effect: **a large number of goals in one why3 file degrades the harder
+ones**, because the `time`/`depth` budget is spent per file across a deeper split tree. If you are
+stuck with many goals in one file, split the FILE (or the function), not just the conjunction.
+
+### State a preservation postcondition in the SAME SHAPE as the invariant that consumes it
+A logically equivalent phrasing is **not** an equivalent hypothesis. Measured: the open goals on this
+component were **instantiation** failures, not missing facts — invariants discriminated entries by
+arena position via `_i` predicates, while the container primitives stated preservation as
+`forall<y:(u64,u32)> … y != x ==>`. Same facts, wrong shape, never instantiated. Adding goal-shaped
+clauses to the primitives took `pool_unlink` 31→22 and `pool_register` 3→2. The same principle
+unblocked three stale-handle refutations, which needed **frame** facts (slot reuse, key-index frame)
+rather than stronger ones.
+
+### `cargo check` is necessary but NOT sufficient
+It does not reproduce pearlite-side errors: `Int as u32`, `Clone` ambiguous against the prelude glob,
+`old()` in a loop invariant, or `recursion_limit = 1024` overflowing at ~31 `#[ensures]`. Only
+`cargo creusot` does. **A verif crate that compiles can still be a broken verif crate**, so "it
+builds" is never evidence. Still run `cargo check` — it caught two real Rust errors here (`use of
+moved value`, `cannot move out of index`). Derive-ambiguity fix: fully-qualified paths
+(`#[derive(::core::clone::Clone, ::core::marker::Copy)]`) **and** drop `PartialEq`/`Eq`, since
+deriving `PartialEq` additionally demands `DeepModel` while pearlite `==` is logical equality.
+
+### Two measurement traps that produce WRONG NUMBERS you will be tempted to report
+- **`proof.json` is written incrementally.** A mid-run read is unreliable — `pool_register` read 0
+  unproved mid-run and 2 when finished. Gate every census on the printed `Proved ✔` /
+  `Goal … ✘ (x/y)` line, never on a mid-run `proof.json`. (This trap cost a wrong number in a
+  hand-off report on the very run that discovered it.)
+- **`why3find` REPLAYS CACHED RESULTS.** After changing a source, delete the module directory or pass
+  `--why3find-arg=-f`, or you are measuring the previous run.
+
+### Dead end — do not retry
+`proof_assert!` is unusable inside `macro_rules!` mutator bodies ("Use of borrowed or uninitialized
+variable p"), with or without explicit `&mut *p` reborrows. Bridging facts must live on callee
+contracts.
+
 ## Definition of done — "not attempted" is not an outcome (mandatory)
 Every inventory property must reach **exactly one** of three end states. There is no fourth box.
 1. **Proved** — a green proof (native), or a disclosed faithful whole-function mirror / `#[trusted]` boundary, named.

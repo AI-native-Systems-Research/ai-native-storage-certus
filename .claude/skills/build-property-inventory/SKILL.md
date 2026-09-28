@@ -154,6 +154,40 @@ Do not fall back to the older section-`group:`/no-NV format.
    Report: "N methods; M distinct properties; A attachments; spec_total/code_total; bundle sizes […];
    K reconciliation flags; NV ledger of size Q."
 
+## Reconciling at scale — do it in two stages, with a mechanical orphan check (measured)
+
+Reconciliation is the step where a property can silently vanish, and on a real component it is large:
+`eviction-policy-session-lists` reconciled 59 spec + 88 code records into M=95. Doing it as one
+in-flight job over the two full YAMLs failed twice to infrastructure timeouts, losing everything both
+times because nothing was written until the end. Only **3 of the 59/88 ids coincided by chance**, so
+pairing must be by MEANING — never by id, and never with difflib or any fuzzy matcher.
+
+**Stage 1 — decisions only, written incrementally.** Digest both extractions into one compact file
+(`id | subject | methods | kind` + a truncated statement; this halved the input, 113 KB → 57 KB) and
+emit a **JSON Lines pairing table**, one line per reconciled obligation:
+`{id, subject, kind, methods, origin, spec_id, code_id, statement, divergence_note}`.
+Append after each subject group (one method at a time, then the globals, then the NV ledgers), so a
+failure costs one group and a successor resumes from where the file stops.
+
+**Stage 2 — assemble `unified_properties.yaml` deterministically** from the two source YAMLs plus that
+table, with a script rather than by hand. Then the completeness check becomes **exact** instead of
+depending on an agent being careful:
+
+- every spec id and every code id appears in **exactly one** `paired_from` — report orphans, ids used
+  twice, and ids that do not exist in either source, and FAIL on any of them;
+- `reconciliation.paired + spec_only + code_only + divergent == counts.unified`;
+- no record carries a non-empty `creusot:`/`kani:` block or any `status`.
+
+Measured outcome doing it this way: 0 orphans, 0 double-use, 0 ghosts across 147 input ids, and the
+assembly step cannot misplace a property because it never makes a judgement.
+
+**`origin: divergent` is the highest-value output of this whole role — never smooth it away.** When
+both sides speak to the same obligation but say materially different things, keep ONE obligation and
+record both readings in `divergence_note`. On that component 9 of 95 were divergent and **8 became
+machine-proved defects**; collapsing them into an agreed statement would have destroyed every one of
+those findings. Likewise never drop a property to make the two lists agree: M may exceed either input
+(here 95 > 88 > 59), and 36 were code-only — real guarantees the specification never mentions.
+
 ## Anti-patterns
 - ❌ Eyeballing a bundle size instead of counting ids. (Defect #4.)
 - ❌ A property with no `source` pin. (Defect #1.)

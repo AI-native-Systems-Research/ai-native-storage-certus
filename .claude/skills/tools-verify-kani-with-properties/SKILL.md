@@ -189,6 +189,40 @@ HashMap-backed component was once mis-recorded as whole-component ⊘ when a one
 - **Reference:** `verif/skills_research/KANI_capability_catalog.md` in the eviction-policy-session-lists
   component carries the full catalog with flags, examples, and soundness costs.
 
+## Harness hygiene the GATE depends on — measured, not theoretical (mandatory)
+
+### 🔴 Do NOT generate harnesses with `macro_rules!` — the gate cannot see them
+`find_harness_names` discovers harnesses by **regex over source text**. A harness emitted from a
+macro is invisible to it, so the property scores "no runnable harness" while the harness sits in the
+file — blaming you for a discovery limitation. Measured: 13 global-invariant harnesses written via
+`macro_rules!` would all have scored that way. Write explicit `#[kani::proof] fn verify_<id>()`
+functions, however repetitive.
+
+### 🔴 `--no-unwinding-checks` PRUNES paths — it does not merely truncate them
+So a harness can pass **with no content**. Measured on eviction-policy-session-lists: in the first
+full run every `verify_*` passed AND **36 `__mutant` twins passed too**, and a passing mutant is the
+definition of a vacuous proof. Two consequences you must design for:
+
+1. **`bounded-shallow` is the fidelity where vacuity is most likely, not least.** Write the harness so
+   that no reachable loop needs more than the bound, and say so in the `note`. The scorer now re-runs
+   the mutant under the same flags as the proof, so a contentless bounded pass is caught — but a
+   harness written to be honest is better than one caught being dishonest.
+2. **For a refutation, bind the outcome instead of trusting a bare assert.** A pruned pass would score
+   a real defect as `proved`. The idiom that survives pruning: bind the outcome, `kani::cover!` the
+   violating case, then assert. An unsatisfiable cover is a FAILED check, so the harness fails whether
+   the violation is unreachable OR the path was pruned away — it can never pass silently.
+
+### `--harness NAME` matches SUBSTRINGS
+One flag can run several harnesses and interleave their verdicts. Never infer a verdict for one
+harness from a run that matched others, and avoid names that are prefixes of other names. This
+produced a false `proved` on a property that both tools had in fact refuted — the worst bug this
+pipeline has had.
+
+### Write a discriminator wherever you suspect a missing check
+A variant that PASSES once the suspected check is added isolates the cause to that check alone. On
+eviction-policy-optimized that was the single strongest piece of evidence in the whole report, and it
+is what turns "this assertion failed" into "this specific missing bounds check is the defect".
+
 ## Definition of done — "not attempted" is not an outcome (mandatory)
 Every inventory property must reach **exactly one** of three end states. There is no fourth box.
 1. **Proved** — a passing harness (bounded scope stated), or a disclosed faithful stub/mirror with the boundary named.
