@@ -77,7 +77,7 @@ write-back into `unified_properties.yaml`.
    `--no-unwinding-checks` at low unwind — every loop *cut* at N, sound only for executions where each
    loop runs ≤N (disclose the cut in `note`; route a fully-sound proof of the same obligation to Creusot).
 7. **Gate — the shipped scorer decides, by reproduction (mandatory; you cannot grade yourself).** The
-   authoritative gate is `scorer_kani.py`, which the `component-verify` orchestrator runs in its Step 2.5.
+   reproduction gate is `scorer_kani.py`, which the `component-verify` orchestrator runs in its Step 2.5.
    If you are running this skill standalone, invoke it yourself before returning and paste its output into
    your report:
    ```bash

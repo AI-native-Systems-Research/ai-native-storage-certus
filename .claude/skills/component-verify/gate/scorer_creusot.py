@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scorer_creusot.py — the AUTHORITATIVE Creusot gate. Reproduction, not declaration.
+"""scorer_creusot.py — the Creusot REPRODUCTION GATE. Reproduction, not declaration.
 
 Mirror of scorer_kani.py for Creusot/why3. The proving agent NEVER writes
 `creusot.status`. This scorer does — by RE-RUNNING `cargo creusot <module>`, which

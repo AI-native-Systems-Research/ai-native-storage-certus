@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scorer_kani.py — the AUTHORITATIVE Kani gate. Reproduction, not declaration.
+"""scorer_kani.py — the Kani REPRODUCTION GATE. Reproduction, not declaration.
 
 The proving agent NEVER writes `kani.status`. This scorer does — by executing
 the artifacts. It is read-only to the agent at run time.

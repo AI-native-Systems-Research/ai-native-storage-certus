@@ -90,7 +90,7 @@ spec-derived-contract sourcing and the structured write-back into `unified_prope
    a contract-carrying `#[trusted]` boundary (block-device I/O, crc32fast, UTF-16, Mutex, raw ptr/FFI)
    (`★`). Report evidence in prose as **VCs/goals discharged + `.coma` count — never bare "files"**.
 7. **Gate — the shipped scorer decides, by reproduction (mandatory; you cannot grade yourself).** The
-   authoritative gate is `scorer_creusot.py`, which the `component-verify` orchestrator runs in its Step
+   reproduction gate is `scorer_creusot.py`, which the `component-verify` orchestrator runs in its Step
    2.5. If you are running this skill standalone, invoke it yourself before returning and paste its output
    into your report:
    ```bash
