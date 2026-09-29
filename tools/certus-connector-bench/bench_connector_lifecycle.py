@@ -34,12 +34,15 @@ Usage (certus-server must be running):
 from __future__ import annotations
 
 import argparse
+import collections
 import csv
 import ctypes
 import hashlib
 import os
+import random
 import statistics
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -543,7 +546,6 @@ def bench_mixed_eviction(
     # runs (still on SSD in the dispatch-map) don't collide and get deduped.
     manager._ring.clear_memory_tier()
     io_before = manager._ring.get_io_stats()
-    import random
     base_seed = random.randint(10_000_000, 99_000_000)
 
     # Seed the tier with an initial generation of loadable keys.
@@ -674,6 +676,601 @@ def bench_mixed_eviction(
         print(f"  NOTE: Store drops with zero SSD writes means background DRAM→SSD")
         print(f"  write-through is not completing. Entries never become evictable.")
         print(f"  Check server --memory-tier-eviction-threshold and drive health.")
+    return result
+
+
+# ── mode: pipelined ──────────────────────────────────────────────────────────
+
+def bench_pipelined(
+    manager: ShmqCertusOffloadingManager,
+    worker,
+    kv_regions: list[KvCacheIpc],
+    keys: list[bytes],
+    batch_size: int,
+    block_bytes: int,
+    min_duration: float,
+    *,
+    pipeline_depth: int = 4,
+    direction: str = "store",
+) -> BenchResult:
+    """Submit multiple batches before reaping to saturate the ThreadPoolExecutor.
+
+    Instead of submit→spin→complete per batch, submit ``pipeline_depth``
+    batches, then drain all completed jobs.  This reveals whether DMA
+    operations actually overlap and whether the pool is the bottleneck.
+    """
+    is_store = direction == "store"
+    label_dir = "Store" if is_store else "Load"
+    phases = {
+        "prepare": PhaseTiming("prepare"),
+        "submit": PhaseTiming("submit"),
+        "pipeline_drain": PhaseTiming("pipeline_drain"),
+        "complete": PhaseTiming("complete"),
+    }
+
+    if not is_store:
+        _populate_keys(manager, worker, keys, batch_size)
+
+    total_blocks = 0
+    wall_start = time.perf_counter()
+    iteration = 0
+    job_id = 600_000
+
+    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+        batches = [keys[i : i + batch_size] for i in range(0, len(keys), batch_size)]
+        in_flight: list[tuple[int, list]] = []  # (job_id, keys_for_complete)
+
+        for batch_keys in batches:
+            if is_store:
+                t0 = time.perf_counter()
+                manager.touch(batch_keys)
+                result = manager.prepare_store(batch_keys)
+                phases["prepare"].record(time.perf_counter() - t0)
+
+                if result is None or not result.keys_to_store:
+                    continue
+
+                stored = result.keys_to_store
+                gpu_ids = list(range(len(stored)))
+                job_id += 1
+
+                t0 = time.perf_counter()
+                worker.submit_store(job_id, _FakeGPUSpec(gpu_ids), result.store_spec)
+                phases["submit"].record(time.perf_counter() - t0)
+
+                in_flight.append((job_id, stored))
+                total_blocks += len(stored)
+            else:
+                t0 = time.perf_counter()
+                manager.touch(batch_keys)
+                hits = [k for k in batch_keys if manager.lookup(k)]
+                if not hits:
+                    continue
+                load_spec = manager.prepare_load(hits)
+                phases["prepare"].record(time.perf_counter() - t0)
+
+                gpu_ids = list(range(len(hits)))
+                job_id += 1
+
+                t0 = time.perf_counter()
+                worker.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
+                phases["submit"].record(time.perf_counter() - t0)
+
+                in_flight.append((job_id, hits))
+                total_blocks += len(hits)
+
+            # Drain when pipeline is full.
+            if len(in_flight) >= pipeline_depth:
+                t0 = time.perf_counter()
+                while in_flight:
+                    finished = worker.get_finished()
+                    if finished:
+                        for _ in finished:
+                            _, done_keys = in_flight.pop(0)
+                            t_c = time.perf_counter()
+                            if is_store:
+                                manager.complete_store(done_keys, success=True)
+                            else:
+                                manager.complete_load(done_keys)
+                            phases["complete"].record(time.perf_counter() - t_c)
+                    else:
+                        time.sleep(0.0001)
+                phases["pipeline_drain"].record(time.perf_counter() - t0)
+
+        # Drain remaining in-flight jobs.
+        if in_flight:
+            t0 = time.perf_counter()
+            while in_flight:
+                finished = worker.get_finished()
+                if finished:
+                    for _ in finished:
+                        _, done_keys = in_flight.pop(0)
+                        t_c = time.perf_counter()
+                        if is_store:
+                            manager.complete_store(done_keys, success=True)
+                        else:
+                            manager.complete_load(done_keys)
+                        phases["complete"].record(time.perf_counter() - t_c)
+                else:
+                    time.sleep(0.0001)
+            phases["pipeline_drain"].record(time.perf_counter() - t0)
+
+        iteration += 1
+        if is_store and (time.perf_counter() - wall_start) < min_duration:
+            _remove_keys(manager._ring, keys, manager._world_size)
+
+    wall = time.perf_counter() - wall_start
+    return BenchResult(
+        label=f"Pipelined {label_dir} (depth={pipeline_depth})",
+        total_blocks=total_blocks,
+        total_bytes=total_blocks * block_bytes,
+        wall_seconds=wall,
+        phases=phases,
+    )
+
+
+# ── mode: prefix-miss ────────────────────────────────────────────────────────
+
+def bench_prefix_miss(
+    manager: ShmqCertusOffloadingManager,
+    worker,
+    kv_regions: list[KvCacheIpc],
+    batch_size: int,
+    block_bytes: int,
+    min_duration: float,
+    *,
+    hit_ratio: float = 0.75,
+    num_blocks: int = 128,
+) -> BenchResult:
+    """Measure the cost of vLLM's _maximal_prefix_lookup at varying hit ratios.
+
+    Pre-stores ``hit_ratio`` fraction of keys, then repeatedly runs
+    touch(all) → per-key lookup breaking at the first miss.  Tracks
+    lookup-cache-hit vs cache-miss-fallback latency separately.
+    """
+    all_keys = make_content_keys(num_blocks)
+    present_count = max(0, min(num_blocks, int(num_blocks * hit_ratio)))
+    present_keys = all_keys[:present_count]
+    absent_keys = all_keys[present_count:]
+
+    # Pre-store the "prefix" keys.
+    if present_keys:
+        _populate_keys(manager, worker, present_keys, batch_size)
+
+    phases = {
+        "touch": PhaseTiming("touch"),
+        "lookup_hit": PhaseTiming("lookup_hit"),
+        "lookup_miss": PhaseTiming("lookup_miss"),
+        "prefix_scan": PhaseTiming("prefix_scan"),
+        "load": PhaseTiming("load"),
+        "store": PhaseTiming("store"),
+    }
+
+    total_scans = 0
+    total_prefix_hits = 0
+    total_blocks = 0
+    wall_start = time.perf_counter()
+    iteration = 0
+    job_id = 700_000
+
+    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+        for batch_start in range(0, num_blocks, batch_size):
+            batch = all_keys[batch_start : batch_start + batch_size]
+
+            # Touch the full batch (populates lookup cache).
+            t0 = time.perf_counter()
+            manager.touch(batch)
+            phases["touch"].record(time.perf_counter() - t0)
+
+            # Maximal prefix scan: per-key lookup, break at first miss.
+            t_scan = time.perf_counter()
+            prefix_hits = []
+            for k in batch:
+                t_lk = time.perf_counter()
+                hit = manager.lookup(k)
+                elapsed = time.perf_counter() - t_lk
+                if hit:
+                    phases["lookup_hit"].record(elapsed)
+                    prefix_hits.append(k)
+                else:
+                    phases["lookup_miss"].record(elapsed)
+                    break
+            phases["prefix_scan"].record(time.perf_counter() - t_scan)
+
+            total_scans += 1
+            total_prefix_hits += len(prefix_hits)
+
+            # Complete the lifecycle: load hits, store the first miss.
+            if prefix_hits:
+                t0 = time.perf_counter()
+                load_spec = manager.prepare_load(prefix_hits)
+                gpu_ids = list(range(len(prefix_hits)))
+                job_id += 1
+                worker.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
+                while not worker.get_finished():
+                    time.sleep(0.0001)
+                manager.complete_load(prefix_hits)
+                phases["load"].record(time.perf_counter() - t0)
+                total_blocks += len(prefix_hits)
+
+        iteration += 1
+
+    wall = time.perf_counter() - wall_start
+    avg_prefix = total_prefix_hits / total_scans if total_scans else 0
+    result = BenchResult(
+        label=(
+            f"Prefix-Miss Scan (hit_ratio={hit_ratio:.0%}, "
+            f"avg_prefix={avg_prefix:.1f}/{batch_size})"
+        ),
+        total_blocks=total_blocks,
+        total_bytes=total_blocks * block_bytes,
+        wall_seconds=wall,
+        phases=phases,
+    )
+    result.print_report()
+    print(f"  Scans={total_scans}  avg_prefix_len={avg_prefix:.1f}  "
+          f"lookup_cache_hits={len(phases['lookup_hit'].samples)}  "
+          f"lookup_cache_misses={len(phases['lookup_miss'].samples)}")
+
+    # Clean up stored keys.
+    if present_keys:
+        _remove_keys(manager._ring, present_keys, manager._world_size)
+
+    return result
+
+
+# ── mode: contention ─────────────────────────────────────────────────────────
+
+
+def bench_contention(
+    manager_store: ShmqCertusOffloadingManager,
+    manager_load: ShmqCertusOffloadingManager,
+    worker_store,
+    worker_load,
+    kv_regions: list[KvCacheIpc],
+    ring: Ring,
+    batch_size: int,
+    block_bytes: int,
+    min_duration: float,
+    *,
+    working_set: int = 1024,
+) -> list[BenchResult]:
+    """Concurrent store + load streams on the same ring.
+
+    Thread A stores new keys continuously.  Thread B loads keys that
+    thread A has committed, received via a shared deque.  Both threads
+    use separate manager/worker instances on the same Ring (thread-safe
+    via per-thread channel assignment).
+    """
+    stop_event = threading.Event()
+    committed_queue: collections.deque = collections.deque()
+    barrier = threading.Barrier(2)
+
+    store_phases = {
+        "touch": PhaseTiming("touch"),
+        "prepare_store": PhaseTiming("prepare_store"),
+        "submit_store": PhaseTiming("submit_store"),
+        "get_finished": PhaseTiming("get_finished"),
+        "complete_store": PhaseTiming("complete_store"),
+    }
+    load_phases = {
+        "touch": PhaseTiming("touch"),
+        "lookup": PhaseTiming("lookup"),
+        "prepare_load": PhaseTiming("prepare_load"),
+        "submit_load": PhaseTiming("submit_load"),
+        "get_finished": PhaseTiming("get_finished"),
+        "complete_load": PhaseTiming("complete_load"),
+    }
+
+    store_state = {"total_blocks": 0, "drops": 0}
+    load_state = {"total_blocks": 0, "misses": 0}
+
+    base_seed = random.randint(10_000_000, 99_000_000)
+
+    def _store_thread():
+        barrier.wait()
+        generation = 0
+        job_id = 800_000
+        while not stop_event.is_set():
+            generation += 1
+            batch_keys = make_content_keys(
+                batch_size, seed=base_seed + 1_000_000 * generation,
+            )
+
+            t0 = time.perf_counter()
+            manager_store.touch(batch_keys)
+            store_phases["touch"].record(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            result = manager_store.prepare_store(batch_keys)
+            store_phases["prepare_store"].record(time.perf_counter() - t0)
+
+            if result is None or not result.keys_to_store:
+                store_state["drops"] += len(batch_keys)
+                continue
+
+            stored = result.keys_to_store
+            if len(stored) < len(batch_keys):
+                store_state["drops"] += len(batch_keys) - len(stored)
+
+            gpu_ids = list(range(len(stored)))
+            job_id += 1
+
+            t0 = time.perf_counter()
+            worker_store.submit_store(
+                job_id, _FakeGPUSpec(gpu_ids), result.store_spec,
+            )
+            store_phases["submit_store"].record(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            while not worker_store.get_finished():
+                time.sleep(0.0001)
+            store_phases["get_finished"].record(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            manager_store.complete_store(stored, success=True)
+            store_phases["complete_store"].record(time.perf_counter() - t0)
+
+            store_state["total_blocks"] += len(stored)
+            committed_queue.append(batch_keys)
+
+    def _load_thread():
+        barrier.wait()
+        time.sleep(0.5)  # let stores seed some keys
+        job_id = 900_000
+        while not stop_event.is_set():
+            try:
+                batch_keys = committed_queue.popleft()
+            except IndexError:
+                time.sleep(0.001)
+                continue
+
+            t0 = time.perf_counter()
+            manager_load.touch(batch_keys)
+            load_phases["touch"].record(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            hits = [k for k in batch_keys if manager_load.lookup(k)]
+            load_phases["lookup"].record(time.perf_counter() - t0)
+
+            if not hits:
+                load_state["misses"] += len(batch_keys)
+                continue
+            load_state["misses"] += len(batch_keys) - len(hits)
+
+            t0 = time.perf_counter()
+            load_spec = manager_load.prepare_load(hits)
+            load_phases["prepare_load"].record(time.perf_counter() - t0)
+
+            gpu_ids = list(range(len(hits)))
+            job_id += 1
+
+            t0 = time.perf_counter()
+            worker_load.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
+            load_phases["submit_load"].record(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            while not worker_load.get_finished():
+                time.sleep(0.0001)
+            load_phases["get_finished"].record(time.perf_counter() - t0)
+
+            t0 = time.perf_counter()
+            manager_load.complete_load(hits)
+            load_phases["complete_load"].record(time.perf_counter() - t0)
+
+            load_state["total_blocks"] += len(hits)
+
+    t_store = threading.Thread(target=_store_thread, name="contention-store")
+    t_load = threading.Thread(target=_load_thread, name="contention-load")
+
+    wall_start = time.perf_counter()
+    t_store.start()
+    t_load.start()
+
+    time.sleep(min_duration)
+    stop_event.set()
+
+    t_store.join(timeout=10)
+    t_load.join(timeout=10)
+    wall = time.perf_counter() - wall_start
+
+    # Drain events on main thread.
+    total_evictions = 0
+    for ev in manager_store.take_events():
+        total_evictions += len(ev.keys) if hasattr(ev, "keys") else 0
+
+    store_result = BenchResult(
+        label="Contention: Store Thread",
+        total_blocks=store_state["total_blocks"],
+        total_bytes=store_state["total_blocks"] * block_bytes,
+        wall_seconds=wall,
+        phases=store_phases,
+    )
+    load_result = BenchResult(
+        label="Contention: Load Thread",
+        total_blocks=load_state["total_blocks"],
+        total_bytes=load_state["total_blocks"] * block_bytes,
+        wall_seconds=wall,
+        phases=load_phases,
+    )
+
+    store_result.print_report()
+    print(f"  Store drops: {store_state['drops']}")
+    load_result.print_report()
+    print(f"  Load misses: {load_state['misses']}  Evictions: {total_evictions}")
+
+    return [store_result, load_result]
+
+
+# ── mode: scheduler-step ─────────────────────────────────────────────────────
+
+def bench_scheduler_step(
+    manager: ShmqCertusOffloadingManager,
+    worker,
+    kv_regions: list[KvCacheIpc],
+    ring: Ring,
+    batch_size: int,
+    block_bytes: int,
+    min_duration: float,
+    *,
+    requests_per_step: int = 8,
+    pipeline_depth: int = 4,
+    num_sessions: int = 4,
+    num_blocks: int = 128,
+) -> BenchResult:
+    """Simulate continuous-batching scheduler steps with prefix sharing.
+
+    Each step admits ``requests_per_step`` requests drawn from
+    ``num_sessions`` conversations.  Earlier-stored keys are shared
+    prefix (should hit on lookup); new keys are suffix (miss → store).
+    Dispatches are pipelined through the worker.
+    """
+    keys_per_request = max(4, num_blocks // requests_per_step)
+    prefix_len = keys_per_request // 2
+    suffix_len = keys_per_request - prefix_len
+
+    phases = {
+        "touch_lookup": PhaseTiming("touch_lookup"),
+        "prepare_store": PhaseTiming("prepare_store"),
+        "prepare_load": PhaseTiming("prepare_load"),
+        "submit": PhaseTiming("submit"),
+        "drain_workers": PhaseTiming("drain_workers"),
+        "complete": PhaseTiming("complete"),
+        "take_events": PhaseTiming("take_events"),
+    }
+
+    # Seed each session's prefix into the server.
+    session_prefixes: list[list[bytes]] = []
+    for s in range(num_sessions):
+        prefix_keys = make_content_keys(prefix_len, seed=s * 10_000)
+        _populate_keys(manager, worker, prefix_keys, batch_size)
+        session_prefixes.append(prefix_keys)
+
+    total_blocks = 0
+    total_steps = 0
+    total_prefix_hits = 0
+    total_suffix_stores = 0
+    wall_start = time.perf_counter()
+    job_id = 1_000_000
+
+    while (time.perf_counter() - wall_start) < min_duration or total_steps < 3:
+        step_start = time.perf_counter()
+
+        # Build requests for this step.
+        all_load_keys: list[bytes] = []
+        all_store_keys: list[bytes] = []
+
+        t_tl = time.perf_counter()
+        for r in range(requests_per_step):
+            s_idx = (total_steps * requests_per_step + r) % num_sessions
+            prefix = session_prefixes[s_idx]
+            suffix = make_content_keys(
+                suffix_len,
+                seed=s_idx * 10_000 + 5_000 + total_steps * 100 + r,
+            )
+            req_keys = prefix + suffix
+
+            manager.touch(req_keys)
+
+            # Maximal prefix scan.
+            prefix_hits = []
+            for k in req_keys:
+                if manager.lookup(k):
+                    prefix_hits.append(k)
+                else:
+                    break
+
+            suffix_misses = req_keys[len(prefix_hits):]
+            all_load_keys.extend(prefix_hits)
+            all_store_keys.extend(suffix_misses)
+            total_prefix_hits += len(prefix_hits)
+            total_suffix_stores += len(suffix_misses)
+
+        phases["touch_lookup"].record(time.perf_counter() - t_tl)
+
+        # Prepare stores.
+        store_result = None
+        if all_store_keys:
+            t0 = time.perf_counter()
+            store_result = manager.prepare_store(all_store_keys)
+            phases["prepare_store"].record(time.perf_counter() - t0)
+
+        # Prepare loads.
+        load_spec = None
+        if all_load_keys:
+            t0 = time.perf_counter()
+            load_spec = manager.prepare_load(all_load_keys)
+            phases["prepare_load"].record(time.perf_counter() - t0)
+
+        # Dispatch (pipelined).
+        t0 = time.perf_counter()
+        stored_keys = None
+        if store_result and store_result.keys_to_store:
+            stored_keys = store_result.keys_to_store
+            gpu_ids = list(range(len(stored_keys)))
+            job_id += 1
+            worker.submit_store(
+                job_id, _FakeGPUSpec(gpu_ids), store_result.store_spec,
+            )
+        if load_spec and all_load_keys:
+            gpu_ids = list(range(len(all_load_keys)))
+            job_id += 1
+            worker.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
+        phases["submit"].record(time.perf_counter() - t0)
+
+        # Drain workers.
+        t0 = time.perf_counter()
+        pending = (1 if stored_keys else 0) + (1 if (load_spec and all_load_keys) else 0)
+        drained = 0
+        while drained < pending:
+            finished = worker.get_finished()
+            if finished:
+                drained += len(finished)
+            else:
+                time.sleep(0.0001)
+        phases["drain_workers"].record(time.perf_counter() - t0)
+
+        # Complete.
+        t0 = time.perf_counter()
+        if stored_keys:
+            manager.complete_store(stored_keys, success=True)
+            total_blocks += len(stored_keys)
+        if all_load_keys:
+            manager.complete_load(all_load_keys)
+            total_blocks += len(all_load_keys)
+        phases["complete"].record(time.perf_counter() - t0)
+
+        # Drain events.
+        t0 = time.perf_counter()
+        for ev in manager.take_events():
+            pass
+        phases["take_events"].record(time.perf_counter() - t0)
+
+        total_steps += 1
+
+        # Remove suffix keys so next step's stores don't dedup.
+        if all_store_keys:
+            _remove_keys(ring, all_store_keys, manager._world_size)
+
+    wall = time.perf_counter() - wall_start
+    result = BenchResult(
+        label=(
+            f"Scheduler Step (reqs={requests_per_step}, "
+            f"sessions={num_sessions}, keys/req={keys_per_request})"
+        ),
+        total_blocks=total_blocks,
+        total_bytes=total_blocks * block_bytes,
+        wall_seconds=wall,
+        phases=phases,
+    )
+    result.print_report()
+    print(f"  Steps={total_steps}  steps/s={total_steps/wall:.1f}  "
+          f"prefix_hits={total_prefix_hits}  suffix_stores={total_suffix_stores}")
+
+    # Clean up session prefixes.
+    for prefix in session_prefixes:
+        _remove_keys(ring, prefix, manager._world_size)
+
     return result
 
 
@@ -1007,12 +1604,15 @@ def main():
         description="End-to-end connector lifecycle benchmark",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Four benchmark phases (all run by default):\n"
+            "Modes (--mode):\n"
             "\n"
-            "  1. Store:     touch → prepare_store → submit_store → get_finished → complete_store\n"
-            "  2. Warm Load: touch → lookup → prepare_load → submit_load → get_finished → complete_load\n"
-            "  3. Cold Load: same as warm, but flush_to_ssd + clear_memory_tier first (SSD→DRAM→GPU)\n"
-            "  4. Eviction:  interleaved store + load under memory-tier pressure, with take_events\n"
+            "  default        Four serial phases: store, warm load, cold load, mixed eviction\n"
+            "  pipelined      Submit N batches before reaping (saturate the worker pool)\n"
+            "  prefix-miss    Vary prefix hit ratio to measure _maximal_prefix_lookup cost\n"
+            "  contention     Concurrent store + load threads on the same ring\n"
+            "  scheduler-step Full scheduler step simulation with multi-request prefix sharing\n"
+            "\n"
+            "Without --mode, runs the default 4-phase lifecycle (or --pattern if given).\n"
             "\n"
             "Unlike certus_fio (which calls Ring.lookup directly), this exercises\n"
             "key namespacing, region construction, ThreadPoolExecutor dispatch,\n"
@@ -1052,6 +1652,21 @@ def main():
                         help="Skip the cold-load benchmark (SSD→DRAM→GPU)")
     parser.add_argument("--no-eviction", action="store_true",
                         help="Skip the eviction-pressure benchmark")
+    parser.add_argument("--mode", type=str, default=None,
+                        choices=["default", "pipelined", "prefix-miss",
+                                 "contention", "scheduler-step"],
+                        help="Benchmark mode (omit for default 4-phase or --pattern)")
+    parser.add_argument("--pipeline-depth", type=int, default=4,
+                        help="(pipelined/scheduler-step) Batches in-flight before reaping")
+    parser.add_argument("--direction", type=str, default="both",
+                        choices=["store", "load", "both"],
+                        help="(pipelined) Which direction to benchmark")
+    parser.add_argument("--hit-ratio", type=float, default=0.75,
+                        help="(prefix-miss) Fraction of keys pre-stored (0.0-1.0)")
+    parser.add_argument("--requests-per-step", type=int, default=8,
+                        help="(scheduler-step) Requests per scheduler step")
+    parser.add_argument("--num-sessions", type=int, default=4,
+                        help="(scheduler-step) Distinct conversations in the pool")
     args = parser.parse_args()
 
     torch.cuda.set_device(args.gpu)
@@ -1093,8 +1708,14 @@ def main():
             pass
     _remove_keys(ring, warmup_keys, args.tp)
 
-    # ── pattern mode: run a certus_fio YAML pattern through the connector ──
-    if args.pattern:
+    # ── mode dispatch ──
+    mode = args.mode
+    if mode is None:
+        mode = "pattern" if args.pattern else "default"
+
+    all_results: list[BenchResult] = []
+
+    if mode == "pattern":
         overrides = {}
         for ov in args.override:
             if "=" in ov:
@@ -1104,95 +1725,126 @@ def main():
         print(f"\nPattern: {pattern.id} ({pattern.name})")
         pattern.describe()
 
-        pattern_results = bench_pattern(
+        all_results = bench_pattern(
             pattern, eval_expr_fn, manager, worker, [store_region],
             ring, args.bs, args.block_bytes if args.block_bytes != DEFAULT_BLOCK_BYTES else None,
             args.min_duration, args.tp,
         )
 
-        if args.csv:
-            extra = {
-                "tag": args.tag,
-                "pattern": args.pattern,
-                "shm_path": args.shm_path,
-                "gpu": args.gpu,
-                "tp": args.tp,
-                "bs": args.bs,
-                "workers": args.workers,
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            }
-            rows = [r.csv_row(extra) for r in pattern_results]
-            if rows:
-                write_header = not os.path.exists(args.csv)
-                fieldnames = list(rows[0].keys())
-                for r in rows[1:]:
-                    for k in r:
-                        if k not in fieldnames:
-                            fieldnames.append(k)
-                with open(args.csv, "a", newline="") as f:
-                    w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-                    if write_header:
-                        w.writeheader()
-                    w.writerows(rows)
-                print(f"\nResults appended to {args.csv}")
+    elif mode == "pipelined":
+        print(f"\n  Mode: pipelined (depth={args.pipeline_depth}, "
+              f"direction={args.direction})")
+        if args.direction in ("store", "both"):
+            r = bench_pipelined(
+                manager, worker, [store_region], keys,
+                args.bs, args.block_bytes, args.min_duration,
+                pipeline_depth=args.pipeline_depth, direction="store",
+            )
+            r.print_report()
+            all_results.append(r)
+        if args.direction in ("load", "both"):
+            _remove_keys(ring, keys, args.tp)
+            r = bench_pipelined(
+                manager, worker, [store_region], keys,
+                args.bs, args.block_bytes, args.min_duration,
+                pipeline_depth=args.pipeline_depth, direction="load",
+            )
+            r.print_report()
+            all_results.append(r)
 
-        executor.shutdown(wait=False)
-        ring.close()
-        print(f"\nDone.")
-        return
-
-    # ── default mode: hardcoded store/load/eviction lifecycle ──
-    store_result = bench_store_lifecycle(
-        manager, worker, [store_region], keys,
-        args.bs, args.block_bytes, args.min_duration,
-    )
-    store_result.print_report()
-
-    # ── warm load benchmark (keys are in memory from store) ──
-    _remove_keys(ring, keys, args.tp)
-    _populate_keys(manager, worker, keys, args.bs)
-
-    warm_result = bench_load_lifecycle(
-        manager, worker, [load_region], keys,
-        args.bs, args.block_bytes, args.min_duration,
-        cold=False,
-    )
-    warm_result.print_report()
-
-    # ── cold load benchmark (SSD→DRAM→GPU: flush + clear before each iter) ──
-    cold_result = None
-    if not args.no_cold:
-        cold_result = bench_load_lifecycle(
-            manager, worker, [load_region], keys,
-            args.bs, args.block_bytes, args.min_duration,
-            cold=True,
-        )
-        cold_result.print_report()
-
-    # ── mixed store+load under eviction pressure ──
-    eviction_result = None
-    if not args.no_eviction:
-        # Start clean: remove leftover entries from earlier phases so the
-        # eviction benchmark controls tier fill from scratch.
-        _remove_keys(ring, keys, args.tp)
-        ring.clear_memory_tier()
-        eviction_result = bench_mixed_eviction(
+    elif mode == "prefix-miss":
+        print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
+        r = bench_prefix_miss(
             manager, worker, [store_region],
             args.bs, args.block_bytes, args.min_duration,
-            working_set=args.working_set,
-            load_fraction=0.5,
+            hit_ratio=args.hit_ratio,
+            num_blocks=args.num_blocks,
         )
+        all_results.append(r)
+
+    elif mode == "contention":
+        print(f"\n  Mode: contention (working_set={args.working_set})")
+        manager_load = ShmqCertusOffloadingManager(
+            ring, block_size_bytes=args.block_bytes, world_size=args.tp,
+        )
+        executor_load = ThreadPoolExecutor(
+            max_workers=args.workers, thread_name_prefix="bench-load",
+        )
+        Worker = worker_class()
+        worker_load = Worker(
+            ring, [load_region], args.block_bytes, executor_load,
+            rank=0, world_size=args.tp,
+        )
+        all_results = bench_contention(
+            manager, manager_load, worker, worker_load,
+            [store_region], ring,
+            args.bs, args.block_bytes, args.min_duration,
+            working_set=args.working_set,
+        )
+        executor_load.shutdown(wait=False)
+
+    elif mode == "scheduler-step":
+        print(f"\n  Mode: scheduler-step (reqs={args.requests_per_step}, "
+              f"sessions={args.num_sessions})")
+        r = bench_scheduler_step(
+            manager, worker, [store_region], ring,
+            args.bs, args.block_bytes, args.min_duration,
+            requests_per_step=args.requests_per_step,
+            pipeline_depth=args.pipeline_depth,
+            num_sessions=args.num_sessions,
+            num_blocks=args.num_blocks,
+        )
+        all_results.append(r)
+
+    else:
+        # ── default mode: hardcoded store/load/eviction lifecycle ──
+        store_result = bench_store_lifecycle(
+            manager, worker, [store_region], keys,
+            args.bs, args.block_bytes, args.min_duration,
+        )
+        store_result.print_report()
+
+        _remove_keys(ring, keys, args.tp)
+        _populate_keys(manager, worker, keys, args.bs)
+
+        warm_result = bench_load_lifecycle(
+            manager, worker, [load_region], keys,
+            args.bs, args.block_bytes, args.min_duration,
+            cold=False,
+        )
+        warm_result.print_report()
+
+        cold_result = None
+        if not args.no_cold:
+            cold_result = bench_load_lifecycle(
+                manager, worker, [load_region], keys,
+                args.bs, args.block_bytes, args.min_duration,
+                cold=True,
+            )
+            cold_result.print_report()
+
+        eviction_result = None
+        if not args.no_eviction:
+            _remove_keys(ring, keys, args.tp)
+            ring.clear_memory_tier()
+            eviction_result = bench_mixed_eviction(
+                manager, worker, [store_region],
+                args.bs, args.block_bytes, args.min_duration,
+                working_set=args.working_set,
+                load_fraction=0.5,
+            )
+
+        all_results = [store_result, warm_result]
+        if cold_result:
+            all_results.append(cold_result)
+        if eviction_result:
+            all_results.append(eviction_result)
 
     # ── CSV output ──
-    all_results = [store_result, warm_result]
-    if cold_result:
-        all_results.append(cold_result)
-    if eviction_result:
-        all_results.append(eviction_result)
-
-    if args.csv:
+    if args.csv and all_results:
         extra = {
             "tag": args.tag,
+            "mode": mode,
             "shm_path": args.shm_path,
             "gpu": args.gpu,
             "tp": args.tp,
@@ -1203,15 +1855,24 @@ def main():
             "working_set": args.working_set,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        rows = [r.csv_row(extra) for r in all_results]
+        if mode == "pipelined":
+            extra["pipeline_depth"] = args.pipeline_depth
+            extra["direction"] = args.direction
+        elif mode == "prefix-miss":
+            extra["hit_ratio"] = args.hit_ratio
+        elif mode == "scheduler-step":
+            extra["requests_per_step"] = args.requests_per_step
+            extra["num_sessions"] = args.num_sessions
+        elif mode == "pattern":
+            extra["pattern"] = args.pattern
 
+        rows = [r.csv_row(extra) for r in all_results]
         write_header = not os.path.exists(args.csv)
         fieldnames = list(rows[0].keys())
         for r in rows[1:]:
             for k in r:
                 if k not in fieldnames:
                     fieldnames.append(k)
-
         with open(args.csv, "a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             if write_header:
@@ -1220,7 +1881,8 @@ def main():
         print(f"\nResults appended to {args.csv}")
 
     # ── cleanup ──
-    _remove_keys(ring, keys, args.tp)
+    if mode not in ("pattern", "contention"):
+        _remove_keys(ring, keys, args.tp)
     executor.shutdown(wait=False)
     ring.close()
 

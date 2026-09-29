@@ -8,7 +8,11 @@ Requires a running `certus-server` with shared memory at `/dev/shm/certus-shmq`.
 
 ### bench_connector_lifecycle.py
 
-End-to-end lifecycle benchmark with four phases:
+End-to-end lifecycle benchmark with multiple modes. Without `--mode`, runs the default 4-phase serial benchmark. Each mode targets a different optimization surface.
+
+#### Default mode (no `--mode` or `--mode default`)
+
+Four serial phases:
 
 1. **Store**: touch → prepare_store → submit → finish → complete
 2. **Warm Load**: touch → lookup → prepare → submit → finish → complete (DRAM-resident)
@@ -16,26 +20,100 @@ End-to-end lifecycle benchmark with four phases:
 4. **Mixed Eviction**: interleaved store + load under memory-tier pressure, with `take_events` drain
 
 ```bash
-# Basic run (5s per phase, bs=16, 512-block working set)
 python tools/certus-connector-bench/bench_connector_lifecycle.py \
     --shm-path /dev/shm/certus-shmq
 
 # Longer run with larger working set
 python tools/certus-connector-bench/bench_connector_lifecycle.py \
     --min-duration 30 --working-set 2048
+```
 
-# Run a certus-fio YAML pattern through the connector
+#### Pipelined mode (`--mode pipelined`)
+
+Submits multiple batches before reaping to saturate the ThreadPoolExecutor. Reveals whether DMA operations overlap and whether the worker pool or the ring/server is the bottleneck.
+
+```bash
+# Store + load, 4 batches in-flight
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode pipelined --pipeline-depth 4
+
+# Store only, deeper pipeline
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode pipelined --pipeline-depth 8 --direction store
+```
+
+Key metric: if `submit` time >> `pipeline_drain` time, the ring is the bottleneck. If `pipeline_drain` >> `submit`, the server/DMA is.
+
+#### Prefix-miss mode (`--mode prefix-miss`)
+
+Measures the cost curve of vLLM's `_maximal_prefix_lookup` at varying hit ratios. Pre-stores a fraction of keys, then runs touch → per-key sequential lookup breaking at the first miss.
+
+```bash
+# 75% prefix hit ratio (default)
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode prefix-miss --hit-ratio 0.75
+
+# Compare: all-miss vs all-hit
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode prefix-miss --hit-ratio 0.0
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode prefix-miss --hit-ratio 1.0
+```
+
+Reports cache-hit vs cache-miss-fallback lookup latency separately, plus average prefix length before the first miss.
+
+#### Contention mode (`--mode contention`)
+
+Runs store and load streams from separate threads against the same ring. Reveals server-side contention (reserve vs pin, copy_to_store vs lookup, write-through vs promote).
+
+```bash
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode contention --min-duration 10 --working-set 1024
+```
+
+Reports per-thread throughput and latency. Compare against `--mode default` to see the contention penalty.
+
+#### Scheduler-step mode (`--mode scheduler-step`)
+
+Simulates full continuous-batching scheduler steps: multiple requests per step, each with touch + maximal-prefix-lookup, pipelined dispatch, and event drain. Models multi-turn conversation prefix sharing.
+
+```bash
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode scheduler-step --requests-per-step 8 --num-sessions 4
+
+# Heavier load
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode scheduler-step --requests-per-step 16 --num-sessions 8 \
+    --min-duration 30
+```
+
+Reports steps/sec, per-step phase breakdown (touch_lookup, prepare, submit, drain, complete, events), and prefix hit/suffix store counts.
+
+#### Pattern mode (`--pattern`)
+
+Runs a certus-fio YAML workload pattern through the connector lifecycle.
+
+```bash
 python tools/certus-connector-bench/bench_connector_lifecycle.py \
     --pattern cold_prefill_store
 
-# TP=2 (2× namespaced keys per logical block)
-python tools/certus-connector-bench/bench_connector_lifecycle.py --tp 2
+python tools/certus-connector-bench/bench_connector_lifecycle.py \
+    --pattern warm_prefill_load_and_suffix_store
+```
 
-# CSV output
-python tools/certus-connector-bench/bench_connector_lifecycle.py --csv
+#### Common options
 
-# Skip eviction phase
-python tools/certus-connector-bench/bench_connector_lifecycle.py --no-eviction
+```
+--shm-path PATH        certus-server shmq mailbox path (default: /dev/shm/certus-shmq)
+--bs N                 Batch size in blocks (default: 16)
+--num-blocks N         Total blocks per iteration (default: 128)
+--block-bytes N        Per-block size in bytes (default: 2097152 = 2 MiB)
+--gpu N                CUDA device index (default: 0)
+--tp N                 Simulated tensor-parallel world size (default: 1)
+--min-duration SECS    Minimum seconds per phase (default: 5.0)
+--workers N            ThreadPoolExecutor worker count (default: 4)
+--csv PATH             Append results to CSV file
+--tag TEXT             Tag column for CSV (e.g. branch name)
 ```
 
 ### bench_connector_path.py
@@ -58,4 +136,4 @@ python tools/certus-connector-bench/bench_connector_race.py \
 
 ## Results
 
-Output goes to `bench-results/` in the repo root. The lifecycle benchmark writes `connector_lifecycle.csv` with per-phase throughput, IOPS, and latency percentiles (p50/p99/mean) for every sub-operation.
+Output goes to `bench-results/` in the repo root. The lifecycle benchmark writes `connector_lifecycle.csv` with per-phase throughput, IOPS, and latency percentiles (p50/p99/mean) for every sub-operation. The `mode` column identifies which benchmark mode produced each row.
