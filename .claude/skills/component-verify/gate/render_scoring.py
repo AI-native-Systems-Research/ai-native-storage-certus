@@ -297,6 +297,23 @@ def main():
              f"<b>{len(props)}</b> verifiable properties (+{len(nv)} non-verifiable) · "
              f"run pin <code>{esc(pin)}</code> · {esc(today)}</p>")
 
+    # KNOWN CORRECTIONS BANNER - top of page, before any count is read.
+    # A status can only be written by a scorer, so when a later gate shows a published verdict wrong
+    # the bundle cannot simply be edited: hand-typing the corrected status is exactly the self-grading
+    # the gate exists to prevent. The honest alternative is a top-level `known_corrections:` list,
+    # surfaced HERE so nobody reads the headline without seeing it. Without this the page shows the
+    # superseded number in silence - the failure mode this pipeline keeps finding in itself.
+    for kc in (d.get("known_corrections") or []):
+        P.append(
+            "<p class='foot' style='border:2px solid #b00;padding:8px'>"
+            "\u26a0 <b>KNOWN CORRECTION - the counts below are superseded for one property.</b> "
+            f"<code>{esc(str(kc.get('property','')))}</code> is shown as "
+            f"<b>{esc(str(kc.get('this_bundle_says','')))}</b> but should read "
+            f"<b>{esc(str(kc.get('should_read','')))}</b>. {esc(str(kc.get('why','')))} "
+            f"<b>{esc(str(kc.get('not_a_defect','')))}</b> "
+            f"Corrected counts: <b>{esc(str(kc.get('correct_counts','')))}</b>. "
+            f"Reproduce: <code>{esc(str(kc.get('reproduce','')))}</code></p>")
+
     if incomplete:
         P.append("<div class='banner'>⚠ INCOMPLETE — some properties are not yet scored (shown as · pending). "
                  "Fractions and ratings reflect only what has been reproduced so far.</div>")
