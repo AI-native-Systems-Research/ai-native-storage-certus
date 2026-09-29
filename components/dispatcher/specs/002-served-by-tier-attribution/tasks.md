@@ -195,16 +195,39 @@ without it.
 
 ## Phase 1f: Gate
 
-- [ ] **T021** `cargo fmt --check`, `cargo clippy --no-deps -p dispatcher -p shmq-dispatcher
-  -p certus-server-yaml --all-targets -- -D warnings`, `cargo doc --no-deps`, and
-  `LD_LIBRARY_PATH=/usr/local/lib cargo test --all -- --test-threads 1`.
+- [x] **T021** Gate run 2026-09-28. `cargo test --all -- --test-threads 1`: **1361 passed, 0
+  failed**. `cargo test --doc`: 61 passed, 0 failed.
 
-  `LD_LIBRARY_PATH` is required or `dispatcher-p2p`'s test binary exits 127 on
-  `libgdrapi.so.2` and reads as a failure that is not one.
+  **The three static gates have pre-existing drift, and the honest gate is therefore "no new
+  findings", not "clean".** Measured, not assumed — the clippy baseline was taken by stashing
+  this work and re-running:
 
-- [ ] **T022** Rebuild **both** the server and the node agent before any hardware re-run. The
-  provenance digest spans all crates, so a stale agent is refused at the handshake (FR-051) —
-  correctly, but it will look like a broken run.
+  | Gate | Clean tree | With this work | Where |
+  |---|---|---|---|
+  | `clippy -- -D warnings` | 12 errors | 12 errors | `izyre.rs` (16 sites), `iblock_device.rs` |
+  | `cargo doc --no-deps` | 4 warnings | 4 warnings | `igpu_services.rs` ×2, `idispatcher.rs:199`, `pipeline.rs:221` |
+  | `cargo fmt --check` | 5 files | 5 files | `eviction-replay-benchmark` ×3, `pipeline.rs`, `zyre/build.rs` |
+
+  Every one attributed by `git blame` to another author or an earlier commit. CLAUDE.md requires
+  a warning-free `cargo doc`, so the tree does not currently meet its own standard; fixing that
+  is not this feature's change and is not folded in silently.
+
+  **Do not run `cargo fmt` unscoped, or `-p dispatcher`**: it reformats `pipeline.rs`, which is
+  unrelated drift. That happened twice here and was reverted twice.
+
+- [~] **T022 not needed for Phase 1d — and saying why is the point.** No hardware re-run was
+  made after T012..T016, deliberately: T002 established that **neither accounting hole fired in
+  this workload** (nothing was held back, no non-`KeyNotFound` error occurred), so a re-run
+  would read `certus_lookup_errors_total 0` and confirm nothing. A green run that cannot
+  distinguish the fix from its absence is not evidence.
+
+  The instruction still stands for any *later* hardware run: rebuild **both** the server and the
+  node agent, because the provenance digest spans all crates and a stale agent is refused at the
+  handshake (FR-051) — correctly, but it looks like a broken run.
+
+  Exercising the error path on hardware needs a workload that actually produces one (a
+  deliberately bad handle, or an injected transport failure). Worth doing; it is a new task, not
+  this one.
 
 ## Dependencies
 
