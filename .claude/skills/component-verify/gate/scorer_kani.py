@@ -675,11 +675,18 @@ def score_property(p, ctx):
                     named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"],
                     escalate=False, extra=["--unwind", str(n)])
                 if sok:
+                    sweep_flags = ["--unwind", str(n)]
+                    vac = vacuity_check(pid, present, ctx, extra=sweep_flags)
+                    if vac:
+                        return "UNRESOLVED", {"harness": named, "unwind": n,
+                                             "lever": "unwind_sweep"}, vac
                     return "proved", {"harness": named, "result": "SUCCESS", "unwind": n,
                                       "wall_clock_s": swall, "peak_rss_mb": srss,
-                                      "lever": "unwind_sweep"}, (
+                                      "lever": "unwind_sweep",
+                                      "vacuity_checked_under_lever": True}, (
                         f"scorer-applied unwind sweep: PROVED at --unwind {n} with unwinding checks "
-                        f"ON (full strength; the agent's own bound did not close)")
+                        f"ON (full strength; the agent's own bound did not close), and its mutant twin "
+                        f"re-run at the same bound correctly FAILED")
             continue
         if lever == "solver_swap":
             for slv in ("cadical", "minisat"):
@@ -687,19 +694,32 @@ def score_property(p, ctx):
                     named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"],
                     escalate=False, extra=["--solver", slv])
                 if sok:
+                    vac = vacuity_check(pid, present, ctx, extra=["--solver", slv])
+                    if vac:
+                        return "UNRESOLVED", {"harness": named, "solver": slv,
+                                             "lever": "solver_swap"}, vac
                     return "proved", {"harness": named, "result": "SUCCESS", "solver": slv,
                                       "wall_clock_s": swall, "peak_rss_mb": srss,
-                                      "lever": "solver_swap"}, (
-                        f"scorer-applied solver swap: PROVED under '{slv}' (full strength)")
+                                      "lever": "solver_swap",
+                                      "vacuity_checked_under_lever": True}, (
+                        f"scorer-applied solver swap: PROVED under '{slv}' (full strength), and its "
+                        f"mutant twin re-run under the same solver correctly FAILED")
             continue
         if lever == "nounwindcheck":
             # Weakest admissible lever, tried only after the full-strength options failed.
             for n in (4, 8):
+                nuc_flags = ["--unwind", str(n), "--no-unwinding-checks"]
                 sok, _, swall, srss, _, _ = run_kani(
                     named, ctx["component_dir"], ctx["cap"], ctx["mem_mb"], escalate=False,
-                    extra=["--unwind", str(n), "--no-unwinding-checks"])
+                    extra=nuc_flags)
                 if sok:
+                    vac = vacuity_check(pid, present, ctx, extra=nuc_flags)
+                    if vac:
+                        return "UNRESOLVED", {"harness": named, "unwind": n,
+                                             "unwinding_checks": False,
+                                             "lever": "nounwindcheck"}, vac
                     return "proved", {"harness": named, "result": "SUCCESS", "unwind": n,
+                                      "vacuity_checked_under_lever": True,
                                       "unwinding_checks": False, "wall_clock_s": swall,
                                       "peak_rss_mb": srss, "lever": "nounwindcheck"}, (
                         f"scorer-applied --unwind {n} --no-unwinding-checks: PROVED, but this is a "

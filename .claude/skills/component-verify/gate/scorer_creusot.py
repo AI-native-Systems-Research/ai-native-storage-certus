@@ -520,6 +520,12 @@ def score_inexpressible(p, ctx, ix_id):
             base, ctx["crate_dir"], ctx["cap"], mem_mb=ctx["mem_mb"], cap_max=ctx["cap_max"])
         if ok:
             ev = {"modules": [base], "result": "Proved", "wall_clock_s": wall, "peak_rss_mb": rss, "lever": None}
+            # Anti-vacuity applies on EVERY path that returns proved, not just the base one.
+            # Three paths here (this one, the scorer-applied lever, and the rejected
+            # inexpressibility claim) returned proved with no mutant check until 2026-09-28.
+            vac = vacuity_check(pid, present, ctx, extra=None)
+            if vac:
+                return "UNRESOLVED", {"modules": [base]}, vac
             return "proved", ev, (f"claims_inexpressible={ix_id} REJECTED: proof module '{base}' PROVED — "
                                   "the property was expressible after all (scored proved, no penalty)")
         return "UNRESOLVED", {}, (f"contradictory: property ships proof module '{base}' AND claims "
@@ -545,6 +551,35 @@ def score_inexpressible(p, ctx, ix_id):
                                      f"{src}; covered_by {construct.get('covered_by')}")
     return "UNRESOLVED", {}, (f"claims_inexpressible={ix_id} NOT confirmed: probe failed but no "
                               f"confirmation_signature matched — re-calibrate. tail: {out[-300:]!r}")
+
+
+def vacuity_check(pid, present, ctx, extra=None):
+    """Anti-vacuity: the `__mutant` twin must FAIL. Returns None if honest, else a reason string.
+
+    A FUNCTION, not inline code, for the reason found on eviction-policy-session-lists on
+    2026-09-28: the check existed on the BASE proved path only, while THREE other paths could also
+    return "proved" — the scorer-applied lever, the agent-supplied lever variant, and the
+    inexpressibility-rejected path — and none of them ran it. Exactly the defect being fixed in the
+    Kani scorer at the same time, in a second place. Scattering an obligation across return sites is
+    how it gets missed; one helper called from every such site is the fix.
+
+    NAME COLLAPSE: `cargo creusot` renders a source module `verify_x__mutant` into
+    `verify_x_mutant.coma` — the double underscore becomes a SINGLE one. This scorer once looked only
+    for the double-underscore form, so the lookup never matched and the check was silently skipped for
+    EVERY Creusot property on every component (34/20/29/23 mutant modules emitted and never executed).
+    Accept either spelling.
+    """
+    base = module_id(pid)
+    mut = next((m for m in (base + "_mutant", base + "__mutant") if m in present), None)
+    if not mut:
+        return None
+    mok, _, _, _, _, _ = run_creusot(
+        mut, ctx["crate_dir"], ctx["cap"], mem_mb=ctx["mem_mb"], escalate=False, extra=extra)
+    if not mok:
+        return None
+    how = f" under the same lever as the proof" if extra else ""
+    return (f"VACUOUS: mutant module {mut} also proved{how} — the proof holds no content; "
+            f"strengthen the property")
 
 
 def score_property(p, ctx):
@@ -632,14 +667,9 @@ def score_property(p, ctx):
         # modules whose .coma were all emitted and never once executed by the gate. A check that
         # silently does nothing is worse than no check, because it is reported as enforced.
         # Accept either spelling, and require the FIRST one that exists to fail.
-        base = module_id(pid)
-        mut = next((m for m in (base + "_mutant", base + "__mutant") if m in present), None)
-        if mut:
-            mok, _, _, _, _, _ = run_creusot(
-                mut, ctx["crate_dir"], ctx["cap"], mem_mb=ctx["mem_mb"], escalate=False)
-            if mok:
-                return "UNRESOLVED", {"modules": mods}, (
-                    f"VACUOUS: mutant module {mut} also proved — strengthen the property")
+        vac = vacuity_check(pid, present, ctx)
+        if vac:
+            return "UNRESOLVED", {"modules": mods}, vac
         ev = {"modules": mods, "result": "Proved", "wall_clock_s": wall, "peak_rss_mb": rss, "lever": None}
         return "proved", ev, "scorer re-ran `cargo creusot` from source -> Proved"
 
@@ -684,6 +714,12 @@ def score_property(p, ctx):
                 m, ctx["crate_dir"], ctx["cap"], extra=flags, mem_mb=ctx["mem_mb"], cap_max=ctx["cap_max"])
             if vok:
                 ev = {"modules": mods, "result": "Proved", "wall_clock_s": vwall, "peak_rss_mb": vrss, "lever": lever}
+                # Anti-vacuity applies on EVERY path that returns proved, not just the base one.
+                # Three paths here (this one, the scorer-applied lever, and the rejected
+                # inexpressibility claim) returned proved with no mutant check until 2026-09-28.
+                vac = vacuity_check(pid, present, ctx, extra=flags)
+                if vac:
+                    return "UNRESOLVED", {"modules": mods}, vac
                 return "proved", ev, f"scorer-applied lever '{lever}' discharged module '{m}' -> Proved"
             continue
         # code lever: require the agent's named variant module, then re-run it
@@ -714,6 +750,12 @@ def score_property(p, ctx):
                 lemma_only.append(variant)
                 continue
             ev = {"modules": [variant], "result": "Proved", "wall_clock_s": vwall, "peak_rss_mb": vrss, "lever": lever}
+            # Anti-vacuity applies on EVERY path that returns proved, not just the base one.
+            # Three paths here (this one, the scorer-applied lever, and the rejected
+            # inexpressibility claim) returned proved with no mutant check until 2026-09-28.
+            vac = vacuity_check(pid, present, ctx, extra=None)
+            if vac:
+                return "UNRESOLVED", {"modules": [variant]}, vac
             return "proved", ev, f"lever '{lever}' variant '{variant}' discharged the obligation -> Proved"
     if missing:
         return "UNRESOLVED", {"modules": mods}, (
