@@ -4,6 +4,46 @@ Benchmarks for the Python connector classes (`certus-shmq-connector`) that vLLM 
 
 Requires a running `certus-server` with shared memory at `/dev/shm/certus-shmq`.
 
+## Prerequisites
+
+The benchmark does **not** start or stop the server. You must start it before running any benchmark:
+
+```bash
+sudo target/release/certus-server \
+    --drive-count 4 \
+    --channels 16 \
+    --memory-tier-size 4G \
+    --memory-tier-eviction-threshold 0.7 \
+    --format
+```
+
+Server parameters (not controlled by the benchmark):
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--drive-count` | (required) | Number of NVMe drives (or simulated drives) |
+| `--channels` | 8 | Mailbox channels = max concurrent requests. Use 16+ for pipelined/contention modes |
+| `--memory-tier-size` | (required) | DRAM cache size (e.g. `4G`) |
+| `--memory-tier-eviction-threshold` | 0.0 | Start evicting when tier is this fraction full (0.7 = 70%) |
+| `--shm-path` | `/dev/shm/certus-shmq` | Shared memory path |
+| `--max-eviction-attempts` | 2048 | Per-reserve eviction retry limit |
+| `--store-backpressure-ms` | 5000 | Max wait for reserve under pressure |
+| `--format` | — | Wipe drives on startup |
+
+To sweep drive counts, restart the server between runs and use `--tag` in the benchmark to label each:
+
+```bash
+for drives in 1 2 4; do
+    sudo target/release/certus-server --drive-count $drives --channels 16 \
+        --memory-tier-size 4G --memory-tier-eviction-threshold 0.7 --format &
+    sleep 3
+    python tools/certus-connector-bench/bench_connector_lifecycle.py \
+        --mode all --min-duration 5 --csv bench-results/drive_sweep.csv \
+        --tag "${drives}-drive"
+    sudo kill %1; wait
+done
+```
+
 ## Scripts
 
 ### bench_connector_lifecycle.py
@@ -101,6 +141,12 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py \
     --pattern warm_prefill_load_and_suffix_store
 ```
 
+#### Run all modes
+
+```bash
+python tools/certus-connector-bench/bench_connector_lifecycle.py --mode all --min-duration 5
+```
+
 #### Common options
 
 ```
@@ -112,8 +158,19 @@ python tools/certus-connector-bench/bench_connector_lifecycle.py \
 --tp N                 Simulated tensor-parallel world size (default: 1)
 --min-duration SECS    Minimum seconds per phase (default: 5.0)
 --workers N            ThreadPoolExecutor worker count (default: 4)
+--working-set N        Blocks for eviction/contention pressure (default: 512)
 --csv PATH             Append results to CSV file
 --tag TEXT             Tag column for CSV (e.g. branch name)
+```
+
+#### Per-mode options
+
+```
+--pipeline-depth N     (pipelined, scheduler-step) Batches in-flight before reaping (default: 4)
+--direction DIR        (pipelined) store, load, or both (default: both)
+--hit-ratio F          (prefix-miss) Fraction of keys pre-stored, 0.0-1.0 (default: 0.75)
+--requests-per-step N  (scheduler-step) Requests per scheduler step (default: 8)
+--num-sessions N       (scheduler-step) Distinct conversations in the pool (default: 4)
 ```
 
 ### bench_connector_path.py
