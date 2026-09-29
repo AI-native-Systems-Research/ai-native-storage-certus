@@ -253,6 +253,15 @@ pub fn map_get(m: &Map, k: u64) -> Option<u32> {
              ==> map_has_i((^m).e@, k2, v2))]
 #[ensures(forall<k2: u64, v2: Int> k2 != k && map_has_i((^m).e@, k2, v2)
              ==> map_has_i((*m).e@, k2, v2))]
+// Positional provenance, existential-free. `idx_ok`, `by_key_entries_live` and
+// `session_entries_ok` all quantify over a POSITION of the resulting list and then look up
+// `nodes[list[k].1]`, so the only hypothesis they can consume is "the pair now at position j is the
+// inserted pair, or the pair that was already at j". The `map_has_i` membership clauses above and a
+// `forall<b: Int>` bound clause both make the solver invent a witness first, and it does not.
+#[ensures((^m).e@.len() == (*m).e@.len() || (^m).e@.len() == (*m).e@.len() + 1)]
+#[ensures(forall<j: Int> 0 <= j && j < (*m).e@.len() ==>
+             (^m).e@[j] == (*m).e@[j] || (^m).e@[j] == (k, v))]
+#[ensures((^m).e@.len() > (*m).e@.len() ==> (^m).e@[(*m).e@.len()] == (k, v))]
 pub fn map_insert(m: &mut Map, k: u64, v: u32) {
     match map_find(m, k) {
         Some(i) => {
@@ -285,6 +294,12 @@ pub fn map_insert(m: &mut Map, k: u64, v: u32) {
 #[ensures(forall<b: Int>
              (forall<j: Int> 0 <= j && j < (*m).e@.len() ==> (((*m).e@[j]).1)@ < b)
              ==> (forall<j: Int> 0 <= j && j < (^m).e@.len() ==> (((^m).e@[j]).1)@ < b))]
+// Positional provenance, existential-free (see `map_insert`). `remove` fills the hole with the last
+// entry, so the pair now at position j is either the pair that was at j or the pair that was last —
+// nothing else can appear. This is what carries the position-indexed invariants across a removal.
+#[ensures((^m).e@.len() == (*m).e@.len() || (^m).e@.len() == (*m).e@.len() - 1)]
+#[ensures(forall<j: Int> 0 <= j && j < (^m).e@.len() ==>
+             (^m).e@[j] == (*m).e@[j] || (^m).e@[j] == (*m).e@[(*m).e@.len() - 1])]
 pub fn map_remove(m: &mut Map, k: u64) {
     match map_find(m, k) {
         Some(i) => {
@@ -354,6 +369,13 @@ pub fn leaves_pos(l: &Leaves, x: (u64, u32)) -> usize {
 #[ensures(forall<y: (u64, u32)> !leaves_mem((*l).e@, y) && y != x ==> !leaves_mem((^l).e@, y))]
 #[ensures(forall<s: u64, ix: Int> !leaves_mem_i((*l).e@, s, ix)
              && !(s == x.0 && ix == (x.1)@) ==> !leaves_mem_i((^l).e@, s, ix))]
+// Positional provenance, existential-free (see `map_insert`): a sorted insert shifts the tail right
+// by one, so the entry now at position k is `x`, the entry that was at k, or the entry that was at
+// k-1. `idx_ok` reads the candidate list by position, so it needs this and not `leaves_mem`.
+#[ensures(forall<k: Int> 0 <= k && k < (^l).e@.len() ==>
+             (^l).e@[k] == x
+             || (k < (*l).e@.len() && (^l).e@[k] == (*l).e@[k])
+             || (1 <= k && k - 1 < (*l).e@.len() && (^l).e@[k] == (*l).e@[k - 1]))]
 pub fn leaves_insert(l: &mut Leaves, x: (u64, u32)) {
     let p = leaves_pos(l, x);
     if p < l.e.len() && l.e[p].0 == x.0 && l.e[p].1 == x.1 {
@@ -380,6 +402,10 @@ pub fn leaves_insert(l: &mut Leaves, x: (u64, u32)) {
 #[ensures(forall<s: u64, ix: Int> leaves_mem_i((*l).e@, s, ix) && ix != (x.1)@
              ==> leaves_mem_i((^l).e@, s, ix))]
 #[ensures(forall<s: u64, ix: Int> leaves_mem_i((^l).e@, s, ix) ==> leaves_mem_i((*l).e@, s, ix))]
+// Positional provenance, existential-free (see `map_insert`): a sorted removal shifts the tail left
+// by one, so the entry now at position k is the entry that was at k or the one that was at k+1.
+#[ensures(forall<k: Int> 0 <= k && k < (^l).e@.len() ==>
+             (^l).e@[k] == (*l).e@[k] || (^l).e@[k] == (*l).e@[k + 1])]
 pub fn leaves_remove(l: &mut Leaves, x: (u64, u32)) {
     let p = leaves_pos(l, x);
     let old = snapshot! { l.e@ };
@@ -596,11 +622,21 @@ pub fn free_nodup(p: &Pool) -> bool {
     }
 }
 
+/// "slot `i` is somewhere on the spare list". Named, rather than written inline in
+/// `free_covers_inactive`, so that the ONE existential in the model sits behind a predicate symbol.
+/// Behind a symbol, carrying coverage across a mutation is equality reasoning on `free_covers(..)`
+/// terms; written inline, every caller has to re-find a witness. The existential itself is then
+/// discharged only where a witness genuinely appears: inside `free_push` and `pool_alloc`.
+#[logic]
+pub fn free_covers(f: Seq<u32>, i: Int) -> bool {
+    pearlite! { exists<k: Int> 0 <= k && k < f.len() && ((f[k])@ == i) }
+}
+
 #[logic]
 pub fn free_covers_inactive(p: &Pool) -> bool {
     pearlite! {
         forall<i: Int> 0 <= i && i < p.nodes@.len() && !((p.nodes@[i]).active) ==>
-              (exists<k: Int> 0 <= k && k < p.free@.len() && ((p.free@[k])@ == i))
+              free_covers(p.free@, i)
     }
 }
 
@@ -810,6 +846,11 @@ pub fn pool_candidates(p: &Pool, n: usize) -> Vec<u64> {
 #[ensures((^p).leaves.e@ == (*p).leaves.e@)]
 #[ensures((^p).clock == (*p).clock)]
 #[ensures((^p).len == (*p).len)]
+// Spare-list coverage in the shape `free_covers_inactive` consumes. Popping the last entry cannot
+// un-cover any slot other than the one popped: a witness at any other position is below the new
+// length. Stated here because deriving it from the `subsequence` clause above cost the caller a
+// 29.0 s search that sat right at the budget edge and was the goal that starved inside `free_exact`.
+#[ensures(forall<i: Int> free_covers((*p).free@, i) && i != result@ ==> free_covers((^p).free@, i))]
 pub fn pool_alloc(p: &mut Pool, node: Node) -> u32 {
     match p.free.pop() {
         Some(idx) => {
@@ -828,6 +869,19 @@ pub fn pool_alloc(p: &mut Pool, node: Node) -> u32 {
 // Bodies are written ONCE as macros, so a second contract over the same code is a new proof of
 // the same body, never a second implementation that could drift from it.
 // ---------------------------------------------------------------------------
+
+/// `Vec::push` on the spare list. The only reason this is not written inline is the WITNESS.
+/// `free_covers_inactive` is the one existential invariant in the model
+/// (`forall i inactive. exists k. free[k] == i`), and after a push the witness for the slot just
+/// freed is `free@.len()` — a term no prover derives from the `push_back` axiom on its own. Stating
+/// both halves here, in a one-line context, is what carries that invariant across an unlink.
+#[ensures((^v)@ == (*v)@.push_back(x))]
+#[ensures((^v)@.len() == (*v)@.len() + 1)]
+#[ensures(free_covers((^v)@, x@))]
+#[ensures(forall<i: Int> free_covers((*v)@, i) ==> free_covers((^v)@, i))]
+pub fn free_push(v: &mut Vec<u32>, x: u32) {
+    v.push(x);
+}
 
 macro_rules! touch_body {
     ($p:expr, $index:expr) => { touch_body!($p, $index, {}) };
@@ -953,7 +1007,7 @@ macro_rules! unlink_body {
         p.nodes[i].active = false;
         p.nodes[i].parent = None;
         p.nodes[i].child = None;
-        p.free.push(idx);
+        free_push(&mut p.free, idx);
         p.len -= 1;
         $post
         key
@@ -1750,6 +1804,16 @@ pub fn pool_batch_touch(p: &mut Pool, idxs: &Vec<u32>) -> Result<(), PolicyError
     #[invariant(p.by_key.e@ == *bykey0)]
     #[invariant(forall<j: Int> 0 <= j && j < i@ ==>
                    (idxs@[j])@ < p.nodes@.len() && ((p.nodes@[(idxs@[j])@]).stamp@ > *start))]
+    // `touch` never clears a slot, so liveness is frozen for the whole batch. Needed only to pull
+    // the next invariant back to the PRE-state arena.
+    #[invariant(forall<j: Int> 0 <= j && j < p.nodes@.len() ==>
+                   ((p.nodes@[j]).active) == (((*nodes0)[j]).active))]
+    // Reaching iteration i means every earlier handle was accepted, and `pool_touch` accepts only a
+    // handle that was in range and live IN THE PRE-STATE. Without this the exit clause
+    // "an invalid first handle forces an error" has nothing to contradict: the other invariants
+    // speak about the current arena, and the obligation is about the arena on entry.
+    #[invariant(forall<j: Int> 0 <= j && j < i@ ==>
+                   (idxs@[j])@ < (*nodes0).len() && (((*nodes0)[(idxs@[j])@]).active))]
     #[invariant(forall<j: Int> 0 <= j && j < p.nodes@.len()
                    && (forall<k: Int> 0 <= k && k < i@ ==> (idxs@[k])@ != j) ==>
                       p.nodes@[j] == (*nodes0)[j])]

@@ -1,6 +1,36 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_state_track": { "prover": "alt-ergo", "time": 0.031 } }
+    "Coma": {
+      "vc_state_clear_pool": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_epsl_inv_pool_ids_stay_valid_forever": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.053 },
+          { "prover": "alt-ergo", "time": 0.054 },
+          { "prover": "alt-ergo", "time": 0.058 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.031 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.033 },
+                  { "prover": "alt-ergo", "time": 0.028 },
+                  null
+                ]
+              },
+              { "prover": "alt-ergo", "time": 0.032 }
+            ]
+          },
+          { "prover": "alt-ergo", "time": 0.03 }
+        ]
+      }
+    }
   }
 }

@@ -7,8 +7,8 @@
         "time": 0.014
       },
       "vc_insert_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_leaves_insert": { "prover": "alt-ergo", "time": 0.762 },
-      "vc_leaves_pos": { "prover": "alt-ergo", "time": 0.012 },
+      "vc_leaves_insert": { "prover": "alt-ergo", "time": 0.556 },
+      "vc_leaves_pos": { "prover": "alt-ergo", "time": 0.016 },
       "vc_len_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.016 }
     }
   }

@@ -7,8 +7,8 @@
         "prover": "alt-ergo",
         "time": 0.014
       },
-      "vc_map_find": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_map_insert": { "prover": "alt-ergo", "time": 0.673 },
+      "vc_map_find": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_map_insert": { "prover": "alt-ergo", "time": 1.8 },
       "vc_push_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.016 }
     }
   }

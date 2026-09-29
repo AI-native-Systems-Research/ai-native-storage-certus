@@ -2,7 +2,22 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_batch_touch_n": { "prover": "alt-ergo", "time": 0.017 }
+      "vc_state_batch_touch_n": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epsl_batch_touch_empty_succeeds_without_validation": {
+        "tactic": "split_vc",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.043 },
+              { "prover": "alt-ergo", "time": 0.043 },
+              null
+            ]
+          },
+          { "prover": "alt-ergo", "time": 0.027 }
+        ]
+      }
     }
   }
 }

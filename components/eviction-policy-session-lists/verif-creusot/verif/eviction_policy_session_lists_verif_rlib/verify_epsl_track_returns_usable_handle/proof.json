@@ -3,7 +3,36 @@
   "proofs": {
     "Coma": {
       "vc_elim_Err": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_state_track": { "prover": "alt-ergo", "time": 0.033 }
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_verify_epsl_track_returns_usable_handle": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.054 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.026 },
+              null,
+              { "prover": "alt-ergo", "time": 0.028 }
+            ]
+          },
+          { "prover": "alt-ergo", "time": 0.029 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.033 },
+              { "prover": "z3", "time": 0.019 },
+              null
+            ]
+          },
+          { "prover": "alt-ergo", "time": 0.028 },
+          { "prover": "alt-ergo", "time": 0.028 },
+          { "prover": "alt-ergo", "time": 0.032 }
+        ]
+      }
     }
   }
 }

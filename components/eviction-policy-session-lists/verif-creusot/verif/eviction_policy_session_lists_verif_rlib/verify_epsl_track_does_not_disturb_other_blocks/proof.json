@@ -1,6 +1,12 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_pool_register": { "prover": "alt-ergo", "time": 0.018 } }
+    "Coma": {
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epsl_track_does_not_disturb_other_blocks": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.046 }, null ]
+      }
+    }
   }
 }

@@ -13,7 +13,7 @@
       },
       "vc_len_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.016 },
       "vc_map_find": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_map_remove": { "prover": "alt-ergo", "time": 0.825 },
+      "vc_map_remove": { "prover": "alt-ergo", "time": 0.693 },
       "vc_pop_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.015 }
     }
   }

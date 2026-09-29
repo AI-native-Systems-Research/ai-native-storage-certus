@@ -1,9 +1,9 @@
-(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 304 0 304 29 *)
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 319 0 319 29 *)
 
-let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 305 4 305 15
-let%span slib'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 301 10 301 28
-let%span slib'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 302 10 302 31
-let%span slib'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 303 10 303 45
+let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 320 4 320 15
+let%span slib'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 316 10 316 28
+let%span slib'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 317 10 317 31
+let%span slib'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 318 10 318 45
 let%span slib'3 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 135 16 135 94
 let%span slib'4 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 141 16 141 69
 let%span svec = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 163 18 163 37
@@ -49,7 +49,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let map_clear [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 304 0 304 29]
+let map_clear [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 319 0 319 29]
   (m: MutBorrow.t t_Map) (return (x: ())) = (! bb0
   [ bb0 = s0
     [ s0 = MutBorrow.borrow_final <t_Vec_tup2_u64_u32_Global> {m.current.e}

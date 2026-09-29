@@ -3,7 +3,16 @@
   "proofs": {
     "Coma": {
       "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.03 },
-      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.032 }
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_verify_epsl_candidates_listed_in_eviction_order": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.045 },
+          { "prover": "alt-ergo", "time": 0.047 },
+          { "prover": "alt-ergo", "time": 0.06 },
+          null
+        ]
+      }
     }
   }
 }
