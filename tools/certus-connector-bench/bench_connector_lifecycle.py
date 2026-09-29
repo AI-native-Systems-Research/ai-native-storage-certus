@@ -681,7 +681,7 @@ def bench_mixed_eviction(
 
 def _load_pattern(name: str, overrides: dict | None = None):
     """Load a workload pattern YAML, reusing certus_fio's WorkloadPattern."""
-    sys.path.insert(0, _here)
+    sys.path.insert(0, os.path.join(_repo, "tools", "certus-fio"))
     from certus_fio import WorkloadPattern, eval_expr
     patterns_dir = os.path.join(_repo, "knowledge", "workload_patterns")
     path = os.path.join(patterns_dir, f"{name}.yaml")
