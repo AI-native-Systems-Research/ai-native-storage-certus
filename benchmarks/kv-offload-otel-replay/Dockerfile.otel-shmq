@@ -63,7 +63,11 @@ COPY benchmarks/kv-offload-replay/otel_corpus.py /workspace/benchmarks/kv-offloa
 # insert — so the module dir is on PYTHONPATH below.
 COPY benchmarks/kv-offload-replay/tracing_connector.py /workspace/benchmarks/kv-offload-replay/
 
-RUN pip install --no-cache-dir -e /workspace/certus-shmq-connector
+# --no-deps + --no-index + --no-build-isolation: torch/numpy come from the base
+# image (pyproject lists them only as documentation). Without --no-deps, pip
+# re-resolves torch's transitive pins and fails offline on nvidia-nccl-cu13 on
+# CUDA-13 bases (vLLM >= 0.27). Mirrors certus-shmq-connector/Dockerfile.
+RUN pip install --no-build-isolation --no-index --no-deps --no-cache-dir -e /workspace/certus-shmq-connector
 
 COPY benchmarks/kv-offload-otel-replay/docker-entrypoint-otel-shmq.sh /usr/local/bin/certus-otel-entrypoint
 RUN chmod +x /usr/local/bin/certus-otel-entrypoint
