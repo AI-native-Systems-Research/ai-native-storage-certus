@@ -38,12 +38,70 @@ coverage is.)
 3. **Invariant sweep.** Walk **every data field** (its legal range/relation) and **every state +
    transition** (which are legal) to derive global invariants.
 
-## Output (same shape for every artifact)
-- **Coverage ledger** (source unit → property IDs / "not verifiable: reason").
-- **Property table**, one row per operation:
-  `Operation | Precondition(s) | Postcondition(s) | Error cases | Frame (unchanged) | Invariants touched | Source`
-- **Global invariants** list (add one only if the artifact genuinely implies it).
-- **Not verifiable** section.
+## Output — one YAML file (no `.md`)
+Write **exactly one** file: the machine-readable, shareable YAML at the `<output file>` path the caller
+passed (e.g. `spec_properties.yaml` or `code_properties.yaml`). This is what `build-property-inventory`
+reconciles into `unified_properties.yaml`. Do **not** also emit a `.md` — the YAML is the artifact and the
+HTML (rendered downstream) is the human-readable form.
+
+One record per verifiable obligation and one per not-verifiable unit — record count must equal
+`counts.total`, and the `verifiable: true` count must equal `counts.verifiable` (integrity rule).
+```yaml
+# header comment block — avoid the literal tokens id:/verifiable: true/verifiable: false in prose here
+# so a plain editor Cmd+F over the file counts only real records
+component:  <name>
+source:     spec | code | harness        # which single artifact this extraction saw
+artifact:   <path read>
+pin:        <commit/date of the artifact read>
+method:     blind-extraction             # this file is ONE blind pass; no cross-artifact reconciliation
+generated:  <ISO date>
+counts: {total: <n>, methods: <n>, verifiable: <n>, not_verifiable: <n>}
+properties:
+  - id:         <COMPONENT-SUBJECT-KIND>   # stable, semantic; never renumbered on reorder
+    subject:    <public op OR named global invariant>
+    kind:       precondition | postcondition | error-case | frame | invariant
+    verifiable: true
+    statement:  >
+      <the obligation in FULL, self-contained plain English — see the rule below>
+    traces:     [<FR-nnn / US-n / AS-n / SC-n>  (spec)  |  <fn+line>  (code)  |  <assertion>  (harness)]
+  - id:         NV-1                        # not-verifiable ledger entry
+    scope:      <the unit this covers>
+    kind:       not-verifiable
+    verifiable: false
+    reason:     >
+      <why it is not machine-checkable — reuse the Not-verifiable list below>
+    traces:     [<source unit>]
+```
+The YAML is a faithful reformat of the obligations you extracted — do **not** re-extract differently to
+produce it.
+
+### YAML safety — quote any scalar that contains a colon-space (mandatory)
+The values you write for `statement`, `reason`, `scope`, `subject`, and `note` are prose, and prose often
+contains `": "` — *"Edge case: high contention"*, *"Assumption: caller performs the I/O"*, *"post: get(k)=v"*.
+An **unquoted** scalar containing `": "` is parsed by YAML as a nested mapping and the whole file fails to
+load (`mapping values are not allowed here`). Rules, applied to every scalar value you emit:
+- If the value contains `": "` (colon followed by space) or a leading `? `, `- `, `[`, `{`, `#`, `&`, `*`,
+  `!`, `|`, `>`, `@`, `` ` ``, quote it. The safe default is the **block scalar** already shown for
+  `statement`/`reason` (`>`-folded on the next line, indented) — a block scalar needs no inner quoting and
+  is the preferred form for any full sentence.
+- For a **one-line** value that must stay inline (e.g. `scope:`, `subject:`), wrap it in **double quotes**
+  and escape any embedded `"` as `\"`: `scope: "Edge case: high-contention eviction"`.
+- Never leave a colon-bearing sentence bare after `scope:`/`subject:`/`note:`. This is the single most
+  common way these files come out malformed.
+Before finishing, mentally (or by a quick parse) confirm the file loads — a file that does not parse is not
+a deliverable.
+
+### The `statement` must be readable by a non-specialist (mandatory)
+Every `statement` (and every `reason`) is a **full, self-contained sentence a non-specialist can
+understand without the spec, the code, or any FV/tooling knowledge in front of them.**
+- Write what the operation guarantees, in plain words: name the operation, the condition, and the
+  outcome. *"After `insert(key, value)` succeeds, looking up `key` returns exactly that `value`, and no
+  other entry in the map changes."* — not *"post: get(k)=v ∧ frame(m\k)"*.
+- **No bare symbols, no jargon shorthand** as the whole statement (`∀`, `frame`, `WF`, `post:`, VC
+  names). If a term is unavoidable, gloss it in the same sentence.
+- **Self-contained:** do not require the reader to open FR-012 or `map.rs:88` to know what is being
+  promised — the traces are provenance, not the explanation.
+- One obligation per statement (granularity rule below still holds); just say it in English.
 
 ## Not verifiable (list here; don't force into rows)
 Unbounded liveness / deadlock-freedom; wall-clock **timing** (a timeout's *occurrence* is verifiable, its
@@ -57,7 +115,8 @@ non-deterministic / relaxed-ordering quantities.
 2. **Cover** — build the ledger, apply the rubric per operation, run the invariant sweep.
 3. **Normalize** — one obligation per cell; drop non-falsifiable ones to *Not verifiable*; keep surprises
    as their own rows/notes.
-4. **Write** to the requested output file, with sources. Read no files other than the named artifact.
+4. **Write** the one YAML file at the requested output path, with a source on every record and a
+   full plain-English `statement`. Read no files other than the named artifact.
 
 ## Harness note
 A property = *what an assertion / `#[ensures]` actually checks*. A harness property with no counterpart in

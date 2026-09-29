@@ -1,0 +1,87 @@
+# lever_battery_creusot.yaml — the "use every available feature" arsenal for
+# Creusot/why3, encoded as an ENFORCEABLE contract. Mirror of lever_battery.yaml
+# (Kani). A `tool-boundary` claim is INADMISSIBLE until every lever listed here
+# for the observed failure class has been applied — either by the scorer itself
+# (CLI/tactic levers: prover portfolio, budget, split_vc) or as a named, runnable
+# proof MODULE the agent wrote (code levers: FMap mirror, trusted boundary,
+# strengthened invariants, inductive lemma) — and the scorer has re-run each and
+# watched it fail. Missing a required code lever = UNRESOLVED, never tool-boundary.
+#
+# READ-ONLY to the proving agent at run time. The scorer regenerates every .coma
+# FROM SOURCE (touch src/**.rs -> cargo creusot) before judging, so a hand-edited
+# .coma cannot fake a pass — MEASURED: copying a proved .coma over a failing one
+# made `cargo creusot <m>` report Proved until the source was touched (2026-09-16).
+#
+# Proof-unit = a why3 MODULE (one function/lemma), emitted as
+#   verif/<crate>_rlib/<module>.coma
+# Naming convention so the scorer can find things (module = ID lowercased, '-'->'_'):
+#   base proof:        verify_<ID>
+#   lever variant:     verify_<ID>__fmap | verify_<ID>__trusted | verify_<ID>__inv
+#   inductive lemma:   lemma_<ID>
+#   anti-vacuity:      verify_<ID>__mutant   (a deliberately-false twin that MUST fail)
+# A property may instead point the scorer at existing modules via
+#   creusot.evidence.module: <name>      (or  creusot.evidence.modules: [a, b])
+# but the scorer still RE-RUNS `cargo creusot <name>` — the pointer is not the proof.
+
+version: 1
+tool: creusot
+
+levers:
+  prover_portfolio:
+    desc: "Run all four configured provers; alt-ergo/z3/cvc5/cvc4 discharge different goal shapes."
+    scorer_applied: true          # the scorer runs this itself; no new artifact needed
+    probe: "cargo creusot <module> -P alt-ergo,z3,cvc5,cvc4"
+    defeats: [goal-unproved]
+  raise_budget:
+    desc: "Raise why3find search budget (--time/--depth); some goals just need more search time/depth."
+    scorer_applied: true
+    probe: "cargo creusot <module> --time 5 --depth 12"
+    defeats: [goal-unproved]
+  split_vc:
+    desc: "Apply split_vc + compute_specified tactics to break one monolithic VC into discchargeable pieces."
+    scorer_applied: true
+    probe: "cargo creusot <module> -T split_vc,compute_specified"
+    defeats: [goal-unproved]
+  invariant_strengthen:
+    desc: "Add loop invariants / intermediate assertions so the prover can carry the fact through the body."
+    variant: "verify_<ID>__inv"
+    defeats: [goal-unproved]
+  lemma_function:
+    desc: "Extract an inductive #[logic] proof lemma over the unbounded structure and cite it — beats quantifier/induction goals a single VC can't close."
+    variant: "lemma_<ID>"
+    defeats: [goal-unproved, quantifier-induction]
+  fmap_mirror:
+    desc: "Model std HashMap/Vec/BTreeMap as a logic FMap/Seq ghost — std containers ship NO logical insert/remove specs, so the raw container is unprovable."
+    variant: "verify_<ID>__fmap"
+    defeats: [std-container-no-specs]
+    fidelity_if_used: ghost-mirror
+  trusted_boundary:
+    desc: "Replace an unprocessable opaque type (raw pointer, *mut, Arc<...>, trait object, FFI) with a u64 handle + a #[trusted] axiomatized spec — exactly how dispatch-map mirrored Arc<DmaBuffer>/*mut u8."
+    variant: "verify_<ID>__trusted"
+    defeats: [opaque-type-unprocessable]
+    fidelity_if_used: trusted-boundary
+
+# Classification order matters: the scorer walks these top-to-bottom and takes the
+# FIRST whose signature matches, so the specific translate-time walls
+# (opaque/std-container) are listed BEFORE the generic goal-unproved catch-all.
+failure_classes:
+  opaque-type-unprocessable:
+    signatures: ["cannot process", "unsupported type", "raw pointer", "\\*mut ", "\\*const ", "Arc<", "Rc<", "dyn ", "trait object", "extern"]
+    required_levers: [trusted_boundary]
+    note: "Almost always known defeat KD-RAWPTR-ARC-OPAQUE — mirror the opaque value as a u64 handle behind a #[trusted] boundary."
+  std-container-no-specs:
+    signatures: ["HashMap", "BTreeMap", "BTreeSet", "HashSet", "Vec::", "no specification", "no contract", "std::collections"]
+    required_levers: [fmap_mirror]
+    note: "Almost always known defeat KD-STD-CONTAINER-NO-SPECS — model the container as a logic FMap/Seq ghost mirror."
+  translate-error:
+    signatures: ["could not compile", "error\\[E\\d+\\]", "cannot find", "mismatched types", "creusot-rustc.*error", "Compilation failed"]
+    required_levers: []
+    note: "A translation/compile error means the verif crate itself is BROKEN. Fix it. This is NEVER a tool-boundary."
+  goal-unproved:
+    signatures: ["Goal .*✘", "unproved file", "unproved", "'why3find prove' failed", "✘"]
+    required_levers: [prover_portfolio, raise_budget, split_vc, invariant_strengthen, lemma_function]
+    note: "The proof obligation did not discharge. Escalate provers/budget/tactics (scorer does this), then strengthen invariants / add an inductive lemma. Only after ALL fail is a tool-boundary admissible."
+
+# A failure whose class is not listed here is inadmissible as a tool-boundary: an
+# unclassifiable creusot failure means the harness is broken, not that the tool has
+# a limit. Default verdict for everything unproven: UNRESOLVED (gate fails closed).
