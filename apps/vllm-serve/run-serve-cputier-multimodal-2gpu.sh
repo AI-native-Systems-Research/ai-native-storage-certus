@@ -47,8 +47,9 @@
 # passed through the base script's EXTRA_SERVE_ARGS hook. JSON is compact (no
 # spaces) so it survives the base word-split.
 #
-# Prereqs: the certus-offload-bench-fix026 image in the DEFAULT podman store
-# (build_026.sh), both A100s free, and enough host RAM for the CPU tier. Unlike
+# Prereqs: the certus-offload-fix026 image in the DEFAULT podman store
+# (build_cputier_container.sh), both A100s free, and enough host RAM for the CPU
+# tier. Unlike
 # the shmq server there is NO external certus-server and NO mailbox — cputier is
 # self-contained. Pair with the multimodal guidellm driver once the server is up.
 #

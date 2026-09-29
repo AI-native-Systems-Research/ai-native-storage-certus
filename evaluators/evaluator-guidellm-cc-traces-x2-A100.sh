@@ -87,7 +87,7 @@ VLLM_PID=""
 # The shmq serve script runs its container out of the alternate /mnt/certus1 store.
 PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
 PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
-SHMQ_IMAGE="${IMAGE:-localhost/certus-otel-shmq-bench}"
+SHMQ_IMAGE="${IMAGE:-localhost/certus-otel-shmq-connector}"
 
 cleanup() {
   local rc=$?

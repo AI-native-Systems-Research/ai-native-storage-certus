@@ -1,8 +1,9 @@
 #!/bin/bash
-# Build the two kv-offload-otel-replay images (context = repo root). Mirrors
-# build_026.sh: the offload-family image goes to the default podman store; the
-# shmq client image goes to the /mnt/certus1 store (where run-docker-otel-shmq.sh
-# looks for it). Does NOT abort on a single failure — records per-image rc.
+# Build the two kv-offload-otel-replay images (context = repo root). Same store
+# split as the versioned builders: the offload-family image goes to the default
+# podman store (cf. build_cputier_container.sh); the shmq client image goes to
+# the /mnt/certus1 store (where run-docker-otel-shmq.sh looks for it). Does NOT
+# abort on a single failure — records per-image rc.
 #
 # The shmq image is built via certus-shmq-connector/build_connector_container.sh,
 # so it inherits the connector's version handling: the --no-deps offline-install
@@ -40,19 +41,19 @@ if [ "$ONLY" = "both" ] || [ "$ONLY" = "offload" ]; then
   build otel-offload \
     podman build "${BA[@]}" \
       -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-offload \
-      -t certus-otel-offload-bench .
+      -t certus-otel-offload .
 fi
 
 # shmq client image -> the /mnt/certus1 podman store (run-docker-otel-shmq.sh
 # reads it there via --root/--runroot). Delegated to the connector build helper
 # so it shares the connector's version handling + --no-deps offline-install fix.
 # We only override the Dockerfile, the image ref (kept unqualified so it lands as
-# localhost/certus-otel-shmq-bench:latest, which run-docker-otel-shmq.sh expects)
+# localhost/certus-otel-shmq-connector:latest, which run-docker-otel-shmq.sh expects)
 # and the store. VLLM_VERSION is passed as the helper's positional version arg.
 if [ "$ONLY" = "both" ] || [ "$ONLY" = "shmq" ]; then
   build otel-shmq \
     env DOCKERFILE="$REPO_ROOT/benchmarks/kv-offload-otel-replay/Dockerfile.otel-shmq" \
-        IMAGE="certus-otel-shmq-bench" \
+        IMAGE="certus-otel-shmq-connector" \
         PODMAN_STORE="$PODMAN_STORE" PODMAN_RUNROOT="$PODMAN_RUNROOT" \
         NO_CACHE="${NO_CACHE:-}" \
       certus-shmq-connector/build_connector_container.sh "$VLLM_VERSION"

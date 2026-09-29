@@ -16,20 +16,20 @@
 #
 # Build (context = repo root — needs certus-shmq-connector/ + benchmarks/ sources):
 #   podman build -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-shmq \
-#       -t certus-otel-shmq-bench .
+#       -t certus-otel-shmq-connector .
 #
 # Run (server's mailbox reachable via --ipc=host; GPU exposed so the server can
 # open the CUDA IPC handles this container's vLLM process exports):
 #   podman run --rm --device nvidia.com/gpu=all --ipc=host \
 #       -e SHM_PATH=/dev/shm/certus-shmq -e NUM_CONVS=8 -e TIME_SCALE=0 \
 #       -v /mnt/certus1/inference-perf-syn-data/otel_1k:/workspace/otel-corpus:ro \
-#       -v /root/.cache/huggingface:/root/.cache/huggingface certus-otel-shmq-bench
+#       -v /root/.cache/huggingface:/root/.cache/huggingface certus-otel-shmq-connector
 
 # vLLM base-image version. The connector self-adapts at RUN time via
 # certus_shmq_connector.compat (version detection + capability matrix) — this arg
 # only selects the base image. Build another version:
 #   podman build --build-arg VLLM_VERSION=0.26.0 \
-#       -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-shmq -t certus-otel-shmq-bench:vllm0.26 .
+#       -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-shmq -t certus-otel-shmq-connector:vllm0.26 .
 ARG VLLM_VERSION=0.23.0
 FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
 ENTRYPOINT []

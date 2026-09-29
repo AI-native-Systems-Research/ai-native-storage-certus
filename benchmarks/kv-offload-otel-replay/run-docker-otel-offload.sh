@@ -1,6 +1,6 @@
 #!/bin/bash
 # kv-offload-otel-replay on the OffloadingConnector family (image
-# certus-otel-offload-bench). ONE script, three backends selected by env — the
+# certus-otel-offload). ONE script, three backends selected by env — the
 # OTel-corpus counterpart of run-docker-none.sh / run-docker-cpu.sh /
 # run-docker-cputier.sh:
 #
@@ -22,7 +22,7 @@
 # run-docker-common-otel.sh. The corpus is bind-mounted read-only there.
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common-otel.sh"
 
-IMAGE="${IMAGE:-certus-otel-offload-bench}"
+IMAGE="${IMAGE:-certus-otel-offload}"
 OFFLOAD_MODE="$(printf '%s' "${OFFLOAD_MODE:-}" | tr '[:upper:]' '[:lower:]')"
 SECONDARY_TIER="$(printf '%s' "${SECONDARY_TIER:-}" | tr '[:upper:]' '[:lower:]')"
 LOG="${LOG:-${SCRIPT_DIR}/otel_offload_$(stamp).log}"

@@ -49,7 +49,7 @@ cd benchmarks/long-doc-qa
 CONNECTOR=certus MODEL=Qwen/Qwen2.5-7B-Instruct ./run_bench.sh
 ```
 
-`CONNECTOR=certus` uses the `certus-shmq-bench` image, resets its ENTRYPOINT to
+`CONNECTOR=certus` uses the `certus-shmq-connector` image, resets its ENTRYPOINT to
 `vllm serve`, and adds `--ipc=host` + a `--kv-transfer-config`
 (OffloadingConnector / kv_both / CertusShmqOffloadingSpec, shm_path
 /dev/shm/certus-shmq, slab_size_bytes=2097152) + `--enforce-eager`. There is no

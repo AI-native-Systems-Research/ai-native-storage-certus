@@ -125,8 +125,8 @@ ENGINE=${ENGINE:-podman}
 # none/cpu/tiered share the unified offload image (built from
 # ../kv-offload-replay/Dockerfile.offload, which bakes the tiering fix BY DEFAULT
 # so tiering survives at scale). certus needs the shmq connector image.
-OFFLOAD_IMAGE=${OFFLOAD_IMAGE:-certus-offload-bench}
-SHMQ_IMAGE=${SHMQ_IMAGE:-localhost/certus-shmq-bench:latest}
+OFFLOAD_IMAGE=${OFFLOAD_IMAGE:-certus-offload}
+SHMQ_IMAGE=${SHMQ_IMAGE:-localhost/certus-shmq-connector:latest}
 SERVER_NAME=${SERVER_NAME:-sa-vllm-${CONNECTOR}}
 HF_CACHE=${HF_CACHE:-$HOME/.cache/huggingface}
 DETACH=${DETACH:-0}                      # 1 = return after ready, leave container running

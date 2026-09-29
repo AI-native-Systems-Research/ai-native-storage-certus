@@ -19,7 +19,7 @@ evictions without re-running the model.
 > `docker-entrypoint-certus-shmq.sh`) — the real files stay there because that image's
 > build needs the connector Python package in its context, but building via the symlink
 > works (build context is still the repo root: `podman build -f
-> benchmarks/kv-offload-replay/Dockerfile.certus-shmq -t certus-shmq-bench .`). All four
+> benchmarks/kv-offload-replay/Dockerfile.certus-shmq -t certus-shmq-connector .`). All four
 > Dockerfiles take `--build-arg VLLM_VERSION=<x.y.z>` (default `0.23.0`).
 
 ## Files
@@ -415,7 +415,7 @@ all selected phases including the host reconfiguration.
 `profile_all.sh` above is the automated all-backends sweep. The two stability
 scripts below are the manual path for the **closed-loop** live comparison used
 for the fixed-concurrency head-to-head: **cputier-fixed** (vLLM 0.26.0 native
-CPU+fs tiering with the baked tiering fix — image `certus-offload-bench-fix026`)
+CPU+fs tiering with the baked tiering fix — image `certus-offload-fix026`)
 vs **certus-shmq** (host `certus-server` over SPDK NVMe + shmq client container).
 
 ### Open-loop vs closed-loop
@@ -448,7 +448,7 @@ image is self-consistent (build context is the repo root):
 ```bash
 podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
     build --build-arg VLLM_VERSION=0.26.0 \
-    -f certus-shmq-connector/Dockerfile -t certus-shmq-bench .
+    -f certus-shmq-connector/Dockerfile -t certus-shmq-connector .
 ```
 
 > **After rebuilding, do NOT pass `WORKLOAD_SRC` or `ASYNC_SRC`.** Those single-file

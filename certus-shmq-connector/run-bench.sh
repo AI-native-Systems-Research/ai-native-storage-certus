@@ -22,7 +22,7 @@
 #   GPU=0 NUM_CONVS=450 ./run-bench.sh
 #
 # Env (all optional; defaults shown):
-#   IMAGE=certus-shmq-bench     container image tag
+#   IMAGE=certus-shmq-connector     container image tag
 #   GPU=all                     GPU selector (all | 0 | 0,1 | <uuid>)
 #   SHM_PATH=/dev/shm/certus-shmq  mailbox file (shared into the container via
 #                               --ipc=host; must match the server's --shm-path)
@@ -41,7 +41,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Fully-qualified so rootless podman doesn't hit short-name resolution (which
 # can't prompt without a TTY). Override IMAGE to point elsewhere.
-IMAGE="${IMAGE:-localhost/certus-shmq-bench}"
+IMAGE="${IMAGE:-localhost/certus-shmq-connector}"
 GPU="${GPU:-all}"
 # The mailbox file. Under --ipc=host the host /dev/shm is shared into the
 # container, so the SAME path is valid on both sides — no host-gateway address

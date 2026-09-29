@@ -20,8 +20,8 @@ that flips one into the other.
 
 | Tag | Build-arg | vLLM tiering behavior |
 |---|---|---|
-| `certus-offload-bench` | `VLLM_FIX_TIERING=0` (default) | stock 0.26.0 — reproduces the `_req_state` KeyError crash |
-| `certus-offload-bench-fix026` | `VLLM_FIX_TIERING=1` | forked fix baked in — completes cleanly |
+| `certus-offload` | `VLLM_FIX_TIERING=0` (default) | stock 0.26.0 — reproduces the `_req_state` KeyError crash |
+| `certus-offload-fix026` | `VLLM_FIX_TIERING=1` | forked fix baked in — completes cleanly |
 
 Only `Dockerfile.offload` (the 0.26.0 tiering image) is affected. The
 sharedstorage and shmq images are vLLM 0.23.0, lack the tiering framework, and
@@ -29,22 +29,30 @@ are not touched by this build-arg.
 
 ## Building
 
-Both tags in one go:
-
-```bash
-bash benchmarks/kv-offload-replay/build_026.sh
-```
-
-Or build one directly (context = repo root):
+Use the versioned cputier/offload-family builder,
+`benchmarks/kv-offload-replay/build_cputier_container.sh` (`FIX_TIERING`
+selects the arm; `IMAGE` pins the tag these scripts expect). Both tags:
 
 ```bash
 # stock (as-shipped / crashing arm)
-podman build --build-arg VLLM_VERSION=0.26.0 \
-  -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench .
+IMAGE=certus-offload FIX_TIERING=0 \
+  bash benchmarks/kv-offload-replay/build_cputier_container.sh 0.26.0
+
+# fixed (forked tiering fix baked in)
+IMAGE=certus-offload-fix026 FIX_TIERING=1 \
+  bash benchmarks/kv-offload-replay/build_cputier_container.sh 0.26.0
+```
+
+Or invoke `podman build` directly (context = repo root):
+
+```bash
+# stock (as-shipped / crashing arm)
+podman build --build-arg VLLM_VERSION=0.26.0 --build-arg VLLM_FIX_TIERING=0 \
+  -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload .
 
 # fixed (forked tiering fix baked in)
 podman build --build-arg VLLM_VERSION=0.26.0 --build-arg VLLM_FIX_TIERING=1 \
-  -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-bench-fix026 .
+  -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload-fix026 .
 ```
 
 The overlay is a `COPY` of the 3 vendored files over the prebuilt base image —
@@ -58,20 +66,20 @@ be silently applied to the wrong base.
 Point the harness at the tag you want. The stability scripts already default to
 the correct one for each arm:
 
-- `run_cputier_stability.sh` → `certus-offload-bench` (stock / crashing arm)
-- `run_cputier_patched_stability.sh` → `certus-offload-bench-fix026` (fixed arm)
+- `run_cputier_stability.sh` → `certus-offload` (stock / crashing arm)
+- `run_cputier_patched_stability.sh` → `certus-offload-fix026` (fixed arm)
 
 Override on either with the `IMAGE` env var:
 
 ```bash
 # run the fixed image through the (stock-default) harness
-IMAGE=certus-offload-bench-fix026 bash run_cputier_stability.sh out/
+IMAGE=certus-offload-fix026 bash run_cputier_stability.sh out/
 
 # run the stock image through the (patched-default) harness
-IMAGE=certus-offload-bench bash run_cputier_patched_stability.sh out/
+IMAGE=certus-offload bash run_cputier_patched_stability.sh out/
 ```
 
-Because the fix is baked into `certus-offload-bench-fix026`, there is **no
+Because the fix is baked into `certus-offload-fix026`, there is **no
 runtime patch bind-mount** — the only difference between the two arms is which
 tag is run, so any change in reliability/throughput is attributable to the
 patch alone.
@@ -80,11 +88,11 @@ patch alone.
 
 ```bash
 # label: 1 = fixed, 0 = stock
-podman image inspect certus-offload-bench-fix026 \
+podman image inspect certus-offload-fix026 \
   --format '{{index .Config.Labels "org.certus.vllm-fix-tiering"}}'
 
 # handshake symbol: non-zero = fixed, 0 = stock
-podman run --rm --entrypoint sh certus-offload-bench-fix026 \
+podman run --rm --entrypoint sh certus-offload-fix026 \
   -c 'grep -c mark_stores_submitted \
       /usr/local/lib/python3.12/dist-packages/vllm/v1/kv_offload/tiering/manager.py'
 ```
@@ -95,6 +103,6 @@ The build also prints a sentinel line: stock →
 
 ---
 
-**In short:** stock = `certus-offload-bench`, fixed =
-`certus-offload-bench-fix026`. Choose by which tag you build (`VLLM_FIX_TIERING`)
+**In short:** stock = `certus-offload`, fixed =
+`certus-offload-fix026`. Choose by which tag you build (`VLLM_FIX_TIERING`)
 and which tag you run (`IMAGE`).

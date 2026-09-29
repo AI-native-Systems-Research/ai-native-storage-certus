@@ -63,7 +63,7 @@ options:
 env overrides:
   TAG=vllm0.29-test       override the :tag (default vllm<version>)
   IMAGE=repo:tag          override the full image ref
-  IMAGE_REPO=<repo>       override the repo (default localhost/certus-shmq-bench)
+  IMAGE_REPO=<repo>       override the repo (default localhost/certus-shmq-connector)
   PODMAN_STORE= PODMAN_RUNROOT=   use a different podman store
                           (default /mnt/certus1/podman/{storage,run})
   NO_CACHE=1              pass --no-cache to podman build
@@ -95,7 +95,7 @@ fi
 VLLM_VERSION="${VLLM_VERSION#v}"
 
 # Image ref: IMAGE overrides everything; otherwise <repo>:<tag>, tag = vllm<ver>.
-IMAGE_REPO="${IMAGE_REPO:-localhost/certus-shmq-bench}"
+IMAGE_REPO="${IMAGE_REPO:-localhost/certus-shmq-connector}"
 TAG="${TAG:-vllm${VLLM_VERSION}}"
 IMAGE="${IMAGE:-${IMAGE_REPO}:${TAG}}"
 
@@ -126,6 +126,18 @@ podman "${STORE_FLAGS[@]}" build \
   "$REPO_ROOT"
 
 echo
-echo "[build] done: ${IMAGE}"
+# Verify the image really landed in THIS store, and print its id. The image is
+# built into the /mnt/certus1 store (--root/--runroot above), NOT podman's
+# default store — so a bare `podman images` looks empty and invites a needless
+# rebuild. Confirm + show the store-qualified list command so that can't mislead.
+if img_id="$(podman "${STORE_FLAGS[@]}" image inspect "$IMAGE" --format '{{.Id}}' 2>/dev/null)"; then
+  echo "[build] done: ${IMAGE}  (${img_id:0:12})"
+else
+  echo "[build] WARNING: build reported success but ${IMAGE} is not in ${PODMAN_STORE}" >&2
+  echo "[build]          (check the build output above for an error)" >&2
+fi
+echo "[build] NOTE: this image is in the ${PODMAN_STORE} store, not podman's default"
+echo "[build]       store — a bare 'podman images' will NOT show it. List it with:"
+echo "    podman --root ${PODMAN_STORE} --runroot ${PODMAN_RUNROOT} images"
 echo "[build] run it with, e.g.:"
 echo "    IMAGE=${IMAGE} ${REPO_ROOT}/benchmarks/kv-offload-replay/run-docker-certus-shmq.sh"
