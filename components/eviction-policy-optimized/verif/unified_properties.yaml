@@ -58,20 +58,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_create_pool_pre_total
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.88
+      wall_clock_s: 168.18
       peak_rss_mb: 1972
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-CREATE-POOL-POST-SEQUENTIAL-ID
   subject: create_pool
@@ -116,15 +119,15 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_create_pool_post_sequential_id
-      result: FAILED
-      wall_clock_s: 660.5
-      peak_rss_mb: 0
-      signature: TIMEOUT after 420s
     fidelity: null
     note: 'battery exhausted for class ''sat-timeout''; residual signature captured: TIMEOUT after 420s'
     status: tool-boundary
+    evidence:
+      harness: verify_epo_create_pool_post_sequential_id
+      result: FAILED
+      wall_clock_s: 660.5799999999999
+      peak_rss_mb: 0
+      signature: TIMEOUT after 420s
     _scored_by: scorer_kani
 - id: EPO-CREATE-POOL-POST-FRESH-STATE
   subject: create_pool
@@ -170,20 +173,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_create_pool_post_fresh_state
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 167.98
+      wall_clock_s: 168.31
       peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-CREATE-POOL-FRAME-EXISTING-POOLS
   subject: create_pool
@@ -228,20 +234,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_create_pool_frame_existing_pools
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 164.72
-      peak_rss_mb: 1973
+      wall_clock_s: 167.74
+      peak_rss_mb: 1972
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-PRE-POOL-EXISTS
   subject: track
@@ -286,20 +295,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_pre_pool_exists
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.23
+      wall_clock_s: 169.73
       peak_rss_mb: 1971
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-HANDLE
   subject: track
@@ -348,20 +360,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_post_handle
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.95
-      peak_rss_mb: 1972
+      wall_clock_s: 167.69
+      peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-LEN-INCREMENT
   subject: track
@@ -408,20 +423,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_post_len_increment
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 167.41
-      peak_rss_mb: 1971
+      wall_clock_s: 170.04
+      peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-SKETCH-INCREMENT
   subject: track
@@ -468,14 +486,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_track_post_sketch_increment
-      result: SUCCESS
-      wall_clock_s: 2.54
-      peak_rss_mb: 184
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_track_post_sketch_increment
+      result: SUCCESS
+      wall_clock_s: 1.95
+      peak_rss_mb: 49
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-ACCESS-COUNT
   subject: track
@@ -520,20 +538,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_post_access_count
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 160.8
-      peak_rss_mb: 1976
+      wall_clock_s: 162.82
+      peak_rss_mb: 1975
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-MAXLEN-HIGHWATER
   subject: track
@@ -591,20 +612,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_post_maxlen_highwater
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 161.03
-      peak_rss_mb: 1973
+      wall_clock_s: 163.45
+      peak_rss_mb: 1972
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-AGING-TRIGGER
   subject: track
@@ -651,14 +675,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_track_post_aging_trigger
-      result: SUCCESS
-      wall_clock_s: 69.43
-      peak_rss_mb: 171
     fidelity: arithmetic-core
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_track_post_aging_trigger
+      result: SUCCESS
+      wall_clock_s: 69.29
+      peak_rss_mb: 55
     _scored_by: scorer_kani
 - id: EPO-TRACK-INV-AGING-NO-DIVISION-BY-ZERO
   subject: track
@@ -706,20 +730,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_inv_aging_no_division_by_zero
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 167.89
-      peak_rss_mb: 1969
+      wall_clock_s: 166.96
+      peak_rss_mb: 1971
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-INV-AGING-PERIOD-NO-OVERFLOW
   subject: track
@@ -770,14 +797,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_track_inv_aging_period_no_overflow
-      result: SUCCESS
-      wall_clock_s: 1.18
-      peak_rss_mb: 171
     fidelity: null
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_track_inv_aging_period_no_overflow
+      result: SUCCESS
+      wall_clock_s: 0.49
+      peak_rss_mb: 29
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-ADMIT-EMPTY-POOL
   subject: track
@@ -822,20 +849,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_post_admit_empty_pool
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.75
-      peak_rss_mb: 1973
+      wall_clock_s: 167.52
+      peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-ADMIT-MORE-FREQUENT
   subject: track
@@ -880,20 +910,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_post_admit_more_frequent
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 168.65
+      wall_clock_s: 168.88
       peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-ADMIT-NOT-MORE-FREQUENT
   subject: track
@@ -942,20 +975,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_post_admit_not_more_frequent
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.83
-      peak_rss_mb: 1973
+      wall_clock_s: 167.86
+      peak_rss_mb: 1972
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-POST-NON-IDEMPOTENT-REREGISTRATION
   subject: track
@@ -1015,20 +1051,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_post_non_idempotent_reregistration
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 164.93
-      peak_rss_mb: 1975
+      wall_clock_s: 168.01
+      peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-FRAME-SEMANTICS-IGNORED
   subject: track
@@ -1079,20 +1118,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_frame_semantics_ignored
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.98
-      peak_rss_mb: 1971
+      wall_clock_s: 167.36
+      peak_rss_mb: 1972
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-FRAME-EXISTING-ENTRIES
   subject: track
@@ -1142,20 +1184,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_frame_existing_entries
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.49
+      wall_clock_s: 169.9
       peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-FRAME-OTHER-POOLS
   subject: track
@@ -1199,20 +1244,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_frame_other_pools
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 168.23
-      peak_rss_mb: 1972
+      wall_clock_s: 169.93
+      peak_rss_mb: 1971
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-ERROR-INVALID-POOL
   subject: track
@@ -1256,20 +1304,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_error_invalid_pool
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.16
+      wall_clock_s: 169.84
       peak_rss_mb: 1970
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TRACK-ERROR-FRAME-NO-MUTATION
   subject: track
@@ -1311,20 +1362,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_track_error_frame_no_mutation
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 169.14
+      wall_clock_s: 168.2
       peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TOUCH-PRE-POOL-EXISTS
   subject: touch
@@ -1373,20 +1427,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_touch_pre_pool_exists
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.54
-      peak_rss_mb: 1972
+      wall_clock_s: 170.47
+      peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TOUCH-POST-MOVE-TO-MRU
   subject: touch
@@ -1432,14 +1489,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_touch_post_move_to_mru
-      result: SUCCESS
-      wall_clock_s: 67.43
-      peak_rss_mb: 1394
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_touch_post_move_to_mru
+      result: SUCCESS
+      wall_clock_s: 68.99
+      peak_rss_mb: 1394
     _scored_by: scorer_kani
 - id: EPO-TOUCH-POST-NOT-NEXT-VICTIM
   subject: touch
@@ -1490,14 +1547,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_touch_post_not_next_victim
-      result: SUCCESS
-      wall_clock_s: 40.7
-      peak_rss_mb: 691
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_touch_post_not_next_victim
+      result: SUCCESS
+      wall_clock_s: 41.61
+      peak_rss_mb: 690
     _scored_by: scorer_kani
 - id: EPO-TOUCH-POST-ALREADY-AT-BACK-NOOP
   subject: touch
@@ -1543,14 +1600,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_touch_post_already_at_back_noop
-      result: SUCCESS
-      wall_clock_s: 63.4
-      peak_rss_mb: 871
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_touch_post_already_at_back_noop
+      result: SUCCESS
+      wall_clock_s: 65.58
+      peak_rss_mb: 870
     _scored_by: scorer_kani
 - id: EPO-TOUCH-POST-REMOVED-HANDLE-IS-SILENT-NOOP
   subject: touch
@@ -1602,14 +1659,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_touch_post_removed_handle_is_silent_noop
-      result: SUCCESS
-      wall_clock_s: 65.96
-      peak_rss_mb: 898
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_touch_post_removed_handle_is_silent_noop
+      result: SUCCESS
+      wall_clock_s: 67.9
+      peak_rss_mb: 898
     _scored_by: scorer_kani
 - id: EPO-TOUCH-FRAME-SKETCH-UNCHANGED
   subject: touch
@@ -1650,20 +1707,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_touch_frame_sketch_unchanged
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.2
+      wall_clock_s: 167.46
       peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TOUCH-FRAME-MEMBERSHIP
   subject: touch
@@ -1709,14 +1769,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_touch_frame_membership
-      result: SUCCESS
-      wall_clock_s: 35.36
-      peak_rss_mb: 683
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_touch_frame_membership
+      result: SUCCESS
+      wall_clock_s: 37.08
+      peak_rss_mb: 682
     _scored_by: scorer_kani
 - id: EPO-TOUCH-FRAME-RELATIVE-ORDER-OTHERS
   subject: touch
@@ -1760,14 +1820,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_touch_frame_relative_order_others
-      result: SUCCESS
-      wall_clock_s: 44.24
-      peak_rss_mb: 850
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_touch_frame_relative_order_others
+      result: SUCCESS
+      wall_clock_s: 47.44
+      peak_rss_mb: 848
     _scored_by: scorer_kani
 - id: EPO-TOUCH-FRAME-COUNTERS
   subject: touch
@@ -1813,20 +1873,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_touch_frame_counters
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.26
-      peak_rss_mb: 1973
+      wall_clock_s: 166.91
+      peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-TOUCH-ERROR-INVALID-POOL
   subject: touch
@@ -1869,20 +1932,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_touch_error_invalid_pool
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.65
+      wall_clock_s: 170.25
       peak_rss_mb: 1972
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-BATCH-TOUCH-PRE-POOLS-EXIST
   subject: batch_touch
@@ -1927,20 +1993,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_batch_touch_pre_pools_exist
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.13
-      peak_rss_mb: 1972
+      wall_clock_s: 166.77
+      peak_rss_mb: 1971
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-BATCH-TOUCH-POST-EMPTY-NOOP
   subject: batch_touch
@@ -1982,20 +2051,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_batch_touch_post_empty_noop
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 168.42
-      peak_rss_mb: 1972
+      wall_clock_s: 168.55
+      peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-BATCH-TOUCH-POST-EQUIVALENT-TO-SEQUENTIAL
   subject: batch_touch
@@ -2041,20 +2113,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_batch_touch_post_equivalent_to_sequential
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.3
-      peak_rss_mb: 1974
+      wall_clock_s: 168.03
+      peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-BATCH-TOUCH-POST-REMOVED-HANDLES-SKIPPED
   subject: batch_touch
@@ -2104,20 +2179,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_batch_touch_post_removed_handles_skipped
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.55
-      peak_rss_mb: 1973
+      wall_clock_s: 168.46
+      peak_rss_mb: 1972
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-BATCH-TOUCH-FRAME-MEMBERSHIP-AND-SKETCH
   subject: batch_touch
@@ -2163,20 +2241,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_batch_touch_frame_membership_and_sketch
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.04
-      peak_rss_mb: 1973
+      wall_clock_s: 167.64
+      peak_rss_mb: 1972
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-BATCH-TOUCH-ERROR-INVALID-POOL
   subject: batch_touch
@@ -2220,20 +2301,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_batch_touch_error_invalid_pool
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 167.25
-      peak_rss_mb: 1972
+      wall_clock_s: 169.24
+      peak_rss_mb: 1970
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-BATCH-TOUCH-ERROR-PARTIAL-APPLICATION
   subject: batch_touch
@@ -2282,20 +2366,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_batch_touch_error_partial_application
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 167.37
-      peak_rss_mb: 1973
+      wall_clock_s: 167.32
+      peak_rss_mb: 1971
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-BATCH-TOUCH-ERROR-NO-LOG
   subject: batch_touch
@@ -2346,20 +2433,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_batch_touch_error_no_log
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 168.4
+      wall_clock_s: 170.28
       peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-REMOVE-PRE-POOL-EXISTS
   subject: remove
@@ -2404,20 +2494,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_remove_pre_pool_exists
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.55
+      wall_clock_s: 167.19
       peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-REMOVE-POST-UNLINK
   subject: remove
@@ -2466,14 +2559,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_remove_post_unlink
-      result: SUCCESS
-      wall_clock_s: 96.12
-      peak_rss_mb: 2126
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_remove_post_unlink
+      result: SUCCESS
+      wall_clock_s: 97.27
+      peak_rss_mb: 2122
     _scored_by: scorer_kani
 - id: EPO-REMOVE-POST-LEN-DECREMENT
   subject: remove
@@ -2517,14 +2610,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_remove_post_len_decrement
-      result: SUCCESS
-      wall_clock_s: 35.92
-      peak_rss_mb: 698
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_remove_post_len_decrement
+      result: SUCCESS
+      wall_clock_s: 37.3
+      peak_rss_mb: 699
     _scored_by: scorer_kani
 - id: EPO-REMOVE-POST-NEVER-EVICTED
   subject: remove
@@ -2572,14 +2665,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_remove_post_never_evicted
-      result: SUCCESS
-      wall_clock_s: 102.21
-      peak_rss_mb: 1555
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_remove_post_never_evicted
+      result: SUCCESS
+      wall_clock_s: 105.92
+      peak_rss_mb: 1554
     _scored_by: scorer_kani
 - id: EPO-REMOVE-POST-IDEMPOTENT-REMOVED-HANDLE
   subject: remove
@@ -2627,14 +2720,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_remove_post_idempotent_removed_handle
-      result: SUCCESS
-      wall_clock_s: 75.5
-      peak_rss_mb: 1125
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_remove_post_idempotent_removed_handle
+      result: SUCCESS
+      wall_clock_s: 77.85
+      peak_rss_mb: 1123
     _scored_by: scorer_kani
 - id: EPO-REMOVE-POST-SLOT-RECYCLED
   subject: remove
@@ -2685,14 +2778,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_remove_post_slot_recycled
-      result: SUCCESS
-      wall_clock_s: 50.9
-      peak_rss_mb: 870
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_remove_post_slot_recycled
+      result: SUCCESS
+      wall_clock_s: 52.97
+      peak_rss_mb: 871
     _scored_by: scorer_kani
 - id: EPO-REMOVE-FRAME-SKETCH-UNCHANGED
   subject: remove
@@ -2736,20 +2829,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_remove_frame_sketch_unchanged
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 169.74
+      wall_clock_s: 170.04
       peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-REMOVE-FRAME-RELATIVE-ORDER-OTHERS
   subject: remove
@@ -2793,14 +2889,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_remove_frame_relative_order_others
-      result: SUCCESS
-      wall_clock_s: 58.02
-      peak_rss_mb: 869
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_remove_frame_relative_order_others
+      result: SUCCESS
+      wall_clock_s: 61.49
+      peak_rss_mb: 869
     _scored_by: scorer_kani
 - id: EPO-REMOVE-ERROR-INVALID-POOL
   subject: remove
@@ -2843,20 +2939,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_remove_error_invalid_pool
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 168.26
-      peak_rss_mb: 1973
+      wall_clock_s: 168.7
+      peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-EVICT-PRE-TOTAL
   subject: identify_next_to_evict
@@ -2901,20 +3000,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_evict_pre_total
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.55
+      wall_clock_s: 167.25
       peak_rss_mb: 1972
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-EVICT-POST-RETURNS-LRU-HEAD
   subject: identify_next_to_evict
@@ -2958,14 +3060,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_evict_post_returns_lru_head
-      result: SUCCESS
-      wall_clock_s: 36.09
-      peak_rss_mb: 795
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_evict_post_returns_lru_head
+      result: SUCCESS
+      wall_clock_s: 37.48
+      peak_rss_mb: 794
     _scored_by: scorer_kani
 - id: EPO-EVICT-POST-REMOVES-RETURNED
   subject: identify_next_to_evict
@@ -3011,14 +3113,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_evict_post_removes_returned
-      result: SUCCESS
-      wall_clock_s: 104.98
-      peak_rss_mb: 2577
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_evict_post_removes_returned
+      result: SUCCESS
+      wall_clock_s: 106.88
+      peak_rss_mb: 2582
     _scored_by: scorer_kani
 - id: EPO-EVICT-POST-EMPTY-POOL-NONE
   subject: identify_next_to_evict
@@ -3059,14 +3161,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_evict_post_empty_pool_none
-      result: SUCCESS
-      wall_clock_s: 78.98
-      peak_rss_mb: 1874
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_evict_post_empty_pool_none
+      result: SUCCESS
+      wall_clock_s: 81.66
+      peak_rss_mb: 1868
     _scored_by: scorer_kani
 - id: EPO-EVICT-POST-ORDER-FIRST-TIME-KEYS
   subject: identify_next_to_evict
@@ -3122,20 +3224,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_evict_post_order_first_time_keys
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.58
+      wall_clock_s: 167.83
       peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-EVICT-FRAME-SKETCH-AND-COUNTERS
   subject: identify_next_to_evict
@@ -3181,20 +3286,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_evict_frame_sketch_and_counters
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.56
-      peak_rss_mb: 1974
+      wall_clock_s: 169.79
+      peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-EVICT-FRAME-OTHER-POOLS
   subject: identify_next_to_evict
@@ -3236,20 +3344,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_evict_frame_other_pools
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.72
+      wall_clock_s: 167.46
       peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-EVICT-DEGRADE-INVALID-POOL
   subject: identify_next_to_evict
@@ -3294,20 +3405,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_evict_degrade_invalid_pool
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.67
-      peak_rss_mb: 1975
+      wall_clock_s: 166.68
+      peak_rss_mb: 1976
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-CANDIDATES-PRE-TOTAL
   subject: get_eviction_candidates
@@ -3352,20 +3466,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_candidates_pre_total
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 164.93
-      peak_rss_mb: 1972
+      wall_clock_s: 169.5
+      peak_rss_mb: 1971
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-CANDIDATES-POST-ORDERED-PREFIX
   subject: get_eviction_candidates
@@ -3410,14 +3527,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_candidates_post_ordered_prefix
-      result: SUCCESS
-      wall_clock_s: 143.88
-      peak_rss_mb: 3571
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_candidates_post_ordered_prefix
+      result: SUCCESS
+      wall_clock_s: 146.42
+      peak_rss_mb: 3571
     _scored_by: scorer_kani
 - id: EPO-CANDIDATES-POST-COUNT-BOUND
   subject: get_eviction_candidates
@@ -3460,14 +3577,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_candidates_post_count_bound
-      result: SUCCESS
-      wall_clock_s: 91.11
-      peak_rss_mb: 1275
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_candidates_post_count_bound
+      result: SUCCESS
+      wall_clock_s: 92.32
+      peak_rss_mb: 1274
     _scored_by: scorer_kani
 - id: EPO-CANDIDATES-POST-ZERO-EMPTY
   subject: get_eviction_candidates
@@ -3512,14 +3629,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_candidates_post_zero_empty
-      result: SUCCESS
-      wall_clock_s: 37.09
-      peak_rss_mb: 836
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_candidates_post_zero_empty
+      result: SUCCESS
+      wall_clock_s: 38.85
+      peak_rss_mb: 835
     _scored_by: scorer_kani
 - id: EPO-CANDIDATES-FRAME-NON-DESTRUCTIVE
   subject: get_eviction_candidates
@@ -3562,14 +3679,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_candidates_frame_non_destructive
-      result: SUCCESS
-      wall_clock_s: 497.15
-      peak_rss_mb: 6365
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_candidates_frame_non_destructive
+      result: SUCCESS
+      wall_clock_s: 501.95000000000005
+      peak_rss_mb: 6367
     _scored_by: scorer_kani
 - id: EPO-CANDIDATES-DEGRADE-INVALID-POOL
   subject: get_eviction_candidates
@@ -3613,20 +3730,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_candidates_degrade_invalid_pool
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 167.62
+      wall_clock_s: 170.31
       peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-LEN-PRE-TOTAL
   subject: len
@@ -3670,20 +3790,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_len_pre_total
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.56
+      wall_clock_s: 168.64
       peak_rss_mb: 1971
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-LEN-POST-ACTIVE-COUNT
   subject: len
@@ -3727,14 +3850,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_len_post_active_count
-      result: SUCCESS
-      wall_clock_s: 77.05
-      peak_rss_mb: 1152
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_len_post_active_count
+      result: SUCCESS
+      wall_clock_s: 79.86
+      peak_rss_mb: 1150
     _scored_by: scorer_kani
 - id: EPO-LEN-FRAME-PURE
   subject: len
@@ -3774,14 +3897,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_len_frame_pure
-      result: SUCCESS
-      wall_clock_s: 44.34
-      peak_rss_mb: 837
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_len_frame_pure
+      result: SUCCESS
+      wall_clock_s: 45.92
+      peak_rss_mb: 837
     _scored_by: scorer_kani
 - id: EPO-LEN-DEGRADE-INVALID-POOL
   subject: len
@@ -3825,20 +3948,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_len_degrade_invalid_pool
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.03
+      wall_clock_s: 169.5
       peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-CLEAR-PRE-TOTAL
   subject: clear_pool
@@ -3882,20 +4008,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_clear_pre_total
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 164.38
+      wall_clock_s: 168.99
       peak_rss_mb: 1971
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-CLEAR-POST-EMPTY
   subject: clear_pool
@@ -3944,14 +4073,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_clear_post_empty
-      result: SUCCESS
-      wall_clock_s: 33.16
-      peak_rss_mb: 654
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_clear_post_empty
+      result: SUCCESS
+      wall_clock_s: 34.88
+      peak_rss_mb: 650
     _scored_by: scorer_kani
 - id: EPO-CLEAR-FRAME-PRESERVES-SKETCH-AND-COUNTERS
   subject: clear_pool
@@ -4000,20 +4129,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_clear_frame_preserves_sketch_and_counters
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.44
-      peak_rss_mb: 1971
+      wall_clock_s: 167.12
+      peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-CLEAR-POST-RETRACK-ADMITTED-AT-MRU
   subject: clear_pool
@@ -4061,20 +4193,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_clear_post_retrack_admitted_at_mru
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.08
-      peak_rss_mb: 1974
+      wall_clock_s: 167.02
+      peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-CLEAR-POST-SLOT-NUMBERING-RESTARTS
   subject: clear_pool
@@ -4123,14 +4258,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_clear_post_slot_numbering_restarts
-      result: SUCCESS
-      wall_clock_s: 36.11
-      peak_rss_mb: 850
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_clear_post_slot_numbering_restarts
+      result: SUCCESS
+      wall_clock_s: 37.4
+      peak_rss_mb: 851
     _scored_by: scorer_kani
 - id: EPO-CLEAR-FRAME-OTHER-POOLS
   subject: clear_pool
@@ -4174,20 +4309,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_clear_frame_other_pools
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 167.77
-      peak_rss_mb: 1973
+      wall_clock_s: 166.98
+      peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-CLEAR-DEGRADE-INVALID-POOL
   subject: clear_pool
@@ -4231,20 +4369,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_clear_degrade_invalid_pool
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 165.5
+      wall_clock_s: 169.28
       peak_rss_mb: 1975
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-POOL-IDS-UNIQUE-SEQUENTIAL
   subject: 'Global invariant: pool identifiers form a gapless sequence from zero'
@@ -4299,20 +4440,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_pool_ids_unique_sequential
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 169.08
-      peak_rss_mb: 1973
+      wall_clock_s: 167.91
+      peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-POOLS-APPEND-ONLY
   subject: 'Global invariant: pools are only ever added, never removed or reordered'
@@ -4367,20 +4511,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_pools_append_only
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 164.93
+      wall_clock_s: 168.68
       peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-POOL-ISOLATION
   subject: 'Global invariant: pools are independent eviction domains'
@@ -4439,20 +4586,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_pool_isolation
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 167.02
-      peak_rss_mb: 1976
+      wall_clock_s: 167.89
+      peak_rss_mb: 1975
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-LEN-MATCHES-CHAIN
   subject: 'Global invariant: the reported size equals the length of the eviction chain'
@@ -4511,14 +4661,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_len_matches_chain
-      result: SUCCESS
-      wall_clock_s: 79.26
-      peak_rss_mb: 1293
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_len_matches_chain
+      result: SUCCESS
+      wall_clock_s: 81.29
+      peak_rss_mb: 1290
     _scored_by: scorer_kani
 - id: EPO-INV-LEN-MATCHES-ACTIVE-SLOTS
   subject: 'Global invariant: the reported size equals the number of live slots'
@@ -4579,14 +4729,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_len_matches_active_slots
-      result: SUCCESS
-      wall_clock_s: 103.26
-      peak_rss_mb: 2423
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_len_matches_active_slots
+      result: SUCCESS
+      wall_clock_s: 104.39
+      peak_rss_mb: 2421
     _scored_by: scorer_kani
 - id: EPO-INV-LIST-EMPTY-IFF-NO-ENDS
   subject: 'Global invariant: a pool has a front entry exactly when it has a back entry and a non-zero
@@ -4651,14 +4801,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_list_empty_iff_no_ends
-      result: SUCCESS
-      wall_clock_s: 68.82
-      peak_rss_mb: 961
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_list_empty_iff_no_ends
+      result: SUCCESS
+      wall_clock_s: 70.27
+      peak_rss_mb: 959
     _scored_by: scorer_kani
 - id: EPO-INV-LIST-LINKS-SYMMETRIC
   subject: 'Global invariant: the forward and backward links of the eviction order agree'
@@ -4716,14 +4866,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_list_links_symmetric
-      result: SUCCESS
-      wall_clock_s: 94.1
-      peak_rss_mb: 1896
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_list_links_symmetric
+      result: SUCCESS
+      wall_clock_s: 95.94
+      peak_rss_mb: 1894
     _scored_by: scorer_kani
 - id: EPO-INV-LIST-ACYCLIC-AND-LENGTH
   subject: 'Global invariant: the eviction order is a finite chain with no cycle'
@@ -4777,14 +4927,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_list_acyclic_and_length
-      result: SUCCESS
-      wall_clock_s: 77.94
-      peak_rss_mb: 1348
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_list_acyclic_and_length
+      result: SUCCESS
+      wall_clock_s: 80.92
+      peak_rss_mb: 1352
     _scored_by: scorer_kani
 - id: EPO-INV-LIST-TAIL-IS-ONLY-NODE-WITHOUT-NEXT
   subject: 'Global invariant: an entry has no forward link exactly when it is the back of the order'
@@ -4841,14 +4991,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_list_tail_is_only_node_without_next
-      result: SUCCESS
-      wall_clock_s: 71.6
-      peak_rss_mb: 1027
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_list_tail_is_only_node_without_next
+      result: SUCCESS
+      wall_clock_s: 73.83
+      peak_rss_mb: 1026
     _scored_by: scorer_kani
 - id: EPO-INV-VICTIM-IS-LIST-FRONT
   subject: 'Global invariant: the victim is always the front of the order'
@@ -4899,14 +5049,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_victim_is_list_front
-      result: SUCCESS
-      wall_clock_s: 83.22
-      peak_rss_mb: 1193
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_victim_is_list_front
+      result: SUCCESS
+      wall_clock_s: 84.49
+      peak_rss_mb: 1184
     _scored_by: scorer_kani
 - id: EPO-INV-PREVIEW-AGREES-WITH-EVICTION
   subject: 'Global invariant: previewing candidates agrees with actually evicting'
@@ -4957,14 +5107,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_preview_agrees_with_eviction
-      result: SUCCESS
-      wall_clock_s: 184.06
-      peak_rss_mb: 4553
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_preview_agrees_with_eviction
+      result: SUCCESS
+      wall_clock_s: 185.51
+      peak_rss_mb: 4558
     _scored_by: scorer_kani
 - id: EPO-INV-SLOT-OWNERSHIP-DISJOINT
   subject: 'Global invariant: each internal slot is either in use or free, never both'
@@ -5016,14 +5166,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_slot_ownership_disjoint
-      result: SUCCESS
-      wall_clock_s: 107.68
-      peak_rss_mb: 1715
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_slot_ownership_disjoint
+      result: SUCCESS
+      wall_clock_s: 109.51
+      peak_rss_mb: 1719
     _scored_by: scorer_kani
 - id: EPO-INV-SLOTS-ACCOUNTED
   subject: 'Global invariant: every allocated slot is either tracked or free'
@@ -5074,14 +5224,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_slots_accounted
-      result: SUCCESS
-      wall_clock_s: 68.14
-      peak_rss_mb: 960
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_slots_accounted
+      result: SUCCESS
+      wall_clock_s: 69.87
+      peak_rss_mb: 960
     _scored_by: scorer_kani
 - id: EPO-INV-INTERNAL-INDEX-IN-RANGE
   subject: 'Global invariant: every slot number the component stores refers to a slot that exists'
@@ -5137,14 +5287,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_internal_index_in_range
-      result: SUCCESS
-      wall_clock_s: 84.3
-      peak_rss_mb: 1590
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_internal_index_in_range
+      result: SUCCESS
+      wall_clock_s: 86.06
+      peak_rss_mb: 1595
     _scored_by: scorer_kani
 - id: EPO-INV-LEN-NO-UNDERFLOW
   subject: 'Global invariant: the reported size never underflows'
@@ -5192,14 +5342,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_len_no_underflow
-      result: SUCCESS
-      wall_clock_s: 140.26
-      peak_rss_mb: 2226
     fidelity: real-type-bounded
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_len_no_underflow
+      result: SUCCESS
+      wall_clock_s: 143.57
+      peak_rss_mb: 2226
     _scored_by: scorer_kani
 - id: EPO-INV-HANDLE-POOL-SCOPED
   subject: 'Global invariant: a handle is only ever interpreted inside its own pool'
@@ -5253,20 +5403,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_handle_pool_scoped
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.07
-      peak_rss_mb: 1974
+      wall_clock_s: 171.19
+      peak_rss_mb: 1975
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-STALE-HANDLE-NO-CROSS-ENTRY-EFFECT
   subject: 'Global invariant: a stale handle must not act on a different entry that reused its slot'
@@ -5334,16 +5487,16 @@ properties:
     status: refuted
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      refutation: refute_epo_inv_stale_handle_no_cross_entry_effect
-      result: violation demonstrated
-      wall_clock_s: 155.15
-      peak_rss_mb: 5014
     fidelity: real-type-bounded
     note: 'REFUTED — ''refute_epo_inv_stale_handle_no_cross_entry_effect'' demonstrates a reachable violation,
       so the code breaks this obligation. This is a finding, not a gap: see the spec and code locations
       on the property record.'
     status: refuted
+    evidence:
+      refutation: refute_epo_inv_stale_handle_no_cross_entry_effect
+      result: violation demonstrated
+      wall_clock_s: 159.22
+      peak_rss_mb: 5016
     _scored_by: scorer_kani
 - id: EPO-INV-STALE-HANDLE-NEVER-CRASHES
   subject: 'Global invariant: no handle a caller can present may crash the component'
@@ -5409,16 +5562,16 @@ properties:
     status: refuted
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      refutation: refute_epo_inv_stale_handle_never_crashes
-      result: violation demonstrated
-      wall_clock_s: 2.48
-      peak_rss_mb: 232
     fidelity: real-type-bounded
     note: 'REFUTED — ''refute_epo_inv_stale_handle_never_crashes'' demonstrates a reachable violation,
       so the code breaks this obligation. This is a finding, not a gap: see the spec and code locations
       on the property record.'
     status: refuted
+    evidence:
+      refutation: refute_epo_inv_stale_handle_never_crashes
+      result: violation demonstrated
+      wall_clock_s: 1.65
+      peak_rss_mb: 44
     _scored_by: scorer_kani
 - id: EPO-INV-INVALID-HANDLE-NEVER-RETURNED
   subject: 'Global invariant: the invalid-handle error is never produced'
@@ -5474,20 +5627,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_invalid_handle_never_returned
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.87
-      peak_rss_mb: 1975
+      wall_clock_s: 167.55
+      peak_rss_mb: 1974
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-MAXLEN-MONOTONE
   subject: 'Global invariant: the largest-ever-size record only ever grows'
@@ -5537,20 +5693,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_maxlen_monotone
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 160.99
+      wall_clock_s: 161.59
       peak_rss_mb: 1975
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-MAXLEN-UPPER-BOUNDS-LEN
   subject: 'Global invariant: the largest-ever-size record bounds the pool''s current size'
@@ -5607,14 +5766,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_maxlen_upper_bounds_len
-      result: SUCCESS
-      wall_clock_s: 1.35
-      peak_rss_mb: 171
     fidelity: null
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_maxlen_upper_bounds_len
+      result: SUCCESS
+      wall_clock_s: 0.66
+      peak_rss_mb: 29
     _scored_by: scorer_kani
 - id: EPO-INV-ACCESS-COUNT-MONOTONE
   subject: 'Global invariant: the running access count only grows'
@@ -5663,20 +5822,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_access_count_monotone
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 161.27
-      peak_rss_mb: 1972
+      wall_clock_s: 163.11
+      peak_rss_mb: 1973
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-AGING-PERIOD-NON-DECREASING
   subject: 'Global invariant: the ageing interval never shortens'
@@ -5735,14 +5897,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_aging_period_non_decreasing
-      result: SUCCESS
-      wall_clock_s: 1.19
-      peak_rss_mb: 171
     fidelity: arithmetic-core
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_aging_period_non_decreasing
+      result: SUCCESS
+      wall_clock_s: 0.5
+      peak_rss_mb: 29
     _scored_by: scorer_kani
 - id: EPO-INV-SKETCH-COUNTERS-SATURATE
   subject: 'Global invariant: frequency counters saturate instead of wrapping'
@@ -5789,14 +5951,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_sketch_counters_saturate
-      result: SUCCESS
-      wall_clock_s: 2.49
-      peak_rss_mb: 185
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_sketch_counters_saturate
+      result: SUCCESS
+      wall_clock_s: 1.91
+      peak_rss_mb: 48
     _scored_by: scorer_kani
 - id: EPO-INV-SKETCH-ESTIMATE-IS-ROW-MINIMUM
   subject: 'Global invariant: an estimate is the smallest of the rows'' counters'
@@ -5838,14 +6000,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_sketch_estimate_is_row_minimum
-      result: SUCCESS
-      wall_clock_s: 1.74
-      peak_rss_mb: 51
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_sketch_estimate_is_row_minimum
+      result: SUCCESS
+      wall_clock_s: 1.87
+      peak_rss_mb: 53
     _scored_by: scorer_kani
 - id: EPO-INV-SKETCH-ESTIMATE-AT-LEAST-ONE-AFTER-FIRST-TRACK
   subject: 'Global invariant: a just-tracked key has an estimate of at least one'
@@ -5896,14 +6058,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_sketch_estimate_at_least_one_after_first_track
-      result: SUCCESS
-      wall_clock_s: 2.57
-      peak_rss_mb: 186
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_sketch_estimate_at_least_one_after_first_track
+      result: SUCCESS
+      wall_clock_s: 1.99
+      peak_rss_mb: 44
     _scored_by: scorer_kani
 - id: EPO-INV-SKETCH-BUCKET-IN-RANGE
   subject: 'Global invariant: every hashed counter position is inside the fixed table'
@@ -5956,14 +6118,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_sketch_bucket_in_range
-      result: SUCCESS
-      wall_clock_s: 1.17
-      peak_rss_mb: 171
     fidelity: arithmetic-core
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_sketch_bucket_in_range
+      result: SUCCESS
+      wall_clock_s: 0.48
+      peak_rss_mb: 29
     _scored_by: scorer_kani
 - id: EPO-INV-SKETCH-HALVE-NON-INCREASING
   subject: 'Global invariant: ageing never raises an estimate'
@@ -6008,18 +6170,18 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'scorer-applied --unwind 4 --no-unwinding-checks: PROVED, but this is a NARROWER claim — it
+      holds for executions within 4 loop iterations and says nothing about longer ones (fidelity bounded-shallow)'
+    status: proved
     evidence:
       harness: verify_epo_inv_sketch_halve_non_increasing
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 1.04
+      wall_clock_s: 1.06
       peak_rss_mb: 29
       lever: nounwindcheck
-    fidelity: bounded-shallow
-    note: 'scorer-applied --unwind 4 --no-unwinding-checks: PROVED, but this is a NARROWER claim — it
-      holds for executions within 4 loop iterations and says nothing about longer ones (fidelity bounded-shallow)'
-    status: proved
     _scored_by: scorer_kani
 - id: EPO-INV-SKETCH-ROW-HASHES-DISTINCT
   subject: 'Global invariant: the four estimator rows use four different hash multipliers'
@@ -6069,14 +6231,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_sketch_row_hashes_distinct
-      result: SUCCESS
-      wall_clock_s: 1.24
-      peak_rss_mb: 172
     fidelity: arithmetic-core
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_sketch_row_hashes_distinct
+      result: SUCCESS
+      wall_clock_s: 0.52
+      peak_rss_mb: 29
     _scored_by: scorer_kani
 - id: EPO-INV-SKETCH-OPS-BOUNDED-BY-FIXED-SIZE
   subject: 'Global invariant: frequency-estimator work is bounded by the fixed table size'
@@ -6127,14 +6289,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_sketch_ops_bounded_by_fixed_size
-      result: SUCCESS
-      wall_clock_s: 3.13
-      peak_rss_mb: 186
     fidelity: representative
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_sketch_ops_bounded_by_fixed_size
+      result: SUCCESS
+      wall_clock_s: 2.49
+      peak_rss_mb: 64
     _scored_by: scorer_kani
 - id: EPO-INV-ADMISSION-DECIDED-ONLY-BY-VICTIM-COMPARISON
   subject: 'Global invariant: admission depends only on the comparison with the current victim'
@@ -6183,14 +6345,14 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
-    evidence:
-      harness: verify_epo_inv_admission_decided_only_by_victim_comparison
-      result: SUCCESS
-      wall_clock_s: 1.12
-      peak_rss_mb: 171
     fidelity: arithmetic-core
     note: scorer re-ran harness -> VERIFICATION SUCCESSFUL
     status: proved
+    evidence:
+      harness: verify_epo_inv_admission_decided_only_by_victim_comparison
+      result: SUCCESS
+      wall_clock_s: 0.43
+      peak_rss_mb: 29
     _scored_by: scorer_kani
 - id: EPO-INV-NO-DATA-CORRUPTION-UNDER-CONCURRENCY
   subject: 'Global invariant: concurrent use cannot corrupt the policy''s state'
@@ -6248,7 +6410,6 @@ properties:
     status: delegated
     _scored_by: scorer_creusot
   kani:
-    evidence: null
     fidelity: real-type-bounded
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
     delegate_to: 'component-framework (lib/component-framework/crates/component-core) — obligation: show
@@ -6259,6 +6420,7 @@ properties:
 
       '
     status: delegated
+    evidence: {}
     _scored_by: scorer_kani
 - id: EPO-INV-CONCURRENT-TRACK-TOTAL-COUNT
   subject: 'Global invariant: concurrent tracks all land exactly once'
@@ -6303,7 +6465,6 @@ properties:
     status: delegated
     _scored_by: scorer_creusot
   kani:
-    evidence: null
     fidelity: real-type-bounded
     note: delegated to a named referent (scorer did not re-derive; refuter audits)
     delegate_to: 'component-framework (lib/component-framework/crates/component-core) — obligation: show
@@ -6314,6 +6475,7 @@ properties:
 
       '
     status: delegated
+    evidence: {}
     _scored_by: scorer_kani
 - id: EPO-INV-AT-MOST-ONE-POOL-LOCK
   subject: 'Global invariant: at most one pool is locked at a time'
@@ -6379,20 +6541,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_at_most_one_pool_lock
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.97
-      peak_rss_mb: 1975
+      wall_clock_s: 167.39
+      peak_rss_mb: 1976
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-LOGGER-OPTIONAL
   subject: 'Global invariant: behaviour does not depend on whether a logger is connected'
@@ -6451,20 +6616,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_logger_optional
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 166.45
-      peak_rss_mb: 1978
+      wall_clock_s: 167.77
+      peak_rss_mb: 1979
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: EPO-INV-NO-STARTUP-BANNER
   subject: 'Global invariant: bringing the component up logs no banner'
@@ -6509,20 +6677,23 @@ properties:
     status: proved
     _scored_by: scorer_creusot
   kani:
+    fidelity: bounded-shallow
+    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
+      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
+      beyond (fidelity bounded-shallow). Its mutant twin was re-run under the same flags and correctly
+      FAILED, so the bounded claim has content rather than passing because the bound pruned the paths
+      away.'
+    status: proved
     evidence:
       harness: verify_epo_inv_no_startup_banner
       result: SUCCESS
       unwind: 4
       unwinding_checks: false
-      wall_clock_s: 167.29
-      peak_rss_mb: 1972
+      wall_clock_s: 168.66
+      peak_rss_mb: 1971
       lever: nounwindcheck
       known_defeat: KD-MULTIMAP-UNWIND-TIMEOUT
-    fidelity: bounded-shallow
-    note: 'known defeat KD-MULTIMAP-UNWIND-TIMEOUT: its mandated lever ''nounwindcheck'' was applied by
-      the scorer and PROVED at --unwind 4 — a NARROWER claim, holding within 4 loop iterations and silent
-      beyond (fidelity bounded-shallow)'
-    status: proved
+      vacuity_checked_under_lever: true
     _scored_by: scorer_kani
 - id: NV-COMPLEXITY-CLAIMS
   scope: The O(1) cost of single-entry operations and the O(n) cost of previewing candidates (NFR-001
@@ -8010,7 +8181,7 @@ reconciliation:
       - EPO-INV-NO-STARTUP-BANNER
       code: []
 run:
-  gate_commit: c4f19575
+  gate_commit: c9f53b38
   gate_branch: skills/verify-methodology-to-unstable
   creusot:
     scored_by: scorer_creusot
@@ -8032,12 +8203,30 @@ run:
     mem_max_mb: 16384
   kani:
     scored_by: scorer_kani
-    command: scorer_kani.py /home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif
-      --component-dir /home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-kani
-      --cap-seconds 240 --cap-max 420 --resume
-    started: '2026-09-27T13:45:47-07:00'
-    finished: '2026-09-27T19:02:33-07:00'
+    command: scorer_kani.py /home/cornel/rescore-vacuity-20260928/eviction-policy-optimized/verif --component-dir
+      /home/cornel/cv-e2e-eviction-policy-optimized-20260925/components/eviction-policy-optimized/verif-kani
+      --cap-seconds 240 --cap-max 420 --wall-budget 500 --resume
+    started: '2026-09-28T13:30:38-07:00'
+    finished: '2026-09-28T21:08:46-07:00'
     kani_version: cargo-kani 0.67.0
     cap_seconds: 240
     cap_max: 420
     mem_max_mb: 16384
+known_corrections:
+- property: EPO-INV-SKETCH-HALVE-NON-INCREASING
+  recorded: '2026-09-28'
+  this_bundle_says: proved (lever nounwindcheck, --unwind 4, fidelity bounded-shallow)
+  should_read: UNRESOLVED — the proof has no content
+  why: 'Scored by gate c9f53b38, whose anti-vacuity check did not yet cover the lever-battery path this
+    property took. The completed gate (6a43f311) runs the mutant under the proof''s own flags and finds
+    it PASSES, which means the proof establishes nothing. Measured: halve() loops CMS_ROWS*CMS_COLS =
+    4*1024 = 4096 iterations, the proof ran at --unwind 4 with --no-unwinding-checks, so at most 4 of
+    4096 counter updates were observed and the flag suppressed the too-small-bound warning. The mutant
+    asserts the OPPOSITE (ageing raised the estimate) and passes identically at unwind 4 and 8. With unwinding
+    checks ON at bound 8 it fails on ''unwinding assertion loop 0'', so it never tests the mutation at
+    any affordable bound.'
+  not_a_defect: The obligation is NOT refuted and the code may well be correct. We have no proof of it,
+    which is unfinished work, not a finding against the implementation.
+  reproduce: python3 scorer_kani.py <verif> --component-dir <component>/verif-kani --only EPO-INV-SKETCH-HALVE-NON-INCREASING
+    --cap-seconds 240 --cap-max 420 --wall-budget 500
+  correct_counts: 'kani: 104 proved / 1 unresolved / 2 refuted / 1 tool-boundary / 2 delegated'
