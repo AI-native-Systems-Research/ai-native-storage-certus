@@ -1,0 +1,232 @@
+//! Key-derivation tests, per `contracts/key-derivation.md`.
+//!
+//! These were written **before** `src/keys.rs`: the contract already fixes the
+//! expected values, so there is nothing to discover from the implementation.
+//!
+//! # The values in this file are permanent
+//!
+//! Two independent programs must compute the same key — the generator that
+//! writes a trace and any consumer that later checks one it did not produce
+//! (FR-029, FR-034). So changing a single expected value here does not "fix a
+//! test", it makes every trace ever produced by this tool unverifiable, and it
+//! does so silently, because such a trace still loads and still replays. If a
+//! change here ever looks necessary, the key function has to be *versioned*
+//! instead, with the run reporting which version produced the keys.
+
+use workload_model::keys::{self, CacheKey, ROOT_PARENT};
+
+// ---------------------------------------------------------------------------
+// The mix function — the three normative vectors from the contract.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn splitmix64_matches_the_normative_vectors() {
+    assert_eq!(keys::splitmix64(0), 0xe220_a839_7b1d_cdaf);
+    assert_eq!(keys::splitmix64(1), 0x910a_2dec_8902_5cc1);
+    assert_eq!(keys::splitmix64(u64::MAX), 0xe4d9_7177_1b65_2c20);
+}
+
+#[test]
+fn splitmix64_is_a_pure_function_of_its_input() {
+    // Not a tautology worth skipping: it rules out an implementation that
+    // carries state between calls, which is how splitmix64 is normally used
+    // (as a generator advancing a seed) and would make keys depend on call
+    // order rather than on identity.
+    for x in [0u64, 1, 2, 42, 1 << 33, u64::MAX] {
+        assert_eq!(keys::splitmix64(x), keys::splitmix64(x));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The chain.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn key_is_the_contract_composition() {
+    // key(parent, salt) = splitmix64(splitmix64(parent) ^ salt).
+    //
+    // Asserting the composition rather than only its outputs catches the
+    // plausible-looking simplification `splitmix64(parent ^ salt)`, which drops
+    // the inner mix. That inner mix is what stops a low-entropy salt from
+    // leaving the parent's structure visible in the child's low bits.
+    for (parent, salt) in [
+        (0u64, 0u64),
+        (0, 1),
+        (1, 0),
+        (12345, 67890),
+        (u64::MAX, u64::MAX),
+    ] {
+        assert_eq!(
+            keys::key(parent, salt),
+            keys::splitmix64(keys::splitmix64(parent) ^ salt),
+            "key({parent}, {salt}) is not the contract composition"
+        );
+    }
+}
+
+#[test]
+fn key_is_not_splitmix_of_the_xor() {
+    // The specific wrong implementation the test above is aimed at. If these
+    // ever agree, the inner mix has been dropped.
+    assert_ne!(keys::key(1, 2), keys::splitmix64(1 ^ 2));
+}
+
+/// T015 — **permanently pinned** chain vectors. See the module header.
+#[test]
+fn chain_vectors_are_pinned() {
+    // A chain root uses parent 0.
+    assert_eq!(ROOT_PARENT, 0);
+
+    // The contract's worked example: key(parent=0, salt=0) and salt=1.
+    assert_eq!(keys::key(ROOT_PARENT, 0), 0xa706_dd2f_4d19_7e6f);
+    assert_eq!(keys::key(ROOT_PARENT, 1), 0x08b4_fda8_c892_b50e);
+
+    // The contract's required two-element chain: (parent=0, salt=1) then
+    // (parent=that, salt=2).
+    let first: CacheKey = keys::key(ROOT_PARENT, 1);
+    let second: CacheKey = keys::key(first, 2);
+    assert_eq!(first, 0x08b4_fda8_c892_b50e);
+    assert_eq!(second, 0xbedb_5bf1_cd5e_c111);
+
+    // And the three salt constructors at fixed coordinates, so the *salt
+    // layout* is pinned too and not only the mix function. A change to the
+    // field offsets would otherwise pass every test above.
+    assert_eq!(
+        keys::key(ROOT_PARENT, keys::shared_salt(0, 0, 0)),
+        0xfb26_9438_518a_37a0
+    );
+    assert_eq!(
+        keys::key(ROOT_PARENT, keys::input_salt(7, 3)),
+        0x5330_5e28_21f0_4364
+    );
+    assert_eq!(
+        keys::key(ROOT_PARENT, keys::output_salt(7, 3)),
+        0x6247_41cd_5024_ca0e
+    );
+}
+
+#[test]
+fn a_chain_is_order_dependent() {
+    // Reuse between sessions requires a matching *leading run*, so the chain
+    // must not be commutative in its salts.
+    let a = keys::key(keys::key(ROOT_PARENT, 1), 2);
+    let b = keys::key(keys::key(ROOT_PARENT, 2), 1);
+    assert_ne!(
+        a, b,
+        "chain is order-independent, so prefix position is not encoded"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Salt partitioning.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn salt_space_is_partitioned_by_block_kind() {
+    // The tag occupies bits 48.. so no two block kinds can collide by
+    // construction, whatever their coordinates.
+    let shared = keys::shared_salt(0, 7, 3);
+    let input = keys::input_salt(7, 3);
+    let output = keys::output_salt(7, 3);
+    assert_ne!(shared, input);
+    assert_ne!(shared, output);
+    assert_ne!(input, output);
+
+    // Tags, read back out of the top two bits.
+    assert_eq!(shared >> 62, 1, "SHARED_TAG");
+    assert_eq!(input >> 62, 2, "INPUT_TAG");
+    assert_eq!(output >> 62, 3, "OUTPUT_TAG");
+}
+
+#[test]
+fn salt_fields_are_distinct_positions() {
+    // Each coordinate must move the salt on its own, or two different blocks
+    // would share a key.
+    assert_ne!(keys::shared_salt(0, 0, 0), keys::shared_salt(1, 0, 0));
+    assert_ne!(keys::shared_salt(0, 0, 0), keys::shared_salt(0, 1, 0));
+    assert_ne!(keys::shared_salt(0, 0, 0), keys::shared_salt(0, 0, 1));
+    assert_ne!(keys::input_salt(0, 0), keys::input_salt(1, 0));
+    assert_ne!(keys::input_salt(0, 0), keys::input_salt(0, 1));
+}
+
+#[test]
+fn shared_salt_layout_matches_the_contract() {
+    // (SHARED_TAG << 62) ^ (class_id << 50) ^ (instance_index << 24) ^ ordinal
+    // Probe values chosen so every field is distinct and none is a prefix of
+    // another, and each fits its own width.
+    assert_eq!(
+        keys::shared_salt(0xabc, 0x123456, 0xdef012),
+        (1u64 << 62) ^ (0xabcu64 << 50) ^ (0x123456u64 << 24) ^ 0xdef012
+    );
+    assert_eq!(
+        keys::shared_salt(0xabc, 0x123456, 0xdef012),
+        0x6af0_1234_56de_f012
+    );
+}
+
+#[test]
+fn session_salt_layout_matches_the_contract() {
+    // (TAG << 62) ^ (session_id << 24) ^ ordinal
+    assert_eq!(
+        keys::input_salt(0x1234_5678, 0x9abc),
+        (2u64 << 62) ^ (0x1234_5678u64 << 24) ^ 0x9abc
+    );
+    assert_eq!(
+        keys::output_salt(0x1234_5678, 0x9abc),
+        (3u64 << 62) ^ (0x1234_5678u64 << 24) ^ 0x9abc
+    );
+    assert_eq!(keys::input_salt(0x1234_5678, 0x9abc), 0x8012_3456_7800_9abc);
+    assert_eq!(
+        keys::output_salt(0x1234_5678, 0x9abc),
+        0xc012_3456_7800_9abc
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Field bounds. The salt is built with XOR, so a field that overflows its
+// width does not saturate — it silently corrupts a neighbouring field and
+// aliases two different blocks onto one key. That must be loud.
+// ---------------------------------------------------------------------------
+
+#[test]
+#[should_panic(expected = "block_ordinal")]
+fn shared_ordinal_beyond_its_field_panics() {
+    keys::shared_salt(0, 0, 1 << 24);
+}
+
+#[test]
+#[should_panic(expected = "instance_index")]
+fn instance_index_beyond_its_field_panics() {
+    keys::shared_salt(0, 1 << 26, 0);
+}
+
+#[test]
+#[should_panic(expected = "class_id")]
+fn class_id_beyond_its_field_panics() {
+    keys::shared_salt(1 << 12, 0, 0);
+}
+
+#[test]
+#[should_panic(expected = "session_id")]
+fn session_id_beyond_its_field_panics() {
+    keys::input_salt(1 << 38, 0);
+}
+
+#[test]
+fn field_maxima_are_accepted() {
+    // The boundary on the legal side, so the assertions are not off by one.
+    // All fields at maximum must give exactly the top of each tag's range,
+    // which is what proves the layout covers all 64 bits with no overlap.
+    assert_eq!(
+        keys::shared_salt((1 << 12) - 1, (1 << 26) - 1, (1 << 24) - 1),
+        0x7fff_ffff_ffff_ffff
+    );
+    assert_eq!(
+        keys::input_salt((1 << 38) - 1, (1 << 24) - 1),
+        0xbfff_ffff_ffff_ffff
+    );
+    assert_eq!(
+        keys::output_salt((1 << 38) - 1, (1 << 24) - 1),
+        0xffff_ffff_ffff_ffff
+    );
+}

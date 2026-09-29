@@ -1,0 +1,93 @@
+# lever_battery.yaml — the "use every available feature" arsenal, encoded as an
+# ENFORCEABLE contract. This is the heart of the strong gate: a `tool-boundary`
+# claim is INADMISSIBLE until every lever listed here for the observed failure
+# class has been applied AS A NAMED, RUNNABLE ARTIFACT and the scorer has itself
+# re-run each one and watched it fail. Missing a required lever variant = the
+# property scores UNRESOLVED (gate fails), never tool-boundary.
+#
+# The scorer (scorer_kani.py / scorer_creusot.py) reads this file. It is
+# READ-ONLY to the proving agent at run time — the agent may not edit its own
+# rules. Adding a lever here makes it mandatory for every future run.
+#
+# Artifact naming convention (deterministic, so the scorer can find variants):
+#   base harness:            verify_<ID>            (ID lowercased, '-' -> '_')
+#   lever variant:           verify_<ID>__<lever>   (e.g. verify_ep_touch_post__nounwindcheck)
+# A property may instead point the scorer at an existing descriptive harness via
+#   kani.evidence.harness: <name>
+# but the scorer still EXECUTES that harness — the pointer is not the proof.
+
+version: 3
+tool: kani
+
+# ---------------------------------------------------------------------------
+# Levers — each is a concrete Kani feature. `probe` is how the scorer runs the
+# variant; `defeats` names the failure classes this lever is expected to break.
+# ---------------------------------------------------------------------------
+levers:
+  unwind_sweep:
+    scorer_applied: true          # scorer re-runs the base harness at --unwind 4/8/16/32 with unwinding CHECKS ON; a pass is full-strength proved
+    desc: "Raise --unwind across a range; a too-low bound gives a spurious 'unwinding assertion loop 0'."
+    variants_required: ">=2 distinct unwind values, at least one at the cap"
+    probe: "cargo kani --harness <h> --unwind <k>   # for each k in the sweep"
+    defeats: [unwinding-assertion]
+  nounwindcheck:
+    scorer_applied: true          # scorer re-runs at --unwind 4/8 WITH --no-unwinding-checks; tried LAST because a pass is a narrower claim, recorded as fidelity bounded-shallow
+    desc: "Bounded-shallow: --no-unwinding-checks cuts hashbrown's probe loop at N and verifies the bounded prefix."
+    # no variant: --no-unwinding-checks is a CLI flag with no source form, so the scorer
+    # applies it directly. Demanding an artifact here made the lever unsatisfiable.
+    probe: "cargo kani --harness <h> --unwind 2 --no-unwinding-checks"
+    defeats: [unwinding-assertion, sat-timeout]
+    fidelity_if_used: bounded-shallow   # sound ONLY for executions where every loop runs <= N
+  stub:
+    desc: "kani::stub expensive/opaque deps (RandomState::new -> fixed [0,0] seed; I/O; crypto) to kill construction walls."
+    variant: "verify_<ID>__stub   (or #[kani::stub(...)] on the base harness)"
+    probe: "cargo kani --harness <h> -Z stubbing"
+    defeats: [construction-wall, getrandom-syscall]
+  solver_swap:
+    scorer_applied: true          # scorer re-runs the base harness under --solver cadical then minisat; a pass is full-strength proved
+    desc: "Swap the SAT/SMT backend; minisat and cadical have very different timeout profiles."
+    variants_required: "both minisat AND cadical attempted"
+    probe: "cargo kani --harness <h> --solver minisat ; cargo kani --harness <h> --solver cadical"
+    defeats: [sat-timeout]
+  concrete_inputs:
+    desc: "Use concrete representative keys/values instead of symbolic; symbolic CacheKey drives SipHash over symbolic bytes and blows up."
+    variant: "verify_<ID>__concrete"
+    probe: "cargo kani --harness <h>"
+    defeats: [symbolic-key-blowup, sat-timeout]
+    fidelity_if_used: representative
+  split_harness:
+    desc: "Decompose one over-broad harness into per-effect harnesses so each fits the solver budget."
+    variant: "verify_<ID>__split_*"
+    probe: "cargo kani --harness <h>   # each split"
+    defeats: [sat-timeout, path-explosion]
+
+# ---------------------------------------------------------------------------
+# Failure classes — the scorer classifies a harness's stderr into one of these,
+# then REQUIRES every lever whose `defeats` covers the class to have been
+# applied as a runnable variant it can re-run. A tool-boundary is admissible
+# ONLY when the full required set has been run and each still fails, AND the
+# residual signature is not in known_defeats.yaml.
+# ---------------------------------------------------------------------------
+failure_classes:
+  construction-wall:
+    signatures: ["getrandom", "RandomState", "SipHash", "std::collections::hash", "hashbrown::raw::RawTable::new"]
+    required_levers: [stub]
+    note: "Almost always a known defeat — see known_defeats.yaml KD-HASHMAP-RANDOMSTATE."
+  unwinding-assertion:
+    signatures: ["unwinding assertion loop", "unwind.*assertion.*FAILED"]
+    required_levers: [unwind_sweep, nounwindcheck]
+  sat-timeout:
+    signatures: ["Solver.*time", "timed out", "TIMEOUT", "backend.*exceeded", "process.*killed"]
+    required_levers: [nounwindcheck, solver_swap, concrete_inputs, split_harness]
+    note: "The register_idempotent/touch/remove wall lived here; nounwindcheck defeated it at unwind 2 (~7s)."
+  symbolic-key-blowup:
+    signatures: ["SipHash", "symbolic.*key", "hash.*symbolic"]
+    required_levers: [concrete_inputs, nounwindcheck]
+    note: "Fully-sound symbolic-key invariants ARE a genuine Kani boundary -> route to Creusot FMap induction, but only AFTER concrete_inputs + nounwindcheck variants are shown to run (partial coverage still recorded)."
+  path-explosion:
+    signatures: ["too many paths", "state.*explosion"]
+    required_levers: [split_harness, concrete_inputs, nounwindcheck]
+
+# A tool-boundary whose failure class is NOT in this list is itself inadmissible:
+# an unclassifiable failure means the harness is broken, not that the tool has a
+# limit. Fix the harness. Default verdict for everything unproven: UNRESOLVED.

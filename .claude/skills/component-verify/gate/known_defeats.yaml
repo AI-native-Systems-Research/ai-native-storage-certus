@@ -1,0 +1,68 @@
+# known_defeats.yaml — the registry of walls we have ALREADY BROKEN. This is the
+# monotonic ratchet: once a wall is defeated, claiming a tool-boundary on that
+# same signature is auto-rejected forever. The scorer matches an unproven
+# harness's failure signature against these entries; a match forces the mandated
+# lever and scores the property UNRESOLVED (not tool-boundary) with the message
+# "this wall has a documented defeat — apply <lever>."
+#
+# GROW THIS FILE: every time the adversarial refuter (refute-tool-boundary) beats
+# a wall, or a run defeats a new one, append the signature + the lever that broke
+# it. The escape space only ever shrinks.
+#
+# READ-ONLY to the proving agent at run time. Only the orchestrator
+# (component-verify) appends, and only from a *reproduced* defeat.
+
+version: 1
+
+defeats:
+  - id: KD-HASHMAP-RANDOMSTATE
+    tool: kani
+    wall: "HashMap/hashbrown construction pulls RandomState::new -> getrandom syscall / symbolic SipHash seed; Kani stalls or the seed is symbolic."
+    signatures: ["getrandom", "RandomState::new", "hashbrown::raw::RawTable::new", "SipHash"]
+    mandated_lever: stub
+    recipe: >
+      #[kani::stub(RandomState::new, concrete_state)] where
+      fn concrete_state() -> RandomState { unsafe { core::mem::transmute([0u64, 0u64]) } }
+      plus -Z stubbing and #[kani::solver(minisat)]. Proves in situ over the real Pool
+      (two HashMaps + BTreeSet + arena Vec). MEASURED: clock 3.53s/347MB, create_pool_empty
+      9.91s/554MB at unwind 5.
+    proven_on: "eviction-policy-session-lists @ b3307dfac5 (2026-09-16)"
+
+  - id: KD-MULTIMAP-UNWIND-TIMEOUT
+    tool: kani
+    wall: ">=2 HashMap-mutation harnesses: unwind<=3 gives spurious 'unwinding assertion loop 0'; unwind>=5 SAT-times-out (>500s, minisat AND cadical)."
+    signatures: ["unwinding assertion loop 0", "Solver.*time", "timed out"]
+    mandated_lever: nounwindcheck
+    recipe: >
+      Low unwind (2) + --no-unwinding-checks cuts hashbrown's probe loop at N and verifies the
+      bounded prefix -> ~7s / ~355MB (~70x faster). Fidelity = bounded-shallow (sound only for
+      executions where every loop runs <= N; deeper iterations are cut off, NOT proven -> a
+      fully-sound proof still routes to Creusot FMap induction, but the bounded coverage MUST be
+      recorded, not discarded as a tool-boundary). Use CONCRETE representative keys.
+    proven_on: "eviction-policy-session-lists @ b3307dfac5 (2026-09-16)"
+
+  - id: KD-STD-CONTAINER-NO-SPECS
+    tool: creusot
+    wall: "std HashMap/Vec/BTreeMap/BTreeSet carry NO logical insert/remove/get specs, so Creusot cannot reason about a raw std container mutation -> goals over it never discharge."
+    signatures: ["HashMap", "BTreeMap", "BTreeSet", "no specification", "std::collections"]
+    mandated_lever: fmap_mirror
+    recipe: >
+      Model the container as a logic-level FMap (or Seq) ghost mirror and prove CONTAINS-REFLECTS /
+      INIT-GATE / PTR-IN-BOUNDS over the mirror (creusot_std::logic::FMap has insert/remove/get
+      specs; std HashMap does not). Fidelity = ghost-mirror. PROVEN on memory-tier (FMap
+      CONTAINS-REFLECTS, caac84d2) and dispatch-map (Pool maps as FMap, c87f1e25). Claiming a
+      Creusot tool-boundary on a raw std container is rejected — the FMap mirror is the lever.
+    proven_on: "dispatch-map @ c87f1e25 + memory-tier @ caac84d2 (2026-09)"
+
+  - id: KD-RAWPTR-ARC-OPAQUE
+    tool: creusot
+    wall: "Raw pointers (*mut/*const), Arc<...>, Rc<...>, trait objects and FFI values are unprocessable by creusot-rustc -> the verif crate won't translate."
+    signatures: ["cannot process", "raw pointer", "\\*mut ", "Arc<", "Rc<", "dyn ", "trait object"]
+    mandated_lever: trusted_boundary
+    recipe: >
+      Replace the opaque value with an opaque u64 HANDLE and axiomatize only the behavior that
+      matters behind a #[trusted] boundary (dispatch-map's Location enum mirrors Arc<DmaBuffer> as
+      buffer_handle:u64, *mut u8 as offset:u64, mem_handle:u64 -> the rest of the proof runs over the
+      real logic). Fidelity = trusted-boundary. PROVEN on dispatch-map @ c87f1e25. An opaque-type
+      translate failure is therefore never a tool-boundary — the handle mirror is the lever.
+    proven_on: "dispatch-map @ c87f1e25 (2026-09-16)"
