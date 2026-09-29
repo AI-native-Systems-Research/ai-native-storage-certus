@@ -1,0 +1,35 @@
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 746 0 746 34 *)
+
+let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 745 10 745 25
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Vec_Node_Global
+
+type t_Vec_u32_Global
+
+type t_Vec_tup2_u64_u32_Global
+
+type t_Map = { e: t_Vec_tup2_u64_u32_Global }
+
+type t_Leaves = { e'0: t_Vec_tup2_u64_u32_Global }
+
+type t_Pool = {
+  nodes: t_Vec_Node_Global;
+  free: t_Vec_u32_Global;
+  by_key: t_Map;
+  sessions: t_Map;
+  leaves: t_Leaves;
+  clock: UInt64.t;
+  len: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let pool_len [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 746 0 746 34]
+  (p: t_Pool) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- p.len ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & p: t_Pool = p ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:pool_len ensures] [%#slib] result = p.len} (! return {result}) ]

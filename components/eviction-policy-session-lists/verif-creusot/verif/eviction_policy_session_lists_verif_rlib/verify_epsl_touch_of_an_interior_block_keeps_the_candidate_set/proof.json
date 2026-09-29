@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_verify_epsl_touch_of_an_interior_block_keeps_the_candidate_set": {
+        "prover": "alt-ergo",
+        "time": 0.078
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1330 0 1330 38 *)
+
+let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1331 14 1331 15
+let%span slib'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1331 4 1331 15
+let%span slib'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1332 18 1332 19
+let%span slib'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1332 4 1332 19
+let%span slib'3 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1323 11 1323 83
+let%span slib'4 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1324 10 1324 38
+let%span slib'5 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1325 10 1325 38
+let%span slib'6 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1326 10 1326 65
+let%span slib'7 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1327 10 1327 70
+let%span slib'8 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1328 10 1328 46
+let%span slib'9 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1329 10 1329 64
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_LockTrace = { held: UInt64.t; peak: UInt64.t; acquires: UInt64.t; writes': UInt64.t; reads': UInt64.t }
+
+predicate resolve_refmut_LockTrace [@inline:trivial] (_1: MutBorrow.t t_LockTrace) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_LockTrace
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lock_acquire [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1330 0 1330 38]
+  (t: MutBorrow.t t_LockTrace) (return (x: ())) =
+{[@stop_split] [@expl:lock_acquire requires] [%#slib'3] UInt64.t'int t.current.held < 4294967294
+  /\ UInt64.t'int t.current.peak < 4294967294 /\ UInt64.t'int t.current.acquires < 4294967294}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib'0] {t.current.held} {[%#slib] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &t <- { t with current = { t.current with held = _x } } ] s1)
+    | s1 = UInt64.add [%#slib'2] {t.current.acquires} {[%#slib'1] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &t <- { t with current = { t.current with acquires = _x } } ] s2)
+    | s2 = [ &_18 <- UInt64.gt t.current.held t.current.peak ] s3
+    | s3 = any [ br0 -> {_18 = false} (! bb2) | br1 -> {_18} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &t <- { t with current = { t.current with peak = t.current.held } } ] s1
+    | s1 = -{resolve_refmut_LockTrace t}- s2
+    | s2 = return {_ret} ]
+  | bb2 = s0 [ s0 = -{resolve_refmut_LockTrace t}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & t: MutBorrow.t t_LockTrace = t | & _18: bool = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:lock_acquire ensures] ([@stop_split] [@expl:lock_acquire ensures #0] [%#slib'4] UInt64.t'int t.final.held
+      = UInt64.t'int t.current.held + 1)
+    /\ ([@stop_split] [@expl:lock_acquire ensures #1] [%#slib'5] UInt64.t'int t.final.peak
+      >= UInt64.t'int t.current.held + 1)
+    /\ ([@stop_split] [@expl:lock_acquire ensures #2] [%#slib'6] UInt64.t'int t.current.peak
+        >= UInt64.t'int t.current.held + 1 -> t.final.peak = t.current.peak)
+    /\ ([@stop_split] [@expl:lock_acquire ensures #3] [%#slib'7] UInt64.t'int t.current.peak
+        < UInt64.t'int t.current.held + 1 -> UInt64.t'int t.final.peak = UInt64.t'int t.current.held + 1)
+    /\ ([@stop_split] [@expl:lock_acquire ensures #4] [%#slib'8] UInt64.t'int t.final.acquires
+      = UInt64.t'int t.current.acquires + 1)
+    /\ ([@stop_split] [@expl:lock_acquire ensures #5] [%#slib'9] t.final.writes' = t.current.writes'
+    /\ t.final.reads' = t.current.reads')}
+    (! return {result}) ]

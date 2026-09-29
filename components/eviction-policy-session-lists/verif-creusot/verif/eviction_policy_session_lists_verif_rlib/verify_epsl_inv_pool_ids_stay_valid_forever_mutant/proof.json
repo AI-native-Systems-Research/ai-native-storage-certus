@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.034 }
+    }
+  }
+}

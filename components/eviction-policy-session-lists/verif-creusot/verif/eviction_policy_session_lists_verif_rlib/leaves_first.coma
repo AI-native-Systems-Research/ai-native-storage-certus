@@ -1,0 +1,99 @@
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 408 0 408 53 *)
+
+let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 409 7 409 16
+let%span slib'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 409 20 409 21
+let%span slib'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 409 47 409 48
+let%span slib'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 409 46 409 49
+let%span slib'3 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 403 11 403 30
+let%span slib'4 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 404 10 407 29
+let%span slib'5 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 164 16 164 93
+let%span slib'6 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 157 16 157 60
+let%span svec = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_tup2_u64_u32_Global
+
+type t_Leaves = { e: t_Vec_tup2_u64_u32_Global }
+
+type tup2_u64_u32 = { f0: UInt64.t; f1: UInt32.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_u32_Global (self: t_Vec_tup2_u64_u32_Global) : Seq.seq tup2_u64_u32
+
+axiom view_Vec_tup2_u64_u32_Global_spec:
+  forall self: t_Vec_tup2_u64_u32_Global [view_Vec_tup2_u64_u32_Global self]. [%#svec'2] Seq.length (view_Vec_tup2_u64_u32_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_tup2_u64_u32 (self_: t_Vec_tup2_u64_u32_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_tup2_u64_u32_Global self_)}
+    (! return {result}) ]
+
+type t_Option_tup2_u64_u32 = None | Some tup2_u64_u32
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_u32) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq tup2_u64_u32) (out: tup2_u64_u32) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_tup2_u64_u32_Global (self_: t_Vec_tup2_u64_u32_Global) (ix: UInt64.t) (return (x: tup2_u64_u32)) =
+{[@stop_split] [@expl:index requires] [%#svec'0] in_bounds_usize ix (view_Vec_tup2_u64_u32_Global self_)}
+  any
+  [ return (result: tup2_u64_u32) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'1] has_value_usize ix (view_Vec_tup2_u64_u32_Global self_) result}
+    (! return {result}) ]
+
+predicate pair_lt [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 156 0 156 52] (a: tup2_u64_u32) (b: tup2_u64_u32) =
+  [%#slib'6] UInt64.t'int a.f0 < UInt64.t'int b.f0
+  \/ UInt64.t'int a.f0 = UInt64.t'int b.f0 /\ UInt32.t'int a.f1 < UInt32.t'int b.f1
+
+predicate leaves_sorted [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 163 0 163 48] (l: Seq.seq tup2_u64_u32) =
+  [%#slib'5] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length l -> pair_lt (Seq.get l i) (Seq.get l j)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let leaves_first [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 408 0 408 53]
+  (l: t_Leaves) (return (x: t_Option_tup2_u64_u32)) =
+{[@stop_split] [@expl:leaves_first requires] [%#slib'3] leaves_sorted (view_Vec_tup2_u64_u32_Global l.e)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = len_tup2_u64_u32 [%#slib] {l.e} (fun (_x: UInt64.t) -> [ &_7 <- _x ] s1)
+    | s1 = [ &_6 <- _7 = ([%#slib'0] (0: UInt64.t)) ] s2
+    | s2 = any [ br0 -> {_6 = false} (! bb3) | br1 -> {_6} (! bb2) ] ]
+  | bb2 = s0 [ s0 = [ &_ret <- None ] s1 | s1 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = index_Vec_tup2_u64_u32_Global [%#slib'2] {l.e} {[%#slib'1] (0: UInt64.t)}
+        (fun (_x: tup2_u64_u32) -> [ &_10 <- _x ] s1)
+    | s1 = [ &_ret <- Some _10 ] s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: t_Option_tup2_u64_u32 = Any.any_l ()
+  | & l: t_Leaves = l
+  | & _6: bool = Any.any_l ()
+  | & _7: UInt64.t = Any.any_l ()
+  | & _10: tup2_u64_u32 = Any.any_l () ])
+  [ return (result: t_Option_tup2_u64_u32) -> {[@stop_split] [@expl:leaves_first ensures] [%#slib'4] match result with
+      | Some x -> Seq.length (view_Vec_tup2_u64_u32_Global l.e) > 0
+      /\ x = Seq.get (view_Vec_tup2_u64_u32_Global l.e) 0
+      /\ (forall j: int. 0 <= j /\ j < Seq.length (view_Vec_tup2_u64_u32_Global l.e)
+        -> x = Seq.get (view_Vec_tup2_u64_u32_Global l.e) j \/ pair_lt x (Seq.get (view_Vec_tup2_u64_u32_Global l.e) j))
+      | None -> Seq.length (view_Vec_tup2_u64_u32_Global l.e) = 0
+      end}
+    (! return {result}) ]

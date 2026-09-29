@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_verify_epsl_handle_operations_reject_unknown_domain": {
+        "prover": "alt-ergo",
+        "time": 0.069
+      }
+    }
+  }
+}

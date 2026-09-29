@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epsl_arena_slot_count_assumed_below_u32_max": {
+        "prover": "alt-ergo",
+        "time": 0.063
+      }
+    }
+  }
+}

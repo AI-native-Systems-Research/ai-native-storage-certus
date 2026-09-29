@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_pool_register": { "prover": "alt-ergo", "time": 0.019 } }
+  }
+}

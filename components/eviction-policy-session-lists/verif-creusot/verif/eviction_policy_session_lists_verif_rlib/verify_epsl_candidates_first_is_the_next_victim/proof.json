@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_verify_epsl_candidates_first_is_the_next_victim": {
+        "prover": "alt-ergo",
+        "time": 0.075
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_verify_epsl_inv_failed_operations_change_nothing": {
+        "prover": "alt-ergo",
+        "time": 0.193
+      }
+    }
+  }
+}

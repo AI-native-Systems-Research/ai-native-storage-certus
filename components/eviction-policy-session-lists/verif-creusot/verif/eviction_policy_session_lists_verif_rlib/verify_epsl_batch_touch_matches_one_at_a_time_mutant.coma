@@ -1,0 +1,506 @@
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 2585 0 2587 17 *)
+
+let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 2588 12 2588 29
+let%span slib'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 2589 12 2589 29
+let%span slib'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 2580 11 2580 20
+let%span slib'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 2581 11 2581 57
+let%span slib'3 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 2582 11 2582 57
+let%span slib'4 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 2583 10 2583 54
+let%span slib'5 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 856 11 856 22
+let%span slib'6 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 857 11 857 42
+let%span slib'7 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 858 10 858 82
+let%span slib'8 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 859 10 862 61
+let%span slib'9 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 863 10 863 51
+let%span slib'10 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 864 10 864 62
+let%span slib'11 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 865 10 865 63
+let%span slib'12 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 866 10 870 49
+let%span slib'13 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 871 10 872 45
+let%span slib'14 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 873 10 873 48
+let%span slib'15 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 874 10 874 34
+let%span slib'16 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 875 10 875 42
+let%span slib'17 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 876 10 876 46
+let%span slib'18 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 877 10 877 30
+let%span slib'19 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 878 10 878 36
+let%span slib'20 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 879 10 879 92
+let%span slib'21 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 880 10 883 81
+let%span slib'22 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 884 10 884 21
+let%span slib'23 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 885 10 885 25
+let%span slib'24 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 886 10 886 32
+let%span slib'25 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 887 10 887 25
+let%span slib'26 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 888 10 888 35
+let%span slib'27 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 889 10 889 25
+let%span slib'28 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 890 10 890 33
+let%span slib'29 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 891 10 891 32
+let%span slib'30 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 892 10 892 26
+let%span slib'31 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 893 10 893 33
+let%span slib'32 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 894 10 894 26
+let%span slib'33 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 895 10 895 30
+let%span slib'34 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 896 10 896 29
+let%span slib'35 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 897 10 897 33
+let%span slib'36 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 898 10 898 40
+let%span slib'37 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 899 10 899 26
+let%span slib'38 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 900 10 900 35
+let%span slib'39 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 901 10 901 35
+let%span slib'40 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 902 10 902 35
+let%span slib'41 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 903 10 903 34
+let%span slib'42 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 904 10 904 33
+let%span slib'43 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 905 10 905 26
+let%span slib'44 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 906 10 906 38
+let%span slib'45 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 907 10 907 24
+let%span slib'46 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 908 10 908 30
+let%span slib'47 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 909 10 909 30
+let%span slib'48 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 910 10 910 39
+let%span slib'49 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 911 10 911 43
+let%span slib'50 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 912 10 912 56
+let%span slib'51 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 913 10 913 40
+let%span slib'52 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 914 10 914 29
+let%span slib'53 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 915 10 915 36
+let%span slib'54 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1857 8 1857 85
+let%span slib'55 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 683 8 686 56
+let%span slib'56 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 170 16 170 65
+let%span slib'57 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 423 8 434 55
+let%span slib'58 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 442 16 442 56
+let%span slib'59 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 588 8 588 90
+let%span slib'60 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 595 8 595 96
+let%span slib'61 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 602 8 603 82
+let%span slib'62 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 449 16 449 80
+let%span slib'63 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 660 8 663 31
+let%span slib'64 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 670 8 673 31
+let%span slib'65 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 456 16 456 61
+let%span slib'66 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 463 8 467 91
+let%span slib'67 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 567 8 569 63
+let%span slib'68 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 577 8 580 78
+let%span slib'69 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 476 16 476 52
+let%span slib'70 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 638 8 641 66
+let%span slib'71 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 135 16 135 94
+let%span slib'72 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 483 16 483 68
+let%span slib'73 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 492 8 494 64
+let%span slib'74 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 649 8 652 60
+let%span slib'75 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 500 16 500 66
+let%span slib'76 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 611 8 613 76
+let%span slib'77 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 620 8 621 58
+let%span slib'78 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 628 8 630 52
+let%span slib'79 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 508 8 509 25
+let%span slib'80 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 518 8 519 44
+let%span slib'81 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 542 8 544 56
+let%span slib'82 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 164 16 164 93
+let%span slib'83 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 556 8 558 35
+let%span slib'84 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 530 8 534 33
+let%span slib'85 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 203 16 203 61
+let%span slib'86 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 197 16 197 91
+let%span slib'87 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 191 16 191 89
+let%span slib'88 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 157 16 157 60
+let%span svec = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Node_Global
+
+type t_Vec_u32_Global
+
+type t_Vec_tup2_u64_u32_Global
+
+type t_Map = { e: t_Vec_tup2_u64_u32_Global }
+
+type t_Leaves = { e'0: t_Vec_tup2_u64_u32_Global }
+
+type t_Pool = {
+  nodes: t_Vec_Node_Global;
+  free: t_Vec_u32_Global;
+  by_key: t_Map;
+  sessions: t_Map;
+  leaves: t_Leaves;
+  clock: UInt64.t;
+  len: UInt64.t }
+
+type t_Option_u32 = None | Some UInt32.t
+
+type t_Node = {
+  key: UInt64.t;
+  session: UInt64.t;
+  parent: t_Option_u32;
+  child: t_Option_u32;
+  stamp: UInt64.t;
+  birth: UInt64.t;
+  active: bool }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Node_Global (self: t_Vec_Node_Global) : Seq.seq t_Node
+
+axiom view_Vec_Node_Global_spec:
+  forall self: t_Vec_Node_Global [view_Vec_Node_Global self]. [%#svec] Seq.length (view_Vec_Node_Global self)
+    <= UInt64.t'int const_MAX
+
+function view_Vec_u32_Global (self: t_Vec_u32_Global) : Seq.seq UInt32.t
+
+axiom view_Vec_u32_Global_spec:
+  forall self: t_Vec_u32_Global [view_Vec_u32_Global self]. [%#svec] Seq.length (view_Vec_u32_Global self)
+    <= UInt64.t'int const_MAX
+
+type tup2_u64_u32 = { f0: UInt64.t; f1: UInt32.t }
+
+function view_Vec_tup2_u64_u32_Global (self: t_Vec_tup2_u64_u32_Global) : Seq.seq tup2_u64_u32
+
+axiom view_Vec_tup2_u64_u32_Global_spec:
+  forall self: t_Vec_tup2_u64_u32_Global [view_Vec_tup2_u64_u32_Global self]. [%#svec] Seq.length (view_Vec_tup2_u64_u32_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate idx_ok [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 421 0 421 31] (p: t_Pool) =
+  [%#slib'57] Seq.length (view_Vec_Node_Global p.nodes) <= 4294967295
+  /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_Node_Global p.nodes)
+      -> match (Seq.get (view_Vec_Node_Global p.nodes) i).parent with
+        | Some x -> UInt32.t'int x < Seq.length (view_Vec_Node_Global p.nodes)
+        | None -> true
+        end)
+  /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_Node_Global p.nodes)
+      -> match (Seq.get (view_Vec_Node_Global p.nodes) i).child with
+        | Some x -> UInt32.t'int x < Seq.length (view_Vec_Node_Global p.nodes)
+        | None -> true
+        end)
+  /\ (forall k: int. 0 <= k /\ k < Seq.length (view_Vec_u32_Global p.free)
+      -> UInt32.t'int (Seq.get (view_Vec_u32_Global p.free) k) < Seq.length (view_Vec_Node_Global p.nodes))
+  /\ (forall k: int. 0 <= k /\ k < Seq.length (view_Vec_tup2_u64_u32_Global p.leaves.e'0)
+      -> UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.leaves.e'0) k).f1
+      < Seq.length (view_Vec_Node_Global p.nodes))
+  /\ (forall k: int. 0 <= k /\ k < Seq.length (view_Vec_tup2_u64_u32_Global p.by_key.e)
+      -> UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.by_key.e) k).f1
+      < Seq.length (view_Vec_Node_Global p.nodes))
+  /\ (forall k: int. 0 <= k /\ k < Seq.length (view_Vec_tup2_u64_u32_Global p.sessions.e)
+    -> UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.sessions.e) k).f1
+    < Seq.length (view_Vec_Node_Global p.nodes))
+
+predicate size_exact [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 441 0 441 35] (p: t_Pool) =
+  [%#slib'58] Seq.length (view_Vec_Node_Global p.nodes) = UInt64.t'int p.len + Seq.length (view_Vec_u32_Global p.free)
+
+predicate free_all_inactive [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 586 0 586 42] (p: t_Pool) =
+  [%#slib'59] forall k: int. 0 <= k /\ k < Seq.length (view_Vec_u32_Global p.free)
+    -> not (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int (Seq.get (view_Vec_u32_Global p.free) k))).active
+
+predicate free_nodup [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 593 0 593 35] (p: t_Pool) =
+  [%#slib'60] forall j: int, k: int. 0 <= j /\ j < k /\ k < Seq.length (view_Vec_u32_Global p.free)
+    -> Seq.get (view_Vec_u32_Global p.free) j <> Seq.get (view_Vec_u32_Global p.free) k
+
+predicate free_covers_inactive [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 600 0 600 45] (p: t_Pool) =
+  [%#slib'61] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Node_Global p.nodes) /\ not (Seq.get (view_Vec_Node_Global p.nodes) i).active
+    -> (exists k: int. 0 <= k
+      /\ k < Seq.length (view_Vec_u32_Global p.free) /\ UInt32.t'int (Seq.get (view_Vec_u32_Global p.free) k) = i)
+
+predicate free_exact [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 448 0 448 35] (p: t_Pool) =
+  [%#slib'62] free_all_inactive p /\ free_nodup p /\ free_covers_inactive p
+
+predicate opt_is [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 202 0 202 45] (o: t_Option_u32) (v: int) =
+  [%#slib'85] match o with
+    | Some x -> UInt32.t'int x = v
+    | None -> false
+    end
+
+predicate parent_links_agree [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 658 0 658 43] (p: t_Pool) =
+  [%#slib'63] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Node_Global p.nodes) /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active
+    -> match (Seq.get (view_Vec_Node_Global p.nodes) i).parent with
+      | Some x -> (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int x)).active
+      /\ opt_is (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int x)).child i
+      | None -> true
+      end
+
+predicate child_links_agree [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 668 0 668 42] (p: t_Pool) =
+  [%#slib'64] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Node_Global p.nodes) /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active
+    -> match (Seq.get (view_Vec_Node_Global p.nodes) i).child with
+      | Some x -> (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int x)).active
+      /\ opt_is (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int x)).parent i
+      | None -> true
+      end
+
+predicate links_agree [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 455 0 455 36] (p: t_Pool) =
+  [%#slib'65] parent_links_agree p /\ child_links_agree p
+
+predicate lineage_in_session [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 461 0 461 43] (p: t_Pool) =
+  [%#slib'66] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Node_Global p.nodes) /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active
+    -> match (Seq.get (view_Vec_Node_Global p.nodes) i).parent with
+        | Some x -> (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int x)).session
+        = (Seq.get (view_Vec_Node_Global p.nodes) i).session
+        | None -> true
+        end
+    /\ match (Seq.get (view_Vec_Node_Global p.nodes) i).child with
+      | Some x -> (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int x)).session
+      = (Seq.get (view_Vec_Node_Global p.nodes) i).session
+      | None -> true
+      end
+
+predicate leaves_mem_i [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 196 0 196 65] (l: Seq.seq tup2_u64_u32) (s: UInt64.t) (idx: int) =
+  [%#slib'86] exists i: int. 0 <= i /\ i < Seq.length l /\ (Seq.get l i).f0 = s /\ UInt32.t'int (Seq.get l i).f1 = idx
+
+predicate leaf_in_set [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 565 0 565 36] (p: t_Pool) =
+  [%#slib'67] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Node_Global p.nodes)
+      /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active /\ (Seq.get (view_Vec_Node_Global p.nodes) i).child = None
+    -> leaves_mem_i (view_Vec_tup2_u64_u32_Global p.leaves.e'0) (Seq.get (view_Vec_Node_Global p.nodes) i).stamp i
+
+predicate set_only_leaves [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 575 0 575 40] (p: t_Pool) =
+  [%#slib'68] forall k: int. 0 <= k /\ k < Seq.length (view_Vec_tup2_u64_u32_Global p.leaves.e'0)
+    -> (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.leaves.e'0) k).f1)).active
+    /\ (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.leaves.e'0) k).f1)).child
+      = None
+    /\ (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.leaves.e'0) k).f1)).stamp
+    = (Seq.get (view_Vec_tup2_u64_u32_Global p.leaves.e'0) k).f0
+
+predicate leaf_set_exact [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 475 0 475 39] (p: t_Pool) =
+  [%#slib'69] leaf_in_set p /\ set_only_leaves p
+
+predicate map_distinct [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 134 0 134 47] (m: Seq.seq tup2_u64_u32) =
+  [%#slib'71] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length m -> (Seq.get m i).f0 <> (Seq.get m j).f0
+
+predicate session_entries_ok [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 636 0 636 43] (p: t_Pool) =
+  [%#slib'70] forall k: int. 0 <= k /\ k < Seq.length (view_Vec_tup2_u64_u32_Global p.sessions.e)
+    -> (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.sessions.e) k).f1)).active
+    /\ (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.sessions.e) k).f1)).session
+      = (Seq.get (view_Vec_tup2_u64_u32_Global p.sessions.e) k).f0
+    /\ (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.sessions.e) k).f1)).child
+    = None
+
+predicate sessions_ok [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 482 0 482 36] (p: t_Pool) =
+  [%#slib'72] map_distinct (view_Vec_tup2_u64_u32_Global p.sessions.e) /\ session_entries_ok p
+
+predicate map_has_i [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 190 0 190 60] (m: Seq.seq tup2_u64_u32) (k: UInt64.t) (v: int) =
+  [%#slib'87] exists i: int. 0 <= i /\ i < Seq.length m /\ (Seq.get m i).f0 = k /\ UInt32.t'int (Seq.get m i).f1 = v
+
+predicate leaf_is_session_leaf [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 490 0 490 45] (p: t_Pool) =
+  [%#slib'73] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Node_Global p.nodes)
+      /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active /\ (Seq.get (view_Vec_Node_Global p.nodes) i).child = None
+    -> map_has_i (view_Vec_tup2_u64_u32_Global p.sessions.e) (Seq.get (view_Vec_Node_Global p.nodes) i).session i
+
+predicate leaf_sessions_unique [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 647 0 647 45] (p: t_Pool) =
+  [%#slib'74] forall i: int, j: int. 0 <= i
+      /\ i < j
+      /\ j < Seq.length (view_Vec_Node_Global p.nodes)
+      /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active
+      /\ (Seq.get (view_Vec_Node_Global p.nodes) i).child = None
+      /\ (Seq.get (view_Vec_Node_Global p.nodes) j).active /\ (Seq.get (view_Vec_Node_Global p.nodes) j).child = None
+    -> (Seq.get (view_Vec_Node_Global p.nodes) i).session <> (Seq.get (view_Vec_Node_Global p.nodes) j).session
+
+predicate one_leaf_per_session [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 499 0 499 45] (p: t_Pool) =
+  [%#slib'75] leaf_is_session_leaf p /\ leaf_sessions_unique p
+
+predicate by_key_entries_live [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 609 0 609 44] (p: t_Pool) =
+  [%#slib'76] forall k: int. 0 <= k /\ k < Seq.length (view_Vec_tup2_u64_u32_Global p.by_key.e)
+    -> (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.by_key.e) k).f1)).active
+    /\ (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int (Seq.get (view_Vec_tup2_u64_u32_Global p.by_key.e) k).f1)).key
+    = (Seq.get (view_Vec_tup2_u64_u32_Global p.by_key.e) k).f0
+
+predicate by_key_covers_live [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 618 0 618 43] (p: t_Pool) =
+  [%#slib'77] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Node_Global p.nodes) /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active
+    -> map_has_i (view_Vec_tup2_u64_u32_Global p.by_key.e) (Seq.get (view_Vec_Node_Global p.nodes) i).key i
+
+predicate keys_unique [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 626 0 626 36] (p: t_Pool) =
+  [%#slib'78] forall i: int, j: int. 0 <= i
+      /\ i < j
+      /\ j < Seq.length (view_Vec_Node_Global p.nodes)
+      /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active /\ (Seq.get (view_Vec_Node_Global p.nodes) j).active
+    -> (Seq.get (view_Vec_Node_Global p.nodes) i).key <> (Seq.get (view_Vec_Node_Global p.nodes) j).key
+
+predicate by_key_ok [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 506 0 506 34] (p: t_Pool) =
+  [%#slib'79] map_distinct (view_Vec_tup2_u64_u32_Global p.by_key.e)
+  /\ by_key_entries_live p /\ by_key_covers_live p /\ keys_unique p
+
+predicate clock_dominates [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 516 0 516 40] (p: t_Pool) =
+  [%#slib'80] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Node_Global p.nodes) /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active
+    -> UInt64.t'int (Seq.get (view_Vec_Node_Global p.nodes) i).stamp <= UInt64.t'int p.clock
+
+predicate stamps_distinct [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 540 0 540 40] (p: t_Pool) =
+  [%#slib'81] forall i: int, j: int. 0 <= i
+      /\ i < j
+      /\ j < Seq.length (view_Vec_Node_Global p.nodes)
+      /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active /\ (Seq.get (view_Vec_Node_Global p.nodes) j).active
+    -> (Seq.get (view_Vec_Node_Global p.nodes) i).stamp <> (Seq.get (view_Vec_Node_Global p.nodes) j).stamp
+
+predicate pair_lt [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 156 0 156 52] (a: tup2_u64_u32) (b: tup2_u64_u32) =
+  [%#slib'88] UInt64.t'int a.f0 < UInt64.t'int b.f0
+  \/ UInt64.t'int a.f0 = UInt64.t'int b.f0 /\ UInt32.t'int a.f1 < UInt32.t'int b.f1
+
+predicate leaves_sorted [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 163 0 163 48] (l: Seq.seq tup2_u64_u32) =
+  [%#slib'82] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length l -> pair_lt (Seq.get l i) (Seq.get l j)
+
+predicate counts_bounded [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 554 0 554 39] (p: t_Pool) =
+  [%#slib'83] Seq.length (view_Vec_tup2_u64_u32_Global p.by_key.e) = UInt64.t'int p.len
+  /\ Seq.length (view_Vec_tup2_u64_u32_Global p.leaves.e'0) = Seq.length (view_Vec_tup2_u64_u32_Global p.sessions.e)
+  /\ UInt64.t'int p.len <= Seq.length (view_Vec_Node_Global p.nodes)
+
+predicate chain_birth_decreases [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 528 0 528 46] (p: t_Pool) =
+  [%#slib'84] forall i: int. 0 <= i
+      /\ i < Seq.length (view_Vec_Node_Global p.nodes) /\ (Seq.get (view_Vec_Node_Global p.nodes) i).active
+    -> UInt64.t'int (Seq.get (view_Vec_Node_Global p.nodes) i).birth <= UInt64.t'int p.clock
+    /\ match (Seq.get (view_Vec_Node_Global p.nodes) i).parent with
+      | Some x -> UInt64.t'int (Seq.get (view_Vec_Node_Global p.nodes) (UInt32.t'int x)).birth
+      < UInt64.t'int (Seq.get (view_Vec_Node_Global p.nodes) i).birth
+      | None -> true
+      end
+
+predicate pool_inv [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 681 0 681 33] (p: t_Pool) =
+  [%#slib'55] idx_ok p
+  /\ size_exact p
+  /\ free_exact p
+  /\ links_agree p
+  /\ lineage_in_session p
+  /\ leaf_set_exact p
+  /\ sessions_ok p
+  /\ one_leaf_per_session p
+  /\ by_key_ok p
+  /\ clock_dominates p
+  /\ stamps_distinct p
+  /\ leaves_sorted (view_Vec_tup2_u64_u32_Global p.leaves.e'0) /\ counts_bounded p /\ chain_birth_decreases p
+
+predicate leaves_mem [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 169 0 169 60] (l: Seq.seq tup2_u64_u32) (x: tup2_u64_u32) =
+  [%#slib'56] exists i: int. 0 <= i /\ i < Seq.length l /\ Seq.get l i = x
+
+let pool_touch (p: MutBorrow.t t_Pool) (index: UInt32.t) (return (x: bool)) =
+{[@stop_split] [@expl:pool_touch requires] ([@stop_split] [@expl:pool_touch requires #0] [%#slib'5] pool_inv p.current)
+  /\ ([@stop_split] [@expl:pool_touch requires #1] [%#slib'6] UInt64.t'int p.current.clock < 18446744073709551615)}
+  any
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:pool_touch ensures] ([@stop_split] [@expl:pool_touch ensures #0] [%#slib'7] result
+      = (UInt32.t'int index < Seq.length (view_Vec_Node_Global p.current.nodes)
+      /\ (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int index)).active))
+    /\ ([@stop_split] [@expl:pool_touch ensures #1] [%#slib'8] not result
+      -> view_Vec_Node_Global p.final.nodes = view_Vec_Node_Global p.current.nodes
+      /\ view_Vec_tup2_u64_u32_Global p.final.leaves.e'0 = view_Vec_tup2_u64_u32_Global p.current.leaves.e'0
+      /\ p.final.clock = p.current.clock
+      /\ p.final.len = p.current.len
+      /\ view_Vec_u32_Global p.final.free = view_Vec_u32_Global p.current.free
+      /\ view_Vec_tup2_u64_u32_Global p.final.by_key.e = view_Vec_tup2_u64_u32_Global p.current.by_key.e
+      /\ view_Vec_tup2_u64_u32_Global p.final.sessions.e = view_Vec_tup2_u64_u32_Global p.current.sessions.e)
+    /\ ([@stop_split] [@expl:pool_touch ensures #2] [%#slib'9] result
+      -> UInt64.t'int p.final.clock = UInt64.t'int p.current.clock + 1)
+    /\ ([@stop_split] [@expl:pool_touch ensures #3] [%#slib'10] result
+      -> (Seq.get (view_Vec_Node_Global p.final.nodes) (UInt32.t'int index)).stamp = p.final.clock)
+    /\ ([@stop_split] [@expl:pool_touch ensures #4] [%#slib'11] result
+      -> UInt64.t'int (Seq.get (view_Vec_Node_Global p.final.nodes) (UInt32.t'int index)).stamp
+      > UInt64.t'int p.current.clock)
+    /\ ([@stop_split] [@expl:pool_touch ensures #5] [%#slib'12] result
+      -> (Seq.get (view_Vec_Node_Global p.final.nodes) (UInt32.t'int index)).key
+        = (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int index)).key
+      /\ (Seq.get (view_Vec_Node_Global p.final.nodes) (UInt32.t'int index)).session
+        = (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int index)).session
+      /\ (Seq.get (view_Vec_Node_Global p.final.nodes) (UInt32.t'int index)).parent
+        = (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int index)).parent
+      /\ (Seq.get (view_Vec_Node_Global p.final.nodes) (UInt32.t'int index)).child
+        = (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int index)).child
+      /\ (Seq.get (view_Vec_Node_Global p.final.nodes) (UInt32.t'int index)).active)
+    /\ ([@stop_split] [@expl:pool_touch ensures #6] [%#slib'13] forall j: int. 0 <= j
+          /\ j < Seq.length (view_Vec_Node_Global p.current.nodes) /\ j <> UInt32.t'int index
+        -> Seq.get (view_Vec_Node_Global p.final.nodes) j = Seq.get (view_Vec_Node_Global p.current.nodes) j)
+    /\ ([@stop_split] [@expl:pool_touch ensures #7] [%#slib'14] Seq.length (view_Vec_Node_Global p.final.nodes)
+      = Seq.length (view_Vec_Node_Global p.current.nodes))
+    /\ ([@stop_split] [@expl:pool_touch ensures #8] [%#slib'15] view_Vec_u32_Global p.final.free
+      = view_Vec_u32_Global p.current.free)
+    /\ ([@stop_split] [@expl:pool_touch ensures #9] [%#slib'16] view_Vec_tup2_u64_u32_Global p.final.by_key.e
+      = view_Vec_tup2_u64_u32_Global p.current.by_key.e)
+    /\ ([@stop_split] [@expl:pool_touch ensures #10] [%#slib'17] view_Vec_tup2_u64_u32_Global p.final.sessions.e
+      = view_Vec_tup2_u64_u32_Global p.current.sessions.e)
+    /\ ([@stop_split] [@expl:pool_touch ensures #11] [%#slib'18] p.final.len = p.current.len)
+    /\ ([@stop_split] [@expl:pool_touch ensures #12] [%#slib'19] UInt64.t'int p.final.clock
+      >= UInt64.t'int p.current.clock)
+    /\ ([@stop_split] [@expl:pool_touch ensures #13] [%#slib'20] result
+        /\ (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int index)).child <> None
+      -> view_Vec_tup2_u64_u32_Global p.final.leaves.e'0 = view_Vec_tup2_u64_u32_Global p.current.leaves.e'0)
+    /\ ([@stop_split] [@expl:pool_touch ensures #14] [%#slib'21] result
+        /\ (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int index)).child = None
+      -> leaves_mem (view_Vec_tup2_u64_u32_Global p.final.leaves.e'0) { f0 = p.final.clock; f1 = index }
+      /\ Seq.length (view_Vec_tup2_u64_u32_Global p.final.leaves.e'0)
+        = Seq.length (view_Vec_tup2_u64_u32_Global p.current.leaves.e'0)
+      /\ not leaves_mem (view_Vec_tup2_u64_u32_Global p.final.leaves.e'0) { f0 = (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int index)).stamp;
+                                                                            f1 = index })
+    /\ ([@stop_split] [@expl:pool_touch ensures #15] [%#slib'22] idx_ok p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #16] [%#slib'23] size_exact p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #17] [%#slib'24] free_all_inactive p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #18] [%#slib'25] free_nodup p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #19] [%#slib'26] free_covers_inactive p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #20] [%#slib'27] free_exact p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #21] [%#slib'28] parent_links_agree p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #22] [%#slib'29] child_links_agree p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #23] [%#slib'30] links_agree p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #24] [%#slib'31] lineage_in_session p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #25] [%#slib'32] leaf_in_set p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #26] [%#slib'33] set_only_leaves p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #27] [%#slib'34] leaf_set_exact p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #28] [%#slib'35] session_entries_ok p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #29] [%#slib'36] map_distinct (view_Vec_tup2_u64_u32_Global p.final.sessions.e))
+    /\ ([@stop_split] [@expl:pool_touch ensures #30] [%#slib'37] sessions_ok p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #31] [%#slib'38] leaf_is_session_leaf p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #32] [%#slib'39] leaf_sessions_unique p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #33] [%#slib'40] one_leaf_per_session p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #34] [%#slib'41] by_key_entries_live p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #35] [%#slib'42] by_key_covers_live p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #36] [%#slib'43] keys_unique p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #37] [%#slib'44] map_distinct (view_Vec_tup2_u64_u32_Global p.final.by_key.e))
+    /\ ([@stop_split] [@expl:pool_touch ensures #38] [%#slib'45] by_key_ok p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #39] [%#slib'46] clock_dominates p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #40] [%#slib'47] stamps_distinct p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #41] [%#slib'48] leaves_sorted (view_Vec_tup2_u64_u32_Global p.final.leaves.e'0))
+    /\ ([@stop_split] [@expl:pool_touch ensures #42] [%#slib'49] Seq.length (view_Vec_tup2_u64_u32_Global p.final.by_key.e)
+      = UInt64.t'int p.final.len)
+    /\ ([@stop_split] [@expl:pool_touch ensures #43] [%#slib'50] Seq.length (view_Vec_tup2_u64_u32_Global p.final.leaves.e'0)
+      = Seq.length (view_Vec_tup2_u64_u32_Global p.final.sessions.e))
+    /\ ([@stop_split] [@expl:pool_touch ensures #44] [%#slib'51] UInt64.t'int p.final.len
+      <= Seq.length (view_Vec_Node_Global p.final.nodes))
+    /\ ([@stop_split] [@expl:pool_touch ensures #45] [%#slib'52] counts_bounded p.final)
+    /\ ([@stop_split] [@expl:pool_touch ensures #46] [%#slib'53] chain_birth_decreases p.final)}
+    (! return {result}) ]
+
+predicate resolve_refmut_Pool [@inline:trivial] (_1: MutBorrow.t t_Pool) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Pool
+
+type tup2_bool_bool = { f0'0: bool; f1'0: bool }
+
+predicate pready [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1855 0 1855 31] (p: t_Pool) =
+  [%#slib'54] pool_inv p
+  /\ UInt64.t'int p.clock < 18446744073709551000 /\ Seq.length (view_Vec_Node_Global p.nodes) < 4294967280
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_epsl_batch_touch_matches_one_at_a_time__mutant [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 2585 0 2587 17]
+  (p: MutBorrow.t t_Pool) (i0: UInt32.t) (i1: UInt32.t) (return (x: tup2_bool_bool)) =
+{[@stop_split] [@expl:verify_epsl_batch_touch_matches_one_at_a_time__mutant requires] ([@stop_split] [@expl:verify_epsl_batch_touch_matches_one_at_a_time__mutant requires #0] [%#slib'1] pready p.current)
+  /\ ([@stop_split] [@expl:verify_epsl_batch_touch_matches_one_at_a_time__mutant requires #1] [%#slib'2] UInt32.t'int i0
+      < Seq.length (view_Vec_Node_Global p.current.nodes)
+    /\ (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int i0)).active)
+  /\ ([@stop_split] [@expl:verify_epsl_batch_touch_matches_one_at_a_time__mutant requires #2] [%#slib'3] UInt32.t'int i1
+    < Seq.length (view_Vec_Node_Global p.current.nodes)
+  /\ (Seq.get (view_Vec_Node_Global p.current.nodes) (UInt32.t'int i1)).active)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_mut <t_Pool> {p.current}
+        (fun (_bor: MutBorrow.t t_Pool) -> [ &_16 <- _bor ] [ &p <- { p with current = _bor.final } ] s1)
+    | s1 = pool_touch [%#slib] {_16} {i0} (fun (_x: bool) -> [ &a <- _x ] s2)
+    | s2 = MutBorrow.borrow_final <t_Pool> {p.current} {MutBorrow.get_id p}
+        (fun (_bor: MutBorrow.t t_Pool) -> [ &_19 <- _bor ] [ &p <- { p with current = _bor.final } ] s3)
+    | s3 = pool_touch [%#slib'0] {_19} {i1} (fun (_x: bool) -> [ &b <- _x ] s4)
+    | s4 = -{resolve_refmut_Pool p}- s5
+    | s5 = [ &_ret <- { f0'0 = a; f1'0 = b } ] s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: tup2_bool_bool = Any.any_l ()
+  | & p: MutBorrow.t t_Pool = p
+  | & i0: UInt32.t = i0
+  | & i1: UInt32.t = i1
+  | & a: bool = Any.any_l ()
+  | & _16: MutBorrow.t t_Pool = Any.any_l ()
+  | & b: bool = Any.any_l ()
+  | & _19: MutBorrow.t t_Pool = Any.any_l () ])
+  [ return (result: tup2_bool_bool) ->
+  {[@stop_split] [@expl:verify_epsl_batch_touch_matches_one_at_a_time__mutant ensures] [%#slib'4] UInt64.t'int (Seq.get (view_Vec_Node_Global p.final.nodes) (UInt32.t'int i1)).stamp
+    = UInt64.t'int p.current.clock + 1}
+    (! return {result}) ]

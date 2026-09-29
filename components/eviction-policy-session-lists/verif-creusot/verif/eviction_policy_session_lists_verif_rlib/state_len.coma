@@ -1,0 +1,142 @@
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1649 0 1649 66 *)
+
+let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1650 4 1650 22
+let%span slib'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1651 16 1651 29
+let%span slib'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1653 15 1653 16
+let%span slib'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1655 11 1655 26
+let%span slib'3 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1645 11 1645 32
+let%span slib'4 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1646 10 1646 50
+let%span slib'5 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1647 10 1647 68
+let%span slib'6 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1648 10 1648 70
+let%span slib'7 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1358 11 1358 32
+let%span slib'8 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1359 10 1359 40
+let%span slib'9 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1360 10 1360 88
+let%span slib'10 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1361 10 1361 40
+let%span svec = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sslice = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_LockTrace = { held: UInt64.t; peak: UInt64.t; acquires: UInt64.t; writes': UInt64.t; reads': UInt64.t }
+
+let state_read_lock (t: MutBorrow.t t_LockTrace) (return (x: ())) =
+{[@stop_split] [@expl:state_read_lock requires] [%#slib'7] UInt64.t'int t.current.reads' < 4294967294}
+  any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:state_read_lock ensures] ([@stop_split] [@expl:state_read_lock ensures #0] [%#slib'8] UInt64.t'int t.final.reads'
+      = UInt64.t'int t.current.reads' + 1)
+    /\ ([@stop_split] [@expl:state_read_lock ensures #1] [%#slib'9] t.final.writes' = t.current.writes'
+      /\ t.final.held = t.current.held /\ t.final.peak = t.current.peak)
+    /\ ([@stop_split] [@expl:state_read_lock ensures #2] [%#slib'10] t.final.acquires = t.current.acquires)}
+    (! return {result}) ]
+
+predicate resolve_refmut_LockTrace [@inline:trivial] (_1: MutBorrow.t t_LockTrace) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_LockTrace
+
+type t_Vec_Pool_Global
+
+type t_Pools = { pools: t_Vec_Pool_Global; announced: bool }
+
+type t_Vec_Node_Global
+
+type t_Vec_u32_Global
+
+type t_Vec_tup2_u64_u32_Global
+
+type t_Map = { e: t_Vec_tup2_u64_u32_Global }
+
+type t_Leaves = { e'0: t_Vec_tup2_u64_u32_Global }
+
+type t_Pool = {
+  nodes: t_Vec_Node_Global;
+  free: t_Vec_u32_Global;
+  by_key: t_Map;
+  sessions: t_Map;
+  leaves: t_Leaves;
+  clock: UInt64.t;
+  len: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Pool_Global (self: t_Vec_Pool_Global) : Seq.seq t_Pool
+
+axiom view_Vec_Pool_Global_spec:
+  forall self: t_Vec_Pool_Global [view_Vec_Pool_Global self]. [%#svec'2] Seq.length (view_Vec_Pool_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_Pool (self_: t_Vec_Pool_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec] UInt64.t'int result
+    = Seq.length (view_Vec_Pool_Global self_)}
+    (! return {result}) ]
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Pool) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Pool) (out: t_Pool) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_Pool_Global (self_: t_Vec_Pool_Global) (ix: UInt64.t) (return (x: t_Pool)) =
+{[@stop_split] [@expl:index requires] [%#svec'0] in_bounds_usize ix (view_Vec_Pool_Global self_)}
+  any
+  [ return (result: t_Pool) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'1] has_value_usize ix (view_Vec_Pool_Global self_) result}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let state_len [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1649 0 1649 66]
+  (s: t_Pools) (pool: UInt32.t) (t: MutBorrow.t t_LockTrace) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:state_len requires] [%#slib'3] UInt64.t'int t.current.reads' < 4294967294}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_LockTrace> {t.current} {MutBorrow.get_id t}
+        (fun (_bor: MutBorrow.t t_LockTrace) -> [ &_15 <- _bor ] [ &t <- { t with current = _bor.final } ] s1)
+    | s1 = state_read_lock [%#slib] {_15} (fun (_x: ()) -> [ &_14 <- _x ] s2)
+    | s2 = -{resolve_refmut_LockTrace t}- s3
+    | s3 = len_Pool [%#slib'0] {s.pools} (fun (_x: UInt64.t) -> [ &total <- _x ] s4)
+    | s4 = [ &_20 <- UInt64.of_int (UInt32.t'int pool) ] s5
+    | s5 = [ &_19 <- UInt64.ge _20 total ] s6
+    | s6 = any [ br0 -> {_19 = false} (! bb4) | br1 -> {_19} (! bb3) ] ]
+  | bb3 = s0 [ s0 = [ &_ret <- [%#slib'1] (0: UInt64.t) ] s1 | s1 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = [ &_26 <- UInt64.of_int (UInt32.t'int pool) ] s1
+    | s1 = index_Vec_Pool_Global [%#slib'2] {s.pools} {_26} (fun (_x: t_Pool) -> [ &_24 <- _x ] s2)
+    | s2 = [ &_ret <- _24.len ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & s: t_Pools = s
+  | & pool: UInt32.t = pool
+  | & t: MutBorrow.t t_LockTrace = t
+  | & _14: () = Any.any_l ()
+  | & _15: MutBorrow.t t_LockTrace = Any.any_l ()
+  | & total: UInt64.t = Any.any_l ()
+  | & _19: bool = Any.any_l ()
+  | & _20: UInt64.t = Any.any_l ()
+  | & _24: t_Pool = Any.any_l ()
+  | & _26: UInt64.t = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:state_len ensures] ([@stop_split] [@expl:state_len ensures #0] [%#slib'4] UInt32.t'int pool
+        >= Seq.length (view_Vec_Pool_Global s.pools) -> UInt64.t'int result = 0)
+    /\ ([@stop_split] [@expl:state_len ensures #1] [%#slib'5] UInt32.t'int pool
+        < Seq.length (view_Vec_Pool_Global s.pools)
+      -> result = (Seq.get (view_Vec_Pool_Global s.pools) (UInt32.t'int pool)).len)
+    /\ ([@stop_split] [@expl:state_len ensures #2] [%#slib'6] UInt64.t'int t.final.reads'
+      = UInt64.t'int t.current.reads' + 1
+    /\ t.final.writes' = t.current.writes')}
+    (! return {result}) ]

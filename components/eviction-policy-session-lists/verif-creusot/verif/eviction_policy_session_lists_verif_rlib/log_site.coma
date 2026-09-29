@@ -1,0 +1,88 @@
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1378 0 1378 57 *)
+
+let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1380 19 1380 20
+let%span slib'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1381 24 1381 25
+let%span slib'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1381 12 1381 25
+let%span slib'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1382 26 1382 27
+let%span slib'3 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1383 25 1383 26
+let%span slib'4 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1383 12 1383 26
+let%span slib'5 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1385 24 1385 25
+let%span slib'6 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1385 12 1385 25
+let%span slib'7 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1368 11 1368 86
+let%span slib'8 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1369 11 1369 21
+let%span slib'9 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1370 10 1370 70
+let%span slib'10 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1371 10 1371 72
+let%span slib'11 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1372 10 1372 70
+let%span slib'12 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1373 10 1374 54
+let%span slib'13 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1375 10 1375 51
+let%span slib'14 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1376 10 1376 53
+let%span slib'15 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1377 10 1377 51
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Log = { info: UInt64.t; debug: UInt64.t; warn: UInt64.t }
+
+predicate resolve_refmut_Log [@inline:trivial] (_1: MutBorrow.t t_Log) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Log
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let log_site [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1378 0 1378 57]
+  (log: MutBorrow.t t_Log) (connected: bool) (kind: UInt8.t) (return (x: ())) =
+{[@stop_split] [@expl:log_site requires] ([@stop_split] [@expl:log_site requires #0] [%#slib'7] UInt64.t'int log.current.info
+      < 4294967294
+    /\ UInt64.t'int log.current.debug < 4294967294 /\ UInt64.t'int log.current.warn < 4294967294)
+  /\ ([@stop_split] [@expl:log_site requires #1] [%#slib'8] UInt8.t'int kind <= 2)}
+  (! bb0
+  [ bb0 = any [ br0 -> {connected = false} (! bb8) | br1 -> {connected} (! bb1) ]
+  | bb1 = s0
+    [ s0 = [ &_35 <- kind = ([%#slib] (0: UInt8.t)) ] s1
+    | s1 = any [ br0 -> {_35 = false} (! bb3) | br1 -> {_35} (! bb2) ] ]
+  | bb2 = s0
+    [ s0 = UInt64.add [%#slib'1] {log.current.info} {[%#slib'0] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &log <- { log with current = { log.current with info = _x } } ] s1)
+    | s1 = -{resolve_refmut_Log log}- s2
+    | s2 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = [ &_37 <- kind = ([%#slib'2] (1: UInt8.t)) ] s1
+    | s1 = any [ br0 -> {_37 = false} (! bb5) | br1 -> {_37} (! bb4) ] ]
+  | bb4 = s0
+    [ s0 = UInt64.add [%#slib'4] {log.current.debug} {[%#slib'3] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &log <- { log with current = { log.current with debug = _x } } ] s1)
+    | s1 = -{resolve_refmut_Log log}- s2
+    | s2 = return {_ret} ]
+  | bb5 = s0
+    [ s0 = UInt64.add [%#slib'6] {log.current.warn} {[%#slib'5] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &log <- { log with current = { log.current with warn = _x } } ] s1)
+    | s1 = -{resolve_refmut_Log log}- s2
+    | s2 = return {_ret} ]
+  | bb8 = s0 [ s0 = -{resolve_refmut_Log log}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & log: MutBorrow.t t_Log = log
+  | & connected: bool = connected
+  | & kind: UInt8.t = kind
+  | & _35: bool = Any.any_l ()
+  | & _37: bool = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:log_site ensures] ([@stop_split] [@expl:log_site ensures #0] [%#slib'9] connected
+        /\ UInt8.t'int kind = 0 -> UInt64.t'int log.final.info = UInt64.t'int log.current.info + 1)
+    /\ ([@stop_split] [@expl:log_site ensures #1] [%#slib'10] connected /\ UInt8.t'int kind = 1
+      -> UInt64.t'int log.final.debug = UInt64.t'int log.current.debug + 1)
+    /\ ([@stop_split] [@expl:log_site ensures #2] [%#slib'11] connected /\ UInt8.t'int kind = 2
+      -> UInt64.t'int log.final.warn = UInt64.t'int log.current.warn + 1)
+    /\ ([@stop_split] [@expl:log_site ensures #3] [%#slib'12] not connected
+      -> log.final.info = log.current.info /\ log.final.debug = log.current.debug /\ log.final.warn = log.current.warn)
+    /\ ([@stop_split] [@expl:log_site ensures #4] [%#slib'13] UInt8.t'int kind <> 0
+      -> log.final.info = log.current.info)
+    /\ ([@stop_split] [@expl:log_site ensures #5] [%#slib'14] UInt8.t'int kind <> 1
+      -> log.final.debug = log.current.debug)
+    /\ ([@stop_split] [@expl:log_site ensures #6] [%#slib'15] UInt8.t'int kind <> 2
+    -> log.final.warn = log.current.warn)}
+    (! return {result}) ]

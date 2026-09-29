@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_verify_epsl_track_unknown_domain_is_an_error": {
+        "prover": "alt-ergo",
+        "time": 0.109
+      }
+    }
+  }
+}

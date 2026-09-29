@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_state_clear_pool": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_state_len": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_verify_epsl_readonly_queries_degrade_safely_on_unknown_domain": {
+        "prover": "alt-ergo",
+        "time": 0.093
+      }
+    }
+  }
+}

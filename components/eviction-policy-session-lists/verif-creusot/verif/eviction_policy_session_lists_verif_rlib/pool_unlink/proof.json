@@ -1,0 +1,770 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_index_mut_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_is_none_u32": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_leaves_insert": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_leaves_remove": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_map_insert": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_map_remove": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_pool_unlink": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.022 },
+              { "prover": "alt-ergo", "time": 0.044 },
+              { "prover": "alt-ergo", "time": 0.026 },
+              { "prover": "alt-ergo", "time": 0.092 },
+              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "z3", "time": 0.071 },
+              { "prover": "alt-ergo", "time": 0.066 },
+              { "prover": "alt-ergo", "time": 0.088 },
+              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "z3", "time": 0.056 },
+              { "prover": "alt-ergo", "time": 0.029 },
+              { "prover": "z3", "time": 0.14 },
+              { "prover": "alt-ergo", "time": 0.201 },
+              { "prover": "alt-ergo", "time": 0.208 },
+              { "prover": "alt-ergo", "time": 0.217 },
+              { "prover": "z3", "time": 0.669 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.166 },
+                  { "prover": "alt-ergo", "time": 0.342 },
+                  { "prover": "z3", "time": 0.345 },
+                  { "prover": "alt-ergo", "time": 0.247 },
+                  { "prover": "alt-ergo", "time": 0.271 },
+                  { "prover": "alt-ergo", "time": 0.375 },
+                  { "prover": "alt-ergo", "time": 0.309 },
+                  { "prover": "alt-ergo", "time": 0.805 },
+                  { "prover": "alt-ergo", "time": 0.244 },
+                  { "prover": "cvc5", "time": 0.192 },
+                  { "prover": "alt-ergo", "time": 0.377 },
+                  { "prover": "cvc5", "time": 1.6 },
+                  { "prover": "alt-ergo", "time": 0.811 },
+                  { "prover": "cvc5", "time": 2.1 },
+                  { "prover": "cvc4", "time": 0.51 },
+                  { "prover": "cvc4", "time": 0.563 },
+                  { "prover": "z3", "time": 0.319 },
+                  { "prover": "z3", "time": 0.652 },
+                  { "prover": "z3", "time": 0.113 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.047 }, null
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.06 }, null
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.119 }
+                                ]
+                              },
+                              { "prover": "alt-ergo", "time": 0.12 }
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.131 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.163 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  { "prover": "cvc5", "time": 0.241 },
+                  { "prover": "alt-ergo", "time": 5.3 },
+                  { "prover": "alt-ergo", "time": 2.5 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.036 }, null
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.068 }, null
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.074 }
+                                ]
+                              },
+                              { "prover": "alt-ergo", "time": 0.125 }
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.066 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.093 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.06 }, null
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.072 }, null
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.117 }
+                                ]
+                              },
+                              { "prover": "alt-ergo", "time": 0.122 }
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.119 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.182 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 11.2 },
+                          { "prover": "z3", "time": 3.5 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.662 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.116 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  { "prover": "z3", "time": 0.884 },
+                                  { "prover": "alt-ergo", "time": 0.183 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 12.7 },
+                          { "prover": "z3", "time": 2.5 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.762 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.118 },
+                              { "prover": "alt-ergo", "time": 2.4 }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 6.5 },
+                          { "prover": "z3", "time": 4.1 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 1.3 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.108 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  { "prover": "z3", "time": 0.769 },
+                                  { "prover": "alt-ergo", "time": 0.172 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 2.1 },
+                          { "prover": "z3", "time": 11.2 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.889 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.068 },
+                              { "prover": "alt-ergo", "time": 2.2 }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 0.652 },
+                          { "prover": "z3", "time": 0.719 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.382 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.116 },
+                              { "prover": "cvc5", "time": 19.1 }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      { "prover": "cvc5", "time": 3.1 },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.602 },
+                          { "prover": "cvc5", "time": 13.0 }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 2.1 },
+                          { "prover": "z3", "time": 2.8 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 1.1 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.123 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  { "prover": "z3", "time": 0.527 },
+                                  { "prover": "alt-ergo", "time": 0.176 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      { "prover": "cvc5", "time": 2.4 },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.129 }
+                                ]
+                              },
+                              { "prover": "alt-ergo", "time": 0.111 }
+                            ]
+                          },
+                          { "prover": "cvc5", "time": 7.7 }
+                        ]
+                      }
+                    ]
+                  },
+                  { "prover": "z3", "time": 0.174 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      { "prover": "cvc5", "time": 1.9 },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.131 }
+                                ]
+                              },
+                              { "prover": "alt-ergo", "time": 0.128 }
+                            ]
+                          },
+                          { "prover": "cvc5", "time": 4.2 }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 0.522 },
+                          { "prover": "z3", "time": 0.605 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.485 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.073 },
+                              { "prover": "cvc5", "time": 13.2 }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 0.654 },
+                          { "prover": "z3", "time": 0.807 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.409 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.07 },
+                              { "prover": "alt-ergo", "time": 1.1 }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 1.7 },
+                          { "prover": "z3", "time": 4.8 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.554 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.068 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  { "prover": "z3", "time": 0.41 },
+                                  { "prover": "alt-ergo", "time": 0.092 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.053 }, null
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.06 }, null
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.129 }
+                                ]
+                              },
+                              { "prover": "alt-ergo", "time": 0.128 }
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.125 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.15 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 0.616 },
+                          { "prover": "z3", "time": 0.438 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "cvc5", "time": 3.0 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.127 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  { "prover": "z3", "time": 0.356 },
+                                  { "prover": "alt-ergo", "time": 0.162 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  { "prover": "alt-ergo", "time": 9.3 },
+                  { "prover": "alt-ergo", "time": 0.227 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.062 }, null
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.067 }, null
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.128 }
+                                ]
+                              },
+                              { "prover": "alt-ergo", "time": 0.133 }
+                            ]
+                          },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.115 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  null,
+                                  { "prover": "alt-ergo", "time": 0.184 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 0.512 },
+                          { "prover": "z3", "time": 0.603 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "cvc5", "time": 2.3 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.119 },
+                              { "prover": "cvc5", "time": 9.5 }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 0.561 },
+                          { "prover": "z3", "time": 0.57 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "alt-ergo", "time": 0.331 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.121 },
+                              { "prover": "alt-ergo", "time": 1.1 }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  { "prover": "z3", "time": 0.152 },
+                  { "prover": "cvc4", "time": 0.556 },
+                  { "prover": "z3", "time": 1.7 },
+                  { "prover": "alt-ergo", "time": 0.319 },
+                  { "prover": "z3", "time": 2.4 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "z3", "time": 1.0 },
+                          { "prover": "z3", "time": 1.2 }
+                        ]
+                      },
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          { "prover": "cvc5", "time": 2.6 },
+                          {
+                            "tactic": "split_vc",
+                            "children": [
+                              { "prover": "alt-ergo", "time": 0.124 },
+                              {
+                                "tactic": "split_vc",
+                                "children": [
+                                  { "prover": "z3", "time": 0.432 },
+                                  { "prover": "alt-ergo", "time": 0.173 }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "vc_push_u32": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

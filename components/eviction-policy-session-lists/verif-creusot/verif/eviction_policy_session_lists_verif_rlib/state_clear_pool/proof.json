@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_mut_Vec_Pool_Global": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_len_Pool": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_pool_clear": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_clear_pool": { "prover": "alt-ergo", "time": 0.336 },
+      "vc_state_read_lock": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

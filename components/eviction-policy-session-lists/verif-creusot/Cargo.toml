@@ -1,0 +1,27 @@
+[package]
+name = "eviction-policy-session-lists-verif"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+creusot-std = "0.12.0-dev"
+
+# creusot-std is not published; resolve it from the local Creusot checkout via the gitignored
+# `components/eviction-policy-session-lists/creusot` symlink, so the path is checkout-relative and
+# not tied to one machine.
+#
+# This patch lives HERE, in the Creusot crate's own manifest, and deliberately NOT in
+# `components/<component>/.cargo/config.toml`. At component scope a cargo *config* applies to EVERY
+# cargo invocation whose cwd is inside the component — including `cargo kani` and the Kani scorer's
+# `cargo metadata` preflight, which then die in dependency resolution on a crate they have no reason
+# to load. Measured on this run: full `cargo metadata` from the component dir failed with
+# "failed to load source for dependency `creusot-std`", which would have aborted the Kani gate
+# before it scored a single property. A manifest-level [patch] is scoped to this crate alone.
+[patch.crates-io]
+creusot-std = { path = "../creusot/creusot-std" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }

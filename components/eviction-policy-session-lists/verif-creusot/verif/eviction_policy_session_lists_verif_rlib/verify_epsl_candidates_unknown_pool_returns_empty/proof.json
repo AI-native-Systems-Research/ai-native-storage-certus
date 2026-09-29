@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_verify_epsl_candidates_unknown_pool_returns_empty": {
+        "prover": "alt-ergo",
+        "time": 0.045
+      }
+    }
+  }
+}

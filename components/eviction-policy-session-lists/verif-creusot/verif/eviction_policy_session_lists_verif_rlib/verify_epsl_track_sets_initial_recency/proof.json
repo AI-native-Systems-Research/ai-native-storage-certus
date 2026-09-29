@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epsl_track_sets_initial_recency": {
+        "prover": "alt-ergo",
+        "time": 0.343
+      }
+    }
+  }
+}

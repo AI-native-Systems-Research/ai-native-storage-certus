@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_epsl_candidates_change_nothing": {
+        "prover": "z3",
+        "time": 0.246
+      }
+    }
+  }
+}

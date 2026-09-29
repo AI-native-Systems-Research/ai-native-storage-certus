@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_batch_touch": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epsl_batch_touch_refreshes_every_block": {
+        "prover": "alt-ergo",
+        "time": 0.364
+      }
+    }
+  }
+}

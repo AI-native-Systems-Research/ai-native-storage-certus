@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_verify_epsl_evict_does_not_refresh_the_victim": {
+        "prover": "alt-ergo",
+        "time": 0.096
+      }
+    }
+  }
+}

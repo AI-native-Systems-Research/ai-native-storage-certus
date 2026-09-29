@@ -1,0 +1,40 @@
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1353 0 1353 42 *)
+
+let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1354 16 1354 17
+let%span slib'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1354 4 1354 17
+let%span slib'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1349 11 1349 33
+let%span slib'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1350 10 1350 42
+let%span slib'3 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1351 10 1351 86
+let%span slib'4 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1352 10 1352 40
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_LockTrace = { held: UInt64.t; peak: UInt64.t; acquires: UInt64.t; writes': UInt64.t; reads': UInt64.t }
+
+predicate resolve_refmut_LockTrace [@inline:trivial] (_1: MutBorrow.t t_LockTrace) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_LockTrace
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let state_write_lock [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 1353 0 1353 42]
+  (t: MutBorrow.t t_LockTrace) (return (x: ())) =
+{[@stop_split] [@expl:state_write_lock requires] [%#slib'1] UInt64.t'int t.current.writes' < 4294967294}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = UInt64.add [%#slib'0] {t.current.writes'} {[%#slib] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &t <- { t with current = { t.current with writes' = _x } } ] s1)
+    | s1 = -{resolve_refmut_LockTrace t}- s2
+    | s2 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & t: MutBorrow.t t_LockTrace = t ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:state_write_lock ensures] ([@stop_split] [@expl:state_write_lock ensures #0] [%#slib'2] UInt64.t'int t.final.writes'
+      = UInt64.t'int t.current.writes' + 1)
+    /\ ([@stop_split] [@expl:state_write_lock ensures #1] [%#slib'3] t.final.reads' = t.current.reads'
+      /\ t.final.held = t.current.held /\ t.final.peak = t.current.peak)
+    /\ ([@stop_split] [@expl:state_write_lock ensures #2] [%#slib'4] t.final.acquires = t.current.acquires)}
+    (! return {result}) ]

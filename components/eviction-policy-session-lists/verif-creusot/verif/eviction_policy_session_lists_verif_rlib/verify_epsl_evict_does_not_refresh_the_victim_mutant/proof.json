@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.031 }
+    }
+  }
+}

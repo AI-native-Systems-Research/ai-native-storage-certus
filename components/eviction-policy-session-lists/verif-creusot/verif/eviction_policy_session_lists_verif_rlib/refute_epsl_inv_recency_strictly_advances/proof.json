@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_pool_clear": { "prover": "alt-ergo", "time": 0.034 },
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_refute_epsl_inv_recency_strictly_advances": {
+        "prover": "alt-ergo",
+        "time": 0.34
+      }
+    }
+  }
+}

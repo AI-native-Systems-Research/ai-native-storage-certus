@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_epsl_candidates_change_nothing__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.049 },
+              { "prover": "alt-ergo", "time": 0.05 },
+              null
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

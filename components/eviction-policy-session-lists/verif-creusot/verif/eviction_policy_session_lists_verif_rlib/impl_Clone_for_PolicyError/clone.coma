@@ -1,0 +1,18 @@
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 102 9 102 29 *)
+
+(* <PolicyError as std::clone::Clone> *)
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_PolicyError = InvalidPool UInt32.t | InvalidHandle
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_PolicyError [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 102 9 102 29]
+  (self: t_PolicyError) (return (x: t_PolicyError)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_PolicyError = Any.any_l () | & self: t_PolicyError = self ])
+  [ return (result: t_PolicyError) -> (! return {result}) ]

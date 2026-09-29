@@ -1,0 +1,71 @@
+(* #"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 304 0 304 29 *)
+
+let%span slib = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 305 4 305 15
+let%span slib'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 301 10 301 28
+let%span slib'1 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 302 10 302 31
+let%span slib'2 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 303 10 303 45
+let%span slib'3 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 135 16 135 94
+let%span slib'4 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 141 16 141 69
+let%span svec = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 163 18 163 37
+let%span svec'0 = "/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.prelude.MutBorrow
+use seq.Seq
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_tup2_u64_u32_Global
+
+type t_Map = { e: t_Vec_tup2_u64_u32_Global }
+
+type tup2_u64_u32 = { f0: UInt64.t; f1: UInt32.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_tup2_u64_u32_Global (self: t_Vec_tup2_u64_u32_Global) : Seq.seq tup2_u64_u32
+
+axiom view_Vec_tup2_u64_u32_Global_spec:
+  forall self: t_Vec_tup2_u64_u32_Global [view_Vec_tup2_u64_u32_Global self]. [%#svec'0] Seq.length (view_Vec_tup2_u64_u32_Global self)
+    <= UInt64.t'int const_MAX
+
+let clear_tup2_u64_u32 (self_: MutBorrow.t t_Vec_tup2_u64_u32_Global) (return (x: ())) = any
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:clear ensures] [%#svec] Seq.length (view_Vec_tup2_u64_u32_Global self_.final) = 0}
+    (! return {result}) ]
+
+predicate resolve_refmut_Map [@inline:trivial] (_1: MutBorrow.t t_Map) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Map
+
+predicate map_distinct [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 134 0 134 47] (m: Seq.seq tup2_u64_u32) =
+  [%#slib'3] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length m -> (Seq.get m i).f0 <> (Seq.get m j).f0
+
+predicate map_mem [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 140 0 140 50] (m: Seq.seq tup2_u64_u32) (k: UInt64.t) =
+  [%#slib'4] exists i: int. 0 <= i /\ i < Seq.length m /\ (Seq.get m i).f0 = k
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let map_clear [#"/home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot/src/lib.rs" 304 0 304 29]
+  (m: MutBorrow.t t_Map) (return (x: ())) = (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_Vec_tup2_u64_u32_Global> {m.current.e}
+        {MutBorrow.inherit_id (MutBorrow.get_id m) 0}
+        (fun (_bor: MutBorrow.t t_Vec_tup2_u64_u32_Global) ->
+          [ &_9 <- _bor ] [ &m <- { m with current = { e = _bor.final } } ] s1)
+    | s1 = clear_tup2_u64_u32 [%#slib] {_9} (fun (_x: ()) -> [ &_8 <- _x ] s2)
+    | s2 = -{resolve_refmut_Map m}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & m: MutBorrow.t t_Map = m
+  | & _8: () = Any.any_l ()
+  | & _9: MutBorrow.t t_Vec_tup2_u64_u32_Global = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:map_clear ensures] ([@stop_split] [@expl:map_clear ensures #0] [%#slib'0] Seq.length (view_Vec_tup2_u64_u32_Global m.final.e)
+      = 0)
+    /\ ([@stop_split] [@expl:map_clear ensures #1] [%#slib'1] map_distinct (view_Vec_tup2_u64_u32_Global m.final.e))
+    /\ ([@stop_split] [@expl:map_clear ensures #2] [%#slib'2] forall k: UInt64.t. not map_mem (view_Vec_tup2_u64_u32_Global m.final.e) k)}
+    (! return {result}) ]

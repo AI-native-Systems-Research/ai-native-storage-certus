@@ -1,0 +1,86 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_index_mut_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_is_none_u32": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_leaves_insert": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_leaves_remove": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_pool_is_active": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_pool_tick": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_pool_touch": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.241 },
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.024 },
+              { "prover": "alt-ergo", "time": 0.057 },
+              { "prover": "alt-ergo", "time": 1.8 },
+              { "prover": "alt-ergo", "time": 0.06 },
+              {
+                "tactic": "split_vc",
+                "children": [ { "prover": "alt-ergo", "time": 0.054 } ]
+              },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.057 },
+                  { "prover": "alt-ergo", "time": 0.061 },
+                  { "prover": "alt-ergo", "time": 0.09 },
+                  { "prover": "alt-ergo", "time": 0.097 },
+                  { "prover": "alt-ergo", "time": 0.122 },
+                  { "prover": "alt-ergo", "time": 0.083 },
+                  { "prover": "alt-ergo", "time": 0.061 },
+                  { "prover": "alt-ergo", "time": 0.08 },
+                  { "prover": "alt-ergo", "time": 0.077 },
+                  { "prover": "alt-ergo", "time": 0.076 },
+                  { "prover": "alt-ergo", "time": 0.057 },
+                  { "prover": "alt-ergo", "time": 0.064 },
+                  { "prover": "alt-ergo", "time": 0.093 },
+                  { "prover": "alt-ergo", "time": 0.381 },
+                  { "prover": "alt-ergo", "time": 0.745 },
+                  { "prover": "alt-ergo", "time": 0.112 },
+                  { "prover": "alt-ergo", "time": 0.163 },
+                  { "prover": "cvc5", "time": 0.349 },
+                  { "prover": "alt-ergo", "time": 0.248 },
+                  { "prover": "alt-ergo", "time": 0.342 },
+                  { "prover": "alt-ergo", "time": 0.379 },
+                  { "prover": "alt-ergo", "time": 0.304 },
+                  { "prover": "alt-ergo", "time": 0.816 },
+                  { "prover": "alt-ergo", "time": 0.384 },
+                  { "prover": "cvc5", "time": 0.551 },
+                  { "prover": "alt-ergo", "time": 0.952 },
+                  { "prover": "cvc5", "time": 3.5 },
+                  { "prover": "alt-ergo", "time": 0.315 },
+                  { "prover": "alt-ergo", "time": 0.102 },
+                  { "prover": "alt-ergo", "time": 0.344 },
+                  { "prover": "alt-ergo", "time": 0.159 },
+                  { "prover": "alt-ergo", "time": 0.206 },
+                  { "prover": "alt-ergo", "time": 0.288 },
+                  { "prover": "alt-ergo", "time": 0.196 },
+                  { "prover": "alt-ergo", "time": 0.152 },
+                  { "prover": "alt-ergo", "time": 0.193 },
+                  { "prover": "alt-ergo", "time": 0.096 },
+                  { "prover": "alt-ergo", "time": 0.413 },
+                  { "prover": "alt-ergo", "time": 0.158 },
+                  { "prover": "alt-ergo", "time": 0.218 },
+                  { "prover": "alt-ergo", "time": 0.055 },
+                  { "prover": "alt-ergo", "time": 0.099 },
+                  { "prover": "alt-ergo", "time": 0.379 },
+                  { "prover": "alt-ergo", "time": 0.112 },
+                  { "prover": "alt-ergo", "time": 0.379 },
+                  { "prover": "alt-ergo", "time": 0.361 }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
