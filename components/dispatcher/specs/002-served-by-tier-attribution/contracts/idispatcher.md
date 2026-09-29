@@ -25,12 +25,16 @@ pub enum ServedBy {
     /// whether it was then promoted into DRAM (`dispatcher`) or delivered
     /// straight to the GPU with an asynchronous DRAM backfill (`dispatcher-p2p`).
     Ssd,
-    /// A peer served it, and the peer advertised it as memory-tier resident.
-    RemoteDram,
-    /// A peer served it, and the peer advertised it as SSD resident — meaning the
-    /// peer had to read its own SSD. The fabric transfer itself is always out of
-    /// the peer's DRAM.
-    RemoteSsd,
+    /// A peer served it.
+    ///
+    /// Deliberately **not** subdivided by the peer's tier. A responder promotes
+    /// disk-resident keys into its own memory tier before the RDMA read, so every
+    /// remotely served byte leaves a peer's DRAM and a `RemoteSsd` value could only
+    /// have meant "a peer's disk read was on this request's critical path" — an
+    /// advertisement rather than an observation, decaying on repeat access, at 0.81%
+    /// of hits. See `contracts/served-by.md` for the full withdrawal and the
+    /// responder-side counter that answers the question instead.
+    Remote,
     /// The key was not found in any tier, local or remote.
     Miss,
     /// The key was present, but at a different size than requested. Distinct from
@@ -101,7 +105,7 @@ Implementations MUST uphold, and tests MUST verify:
 
 1. **Length and order.** `result.len() == entries.len()`, and index *i* corresponds to
    `entries[i]`.
-2. **Totality.** Every `LookupOutcome` carries one of the seven values. There is no eighth
+2. **Totality.** Every `LookupOutcome` carries one of the six values. There is no seventh
    value and no sentinel.
 3. **Hit agreement.** `served_by.is_hit()` if and only if `result.is_ok()`.
 4. **`Miss` ⇔ absence.** `served_by == Miss` if and only if `result` is
@@ -133,7 +137,7 @@ Every site in `batch_lookup` that assigns a result must assign an attribution. F
 | Cold sub-path: pooled read | :2313-2330 | `Ssd` |
 | Cold sub-path: inline fallback | :2331 | `Ssd` |
 | Cold sub-path: staging post-pass | :2455 | `Ssd` |
-| Remote delivery | :2516-2576 | `RemoteDram` / `RemoteSsd` from the peer's advertisement |
+| Remote delivery | :2516-2576 | `Remote` — the per-key success of the remote pass, no peer tier needed |
 | Remote fetch failed | :2519-2522 | `Miss` if no peer held it, else `Error` |
 | Failed batched sync (overwrite) | :2588-2590 | `Error` |
 | Concurrent-promotion recovery (overwrite) | :2615-2620 | `Dram` on success |

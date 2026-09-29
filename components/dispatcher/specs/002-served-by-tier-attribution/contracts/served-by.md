@@ -10,35 +10,63 @@ shm-queue control plane. The Rust-side interface delta is `contracts/idispatcher
 
 ## The taxonomy
 
-Seven meaningful values. Every looked-up key gets exactly one.
+Six meaningful values. Every looked-up key gets exactly one.
 
 | Value | Data delivered? | Meaning |
 | --- | --- | --- |
 | `DRAM` | yes | Local memory tier hit; the block was already resident. |
 | `SSD` | yes | A local data drive was read to serve this request. |
-| `REMOTE_DRAM` | yes | A peer served it and advertised it as memory-tier resident. |
-| `REMOTE_SSD` | yes | A peer served it and advertised it as SSD resident — i.e. the peer had to read its own disk. |
+| `REMOTE` | yes | A peer served it. **Not** subdivided by the peer's tier — see below. |
 | `MISS` | no | Not found in any tier, local or remote. |
 | `SIZE_MISMATCH` | no | Present, but at a different size than requested. |
 | `ERROR` | no | Attempted and failed for some other reason. |
 
-Three properties of this taxonomy are load-bearing and easy to get wrong:
+Two properties of this taxonomy are load-bearing and easy to get wrong:
 
 1. **It describes the route, not the residency.** In `dispatcher`, an SSD hit is promoted
    into DRAM as part of being served, so "served from SSD" and "now in DRAM" are both true of
    one request. `SSD` is the honest answer because it is what the request cost.
-2. **`REMOTE_SSD` does not mean data crossed the fabric from disk.** The RDMA read is always
-   out of the responding peer's DRAM; a disk-tier key is promoted into the peer's memory tier
-   *before* the transfer. `REMOTE_SSD` therefore means "a peer's disk read was on this
-   request's critical path."
-3. **`REMOTE_SSD` is a first-touch property.** Because serving from disk leaves the entry in
-   the peer's DRAM, the next remote fetch of the same key is expected to report
-   `REMOTE_DRAM`. A fixed holder configuration does not produce a stable `REMOTE_SSD`
-   fraction, and any test or report that assumes otherwise is mis-specified.
+2. **`REMOTE` is deliberately not split by the peer's tier**, and the reasoning matters
+   because splitting it is the obvious thing to want. See the next section.
+
+### Why `REMOTE` is one value and not `REMOTE_DRAM` / `REMOTE_SSD` (decided 2026-09-29)
+
+An earlier revision of this contract split them, on the peer's advertised tier carried out of
+`IRemoteLookup::batch_lookup`. **That split is withdrawn.** It is a real design that looked
+right, so the reasons are recorded here rather than deleted — do not reinstate it without
+answering all four:
+
+1. **`REMOTE_SSD` would not have described where the bytes came from.** The responder
+   *promotes disk-resident keys into its own memory tier before the RDMA read*
+   (`components/remote-lookup/src/server.rs`, `promote_to_memory_tier`, batched once per
+   request). There is no RDMA-from-SSD path in this system, so every remotely served byte
+   leaves a peer's DRAM. `REMOTE_SSD` could only ever have meant "a peer's disk read was on
+   this request's critical path" — a true and useful statement, but not the one its name makes.
+2. **It would have been an advertisement, not an observation.** The value came from what the
+   peer announced, which may be stale by the time the key is served. That was a deliberate
+   choice (serve-time ground truth needs a new message type, see below), but it means the
+   value is one step removed from what happened.
+3. **It decays, so no fixed configuration yields a stable fraction.** Serving from disk leaves
+   the entry in the peer's DRAM, so the *next* fetch of that key advertises memory. The split
+   fraction therefore falls monotonically in a static cluster, and any test or report
+   expecting it to hold still is mis-specified. That defect was already recorded against the
+   split; collapsing removes it rather than documenting around it.
+4. **The volume cannot carry the complexity.** Remote lookup serves **0.369%** of what it is
+   asked and **0.81%** of all hits (measured 2026-09-28, feature Phase 1). `REMOTE_SSD` is a
+   first-touch subset of that, further narrowed because peer selection prefers memory-resident
+   peers (`actor.rs`, `find(Avail::Memory).or_else(|| find(Avail::Disk))`). It would have been
+   the least legible of the wire values at the smallest volume.
+
+**The question the split was reaching for is still worth answering, and is answered better
+elsewhere**: "are peers doing SSD reads on our behalf?" is a question about *pressure we cause
+on peers*, which is an aggregate, not a per-key property of our own lookups. It is answered by
+a responder-side counter of peer-triggered promotions — see
+`components/remote-lookup/specs/002-remote-lookup-rdma` — which needs no wire value, no
+per-key plumbing, and no `IRemoteLookup` tier delta.
 
 ### Hits versus non-hits
 
-`DRAM`, `SSD`, `REMOTE_DRAM`, `REMOTE_SSD` are hits. `MISS`, `SIZE_MISMATCH`, `ERROR` are not.
+`DRAM`, `SSD`, `REMOTE` are hits. `MISS`, `SIZE_MISMATCH`, `ERROR` are not.
 A hit is reported if and only if the lookup succeeded, so a consumer can compute an object
 hit rate as `hits / total` without needing to know the error taxonomy.
 
@@ -78,7 +106,7 @@ testing `byte != 0` is unaffected (`lib/shmq-dispatcher/src/wire.rs:98-110`).
 
 ### **DECISION — needs sign-off:** the wire carries a 5-value projection, not all 7
 
-The taxonomy has seven values, but only four of them mean *served*. On this byte `0` already
+The taxonomy has six values, but only three of them mean *served*. On this byte `0` already
 means *not served*, and `MISS`, `SIZE_MISMATCH` and `ERROR` are all not-served — so they
 cannot each take a distinct non-zero value without making `byte != 0` report "served" for a
 key whose data was never delivered. That would be worse than losing a distinction: a reader
@@ -90,11 +118,10 @@ So the byte carries **not-served, or which tier served**:
 0  not served          (was: ok = 0 — meaning preserved exactly)
 1  DRAM                local memory tier hit; already resident
 2  SSD                 a local data drive was read to serve this request
-3  REMOTE_DRAM         a peer served it, advertising memory-tier residency
-4  REMOTE_SSD          a peer served it, advertising SSD residency
+3  REMOTE              a peer served it
 ```
 
-and the full seven-value `ServedBy` lives in `components/interfaces`, where the dispatcher
+and the full six-value `ServedBy` lives in `components/interfaces`, where the dispatcher
 produces it and the **server's counters consume it**. That is where the not-served breakdown
 is actually needed: FR-024 requires hits plus misses plus errors to equal entries requested,
 which is a counter reconciliation, not a per-key wire question. `MISS`, `SIZE_MISMATCH` and
@@ -120,8 +147,10 @@ treats a size mismatch as a miss by design (`size-mismatch = cache miss`), so it
   proto3 reserves zero as a default and it doubled as version detection. Here `0` is already
   spoken for, and reserving it for "unknown" would silently reclassify every miss as an
   unattributed hit. Version detection belongs to the mailbox's own protocol version.
-- **A conforming server never emits a value outside `0..=4`.** No wire enforcement, so it
-  needs a test.
+- **A conforming server never emits a value outside `0..=3`.** No wire enforcement, so it
+  needs a test. Values `4..=255` are unassigned; a reader MUST treat an unknown non-zero
+  value as *served, tier unknown* rather than as not-served, so that a future split of
+  `REMOTE` cannot turn a hit into a miss in an old reader.
 - **The interface change is compiler-enforced; the byte is not.** Widening
   `IDispatcher::batch_lookup`'s return type makes every implementor and call site a compile
   error until updated. Writing the wrong `u8` compiles cleanly, which is why the attribution
@@ -138,46 +167,48 @@ No other operation gains attribution. Stating that explicitly is the point: a va
 sometimes meaningful depending on which operation produced it is the ambiguity that gets
 discovered by a wrong dashboard six months later.
 
-## The `IRemoteLookup` delta
+## The `IRemoteLookup` delta — WITHDRAWN (2026-09-29)
 
-The two remote values require the peer's advertised tier to leave `remote-lookup`. Today:
+**No `IRemoteLookup` change is required by this feature.** This section previously specified
+carrying the peer's advertised tier out of `batch_lookup` so that `REMOTE_DRAM` and
+`REMOTE_SSD` could be told apart. Collapsing them to a single `REMOTE` removes the only
+consumer, and `batch_lookup` keeps its present signature:
 
 ```rust
 fn batch_lookup(&self, entries: &[(CacheKey, u32)]) -> Vec<Result<(), RemoteLookupError>>;
 ```
 
-The tier is already known — it arrives as `Avail::{None, Memory, Disk}` in the peer's
-KEY_RESPONSE and is retained per peer for the whole operation — but it is discarded at three
-points: the result projection reads key state only, key state has no tier dimension, and
-`Avail` is not exported into the `interfaces` crate.
+`REMOTE` needs nothing new. The dispatcher already learns, per key, whether remote lookup
+succeeded — it zips `remote_results` back against the batch — and that is exactly the
+question `REMOTE` answers. The internal paths that made the tier version awkward (a
+single-flight follower owning no landing slot, the `AlreadyExists` publish path having a
+recorded peer that did not fill DRAM) are moot for the same reason: all of them still produce
+a per-key success, and success is all `REMOTE` asserts.
 
-The contract this feature requires:
+### Findings kept, because they outlive the withdrawn delta
 
-- `IRemoteLookup::batch_lookup` MUST return, per key, the advertised tier of the peer that
-  served it, alongside the existing success/failure result.
-- The tier MUST be derived from the peer's advertised availability, **never from the
-  operation's phase.** Phase and tier are correlated but not equivalent: a peer-DRAM hit can
-  finalize in Phase 2, a disk fetch can occur in Phase 1, phase is stored per operation
-  rather than per key, and it transitions on quorum and timeout rather than on any tier
-  event.
-- A key satisfied as a **single-flight follower** owns no landing slot of its own, so its
-  tier MUST be taken from the leading operation's record. It MUST NOT be left unattributed.
-- A key satisfied via the `AlreadyExists` publish path has a recorded peer that did not fill
-  DRAM; its tier MUST NOT be read from that peer's advertisement without validation.
-- A peer advertising `Avail::None` is not a holder and contributes no tier.
-- **No wire-protocol change.** `WIRE_VERSION` stays at 1 and an unmodified peer remains
-  interoperable. This is a hard constraint, not a preference: the codec frames by record
-  count with no length prefix and no spare or reserved field, so appending a byte to an
-  existing message would mis-align an old decoder from the second record onward and fail
-  silently rather than detectably. There is no capability negotiation to gate a change on,
-  and bumping the version makes old peers drop every frame as unknown. A *new message type*
-  would be compatible where a new field is not — which is the shape any future serve-time
-  ground-truth feature must take.
+- **Phase is not a tier proxy, and must never be used as one.** Phase 1 / Phase 2 and tier are
+  correlated but not equivalent: a peer-DRAM hit can finalize in Phase 2, a disk fetch can
+  occur in Phase 1, phase is stored per operation rather than per key, and it transitions on
+  quorum and timeout rather than on any tier event. This is recorded as a standing caution for
+  anyone tempted to reconstruct a tier cheaply.
+- **The peer wire protocol cannot absorb a new field, only a new message.** The codec frames
+  by record count with **no length prefix and no spare or reserved field**, so appending a byte
+  to an existing message mis-aligns an old decoder from the second record onward and fails
+  **silently rather than detectably**. There is no capability negotiation to gate a change on,
+  and bumping `WIRE_VERSION` makes old peers drop every frame as unknown. Any future
+  serve-time ground-truth feature must therefore take the shape of a *new message type*.
+  `WIRE_VERSION` stays at 1 and unmodified peers stay interoperable.
+- **The tier information itself still exists**, should a future feature want it: it arrives as
+  `Avail::{None, Memory, Disk}` in the peer's KEY_RESPONSE and is retained per peer for the
+  operation, then discarded at three points — the result projection reads key state only, key
+  state has no tier dimension, and `Avail` is not exported into `interfaces`. It is used today
+  for peer *selection* (memory-resident peers are preferred), not for reporting.
 
 ## Internal-to-wire mapping
 
-**Not one-to-one, and that is the decision above.** The seven internal values project onto
-five wire values, because three of them mean *not served* and the byte's `0` already says so.
+**Not one-to-one, and that is the decision above.** The six internal values project onto
+four wire values, because three of them mean *not served* and the byte's `0` already says so.
 A server MUST NOT infer a tier from a latency or any other proxy; it may only report what the
 dispatcher returned, and it MUST NOT invent a wire value for a not-served key.
 
@@ -185,13 +216,12 @@ dispatcher returned, and it MUST NOT invent a wire value for a not-served key.
 | --- | --- | --- | --- |
 | `Dram` | `1` | yes | `lookup_hits`, `lookup_hits_dram` |
 | `Ssd` | `2` | yes | `lookup_hits`, `lookup_hits_ssd` |
-| `RemoteDram` | `3` | yes | `lookup_hits`, `remote_lookup_hits` |
-| `RemoteSsd` | `4` | yes | `lookup_hits`, `remote_lookup_hits` |
+| `Remote` | `3` | yes | `lookup_hits`, `remote_lookup_hits` |
 | `Miss` | `0` | no | `lookup_misses` |
 | `SizeMismatch` | `0` | no | `lookup_misses` (see below) |
 | `Error` | `0` | no | `lookup_errors` |
 
-The three `0` rows are why the internal taxonomy stays seven-valued: the counters need the
+The three `0` rows are why the internal taxonomy stays six-valued: the counters need the
 distinction that the wire cannot carry, and FR-024's reconciliation — hits plus misses plus
 errors equals entries requested — is only checkable if `Error` is counted apart from `Miss`.
 

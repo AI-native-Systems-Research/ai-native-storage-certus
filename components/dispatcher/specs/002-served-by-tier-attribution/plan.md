@@ -124,12 +124,14 @@ Re-counted 2026-09-28: four impls, of which **two are production** (`components/
 `lib/shmq-dispatcher`'s test mock). The inventory in `contracts/idispatcher.md` still
 predates two upstream changes and its line numbers remain stale.
 
-Phase 2 also carries **the `IRemoteLookup` delta** (`contracts/served-by.md`, "The
-`IRemoteLookup` delta"), which was previously filed under Phase 4. It cannot wait: the
-projection keeps `RemoteDram` (`3`) and `RemoteSsd` (`4`) distinct, and the dispatcher can
-only tell them apart from the peer's advertised tier carried out of
-`IRemoteLookup::batch_lookup`. Without the delta, Phase 2 would have to either invent a
-remote value or collapse the two — both of which Phase 3 would then have to undo.
+Phase 2 carries **no `IRemoteLookup` change at all.** An earlier revision of this plan moved
+that delta into Phase 2 (from Phase 4, where the compiler forbade it) because the projection
+split `RemoteDram` from `RemoteSsd` and only the peer's advertised tier could tell them apart.
+**The split was then withdrawn** (2026-09-29): the two collapsed to a single `REMOTE`, which
+the dispatcher derives from the per-key success of the remote pass it already has.
+`IRemoteLookup::batch_lookup` keeps its signature, and Phase 2 is smaller than either earlier
+revision of this plan implied. The question the split was reaching for is answered by a
+responder-side counter in `remote-lookup`, outside this feature's interface work entirely.
 
 **Phase 3 — the control plane.** Widen `LOOKUP`'s per-key byte. Carries the open decision in
 `contracts/served-by.md` about the five-value projection, which needs sign-off before it is

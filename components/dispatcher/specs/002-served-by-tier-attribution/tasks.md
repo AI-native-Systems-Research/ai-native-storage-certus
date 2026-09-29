@@ -253,6 +253,8 @@ The `ServedBy` taxonomy, `IDispatcher::batch_lookup`'s return type, the `LOOKUP`
 widening and its open five-value decision, `dispatcher-p2p`, `remote-lookup`, and both
 verification-bearing component specs. All are Phases 2–4.
 
-**Do not infer from this list which of those phases owns each item** — `dispatcher-p2p` and
-the `IRemoteLookup` delta land in Phase 2 because the compiler forces them to, leaving Phase
-4 to own verification and the component specs. See plan.md's boundary note.
+**Do not infer from this list which of those phases owns each item** — `dispatcher-p2p` lands
+in Phase 2 because the compiler forces it to, leaving Phase 4 to own verification and the
+component specs. There is no longer an `IRemoteLookup` delta in any phase: the two remote
+taxonomy values were collapsed on 2026-09-29, so no tier crosses that interface. See plan.md's
+boundary note.

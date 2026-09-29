@@ -132,11 +132,13 @@ dependency was: the generator can drive a workload that exercises remote lookup
 is the gap this feature closes, and it is why the motivation in `**Input**` is now a
 measurement result rather than another spec's requirement.
 
-One consequence of the original scoping survives and is still intentional: remote hits are
-attributed by the peer's **advertised** tier, which is precise enough for a hit-rate
-measurement but is not serve-time ground truth. The distinction is spelled out in
-FR-016..FR-018 and in `## Assumptions`, because a report that says `REMOTE_SSD` is making a
-weaker claim than it appears to.
+One consequence of the original scoping has since been **removed rather than documented
+around**: remote hits were to be attributed by the peer's *advertised* tier, splitting
+`REMOTE_DRAM` from `REMOTE_SSD`. That split is withdrawn (2026-09-29) and remote hits carry a
+single `REMOTE`. The reasoning is recorded in `contracts/served-by.md`; the short form is that
+`REMOTE_SSD` named something it could not deliver — no byte ever crosses the fabric from a
+peer's disk — while being an advertisement rather than an observation, decaying on repeat
+access, at 0.81% of hits.
 
 ## Reconciliation (2026-09-25)
 
@@ -204,14 +206,18 @@ rework. They must be re-counted at plan time; the line numbers there are known s
   per key** (`operation.rs:76`), so a mixed batch carries one value for both. And it
   transitions on quorum/timeout, never on a tier event (`actor.rs:698-705`). Any
   implementation that reads phase instead of `Avail` is wrong.
-- Q: What does `REMOTE_SSD` mean, given the transport? → A: **"The responding peer had to
-  read from its SSD in order to serve this," never "the NIC read from SSD."** The RDMA read
-  is always out of the responder's DRAM: a disk-tier key is promoted into the peer's memory
-  tier *before* the write (`components/remote-lookup/src/server.rs:243-265`) and the
+- Q: What does `REMOTE_SSD` mean, given the transport? → A: **It was asked, answered, and the
+  answer is why the value no longer exists.** It could only ever have meant "the responding peer
+  had to read from its SSD in order to serve this," never "the NIC read from SSD": the RDMA read
+  is always out of the responder's DRAM, because a disk-tier key is promoted into the peer's
+  memory tier *before* the write (`components/remote-lookup/src/server.rs:243-265`) and the
   initiator sources bytes only via `IMemoryTier::peek`
-  (`components/remote-lookup-rdma-initiator/src/lib.rs:157-169`). This is also why
-  `REMOTE_SSD` is a property of a *first* touch: having served it, the peer now holds it in
-  DRAM, so a second request for the same key advertises `Memory`.
+  (`components/remote-lookup-rdma-initiator/src/lib.rs:157-169`). It was also a *first-touch*
+  property — having served it, the peer holds it in DRAM, so the next request advertises
+  `Memory`. A value whose name overstates it, which is an advertisement rather than an
+  observation, and whose population decays, was not worth a wire slot at 0.81% of hits.
+  **Collapsed to `REMOTE` on 2026-09-29**; the peer's disk work is now counted on the peer,
+  where it is a stable aggregate. Full reasoning in `contracts/served-by.md`.
 - Q: How is a size mismatch classified? → A: **Its own bucket, `SIZE_MISMATCH`.** It is
   neither a hit (no data delivered) nor a plain miss (the key *is* present). Giving it a
   distinct value changes no dispatcher behaviour: today `LookupResult::MismatchSize` yields
@@ -353,12 +359,11 @@ no RDMA hardware required for the mocked mesh path.
 **Acceptance Scenarios**:
 
 1. **Given** a key held in a peer's memory tier, **When** it is fetched remotely, **Then**
-   the requester attributes it `REMOTE_DRAM`.
-2. **Given** a key held only on a peer's SSD, **When** it is fetched remotely for the first
-   time, **Then** the requester attributes it `REMOTE_SSD`.
-3. **Given** the same SSD-held key is fetched remotely a second time, **When** it is
-   attributed, **Then** `REMOTE_DRAM` is permitted and correct, because serving it promoted
-   it into the peer's DRAM.
+   the requester attributes it `REMOTE`.
+2. **Given** a key held only on a peer's SSD, **When** it is fetched remotely, **Then** the
+   requester also attributes it `REMOTE` — identically, and on every fetch, because the
+   requester does not distinguish the peer's tier — **and** the responding peer counts one
+   peer-triggered promotion on the first fetch and none on the second.
 4. **Given** a remote fetch deduplicated by single-flight such that this caller is a
    follower, **When** it is attributed, **Then** it carries the same tier as the leading
    fetch and never `UNSPECIFIED`.
@@ -447,13 +452,15 @@ assert identical attribution for identical residency, except where FR-014 specif
 
 ### Outcome taxonomy
 
-- **FR-001**: The system MUST define a serving-tier taxonomy with exactly seven meaningful
-  values: `DRAM`, `SSD`, `REMOTE_DRAM`, `REMOTE_SSD`, `MISS`, `SIZE_MISMATCH`, and `ERROR`.
+- **FR-001** *(revised 2026-09-29 — the two remote values collapsed to one; see
+  `contracts/served-by.md`)*: The system MUST define a serving-tier taxonomy with exactly six
+  meaningful values: `DRAM`, `SSD`, `REMOTE`, `MISS`, `SIZE_MISMATCH`, and `ERROR`. It MUST NOT
+  subdivide `REMOTE` by the serving peer's tier.
 - **FR-002**: Every looked-up key MUST be attributed exactly one value. There MUST NOT be an
   "unknown" or "other" outcome.
-- **FR-003**: The taxonomy MUST distinguish *hits* (`DRAM`, `SSD`, `REMOTE_DRAM`,
-  `REMOTE_SSD`), in which data was delivered to the caller's destination, from *non-hits*
-  (`MISS`, `SIZE_MISMATCH`, `ERROR`), in which it was not.
+- **FR-003**: The taxonomy MUST distinguish *hits* (`DRAM`, `SSD`, `REMOTE`), in which data
+  was delivered to the caller's destination, from *non-hits* (`MISS`, `SIZE_MISMATCH`,
+  `ERROR`), in which it was not.
 - **FR-004**: Attribution MUST describe the route by which the request was served, not the
   entry's residency after serving.
 - **FR-005**: `MISS` MUST mean the key was not found in any tier, local or remote.
@@ -490,11 +497,22 @@ assert identical attribution for identical residency, except where FR-014 specif
 
 ### Remote attribution
 
-- **FR-016**: `components/remote-lookup` MUST carry the responding peer's advertised tier out
-  of `batch_lookup`, per key, so that a remote hit resolves to `REMOTE_DRAM` or
-  `REMOTE_SSD`.
-- **FR-017**: Remote attribution MUST be derived from the peer's advertised availability, and
-  MUST NOT be derived from the operation's phase.
+- **FR-016** *(WITHDRAWN 2026-09-29, replaced)*: previously required `components/remote-lookup`
+  to carry the responding peer's advertised tier out of `batch_lookup`. With `REMOTE` collapsed
+  there is no consumer, and `IRemoteLookup::batch_lookup` keeps its present signature. A remote
+  hit is attributed from the per-key success of the remote pass, which the dispatcher already
+  has. **Replaced by**: `components/remote-lookup` MUST count the keys it promoted from its own
+  disk in order to serve a *peer's* request, and expose that count — the question the split was
+  reaching for, answered as an aggregate about pressure this node's peers place on it. Specified
+  in `components/remote-lookup/specs/002-remote-lookup-rdma`.
+- **FR-017** *(revised 2026-09-29 with FR-016)*: Remote attribution MUST be derived from the
+  per-key outcome of the remote pass — the key was served by a peer, or it was not. It MUST NOT
+  be derived from the operation's phase, and it MUST NOT be derived from the peer's advertised
+  availability either, because no tier is carried any more. **The phase prohibition is kept
+  even though nothing now needs a tier**, because phase is the cheap proxy anyone
+  reconstructing this would reach for first: phase is per operation rather than per key, a
+  peer-DRAM hit can finalize in Phase 2, a disk fetch can occur in Phase 1, and it transitions
+  on quorum and timeout rather than on any tier event.
 - **FR-018**: This feature MUST NOT change the remote-lookup wire protocol, MUST NOT change
   `WIRE_VERSION`, and MUST remain interoperable with an unmodified peer.
 
@@ -567,8 +585,8 @@ assert identical attribution for identical residency, except where FR-014 specif
 - **ServedBy** — the serving-tier taxonomy of FR-001. One value per looked-up key.
 - **LookupOutcome** — the pair of (attribution, result) returned per key by
   `IDispatcher::batch_lookup`, replacing the bare `Result<(), DispatcherError>`.
-- **RemoteTier** — the peer's advertised availability as carried out of
-  `IRemoteLookup::batch_lookup`, from which `REMOTE_DRAM`/`REMOTE_SSD` is derived.
+- ~~**RemoteTier**~~ — withdrawn 2026-09-29 with FR-016. No tier crosses
+  `IRemoteLookup::batch_lookup`; `REMOTE` is derived from per-key success alone.
 
 ## Requirement coverage after Phase 1 (2026-09-28)
 
@@ -602,8 +620,10 @@ Two Phase 1 findings that bear on requirements elsewhere in this spec:
 - **SC-002**: A single-node capacity sweep shows the reported DRAM-to-SSD served ratio moving
   monotonically as DRAM capacity is reduced against a fixed working set — the attribution
   responds to the thing it claims to measure.
-- **SC-003**: On a multi-node cluster, a key held only in a peer's DRAM is reported
-  `REMOTE_DRAM` and a key held only on a peer's SSD is reported `REMOTE_SSD` on first fetch.
+- **SC-003** *(revised 2026-09-29)*: On a multi-node cluster, a key held only by a peer —
+  whether in that peer's DRAM or on its disk — is reported `REMOTE`, and a locally served key
+  never is. Separately, a key held only on a peer's disk increments that peer's peer-triggered
+  promotion count on first fetch, and does not increment it on the second.
 - **SC-004**: Hits plus misses plus errors equals entries requested, for every batch,
   including batches containing non-miss failures.
 - **SC-005**: The same batch against `dispatcher` and `dispatcher-p2p` yields identical
@@ -667,18 +687,19 @@ Two Phase 1 findings that bear on requirements elsewhere in this spec:
 - The tier that resolves a lookup is already known internally at each resolution site, so
   this feature adds no measurement — only propagation. Verified against
   `components/interfaces/src/idispatch_map.rs:9-28` and both dispatchers' `batch_lookup`.
-- **`REMOTE_SSD` means the peer read its SSD to serve the request, not that data moved off
-  SSD over the fabric.** The RDMA read is always from the peer's DRAM. A report consuming
-  this field is making that weaker claim.
+- **No byte ever crosses the fabric from a peer's disk.** The RDMA read is always from the
+  peer's DRAM, after the responder promotes any disk-resident key. This is why the taxonomy
+  carries no remote-SSD value; the peer's disk work is counted on the peer instead.
 - **Remote attribution is the peer's advertisement, not serve-time truth.** The peer
   re-resolves at serve time and the entry may have been promoted, evicted, or demoted in
   between (`components/remote-lookup/src/server.rs:216-238`), so a small fraction of remote
   attributions can be wrong in a way this feature does not detect. This is accepted as
   precise enough for aggregate hit-rate measurement and inadequate for per-request forensics.
-- **`REMOTE_SSD` is a transient, first-touch property.** Because serving from disk promotes
-  the entry into the peer's DRAM, a repeated remote fetch of the same key is expected to
-  report `REMOTE_DRAM`. A test or report that expects a stable `REMOTE_SSD` fraction from a
-  fixed holder configuration is mis-specified.
+- **The peer-triggered promotion count is a first-touch quantity, and that is now a feature
+  rather than a defect.** Serving from disk promotes the entry into the peer's DRAM, so the
+  same key counts once and not again. As a *rate* on the responder this is exactly the signal
+  wanted — how much cold work peers are causing — whereas as a per-key attribution on the
+  requester it was a decaying fraction that no fixed configuration could hold steady.
 - The dispatcher selection remains a build-time profile choice (`CERTUS_PROFILE`), so both
   dispatchers must be verified separately rather than switched at runtime. This is why
   FR-014's cold-path difference cannot be tested by flipping a flag.

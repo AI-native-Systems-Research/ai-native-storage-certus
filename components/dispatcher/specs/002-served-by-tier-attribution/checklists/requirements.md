@@ -52,9 +52,12 @@
       remote attributions can be wrong in a way this feature cannot detect. Accepted for
       aggregate hit rate; inadequate for per-request forensics. Any report built on it should
       say so
-- [ ] **`REMOTE_SSD` is transient.** Serving from a peer's disk promotes the entry into that
-      peer's DRAM, so a fixed holder configuration yields a decaying `REMOTE_SSD` fraction
-      rather than a stable one. A test asserting a stable fraction would be wrong, not the code
+- [x] **`REMOTE_SSD` is transient — RESOLVED by removing the value (2026-09-29).** Serving
+      from a peer's disk promoted the entry into that peer's DRAM, so a fixed holder
+      configuration yielded a decaying fraction that no test could hold steady. Rather than
+      specify around it, the two remote values were collapsed to one `REMOTE` and the peer's
+      disk work is now counted on the responder, where first-touch decay is the wanted signal
+      rather than an artifact. See `contracts/served-by.md`
 - [ ] **Python stub staleness.** Two of the three checked-in stub sets are already drifted;
       one is shipped to remote nodes by the multi-node test script. Regeneration is in scope
       as a decision (FR-030) but the drift repair is not
