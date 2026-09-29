@@ -6,6 +6,15 @@ spec_sync_git_commit: 3b1cca02
 spec_sync_inputs_sha256: 58c590e9c8292d98872b5c90099144e370572f8f5b1ef79d5870b8b8389f4c4f
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-29 (feature 002 Phase 1: counters, FR-058 sync, taxonomy
+> collapse).** Branch `certus-lookup-observability`, layered on the accounting fixes
+> re-stamped above. Adds the two remote-lookup counters to `TierEventStats` (so FR-058
+> goes from six fields to eight), the responder-side serve counters, and the collapse
+> of the two remote taxonomy values into one. The appended sweep below carries the
+> findings and, importantly, the reason its method differs from the workload
+> generator's: this component cites 4 requirement ids across 120 defined, so
+> citation-counting proves nothing here.
+
 > **Re-stamp 2026-09-29 (lookup-accounting fixes; spec backfilled with the behaviour
 > change).** Branch `fix/lookup-accounting`. Two defects in the server's lookup
 > accounting: `batch_lookup` collapsed every `RemoteLookupError` into `IoError`, so a
@@ -126,3 +135,130 @@ None after this sweep. `scatter_gather_multi_drive_zero_copy` and `DriveWork` ar
    residual mentions live only in dated `.specify/sync/` changelog/backup records
    and unrelated `certus-server` gRPC-server specs, which are left intact as
    historical / legitimate.
+
+---
+
+# Appended sweep — feature 002 Phase 1 (2026-09-28)
+
+Generated: 2026-09-28
+Component: `components/dispatcher` (+ `lib/shmq-dispatcher`, `apps/certus-server-yaml`)
+Trigger: feature 002 Phase 1 — lookup classification fix, remote-lookup counters, FR-024 accounting
+Branch: `certus-lookup-observability`
+
+## THE METHOD USED HERE IS NOT THE ONE THAT WORKED ON THE WORKLOAD GENERATOR
+
+The generator's sweep counted each requirement id across `crates/**/*.rs` and treated an
+uncited requirement as a signal, because that code cites requirements densely. **That
+method is invalid in this component and would have produced a garbage report.** Measured:
+
+| | dispatcher | workload-generator |
+|---|---|---|
+| requirements defined | 120 (78 + 42) | 99 |
+| distinct ids cited in code | **4** | 75+ |
+
+Four citations against 120 requirements. Reporting "116 not implemented" would have been
+the output of the method, and it would have been false. This sweep therefore checks
+**meaning**, scoped to what Phase 1 could have falsified, and says so rather than
+implying whole-spec coverage.
+
+## Summary
+
+| Category | Count |
+|----------|-------|
+| Specs analysed | 2 |
+| Requirements checked (scoped) | 11 |
+| ✓ Aligned after fixes | 8 |
+| ⚠️ Drifted — **FIXED in this pass** | 3 |
+| ✗ Not implemented | 0 in scope |
+| 🆕 Unspecced surface | 1 (pre-existing, structural — see below) |
+
+## Findings
+
+### 1. ⚠️ MAJOR — FR-058 enumerated six counters; the struct has eight
+
+`spec.md` FR-058 (001): "`TierEventStats` is a `Copy` struct of **six** `u64` fields",
+then names them. `components/interfaces/src/idispatcher.rs` now has **eight** —
+`remote_lookup_hits` and `remote_lookup_misses` were added by `9416c997`.
+
+**This is drift I introduced and then missed.** Phase 1 updated FR-011 and
+`contracts/errors.md` for the classification change, but not the one requirement that
+*enumerates these very counters*. The precedent was already in the file and I did not
+follow it: the 2026-09-09 sync updated FR-058 from four fields to six when
+store-backpressure added two.
+
+**FIXED**: FR-058 now says eight and documents both, including the accounting rule that a
+`TransportError` is neither hit nor miss, and that zeroes mean "no remote traffic" rather
+than "remote lookup unwired".
+
+**SC-017 also fixed**, because it covered FR-058 and would otherwise silently
+under-verify it: a populate/lookup/evict cycle does not exercise the remote counters at
+all, so they needed their own criterion (must not move on a purely local hit; hits +
+misses equals keys forwarded less transport failures).
+
+### 2. ⚠️ MODERATE — `contracts/idispatcher.md` claimed the interface change is what makes FR-024 enforceable
+
+`contracts/idispatcher.md:51` said `served_by` being meaningful on failure paths "is what
+makes 'every request lands in exactly one bucket' enforceable."
+
+**Phase 1 disproved this.** FR-024's aggregate identity is now enforced server-side by a
+pure tally in `shmq-dispatcher`, with **no interface change at all**. The claim tied a
+requirement to a design that turned out not to be necessary for it.
+
+**FIXED**: the contract now claims what `LookupOutcome` actually adds — per-key
+attribution, which a tally cannot recover — and explicitly warns against re-arguing the
+identity as a justification for the change. The argument for Phase 2 has to be
+attribution, or it is not an argument.
+
+### 3. ⚠️ MODERATE — the same contract's "Migration: compiler-enforced" was unqualified
+
+True of the return-type widening it was written about; **false as a blanket property**.
+Adding two fields to `TierEventStats` compiled with zero errors because the other three
+implementors use `..Default::default()`, so a future implementor can silently
+under-report.
+
+**FIXED**: scoped to the return-type change, with the struct-field counter-example
+recorded as measured rather than predicted.
+
+### ✓ Aligned (verified, not assumed)
+
+- **FR-011 + `contracts/errors.md`** — `RemoteLookupError::NotFound` → `KeyNotFound`,
+  `TransportError` → `IoError`. Matches `dispatcher/src/lib.rs` exactly; both tables
+  updated in the same commit as the behaviour change.
+- **FR-024** — hits + misses + errors == entries requested, enforced by
+  `Translator::tally_lookup` and tested as the identity, mutation-verified.
+- **FR-026** — attribution does not depend on draining the eviction stream; the counters
+  are polled via `tier_event_stats()`, which does not touch that stream.
+- **FR-030/031** — per-component documentation obligations met: 001 for the behaviour
+  change, definition-site docs in `shmq-dispatcher` (which owns no `specs/`).
+- **FR-025, FR-027, FR-028, FR-029** — correctly **not** claimed by Phase 1; recorded as
+  awaiting later phases in 002's new coverage table rather than left to inference.
+
+### 🆕 Unspecced surface — the Prometheus endpoint has no owning spec (PRE-EXISTING)
+
+`serve_metrics` renders 16 `certus_*` metrics. **No requirement in any spec names any of
+them**, including the three Phase 1 added (`certus_lookup_errors_total`,
+`certus_remote_lookup_hits_total`, `certus_remote_lookup_misses_total`).
+
+**Not attributed to this change.** `apps/certus-server-yaml` has no `specs/` and no
+`.specify/` at all, so it cannot own a feature, and the same gap already covers
+`certus_populates_total`, the memory-tier and the NVMe metrics. Phase 1 made an existing
+structural gap two metrics wider; it did not create it.
+
+Worth a decision, not a silent backfill: **metric names are an external contract** — a
+scraper or dashboard breaks if they change — and right now nothing in the repo pins them.
+Options are to give the server app a spec, or to name the Prometheus surface in the
+dispatcher spec that produces the counters. Both are choices for the user.
+
+## Inter-spec conflicts
+
+None found between 001 and 002 in the checked scope. The known **seven-value taxonomy
+versus five-value wire projection** tension is internal to 002, deliberately recorded
+there, and unresolved pending sign-off — a declared open decision, not drift.
+
+## Recommendations
+
+1. **Commit findings 1–3** (done in this pass) — all three are documentation catching up
+   to shipped code, no behaviour change.
+2. **Decide who owns the `/metrics` name surface** before Phase 3 widens it further.
+3. **Do not run the citation-count method on this component again** without stating that
+   it does not apply; record the 4-of-120 measurement so the next sweep starts from it.

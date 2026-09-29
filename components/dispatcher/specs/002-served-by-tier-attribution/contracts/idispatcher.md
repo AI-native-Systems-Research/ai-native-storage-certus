@@ -49,7 +49,14 @@ impl ServedBy {
 /// The per-key outcome of a batched lookup: what happened, and where it came from.
 ///
 /// `served_by` is always meaningful, including on the failure paths — which is what
-/// makes "every request lands in exactly one bucket" enforceable.
+/// makes per-key *attribution* total.
+///
+/// NOTE (2026-09-28): this used to claim it is what makes "every request lands in exactly
+/// one bucket" enforceable. That claim was too strong and Phase 1 disproved it — the
+/// aggregate identity (FR-024) is now enforced server-side by a pure tally in
+/// `shmq-dispatcher`, with no interface change at all. What this struct adds is *which
+/// tier*, per key, which the tally cannot recover. Do not re-argue the identity as a
+/// reason for this change; argue attribution.
 #[derive(Debug, Clone)]
 pub struct LookupOutcome {
     pub served_by: ServedBy,
@@ -145,7 +152,14 @@ proto surface, because the same taxonomy crosses both boundaries.
 
 ## Migration
 
-Compiler-enforced; nothing silently keeps working.
+Compiler-enforced **for the return-type change specifically** — widening `batch_lookup`
+makes every implementor and call site a compile error until updated.
+
+**Do not generalise that to this interface as a whole.** Phase 1 added two fields to
+`TierEventStats` and the workspace compiled with **zero errors**, because the other three
+implementors build it with `..Default::default()`. A struct-field addition is therefore
+*not* compiler-enforced, and a future implementor can silently under-report a counter it
+never populates. Measured, not predicted (2026-09-28).
 
 **The inventory below is from 2026-08-04 and is NOT re-verified.** It predates the gRPC
 removal (`97e26738`) and an upstream rework of `dispatcher/src/lib.rs`, so both the line
