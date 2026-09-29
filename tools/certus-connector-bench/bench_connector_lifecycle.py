@@ -1674,8 +1674,9 @@ def main():
                         help="Skip the eviction-pressure benchmark")
     parser.add_argument("--mode", type=str, default=None,
                         choices=["default", "pipelined", "prefix-miss",
-                                 "contention", "scheduler-step"],
-                        help="Benchmark mode (omit for default 4-phase or --pattern)")
+                                 "contention", "scheduler-step", "all"],
+                        help="Benchmark mode (omit for default 4-phase or --pattern; "
+                             "'all' runs every mode sequentially)")
     parser.add_argument("--pipeline-depth", type=int, default=4,
                         help="(pipelined/scheduler-step) Batches in-flight before reaping")
     parser.add_argument("--direction", type=str, default="both",
@@ -1746,136 +1747,157 @@ def main():
     _remove_keys(ring, warmup_keys, args.tp)
 
     # ── mode dispatch ──
+
+    def _run_mode(mode: str) -> list[BenchResult]:
+        """Run a single benchmark mode, return its results."""
+        results: list[BenchResult] = []
+
+        if mode == "pattern":
+            overrides = {}
+            for ov in args.override:
+                if "=" in ov:
+                    k, v = ov.split("=", 1)
+                    overrides[k] = v
+            pattern, eval_expr_fn = _load_pattern(args.pattern, overrides)
+            print(f"\nPattern: {pattern.id} ({pattern.name})")
+            pattern.describe()
+            return bench_pattern(
+                pattern, eval_expr_fn, manager, worker, [store_region],
+                ring, args.bs,
+                args.block_bytes if args.block_bytes != DEFAULT_BLOCK_BYTES else None,
+                args.min_duration, args.tp,
+            )
+
+        if mode == "pipelined":
+            print(f"\n  Mode: pipelined (depth={args.pipeline_depth}, "
+                  f"direction={args.direction})")
+            if args.direction in ("store", "both"):
+                r = bench_pipelined(
+                    manager, worker, [store_region], keys,
+                    args.bs, args.block_bytes, args.min_duration,
+                    pipeline_depth=args.pipeline_depth, direction="store",
+                )
+                r.print_report()
+                results.append(r)
+            if args.direction in ("load", "both"):
+                _remove_keys(ring, keys, args.tp)
+                r = bench_pipelined(
+                    manager, worker, [store_region], keys,
+                    args.bs, args.block_bytes, args.min_duration,
+                    pipeline_depth=args.pipeline_depth, direction="load",
+                )
+                r.print_report()
+                results.append(r)
+
+        elif mode == "prefix-miss":
+            print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
+            r = bench_prefix_miss(
+                manager, worker, [store_region],
+                args.bs, args.block_bytes, args.min_duration,
+                hit_ratio=args.hit_ratio,
+                num_blocks=args.num_blocks,
+            )
+            results.append(r)
+
+        elif mode == "contention":
+            print(f"\n  Mode: contention (working_set={args.working_set})")
+            manager_load = ShmqCertusOffloadingManager(
+                ring, block_size_bytes=args.block_bytes, world_size=args.tp,
+            )
+            executor_load = ThreadPoolExecutor(
+                max_workers=args.workers, thread_name_prefix="bench-load",
+            )
+            Worker_cls = worker_class()
+            w_load = Worker_cls(
+                ring, [load_region], args.block_bytes, executor_load,
+                rank=0, world_size=args.tp,
+            )
+            results = bench_contention(
+                manager, manager_load, worker, w_load,
+                [store_region], ring,
+                args.bs, args.block_bytes, args.min_duration,
+                working_set=args.working_set,
+            )
+            executor_load.shutdown(wait=False)
+
+        elif mode == "scheduler-step":
+            print(f"\n  Mode: scheduler-step (reqs={args.requests_per_step}, "
+                  f"sessions={args.num_sessions})")
+            r = bench_scheduler_step(
+                manager, worker, [store_region], ring,
+                args.bs, args.block_bytes, args.min_duration,
+                requests_per_step=args.requests_per_step,
+                pipeline_depth=args.pipeline_depth,
+                num_sessions=args.num_sessions,
+                num_blocks=args.num_blocks,
+            )
+            results.append(r)
+
+        else:  # default
+            store_result = bench_store_lifecycle(
+                manager, worker, [store_region], keys,
+                args.bs, args.block_bytes, args.min_duration,
+            )
+            store_result.print_report()
+
+            _remove_keys(ring, keys, args.tp)
+            _populate_keys(manager, worker, keys, args.bs)
+
+            warm_result = bench_load_lifecycle(
+                manager, worker, [load_region], keys,
+                args.bs, args.block_bytes, args.min_duration,
+                cold=False,
+            )
+            warm_result.print_report()
+
+            cold_result = None
+            if not args.no_cold:
+                cold_result = bench_load_lifecycle(
+                    manager, worker, [load_region], keys,
+                    args.bs, args.block_bytes, args.min_duration,
+                    cold=True,
+                )
+                cold_result.print_report()
+
+            eviction_result = None
+            if not args.no_eviction:
+                _remove_keys(ring, keys, args.tp)
+                ring.clear_memory_tier()
+                eviction_result = bench_mixed_eviction(
+                    manager, worker, [store_region],
+                    args.bs, args.block_bytes, args.min_duration,
+                    working_set=args.working_set,
+                    load_fraction=0.5,
+                )
+
+            results = [store_result, warm_result]
+            if cold_result:
+                results.append(cold_result)
+            if eviction_result:
+                results.append(eviction_result)
+
+        # Clean up between modes.
+        try:
+            _remove_keys(ring, keys, args.tp)
+        except Exception:
+            pass
+
+        return results
+
     mode = args.mode
     if mode is None:
         mode = "pattern" if args.pattern else "default"
 
+    ALL_MODES = ["default", "pipelined", "prefix-miss", "contention", "scheduler-step"]
+    modes_to_run = ALL_MODES if mode == "all" else [mode]
+
     all_results: list[BenchResult] = []
-
-    if mode == "pattern":
-        overrides = {}
-        for ov in args.override:
-            if "=" in ov:
-                k, v = ov.split("=", 1)
-                overrides[k] = v
-        pattern, eval_expr_fn = _load_pattern(args.pattern, overrides)
-        print(f"\nPattern: {pattern.id} ({pattern.name})")
-        pattern.describe()
-
-        all_results = bench_pattern(
-            pattern, eval_expr_fn, manager, worker, [store_region],
-            ring, args.bs, args.block_bytes if args.block_bytes != DEFAULT_BLOCK_BYTES else None,
-            args.min_duration, args.tp,
-        )
-
-    elif mode == "pipelined":
-        print(f"\n  Mode: pipelined (depth={args.pipeline_depth}, "
-              f"direction={args.direction})")
-        if args.direction in ("store", "both"):
-            r = bench_pipelined(
-                manager, worker, [store_region], keys,
-                args.bs, args.block_bytes, args.min_duration,
-                pipeline_depth=args.pipeline_depth, direction="store",
-            )
-            r.print_report()
-            all_results.append(r)
-        if args.direction in ("load", "both"):
-            _remove_keys(ring, keys, args.tp)
-            r = bench_pipelined(
-                manager, worker, [store_region], keys,
-                args.bs, args.block_bytes, args.min_duration,
-                pipeline_depth=args.pipeline_depth, direction="load",
-            )
-            r.print_report()
-            all_results.append(r)
-
-    elif mode == "prefix-miss":
-        print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
-        r = bench_prefix_miss(
-            manager, worker, [store_region],
-            args.bs, args.block_bytes, args.min_duration,
-            hit_ratio=args.hit_ratio,
-            num_blocks=args.num_blocks,
-        )
-        all_results.append(r)
-
-    elif mode == "contention":
-        print(f"\n  Mode: contention (working_set={args.working_set})")
-        manager_load = ShmqCertusOffloadingManager(
-            ring, block_size_bytes=args.block_bytes, world_size=args.tp,
-        )
-        executor_load = ThreadPoolExecutor(
-            max_workers=args.workers, thread_name_prefix="bench-load",
-        )
-        Worker = worker_class()
-        worker_load = Worker(
-            ring, [load_region], args.block_bytes, executor_load,
-            rank=0, world_size=args.tp,
-        )
-        all_results = bench_contention(
-            manager, manager_load, worker, worker_load,
-            [store_region], ring,
-            args.bs, args.block_bytes, args.min_duration,
-            working_set=args.working_set,
-        )
-        executor_load.shutdown(wait=False)
-
-    elif mode == "scheduler-step":
-        print(f"\n  Mode: scheduler-step (reqs={args.requests_per_step}, "
-              f"sessions={args.num_sessions})")
-        r = bench_scheduler_step(
-            manager, worker, [store_region], ring,
-            args.bs, args.block_bytes, args.min_duration,
-            requests_per_step=args.requests_per_step,
-            pipeline_depth=args.pipeline_depth,
-            num_sessions=args.num_sessions,
-            num_blocks=args.num_blocks,
-        )
-        all_results.append(r)
-
-    else:
-        # ── default mode: hardcoded store/load/eviction lifecycle ──
-        store_result = bench_store_lifecycle(
-            manager, worker, [store_region], keys,
-            args.bs, args.block_bytes, args.min_duration,
-        )
-        store_result.print_report()
-
-        _remove_keys(ring, keys, args.tp)
-        _populate_keys(manager, worker, keys, args.bs)
-
-        warm_result = bench_load_lifecycle(
-            manager, worker, [load_region], keys,
-            args.bs, args.block_bytes, args.min_duration,
-            cold=False,
-        )
-        warm_result.print_report()
-
-        cold_result = None
-        if not args.no_cold:
-            cold_result = bench_load_lifecycle(
-                manager, worker, [load_region], keys,
-                args.bs, args.block_bytes, args.min_duration,
-                cold=True,
-            )
-            cold_result.print_report()
-
-        eviction_result = None
-        if not args.no_eviction:
-            _remove_keys(ring, keys, args.tp)
-            ring.clear_memory_tier()
-            eviction_result = bench_mixed_eviction(
-                manager, worker, [store_region],
-                args.bs, args.block_bytes, args.min_duration,
-                working_set=args.working_set,
-                load_fraction=0.5,
-            )
-
-        all_results = [store_result, warm_result]
-        if cold_result:
-            all_results.append(cold_result)
-        if eviction_result:
-            all_results.append(eviction_result)
+    for m in modes_to_run:
+        if mode == "all":
+            print(f"\n{'='*70}")
+            print(f"  Running mode: {m}")
+            print(f"{'='*70}")
+        all_results.extend(_run_mode(m))
 
     # ── CSV output ──
     if args.csv and all_results:
