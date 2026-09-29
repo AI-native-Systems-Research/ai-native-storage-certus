@@ -1679,6 +1679,23 @@ def main():
     # ── set up ring + connector objects ──
     ring = Ring(args.shm_path, ready_timeout=10.0, log=lambda msg: None)
 
+    # Clear leaked channel owner words from crashed/exited benchmark processes.
+    # The server never touches owner words, so a non-zero owner from a dead
+    # process permanently blocks that channel.  Safe because we are the only
+    # live client right now (the benchmark is single-process).
+    from certus_shmq_connector.ring import OFF_OWNER
+    cleared = 0
+    for ch in range(ring._num_channels):
+        owner_off = ring._channel_base(ch) + OFF_OWNER
+        if ring._rd_u32(owner_off) != 0:
+            ring._wr_u32(owner_off, 0)
+            cleared += 1
+    if cleared:
+        print(f"  Cleared {cleared} leaked channel claims from prior runs")
+    # Re-claim channel 0 for the main thread (the constructor already did this,
+    # but we just zeroed the owner word above).
+    ring._tls.channel = None  # force re-claim on next use
+
     manager = ShmqCertusOffloadingManager(
         ring, block_size_bytes=args.block_bytes, world_size=args.tp,
     )
