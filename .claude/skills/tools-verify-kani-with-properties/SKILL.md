@@ -198,6 +198,69 @@ file — blaming you for a discovery limitation. Measured: 13 global-invariant h
 `macro_rules!` would all have scored that way. Write explicit `#[kani::proof] fn verify_<id>()`
 functions, however repetitive.
 
+### 🥇 LOOP CONTRACTS FIRST — the correct answer to a loop that will not fit a bound
+`-Z loop-contracts` replaces unrolling with a Floyd–Hoare invariant, so **the loop body executes
+exactly twice** and verification cost is decoupled from the iteration count. This is available in
+cargo-kani 0.67.0 (checked: `-Z` accepts `loop-contracts`, `function-contracts`, `quantifiers`,
+`ghost-state`, `mem-predicates`, `uninit-checks`, `valid-value-checks`).
+
+**Measured, on a 1024-iteration loop that mirrors a real component's `halve()`:**
+
+| approach | base harness | its mutant (MUST fail) | time | sound? |
+|---|---|---|---|---|
+| `--unwind 4 --no-unwinding-checks` | SUCCESSFUL | **SUCCESSFUL** | 0.034 s | **NO — vacuous** |
+| `-Z loop-contracts`, no bound at all | SUCCESSFUL | **FAILED** ✓ | 0.20 s | **YES** |
+
+Read that table before reaching for `--no-unwinding-checks` again. The bounded version "verified" in
+34 ms **and so did a harness asserting the exact opposite**, because a 4-iteration bound over a
+4096-iteration loop prunes away every path the obligation is about. The loop-contract version costs
+6× more and is worth infinitely more: it holds for all iteration counts, and its mutant correctly
+fails. Kani's own tool paper puts the same contrast at 0.2 s with a contract versus 91.8 s unrolling
+19 iterations.
+
+```rust
+#![cfg_attr(kani, feature(stmt_expr_attributes, proc_macro_hygiene))]
+let mut i = 0usize;
+#[kani::loop_invariant(i <= COLS && (i == 0 || c[0] <= 127))]
+while i < COLS { c[i] >>= 1; i += 1; }
+```
+Run with `-Z loop-contracts`. Companions: `#[kani::loop_modifies(...)]` when the inferred write set is
+wrong, and `#[kani::loop_decreases(expr)]` for termination.
+
+**Limitations you WILL hit, so design around them:**
+- **Struct field projections in an invariant are known-broken** (kani #3168). Measured here: an
+  invariant over `self.c[0]` failed both establishment and the base proof; hoisting the data to a
+  local made the identical invariant prove. **Write invariants over locals**, not over `self.field`.
+- `while let` loops are unsupported. `while` and `loop` work; `for` works over ranges, slices, Vec,
+  Iter and the common adaptors.
+- **Without `loop_decreases` you get PARTIAL correctness** — "if the loop terminates, the result is
+  correct". Kani's docs show an infinite `while true` whose post-loop assertion is reported *proved*.
+  So an invariant alone does not rule out non-termination; add a decreases measure when that matters,
+  and record fidelity accordingly.
+- `loop_decreases` takes **integer** expressions only, no lexicographic tuples, no field projections,
+  and it conflicts with `loop_modifies` in this version.
+- The invariant and the decreases expression must be **pure**; side effects there are unchecked and
+  "could lead to an unsound proof result".
+- Diagnosing: establishment fails → invariant too strong for the initial state; preservation fails →
+  too weak to prove itself, or too strong for the body; post-loop assertion fails → invariant plus
+  `!guard` is not enough.
+
+### The escalation order for a loop-bound failure — strongest claim first
+1. **`#[kani::unwind(n)]` / `--unwind n` sweep with unwinding checks ON.** Anything that proves here is
+   full strength. Note Kani needs the bound **one more than** the iteration count, and `break`/
+   `continue` can need two or three more.
+2. **`-Z loop-contracts`.** Unbounded and full strength. Prefer this over any bounded fallback.
+3. **Shrink the problem** — a smaller `const` bound in the harness, honestly recorded, so the claim is
+   about the smaller structure rather than silently about nothing.
+4. **`--no-unwinding-checks` LAST, and never without its mutant twin.** See below.
+
+### 🔴 `--no-unwinding-checks` PRUNES paths — and it destroys Kani's own completeness claim
+Kani's guarantee is stated as "**practically complete when all unwinding assertions pass**". The
+unwinding assertion is the check that your bound was big enough. `--no-unwinding-checks` deletes
+exactly that check, so it does not merely narrow the claim — it removes the evidence that the claim
+covers anything. Kani's documentation never recommends the flag; the tutorial's remedy for a
+too-small bound is to raise the bound or shrink the problem.
+
 ### 🔴 `--no-unwinding-checks` PRUNES paths — it does not merely truncate them
 So a harness can pass **with no content**. Measured on eviction-policy-session-lists: in the first
 full run every `verify_*` passed AND **36 `__mutant` twins passed too**, and a passing mutant is the
@@ -211,6 +274,31 @@ definition of a vacuous proof. Two consequences you must design for:
    a real defect as `proved`. The idiom that survives pruning: bind the outcome, `kani::cover!` the
    violating case, then assert. An unsatisfiable cover is a FAILED check, so the harness fails whether
    the violation is unreachable OR the path was pruned away — it can never pass silently.
+
+### Why every proof here carries a mutant twin — Kani has no vacuity detection
+Kani's own tool paper is explicit that a bad assumption "makes the proof vacuously true, so
+assumptions must be reviewed as carefully as the code itself", and it describes **no** vacuity
+detection, no reachability or coverage metric, and no assumption-consistency check. Mutation testing
+of proofs appears nowhere in it. So the `verify_<id>__mutant` twin is not ceremony and not
+duplication: it is the only mechanism in this pipeline that can tell a proof from an empty one, and
+the tool cannot do it for you.
+
+Measured worth: on `eviction-policy-session-lists` the gate found **52 of 90** harnesses vacuous, and
+on `eviction-policy-optimized` one published proof was empty. Every one of those passed Kani cleanly.
+
+### Trusted stubs make a proof CONDITIONAL — prefer `stub_verified`
+A plain `#[kani::stub(f, g)]` is **not** checked against the real `f`. Any result that depends on it is
+sound only if the stub over-approximates faithfully, which nothing verifies. With `-Z function-contracts`
+you can instead give `f` a contract, prove it once with `#[kani::proof_for_contract]`, and use
+`stub_verified` — then the abstraction is checked rather than trusted. Where you must use a plain stub
+(the `RandomState::new` seed stub is the standing example), record `fidelity: representative` and name
+the stub in the note, so the page shows a conditional claim as conditional.
+
+### Solver choice is a real lever, and wider than two options
+Backends available: SAT — **MiniSat (default)**, Kissat, CaDiCaL; SMT — Z3, cvc5, Bitwuzla. Their
+timeout profiles differ sharply, so a sat-timeout is worth retrying across several, not just one swap.
+Quantifiers are bounded: SAT backends expand eagerly and warn above ~1000 values, while SMT backends
+accept runtime-valued bounds — so a quantified invariant over a large array wants an SMT backend.
 
 ### `--harness NAME` matches SUBSTRINGS
 One flag can run several harnesses and interleave their verdicts. Never infer a verdict for one

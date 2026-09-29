@@ -705,6 +705,33 @@ def score_property(p, ctx):
                         f"scorer-applied solver swap: PROVED under '{slv}' (full strength), and its "
                         f"mutant twin re-run under the same solver correctly FAILED")
             continue
+        if lever == "loop_contract":
+            # STRONGEST available fallback, tried BEFORE nounwindcheck. -Z loop-contracts replaces
+            # unrolling with an invariant, so the body executes twice, the cost is decoupled from the
+            # iteration count, and the claim is UNBOUNDED. Measured on a 1024-iteration loop (see
+            # gate/case-studies/loop_contract_vs_nounwindcheck.rs): the nounwindcheck form "proved" in
+            # 0.034s AND its mutant also passed, i.e. vacuous; the contract form proved in 0.20s with
+            # the mutant correctly failing. It needs the agent to have written the invariant, so an
+            # absent variant is missing work rather than a tool limit.
+            lc_flags = ["-Z", "loop-contracts"]
+            for cand in (variant, named):
+                if cand and cand in present:
+                    sok, _, swall, srss, _, _ = run_kani(
+                        cand, ctx["component_dir"], ctx["cap"], ctx["mem_mb"],
+                        escalate=False, extra=lc_flags)
+                    if sok:
+                        vac = vacuity_check(pid, present, ctx, extra=lc_flags)
+                        if vac:
+                            return "UNRESOLVED", {"harness": cand, "lever": "loop_contract"}, vac
+                        return "proved", {"harness": cand, "result": "SUCCESS",
+                                          "wall_clock_s": swall, "peak_rss_mb": srss,
+                                          "lever": "loop_contract", "unbounded": True,
+                                          "vacuity_checked_under_lever": True}, (
+                            "scorer-applied loop contract (-Z loop-contracts): PROVED with NO unwind "
+                            "bound, so the claim covers every iteration count rather than a bounded "
+                            "prefix - full strength. Its mutant twin was re-run under the same flag "
+                            "and correctly FAILED.")
+            continue
         if lever == "nounwindcheck":
             # Weakest admissible lever, tried only after the full-strength options failed.
             for n in (4, 8):
