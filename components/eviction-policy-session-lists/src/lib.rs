@@ -228,6 +228,12 @@ impl IEvictionPolicy for EvictionPolicySessionListsComponent {
     }
 }
 
+/// Kani proof harnesses at the component boundary. Additive and `#[cfg(kani)]`-only;
+/// the harness bodies live in `verif-kani/`, outside `src/`.
+#[cfg(kani)]
+#[path = "../verif-kani/component_harnesses.rs"]
+mod component_harnesses;
+
 #[cfg(test)]
 mod tests {
     use super::*;

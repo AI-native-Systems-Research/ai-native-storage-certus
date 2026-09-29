@@ -1,0 +1,1331 @@
+# Blind CODE-ONLY verifiable-property extraction for eviction-policy-session-lists.
+#
+# Produced by reading ONLY the component sources (src/lib.rs, src/session_list.rs),
+# the macro-generated interface declaration, and the component's own tests/benches.
+# The specification was NOT read. Doc-comments inside the sources are treated as
+# claims the code makes about itself; where a doc-comment and the code below it
+# disagree, both are recorded and the disagreement is named.
+#
+# No per-tool blocks and no outcome fields appear here by design; the gate scorers
+# own those. This file is a faithful reformat of the obligations the code embodies.
+component: eviction-policy-session-lists
+interface: IEvictionPolicy
+pin: 937838a9
+generated: 2026-09-28
+source: components/eviction-policy-session-lists/src/**
+extraction: code-only-blind
+counts:
+  methods: 9
+  code_total: 88
+  not_verifiable: 12
+properties:
+
+  # ---------------------------------------------------------------- create_pool
+  - id: EPSL-CREATE-POOL-RETURNS-NEXT-SEQUENTIAL-ID
+    subject: create_pool
+    methods: [create_pool]
+    object_fn: "EvictionPolicySessionListsComponent::create_pool -> Vec::len / Vec::push"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Creating a pool returns the number of pools that existed before the call, so the
+      very first pool is numbered 0, the next 1, and so on with no gaps. Pool numbers
+      are handed out in order and a number is never handed out twice.
+    source: {code: ["lib.rs:103", "lib.rs:105", "lib.rs:106", "lib.rs:120"]}
+
+  - id: EPSL-CREATE-POOL-YIELDS-AN-EMPTY-POOL
+    subject: create_pool
+    methods: [create_pool, len, get_eviction_candidates, identify_next_to_evict]
+    object_fn: "EvictionPolicySessionListsComponent::create_pool -> Pool::default"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A freshly created pool starts out completely empty, which means asking for its
+      size reports zero, asking for eviction candidates returns an empty list, and
+      asking it to pick a block to evict returns nothing.
+    source: {code: ["lib.rs:106", "session_list.rs:40", "session_list.rs:41"]}
+
+  - id: EPSL-CREATE-POOL-PRESERVES-EXISTING-POOLS
+    subject: create_pool
+    methods: [create_pool]
+    object_fn: "EvictionPolicySessionListsComponent::create_pool -> Vec::push"
+    kind: frame
+    verifiable: true
+    statement: >
+      Creating a new pool does not disturb any pool that already exists: every pool
+      number already handed out still refers to the same pool, and the blocks tracked
+      in those pools, their lineage, their recency order and their sizes are all
+      unchanged.
+    source: {code: ["lib.rs:104", "lib.rs:106"]}
+
+  - id: EPSL-CREATE-POOL-ANNOUNCES-AT-MOST-ONCE
+    subject: create_pool
+    methods: [create_pool]
+    object_fn: "EvictionPolicySessionListsComponent::create_pool -> EvictionState::announced"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The one-off startup announcement that this session-lineage policy was selected is
+      emitted at most once for the lifetime of the component, no matter how many pools
+      are created, because the component records that it has announced and never clears
+      that record.
+    source: {code: ["lib.rs:84", "lib.rs:86", "lib.rs:111", "lib.rs:116"]}
+
+  - id: EPSL-ANNOUNCE-LATCH-SET-ONLY-WITH-A-LOGGER
+    subject: create_pool
+    methods: [create_pool]
+    object_fn: "EvictionPolicySessionListsComponent::create_pool -> Receptacle::get"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The record that the startup announcement has already been made is only written
+      while a logger is actually connected. Pools created before any logger is attached
+      therefore do not consume the one-off announcement, so the announcement can still
+      be emitted later, on the first pool created after a logger appears. The
+      doc-comment says the announcement fires exactly once regardless of how many pools
+      are created; the code only guarantees at most once, and only counts pool creations
+      that happened while a logger was present.
+    source: {code: ["lib.rs:83", "lib.rs:84", "lib.rs:107", "lib.rs:111", "lib.rs:116"]}
+
+  - id: EPSL-POOL-COUNT-ASSUMED-BELOW-U32-MAX
+    subject: create_pool
+    methods: [create_pool, track, touch, batch_touch, remove, identify_next_to_evict, get_eviction_candidates, len, clear_pool]
+    object_fn: "EvictionPolicySessionListsComponent::create_pool -> usize-to-u32 narrowing cast"
+    kind: precondition
+    verifiable: true
+    statement: >
+      The code assumes fewer than about four billion pools are ever created, because it
+      shortens the pool count to a 32-bit number when it makes up the new pool's
+      identifier. If that many pools were created the identifier would wrap around and a
+      new pool would be given the number of an existing one, silently aliasing two
+      different pools.
+    source: {code: ["lib.rs:105"]}
+
+  # --------------------------------------------------------------------- track
+  - id: EPSL-TRACK-REJECTS-UNKNOWN-POOL
+    subject: track
+    methods: [track]
+    object_fn: "EvictionPolicySessionListsComponent::track -> Vec::get / EvictionPolicyError::InvalidPool"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Asking to track a block in a pool number that was never created fails with an
+      invalid-pool error that reports the offending number, and nothing anywhere in the
+      component changes as a result.
+    source: {code: ["lib.rs:130", "lib.rs:136"]}
+
+  - id: EPSL-TRACK-NEVER-REPORTS-INVALID-HANDLE
+    subject: track
+    methods: [track]
+    object_fn: "EvictionPolicySessionListsComponent::track -> EvictionPolicyError"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Tracking a block has exactly one way to fail, namely an unknown pool. It never
+      reports the other error the interface defines, the invalid-handle error, so any
+      caller that distinguishes the two can treat an invalid-handle result from tracking
+      as impossible.
+    source: {code: ["lib.rs:123", "lib.rs:136", "lib.rs:140"]}
+
+  - id: EPSL-TRACK-FRESH-KEY-BECOMES-THE-SESSION-LEAF
+    subject: track
+    methods: [track, get_eviction_candidates, len]
+    object_fn: "Pool::register -> Pool::alloc / BTreeSet::insert / HashMap::insert"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Tracking a key that the pool does not yet hold adds exactly one new block, that
+      block has no child of its own, it becomes its session's current end-of-chain
+      block, it appears among the eviction candidates, and the pool's reported size goes
+      up by exactly one.
+    source: {code: ["session_list.rs:96", "session_list.rs:98", "session_list.rs:114", "session_list.rs:115", "session_list.rs:117"]}
+
+  - id: EPSL-TRACK-FRESH-KEY-LINKS-UNDER-PREVIOUS-LEAF
+    subject: track
+    methods: [track]
+    object_fn: "Pool::register -> HashMap::get(sessions)"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When a session already has blocks, the newly tracked block is attached directly
+      beneath that session's current end-of-chain block, recording that the earlier
+      block is the new block's ancestor. This is what makes the chain a lineage record
+      rather than just a list.
+    source: {code: ["session_list.rs:97", "session_list.rs:98", "session_list.rs:107", "session_list.rs:111"]}
+
+  - id: EPSL-TRACK-DEMOTES-THE-PREVIOUS-LEAF
+    subject: track
+    methods: [track, get_eviction_candidates, identify_next_to_evict]
+    object_fn: "Pool::register -> BTreeSet::remove(leaves)"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The block that was previously the end of a session's chain stops being an
+      eviction candidate the moment a new block is attached beneath it, because it now
+      has a descendant that is still being tracked. Its recency is not changed by this
+      demotion.
+    source: {code: ["session_list.rs:108", "session_list.rs:109", "session_list.rs:110", "session_list.rs:111"]}
+
+  - id: EPSL-TRACK-NEW-SESSION-STARTS-A-HEAD
+    subject: track
+    methods: [track]
+    object_fn: "Pool::register -> HashMap::get(sessions) returning None"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The first block tracked for a session has no ancestor at all, so it is both the
+      start and the end of that session's chain, and it is immediately an eviction
+      candidate.
+    source: {code: ["session_list.rs:97", "session_list.rs:101", "session_list.rs:107", "session_list.rs:115"]}
+
+  - id: EPSL-TRACK-IS-IDEMPOTENT-FOR-A-TRACKED-KEY
+    subject: track
+    methods: [track, len]
+    object_fn: "Pool::register -> HashMap::get(by_key) / Pool::touch"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Tracking a key the pool is already tracking does not add a second block. It
+      returns the same handle that was returned the first time, leaves the pool's size
+      unchanged, leaves every ancestor and descendant relationship exactly as it was,
+      and its only effect is to mark that block as the most recently accessed one.
+    source: {code: ["session_list.rs:86", "session_list.rs:91", "session_list.rs:92", "session_list.rs:93"]}
+
+  - id: EPSL-TRACK-RETRACK-IGNORES-THE-SUPPLIED-SESSION
+    subject: track
+    methods: [track]
+    object_fn: "Pool::register -> HashMap::get(by_key) keyed on key only"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When a key is already being tracked, the session identifier supplied with the new
+      request is discarded entirely; the block stays in the session it was first tracked
+      under, even if the caller asked for a different one. The interface documentation
+      says a lineage-aware policy reads the supplied session identifier to place the
+      block into its session's chain, which is true only for a key that is not yet
+      tracked, so a caller that re-tracks a key under a new session gets no error and no
+      effect.
+    source: {code: ["session_list.rs:91", "session_list.rs:92", "session_list.rs:93", "lib.rs:139"]}
+
+  - id: EPSL-TRACK-RETURNS-A-HANDLE-NAMING-POOL-AND-SLOT
+    subject: track
+    methods: [track, touch, batch_touch, remove]
+    object_fn: "EvictionPolicySessionListsComponent::track -> EvictionHandle::new"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The handle returned when a block is tracked carries the pool number the caller
+      asked for together with the storage slot the block occupies, and those are exactly
+      what the later refresh and stop-tracking operations use to find the block again.
+    source: {code: ["lib.rs:139", "lib.rs:140", "ieviction_policy.rs:15"]}
+
+  - id: EPSL-TRACK-ASSIGNS-THE-NEWEST-STAMP
+    subject: track
+    methods: [track, touch, batch_touch]
+    object_fn: "Pool::tick -> u64 counter increment"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Every tracking request that either adds a block or refreshes an existing one gives
+      that block an access number strictly larger than every access number handed out
+      before it in the same pool, so the block is unambiguously the most recently
+      accessed one and the ordering of blocks by recency is never tied.
+    source: {code: ["session_list.rs:62", "session_list.rs:63", "session_list.rs:96"]}
+
+  - id: EPSL-TRACK-REUSES-ONLY-FREED-SLOTS
+    subject: track
+    methods: [track]
+    object_fn: "Pool::alloc -> Vec::pop(free) / Vec::push(nodes)"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A new block is placed either in a storage slot that was previously released by a
+      removal or in a brand-new slot appended at the end of storage. It never overwrites
+      a slot that still holds a tracked block.
+    source: {code: ["session_list.rs:68", "session_list.rs:69", "session_list.rs:70", "session_list.rs:73"]}
+
+  - id: EPSL-TRACK-LEAVES-OTHER-SESSIONS-ALONE
+    subject: track
+    methods: [track]
+    object_fn: "Pool::register -> HashMap(sessions) single-entry update"
+    kind: frame
+    verifiable: true
+    statement: >
+      Tracking a block changes only the chain of the session it belongs to. No block of
+      any other session changes its ancestor, its descendant, its recency or its
+      candidacy for eviction.
+    source: {code: ["session_list.rs:97", "session_list.rs:107", "session_list.rs:114"]}
+
+  - id: EPSL-TRACK-KEYS-ARE-SCOPED-TO-ONE-POOL
+    subject: track
+    methods: [track, len, get_eviction_candidates]
+    object_fn: "Pool::by_key -> per-pool HashMap"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The record of which keys are already tracked is kept separately for each pool, so
+      the same key may be tracked independently in two different pools and each pool
+      then holds its own block for it with its own lineage, recency and handle. The
+      no-duplicate rule applies within a pool only.
+    source: {code: ["session_list.rs:47", "session_list.rs:91", "lib.rs:82"]}
+
+  - id: EPSL-ARENA-SLOT-COUNT-ASSUMED-BELOW-U32-MAX
+    subject: track
+    methods: [track, touch, batch_touch, remove]
+    object_fn: "Pool::alloc -> usize-to-u32 narrowing cast"
+    kind: precondition
+    verifiable: true
+    statement: >
+      The code assumes a single pool never grows beyond about four billion storage
+      slots, because it shortens the slot number to a 32-bit value when it builds the
+      handle. If a pool ever exceeded that, the slot number would wrap around and two
+      different blocks would be reachable through the same handle.
+    source: {code: ["session_list.rs:73", "session_list.rs:42"]}
+
+  - id: EPSL-ACCESS-CLOCK-ASSUMED-NOT-TO-OVERFLOW
+    subject: "global invariant: access-counter bound"
+    methods: [track, touch, batch_touch]
+    object_fn: "Pool::tick -> u64 addition"
+    kind: precondition
+    verifiable: true
+    statement: >
+      The code assumes the running count of accesses in a pool never exceeds the largest
+      64-bit number. The counter is incremented without any overflow guard, so reaching
+      that limit would either abort the program or restart the count from zero, and
+      restarting would break the rule that a newer access always has a larger number
+      than an older one, which is what the eviction order depends on.
+    source: {code: ["session_list.rs:52", "session_list.rs:63"]}
+
+  # --------------------------------------------------------------------- touch
+  - id: EPSL-TOUCH-REJECTS-UNKNOWN-POOL
+    subject: touch
+    methods: [touch]
+    object_fn: "EvictionPolicySessionListsComponent::touch -> Vec::get / EvictionPolicyError::InvalidPool"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Refreshing a block through a handle that names a pool number that was never
+      created fails with an invalid-pool error reporting that number, and nothing
+      changes.
+    source: {code: ["lib.rs:145", "lib.rs:148"]}
+
+  - id: EPSL-TOUCH-REJECTS-AN-UNOCCUPIED-SLOT
+    subject: touch
+    methods: [touch]
+    object_fn: "Pool::is_active -> Vec::get / Node::active"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Refreshing a block fails with an invalid-handle error, and changes nothing, when
+      the handle names a storage slot that is beyond the end of the pool's storage or a
+      slot whose block has already been removed. Refreshing the same handle twice after
+      a removal fails both times.
+    source: {code: ["session_list.rs:80", "session_list.rs:81", "session_list.rs:124", "session_list.rs:125", "lib.rs:150", "lib.rs:153"]}
+
+  - id: EPSL-TOUCH-MAKES-THE-BLOCK-NEWEST
+    subject: touch
+    methods: [touch, batch_touch, track]
+    object_fn: "Pool::touch -> Pool::tick / Node::stamp"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A successful refresh gives the block an access number larger than that of every
+      other tracked block in the pool, making it the most recently accessed block there.
+    source: {code: ["session_list.rs:130", "session_list.rs:131"]}
+
+  - id: EPSL-TOUCH-OF-A-LEAF-MOVES-IT-LAST-IN-THE-CANDIDATE-ORDER
+    subject: touch
+    methods: [touch, batch_touch, get_eviction_candidates, identify_next_to_evict]
+    object_fn: "Pool::touch -> BTreeSet::remove then BTreeSet::insert(leaves)"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Refreshing a block that is at the end of its chain keeps it in the candidate list
+      but moves it to the very back of the eviction order, so it is the last of the
+      current candidates that would be evicted. If it had been the next victim, some
+      other block becomes the next victim instead.
+    source: {code: ["session_list.rs:129", "session_list.rs:132", "session_list.rs:133", "session_list.rs:134"]}
+
+  - id: EPSL-TOUCH-OF-AN-INTERIOR-BLOCK-KEEPS-THE-CANDIDATE-SET
+    subject: touch
+    methods: [touch, batch_touch, get_eviction_candidates]
+    object_fn: "Pool::touch -> Node::child.is_none() guard"
+    kind: frame
+    verifiable: true
+    statement: >
+      Refreshing a block that still has a tracked descendant does not add it to the list
+      of eviction candidates and does not change that list at all. Refreshing a
+      protected block is allowed and reported as success, but has no immediate effect on
+      which block would be evicted next.
+    source: {code: ["session_list.rs:129", "session_list.rs:132", "session_list.rs:135"]}
+
+  - id: EPSL-TOUCH-PRESERVES-LINEAGE-AND-SIZE
+    subject: touch
+    methods: [touch, batch_touch]
+    object_fn: "Pool::touch -> Node::stamp assignment only"
+    kind: frame
+    verifiable: true
+    statement: >
+      Refreshing a block changes only its recency. It does not change which block is its
+      ancestor or descendant, does not move it to another session, does not change which
+      keys are tracked, and does not change the pool's reported size. No other block's
+      recency changes either.
+    source: {code: ["session_list.rs:123", "session_list.rs:131", "session_list.rs:136"]}
+
+  - id: EPSL-HANDLE-VALIDATION-IS-OCCUPANCY-ONLY
+    subject: "global invariant: handle validation"
+    methods: [touch, batch_touch, remove]
+    object_fn: "Pool::is_active -> Node::active flag (no generation counter)"
+    kind: error-case
+    verifiable: true
+    statement: >
+      The only checks made on a handle are that the pool it names exists and that the
+      storage slot it names is currently occupied by some tracked block. Nothing ties a
+      handle to the particular key it was issued for, and the handle type can be
+      constructed by any caller from an arbitrary pool number and slot number. A handle
+      that was never issued by this component, but that happens to name an occupied
+      slot, is therefore accepted and acts on whatever block occupies that slot.
+    source: {code: ["session_list.rs:79", "session_list.rs:80", "session_list.rs:81", "ieviction_policy.rs:9", "ieviction_policy.rs:15", "lib.rs:150", "lib.rs:193"]}
+
+  - id: EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT
+    subject: "global invariant: handle validation"
+    methods: [track, touch, batch_touch, remove]
+    object_fn: "Pool::alloc -> Vec::pop(free) reusing a slot number"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      After a block is removed, its storage slot is put back into the pool of spare
+      slots and is reused by the next block that is tracked. A handle held from before
+      the removal then names the slot of that new, unrelated block, so refreshing or
+      removing through the stale handle succeeds and acts on the new block instead of
+      reporting an invalid handle. Because spare slots are reused most-recently-freed
+      first, this happens on the very next tracking call after a removal.
+    source: {code: ["session_list.rs:69", "session_list.rs:70", "session_list.rs:179", "session_list.rs:182", "session_list.rs:80"]}
+
+  # --------------------------------------------------------------- batch_touch
+  - id: EPSL-BATCH-TOUCH-EMPTY-SUCCEEDS-WITHOUT-VALIDATION
+    subject: batch_touch
+    methods: [batch_touch]
+    object_fn: "EvictionPolicySessionListsComponent::batch_touch -> slice::is_empty early return"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Refreshing an empty list of blocks reports success, changes nothing at all, and
+      does not take any lock or check that any pool exists.
+    source: {code: ["lib.rs:158", "lib.rs:159"]}
+
+  - id: EPSL-BATCH-TOUCH-REJECTS-UNKNOWN-POOL
+    subject: batch_touch
+    methods: [batch_touch]
+    object_fn: "EvictionPolicySessionListsComponent::batch_touch -> Vec::get / EvictionPolicyError::InvalidPool"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If any handle in the list names a pool number that was never created, the whole
+      call fails with an invalid-pool error naming that number. This is checked when the
+      list first reaches a handle for that pool, so handles listed before it have
+      already been refreshed.
+    source: {code: ["lib.rs:162", "lib.rs:166", "lib.rs:174", "lib.rs:176"]}
+
+  - id: EPSL-BATCH-TOUCH-REJECTS-AN-UNOCCUPIED-SLOT
+    subject: batch_touch
+    methods: [batch_touch]
+    object_fn: "Pool::touch returning false -> EvictionPolicyError::InvalidHandle"
+    kind: error-case
+    verifiable: true
+    statement: >
+      If any handle in the list names a storage slot that is empty or beyond the end of
+      its pool's storage, the call stops at that handle and fails with an invalid-handle
+      error.
+    source: {code: ["lib.rs:179", "lib.rs:180"]}
+
+  - id: EPSL-BATCH-TOUCH-MATCHES-SEQUENTIAL-TOUCHES
+    subject: batch_touch
+    methods: [batch_touch, touch]
+    object_fn: "EvictionPolicySessionListsComponent::batch_touch -> Pool::touch per handle, in order"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When refreshing a list of blocks succeeds, the resulting state is exactly what you
+      would get by refreshing each block one at a time in the order given. In
+      particular, if the same block appears twice in the list, the later position wins
+      and the block ends up with the newer access number.
+    source: {code: ["lib.rs:169", "lib.rs:179", "lib.rs:183"]}
+
+  - id: EPSL-BATCH-TOUCH-IS-NOT-ROLLED-BACK-ON-FAILURE
+    subject: batch_touch
+    methods: [batch_touch]
+    object_fn: "EvictionPolicySessionListsComponent::batch_touch -> early `return Err` with no undo"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A failing batch refresh is not undone. Every handle that appeared before the
+      failing one has already been marked as accessed, and those refreshes stay in
+      effect, so the eviction order can be permanently changed by a call that reports
+      failure. The batch is not all-or-nothing.
+    source: {code: ["lib.rs:169", "lib.rs:179", "lib.rs:180", "lib.rs:181"]}
+
+  - id: EPSL-BATCH-TOUCH-SPANS-POOLS-ONE-LOCK-AT-A-TIME
+    subject: batch_touch
+    methods: [batch_touch]
+    object_fn: "EvictionPolicySessionListsComponent::batch_touch -> drop(pool_guard) before Mutex::lock"
+    kind: invariant
+    verifiable: true
+    statement: >
+      While refreshing a list of blocks that spans several pools, the component always
+      releases the pool it currently holds exclusive access to before taking exclusive
+      access to the next one, so it never holds two pools at once. This is what prevents
+      two concurrent batch refreshes over the same pools from blocking each other
+      forever.
+    source: {code: ["lib.rs:167", "lib.rs:170", "lib.rs:171", "lib.rs:177"]}
+
+  - id: EPSL-BATCH-TOUCH-RELOCKS-WHEN-THE-POOL-CHANGES
+    subject: batch_touch
+    methods: [batch_touch]
+    object_fn: "EvictionPolicySessionListsComponent::batch_touch -> pool_id change detection"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A list of handles may mix blocks from different pools, and each block is refreshed
+      in its own pool. The component only switches pools when consecutive handles differ,
+      so a list that alternates between two pools switches back and forth once per
+      handle, and the promised saving of one lock acquisition for the whole batch only
+      holds when the handles for a pool are grouped together.
+    source: {code: ["lib.rs:162", "lib.rs:170", "lib.rs:172", "lib.rs:177", "ieviction_policy.rs:94", "ieviction_policy.rs:95"]}
+
+  # -------------------------------------------------------------------- remove
+  - id: EPSL-REMOVE-REJECTS-UNKNOWN-POOL
+    subject: remove
+    methods: [remove]
+    object_fn: "EvictionPolicySessionListsComponent::remove -> Vec::get / EvictionPolicyError::InvalidPool"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Asking to stop tracking a block through a handle that names a pool number that was
+      never created fails with an invalid-pool error reporting that number, and nothing
+      changes.
+    source: {code: ["lib.rs:188", "lib.rs:191"]}
+
+  - id: EPSL-REMOVE-REJECTS-AN-UNOCCUPIED-SLOT
+    subject: remove
+    methods: [remove]
+    object_fn: "Pool::remove -> Pool::is_active guard"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Asking to stop tracking a block fails with an invalid-handle error, and changes
+      nothing, when the handle names a slot beyond the end of the pool's storage or a
+      slot whose block has already been removed. Removing the same block twice fails the
+      second time.
+    source: {code: ["session_list.rs:206", "session_list.rs:207", "session_list.rs:208", "lib.rs:193", "lib.rs:196"]}
+
+  - id: EPSL-REMOVE-RELINKS-THE-CHAIN
+    subject: remove
+    methods: [remove, identify_next_to_evict]
+    object_fn: "Pool::unlink -> Node::parent and Node::child reassignment"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Removing a block from the middle of a session's chain joins its ancestor and its
+      descendant directly to each other, so the session is still one unbroken chain with
+      no gap and no block left dangling. The descendant's recorded ancestor becomes the
+      removed block's ancestor, and that ancestor's recorded descendant becomes the
+      removed block's descendant.
+    source: {code: ["session_list.rs:141", "session_list.rs:154", "session_list.rs:155", "session_list.rs:157", "session_list.rs:158"]}
+
+  - id: EPSL-REMOVE-OF-A-LEAF-PROMOTES-ITS-PARENT
+    subject: remove
+    methods: [remove, identify_next_to_evict, get_eviction_candidates]
+    object_fn: "Pool::unlink -> BTreeSet::insert(leaves) / HashMap::insert(sessions)"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Removing the block at the end of a session's chain makes its ancestor the new end
+      of that chain, and that ancestor immediately becomes eligible for eviction because
+      it no longer has any tracked descendant.
+    source: {code: ["session_list.rs:142", "session_list.rs:161", "session_list.rs:164", "session_list.rs:166", "session_list.rs:167", "session_list.rs:168"]}
+
+  - id: EPSL-REMOVE-OF-A-LONE-BLOCK-DROPS-THE-SESSION
+    subject: remove
+    methods: [remove, identify_next_to_evict, get_eviction_candidates]
+    object_fn: "Pool::unlink -> HashMap::remove(sessions)"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Removing the only remaining block of a session makes that session disappear from
+      the pool entirely, so the pool no longer offers any eviction candidate for it and
+      the session starts fresh if a block is tracked under it again later.
+    source: {code: ["session_list.rs:170", "session_list.rs:171", "session_list.rs:172"]}
+
+  - id: EPSL-REMOVE-OF-AN-INTERIOR-BLOCK-KEEPS-THE-CANDIDATES
+    subject: remove
+    methods: [remove]
+    object_fn: "Pool::unlink -> was_leaf guard"
+    kind: frame
+    verifiable: true
+    statement: >
+      Removing a block that still has a tracked descendant, including the first block of
+      a chain, does not change which blocks are eviction candidates and does not change
+      which block is the end of that session's chain. Only the size and the chain's
+      shape change.
+    source: {code: ["session_list.rs:151", "session_list.rs:161", "session_list.rs:176"]}
+
+  - id: EPSL-REMOVE-UNTRACKS-THE-KEY-AND-FREES-THE-SLOT
+    subject: remove
+    methods: [remove, identify_next_to_evict, track, len]
+    object_fn: "Pool::unlink -> HashMap::remove(by_key) / Vec::push(free) / len decrement"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Removing a block stops the pool from tracking its key, so the key can afterwards
+      be tracked again as a brand-new block with a fresh position in its session's
+      chain. The block's storage slot is marked empty and made available for reuse, its
+      recorded ancestor and descendant are erased, and the pool's reported size goes
+      down by exactly one.
+    source: {code: ["session_list.rs:178", "session_list.rs:179", "session_list.rs:180", "session_list.rs:181", "session_list.rs:182", "session_list.rs:183"]}
+
+  - id: EPSL-REMOVE-DOES-NOT-REFRESH-RECENCY
+    subject: remove
+    methods: [remove, identify_next_to_evict]
+    object_fn: "Pool::unlink -> no call to Pool::tick"
+    kind: frame
+    verifiable: true
+    statement: >
+      Removing a block does not count as an access to anything. The running access
+      counter does not advance and no surviving block's recency changes, so the eviction
+      order among the remaining candidates is exactly what it was, apart from the
+      removed block disappearing and its ancestor possibly appearing.
+    source: {code: ["session_list.rs:143", "session_list.rs:144", "session_list.rs:189"]}
+
+  - id: EPSL-PROMOTED-PARENT-KEEPS-ITS-OLD-STAMP
+    subject: "global invariant: promotion recency"
+    methods: [remove, identify_next_to_evict, touch, batch_touch]
+    object_fn: "Pool::unlink -> BTreeSet::insert with the parent's existing Node::stamp"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When a block becomes eligible for eviction because its descendant was removed, it
+      enters the eviction order at the recency it already had, not as a freshly accessed
+      block. A long-untouched ancestor can therefore become the very next victim
+      immediately after its descendant is evicted, ahead of candidates in other sessions
+      that were accessed later. Refreshing a protected block does change the position it
+      will take when it is eventually promoted.
+    source: {code: ["session_list.rs:165", "session_list.rs:166", "session_list.rs:167", "session_list.rs:131"]}
+
+  - id: EPSL-REMOVE-LEAVES-OTHER-SESSIONS-ALONE
+    subject: remove
+    methods: [remove, identify_next_to_evict]
+    object_fn: "Pool::unlink -> single-session relink"
+    kind: frame
+    verifiable: true
+    statement: >
+      Removing a block changes only the chain of the session that block belonged to. No
+      block of any other session changes its ancestor, its descendant, its recency or
+      its candidacy.
+    source: {code: ["session_list.rs:147", "session_list.rs:154", "session_list.rs:158", "session_list.rs:168"]}
+
+  - id: EPSL-TRACKED-SIZE-NEVER-UNDERFLOWS
+    subject: "global invariant: size counter bound"
+    methods: [remove, identify_next_to_evict]
+    object_fn: "Pool::unlink -> usize subtraction guarded by Pool::is_active"
+    kind: precondition
+    verifiable: true
+    statement: >
+      The stored count of tracked blocks is decreased without any guard against going
+      below zero, so the code relies on that decrease only ever happening for a block
+      that really was being tracked. Every path that reaches it first confirms the slot
+      is occupied, either by an explicit check or by taking the block from the candidate
+      list.
+    source: {code: ["session_list.rs:183", "session_list.rs:207", "session_list.rs:191"]}
+
+  # --------------------------------------------------- identify_next_to_evict
+  - id: EPSL-EVICT-UNKNOWN-POOL-RETURNS-NOTHING
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict]
+    object_fn: "EvictionPolicySessionListsComponent::identify_next_to_evict -> Vec::get with `?`"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Asking an unknown pool number for a block to evict reports that there is nothing
+      to evict, rather than reporting an error. The caller cannot tell an unknown pool
+      apart from a pool that is simply empty, even though the interface has an
+      invalid-pool error and the tracking operation does use it.
+    source: {code: ["lib.rs:200", "lib.rs:202", "lib.rs:130"]}
+
+  - id: EPSL-EVICT-EMPTY-POOL-RETURNS-NOTHING
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict]
+    object_fn: "Pool::evict_oldest -> BTreeSet::iter().next() returning None"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Asking a pool that tracks no blocks for a block to evict reports that there is
+      nothing to evict, and leaves the pool untouched.
+    source: {code: ["session_list.rs:188", "session_list.rs:191"]}
+
+  - id: EPSL-EVICT-CHOOSES-THE-OLDEST-LEAF
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict]
+    object_fn: "Pool::evict_oldest -> BTreeSet<(u64, u32)>::iter().next()"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The block chosen for eviction is the least recently accessed among all blocks that
+      have no tracked descendant, considered across every session in the pool at once.
+      No candidate with an older access than the chosen one exists at the moment of the
+      choice.
+    source: {code: ["session_list.rs:186", "session_list.rs:187", "session_list.rs:191", "session_list.rs:50", "session_list.rs:51"]}
+
+  - id: EPSL-EVICT-NEVER-CHOOSES-A-BLOCK-WITH-A-DESCENDANT
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict, get_eviction_candidates]
+    object_fn: "Pool::leaves -> membership restricted to Node::child == None"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A block that still has a tracked descendant in its session's chain is never chosen
+      for eviction, however long ago it was last accessed. This is the whole point of
+      the policy: the ancestors that a still-cached block was derived from are protected,
+      which a plain least-recently-used policy would not do.
+    source: {code: ["session_list.rs:6", "session_list.rs:7", "session_list.rs:8", "session_list.rs:110", "session_list.rs:115", "session_list.rs:191"]}
+
+  - id: EPSL-EVICT-REMOVES-THE-VICTIM-FROM-TRACKING
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict, len, track]
+    object_fn: "Pool::evict_oldest -> Pool::unlink"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Choosing a block to evict also stops tracking it, with exactly the same effect as
+      explicitly asking for it to be removed: the pool's size drops by one, its key is
+      no longer tracked, its chain is rejoined, its ancestor may be promoted, and its
+      storage slot becomes reusable. The operation is not a read-only query despite its
+      name.
+    source: {code: ["session_list.rs:187", "session_list.rs:192", "lib.rs:204", "ieviction_policy.rs:101", "ieviction_policy.rs:102"]}
+
+  - id: EPSL-EVICT-DOES-NOT-REFRESH-RECENCY
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict]
+    object_fn: "Pool::evict_oldest -> Pool::unlink with no Pool::tick"
+    kind: frame
+    verifiable: true
+    statement: >
+      Evicting a block does not mark it, or any surviving block, as recently accessed.
+      The access counter does not advance, so repeatedly asking for a block to evict
+      walks steadily through the candidates from oldest to newest rather than cycling.
+    source: {code: ["session_list.rs:188", "session_list.rs:189", "session_list.rs:192"]}
+
+  - id: EPSL-EVICT-VICTIM-IS-UNIQUELY-DETERMINED
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict, get_eviction_candidates]
+    object_fn: "Pool::leaves -> BTreeSet ordered by (stamp, index) with unique stamps"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      There is never any ambiguity about which block gets evicted. Because every access
+      is given its own number and no two tracked blocks share one, the candidates have a
+      strict oldest-to-newest order with no ties, so the same sequence of operations
+      always produces the same victim.
+    source: {code: ["session_list.rs:59", "session_list.rs:60", "session_list.rs:61", "session_list.rs:51"]}
+
+  - id: EPSL-DISTINCT-SESSIONS-REDUCE-TO-PLAIN-LRU
+    subject: identify_next_to_evict
+    methods: [track, identify_next_to_evict, get_eviction_candidates]
+    object_fn: "Pool::register -> HashMap(sessions) lookup miss for every distinct session"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If every block is tracked under a session identifier of its own, then no block ever
+      has an ancestor or a descendant, every block is always a candidate, and the block
+      chosen for eviction is simply the least recently accessed block in the pool. In
+      that configuration the policy behaves exactly like a plain least-recently-used
+      policy, which is what the module documentation claims.
+    source: {code: ["lib.rs:12", "lib.rs:13", "lib.rs:14", "session_list.rs:97", "session_list.rs:107"]}
+
+  # ------------------------------------------------- get_eviction_candidates
+  - id: EPSL-CANDIDATES-UNKNOWN-POOL-RETURNS-EMPTY
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates]
+    object_fn: "EvictionPolicySessionListsComponent::get_eviction_candidates -> Vec::get match on None"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Asking an unknown pool number for eviction candidates returns an empty list rather
+      than reporting an error, so the caller cannot tell an unknown pool apart from a
+      pool that has no candidates.
+    source: {code: ["lib.rs:209", "lib.rs:211"]}
+
+  - id: EPSL-CANDIDATES-ARE-LEAVES-OLDEST-FIRST
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates]
+    object_fn: "Pool::candidates -> BTreeSet::iter in (stamp, index) order"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The candidate list contains only blocks that have no tracked descendant, and they
+      are listed least recently accessed first.
+    source: {code: ["session_list.rs:195", "session_list.rs:197", "session_list.rs:198", "session_list.rs:200"]}
+
+  - id: EPSL-CANDIDATES-ARE-CAPPED-AT-N
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates]
+    object_fn: "Pool::candidates -> Iterator::take(n)"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The candidate list never contains more entries than the number the caller asked
+      for, and contains exactly as many as are available when fewer exist. Asking for
+      zero candidates returns an empty list.
+    source: {code: ["session_list.rs:196", "session_list.rs:199"]}
+
+  - id: EPSL-CANDIDATES-CHANGE-NOTHING
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates]
+    object_fn: "Pool::candidates -> &self read-only borrow"
+    kind: frame
+    verifiable: true
+    statement: >
+      Asking for the candidate list changes nothing: no block is removed, no recency is
+      refreshed, the access counter does not advance, and the pool's reported size is the
+      same before and after. Asking twice in a row gives the same answer.
+    source: {code: ["session_list.rs:195", "session_list.rs:196"]}
+
+  - id: EPSL-CANDIDATES-FIRST-IS-THE-NEXT-VICTIM
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates, identify_next_to_evict]
+    object_fn: "Pool::candidates and Pool::evict_oldest -> the same BTreeSet first element"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When at least one candidate exists, the first entry of the candidate list is
+      exactly the block that the next eviction would choose, because both read the same
+      oldest-first ordering and take its first element.
+    source: {code: ["session_list.rs:191", "session_list.rs:197", "session_list.rs:198"]}
+
+  - id: EPSL-CANDIDATES-AFTER-THE-FIRST-ARE-NOT-THE-EVICTION-SEQUENCE
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates, identify_next_to_evict]
+    object_fn: "Pool::candidates -> snapshot of current leaves, ignoring promotion"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Beyond its first entry, the candidate list is not in general the order in which
+      blocks will actually be evicted. Evicting a block can promote its ancestor into the
+      candidate set at that ancestor's older recency, and the promoted ancestor can then
+      be evicted ahead of blocks that the earlier list named. For example, with one
+      session holding an older block beneath a newer one and a second session holding a
+      single newest block, the list of two candidates names the newer block of the first
+      session and then the block of the second session, whereas two successive evictions
+      take the newer block of the first session and then its promoted ancestor. The
+      interface documentation describes this list as the keys the policy would evict next
+      in eviction order; the code only guarantees that for the first entry.
+    source: {code: ["ieviction_policy.rs:106", "ieviction_policy.rs:107", "session_list.rs:195", "session_list.rs:166", "session_list.rs:167"]}
+
+  - id: EPSL-CANDIDATES-HOLD-AT-MOST-ONE-KEY-PER-SESSION
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates]
+    object_fn: "Pool::leaves -> one entry per non-empty session chain"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      No two entries of the candidate list belong to the same session, because a session
+      has exactly one block with no tracked descendant. The number of candidates
+      available is therefore the number of sessions that currently have any blocks, not
+      the number of blocks.
+    source: {code: ["session_list.rs:16", "session_list.rs:17", "session_list.rs:49", "session_list.rs:110", "session_list.rs:115"]}
+
+  # ----------------------------------------------------------------------- len
+  - id: EPSL-LEN-COUNTS-TRACKED-BLOCKS
+    subject: len
+    methods: [len]
+    object_fn: "Pool::len -> Pool::len field"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The reported size of a pool is the number of blocks it is currently tracking,
+      counting blocks anywhere in a chain and not just the ones eligible for eviction. It
+      goes up by one for each newly tracked key and down by one for each removal or
+      eviction, and is unchanged by refreshing recency or by re-tracking a key already
+      held.
+    source: {code: ["session_list.rs:54", "session_list.rs:55", "session_list.rs:214", "session_list.rs:216", "session_list.rs:117", "session_list.rs:183"]}
+
+  - id: EPSL-LEN-UNKNOWN-POOL-RETURNS-ZERO
+    subject: len
+    methods: [len]
+    object_fn: "EvictionPolicySessionListsComponent::len -> Vec::get match on None"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Asking an unknown pool number for its size reports zero rather than an error, so a
+      caller that mistypes a pool number sees a pool that looks empty instead of being
+      told the pool does not exist.
+    source: {code: ["lib.rs:217", "lib.rs:219", "lib.rs:220"]}
+
+  - id: EPSL-LEN-CHANGES-NOTHING
+    subject: len
+    methods: [len]
+    object_fn: "Pool::len -> &self read-only borrow"
+    kind: frame
+    verifiable: true
+    statement: >
+      Asking for a pool's size changes nothing about the pool: no block is added or
+      removed, no recency is refreshed, and the access counter does not advance.
+    source: {code: ["session_list.rs:215", "session_list.rs:216"]}
+
+  # ---------------------------------------------------------------- clear_pool
+  - id: EPSL-CLEAR-POOL-EMPTIES-EVERYTHING-AND-RESETS-THE-CLOCK
+    subject: clear_pool
+    methods: [clear_pool, len, get_eviction_candidates, identify_next_to_evict]
+    object_fn: "Pool::clear -> Vec::clear / HashMap::clear / BTreeSet::clear"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Clearing a pool discards every block it tracked, every session it knew about and
+      every eviction candidate, reports a size of zero afterwards, offers no eviction
+      candidate, and also resets the pool's running access counter back to its starting
+      value so that the next block tracked gets the lowest possible access number again.
+    source: {code: ["session_list.rs:219", "session_list.rs:220", "session_list.rs:221", "session_list.rs:226", "session_list.rs:227"]}
+
+  - id: EPSL-CLEAR-POOL-UNKNOWN-POOL-IS-A-SILENT-NO-OP
+    subject: clear_pool
+    methods: [clear_pool]
+    object_fn: "EvictionPolicySessionListsComponent::clear_pool -> `if let Some` with no else"
+    kind: error-case
+    verifiable: true
+    statement: >
+      Clearing an unknown pool number does nothing at all and says nothing at all. The
+      operation returns no result, so a caller has no way to learn that the pool it
+      named does not exist.
+    source: {code: ["lib.rs:223", "lib.rs:225", "lib.rs:226", "lib.rs:227"]}
+
+  - id: EPSL-CLEAR-POOL-KEEPS-THE-POOL-USABLE
+    subject: clear_pool
+    methods: [clear_pool, track]
+    object_fn: "Pool::clear -> collections emptied but Pool retained in Vec"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A cleared pool keeps its pool number and stays usable. Blocks can be tracked in it
+      again immediately afterwards, and the first block tracked after a clear is the
+      start of a brand-new chain with no ancestor.
+    source: {code: ["lib.rs:225", "lib.rs:226", "session_list.rs:220", "session_list.rs:224"]}
+
+  - id: EPSL-CLEAR-POOL-SILENTLY-INVALIDATES-OUTSTANDING-HANDLES
+    subject: clear_pool
+    methods: [clear_pool, track, touch, batch_touch, remove]
+    object_fn: "Pool::clear -> Vec::clear(nodes) resetting slot numbering to zero"
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Clearing a pool throws away its whole storage area, so slot numbering restarts from
+      the beginning. Handles the caller still holds from before the clear are not marked
+      invalid in any durable way: while the pool is empty they are correctly rejected,
+      but as soon as new blocks are tracked the old handles name those new, unrelated
+      blocks and will be accepted for refreshing or removal. The operation gives the
+      caller no indication that its handles have become meaningless.
+    source: {code: ["session_list.rs:221", "session_list.rs:222", "session_list.rs:73", "session_list.rs:80"]}
+
+  - id: EPSL-CLEAR-POOL-LEAVES-OTHER-POOLS-ALONE
+    subject: clear_pool
+    methods: [clear_pool]
+    object_fn: "EvictionPolicySessionListsComponent::clear_pool -> single Mutex<Pool> lock"
+    kind: frame
+    verifiable: true
+    statement: >
+      Clearing one pool has no effect on any other pool: their blocks, lineage, recency,
+      access counters and sizes are all unchanged, and their pool numbers stay valid.
+    source: {code: ["lib.rs:225", "lib.rs:226"]}
+
+  # ------------------------------------------------------- global invariants
+  - id: EPSL-INV-CHAIN-LINKS-ARE-MUTUAL
+    subject: "global invariant: mutual chain links"
+    methods: [track, touch, batch_touch, remove, identify_next_to_evict, clear_pool]
+    object_fn: "Node::parent and Node::child -> Pool::register / Pool::unlink"
+    kind: invariant
+    verifiable: true
+    statement: >
+      For every tracked block, if it records another block as its ancestor then that
+      ancestor records it back as its descendant, and if it records a descendant then
+      that descendant records it back as its ancestor. The links are always consistent in
+      both directions, after every operation.
+    source: {code: ["session_list.rs:279", "session_list.rs:284", "session_list.rs:287", "session_list.rs:289", "session_list.rs:292", "session_list.rs:111", "session_list.rs:155", "session_list.rs:158"]}
+
+  - id: EPSL-INV-A-BLOCK-HAS-AT-MOST-ONE-CHILD
+    subject: "global invariant: single descendant"
+    methods: [track, remove, identify_next_to_evict]
+    object_fn: "Node::child -> Option<u32> single slot, written only from Pool::register and Pool::unlink"
+    kind: invariant
+    verifiable: true
+    statement: >
+      No tracked block ever has more than one direct descendant, so each session's blocks
+      form a single straight line rather than a tree. This holds because a new block is
+      only ever attached beneath the session's current end-of-chain block, which by
+      definition has no descendant yet.
+    source: {code: ["session_list.rs:31", "session_list.rs:32", "session_list.rs:97", "session_list.rs:111", "session_list.rs:158"]}
+
+  - id: EPSL-INV-CHAINS-ARE-ACYCLIC
+    subject: "global invariant: acyclic chains"
+    methods: [track, remove, identify_next_to_evict]
+    object_fn: "Node::parent -> ancestor walk bounded by Pool::len"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Following the ancestor links upward from any tracked block always reaches the start
+      of a chain in a finite number of steps, never more steps than the number of blocks
+      in the pool. No block is ever its own ancestor, directly or indirectly, so the
+      chains never form a loop.
+    source: {code: ["session_list.rs:298", "session_list.rs:300", "session_list.rs:301", "session_list.rs:302", "session_list.rs:303"]}
+
+  - id: EPSL-INV-CANDIDATE-SET-IS-EXACTLY-THE-LEAVES
+    subject: "global invariant: candidate-set exactness"
+    methods: [track, touch, batch_touch, remove, identify_next_to_evict, clear_pool]
+    object_fn: "Pool::leaves -> BTreeSet<(stamp, index)> maintained against Node::child"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The stored set of eviction candidates always holds precisely the tracked blocks
+      that have no descendant, each listed once, each recorded with its current access
+      number. It never holds a block that has a descendant, never holds a block that has
+      been removed, never holds the same block twice, and never records an out-of-date
+      access number.
+    source: {code: ["session_list.rs:257", "session_list.rs:258", "session_list.rs:264", "session_list.rs:267", "session_list.rs:272", "session_list.rs:275", "session_list.rs:276"]}
+
+  - id: EPSL-INV-SESSION-MAP-POINTS-AT-A-LEAF
+    subject: "global invariant: session-to-leaf consistency"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    object_fn: "Pool::sessions -> HashMap<SessionId, u32> maintained against Node::child and Node::session"
+    kind: invariant
+    verifiable: true
+    statement: >
+      For every session the pool knows about, the block it records as that session's
+      current end of chain is a block that is still tracked, that really belongs to that
+      session, and that has no descendant.
+    source: {code: ["session_list.rs:307", "session_list.rs:308", "session_list.rs:310", "session_list.rs:311", "session_list.rs:312"]}
+
+  - id: EPSL-INV-ONE-LEAF-PER-ACTIVE-SESSION
+    subject: "global invariant: one candidate per session"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    object_fn: "Pool::leaves and Pool::sessions -> paired insert and remove in Pool::register and Pool::unlink"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The number of eviction candidates always equals the number of sessions that
+      currently have at least one tracked block, because every candidate is some
+      session's end of chain and every such end of chain is a candidate. Every operation
+      that adds or removes a candidate makes the matching change to the list of known
+      sessions. The module documentation states this as a fact, and the component's own
+      internal invariant check does not test it.
+    source: {code: ["session_list.rs:16", "session_list.rs:17", "session_list.rs:110", "session_list.rs:114", "session_list.rs:115", "session_list.rs:162", "session_list.rs:167", "session_list.rs:168", "session_list.rs:173"]}
+
+  - id: EPSL-INV-A-CHAIN-BELONGS-TO-ONE-SESSION
+    subject: "global invariant: session homogeneity of a chain"
+    methods: [track, remove, identify_next_to_evict]
+    object_fn: "Node::session -> set once in Pool::register, never rewritten"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every block in one chain names the same session, and a block's session is fixed for
+      as long as it is tracked, never rewritten by any later operation. Rejoining a chain
+      after a removal therefore never merges two sessions. The component's own internal
+      invariant check does not test this.
+    source: {code: ["session_list.rs:26", "session_list.rs:27", "session_list.rs:97", "session_list.rs:100", "session_list.rs:147", "session_list.rs:155"]}
+
+  - id: EPSL-INV-KEY-INDEX-IS-ONE-TO-ONE
+    subject: "global invariant: key index is one-to-one"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    object_fn: "Pool::by_key -> HashMap<CacheKey, u32> maintained against Node::key"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Within one pool, the lookup table from key to block holds exactly one entry for
+      every tracked block and nothing else. Each entry points at a block that is still
+      tracked and that really holds that key, so a key is never tracked twice in the same
+      pool and a key that has been removed is never still findable.
+    source: {code: ["session_list.rs:245", "session_list.rs:246", "session_list.rs:251", "session_list.rs:253", "session_list.rs:254", "session_list.rs:116", "session_list.rs:178"]}
+
+  - id: EPSL-INV-SIZE-AGREES-WITH-ARENA-OCCUPANCY
+    subject: "global invariant: size agreement"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    object_fn: "Pool::len -> counted against Node::active and Pool::free"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The pool's stored size always equals the number of occupied storage slots, and also
+      equals the total number of slots minus the number of slots on the spare list. The
+      size counter can never drift away from what the pool actually holds.
+    source: {code: ["session_list.rs:236", "session_list.rs:237", "session_list.rs:238", "session_list.rs:240", "session_list.rs:241"]}
+
+  - id: EPSL-INV-FREE-LIST-IS-EXACTLY-THE-EMPTY-SLOTS
+    subject: "global invariant: spare-slot list exactness"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    object_fn: "Pool::free -> Vec<u32> maintained against Node::active"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The list of spare storage slots contains every empty slot exactly once and no
+      occupied slot. If a slot number appeared on that list twice, the next two blocks
+      tracked would be placed in the same slot and one of them would silently overwrite
+      the other. The component's own internal invariant check only compares the size of
+      the spare list against the number of occupied slots, and does not test that the
+      list is free of duplicates or that its entries are really empty.
+    source: {code: ["session_list.rs:44", "session_list.rs:45", "session_list.rs:69", "session_list.rs:182", "session_list.rs:239", "session_list.rs:240", "session_list.rs:241"]}
+
+  - id: EPSL-INV-ACTIVE-STAMPS-ARE-DISTINCT
+    subject: "global invariant: distinct access numbers"
+    methods: [track, touch, batch_touch, clear_pool]
+    object_fn: "Node::stamp -> assigned only from Pool::tick"
+    kind: invariant
+    verifiable: true
+    statement: >
+      No two tracked blocks in the same pool ever share an access number, because every
+      access number handed out is larger than all the ones before it and each block holds
+      only the most recent one it was given. This is what makes the oldest-first ordering
+      of candidates a strict order with no ties. The component's own internal invariant
+      check does not test it.
+    source: {code: ["session_list.rs:33", "session_list.rs:34", "session_list.rs:59", "session_list.rs:60", "session_list.rs:63", "session_list.rs:96", "session_list.rs:131"]}
+
+  - id: EPSL-INV-CLOCK-DOMINATES-EVERY-STAMP
+    subject: "global invariant: access counter dominates"
+    methods: [track, touch, batch_touch, clear_pool]
+    object_fn: "Pool::clock -> compared against Node::stamp"
+    kind: invariant
+    verifiable: true
+    statement: >
+      The pool's running access counter is always at least as large as the access number
+      of every block it tracks, so the next number it hands out is guaranteed to be newer
+      than everything currently stored. The component's own internal invariant check does
+      not test it.
+    source: {code: ["session_list.rs:52", "session_list.rs:53", "session_list.rs:63", "session_list.rs:96", "session_list.rs:130"]}
+
+  - id: EPSL-INV-NO-LIVE-LINK-POINTS-AT-AN-EMPTY-SLOT
+    subject: "global invariant: no dangling links"
+    methods: [track, touch, batch_touch, remove, identify_next_to_evict, clear_pool]
+    object_fn: "Node::parent / Node::child / Pool::sessions / Pool::by_key -> checked against Node::active"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Nothing the pool stores ever refers to an empty storage slot. The ancestor and
+      descendant recorded by a tracked block are themselves tracked blocks, the block
+      recorded as a session's end of chain is tracked, the key lookup table only points
+      at tracked blocks, and the candidate set only contains tracked blocks. Because of
+      this, the places where the code reaches directly into storage without a bounds
+      check are safe.
+    source: {code: ["session_list.rs:285", "session_list.rs:291", "session_list.rs:274", "session_list.rs:310", "session_list.rs:252", "session_list.rs:109", "session_list.rs:166"]}
+
+  - id: EPSL-INV-POOLS-ARE-MUTUALLY-ISOLATED
+    subject: "global invariant: pool isolation"
+    methods: [create_pool, track, touch, batch_touch, remove, identify_next_to_evict, get_eviction_candidates, len, clear_pool]
+    object_fn: "EvictionState::pools -> Vec<Mutex<Pool>> with per-pool state"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every operation affects at most the one pool it names. No block, session, chain,
+      recency value, access counter or size in any other pool is ever changed. Keys,
+      session identifiers and handles are meaningful only within the pool they were used
+      in, and two pools may hold the same key or the same session identifier
+      independently.
+    source: {code: ["lib.rs:82", "lib.rs:130", "lib.rs:147", "lib.rs:189", "lib.rs:202", "lib.rs:209", "lib.rs:217", "lib.rs:225"]}
+
+  - id: EPSL-INV-POOL-IDS-STAY-VALID-FOREVER
+    subject: "global invariant: pool identifiers are permanent"
+    methods: [create_pool, track, touch, batch_touch, remove, identify_next_to_evict, get_eviction_candidates, len, clear_pool]
+    object_fn: "EvictionState::pools -> append-only Vec, never removed or reordered"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Once a pool number has been handed out it stays valid for the rest of the
+      component's life and always refers to the same pool. There is no operation that
+      destroys a pool, so pool numbers are never recycled and never go stale; clearing a
+      pool empties it but keeps it.
+    source: {code: ["lib.rs:105", "lib.rs:106", "lib.rs:223", "lib.rs:226"]}
+
+  - id: EPSL-INV-ARENA-ONLY-GROWS-EXCEPT-ON-CLEAR
+    subject: "global invariant: storage area only grows"
+    methods: [track, touch, batch_touch, remove, identify_next_to_evict, clear_pool]
+    object_fn: "Pool::nodes -> Vec::push and Vec::clear only"
+    kind: invariant
+    verifiable: true
+    statement: >
+      A pool's storage area only ever gets bigger, one slot at a time, except when the
+      pool is cleared, which empties it completely. Removing a block marks its slot empty
+      but does not shrink the area, so a slot number that was once valid stays within
+      range unless the pool is cleared. This is why a handle to a removed block is
+      rejected rather than reading past the end of storage.
+    source: {code: ["session_list.rs:74", "session_list.rs:179", "session_list.rs:182", "session_list.rs:221"]}
+
+  # --------------------------------------------------------- locking discipline
+  - id: EPSL-LOCKS-ASSUMED-NEVER-POISONED
+    subject: "global invariant: lock-poisoning assumption"
+    methods: [create_pool, track, touch, batch_touch, remove, identify_next_to_evict, get_eviction_candidates, len, clear_pool]
+    object_fn: "RwLock::read / RwLock::write / Mutex::lock -> Result::unwrap"
+    kind: precondition
+    verifiable: true
+    statement: >
+      Every operation assumes that no earlier operation crashed while holding the
+      component's internal locks. The code takes each lock and unconditionally assumes
+      success, so if a crash ever happened while a pool's lock was held, every later
+      operation on that pool, and in the case of the component-wide lock every later
+      operation at all, would itself crash rather than return an error. The interface
+      offers no error for this situation, so it cannot be reported to a caller.
+    source: {code: ["lib.rs:104", "lib.rs:129", "lib.rs:138", "lib.rs:144", "lib.rs:149", "lib.rs:161", "lib.rs:167", "lib.rs:187", "lib.rs:192", "lib.rs:201", "lib.rs:203", "lib.rs:210", "lib.rs:218", "lib.rs:226"]}
+
+  - id: EPSL-ONLY-POOL-CREATION-TAKES-THE-EXCLUSIVE-LOCK
+    subject: "global invariant: concurrency discipline"
+    methods: [create_pool, track, touch, batch_touch, remove, identify_next_to_evict, get_eviction_candidates, len, clear_pool]
+    object_fn: "RwLock<EvictionState> -> write() only in create_pool, read() elsewhere"
+    kind: invariant
+    verifiable: true
+    statement: >
+      Creating a pool is the only operation that takes exclusive access to the
+      component's shared state; every other operation takes shared access and then takes
+      exclusive access to just the one pool it works on. Operations on different pools
+      therefore never block each other, and the list of pools cannot change underneath an
+      operation that is already running.
+    source: {code: ["lib.rs:104", "lib.rs:129", "lib.rs:144", "lib.rs:161", "lib.rs:187", "lib.rs:201", "lib.rs:208", "lib.rs:216", "lib.rs:224", "lib.rs:19", "lib.rs:20"]}
+
+  # ----------------------------------------------- not-verifiable ledger (NV)
+  - id: NV-1
+    scope: "asymptotic cost claims in the doc-comments (constant-time refresh and removal, logarithmic victim selection)"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      How the cost of an operation grows with the amount of data is a statement about
+      resource use, not about what the component computes, so no single run can show it
+      true or false. It is also worth recording that these claims are loose: the handle
+      documentation and the interface documentation both describe refreshing and removal
+      as constant-time, whereas the implementation keeps its eviction candidates in an
+      ordered set, so both operations cost time that grows with the number of sessions.
+      The module documentation of the data structure states the logarithmic cost
+      correctly.
+    source: {code: ["ieviction_policy.rs:7", "ieviction_policy.rs:98", "session_list.rs:15", "session_list.rs:16"]}
+
+  - id: NV-2
+    scope: "throughput and latency levels exercised by the benchmark suite"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The benchmarks measure how fast tracking, refreshing, batch refreshing and victim
+      selection run with ten thousand up to a million blocks. Wall-clock speed depends on
+      the machine, the compiler and the system load, so there is no fixed outcome a
+      checker could confirm.
+    source: {code: ["benches/session_list_benchmark.rs:41", "benches/session_list_benchmark.rs:64", "benches/session_list_benchmark.rs:79", "benches/session_list_benchmark.rs:94"]}
+
+  - id: NV-3
+    scope: "the log messages themselves — the one-off selection announcement, the per-pool debug line, and the warning on tracking into an unknown pool"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The text of a log line and the fact that it reaches a log sink are side effects
+      outside the component's own state and depend on a separate logging component. Only
+      the internal record of whether the announcement has already been made is checkable,
+      and that is captured as its own obligation. It is worth noting that the logging is
+      inconsistent across operations: tracking into an unknown pool logs a warning, while
+      refreshing, batch refreshing and removing through a handle naming an unknown pool,
+      and clearing or measuring an unknown pool, log nothing.
+    source: {code: ["lib.rs:112", "lib.rs:118", "lib.rs:132", "lib.rs:148", "lib.rs:191"]}
+
+  - id: NV-4
+    scope: "whether a logger component is connected to the logger receptacle at run time"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Whether the surrounding system wires up a logger is a deployment and
+      environment fact decided outside this component, so the component cannot be checked
+      for it. The component's behaviour in both cases is captured by the obligations
+      above.
+    source: {code: ["lib.rs:93", "lib.rs:107", "lib.rs:131"]}
+
+  - id: NV-5
+    scope: "progress and freedom from indefinite blocking under concurrent use, and the fairness of the shared/exclusive lock"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Whether every waiting thread eventually gets its turn depends on the operating
+      system's thread scheduler and on the lock implementation in the standard library,
+      neither of which is part of this component. The structural rule that no two pool
+      locks are held at once, which is what rules out the circular waiting that this
+      component could itself cause, is recorded as its own obligation.
+    source: {code: ["lib.rs:19", "lib.rs:20", "lib.rs:167", "lib.rs:171"]}
+
+  - id: NV-6
+    scope: "memory footprint, growth of the storage area, and the design claim that index-based slots avoid self-referential borrowing"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      How much memory a pool occupies, and how often its storage area is reallocated as
+      it grows, are resource facts rather than behaviour. The related claim that using
+      slot numbers instead of pointers means blocks survive reallocation is a statement
+      about the programming language's rules, which hold by construction and admit no
+      counterexample to look for.
+    source: {code: ["session_list.rs:12", "session_list.rs:13", "session_list.rs:14"]}
+
+  - id: NV-7
+    scope: "the absence of lock poisoning"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      A lock becomes poisoned only if some thread crashes while holding it, which can
+      originate in caller code or in a component this one calls into. Whether that ever
+      happens cannot be decided by looking at this component alone. What this component
+      assumes, and what happens if the assumption breaks, is recorded as its own
+      obligation.
+    source: {code: ["lib.rs:104", "lib.rs:138", "lib.rs:149"]}
+
+  - id: NV-8
+    scope: "the adequacy of the two randomized test loops as evidence that the invariants hold"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Both randomized tests drive a fixed number of operations from one fixed
+      pseudo-random seed, five thousand operations against the internal invariant check
+      and eight thousand against an independent reference model. Passing them shows no
+      counterexample was found along those particular paths, which is evidence rather
+      than a guarantee; whether the sampling is sufficient is a judgement, not a
+      checkable claim. The invariants they are sampling are recorded individually above.
+    source: {code: ["session_list.rs:514", "session_list.rs:529", "tests/lineage_properties.rs:104", "tests/lineage_properties.rs:125"]}
+
+  - id: NV-9
+    scope: "the runnable examples in the module documentation"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The documentation examples are compiled and run by the build system. That they
+      compile is a build-time fact about the documentation, and the behaviour they
+      demonstrate is already covered by the obligations on tracking, refreshing and
+      victim selection.
+    source: {code: ["lib.rs:24", "lib.rs:46", "lib.rs:50", "lib.rs:67"]}
+
+  - id: NV-10
+    scope: "type and layout facts — the handle being freely copyable, the default-constructibility of the pool and the component state, and the size of a stored block record"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      These are properties of the type declarations that the compiler enforces, with no
+      possible counterexample at run time, and none of them gates any behaviour of the
+      policy. One consequence of the handle being freely constructible does gate
+      behaviour and is recorded as an obligation about how handles are validated.
+    source: {code: ["ieviction_policy.rs:8", "ieviction_policy.rs:42", "session_list.rs:24", "session_list.rs:40", "lib.rs:80"]}
+
+  - id: NV-11
+    scope: "the claim that this policy improves on plain recency-based eviction by protecting still-needed ancestors"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is a judgement about how well the policy serves a real workload — how often
+      the blocks it protects turn out to be the ones that were needed. It depends on the
+      access pattern of whatever system uses the cache, not on the component, so there is
+      no fixed outcome to check. The mechanical part of the claim, that a block with a
+      tracked descendant is never evicted, is recorded as an obligation.
+    source: {code: ["lib.rs:8", "lib.rs:9", "lib.rs:10", "session_list.rs:9", "session_list.rs:10"]}
+
+  - id: NV-12
+    scope: "the internal invariant check being compiled only into test builds"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The routine that asserts the data-structure invariants is compiled only when the
+      component is built for testing, so in a production build nothing checks them at run
+      time. Which build configuration is used is a build-system fact, not a behaviour of
+      the component. The invariants themselves are recorded individually above so that
+      they can be established for all builds rather than sampled in one.
+    source: {code: ["session_list.rs:230", "session_list.rs:231", "session_list.rs:232"]}

@@ -314,6 +314,13 @@ impl Pool {
     }
 }
 
+/// Kani proof harnesses over the internal arena. Additive and `#[cfg(kani)]`-only;
+/// the harness bodies live in `verif-kani/`, outside `src/`. This must be a CHILD
+/// module of `session_list` so it can read `Pool`'s private fields.
+#[cfg(kani)]
+#[path = "../verif-kani/pool_harnesses.rs"]
+pub(crate) mod pool_harnesses;
+
 #[cfg(test)]
 mod tests {
     use super::*;

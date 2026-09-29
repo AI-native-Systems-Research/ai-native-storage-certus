@@ -1,0 +1,3107 @@
+component: eviction-policy-session-lists
+interface: IEvictionPolicy
+pin: 937838a9
+generated: '2026-09-28'
+spec_source: components/eviction-policy-session-lists/specs/001-session-list-eviction/spec.md
+code_source: components/eviction-policy-session-lists/src/**
+tools:
+- creusot
+- kani
+counts:
+  methods: 9
+  spec_total: 59
+  code_total: 88
+  unified: 95
+  attachments: 290
+  not_verifiable: 20
+reconciliation:
+  paired: 43
+  spec_only: 7
+  code_only: 36
+  divergent: 9
+  method: explicit semantic pairing table (verif/pairing_table.jsonl), reviewed statement by statement;
+    assembled deterministically from the two blind extractions
+  notes: 'Two independent blind extractions (spec-only, code-only) with no shared context; only 3 of 59/88
+    ids coincided by chance, so pairing was by meaning. Every spec and code id is used exactly once —
+    verified mechanically, no orphans. The 9 divergent obligations are the highest-value output: each
+    is a place the specification and the implementation disagree in substance, kept as a single obligation
+    with both readings recorded rather than smoothed into agreement.'
+properties:
+- id: EPSL-CREATE-POOL-STARTS-EMPTY
+  subject: create_pool
+  methods:
+  - create_pool
+  - len
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: EvictionPolicySessionListsComponent::create_pool -> Pool::default
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-013
+    - FR-014
+    - IFACE-create_pool
+    - ASSUMPTION-pool-mapping
+    code:
+    - lib.rs:106
+    - session_list.rs:40
+    - session_list.rs:41
+  paired_from:
+    spec: EPSL-CREATE-POOL-STARTS-EMPTY
+    code: EPSL-CREATE-POOL-YIELDS-AN-EMPTY-POOL
+  statement: A newly created eviction domain tracks no cache blocks at all. Immediately after it is created,
+    the reported number of tracked blocks in it is zero, a request for a block to evict from it reports
+    that there is nothing to evict, and a request for eviction candidates returns an empty list.
+  creusot: {}
+  kani: {}
+- id: EPSL-CREATE-POOL-ISSUES-A-FRESH-SEQUENTIAL-IDENTIFIER
+  subject: create_pool
+  methods:
+  - create_pool
+  object_fn: EvictionPolicySessionListsComponent::create_pool -> Vec::len / Vec::push
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - IFACE-create_pool
+    - ASSUMPTION-pool-mapping
+    code:
+    - lib.rs:103
+    - lib.rs:105
+    - lib.rs:106
+    - lib.rs:120
+  paired_from:
+    spec: EPSL-CREATE-POOL-FRESH-IDENTIFIER
+    code: EPSL-CREATE-POOL-RETURNS-NEXT-SEQUENTIAL-ID
+  statement: Every request to create an eviction domain hands back an identifier that differs from the
+    identifier of every domain created before it, so two domains can never be confused for one another.
+    Concretely the identifier handed back is the number of domains that existed before the call, so identifiers
+    start at zero and count upwards with no gaps and no reuse.
+  creusot: {}
+  kani: {}
+- id: EPSL-CREATE-POOL-PRESERVES-EXISTING-POOLS
+  subject: create_pool
+  methods:
+  - create_pool
+  object_fn: EvictionPolicySessionListsComponent::create_pool -> Vec::push
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:104
+    - lib.rs:106
+  paired_from:
+    spec: null
+    code: EPSL-CREATE-POOL-PRESERVES-EXISTING-POOLS
+  statement: 'Creating a new eviction domain disturbs no domain that already exists: every identifier
+    already handed out still names the same domain, and the blocks tracked in those domains, their parent
+    and child links, their recency values and their reported sizes are all unchanged.'
+  creusot: {}
+  kani: {}
+- id: EPSL-CREATE-POOL-ANNOUNCES-AT-MOST-ONCE
+  subject: create_pool
+  methods:
+  - create_pool
+  object_fn: EvictionPolicySessionListsComponent::create_pool -> EvictionState::announced
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:84
+    - lib.rs:86
+    - lib.rs:111
+    - lib.rs:116
+  paired_from:
+    spec: null
+    code: EPSL-CREATE-POOL-ANNOUNCES-AT-MOST-ONCE
+  statement: The one-off startup announcement that this session-lineage eviction policy has been selected
+    happens at most once for the whole life of the component, however many eviction domains are created,
+    because the component keeps an internal record that the announcement has already been made and checks
+    it before announcing again.
+  creusot: {}
+  kani: {}
+- id: EPSL-ANNOUNCE-LATCH-SET-ONLY-WITH-A-LOGGER
+  subject: create_pool
+  methods:
+  - create_pool
+  object_fn: EvictionPolicySessionListsComponent::create_pool -> Receptacle::get
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:83
+    - lib.rs:84
+    - lib.rs:107
+    - lib.rs:111
+    - lib.rs:116
+  paired_from:
+    spec: null
+    code: EPSL-ANNOUNCE-LATCH-SET-ONLY-WITH-A-LOGGER
+  statement: The internal record that the startup announcement has already been made is only written while
+    a logging component is actually attached. Domains created before any logger is attached therefore
+    do not consume the one-off announcement, and the announcement can still be made later once a logger
+    is present.
+  creusot: {}
+  kani: {}
+- id: EPSL-POOL-COUNT-ASSUMED-BELOW-U32-MAX
+  subject: create_pool
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  object_fn: EvictionPolicySessionListsComponent::create_pool -> usize-to-u32 narrowing cast
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 9
+  origin: code-only
+  source:
+    code:
+    - lib.rs:105
+  paired_from:
+    spec: null
+    code: EPSL-POOL-COUNT-ASSUMED-BELOW-U32-MAX
+  statement: The implementation assumes that fewer than about four billion eviction domains are ever created,
+    because it shortens the count of domains to a 32-bit number when it builds the new domain's identifier.
+    If that many domains were ever created the identifiers would start repeating and handles would name
+    the wrong domain.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-RETURNS-USABLE-HANDLE
+  subject: track
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  object_fn: EvictionPolicySessionListsComponent::track -> EvictionHandle::new
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-001
+    - CONTRACT-1
+    code:
+    - lib.rs:139
+    - lib.rs:140
+    - ieviction_policy.rs:15
+  paired_from:
+    spec: EPSL-TRACK-RETURNS-USABLE-HANDLE
+    code: EPSL-TRACK-RETURNS-A-HANDLE-NAMING-POOL-AND-SLOT
+  statement: 'When the caller successfully registers a cache block, the policy hands back a handle that
+    identifies exactly that block: it carries the eviction domain the caller named together with the storage
+    position the block occupies, and those two pieces are exactly what a later recency refresh or stop-tracking
+    request uses to find the block again.'
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-FIRST-BLOCK-IS-HEAD-AND-LEAF
+  subject: track
+  methods:
+  - track
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: Pool::register -> HashMap::get(sessions) returning None
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: spec+code
+  source:
+    spec:
+    - FR-002
+    - US-2.1
+    - EC-single-block
+    - CONTRACT-1
+    code:
+    - session_list.rs:97
+    - session_list.rs:101
+    - session_list.rs:107
+    - session_list.rs:115
+  paired_from:
+    spec: EPSL-TRACK-FIRST-BLOCK-IS-HEAD-AND-LEAF
+    code: EPSL-TRACK-NEW-SESSION-STARTS-A-HEAD
+  statement: When a block is registered for a session that currently holds no blocks, that block becomes
+    both the start of the session's chain, having no parent block, and the end of that chain, having no
+    child block, and it is immediately eligible for eviction.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-LINKS-UNDER-CURRENT-LEAF
+  subject: track
+  methods:
+  - track
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: Pool::register -> HashMap::get(sessions)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: spec+code
+  source:
+    spec:
+    - FR-002
+    - US-2.2
+    - CONTRACT-2
+    - DM-TRANSITION-track
+    code:
+    - session_list.rs:97
+    - session_list.rs:98
+    - session_list.rs:107
+    - session_list.rs:111
+  paired_from:
+    spec: EPSL-TRACK-LINKS-UNDER-CURRENT-LEAF
+    code: EPSL-TRACK-FRESH-KEY-LINKS-UNDER-PREVIOUS-LEAF
+  statement: When a block is registered for a session that already holds blocks, the block that was previously
+    the end of that session's chain becomes the new block's parent, and the new block becomes the new
+    end of that session's chain.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-SESSION-COMES-FROM-CALLER
+  subject: track
+  methods:
+  - track
+  object_fn: Pool::register -> HashMap::get(by_key) keyed on key only
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: divergent
+  source:
+    spec:
+    - FR-003
+    - ASSUMPTION-caller-supplies-session
+    - CLAR-2
+    code:
+    - session_list.rs:91
+    - session_list.rs:92
+    - session_list.rs:93
+    - lib.rs:139
+  paired_from:
+    spec: EPSL-TRACK-SESSION-COMES-FROM-CALLER
+    code: EPSL-TRACK-RETRACK-IGNORES-THE-SUPPLIED-SESSION
+  statement: The session a registered block belongs to must be exactly the session the caller named at
+    registration time; the policy never works the session out from the cache key or from anything else.
+  divergence_note: 'The specification promises that the session a block is placed in is exactly the session
+    named by the caller on that registration. The code honours this only for a key that is not already
+    tracked: when the key is already tracked, registration takes the early idempotent path, refreshes
+    the existing block''s recency and returns its handle, discarding the newly supplied session identifier
+    entirely (src/session_list.rs:90-94 - the `by_key` hit calls `touch` and returns before the `session`
+    argument is ever read). Re-registering a key under a different session therefore silently keeps the
+    block in its original session and the caller is given no indication. The specification is authoritative
+    on intent; the code''s behaviour is a defect unless the specification is amended to say the session
+    is fixed at first registration.'
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-SETS-INITIAL-RECENCY
+  subject: track
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - identify_next_to_evict
+  object_fn: Pool::tick -> u64 counter increment
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-004
+    - US-3-rationale
+    - DM-TRANSITION-track
+    - RESEARCH-D3
+    code:
+    - session_list.rs:62
+    - session_list.rs:63
+    - session_list.rs:96
+  paired_from:
+    spec: EPSL-TRACK-SETS-INITIAL-RECENCY
+    code: EPSL-TRACK-ASSIGNS-THE-NEWEST-STAMP
+  statement: Every registration request that either adds a block or refreshes an already tracked one stamps
+    that block with a recency value strictly newer than every recency value handed out before it in the
+    same eviction domain, so a just-registered block counts as more recently used than every other block
+    in that domain.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-REREGISTRATION-IS-IDEMPOTENT
+  subject: track
+  methods:
+  - track
+  - len
+  object_fn: Pool::register -> HashMap::get(by_key) / Pool::touch
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-017
+    - CLAR-4
+    - EC-reregistration
+    - CONTRACT-4
+    - IFACE-track
+    code:
+    - session_list.rs:86
+    - session_list.rs:91
+    - session_list.rs:92
+    - session_list.rs:93
+  paired_from:
+    spec: EPSL-TRACK-REREGISTRATION-IS-IDEMPOTENT
+    code: EPSL-TRACK-IS-IDEMPOTENT-FOR-A-TRACKED-KEY
+  statement: 'Registering a cache key the domain is already tracking does not create a second block for
+    that key. It is treated as an access to the existing block: the same handle is returned as the first
+    time, the existing block''s recency is refreshed, the reported size of the domain is unchanged, and
+    no parent or child link anywhere is altered.'
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-DISTINCT-SESSIONS-GIVE-PLAIN-RECENCY-ORDER
+  subject: track
+  methods:
+  - track
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: Pool::register -> HashMap(sessions) lookup miss for every distinct session
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: spec+code
+  source:
+    spec:
+    - FR-001
+    - CONTRACT-3
+    - RESEARCH-D1
+    - DM-TRANSITION-track
+    code:
+    - lib.rs:12
+    - lib.rs:13
+    - lib.rs:14
+    - session_list.rs:97
+    - session_list.rs:107
+  paired_from:
+    spec: EPSL-TRACK-DISTINCT-SESSIONS-GIVE-PLAIN-RECENCY-ORDER
+    code: EPSL-DISTINCT-SESSIONS-REDUCE-TO-PLAIN-LRU
+  statement: If the caller gives every block a session of its own, then no block ever has a parent or
+    a child, every block is a one-block chain that is both the start and the end of its session, every
+    block is always eligible for eviction, and the block chosen for eviction is simply the least recently
+    used block in the domain. In that case the policy behaves exactly like plain least-recently-used eviction.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-UNKNOWN-DOMAIN-IS-AN-ERROR
+  subject: track
+  methods:
+  - track
+  object_fn: EvictionPolicySessionListsComponent::track -> Vec::get / EvictionPolicyError::InvalidPool
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-015
+    - CONTRACT-5
+    code:
+    - lib.rs:130
+    - lib.rs:136
+  paired_from:
+    spec: EPSL-TRACK-UNKNOWN-DOMAIN-IS-AN-ERROR
+    code: EPSL-TRACK-REJECTS-UNKNOWN-POOL
+  statement: Registering a block into an eviction domain that does not exist reports an error to the caller,
+    naming the offending domain identifier, instead of appearing to succeed, and leaves the tracking state
+    of every existing domain exactly as it was.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-DOES-NOT-DISTURB-OTHER-BLOCKS
+  subject: track
+  methods:
+  - track
+  object_fn: Pool::register -> HashMap(sessions) single-entry update
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-002
+    - FR-003
+    - US-2.3
+    - CONTRACT-6
+    code:
+    - session_list.rs:97
+    - session_list.rs:107
+    - session_list.rs:114
+  paired_from:
+    spec: EPSL-TRACK-DOES-NOT-DISTURB-OTHER-BLOCKS
+    code: EPSL-TRACK-LEAVES-OTHER-SESSIONS-ALONE
+  statement: Registering a block changes only that block's own record and the parent and child link to
+    the block that used to end its session's chain. No block of any other session changes its parent,
+    its child, its recency or its eligibility for eviction, and no other block stops being tracked.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-FRESH-KEY-BECOMES-THE-SESSION-LEAF
+  subject: track
+  methods:
+  - track
+  - len
+  - get_eviction_candidates
+  object_fn: Pool::register -> Pool::alloc / BTreeSet::insert / HashMap::insert
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:96
+    - session_list.rs:98
+    - session_list.rs:114
+    - session_list.rs:115
+    - session_list.rs:117
+  paired_from:
+    spec: null
+    code: EPSL-TRACK-FRESH-KEY-BECOMES-THE-SESSION-LEAF
+  statement: Registering a key the domain does not yet hold adds exactly one new block. That block has
+    no child of its own, it becomes its session's current end-of-chain block, it appears among the eviction
+    candidates, and the reported size of the domain goes up by exactly one.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-DEMOTES-THE-PREVIOUS-LEAF
+  subject: track
+  methods:
+  - track
+  - get_eviction_candidates
+  - identify_next_to_evict
+  object_fn: Pool::register -> BTreeSet::remove(leaves)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:108
+    - session_list.rs:109
+    - session_list.rs:110
+    - session_list.rs:111
+  paired_from:
+    spec: null
+    code: EPSL-TRACK-DEMOTES-THE-PREVIOUS-LEAF
+  statement: The block that was previously the end of a session's chain stops being an eviction candidate
+    the moment a new block is attached beneath it, because it now has a child that is still tracked. It
+    is removed from the candidate set in the same operation that adds the new block.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-NEVER-REPORTS-INVALID-HANDLE
+  subject: track
+  methods:
+  - track
+  object_fn: EvictionPolicySessionListsComponent::track -> EvictionPolicyError
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:123
+    - lib.rs:136
+    - lib.rs:140
+  paired_from:
+    spec: null
+    code: EPSL-TRACK-NEVER-REPORTS-INVALID-HANDLE
+  statement: Registering a block has exactly one way to fail, namely naming an eviction domain that does
+    not exist. It never reports the other error the interface defines, the invalid-handle error, so a
+    caller that distinguishes the two error kinds never sees an invalid-handle error from a registration.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-REUSES-ONLY-FREED-SLOTS
+  subject: track
+  methods:
+  - track
+  object_fn: Pool::alloc -> Vec::pop(free) / Vec::push(nodes)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:68
+    - session_list.rs:69
+    - session_list.rs:70
+    - session_list.rs:73
+  paired_from:
+    spec: null
+    code: EPSL-TRACK-REUSES-ONLY-FREED-SLOTS
+  statement: A newly registered block is placed either in a storage position that was previously released
+    by a removal or eviction, or in a brand-new position appended at the end of the domain's storage.
+    It never overwrites a position that still holds a tracked block.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACK-KEYS-ARE-SCOPED-TO-ONE-POOL
+  subject: track
+  methods:
+  - track
+  - len
+  - get_eviction_candidates
+  object_fn: Pool::by_key -> per-pool HashMap
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:47
+    - session_list.rs:91
+    - lib.rs:82
+  paired_from:
+    spec: null
+    code: EPSL-TRACK-KEYS-ARE-SCOPED-TO-ONE-POOL
+  statement: The record of which cache keys are already tracked is kept separately for each eviction domain,
+    so the same key may be tracked independently in two different domains, and each domain then holds
+    its own block for that key with its own session, its own place in a chain and its own recency.
+  creusot: {}
+  kani: {}
+- id: EPSL-ARENA-SLOT-COUNT-ASSUMED-BELOW-U32-MAX
+  subject: track
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  object_fn: Pool::alloc -> usize-to-u32 narrowing cast
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:73
+    - session_list.rs:42
+  paired_from:
+    spec: null
+    code: EPSL-ARENA-SLOT-COUNT-ASSUMED-BELOW-U32-MAX
+  statement: The implementation assumes a single eviction domain never grows beyond about four billion
+    storage positions, because it shortens the position number to a 32-bit value when it builds a handle.
+    If a domain ever exceeded that, handles would start naming the wrong storage position.
+  creusot: {}
+  kani: {}
+- id: EPSL-TOUCH-REFRESHES-RECENCY
+  subject: touch
+  methods:
+  - touch
+  - identify_next_to_evict
+  object_fn: Pool::touch -> Pool::tick / Node::stamp
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-004
+    - US-3.1
+    - DM-TRANSITION-touch
+    code:
+    - session_list.rs:130
+    - session_list.rs:131
+  paired_from:
+    spec: EPSL-TOUCH-REFRESHES-RECENCY
+    code: EPSL-TOUCH-MAKES-THE-BLOCK-NEWEST
+  statement: Reporting an access to a tracked block sets that block's recency to a value newer than that
+    of every other tracked block in its eviction domain, making it the most recently used block there
+    and therefore the last block that would be chosen for eviction among the eligible ones.
+  creusot: {}
+  kani: {}
+- id: EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR
+  subject: touch
+  methods:
+  - touch
+  object_fn: Pool::is_active -> Vec::get / Node::active
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: divergent
+  source:
+    spec:
+    - FR-015
+    - EC-after-eviction
+    code:
+    - session_list.rs:80
+    - session_list.rs:81
+    - session_list.rs:124
+    - session_list.rs:125
+    - lib.rs:150
+    - lib.rs:153
+  paired_from:
+    spec: EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR
+    code: EPSL-TOUCH-REJECTS-AN-UNOCCUPIED-SLOT
+  statement: Reporting an access with a handle that was never issued, or that names a block that has already
+    been evicted or removed, must report an error to the caller instead of quietly doing nothing or acting
+    on some other block, and must change nothing.
+  divergence_note: The specification requires an error for any handle naming a block that has already
+    been evicted or removed. The code only checks that the storage position named by the handle is beyond
+    the end of the domain's storage or currently unoccupied (src/session_list.rs:80-82, 123-126). Because
+    a freed position goes onto the spare list and is reused by the next registration, a handle to a removed
+    block reports an error only until its position is reused; after reuse the refresh silently succeeds
+    and refreshes a different block. The specification is authoritative; the code cannot deliver the promised
+    error because handles carry no use-generation marker (see EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT
+    for the root cause, which the specification itself records as an open gap).
+  creusot: {}
+  kani: {}
+- id: EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN
+  subject: 'global invariant: handle-taking operations reject a handle naming a domain that does not exist'
+  methods:
+  - touch
+  - batch_touch
+  - remove
+  object_fn: EvictionPolicySessionListsComponent::touch -> Vec::get / EvictionPolicyError::InvalidPool
+  kind: error-case
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: spec+code
+  source:
+    spec:
+    - FR-015
+    code:
+    - lib.rs:145
+    - lib.rs:148
+  paired_from:
+    spec: EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN
+    code: EPSL-TOUCH-REJECTS-UNKNOWN-POOL
+  statement: If a handle refers to an eviction domain that does not exist, every operation that takes
+    a handle reports an error instead of appearing to succeed, and changes nothing. The error reported
+    is specifically an invalid-domain error naming the offending domain identifier.
+  creusot: {}
+  kani: {}
+- id: EPSL-TOUCH-CHANGES-ONLY-RECENCY
+  subject: touch
+  methods:
+  - touch
+  - batch_touch
+  object_fn: Pool::touch -> Node::stamp assignment only
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-004
+    - DM-TRANSITION-touch
+    code:
+    - session_list.rs:123
+    - session_list.rs:131
+    - session_list.rs:136
+  paired_from:
+    spec: EPSL-TOUCH-CHANGES-ONLY-RECENCY
+    code: EPSL-TOUCH-PRESERVES-LINEAGE-AND-SIZE
+  statement: 'Reporting an access to a block changes nothing except that one block''s recency: the block
+    keeps the same parent and the same child, it stays in the same session, no block is added or removed,
+    which cache keys are tracked is unchanged, and the reported size of the domain is unchanged.'
+  creusot: {}
+  kani: {}
+- id: EPSL-TOUCH-OF-A-LEAF-MOVES-IT-LAST-IN-THE-CANDIDATE-ORDER
+  subject: touch
+  methods:
+  - touch
+  - batch_touch
+  - get_eviction_candidates
+  - identify_next_to_evict
+  object_fn: Pool::touch -> BTreeSet::remove then BTreeSet::insert(leaves)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:129
+    - session_list.rs:132
+    - session_list.rs:133
+    - session_list.rs:134
+  paired_from:
+    spec: null
+    code: EPSL-TOUCH-OF-A-LEAF-MOVES-IT-LAST-IN-THE-CANDIDATE-ORDER
+  statement: Reporting an access to a block that is at the end of its session's chain keeps it among the
+    eviction candidates but moves it to the very back of the candidate order, so it becomes the last of
+    the current candidates that would be evicted.
+  creusot: {}
+  kani: {}
+- id: EPSL-TOUCH-OF-AN-INTERIOR-BLOCK-KEEPS-THE-CANDIDATE-SET
+  subject: touch
+  methods:
+  - touch
+  - batch_touch
+  - get_eviction_candidates
+  object_fn: Pool::touch -> Node::child.is_none() guard
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:129
+    - session_list.rs:132
+    - session_list.rs:135
+  paired_from:
+    spec: null
+    code: EPSL-TOUCH-OF-AN-INTERIOR-BLOCK-KEEPS-THE-CANDIDATE-SET
+  statement: Reporting an access to a block that still has a tracked child does not add it to the eviction
+    candidates and does not change the candidate list at all. Refreshing such a protected block is allowed
+    and is reported as a success; only the block's own recency changes.
+  creusot: {}
+  kani: {}
+- id: EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
+  subject: batch_touch
+  methods:
+  - batch_touch
+  - identify_next_to_evict
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec-only
+  source:
+    spec:
+    - FR-005
+    - US-3.2
+  paired_from:
+    spec: EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
+    code: null
+  statement: When the caller reports a group of accessed blocks in one operation, every block in that
+    group has its recency refreshed, not just the first or the last one, so all of them count as recently
+    used afterwards.
+  creusot: {}
+  kani: {}
+- id: EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
+  subject: batch_touch
+  methods:
+  - batch_touch
+  - touch
+  object_fn: EvictionPolicySessionListsComponent::batch_touch -> Pool::touch per handle, in order
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-005
+    - DM-TRANSITION-batch_touch
+    code:
+    - lib.rs:169
+    - lib.rs:179
+    - lib.rs:183
+  paired_from:
+    spec: EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
+    code: EPSL-BATCH-TOUCH-MATCHES-SEQUENTIAL-TOUCHES
+  statement: When a group recency refresh succeeds, it leaves the policy in exactly the condition that
+    reporting those same accesses one at a time, in the order they appear in the group, would have produced.
+    Batching is a performance convenience only, and in particular a block named twice in the group ends
+    up with the recency of its last mention.
+  creusot: {}
+  kani: {}
+- id: EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR
+  subject: batch_touch
+  methods:
+  - batch_touch
+  object_fn: Pool::touch returning false -> EvictionPolicyError::InvalidHandle
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: divergent
+  source:
+    spec:
+    - FR-015
+    code:
+    - lib.rs:179
+    - lib.rs:180
+  paired_from:
+    spec: EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR
+    code: EPSL-BATCH-TOUCH-REJECTS-AN-UNOCCUPIED-SLOT
+  statement: If a group of reported accesses contains a handle that was never issued, or one that names
+    a block that is no longer tracked, the operation must report an error to the caller rather than appearing
+    to succeed.
+  divergence_note: The specification requires an error for any handle in the group that names a block
+    that is no longer tracked. The code stops at the first handle whose storage position is empty or beyond
+    the end of its domain's storage and reports an invalid-handle error (src/lib.rs:179-181), but a handle
+    to a removed block whose position has since been reused passes that check and silently refreshes the
+    block that now occupies the position. Specification authoritative; same root cause as EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT.
+  creusot: {}
+  kani: {}
+- id: EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE
+  subject: batch_touch
+  methods:
+  - batch_touch
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec-only
+  source:
+    spec:
+    - FR-005
+    - DM-TRANSITION-batch_touch
+  paired_from:
+    spec: EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE
+    code: null
+  statement: Reporting a group of accesses changes only the recency of the blocks named in the group.
+    A block not named in the group keeps its recency, no parent or child link anywhere changes, no block
+    is added or removed, and no domain's reported size changes.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING
+  subject: 'global invariant: a rejected operation never leaves partial state'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  object_fn: EvictionPolicySessionListsComponent::batch_touch -> early `return Err` with no undo
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 8
+  origin: divergent
+  source:
+    spec:
+    - FR-015
+    code:
+    - lib.rs:169
+    - lib.rs:179
+    - lib.rs:180
+    - lib.rs:181
+  paired_from:
+    spec: EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING
+    code: EPSL-BATCH-TOUCH-IS-NOT-ROLLED-BACK-ON-FAILURE
+  statement: Whenever an operation reports an error, or safely does nothing because the domain named does
+    not exist, the policy's tracking state is left exactly as it was beforehand; no operation, valid or
+    invalid, ever leaves partially applied state behind.
+  divergence_note: 'The specification''s global invariant promises that a failed operation leaves no partial
+    state. The code''s group recency refresh violates this: it refreshes each handle in turn and returns
+    the error as soon as it reaches a bad one (src/lib.rs:169-182), so every handle before the failing
+    one keeps its new recency and the eviction order is permanently changed by an operation the caller
+    was told had failed. Every other operation does satisfy the invariant - each single-handle operation
+    validates before mutating. The specification is authoritative on intent, but its own not-verifiable
+    ledger records that it never explicitly states whether a group refresh is all-or-nothing (spec NV-11),
+    so this is at minimum an unresolved conflict that the specification must settle.'
+  creusot: {}
+  kani: {}
+- id: EPSL-BATCH-TOUCH-REJECTS-UNKNOWN-POOL
+  subject: batch_touch
+  methods:
+  - batch_touch
+  object_fn: EvictionPolicySessionListsComponent::batch_touch -> Vec::get / EvictionPolicyError::InvalidPool
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:162
+    - lib.rs:166
+    - lib.rs:174
+    - lib.rs:176
+  paired_from:
+    spec: null
+    code: EPSL-BATCH-TOUCH-REJECTS-UNKNOWN-POOL
+  statement: If any handle in the group names an eviction domain that does not exist, the whole call fails
+    with an invalid-domain error naming that identifier. The check happens when the walk through the group
+    first reaches a handle for that domain, not up front for the whole group.
+  creusot: {}
+  kani: {}
+- id: EPSL-BATCH-TOUCH-EMPTY-SUCCEEDS-WITHOUT-VALIDATION
+  subject: batch_touch
+  methods:
+  - batch_touch
+  object_fn: EvictionPolicySessionListsComponent::batch_touch -> slice::is_empty early return
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:158
+    - lib.rs:159
+  paired_from:
+    spec: null
+    code: EPSL-BATCH-TOUCH-EMPTY-SUCCEEDS-WITHOUT-VALIDATION
+  statement: Reporting an empty group of accesses reports success, changes nothing at all, and does not
+    even take a lock or check that any eviction domain exists.
+  creusot: {}
+  kani: {}
+- id: EPSL-BATCH-TOUCH-SPANS-POOLS-ONE-LOCK-AT-A-TIME
+  subject: batch_touch
+  methods:
+  - batch_touch
+  object_fn: EvictionPolicySessionListsComponent::batch_touch -> drop(pool_guard) before Mutex::lock
+  kind: invariant
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:167
+    - lib.rs:170
+    - lib.rs:171
+    - lib.rs:177
+  paired_from:
+    spec: null
+    code: EPSL-BATCH-TOUCH-SPANS-POOLS-ONE-LOCK-AT-A-TIME
+  statement: While refreshing a group of blocks that spans several eviction domains, the component always
+    releases exclusive access to the domain it currently holds before taking exclusive access to the next
+    one, so it never holds exclusive access to two domains at the same time.
+  creusot: {}
+  kani: {}
+- id: EPSL-BATCH-TOUCH-RELOCKS-WHEN-THE-POOL-CHANGES
+  subject: batch_touch
+  methods:
+  - batch_touch
+  object_fn: EvictionPolicySessionListsComponent::batch_touch -> pool_id change detection
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:162
+    - lib.rs:170
+    - lib.rs:172
+    - lib.rs:177
+    - ieviction_policy.rs:94
+    - ieviction_policy.rs:95
+  paired_from:
+    spec: null
+    code: EPSL-BATCH-TOUCH-RELOCKS-WHEN-THE-POOL-CHANGES
+  statement: A group of handles may mix blocks from different eviction domains, and each block is refreshed
+    in its own domain. The component switches domains only when consecutive handles in the group name
+    different domains, so a group that alternates between two domains changes domains on every step.
+  creusot: {}
+  kani: {}
+- id: EPSL-REMOVE-STOPS-TRACKING-THE-BLOCK
+  subject: remove
+  methods:
+  - remove
+  - len
+  - track
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: Pool::unlink -> HashMap::remove(by_key) / Vec::push(free) / len decrement
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: spec+code
+  source:
+    spec:
+    - FR-011
+    - DM-TRANSITION-remove
+    code:
+    - session_list.rs:178
+    - session_list.rs:179
+    - session_list.rs:180
+    - session_list.rs:181
+    - session_list.rs:182
+    - session_list.rs:183
+  paired_from:
+    spec: EPSL-REMOVE-STOPS-TRACKING-THE-BLOCK
+    code: EPSL-REMOVE-UNTRACKS-THE-KEY-AND-FREES-THE-SLOT
+  statement: 'When the caller asks the policy to stop tracking a block, that block is no longer tracked
+    afterwards: the reported size of its domain drops by exactly one, the block is never again offered
+    as an eviction candidate or chosen as a victim, its cache key stops being tracked so the same key
+    can later be registered again as a brand-new block, and its storage position is released for reuse.'
+  creusot: {}
+  kani: {}
+- id: EPSL-REMOVE-RELINKS-THE-CHAIN
+  subject: remove
+  methods:
+  - remove
+  - identify_next_to_evict
+  object_fn: Pool::unlink -> Node::parent and Node::child reassignment
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-011
+    - EC-interior-removal
+    - RESEARCH-D5
+    - DM-TRANSITION-remove
+    code:
+    - session_list.rs:141
+    - session_list.rs:154
+    - session_list.rs:155
+    - session_list.rs:157
+    - session_list.rs:158
+  paired_from:
+    spec: EPSL-REMOVE-RELINKS-THE-CHAIN
+    code: EPSL-REMOVE-RELINKS-THE-CHAIN
+  statement: 'When the block being removed sits in the middle of a session''s chain, the policy joins
+    the two ends back together: the removed block''s child is given the removed block''s parent as its
+    new parent, and that parent is given the child as its new child, so the session is still one unbroken
+    chain with no gap and no dangling block.'
+  creusot: {}
+  kani: {}
+- id: EPSL-REMOVE-LAST-BLOCK-EMPTIES-THE-SESSION
+  subject: remove
+  methods:
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: Pool::unlink -> HashMap::remove(sessions)
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: spec+code
+  source:
+    spec:
+    - FR-011
+    - RESEARCH-D5
+    - EC-single-block
+    code:
+    - session_list.rs:170
+    - session_list.rs:171
+    - session_list.rs:172
+  paired_from:
+    spec: EPSL-REMOVE-LAST-BLOCK-EMPTIES-THE-SESSION
+    code: EPSL-REMOVE-OF-A-LONE-BLOCK-DROPS-THE-SESSION
+  statement: 'When the block removed was the only block its session still held, that session is left with
+    no blocks at all: the policy forgets the session entirely, it contributes no eviction candidate, and
+    it starts fresh if a block is later registered for it again.'
+  creusot: {}
+  kani: {}
+- id: EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR
+  subject: remove
+  methods:
+  - remove
+  object_fn: Pool::remove -> Pool::is_active guard
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: divergent
+  source:
+    spec:
+    - FR-015
+    - EC-after-eviction
+    code:
+    - session_list.rs:206
+    - session_list.rs:207
+    - session_list.rs:208
+    - lib.rs:193
+    - lib.rs:196
+  paired_from:
+    spec: EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR
+    code: EPSL-REMOVE-REJECTS-AN-UNOCCUPIED-SLOT
+  statement: Asking the policy to stop tracking a block with a handle that was never issued, or that names
+    a block already evicted or already removed, must report an error to the caller rather than quietly
+    succeeding, and must change nothing.
+  divergence_note: The specification requires an error for a handle naming an already removed or evicted
+    block. The code checks only that the handle's storage position is within the domain's storage and
+    currently occupied (src/session_list.rs:206-209). Once the position of a removed block has been reused
+    by a later registration, a stale handle passes the check and removes the block that now occupies that
+    position - a silent removal of the wrong block, which is worse than the false success in the refresh
+    case. Specification authoritative; same root cause as EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT.
+  creusot: {}
+  kani: {}
+- id: EPSL-REMOVE-DISTURBS-ONLY-THE-CHAIN-NEIGHBOURS
+  subject: remove
+  methods:
+  - remove
+  - identify_next_to_evict
+  object_fn: Pool::unlink -> single-session relink
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-011
+    - FR-003
+    code:
+    - session_list.rs:147
+    - session_list.rs:154
+    - session_list.rs:158
+    - session_list.rs:168
+  paired_from:
+    spec: EPSL-REMOVE-DISTURBS-ONLY-THE-CHAIN-NEIGHBOURS
+    code: EPSL-REMOVE-LEAVES-OTHER-SESSIONS-ALONE
+  statement: Removing a block changes only that block's own record and the parent and child links of its
+    immediate parent and child. No block's recency changes, no other block stops being tracked, and no
+    block of any other session changes its parent, its child, its recency or its eligibility for eviction.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-PARENT-BECOMES-ELIGIBLE-WHEN-ITS-CHILD-GOES
+  subject: 'global invariant: losing a child makes a block eligible for eviction'
+  methods:
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: Pool::unlink -> BTreeSet::insert(leaves) / HashMap::insert(sessions)
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: spec+code
+  source:
+    spec:
+    - FR-009
+    - US-1.2
+    - DM-TRANSITION-remove
+    - DM-TRANSITION-identify_next_to_evict
+    code:
+    - session_list.rs:142
+    - session_list.rs:161
+    - session_list.rs:164
+    - session_list.rs:166
+    - session_list.rs:167
+    - session_list.rs:168
+  paired_from:
+    spec: EPSL-INV-PARENT-BECOMES-ELIGIBLE-WHEN-ITS-CHILD-GOES
+    code: EPSL-REMOVE-OF-A-LEAF-PROMOTES-ITS-PARENT
+  statement: As soon as a block's only child stops being tracked, whether that child was evicted or explicitly
+    removed, the block itself becomes the end of its session's chain and is therefore eligible for a later
+    eviction. This is how a session's chain is consumed from the end back towards its start.
+  creusot: {}
+  kani: {}
+- id: EPSL-REMOVE-REJECTS-UNKNOWN-POOL
+  subject: remove
+  methods:
+  - remove
+  object_fn: EvictionPolicySessionListsComponent::remove -> Vec::get / EvictionPolicyError::InvalidPool
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:188
+    - lib.rs:191
+  paired_from:
+    spec: null
+    code: EPSL-REMOVE-REJECTS-UNKNOWN-POOL
+  statement: Asking to stop tracking a block through a handle that names an eviction domain that was never
+    created fails with an invalid-domain error reporting that identifier, and nothing anywhere changes.
+  creusot: {}
+  kani: {}
+- id: EPSL-REMOVE-OF-AN-INTERIOR-BLOCK-KEEPS-THE-CANDIDATES
+  subject: remove
+  methods:
+  - remove
+  - get_eviction_candidates
+  object_fn: Pool::unlink -> was_leaf guard
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:151
+    - session_list.rs:161
+    - session_list.rs:176
+  paired_from:
+    spec: null
+    code: EPSL-REMOVE-OF-AN-INTERIOR-BLOCK-KEEPS-THE-CANDIDATES
+  statement: Removing a block that still has a tracked child, including the block at the start of a chain,
+    does not change which blocks are eviction candidates and does not change which block is the end of
+    that session's chain.
+  creusot: {}
+  kani: {}
+- id: EPSL-REMOVE-DOES-NOT-REFRESH-RECENCY
+  subject: remove
+  methods:
+  - remove
+  - identify_next_to_evict
+  object_fn: Pool::unlink -> no call to Pool::tick
+  kind: frame
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:143
+    - session_list.rs:144
+    - session_list.rs:189
+  paired_from:
+    spec: null
+    code: EPSL-REMOVE-DOES-NOT-REFRESH-RECENCY
+  statement: 'Removing a block does not count as an access to anything: the domain''s recency counter
+    does not advance and no surviving block''s recency changes, so the eviction order among the remaining
+    candidates is exactly as it was apart from the removed block''s disappearance.'
+  creusot: {}
+  kani: {}
+- id: EPSL-PROMOTED-PARENT-KEEPS-ITS-OLD-STAMP
+  subject: 'global invariant: a block promoted to end-of-chain keeps its old recency'
+  methods:
+  - remove
+  - identify_next_to_evict
+  - touch
+  - batch_touch
+  object_fn: Pool::unlink -> BTreeSet::insert with the parent's existing Node::stamp
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:165
+    - session_list.rs:166
+    - session_list.rs:167
+    - session_list.rs:131
+  paired_from:
+    spec: null
+    code: EPSL-PROMOTED-PARENT-KEEPS-ITS-OLD-STAMP
+  statement: When a block becomes eligible for eviction because its child stopped being tracked, it enters
+    the eviction order at the recency it already had, not as a freshly accessed block. A long-untouched
+    parent therefore becomes the next victim immediately on promotion rather than going to the back of
+    the queue.
+  creusot: {}
+  kani: {}
+- id: EPSL-TRACKED-SIZE-NEVER-UNDERFLOWS
+  subject: 'global invariant: the tracked-block counter never goes below zero'
+  methods:
+  - remove
+  - identify_next_to_evict
+  object_fn: Pool::unlink -> usize subtraction guarded by Pool::is_active
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:183
+    - session_list.rs:207
+    - session_list.rs:191
+  paired_from:
+    spec: null
+    code: EPSL-TRACKED-SIZE-NEVER-UNDERFLOWS
+  statement: The stored count of tracked blocks is decreased with no guard against dropping below zero,
+    so the implementation relies on that decrease only ever happening for a block that really was being
+    tracked. Every path that decreases it is reached only after the block has been confirmed to occupy
+    its storage position.
+  creusot: {}
+  kani: {}
+- id: EPSL-EVICT-PICKS-OLDEST-ELIGIBLE-LEAF
+  subject: identify_next_to_evict
+  methods:
+  - identify_next_to_evict
+  object_fn: Pool::evict_oldest -> BTreeSet<(u64, u32)>::iter().next()
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-008
+    - SC-004
+    - US-1.1
+    - CLAR-2
+    - ASSUMPTION-shared-domain
+    code:
+    - session_list.rs:186
+    - session_list.rs:187
+    - session_list.rs:191
+    - session_list.rs:50
+    - session_list.rs:51
+  paired_from:
+    spec: EPSL-EVICT-PICKS-OLDEST-ELIGIBLE-LEAF
+    code: EPSL-EVICT-CHOOSES-THE-OLDEST-LEAF
+  statement: When asked for a victim, the policy returns the eligible block - a block with no still-tracked
+    child - whose recency is the oldest among all such blocks anywhere in that eviction domain, comparing
+    across every session in the domain at once. No eligible block with an older recency is ever passed
+    over.
+  creusot: {}
+  kani: {}
+- id: EPSL-EVICT-STOPS-TRACKING-THE-VICTIM
+  subject: identify_next_to_evict
+  methods:
+  - identify_next_to_evict
+  - len
+  - track
+  - get_eviction_candidates
+  object_fn: Pool::evict_oldest -> Pool::unlink
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-008
+    - US-1.1
+    - DM-TRANSITION-identify_next_to_evict
+    code:
+    - session_list.rs:187
+    - session_list.rs:192
+    - lib.rs:204
+    - ieviction_policy.rs:101
+    - ieviction_policy.rs:102
+  paired_from:
+    spec: EPSL-EVICT-STOPS-TRACKING-THE-VICTIM
+    code: EPSL-EVICT-REMOVES-THE-VICTIM-FROM-TRACKING
+  statement: 'The block returned as the victim stops being tracked as part of the same operation, with
+    exactly the same effect as an explicit request to stop tracking it: the domain''s reported size drops
+    by one, its cache key is no longer tracked, its session''s chain is rejoined and its parent promoted,
+    and the same block is never returned again by a later victim request or listed as a candidate.'
+  creusot: {}
+  kani: {}
+- id: EPSL-EVICT-EMPTY-DOMAIN-REPORTS-NOTHING
+  subject: identify_next_to_evict
+  methods:
+  - identify_next_to_evict
+  object_fn: Pool::evict_oldest -> BTreeSet::iter().next() returning None
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-008
+    - US-1.3
+    - EC-empty-domain
+    code:
+    - session_list.rs:188
+    - session_list.rs:191
+  paired_from:
+    spec: EPSL-EVICT-EMPTY-DOMAIN-REPORTS-NOTHING
+    code: EPSL-EVICT-EMPTY-POOL-RETURNS-NOTHING
+  statement: When an eviction domain currently tracks no blocks at all, a request for a victim reports
+    that there is nothing to evict rather than returning some block or failing, and it leaves the domain
+    untouched.
+  creusot: {}
+  kani: {}
+- id: EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM
+  subject: identify_next_to_evict
+  methods:
+  - identify_next_to_evict
+  object_fn: Pool::evict_oldest -> Pool::unlink with no Pool::tick
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-006
+    - US-3.3
+    - DM-TRANSITION-identify_next_to_evict
+    code:
+    - session_list.rs:188
+    - session_list.rs:189
+    - session_list.rs:192
+  paired_from:
+    spec: EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM
+    code: EPSL-EVICT-DOES-NOT-REFRESH-RECENCY
+  statement: 'Choosing a block for eviction does not count as an access to it or to any surviving block:
+    the domain''s recency counter does not advance and no recency changes, so the selection can never
+    make the block it just selected look recently used, and repeated victim requests walk steadily through
+    the candidates from oldest to newest.'
+  creusot: {}
+  kani: {}
+- id: EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
+  subject: identify_next_to_evict
+  methods:
+  - identify_next_to_evict
+  - len
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec-only
+  source:
+    spec:
+    - FR-007
+    - FR-008
+    - FR-018
+    - CLAR-1
+  paired_from:
+    spec: EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
+    code: null
+  statement: Whenever an eviction domain tracks at least one block, a request for a victim always returns
+    one. The policy can never reach a state in which it tracks blocks but reports that none of them may
+    be evicted.
+  creusot: {}
+  kani: {}
+- id: EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
+  subject: identify_next_to_evict
+  methods:
+  - identify_next_to_evict
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec-only
+  source:
+    spec:
+    - FR-008
+    - FR-009
+    - FR-003
+  paired_from:
+    spec: EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
+    code: null
+  statement: Evicting a block changes only that block's own record and its parent's end-of-chain status.
+    No surviving block's recency changes, no other block stops being tracked, and no other session's chain
+    is altered.
+  creusot: {}
+  kani: {}
+- id: EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
+  subject: 'global invariant: the operations that cannot report an error degrade safely on an unknown
+    domain'
+  methods:
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  object_fn: EvictionPolicySessionListsComponent::identify_next_to_evict -> Vec::get with `?`
+  kind: error-case
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-015
+    code:
+    - lib.rs:200
+    - lib.rs:202
+    - lib.rs:130
+  paired_from:
+    spec: EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
+    code: EPSL-EVICT-UNKNOWN-POOL-RETURNS-NOTHING
+  statement: 'The four operations that have no way to report an error - asking for a victim, asking for
+    candidates, asking for a size, and clearing - behave harmlessly when asked about an eviction domain
+    that does not exist: the victim request reports that there is nothing to evict, and nothing anywhere
+    in the component changes. A consequence is that the caller cannot tell an unknown domain apart from
+    one that is simply empty.'
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-A-BLOCK-WITH-A-DESCENDANT-IS-NEVER-EVICTED
+  subject: 'global invariant: only end-of-chain blocks may be evicted'
+  methods:
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: Pool::leaves -> membership restricted to Node::child == None
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-007
+    - SC-004
+    - US-1.2
+    - ASSUMPTION-leaves-only
+    code:
+    - session_list.rs:6
+    - session_list.rs:7
+    - session_list.rs:8
+    - session_list.rs:110
+    - session_list.rs:115
+    - session_list.rs:191
+  paired_from:
+    spec: EPSL-INV-A-BLOCK-WITH-A-DESCENDANT-IS-NEVER-EVICTED
+    code: EPSL-EVICT-NEVER-CHOOSES-A-BLOCK-WITH-A-DESCENDANT
+  statement: The policy never selects as a victim, and never offers as a candidate, a block that still
+    has a tracked block descended from it, however long ago that block was last accessed. Blocks at the
+    start and in the middle of a chain are therefore protected until everything below them has gone. This
+    is the whole point of the policy.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-VICTIM-CHOICE-IS-REPEATABLE
+  subject: 'global invariant: victim selection is deterministic'
+  methods:
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: Pool::leaves -> BTreeSet ordered by (stamp, index) with unique stamps
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-012
+    - EC-tie
+    code:
+    - session_list.rs:59
+    - session_list.rs:60
+    - session_list.rs:61
+    - session_list.rs:51
+  paired_from:
+    spec: EPSL-INV-VICTIM-CHOICE-IS-REPEATABLE
+    code: EPSL-EVICT-VICTIM-IS-UNIQUELY-DETERMINED
+  statement: 'Victim selection depends only on the tracking state and never on anything incidental, and
+    there is never any ambiguity about which block is chosen: because every access is stamped with its
+    own recency value and no two tracked blocks in a domain share one, the eligible blocks have a strict
+    oldest-to-newest order with a unique oldest. Two domains in identical states always name the same
+    victim and produce the same candidate list.'
+  creusot: {}
+  kani: {}
+- id: EPSL-CANDIDATES-NEVER-MORE-THAN-ASKED
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  object_fn: Pool::candidates -> Iterator::take(n)
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-010
+    - US-1.4
+    code:
+    - session_list.rs:196
+    - session_list.rs:199
+  paired_from:
+    spec: EPSL-CANDIDATES-NEVER-MORE-THAN-ASKED
+    code: EPSL-CANDIDATES-ARE-CAPPED-AT-N
+  statement: When the caller asks for up to a given number of eviction candidates, the policy returns
+    no more than that many and no more than the number of eligible blocks it is actually tracking, returning
+    exactly as many as are available when fewer exist. Asking for zero candidates returns an empty list.
+  creusot: {}
+  kani: {}
+- id: EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  - identify_next_to_evict
+  object_fn: Pool::candidates -> snapshot of current leaves, ignoring promotion
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: divergent
+  source:
+    spec:
+    - FR-010
+    - US-1.4
+    - DM-TRANSITION-get_eviction_candidates
+    code:
+    - ieviction_policy.rs:106
+    - ieviction_policy.rs:107
+    - session_list.rs:195
+    - session_list.rs:166
+    - session_list.rs:167
+  paired_from:
+    spec: EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER
+    code: EPSL-CANDIDATES-AFTER-THE-FIRST-ARE-NOT-THE-EVICTION-SEQUENCE
+  statement: The candidates are listed in the order the policy would actually evict them, oldest access
+    first, so that the list read from front to back is the sequence of blocks successive victim requests
+    would return.
+  divergence_note: 'The specification promises the candidate list is in true eviction order. The code
+    returns the currently eligible end-of-chain blocks sorted by recency, oldest first (src/session_list.rs:196-202),
+    which guarantees only the FIRST entry: evicting that block promotes its parent into the eligible set
+    at the parent''s own, possibly much older, recency, so the block actually evicted second may be a
+    block that was not in the list at all, or one further down it. The code extraction states this explicitly
+    as a separate obligation. The specification''s own first-entry claim is met; its whole-list ordering
+    claim is not. Either the specification must be weakened to ''the first candidate is the next victim'',
+    or the implementation must simulate successive evictions - the specification is authoritative and
+    currently over-promises.'
+  creusot: {}
+  kani: {}
+- id: EPSL-CANDIDATES-ARE-DISTINCT
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  object_fn: Pool::leaves -> one entry per non-empty session chain
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-010
+    - FR-018
+    - DM-INV-2
+    - DM-INV-5
+    code:
+    - session_list.rs:16
+    - session_list.rs:17
+    - session_list.rs:49
+    - session_list.rs:110
+    - session_list.rs:115
+  paired_from:
+    spec: EPSL-CANDIDATES-ARE-DISTINCT
+    code: EPSL-CANDIDATES-HOLD-AT-MOST-ONE-KEY-PER-SESSION
+  statement: The returned candidate list never names the same cache block twice; each entry is a different
+    tracked block. Moreover no two entries ever belong to the same session, because a session has exactly
+    one block with no tracked child, so the number of candidates available is the number of sessions currently
+    holding blocks.
+  creusot: {}
+  kani: {}
+- id: EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec-only
+  source:
+    spec:
+    - EC-empty-domain
+    - US-1.4
+  paired_from:
+    spec: EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
+    code: null
+  statement: When an eviction domain currently tracks no blocks, a request for candidates returns an empty
+    list rather than failing or inventing entries.
+  creusot: {}
+  kani: {}
+- id: EPSL-CANDIDATES-CHANGE-NOTHING
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  object_fn: Pool::candidates -> &self read-only borrow
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-010
+    - US-1.4
+    code:
+    - session_list.rs:195
+    - session_list.rs:196
+  paired_from:
+    spec: EPSL-CANDIDATES-CHANGE-NOTHING
+    code: EPSL-CANDIDATES-CHANGE-NOTHING
+  statement: 'Asking for eviction candidates is a pure enquiry: none of the listed blocks is removed from
+    tracking, the reported size of the domain is unchanged, no recency changes, the recency counter does
+    not advance, and no parent or child link is altered. Asking twice in a row returns the same list.'
+  creusot: {}
+  kani: {}
+- id: EPSL-CANDIDATES-ARE-LEAVES-OLDEST-FIRST
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  object_fn: Pool::candidates -> BTreeSet::iter in (stamp, index) order
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:195
+    - session_list.rs:197
+    - session_list.rs:198
+    - session_list.rs:200
+  paired_from:
+    spec: null
+    code: EPSL-CANDIDATES-ARE-LEAVES-OLDEST-FIRST
+  statement: The candidate list contains only blocks that have no tracked child, and they are listed least
+    recently accessed first.
+  creusot: {}
+  kani: {}
+- id: EPSL-CANDIDATES-FIRST-IS-THE-NEXT-VICTIM
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  - identify_next_to_evict
+  object_fn: Pool::candidates and Pool::evict_oldest -> the same BTreeSet first element
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:191
+    - session_list.rs:197
+    - session_list.rs:198
+  paired_from:
+    spec: null
+    code: EPSL-CANDIDATES-FIRST-IS-THE-NEXT-VICTIM
+  statement: When at least one candidate exists, the first entry of the candidate list is exactly the
+    block that the next victim request would choose, because both operations read the same oldest-first
+    ordering of eligible blocks and take its first element.
+  creusot: {}
+  kani: {}
+- id: EPSL-CANDIDATES-UNKNOWN-POOL-RETURNS-EMPTY
+  subject: get_eviction_candidates
+  methods:
+  - get_eviction_candidates
+  object_fn: EvictionPolicySessionListsComponent::get_eviction_candidates -> Vec::get match on None
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:209
+    - lib.rs:211
+  paired_from:
+    spec: null
+    code: EPSL-CANDIDATES-UNKNOWN-POOL-RETURNS-EMPTY
+  statement: Asking an eviction domain identifier that was never created for eviction candidates returns
+    an empty list rather than reporting an error, so the caller cannot tell an unknown domain apart from
+    one that currently has no candidates.
+  creusot: {}
+  kani: {}
+- id: EPSL-LEN-REPORTS-TRACKED-COUNT
+  subject: len
+  methods:
+  - len
+  object_fn: Pool::len -> Pool::len field
+  kind: postcondition
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-013
+    - DM-INV-6
+    code:
+    - session_list.rs:54
+    - session_list.rs:55
+    - session_list.rs:214
+    - session_list.rs:216
+    - session_list.rs:117
+    - session_list.rs:183
+  paired_from:
+    spec: EPSL-LEN-REPORTS-TRACKED-COUNT
+    code: EPSL-LEN-COUNTS-TRACKED-BLOCKS
+  statement: The reported size of an eviction domain is exactly the number of cache blocks the policy
+    is currently tracking in it, counting blocks in every session and at every position in a chain, not
+    only the ones eligible for eviction. It goes up by one for each newly registered block and down by
+    one for each block removed or evicted.
+  creusot: {}
+  kani: {}
+- id: EPSL-LEN-CHANGES-NOTHING
+  subject: len
+  methods:
+  - len
+  object_fn: Pool::len -> &self read-only borrow
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: spec+code
+  source:
+    spec:
+    - FR-013
+    code:
+    - session_list.rs:215
+    - session_list.rs:216
+  paired_from:
+    spec: EPSL-LEN-CHANGES-NOTHING
+    code: EPSL-LEN-CHANGES-NOTHING
+  statement: 'Asking for the size of an eviction domain is a pure enquiry: it removes nothing, adds nothing,
+    refreshes no block''s recency, does not advance the recency counter, and changes no parent or child
+    link.'
+  creusot: {}
+  kani: {}
+- id: EPSL-LEN-UNKNOWN-POOL-RETURNS-ZERO
+  subject: len
+  methods:
+  - len
+  object_fn: EvictionPolicySessionListsComponent::len -> Vec::get match on None
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:217
+    - lib.rs:219
+    - lib.rs:220
+  paired_from:
+    spec: null
+    code: EPSL-LEN-UNKNOWN-POOL-RETURNS-ZERO
+  statement: Asking an eviction domain identifier that was never created for its size reports zero rather
+    than an error, so a caller that mistypes an identifier sees what looks like an empty domain instead
+    of being told the domain does not exist.
+  creusot: {}
+  kani: {}
+- id: EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
+  subject: clear_pool
+  methods:
+  - clear_pool
+  - len
+  - identify_next_to_evict
+  - get_eviction_candidates
+  object_fn: Pool::clear -> Vec::clear / HashMap::clear / BTreeSet::clear
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-014
+    - DM-TRANSITION-clear_pool
+    code:
+    - session_list.rs:219
+    - session_list.rs:220
+    - session_list.rs:221
+    - session_list.rs:226
+    - session_list.rs:227
+  paired_from:
+    spec: EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
+    code: EPSL-CLEAR-POOL-EMPTIES-EVERYTHING-AND-RESETS-THE-CLOCK
+  statement: 'Clearing an eviction domain discards every block it was tracking, every session it knew
+    about and every eviction candidate: afterwards its reported size is zero, a victim request reports
+    nothing to evict, and a candidate request returns an empty list. The implementation also resets the
+    domain''s recency counter back to its starting value and discards its whole storage area.'
+  creusot: {}
+  kani: {}
+- id: EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES
+  subject: clear_pool
+  methods:
+  - clear_pool
+  - touch
+  - batch_touch
+  - remove
+  - track
+  object_fn: Pool::clear -> Vec::clear(nodes) resetting slot numbering to zero
+  kind: error-case
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: divergent
+  source:
+    spec:
+    - FR-014
+    - FR-015
+    - EC-after-eviction
+    code:
+    - session_list.rs:221
+    - session_list.rs:222
+    - session_list.rs:73
+    - session_list.rs:80
+  paired_from:
+    spec: EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES
+    code: EPSL-CLEAR-POOL-SILENTLY-INVALIDATES-OUTSTANDING-HANDLES
+  statement: A handle the caller obtained before a domain was cleared no longer names a tracked block
+    afterwards, so using it to refresh recency or to stop tracking must report an error rather than appearing
+    to succeed.
+  divergence_note: The specification promises that a pre-clear handle is rejected with an error. The code
+    clears the domain's whole storage area and its spare list (src/session_list.rs:220-228), so storage
+    positions are numbered from the beginning again. A pre-clear handle is rejected only while the domain
+    is still smaller than that handle's position; once enough blocks have been registered after the clear,
+    the same handle names a live but completely unrelated block and a refresh or a stop-tracking request
+    on it silently succeeds against the wrong block. The specification is authoritative; the code cannot
+    deliver the promised error for the same reason as EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT - handles
+    carry no marker of which use of a position they belong to.
+  creusot: {}
+  kani: {}
+- id: EPSL-CLEAR-LEAVES-DOMAIN-USABLE
+  subject: clear_pool
+  methods:
+  - clear_pool
+  - track
+  object_fn: Pool::clear -> collections emptied but Pool retained in Vec
+  kind: postcondition
+  verifiable: true
+  global: true
+  attachments: 2
+  origin: spec+code
+  source:
+    spec:
+    - FR-014
+    code:
+    - lib.rs:225
+    - lib.rs:226
+    - session_list.rs:220
+    - session_list.rs:224
+  paired_from:
+    spec: EPSL-CLEAR-LEAVES-DOMAIN-USABLE
+    code: EPSL-CLEAR-POOL-KEEPS-THE-POOL-USABLE
+  statement: 'A cleared eviction domain is empty but still usable and keeps its identifier: registering
+    a block into it afterwards succeeds, and that block starts a fresh chain for its session, with no
+    parent, as if the session had never held any blocks.'
+  creusot: {}
+  kani: {}
+- id: EPSL-CLEAR-POOL-UNKNOWN-POOL-IS-A-SILENT-NO-OP
+  subject: clear_pool
+  methods:
+  - clear_pool
+  object_fn: EvictionPolicySessionListsComponent::clear_pool -> `if let Some` with no else
+  kind: error-case
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:223
+    - lib.rs:225
+    - lib.rs:226
+    - lib.rs:227
+  paired_from:
+    spec: null
+    code: EPSL-CLEAR-POOL-UNKNOWN-POOL-IS-A-SILENT-NO-OP
+  statement: Clearing an eviction domain identifier that was never created does nothing at all and reports
+    nothing at all. The operation returns no result, so the caller has no way to learn that the domain
+    it named does not exist.
+  creusot: {}
+  kani: {}
+- id: EPSL-CLEAR-POOL-LEAVES-OTHER-POOLS-ALONE
+  subject: clear_pool
+  methods:
+  - clear_pool
+  object_fn: EvictionPolicySessionListsComponent::clear_pool -> single Mutex<Pool> lock
+  kind: frame
+  verifiable: true
+  global: false
+  attachments: 1
+  origin: code-only
+  source:
+    code:
+    - lib.rs:225
+    - lib.rs:226
+  paired_from:
+    spec: null
+    code: EPSL-CLEAR-POOL-LEAVES-OTHER-POOLS-ALONE
+  statement: 'Clearing one eviction domain has no effect on any other domain: their blocks, chains, recency
+    values, recency counters and reported sizes are all unchanged, and their identifiers stay valid.'
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-AT-MOST-ONE-CHILD
+  subject: 'global invariant: each tracked block has at most one child'
+  methods:
+  - track
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Node::child -> Option<u32> single slot, written only from Pool::register and Pool::unlink
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-018
+    - CLAR-1
+    - DM-INV-1
+    - EC-deep-chains
+    - SC-006
+    code:
+    - session_list.rs:31
+    - session_list.rs:32
+    - session_list.rs:97
+    - session_list.rs:111
+    - session_list.rs:158
+  paired_from:
+    spec: EPSL-INV-AT-MOST-ONE-CHILD
+    code: EPSL-INV-A-BLOCK-HAS-AT-MOST-ONE-CHILD
+  statement: 'A session''s lineage is always a single straight chain and never a branching tree: at every
+    moment no tracked block has more than one tracked child. This holds however long the chain is and
+    whatever sequence of registrations, accesses, evictions and removals has been performed, because a
+    new block is only ever attached beneath the session''s current end-of-chain block, which by definition
+    has no child.'
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-EXACTLY-ONE-LEAF-PER-SESSION
+  subject: 'global invariant: one eligible end-of-chain block per non-empty session'
+  methods:
+  - track
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  - get_eviction_candidates
+  object_fn: Pool::leaves and Pool::sessions -> paired insert and remove in Pool::register and Pool::unlink
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: spec+code
+  source:
+    spec:
+    - FR-018
+    - CLAR-1
+    - DM-INV-3
+    - ASSUMPTION-linear-stack
+    code:
+    - session_list.rs:16
+    - session_list.rs:17
+    - session_list.rs:110
+    - session_list.rs:114
+    - session_list.rs:115
+    - session_list.rs:162
+    - session_list.rs:167
+    - session_list.rs:168
+    - session_list.rs:173
+  paired_from:
+    spec: EPSL-INV-EXACTLY-ONE-LEAF-PER-SESSION
+    code: EPSL-INV-ONE-LEAF-PER-ACTIVE-SESSION
+  statement: Every session that currently holds at least one block has exactly one end-of-chain block,
+    that is one block with no tracked child, and that is the only block of that session eligible for eviction.
+    Consequently the number of eviction candidates always equals the number of sessions currently holding
+    at least one block, and a session holding no blocks contributes no candidate.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-NO-CYCLES-IN-LINEAGE
+  subject: 'global invariant: lineage has no cycles'
+  methods:
+  - track
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Node::parent -> ancestor walk bounded by Pool::len
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - SC-006
+    - DM-INV-1
+    - EC-deep-chains
+    code:
+    - session_list.rs:298
+    - session_list.rs:300
+    - session_list.rs:301
+    - session_list.rs:302
+    - session_list.rs:303
+  paired_from:
+    spec: EPSL-INV-NO-CYCLES-IN-LINEAGE
+    code: EPSL-INV-CHAINS-ARE-ACYCLIC
+  statement: Following the parent links upwards from any tracked block always reaches the start of its
+    session's chain after a finite number of steps, never more steps than the number of blocks the domain
+    holds. No block is ever its own ancestor, so the lineage can always be walked to the top without looping
+    forever.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-NO-ORPHANED-BLOCKS
+  subject: 'global invariant: parent and child links agree and point at live blocks'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Node::parent and Node::child -> Pool::register / Pool::unlink
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 6
+  origin: spec+code
+  source:
+    spec:
+    - SC-006
+    - DM-INV-4
+    - FR-011
+    code:
+    - session_list.rs:279
+    - session_list.rs:284
+    - session_list.rs:287
+    - session_list.rs:289
+    - session_list.rs:292
+    - session_list.rs:111
+    - session_list.rs:155
+    - session_list.rs:158
+  paired_from:
+    spec: EPSL-INV-NO-ORPHANED-BLOCKS
+    code: EPSL-INV-CHAIN-LINKS-ARE-MUTUAL
+  statement: Whenever a tracked block records another block as its parent, that parent is itself still
+    tracked and records the first block as its child, and whenever it records a child, that child is still
+    tracked and records it back as its parent. The two directions of every link always agree, so no tracked
+    block is ever left referring to a block that has gone.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-ELIGIBLE-SET-IS-EXACTLY-THE-CHILDLESS
+  subject: 'global invariant: the eviction-eligible set equals the set of childless tracked blocks'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - clear_pool
+  object_fn: Pool::leaves -> BTreeSet<(stamp, index)> maintained against Node::child
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 7
+  origin: spec+code
+  source:
+    spec:
+    - FR-007
+    - DM-INV-2
+    - SC-004
+    code:
+    - session_list.rs:257
+    - session_list.rs:258
+    - session_list.rs:264
+    - session_list.rs:267
+    - session_list.rs:272
+    - session_list.rs:275
+    - session_list.rs:276
+  paired_from:
+    spec: EPSL-INV-ELIGIBLE-SET-IS-EXACTLY-THE-CHILDLESS
+    code: EPSL-INV-CANDIDATE-SET-IS-EXACTLY-THE-LEAVES
+  statement: 'The set of blocks the policy considers for eviction is at every moment exactly the set of
+    tracked blocks that have no tracked child: never a block that still has one, and never missing a block
+    that has none. Each such block is listed once, recorded with its current recency, so the stored candidate
+    set never disagrees with the chains themselves.'
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-SESSION-POINTS-AT-ITS-OWN-END-OF-CHAIN
+  subject: 'global invariant: each session''s recorded end-of-chain block is live, its own, and childless'
+  methods:
+  - track
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Pool::sessions -> HashMap<SessionId, u32> maintained against Node::child and Node::session
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - DM-INV-3
+    - FR-002
+    - FR-018
+    code:
+    - session_list.rs:307
+    - session_list.rs:308
+    - session_list.rs:310
+    - session_list.rs:311
+    - session_list.rs:312
+  paired_from:
+    spec: EPSL-INV-SESSION-POINTS-AT-ITS-OWN-END-OF-CHAIN
+    code: EPSL-INV-SESSION-MAP-POINTS-AT-A-LEAF
+  statement: For every session the policy knows about, the block it remembers as that session's end of
+    chain is still tracked, genuinely belongs to that session, and has no tracked child.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-ONE-TRACKED-BLOCK-PER-CACHE-KEY
+  subject: 'global invariant: a cache key is tracked at most once per domain'
+  methods:
+  - track
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Pool::by_key -> HashMap<CacheKey, u32> maintained against Node::key
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-017
+    - DM-INV-5
+    - CLAR-4
+    code:
+    - session_list.rs:245
+    - session_list.rs:246
+    - session_list.rs:251
+    - session_list.rs:253
+    - session_list.rs:254
+    - session_list.rs:116
+    - session_list.rs:178
+  paired_from:
+    spec: EPSL-INV-ONE-TRACKED-BLOCK-PER-CACHE-KEY
+    code: EPSL-INV-KEY-INDEX-IS-ONE-TO-ONE
+  statement: 'Within one eviction domain no two tracked blocks ever carry the same cache key: the lookup
+    table from key to block holds exactly one entry for every tracked block and nothing else, each entry
+    points at a block that is still tracked and really holds that key, and every tracked block''s key
+    is in the table. This is what makes re-registering an existing key an access rather than a second
+    registration.'
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-SIZE-ACCOUNTING-IS-EXACT
+  subject: 'global invariant: reported size always equals the number of tracked blocks'
+  methods:
+  - len
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - clear_pool
+  object_fn: Pool::len -> counted against Node::active and Pool::free
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 8
+  origin: spec+code
+  source:
+    spec:
+    - FR-013
+    - DM-INV-6
+    code:
+    - session_list.rs:236
+    - session_list.rs:237
+    - session_list.rs:238
+    - session_list.rs:240
+    - session_list.rs:241
+  paired_from:
+    spec: EPSL-INV-SIZE-ACCOUNTING-IS-EXACT
+    code: EPSL-INV-SIZE-AGREES-WITH-ARENA-OCCUPANCY
+  statement: The size a domain reports always matches the blocks it really holds. It goes up by exactly
+    one for each newly registered block, stays the same when an existing key is re-registered and when
+    accesses are reported or enquiries made, and goes down by exactly one for each block removed or evicted.
+    Equivalently it always equals the number of occupied storage positions, which is the total number
+    of positions minus the number on the spare list, so the counter can never drift away from the real
+    contents.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-LINEAGE-NEVER-CROSSES-SESSIONS
+  subject: 'global invariant: parent and child links stay inside one session'
+  methods:
+  - track
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Node::session -> set once in Pool::register, never rewritten
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: spec+code
+  source:
+    spec:
+    - FR-003
+    - US-2.3
+    - CONTRACT-6
+    - ASSUMPTION-linear-stack
+    code:
+    - session_list.rs:26
+    - session_list.rs:27
+    - session_list.rs:97
+    - session_list.rs:100
+    - session_list.rs:147
+    - session_list.rs:155
+  paired_from:
+    spec: EPSL-INV-LINEAGE-NEVER-CROSSES-SESSIONS
+    code: EPSL-INV-A-CHAIN-BELONGS-TO-ONE-SESSION
+  statement: 'Blocks of different sessions are never linked to one another: a block''s parent and its
+    child always belong to the same session as the block itself, so every block in one chain names the
+    same session and one session''s blocks never appear anywhere in another session''s chain. Rejoining
+    a chain after a removal therefore never mixes sessions.'
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION
+  subject: 'global invariant: every block belongs to exactly one session, fixed at registration'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 5
+  origin: spec-only
+  source:
+    spec:
+    - FR-003
+    - ASSUMPTION-caller-supplies-session
+  paired_from:
+    spec: EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION
+    code: null
+  statement: Every tracked block belongs to exactly one session, never to none and never to two, and the
+    session it belongs to is the one named when it was registered and never changes for as long as the
+    block remains tracked.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-DOMAINS-ARE-INDEPENDENT
+  subject: 'global invariant: eviction domains do not affect one another'
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  object_fn: EvictionState::pools -> Vec<Mutex<Pool>> with per-pool state
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 9
+  origin: spec+code
+  source:
+    spec:
+    - FR-008
+    - FR-013
+    - FR-014
+    - ASSUMPTION-pool-mapping
+    code:
+    - lib.rs:82
+    - lib.rs:130
+    - lib.rs:147
+    - lib.rs:189
+    - lib.rs:202
+    - lib.rs:209
+    - lib.rs:217
+    - lib.rs:225
+  paired_from:
+    spec: EPSL-INV-DOMAINS-ARE-INDEPENDENT
+    code: EPSL-INV-POOLS-ARE-MUTUALLY-ISOLATED
+  statement: 'Every operation affects at most the one eviction domain it names, and anything done to one
+    domain leaves every other domain completely unchanged: no block, session, chain, recency value, recency
+    counter or reported size in any other domain is ever altered, a victim is only ever chosen from the
+    blocks of the domain asked about, and a reported size counts only that domain''s blocks. Cache keys,
+    session identifiers and handles are meaningful only within the domain they were used in.'
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-RECENCY-STRICTLY-ADVANCES
+  subject: 'global invariant: recency values strictly advance'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - clear_pool
+  object_fn: Pool::clock -> compared against Node::stamp
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: divergent
+  source:
+    spec:
+    - FR-004
+    - FR-012
+    - RESEARCH-D3
+    - ASSUMPTION-monotonic-clock
+    code:
+    - session_list.rs:52
+    - session_list.rs:53
+    - session_list.rs:63
+    - session_list.rs:96
+    - session_list.rs:130
+  paired_from:
+    spec: EPSL-INV-RECENCY-STRICTLY-ADVANCES
+    code: EPSL-INV-CLOCK-DOMINATES-EVERY-STAMP
+  statement: Every time a block is registered or an access to it is reported, it is stamped with a recency
+    value strictly later than every recency value handed out before it in that eviction domain, so recency
+    only ever moves forward and older accesses can never appear newer than later ones.
+  divergence_note: The specification promises that recency values strictly advance for the whole life
+    of a domain. The code maintains only the weaker property that the domain's recency counter is at least
+    as large as the recency of every block it currently tracks, and it resets that counter to zero when
+    the domain is cleared (src/session_list.rs:226), so values handed out after a clear repeat values
+    handed out before it. This is unobservable while it lasts, because clearing discards every block,
+    so no two blocks ever share a recency value and the eviction order is never wrong - but the specification's
+    monotonicity claim is literally false across a clear, and it becomes observable if a pre-clear handle
+    is reused (see EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES). The specification should be weakened to per-epoch
+    monotonicity, or the counter should not be reset.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK
+  subject: 'global invariant: a handle keeps identifying its own block and never another'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Pool::alloc -> Vec::pop(free) reusing a slot number
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 6
+  origin: divergent
+  source:
+    spec:
+    - FR-001
+    - FR-011
+    - IFACE-track
+    code:
+    - session_list.rs:69
+    - session_list.rs:70
+    - session_list.rs:179
+    - session_list.rs:182
+    - session_list.rs:80
+  paired_from:
+    spec: EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK
+    code: EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT
+  statement: For as long as a block remains tracked, the handle issued for it keeps identifying that same
+    block, however many other blocks are registered, accessed, evicted or removed in the meantime, and
+    a handle never starts identifying a different block.
+  divergence_note: The specification promises a handle never comes to name a different block. The code's
+    handle is nothing but the domain identifier plus the storage position (src/lib.rs:140), with no counter
+    recording which use of that position it belongs to, and a position freed by a removal or eviction
+    is pushed onto a spare list and handed to the next registration (src/session_list.rs:182 and the allocator).
+    A handle held across the removal of its block therefore names whatever block later occupies that position,
+    and every operation that takes a handle will act on that unrelated block while reporting success.
+    This is the root cause of the three per-method invalid-handle divergences and of the clear-domain
+    one. The specification is authoritative but its own not-verifiable ledger admits it never required
+    a generation marker (spec NV-12); closing the gap needs either a generation counter in the handle
+    or an explicit specification change permitting aliasing.
+  creusot: {}
+  kani: {}
+- id: EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
+  subject: 'global invariant: every operation is total over its inputs'
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 9
+  origin: spec-only
+  source:
+    spec:
+    - FR-015
+  paired_from:
+    spec: EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
+    code: null
+  statement: 'There is no precondition the caller must satisfy beyond supplying correctly typed arguments:
+    any domain identifier, any handle, any cache key, any session identifier and any requested candidate
+    count is accepted, and the operation either succeeds or reports an error, never aborting the process.'
+  creusot: {}
+  kani: {}
+- id: EPSL-HANDLE-VALIDATION-IS-OCCUPANCY-ONLY
+  subject: 'global invariant: handle validation checks occupancy only'
+  methods:
+  - touch
+  - batch_touch
+  - remove
+  object_fn: Pool::is_active -> Node::active flag (no generation counter)
+  kind: error-case
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:79
+    - session_list.rs:80
+    - session_list.rs:81
+    - ieviction_policy.rs:9
+    - ieviction_policy.rs:15
+    - lib.rs:150
+    - lib.rs:193
+  paired_from:
+    spec: null
+    code: EPSL-HANDLE-VALIDATION-IS-OCCUPANCY-ONLY
+  statement: The only checks made on a handle are that the eviction domain it names exists and that the
+    storage position it names is currently occupied by some tracked block. Nothing ties a handle to the
+    particular cache key, session or registration it was issued for.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-ACTIVE-STAMPS-ARE-DISTINCT
+  subject: 'global invariant: no two tracked blocks share a recency value'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - clear_pool
+  object_fn: Node::stamp -> assigned only from Pool::tick
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:33
+    - session_list.rs:34
+    - session_list.rs:59
+    - session_list.rs:60
+    - session_list.rs:63
+    - session_list.rs:96
+    - session_list.rs:131
+  paired_from:
+    spec: null
+    code: EPSL-INV-ACTIVE-STAMPS-ARE-DISTINCT
+  statement: No two blocks tracked in the same eviction domain ever share a recency value, because every
+    value handed out is larger than all the ones handed out before it in that domain and each block holds
+    only the most recent value it was given.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-FREE-LIST-IS-EXACTLY-THE-EMPTY-SLOTS
+  subject: 'global invariant: the spare-position list holds exactly the empty positions'
+  methods:
+  - track
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Pool::free -> Vec<u32> maintained against Node::active
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 4
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:44
+    - session_list.rs:45
+    - session_list.rs:69
+    - session_list.rs:182
+    - session_list.rs:239
+    - session_list.rs:240
+    - session_list.rs:241
+  paired_from:
+    spec: null
+    code: EPSL-INV-FREE-LIST-IS-EXACTLY-THE-EMPTY-SLOTS
+  statement: The list of spare storage positions contains every empty position exactly once and no occupied
+    position. If a position appeared on that list twice, the next two blocks registered would be placed
+    in the same position and one would silently overwrite the other.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-NO-LIVE-LINK-POINTS-AT-AN-EMPTY-SLOT
+  subject: 'global invariant: nothing stored refers to an empty storage position'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Node::parent / Node::child / Pool::sessions / Pool::by_key -> checked against Node::active
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 6
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:285
+    - session_list.rs:291
+    - session_list.rs:274
+    - session_list.rs:310
+    - session_list.rs:252
+    - session_list.rs:109
+    - session_list.rs:166
+  paired_from:
+    spec: null
+    code: EPSL-INV-NO-LIVE-LINK-POINTS-AT-AN-EMPTY-SLOT
+  statement: 'Nothing the policy stores ever refers to an empty storage position: the parent and child
+    recorded by a tracked block are themselves tracked blocks, the block recorded as a session''s end
+    of chain is a tracked block, and every entry of the candidate set and of the key lookup table names
+    a tracked block.'
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-POOL-IDS-STAY-VALID-FOREVER
+  subject: 'global invariant: domain identifiers are permanent'
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  object_fn: EvictionState::pools -> append-only Vec, never removed or reordered
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 9
+  origin: code-only
+  source:
+    code:
+    - lib.rs:105
+    - lib.rs:106
+    - lib.rs:223
+    - lib.rs:226
+  paired_from:
+    spec: null
+    code: EPSL-INV-POOL-IDS-STAY-VALID-FOREVER
+  statement: Once an eviction domain identifier has been handed out it stays valid for the rest of the
+    component's life and always refers to the same domain. There is no operation that destroys a domain,
+    so identifiers are never recycled and a handle's domain part never goes stale.
+  creusot: {}
+  kani: {}
+- id: EPSL-INV-ARENA-ONLY-GROWS-EXCEPT-ON-CLEAR
+  subject: 'global invariant: a domain''s storage area only grows, except on a clear'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - clear_pool
+  object_fn: Pool::nodes -> Vec::push and Vec::clear only
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 6
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:74
+    - session_list.rs:179
+    - session_list.rs:182
+    - session_list.rs:221
+  paired_from:
+    spec: null
+    code: EPSL-INV-ARENA-ONLY-GROWS-EXCEPT-ON-CLEAR
+  statement: An eviction domain's storage area only ever gets bigger, one position at a time, with the
+    single exception of clearing the domain, which empties it completely. Removing or evicting a block
+    marks its position empty but does not shrink the area, so position numbers already in use never move.
+  creusot: {}
+  kani: {}
+- id: EPSL-ACCESS-CLOCK-ASSUMED-NOT-TO-OVERFLOW
+  subject: 'global invariant: the recency counter is assumed not to overflow'
+  methods:
+  - track
+  - touch
+  - batch_touch
+  object_fn: Pool::tick -> u64 addition
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 3
+  origin: code-only
+  source:
+    code:
+    - session_list.rs:52
+    - session_list.rs:63
+  paired_from:
+    spec: null
+    code: EPSL-ACCESS-CLOCK-ASSUMED-NOT-TO-OVERFLOW
+  statement: The implementation assumes the running count of accesses in one eviction domain never exceeds
+    the largest 64-bit number. The counter is increased with no overflow guard, so reaching that limit
+    would either abort the process or wrap round and corrupt the eviction order.
+  creusot: {}
+  kani: {}
+- id: EPSL-LOCKS-ASSUMED-NEVER-POISONED
+  subject: 'global invariant: internal locks are assumed never to have been abandoned by a crashed operation'
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  object_fn: RwLock::read / RwLock::write / Mutex::lock -> Result::unwrap
+  kind: precondition
+  verifiable: true
+  global: true
+  attachments: 9
+  origin: code-only
+  source:
+    code:
+    - lib.rs:104
+    - lib.rs:129
+    - lib.rs:138
+    - lib.rs:144
+    - lib.rs:149
+    - lib.rs:161
+    - lib.rs:167
+    - lib.rs:187
+    - lib.rs:192
+    - lib.rs:201
+    - lib.rs:203
+    - lib.rs:210
+    - lib.rs:218
+    - lib.rs:226
+  paired_from:
+    spec: null
+    code: EPSL-LOCKS-ASSUMED-NEVER-POISONED
+  statement: Every operation assumes no earlier operation crashed while holding one of the component's
+    internal locks. The code takes each lock and assumes success unconditionally, so if such a crash ever
+    happened every later operation on the component would itself abort.
+  creusot: {}
+  kani: {}
+- id: EPSL-ONLY-POOL-CREATION-TAKES-THE-EXCLUSIVE-LOCK
+  subject: 'global invariant: concurrency discipline of the internal locks'
+  methods:
+  - create_pool
+  - track
+  - touch
+  - batch_touch
+  - remove
+  - identify_next_to_evict
+  - get_eviction_candidates
+  - len
+  - clear_pool
+  object_fn: RwLock<EvictionState> -> write() only in create_pool, read() elsewhere
+  kind: invariant
+  verifiable: true
+  global: true
+  attachments: 9
+  origin: code-only
+  source:
+    code:
+    - lib.rs:104
+    - lib.rs:129
+    - lib.rs:144
+    - lib.rs:161
+    - lib.rs:187
+    - lib.rs:201
+    - lib.rs:208
+    - lib.rs:216
+    - lib.rs:224
+    - lib.rs:19
+    - lib.rs:20
+  paired_from:
+    spec: null
+    code: EPSL-ONLY-POOL-CREATION-TAKES-THE-EXCLUSIVE-LOCK
+  statement: Creating an eviction domain is the only operation that takes exclusive access to the component's
+    shared state. Every other operation takes shared access to that state and then takes exclusive access
+    only to the one domain it works on, so operations on different domains never block one another.
+  creusot: {}
+  kani: {}
+- id: EPSL-NV-WORKLOAD-BENEFIT-OVER-PLAIN-LRU
+  scope: 'not-verifiable: the claimed workload benefit over plain recency eviction'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec+code
+  reason: NOT VERIFIABLE. The claim that this policy causes at least fifteen percent fewer prefix reloads
+    than basic recency eviction, and more generally that protecting still-needed ancestors serves a real
+    workload better, is a comparative empirical measurement against a different component on representative
+    workload traces. It depends on the access pattern of whatever system uses the policy and has no pass
+    or fail condition on a single execution of this component.
+  paired_from:
+    spec: NV-1
+    code: NV-11
+  traces:
+  - SC-001
+- id: EPSL-NV-ASYMPTOTIC-COST-OF-THE-HOT-PATH
+  scope: 'not-verifiable: the asymptotic cost claims for registration, recency refresh and removal'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec+code
+  reason: NOT VERIFIABLE. The claim that registration, recency refresh and removal cost is effectively
+    constant, and the related documented claim of logarithmic victim selection, are statements about how
+    execution time grows with the number of tracked blocks. Asymptotic cost is a performance characteristic
+    measured by benchmarks; no single execution can show it true or false.
+  paired_from:
+    spec: NV-2
+    code: NV-1
+  traces:
+  - SC-002
+  - PLAN
+- id: EPSL-NV-VICTIM-SELECTION-SCALING
+  scope: 'not-verifiable: success criterion SC-003, victim selection scales with the number of sessions
+    rather than blocks'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec-only
+  reason: NOT VERIFIABLE. This is an asymptotic-cost and wall-clock claim, including a time bound on a
+    domain holding at least one million blocks. Performance scaling is measured rather than proved, and
+    the functional content of the requirement - that selection considers only the end-of-chain blocks
+    - is already captured as a verifiable obligation elsewhere.
+  paired_from:
+    spec: NV-3
+    code: null
+  traces:
+  - SC-003
+  - PLAN
+- id: EPSL-NV-THROUGHPUT-OF-THE-REFRESH-PATH
+  scope: 'not-verifiable: success criterion SC-005 and the benchmark throughput and latency levels'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec+code
+  reason: NOT VERIFIABLE. The requirement that the recency-refresh path sustains the cache's hot-path
+    access rate, and the throughput and latency levels the benchmark suite exercises from ten thousand
+    up to a million blocks, are wall-clock targets that depend on the machine, the compiler and the surrounding
+    subsystem's demand. They have no pass or fail condition on a single execution.
+  paired_from:
+    spec: NV-4
+    code: NV-2
+  traces:
+  - SC-005
+- id: EPSL-NV-LOG-EMISSION
+  scope: 'not-verifiable: the log messages themselves'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec+code
+  reason: NOT VERIFIABLE. The one-off selection announcement, the per-domain debug line and the warning
+    on registering into an unknown domain are side effects outside the component's own state, delivered
+    through a separate logging component. The specification marks the announcement explicitly non-normative
+    and states it has no effect on eviction behaviour. Only the component's internal record of whether
+    the announcement has been made is verifiable, and that is captured as a separate obligation.
+  paired_from:
+    spec: NV-5
+    code: NV-3
+  traces:
+  - OBS-1
+- id: EPSL-NV-MONOTONIC-TIME-SOURCE-ASSUMPTION
+  scope: 'not-verifiable: the assumption that a monotonic time source is available'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec-only
+  reason: NOT VERIFIABLE. This is an assumption about the environment the component runs in rather than
+    a behaviour of the component. The consequence that matters - that recency values only ever move forward
+    - is captured as a verifiable obligation, and the implementation in fact uses its own per-domain counter
+    rather than a clock.
+  paired_from:
+    spec: NV-6
+    code: null
+  traces:
+  - ASSUMPTION-monotonic-clock
+- id: EPSL-NV-IN-MEMORY-ONLY-ACROSS-RESTARTS
+  scope: 'not-verifiable: tracking state is in-memory only and is rebuilt by the cache after a restart'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec-only
+  reason: NOT VERIFIABLE. This is a scoping decision about what the component deliberately does not do.
+    Behaviour across a process restart lies outside any single execution of the component, and persistence
+    and crash consistency are another component's concern.
+  paired_from:
+    spec: NV-7
+    code: null
+  traces:
+  - CLAR-3
+  - ASSUMPTION-in-memory
+- id: EPSL-NV-CONCURRENT-SAFETY-AND-PROGRESS
+  scope: 'not-verifiable: safety, deadlock freedom and progress under concurrent use'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec+code
+  reason: NOT VERIFIABLE by single-execution reasoning. Safety under arbitrary concurrent interleavings,
+    freedom from deadlock between the operations, whether every waiting thread eventually gets its turn,
+    and the fairness of the shared and exclusive lock are properties of unboundedly many schedules and
+    of the operating system scheduler and standard-library lock implementation, not of one execution.
+    They need a concurrency model checker rather than this component's verification tools.
+  paired_from:
+    spec: NV-8
+    code: NV-5
+  traces:
+  - ASSUMPTION-concurrency
+  - RESEARCH-D4
+- id: EPSL-NV-ENCAPSULATION-BEHIND-THE-INTERFACE
+  scope: 'not-verifiable: FR-016, all behaviour reachable only through the shared eviction-policy interface'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec-only
+  reason: NOT VERIFIABLE at run time. This is an encapsulation and architecture requirement about which
+    functions are publicly reachable. It is settled by inspecting the visibility of the crate's items
+    at compile time and has no runtime counterexample.
+  paired_from:
+    spec: NV-9
+    code: null
+  traces:
+  - FR-016
+  - PLAN
+- id: EPSL-NV-LINUX-ONLY-TARGET
+  scope: 'not-verifiable: the component targets Linux only'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec-only
+  reason: NOT VERIFIABLE. A build and platform fact rather than a behaviour of any operation, so no execution
+    can refute it.
+  paired_from:
+    spec: NV-10
+    code: null
+  traces:
+  - ASSUMPTION-linux
+  - PLAN
+- id: EPSL-NV-SPEC-GAP-GROUP-REFRESH-ATOMICITY
+  scope: 'not-verifiable: specification gap, whether a group recency refresh is all-or-nothing'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec-only
+  reason: NOT VERIFIABLE as written - SPECIFICATION GAP found during extraction. The requirement says
+    a group refresh must report an error rather than silently succeed when a handle is invalid, but it
+    never says whether the valid handles earlier in the group keep their refreshed recency. Until the
+    specification settles this there is no checkable claim. The code's answer, that earlier refreshes
+    stay in effect, is recorded as the verifiable divergent obligation EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING.
+  paired_from:
+    spec: NV-11
+    code: null
+  traces:
+  - FR-005
+  - FR-015
+- id: EPSL-NV-SPEC-GAP-HANDLE-GENERATION
+  scope: 'not-verifiable: specification gap, whether a stale handle may name a different block after its
+    position is reused'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec-only
+  reason: NOT VERIFIABLE as written - SPECIFICATION GAP found during extraction. An error is required
+    for an invalid or already-removed handle, but nothing in the specification says a handle carries any
+    marker distinguishing one use of a storage position from the next. Until that is settled the requirement
+    has no checkable form. The code's actual behaviour is recorded as the verifiable divergent obligation
+    EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK.
+  paired_from:
+    spec: NV-12
+    code: null
+  traces:
+  - FR-015
+  - FR-011
+- id: EPSL-NV-INTERNAL-DESIGN-AND-MEMORY-CHOICES
+  scope: 'not-verifiable: internal data-structure, memory and concurrency design choices'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec+code
+  reason: NOT VERIFIABLE. The choice of a position-indexed storage area with a spare list, an ordered
+    set over the eligible blocks, a per-domain access counter and a particular lock layout are implementation
+    decisions rather than obligations. How much memory a domain occupies and how often its storage area
+    is reallocated as it grows are resource facts, and the accompanying claim that using position numbers
+    instead of pointers avoids self-referential borrowing is a statement about what the compiler accepts,
+    not about behaviour.
+  paired_from:
+    spec: NV-13
+    code: NV-6
+  traces:
+  - RESEARCH-D1
+  - RESEARCH-D2
+  - RESEARCH-D3
+  - RESEARCH-D4
+  - ASSUMPTION-pool-mapping
+- id: EPSL-NV-BUILD-AND-DOCUMENTATION-GATES
+  scope: 'not-verifiable: build, lint, documentation and compiler-version gates'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec+code
+  reason: NOT VERIFIABLE at run time. Formatting, lint cleanliness, documentation coverage, absence of
+    unsafe code, the minimum compiler version, and the fact that the runnable examples in the module documentation
+    compile and run are all toolchain and review gates applied to the source text. They assert nothing
+    about what the component computes, and the behaviour the documentation examples demonstrate is already
+    covered by the verifiable obligations.
+  paired_from:
+    spec: NV-14
+    code: NV-9
+  traces:
+  - PLAN
+  - QUICKSTART
+- id: EPSL-NV-SPEC-PROCESS-AND-BUILD-INSTRUCTIONS
+  scope: 'not-verifiable: specification-quality checklist items and the build, test and benchmark instructions'
+  kind: not-verifiable
+  verifiable: false
+  origin: spec-only
+  reason: NOT VERIFIABLE. These units describe the specification process and how to compile and exercise
+    the component. They make no claim about the component's behaviour, so they map to no property. Recorded
+    here so the extraction can be seen to have covered every unit of the specification.
+  paired_from:
+    spec: NV-15
+    code: null
+  traces:
+  - CHECKLIST
+  - QUICKSTART
+- id: EPSL-NV-WHETHER-A-LOGGER-IS-CONNECTED
+  scope: 'not-verifiable: whether a logging component is attached at run time'
+  kind: not-verifiable
+  verifiable: false
+  origin: code-only
+  reason: NOT VERIFIABLE. Whether the surrounding system attaches a logger is a deployment and environment
+    fact decided outside this component. The component's behaviour in both cases is captured by the verifiable
+    obligations about the announcement record.
+  paired_from:
+    spec: null
+    code: NV-4
+- id: EPSL-NV-ABSENCE-OF-LOCK-POISONING
+  scope: 'not-verifiable: the absence of abandoned internal locks'
+  kind: not-verifiable
+  verifiable: false
+  origin: code-only
+  reason: NOT VERIFIABLE. An internal lock is abandoned only if some thread crashes while holding it,
+    which can originate in caller code or in a component this one calls into. Whether that ever happens
+    cannot be decided by looking at this component. The component's reliance on it not happening is recorded
+    separately as a precondition.
+  paired_from:
+    spec: null
+    code: NV-7
+- id: EPSL-NV-ADEQUACY-OF-THE-RANDOMIZED-TESTS
+  scope: 'not-verifiable: the adequacy of the randomized test loops as evidence'
+  kind: not-verifiable
+  verifiable: false
+  origin: code-only
+  reason: NOT VERIFIABLE. Both randomized tests drive a fixed number of operations from one fixed pseudo-random
+    seed, five thousand operations against the internal invariant check and eight thousand against an
+    independent reference model. Whether that is adequate evidence that the invariants hold is a judgement
+    about test strength, not a property of the component.
+  paired_from:
+    spec: null
+    code: NV-8
+- id: EPSL-NV-TYPE-AND-LAYOUT-FACTS
+  scope: 'not-verifiable: type and layout facts the compiler enforces'
+  kind: not-verifiable
+  verifiable: false
+  origin: code-only
+  reason: NOT VERIFIABLE at run time. That the handle is freely copyable, that the domain and the component
+    state are default-constructible, and the size of a stored block record are properties of the type
+    declarations enforced by the compiler, with no possible counterexample at run time, and none of them
+    gates any behaviour of the policy. One consequence of the handle being freely copyable - that stale
+    copies can be kept and reused - is captured as a verifiable obligation.
+  paired_from:
+    spec: null
+    code: NV-10
+- id: EPSL-NV-INVARIANT-CHECK-ONLY-IN-TEST-BUILDS
+  scope: 'not-verifiable: the internal invariant check is compiled only into test builds'
+  kind: not-verifiable
+  verifiable: false
+  origin: code-only
+  reason: NOT VERIFIABLE. The routine that asserts the internal data-structure invariants is compiled
+    only when the component is built for testing, so nothing checks them at run time in a production build.
+    Which build configuration is in use is not a behaviour of the component.
+  paired_from:
+    spec: null
+    code: NV-12

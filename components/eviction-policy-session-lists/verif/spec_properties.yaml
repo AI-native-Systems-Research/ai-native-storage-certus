@@ -1,0 +1,936 @@
+# Blind spec-only verifiable-property extraction for eviction-policy-session-lists.
+#
+# This file was produced by reading ONLY the feature specification and its sibling
+# spec-kit artifacts (data-model, contract, research, plan, quickstart, checklist)
+# plus the interface declaration for the method-name surface. The implementation
+# was NOT read. It is therefore an independent list, to be reconciled later with a
+# separate code-only extraction so that spec/code divergences become visible.
+#
+# Trace tokens used below:
+#   FR-nnn          functional requirement in spec.md
+#   US-n.m          user story n, acceptance scenario m
+#   EC-<name>       edge case bullet in spec.md
+#   SC-nnn          success criterion in spec.md
+#   CLAR-n          clarification Q/A n (Session 2026-08-03)
+#   ASSUMPTION-<t>  assumption bullet in spec.md
+#   DM-INV-n        invariant n in data-model.md
+#   DM-TRANSITION-x state-transition row for operation x in data-model.md
+#   CONTRACT-n      row n of the behavioral contract table in contracts/ieviction_policy_track.md
+#   RESEARCH-Dn     design decision n in research.md
+#   IFACE-<method>  doc comment on that method in components/interfaces/src/ieviction_policy.rs
+#   OBS-1           the non-normative Observability section of spec.md
+#   CHECKLIST       checklists/requirements.md
+#   QUICKSTART      quickstart.md
+#   PLAN            plan.md
+
+component: eviction-policy-session-lists
+interface: IEvictionPolicy
+pin: 937838a9
+generated: 2026-09-27
+source: components/eviction-policy-session-lists/specs/001-session-list-eviction/spec.md
+extraction: spec-only-blind
+counts:
+  methods: 9
+  spec_total: 59
+  not_verifiable: 15
+
+properties:
+
+  # ---------------------------------------------------------------- create_pool
+
+  - id: EPSL-CREATE-POOL-STARTS-EMPTY
+    subject: create_pool
+    methods: [create_pool, len, identify_next_to_evict, get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A newly created eviction domain tracks no cache blocks at all, so immediately
+      after it is created the reported number of tracked blocks is zero, a request
+      for a victim reports that there is nothing to evict, and a request for
+      eviction candidates returns an empty list.
+    traces: [FR-013, FR-014, IFACE-create_pool, ASSUMPTION-pool-mapping]
+
+  - id: EPSL-CREATE-POOL-FRESH-IDENTIFIER
+    subject: create_pool
+    methods: [create_pool]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Every request to create an eviction domain hands back an identifier that is
+      different from the identifier of every domain created before it, so two
+      domains can never be confused for one another.
+    traces: [IFACE-create_pool, ASSUMPTION-pool-mapping]
+
+  # ---------------------------------------------------------------------- track
+
+  - id: EPSL-TRACK-RETURNS-USABLE-HANDLE
+    subject: track
+    methods: [track, touch, remove]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the caller successfully registers a cache block, the policy hands back a
+      handle that identifies exactly that block, and using that handle afterwards to
+      refresh the block's recency or to stop tracking it succeeds and acts on that
+      same block and no other.
+    traces: [FR-001, CONTRACT-1]
+
+  - id: EPSL-TRACK-FIRST-BLOCK-IS-HEAD-AND-LEAF
+    subject: track
+    methods: [track, identify_next_to_evict, get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When a block is registered for a session that currently has no blocks, that
+      block becomes both the start of the session's chain (it has no parent block)
+      and the end of the chain (it has no child block), which also makes it the one
+      block of that session that is eligible for eviction.
+    traces: [FR-002, US-2.1, EC-single-block, CONTRACT-1]
+
+  - id: EPSL-TRACK-LINKS-UNDER-CURRENT-LEAF
+    subject: track
+    methods: [track, identify_next_to_evict, get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When a block is registered for a session that already has blocks, the block
+      that was previously the end of that session's chain becomes the new block's
+      parent, and the new block becomes the new end of the chain; as a consequence
+      the previous end-of-chain block stops being eligible for eviction and the new
+      block becomes the session's only eligible block.
+    traces: [FR-002, US-2.2, CONTRACT-2, DM-TRANSITION-track]
+
+  - id: EPSL-TRACK-SESSION-COMES-FROM-CALLER
+    subject: track
+    methods: [track]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The session a newly registered block is placed in is exactly the session the
+      caller named at registration time; the policy never works the session out from
+      the cache key or from anything else.
+    traces: [FR-003, ASSUMPTION-caller-supplies-session, CLAR-2]
+
+  - id: EPSL-TRACK-SETS-INITIAL-RECENCY
+    subject: track
+    methods: [track, identify_next_to_evict]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Registering a new block records the current time as that block's
+      most-recent-access time, so a block that has just been registered counts as
+      more recently used than every block registered or accessed before it, and a
+      victim can be chosen sensibly even if the caller never reports an access.
+    traces: [FR-004, US-3-rationale, DM-TRANSITION-track, RESEARCH-D3]
+
+  - id: EPSL-TRACK-REREGISTRATION-IS-IDEMPOTENT
+    subject: track
+    methods: [track, len]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Registering a cache key that the domain is already tracking does not create a
+      second block for that key. Instead it is treated as an access to the existing
+      block, refreshing that block's most-recent-access time, returning the handle
+      the caller already had, leaving the number of tracked blocks unchanged, and
+      leaving every parent/child link exactly as it was.
+    traces: [FR-017, CLAR-4, EC-reregistration, CONTRACT-4, IFACE-track]
+
+  - id: EPSL-TRACK-DISTINCT-SESSIONS-GIVE-PLAIN-RECENCY-ORDER
+    subject: track
+    methods: [track, identify_next_to_evict, get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      If the caller gives every block a session of its own, then every block is a
+      one-block chain that is both the start and the end of its session, so every
+      block is always eligible for eviction and the policy evicts simply in
+      least-recently-used order. This is how a caller that does not care about
+      lineage gets ordinary recency behaviour out of this policy, and it needs no
+      separate call.
+    traces: [FR-001, CONTRACT-3, RESEARCH-D1, DM-TRANSITION-track]
+
+  - id: EPSL-TRACK-UNKNOWN-DOMAIN-IS-AN-ERROR
+    subject: track
+    methods: [track]
+    kind: error-case
+    verifiable: true
+    statement: >
+      Registering a block into an eviction domain that does not exist reports an
+      error to the caller instead of appearing to succeed, and leaves all tracking
+      state for every existing domain exactly as it was.
+    traces: [FR-015, CONTRACT-5]
+
+  - id: EPSL-TRACK-DOES-NOT-DISTURB-OTHER-BLOCKS
+    subject: track
+    methods: [track]
+    kind: frame
+    verifiable: true
+    statement: >
+      Registering a block changes only that block's own record and the parent/child
+      link to the block that used to end its session's chain. No other block's
+      most-recent-access time changes, no other block gains or loses a parent or a
+      child, no other block stops being tracked, and the chains of all other
+      sessions are untouched.
+    traces: [FR-002, FR-003, US-2.3, CONTRACT-6]
+
+  # ---------------------------------------------------------------------- touch
+
+  - id: EPSL-TOUCH-REFRESHES-RECENCY
+    subject: touch
+    methods: [touch, identify_next_to_evict]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Reporting an access to a tracked block sets that block's most-recent-access
+      time to the current time, which makes it the most recently used block in its
+      domain and therefore the last block that would be considered for eviction
+      among blocks that are eligible.
+    traces: [FR-004, US-3.1, DM-TRANSITION-touch]
+
+  - id: EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR
+    subject: touch
+    methods: [touch]
+    kind: error-case
+    verifiable: true
+    statement: >
+      Reporting an access with a handle that was never issued, or that names a block
+      that has already been evicted or removed, reports an error to the caller
+      instead of quietly doing nothing or acting on the wrong block, and changes no
+      tracking state.
+    traces: [FR-015, EC-after-eviction]
+
+  - id: EPSL-TOUCH-CHANGES-ONLY-RECENCY
+    subject: touch
+    methods: [touch]
+    kind: frame
+    verifiable: true
+    statement: >
+      Reporting an access to a block changes nothing except that one block's
+      most-recent-access time: the block keeps the same parent and the same child,
+      no block is added or removed, the number of tracked blocks is unchanged, and
+      no other block's most-recent-access time changes.
+    traces: [FR-004, DM-TRANSITION-touch]
+
+  # ---------------------------------------------------------------- batch_touch
+
+  - id: EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
+    subject: batch_touch
+    methods: [batch_touch, identify_next_to_evict]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the caller reports a group of accessed blocks in one operation, every
+      block in that group has its most-recent-access time refreshed - not just the
+      first or the last one - so all of them count as recently used afterwards.
+    traces: [FR-005, US-3.2]
+
+  - id: EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
+    subject: batch_touch
+    methods: [batch_touch, touch]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Reporting a group of accesses in a single operation leaves the policy in the
+      same condition as reporting those same accesses one at a time, in the order
+      they appear in the group; batching is a performance convenience and never
+      changes the outcome.
+    traces: [FR-005, DM-TRANSITION-batch_touch]
+
+  - id: EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR
+    subject: batch_touch
+    methods: [batch_touch]
+    kind: error-case
+    verifiable: true
+    statement: >
+      If a group of reported accesses contains a handle that was never issued or
+      that names a block that is no longer tracked, the operation reports an error
+      to the caller rather than appearing to succeed. The specification does not say
+      whether the valid handles in the same group are applied before the error is
+      reported, so only the fact that an error is reported is claimed here.
+    traces: [FR-015]
+
+  - id: EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE
+    subject: batch_touch
+    methods: [batch_touch]
+    kind: frame
+    verifiable: true
+    statement: >
+      Reporting a group of accesses changes only the most-recent-access times of the
+      blocks named in that group. A block not named in the group keeps its
+      most-recent-access time, no parent/child link anywhere changes, and the number
+      of tracked blocks is unchanged.
+    traces: [FR-005, DM-TRANSITION-batch_touch]
+
+  # --------------------------------------------------------------------- remove
+
+  - id: EPSL-REMOVE-STOPS-TRACKING-THE-BLOCK
+    subject: remove
+    methods: [remove, len, identify_next_to_evict, get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the caller asks the policy to stop tracking a block, that block is no
+      longer tracked afterwards: the count of tracked blocks in its domain drops by
+      exactly one, and the block is never again offered as a victim or as an
+      eviction candidate.
+    traces: [FR-011, DM-TRANSITION-remove]
+
+  - id: EPSL-REMOVE-RELINKS-THE-CHAIN
+    subject: remove
+    methods: [remove]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the block being removed sits in the middle of a session's chain, the
+      policy joins the two ends back together - the removed block's child is given
+      the removed block's parent as its new parent - so the chain stays in one piece
+      and no block is left with a parent that is no longer tracked. If the removed
+      block was the start of the chain, its child becomes the new start and has no
+      parent.
+    traces: [FR-011, EC-interior-removal, RESEARCH-D5, DM-TRANSITION-remove]
+
+  - id: EPSL-REMOVE-LAST-BLOCK-EMPTIES-THE-SESSION
+    subject: remove
+    methods: [remove, identify_next_to_evict, get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the block removed was the only block its session still had, that session
+      is left with no blocks at all and contributes nothing further to eviction
+      decisions until a new block is registered for it.
+    traces: [FR-011, RESEARCH-D5, EC-single-block]
+
+  - id: EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR
+    subject: remove
+    methods: [remove]
+    kind: error-case
+    verifiable: true
+    statement: >
+      Asking the policy to stop tracking a block using a handle that was never
+      issued, or that names a block already evicted or already removed, reports an
+      error to the caller rather than quietly succeeding, and changes no tracking
+      state.
+    traces: [FR-015, EC-after-eviction]
+
+  - id: EPSL-REMOVE-DISTURBS-ONLY-THE-CHAIN-NEIGHBOURS
+    subject: remove
+    methods: [remove]
+    kind: frame
+    verifiable: true
+    statement: >
+      Removing a block changes only that block's own record and the parent/child
+      links of its immediate parent and child. No block's most-recent-access time
+      changes, no other block stops being tracked, and the chains of all other
+      sessions and all other domains are untouched.
+    traces: [FR-011, FR-003]
+
+  # ----------------------------------------------------- identify_next_to_evict
+
+  - id: EPSL-EVICT-PICKS-OLDEST-ELIGIBLE-LEAF
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When asked for a victim, the policy returns the eligible block - a block with
+      no still-tracked child - whose most recent access is the oldest of all such
+      blocks anywhere in that eviction domain, comparing across every session in the
+      domain rather than within one session.
+    traces: [FR-008, SC-004, US-1.1, CLAR-2, ASSUMPTION-shared-domain]
+
+  - id: EPSL-EVICT-STOPS-TRACKING-THE-VICTIM
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict, len, get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The block returned as the victim is no longer tracked once it has been
+      returned: the count of tracked blocks in the domain drops by exactly one, the
+      same block is not returned again by a later victim request, and it no longer
+      appears among the eviction candidates.
+    traces: [FR-008, US-1.1, DM-TRANSITION-identify_next_to_evict]
+
+  - id: EPSL-EVICT-EMPTY-DOMAIN-REPORTS-NOTHING
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict]
+    kind: error-case
+    verifiable: true
+    statement: >
+      When an eviction domain currently tracks no blocks at all, a request for a
+      victim reports that there is nothing to evict rather than returning some block
+      or failing, and it leaves the domain unchanged.
+    traces: [FR-008, US-1.3, EC-empty-domain]
+
+  - id: EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict, len]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Whenever an eviction domain tracks at least one block, a request for a victim
+      always returns one; the policy can never get into a state where it tracks
+      blocks but reports that none of them may be evicted. This follows from every
+      non-empty session having exactly one end-of-chain block, which is always
+      eligible.
+    traces: [FR-007, FR-008, FR-018, CLAR-1]
+
+  - id: EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict]
+    kind: frame
+    verifiable: true
+    statement: >
+      Choosing a block for eviction does not count as an access to it: the act of
+      evicting a block never refreshes that block's most-recent-access time, so the
+      selection cannot make the block it just selected look recently used.
+    traces: [FR-006, US-3.3, DM-TRANSITION-identify_next_to_evict]
+
+  - id: EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
+    subject: identify_next_to_evict
+    methods: [identify_next_to_evict]
+    kind: frame
+    verifiable: true
+    statement: >
+      Evicting a block changes only that block's own record and its parent's
+      end-of-chain status. No surviving block's most-recent-access time changes, no
+      other block stops being tracked, and no other session's or other domain's
+      chains are touched.
+    traces: [FR-008, FR-009, FR-003]
+
+  # ------------------------------------------------------ get_eviction_candidates
+
+  - id: EPSL-CANDIDATES-NEVER-MORE-THAN-ASKED
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      When the caller asks for up to a given number of eviction candidates, the
+      policy returns no more than that many, and no more than the number of eligible
+      blocks it is actually tracking; when it has at least that many eligible blocks
+      it returns exactly the number asked for. Asking for none returns an empty
+      list.
+    traces: [FR-010, US-1.4]
+
+  - id: EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates, identify_next_to_evict]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The candidates are listed in the order the policy would actually evict them,
+      oldest access first, so the first candidate in the list is exactly the block a
+      victim request would return at that moment, the second is the one after that,
+      and so on.
+    traces: [FR-010, US-1.4, DM-TRANSITION-get_eviction_candidates]
+
+  - id: EPSL-CANDIDATES-ARE-DISTINCT
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The returned candidate list never names the same cache block twice; each entry
+      is a different tracked block.
+    traces: [FR-010, FR-018, DM-INV-2, DM-INV-5]
+
+  - id: EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates]
+    kind: error-case
+    verifiable: true
+    statement: >
+      When an eviction domain currently tracks no blocks, a request for candidates
+      returns an empty list rather than failing or inventing entries.
+    traces: [EC-empty-domain, US-1.4]
+
+  - id: EPSL-CANDIDATES-CHANGE-NOTHING
+    subject: get_eviction_candidates
+    methods: [get_eviction_candidates]
+    kind: frame
+    verifiable: true
+    statement: >
+      Asking for eviction candidates is a pure enquiry: none of the listed blocks is
+      removed from tracking, the count of tracked blocks is unchanged, no
+      most-recent-access time changes, and no parent/child link changes. Asking twice
+      in a row with nothing in between gives the same answer both times.
+    traces: [FR-010, US-1.4]
+
+  # ------------------------------------------------------------------------ len
+
+  - id: EPSL-LEN-REPORTS-TRACKED-COUNT
+    subject: len
+    methods: [len]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      The reported size of an eviction domain is exactly the number of cache blocks
+      the policy is currently tracking in that domain - counting blocks in every
+      session, whether they are at the start, the middle, or the end of their
+      session's chain.
+    traces: [FR-013, DM-INV-6]
+
+  - id: EPSL-LEN-CHANGES-NOTHING
+    subject: len
+    methods: [len]
+    kind: frame
+    verifiable: true
+    statement: >
+      Asking for the size of an eviction domain is a pure enquiry: it removes
+      nothing, refreshes nobody's most-recent-access time, and changes no
+      parent/child link.
+    traces: [FR-013]
+
+  # ----------------------------------------------------------------- clear_pool
+
+  - id: EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
+    subject: clear_pool
+    methods: [clear_pool, len, identify_next_to_evict, get_eviction_candidates]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      Clearing an eviction domain removes every block it was tracking: afterwards
+      its reported size is zero, every session in it is empty, a victim request
+      reports nothing to evict, and a candidate request returns an empty list.
+    traces: [FR-014, DM-TRANSITION-clear_pool]
+
+  - id: EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES
+    subject: clear_pool
+    methods: [clear_pool, touch, remove, batch_touch]
+    kind: error-case
+    verifiable: true
+    statement: >
+      Handles the caller obtained before a domain was cleared no longer name tracked
+      blocks afterwards, so using one of them to refresh recency or to stop tracking
+      reports an error rather than appearing to succeed or acting on some unrelated
+      block.
+    traces: [FR-014, FR-015, EC-after-eviction]
+
+  - id: EPSL-CLEAR-LEAVES-DOMAIN-USABLE
+    subject: clear_pool
+    methods: [clear_pool, track]
+    kind: postcondition
+    verifiable: true
+    statement: >
+      A cleared eviction domain is empty but still usable: registering a block into
+      it afterwards succeeds, and that block starts a fresh chain for its session as
+      if the session had never held any blocks.
+    traces: [FR-014]
+
+  # ------------------------------------------------- global / shared invariants
+
+  - id: EPSL-INV-AT-MOST-ONE-CHILD
+    subject: "Global invariant: each block has at most one child"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      A session's lineage is always a single straight chain and never a branching
+      tree: at every moment, no tracked block has more than one tracked child. This
+      holds no matter how long the chain is and no matter what sequence of
+      registrations, accesses, evictions and removals has been performed.
+    traces: [FR-018, CLAR-1, DM-INV-1, EC-deep-chains, SC-006]
+
+  - id: EPSL-INV-EXACTLY-ONE-LEAF-PER-SESSION
+    subject: "Global invariant: one eligible end-of-chain block per non-empty session"
+    methods: [track, remove, identify_next_to_evict, clear_pool, get_eviction_candidates]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every session that currently holds at least one block has exactly one
+      end-of-chain block - one block with no tracked child - and that is the only
+      block of that session eligible for eviction. A session holding no blocks has
+      none.
+    traces: [FR-018, CLAR-1, DM-INV-3, ASSUMPTION-linear-stack]
+
+  - id: EPSL-INV-NO-CYCLES-IN-LINEAGE
+    subject: "Global invariant: lineage has no cycles"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Following the parent links upwards from any tracked block always reaches the
+      start of its session's chain after a finite number of steps; no block is ever
+      its own ancestor, so the lineage can always be walked to the top without
+      looping forever. This holds for chains of any length.
+    traces: [SC-006, DM-INV-1, EC-deep-chains]
+
+  - id: EPSL-INV-NO-ORPHANED-BLOCKS
+    subject: "Global invariant: parent and child links agree and point at live blocks"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Whenever a tracked block records another block as its parent, that parent is
+      itself still tracked and records the first block as its child; the two links
+      always agree with each other. No tracked block is ever left pointing at a
+      block that has been evicted or removed.
+    traces: [SC-006, DM-INV-4, FR-011]
+
+  - id: EPSL-INV-ELIGIBLE-SET-IS-EXACTLY-THE-CHILDLESS
+    subject: "Global invariant: the eviction-eligible set equals the set of childless tracked blocks"
+    methods: [track, remove, identify_next_to_evict, get_eviction_candidates, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      The set of blocks the policy considers for eviction is at every moment exactly
+      the set of tracked blocks that have no tracked child - never a block that still
+      has one, and never missing a block that has none.
+    traces: [FR-007, DM-INV-2, SC-004]
+
+  - id: EPSL-INV-SESSION-POINTS-AT-ITS-OWN-END-OF-CHAIN
+    subject: "Global invariant: each session's recorded end-of-chain block is live, its own, and childless"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      For every session the policy knows about, the block it remembers as that
+      session's end of chain is still tracked, genuinely belongs to that session, and
+      has no tracked child.
+    traces: [DM-INV-3, FR-002, FR-018]
+
+  - id: EPSL-INV-ONE-TRACKED-BLOCK-PER-CACHE-KEY
+    subject: "Global invariant: a cache key is tracked at most once per domain"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Within one eviction domain, no two tracked blocks ever carry the same cache
+      key; each key the policy is tracking corresponds to exactly one block. This is
+      what makes re-registering an existing key an update rather than a duplicate.
+    traces: [FR-017, DM-INV-5, CLAR-4]
+
+  - id: EPSL-INV-SIZE-ACCOUNTING-IS-EXACT
+    subject: "Global invariant: reported size always equals the number of tracked blocks"
+    methods: [len, track, touch, batch_touch, remove, identify_next_to_evict, get_eviction_candidates, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      The size a domain reports always matches the blocks it really holds: it goes up
+      by exactly one for each newly registered block, stays the same when an existing
+      key is re-registered, when accesses are reported, and when candidates or the
+      size itself are queried, goes down by exactly one for each block evicted or
+      removed, and becomes zero when the domain is cleared. It is never negative.
+    traces: [FR-013, DM-INV-6]
+
+  - id: EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION
+    subject: "Global invariant: every block belongs to exactly one session, fixed at registration"
+    methods: [track, touch, batch_touch, remove, identify_next_to_evict]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every tracked block belongs to exactly one session - never to none and never to
+      two - and the session it belongs to is the one named when it was registered and
+      never changes for as long as the block is tracked.
+    traces: [FR-003, ASSUMPTION-caller-supplies-session]
+
+  - id: EPSL-INV-LINEAGE-NEVER-CROSSES-SESSIONS
+    subject: "Global invariant: parent/child links stay inside one session"
+    methods: [track, remove, identify_next_to_evict, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Blocks of different sessions are never linked to one another: a block's parent
+      and its child always belong to the same session as the block itself, so one
+      session's blocks never appear anywhere in another session's lineage and the
+      chains stay completely independent.
+    traces: [FR-003, US-2.3, CONTRACT-6, ASSUMPTION-linear-stack]
+
+  - id: EPSL-INV-A-BLOCK-WITH-A-DESCENDANT-IS-NEVER-EVICTED
+    subject: "Global invariant: only end-of-chain blocks may be evicted"
+    methods: [identify_next_to_evict, get_eviction_candidates]
+    kind: invariant
+    verifiable: true
+    statement: >
+      The policy never selects, and never offers as a candidate, a block that still
+      has a tracked block descended from it. Start-of-chain and middle-of-chain
+      blocks are therefore protected until everything descended from them has itself
+      been evicted or removed - this is the mechanism by which session lineage is
+      preserved.
+    traces: [FR-007, SC-004, US-1.2, ASSUMPTION-leaves-only]
+
+  - id: EPSL-INV-PARENT-BECOMES-ELIGIBLE-WHEN-ITS-CHILD-GOES
+    subject: "Global invariant: losing a child makes a block eligible"
+    methods: [identify_next_to_evict, remove]
+    kind: invariant
+    verifiable: true
+    statement: >
+      As soon as a block's only child stops being tracked - whether that child was
+      evicted or explicitly removed - the block itself becomes an end-of-chain block
+      and is therefore eligible for a later eviction, so a chain can be consumed from
+      its end one block at a time.
+    traces: [FR-009, US-1.2, DM-TRANSITION-remove, DM-TRANSITION-identify_next_to_evict]
+
+  - id: EPSL-INV-VICTIM-CHOICE-IS-REPEATABLE
+    subject: "Global invariant: victim selection is deterministic"
+    methods: [identify_next_to_evict, get_eviction_candidates]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Victim selection depends only on the tracking state, never on anything
+      incidental: asking for a victim twice from two domains in identical states
+      always names the same block, and the candidate list for identical states is
+      always the same list in the same order. In particular, if two eligible blocks
+      were somehow equally old, the choice between them is still made the same way
+      every time rather than arbitrarily.
+    traces: [FR-012, EC-tie]
+
+  - id: EPSL-INV-DOMAINS-ARE-INDEPENDENT
+    subject: "Global invariant: eviction domains do not affect one another"
+    methods: [create_pool, track, touch, batch_touch, remove, identify_next_to_evict, get_eviction_candidates, len, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Anything done to one eviction domain leaves every other domain completely
+      unchanged: a victim is only ever chosen from among the blocks of the domain
+      asked about, a reported size counts only that domain's blocks, and clearing one
+      domain never removes a block from another.
+    traces: [FR-008, FR-013, FR-014, ASSUMPTION-pool-mapping]
+
+  - id: EPSL-INV-RECENCY-STRICTLY-ADVANCES
+    subject: "Global invariant: recency values strictly advance"
+    methods: [track, touch, batch_touch]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Every time a block is registered or an access to it is reported, it is stamped
+      with a recency value strictly later than every recency value handed out before
+      it in that domain. Recency therefore only ever moves forward, two blocks never
+      end up equally recent, and "the oldest eligible block" is always a single
+      well-defined block.
+    traces: [FR-004, FR-012, RESEARCH-D3, ASSUMPTION-monotonic-clock]
+
+  - id: EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING
+    subject: "Global invariant: a rejected or degraded operation never corrupts state"
+    methods: [track, touch, batch_touch, remove, identify_next_to_evict, get_eviction_candidates, len, clear_pool]
+    kind: invariant
+    verifiable: true
+    statement: >
+      Whenever an operation reports an error, or safely does nothing because the
+      domain named does not exist, the policy's tracking state is left exactly as it
+      was beforehand. No operation, valid or invalid, ever leaves tracking state
+      inconsistent.
+    traces: [FR-015]
+
+  - id: EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK
+    subject: "Global invariant: a handle keeps identifying its block while that block is tracked"
+    methods: [track, touch, batch_touch, remove, identify_next_to_evict]
+    kind: invariant
+    verifiable: true
+    statement: >
+      For as long as a block remains tracked, the handle issued for it keeps
+      identifying that same block, no matter how many other blocks are registered,
+      accessed, evicted or removed in the meantime. A handle never starts naming a
+      different block while its own block is still tracked.
+    traces: [FR-001, FR-011, IFACE-track]
+
+  - id: EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
+    subject: "Global invariant: every operation is total over its inputs"
+    methods: [create_pool, track, touch, batch_touch, remove, identify_next_to_evict, get_eviction_candidates, len, clear_pool]
+    kind: precondition
+    verifiable: true
+    statement: >
+      There is no precondition the caller must satisfy beyond supplying
+      correctly-typed arguments: any domain identifier, any handle, any cache key,
+      any session identifier, any requested candidate count and any group of handles
+      - including ones that are unknown, stale, empty or extreme - may be passed to
+      any operation without the policy crashing, aborting, or overflowing. Bad inputs
+      are reported as errors or handled harmlessly instead.
+    traces: [FR-015]
+
+  - id: EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN
+    subject: "Global invariant: handle-taking operations reject handles naming a dead domain"
+    methods: [touch, batch_touch, remove]
+    kind: error-case
+    verifiable: true
+    statement: >
+      If a handle refers to an eviction domain that does not exist, the operations
+      that take handles report an error instead of appearing to succeed. The
+      specification requires an error but does not pin down which of the two error
+      kinds is reported, so only the fact that an error is reported is claimed here.
+    traces: [FR-015]
+
+  - id: EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
+    subject: "Global invariant: the read-only queries degrade safely on an unknown domain"
+    methods: [identify_next_to_evict, get_eviction_candidates, len, clear_pool]
+    kind: error-case
+    verifiable: true
+    statement: >
+      The four operations that have no way to report an error - asking for a victim,
+      asking for candidates, asking for a size, and clearing - behave harmlessly when
+      asked about a domain that does not exist: they respectively report nothing to
+      evict, return an empty list, report zero, and do nothing at all. None of them
+      crashes and none of them disturbs any domain that does exist.
+    traces: [FR-015]
+
+  # -------------------------------------------------------- not-verifiable ledger
+
+  - id: NV-1
+    scope: "Success criterion SC-001: at least 15 percent fewer prefix reloads than basic LRU"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is a comparative empirical measurement against a different component on
+      representative workload traces, not a claim about this component's own
+      behaviour on a single operation sequence. The specification itself downgrades
+      it to an aspirational design goal and records that the comparative
+      trace-replay harness needed to measure it does not exist. No counterexample
+      execution of this component could refute it.
+    traces: [SC-001]
+
+  - id: NV-2
+    scope: "Success criterion SC-002: registration, recency refresh and removal cost is effectively constant"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is a statement about how execution time grows with the number of tracked
+      blocks. Timing and asymptotic cost are performance characteristics measured by
+      benchmarks, not functional assertions a verifier can refute with a
+      counterexample.
+    traces: [SC-002, PLAN]
+
+  - id: NV-3
+    scope: "Success criterion SC-003: victim selection scales with the number of sessions, not blocks"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Another asymptotic-cost and wall-clock-bound claim, including a bound on a
+      domain of at least one million blocks. Performance scaling is measured, not
+      proved, and the functional content of the requirement is already captured by
+      the victim-selection correctness properties.
+    traces: [SC-003, PLAN]
+
+  - id: NV-4
+    scope: "Success criterion SC-005: the recency-refresh path sustains the cache hot-path access rate"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      A throughput target measured against an external subsystem's demand. It has no
+      pass/fail condition on a single execution and depends on the machine it runs
+      on.
+    traces: [SC-005]
+
+  - id: NV-5
+    scope: "One-time informational log line emitted on first selection as the active eviction policy"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The specification marks this section non-normative and states explicitly that
+      it is a diagnostic, not a functional requirement, and that it has no effect on
+      eviction behaviour. Log emission through an optional external receptacle is not
+      observable through the eviction-policy interface, so there is no behavioural
+      obligation to check.
+    traces: [OBS-1]
+
+  - id: NV-6
+    scope: "Assumption that a monotonic current-time source is available to the component"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      This is an assumption about the environment the component runs in, not a
+      behaviour of the component. The consequence that matters - that recency values
+      only ever move forward - is captured as a verifiable invariant separately.
+    traces: [ASSUMPTION-monotonic-clock]
+
+  - id: NV-7
+    scope: "Tracking state is in-memory only and is rebuilt by the cache after a restart"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      A scoping decision about what the component deliberately does not do.
+      Behaviour across a process restart is outside any single execution of the
+      component, and persistence and crash consistency are declared out of scope, so
+      there is nothing to falsify.
+    traces: [CLAR-3, ASSUMPTION-in-memory]
+
+  - id: NV-8
+    scope: "Assumption that hot-path operations may be invoked concurrently and must remain safe"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      Safety under arbitrary concurrent interleavings, and freedom from deadlock
+      between the operations, is a property of unboundedly many schedules rather than
+      of one execution. It needs a concurrency model checker rather than a sequential
+      verifier, so it is recorded here instead of being forced into a row.
+    traces: [ASSUMPTION-concurrency, RESEARCH-D4]
+
+  - id: NV-9
+    scope: "FR-016: all behaviour is reachable only through the shared eviction-policy interface"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      An encapsulation and architecture requirement about which functions are
+      publicly reachable. It is settled by inspecting the visibility of the crate's
+      items at compile time and has no runtime counterexample.
+    traces: [FR-016, PLAN]
+
+  - id: NV-10
+    scope: "The component targets Linux only"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      A build-and-platform fact, not a behaviour of any operation, so no execution
+      can refute it.
+    traces: [ASSUMPTION-linux, PLAN]
+
+  - id: NV-11
+    scope: "Whether a group recency refresh is all-or-nothing when one handle in the group is invalid"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      SPECIFICATION GAP found during extraction. The requirement says the group
+      refresh must report an error rather than silently succeed on an invalid handle,
+      but it never says whether the valid handles in the same group are applied
+      first. Both an all-or-nothing group and a partially-applied group satisfy the
+      text as written, so there is no obligation here to check; only the
+      error-reporting half is stated as a property above.
+    traces: [FR-005, FR-015]
+
+  - id: NV-12
+    scope: "Whether a stale handle can start naming a different block after its slot is reused"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      SPECIFICATION GAP found during extraction. An error is required for an invalid
+      or already-removed handle, but nothing in the specification says a handle
+      carries any marker that distinguishes one use of a tracking slot from the next.
+      So after a block is removed or evicted and new blocks are registered, whether
+      the old handle is still detected as stale or silently names the newly
+      registered block is simply not specified, and neither behaviour can be called a
+      violation.
+    traces: [FR-015, FR-011]
+
+  - id: NV-13
+    scope: "Internal data-structure and concurrency design choices recorded in the design notes"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      The choice of an index arena with a free list, an ordered set over the eligible
+      blocks, a per-domain access counter, and a particular lock layout are
+      implementation decisions rather than obligations on observable behaviour. Their
+      observable consequences - ordering, determinism, idempotent re-registration,
+      chain splicing - appear as properties above; the structures themselves must not
+      be pinned by a specification-derived property, or the property would forbid a
+      correct alternative implementation.
+    traces: [RESEARCH-D1, RESEARCH-D2, RESEARCH-D3, RESEARCH-D4, ASSUMPTION-pool-mapping]
+
+  - id: NV-14
+    scope: "Code-quality and build gates: formatting, lint, documentation, no unsafe code, minimum compiler version"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      These are toolchain and review gates applied to the source text, not assertions
+      about what the component computes, so they have no counterexample execution.
+    traces: [PLAN, QUICKSTART]
+
+  - id: NV-15
+    scope: "Specification-quality checklist items and the build, test and benchmark instructions"
+    kind: not-verifiable
+    verifiable: false
+    reason: >
+      These units describe the specification process and how to compile and exercise
+      the component. They make no claim about the component's behaviour, so they map
+      to no property. Recorded here so that every unit of every artifact read is
+      accounted for.
+    traces: [CHECKLIST, QUICKSTART]
