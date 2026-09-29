@@ -1188,6 +1188,26 @@ def bench_scheduler_step(
 
         phases["touch_lookup"].record(time.perf_counter() - t_tl)
 
+        # Deduplicate: multiple requests in a step can share prefix keys.
+        # The server rejects duplicate keys in a single Pin/Reserve batch.
+        seen_load: set[bytes] = set()
+        deduped_load = []
+        for k in all_load_keys:
+            kb = k if isinstance(k, bytes) else k
+            if kb not in seen_load:
+                seen_load.add(kb)
+                deduped_load.append(k)
+        all_load_keys = deduped_load
+
+        seen_store: set[bytes] = set()
+        deduped_store = []
+        for k in all_store_keys:
+            kb = k if isinstance(k, bytes) else k
+            if kb not in seen_store:
+                seen_store.add(kb)
+                deduped_store.append(k)
+        all_store_keys = deduped_store
+
         # Prepare stores.
         store_result = None
         if all_store_keys:
