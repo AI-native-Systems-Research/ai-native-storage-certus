@@ -78,13 +78,16 @@ SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"  # offload block size — MUST mat
 # certus_shmq_connector inside it, and drives it via `vllm serve`. The image lives
 # in the /mnt/certus1 podman store, not the default store (mirrors
 # run-docker-otel-shmq.sh / run-docker-certus-shmq.sh). Build one with either:
-#   certus-shmq-connector/build_connector_container.sh 0.28.0   # -> localhost/certus-shmq-connector:vllm0.28.0
+#   certus-shmq-connector/build_connector_container.sh 0.26.0   # -> localhost/certus-shmq-connector:vllm0.26.0
 #   benchmarks/kv-offload-otel-replay/build-otel.sh             # -> localhost/certus-otel-shmq-connector:latest
-# then point IMAGE at it. build_connector_container.sh <ver> selects the vLLM base
-# version (FULL patch tag, e.g. 0.28.0 — not a bare 0.28); `--help` lists versions.
-# Default is the otel image (unversioned :latest); set IMAGE for a versioned one:
-#   IMAGE=localhost/certus-shmq-connector:vllm0.28.0 ./run-serve-certus-shmq.sh
-IMAGE="${IMAGE:-localhost/certus-otel-shmq-connector}"
+# build_connector_container.sh <ver> selects the vLLM base version (FULL patch
+# tag, e.g. 0.26.0 — not a bare 0.26); `--help` lists versions.
+# Default to the 0.26 connector image, matched to the cputier server's 0.26 base
+# for backend comparability; the fix#3 clamp below (VLLM_FIX3=1, default) is
+# load-bearing on 0.26. Override IMAGE= to pin another build:
+#   IMAGE=localhost/certus-shmq-connector:vllm0.30.0 ./run-serve-certus-shmq.sh
+#   IMAGE=localhost/certus-otel-shmq-connector       ./run-serve-certus-shmq.sh
+IMAGE="${IMAGE:-localhost/certus-shmq-connector:vllm0.26.0}"
 PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
 PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
 STORE_FLAGS=(--root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT")
@@ -129,9 +132,9 @@ fi
 # ── Preflight ──────────────────────────────────────────────────────────────────
 if ! command podman "${STORE_FLAGS[@]}" image exists "$IMAGE"; then
   echo "error: image '$IMAGE' not found in store ${PODMAN_STORE}." >&2
-  echo "       build one first (then set IMAGE= if it is not the default), e.g.:" >&2
-  echo "         certus-shmq-connector/build_connector_container.sh 0.28.0   # versioned shmq image" >&2
-  echo "         bash benchmarks/kv-offload-otel-replay/build-otel.sh        # default otel-shmq image" >&2
+  echo "       build the default 0.26 connector image first, e.g.:" >&2
+  echo "         certus-shmq-connector/build_connector_container.sh 0.26.0   # -> certus-shmq-connector:vllm0.26.0" >&2
+  echo "         bash benchmarks/kv-offload-otel-replay/build-otel.sh        # -> certus-otel-shmq-connector (set IMAGE= to use)" >&2
   echo "       (build_connector_container.sh --help lists supported vLLM versions)" >&2
   exit 1
 fi
