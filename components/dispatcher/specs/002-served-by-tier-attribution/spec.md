@@ -11,9 +11,16 @@
 SSD, a peer's DRAM, a peer's SSD — or why it was not served. Today a successful `Lookup`
 is indistinguishable across all four, so no tiered hit rate is measurable.
 
-**Why now, measured rather than asserted.** Two hardware measurements on 2026-09-24/25
-established remote lookup's **cost** and neither could establish its **benefit**, because
-no instrument can separate a local hit from a remote one. Driving four instances that could
+**Why now — and as of 2026-09-28 the benefit is measured, not merely missing.** Phase 1's
+counters shipped and gave the first reading: remote lookup serves **0.369%** of the keys
+forwarded to a peer (2 443 of 661 534), contributing **0.255 percentage points** to a 31.3%
+hit rate, while the same run declined **27.5%** of stores. Roughly 100:1 against, on this
+workload. Details and caveats in `research.md` R6; the statement that there was "no evidence
+remote lookup serves anything" described the instrument and is superseded.
+
+Before that counter existed, two hardware measurements established remote lookup's **cost**
+and neither could establish its **benefit**, because nothing could separate a local hit from
+a remote one. Driving four instances that could
 see each other versus the same workload with each instance isolated: hit rate 33.9% with
 peers against 34.6% without — no detectable benefit — while store declines went from 41.2%
 to 0.0%. A second sweep reproduced the decline half at a different rate and in a different

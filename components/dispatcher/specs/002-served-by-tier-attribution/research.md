@@ -155,6 +155,78 @@ not evidence about whether remote lookup serves anything, because `lookup_hits` 
 distinguish local from remote — that is exactly what the counter in R1 is for, and these two
 runs also differ in timing and cache state. Noted so it is not later mistaken for a result.
 
+## R6. ANSWERED: remote lookup serves 0.369% of what it is asked
+
+The question this feature exists for, measured 2026-09-28 — the first reading ever
+possible, because before the counter nothing could separate a local hit from a remote one.
+
+Four instances driven in one RDMA group (node2 n0/n1, node5 n0/n1), `--until 10 --rate
+inf`, cold-formatted, both hosts on the fixed build. **262 migrations**, so the
+opportunity for a peer to hold a session's prefix genuinely existed.
+
+| instance | remote hits | remote misses |
+| --- | --- | --- |
+| node2:9400 | 312 | 166 405 |
+| node2:9401 | 898 | 169 186 |
+| node5:9400 | 977 | 172 258 |
+| node5:9401 | 256 | 151 242 |
+| **total** | **2 443** | **659 091** |
+
+| | |
+| --- | --- |
+| remote hit rate | **0.369%** of 661 534 keys forwarded to a peer |
+| share of all hits | **0.81%** (2 443 of 300 076) |
+| contribution to hit rate | **0.255pp** of the 31.3% overall |
+| stores declined, **same run** | **27.5%** (181 258 of 659 091) |
+
+**Why this reading can be trusted, where the earlier ones could not.** The accounting
+closes against an *independent* count: per-instance remote misses sum to 659 091, exactly
+the generator's own not-served figure, and lookup hits sum to 300 076, exactly its
+returned-data figure. Zero transport errors, so every forwarded key got an answer and
+hits + misses is the whole of what was asked.
+
+**The trade is now measurable within one run.** Remote lookup buys 0.255 percentage
+points of hit rate and costs 27.5% of stores declined — roughly 100:1 against. Previous
+solo-versus-shared A/Bs put declines at ~0–1.5% without peers and 41–49% with them, and
+the responder-pin hypothesis remains the leading mechanism: `remote-lookup/src/server.rs`
+holds a `PinnedBatch` across an RDMA completion, and a held read-ref makes an entry
+unevictable, so constant peer traffic suppresses eviction and reserves then fail.
+
+**This supersedes "no evidence remote lookup serves anything."** That statement described
+the instrument, not the system. It serves; it serves very little.
+
+**What this does NOT establish.** One workload (`/tmp/stress-2m.yml`), whose working set
+overflows the tier, with 262 migrations in 10 virtual seconds. Heavier migration or a
+hotter shared prefix could do better, and "remote lookup is useless" is not supported.
+What is durable is the instrument: any other workload can now be checked in one run.
+
+### Two earlier readings that were NOT results, recorded so they are not cited as such
+
+- **Solo/shared with an *undriven* peer: 0 remote hits.** Vacuous by construction — the
+  second server was never driven, so its cache was empty and it could not serve. The
+  fixture was built to trigger the relabelling bug and that same choice made the hit
+  measurement meaningless. Reporting it as a negative would have been a serious over-claim.
+- **All counters zero across four instances.** The generator never ran: FR-051 refused it
+  because node5's agent binary was stale. A zero from a run that did not happen looks
+  identical to a zero from a run that found nothing.
+
+### Method note: node5 is configured independently, and it cost three failed runs
+
+Its own `/tmp` helpers, its own binaries, its own build. Every fix on node2 needs
+propagating, and I missed all three in turn:
+
+1. `/tmp/stress-servers.sh` — node5 kept the old `grep "cold pool started"` as its **last
+   command**, so a healthy start exited 1 and the caller's `set -e` aborted.
+2. `certus-server-yaml` — needed rsync plus a `full-remote` rebuild on node5.
+3. `workload-node-agent` — FR-051 refused twice. **Copy node2's binary rather than
+   rebuilding**: identical bytes cannot disagree about provenance, and node5's tree holds
+   an older generator source. `rm` the destination first — it is a cargo hardlink and
+   `scp` fails with "dest open Failure" writing in place.
+
+**Grep-as-last-command caused three separate false failures this session.** A script
+ending in `grep` makes "nothing matched" its exit status, so a healthy operation reports
+failure. Always `|| true` an informational grep.
+
 ## R3. Where the counters live, and what a new one costs
 
 | Piece | Location |

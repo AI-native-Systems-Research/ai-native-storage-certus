@@ -124,6 +124,17 @@ below states what it must be shown to fail against.
   path — the failure mode that would make the counter agree with `lookup_hits` and look
   plausible while measuring nothing.
 
+## Phase 1c result: the benefit, measured 2026-09-28
+
+**Remote lookup serves 0.369% of what it is asked** — 2 443 hits of 661 534 forwards,
+0.81% of all hits, **0.255pp** of a 31.3% hit rate, against **27.5% of stores declined in
+the same run**. Full reading, caveats and the two non-results in `research.md` R6;
+`remote-benefit.sh` beside this file re-runs it.
+
+This is what Phase 1 was for. It does not decide whether remote lookup should stay — one
+workload with 262 migrations cannot — but the question is now empirical instead of
+unanswerable, which it was not before the counter existed.
+
 ## Phase 1d: Close the two accounting holes (FR-024)
 
 - [ ] **T012** Count held-back entries. Entries whose handles fail to open are excluded from
