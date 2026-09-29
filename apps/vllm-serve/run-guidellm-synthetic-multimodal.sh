@@ -45,7 +45,7 @@ HF_HOME=/mnt/certus1/hf-cache
 # ── Image side (synthetic_image -> "image"): a synthetic JPEG per request.
 #    RESOLUTION is a guidellm preset (240p/360p/480p/540p/720p/1080p/1440p/2160p/4k);
 #    IMAGES_PER_REQUEST>1 requires the server's --limit-mm-per-prompt to allow it.
-RESOLUTION="${RESOLUTION:-720p}"
+RESOLUTION="${RESOLUTION:-1080p}"
 IMAGES_PER_REQUEST="${IMAGES_PER_REQUEST:-1}"
 IMAGE_CONTENT="${IMAGE_CONTENT:-noise}"   # gradient|noise|solid|checkerboard (noise = least-compressible)
 IMAGE_DATA="${IMAGE_DATA:-kind=synthetic_image,resolution=${RESOLUTION},content=${IMAGE_CONTENT},images_per_request=${IMAGES_PER_REQUEST}}"
