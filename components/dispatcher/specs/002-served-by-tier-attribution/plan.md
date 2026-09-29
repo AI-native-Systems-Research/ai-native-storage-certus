@@ -118,19 +118,49 @@ apps/certus-server-yaml/src/
 Answers "does remote lookup serve anything".
 
 **Phase 2 — the interface.** `ServedBy` in `interfaces`, `batch_lookup`'s return type, and
-every implementor. Compiler-enforced blast radius, but the inventory in
-`contracts/idispatcher.md` predates two upstream changes and must be re-counted first.
+**every implementor, because the compiler leaves no choice** — see the boundary note below.
+Re-counted 2026-09-28: four impls, of which **two are production** (`components/dispatcher`,
+`components/dispatcher-p2p`) and two are mocks (`components/remote-lookup/src/seams.rs`,
+`lib/shmq-dispatcher`'s test mock). The inventory in `contracts/idispatcher.md` still
+predates two upstream changes and its line numbers remain stale.
+
+Phase 2 also carries **the `IRemoteLookup` delta** (`contracts/served-by.md`, "The
+`IRemoteLookup` delta"), which was previously filed under Phase 4. It cannot wait: the
+projection keeps `RemoteDram` (`3`) and `RemoteSsd` (`4`) distinct, and the dispatcher can
+only tell them apart from the peer's advertised tier carried out of
+`IRemoteLookup::batch_lookup`. Without the delta, Phase 2 would have to either invent a
+remote value or collapse the two — both of which Phase 3 would then have to undo.
 
 **Phase 3 — the control plane.** Widen `LOOKUP`'s per-key byte. Carries the open decision in
 `contracts/served-by.md` about the five-value projection, which needs sign-off before it is
 built.
 
-**Phase 4 — the other dispatchers and remote-lookup**, with their component specs, both
-verification-bearing.
+**Phase 4 — verification and the component specs, NOT "making the other dispatchers work".**
+They already work after Phase 2; what they lack is proof and specification. Phase 4 owns:
+the verification-bearing feature specs for `dispatcher-p2p` and `remote-lookup`; the FR-027
+and FR-028 tests for attribution those components produce; and specifically the FR-014
+cold-path case, which spec.md records **cannot be tested by flipping a flag** and so needs
+real test construction rather than a parameter.
 
 Phase 1 is deliberately ordered first because it is the only phase that produces a
 **measurement** rather than a capability, and the measurement may change what later phases
 are worth.
+
+### Boundary note: why Phase 4 cannot own the other implementors
+
+Widening `batch_lookup`'s return type is a **signature** change, so all four implementors
+become compile errors the moment Phase 2 lands. Deferring any of them to Phase 4 would leave
+the workspace unbuildable in between, which no phase boundary may do.
+
+So Phase 2 necessarily touches `dispatcher-p2p`, and it must give it the **right** value
+rather than a placeholder: FR-014 already fixes that value (its SSD-to-GPU cold path
+attributes as `SSD`, because it does not populate DRAM synchronously). A placeholder would
+be inventing an attribution the spec has already decided, and FR-027 forbids shipping a
+value no test can fail against.
+
+The earlier wording — "Phase 4 — the other dispatchers and remote-lookup" — contradicted
+Phase 2's own "every implementor" and implied a phase ordering the compiler forbids.
+Corrected 2026-09-28.
 
 ## Complexity Tracking
 
