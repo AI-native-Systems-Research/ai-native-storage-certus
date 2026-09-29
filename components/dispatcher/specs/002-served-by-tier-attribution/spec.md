@@ -570,6 +570,29 @@ assert identical attribution for identical residency, except where FR-014 specif
 - **RemoteTier** — the peer's advertised availability as carried out of
   `IRemoteLookup::batch_lookup`, from which `REMOTE_DRAM`/`REMOTE_SSD` is derived.
 
+## Requirement coverage after Phase 1 (2026-09-28)
+
+Recorded so a reader need not infer it from the task list. Phase 1 changed only `dispatcher`,
+`interfaces` (two struct fields), `shmq-dispatcher` and `certus-server-yaml`.
+
+| Requirement | State after Phase 1 |
+|---|---|
+| FR-024 | **Satisfied for the server-side tally.** Every requested entry now lands in exactly one of hits / misses / errors: `KeyNotFound` → miss, every other dispatcher error → error, and entries held back before dispatch (their GPU handle would not open) → error, counted as `requested - dispatched`. Held via `Translator::tally_lookup`, tested as the identity itself, and shown to fail against both former holes. |
+| FR-025 | **Not addressed.** There is no per-entry attribution yet to agree with — that is the `ServedBy` value of Phase 3. The aggregates are internally consistent, which is a weaker claim. |
+| FR-026 | **Satisfied incidentally, and it needs re-checking in Phase 3.** The counters live in `TierEventCounters` and are read by polling `tier_event_stats()`, which does not touch the eviction event stream at all. The risk this requirement guards against returns if attribution is ever routed through that stream. |
+| FR-027, FR-028 | **Not applicable yet** (no attribution values). Their *method* was applied anyway: every Phase 1 test was mutation-verified against the defect it guards. |
+| FR-029 | **Not addressed.** Phase 1's tests were not run under `integrity-check`. |
+
+Two Phase 1 findings that bear on requirements elsewhere in this spec:
+
+- **FR-030's "compiler-enforced" claim is false for a struct field.** Adding fields to
+  `TierEventStats` compiled with zero errors because the other implementors build it with
+  `::default()`. A future implementor can therefore silently under-report. See
+  `contracts/idispatcher.md`, which asserts the opposite and must be corrected in Phase 2.
+- **The two accounting holes never fired in the measured workload** (nothing was held back, no
+  non-`KeyNotFound` error occurred), so FR-024's closure is hardening rather than a correction
+  of any recorded number. The hardware result in `research.md` R6 is not evidence about them.
+
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes

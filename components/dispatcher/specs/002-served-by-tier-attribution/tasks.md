@@ -137,25 +137,44 @@ unanswerable, which it was not before the counter existed.
 
 ## Phase 1d: Close the two accounting holes (FR-024)
 
-- [ ] **T012** Count held-back entries. Entries whose handles fail to open are excluded from
+- [x] **T012** Count held-back entries. Entries whose handles fail to open are excluded from
   the batch and reported `ok = 0` (`translate.rs:571-583`), so the counting loop never sees
   them. They must be counted — as misses or as a third category, decided in T013.
 
-- [ ] **T013** Decide and record whether a handle-resolution failure is a *miss* or an
+- [x] **T013** Decide and record whether a handle-resolution failure is a *miss* or an
   *error*. It is not obviously either: the key may well be resident, and the failure is the
   caller's handle. **Recommendation**: a third `errors` count, because calling it a miss would
   corrupt the hit rate with a client-side fault. Needs a decision before T014.
 
-- [ ] **T014** Replace `Err(_) => {}` (`translate.rs:604-605`) so every dispatched entry lands
+- [x] **T014** Replace `Err(_) => {}` (`translate.rs:604-605`) so every dispatched entry lands
   in exactly one of hits / misses / errors. `KeyNotFound` → miss; everything else → error.
 
-- [ ] **T015** Extend `on_lookup` to carry the error count, or add it alongside — same
+- [x] **T015** Extend `on_lookup` to carry the error count, or add it alongside — same
   defaulting constraint as T006.
 
-- [ ] **T016** Test the FR-024 identity directly: for a batch mixing a hit, a miss, a
+- [x] **T016** Test the FR-024 identity directly: for a batch mixing a hit, a miss, a
   transport failure and an unopenable handle, assert
   `hits + misses + errors == entries requested`. **Must be shown to fail** against today's
   code, which drops two of those four.
+
+## Phase 1d result
+
+**T013 decided: an unopenable handle is an error, not a miss.** The key may well be resident;
+the fault is in the caller's handle, so calling it a miss would corrupt the hit rate with a
+client-side fault. Recorded at the definition in `translate.rs` as well as here.
+
+The tally was extracted as a **pure function**, `Translator::tally_lookup(requested, results)`,
+for a reason worth keeping: the identity cannot otherwise be tested without a GPU, because
+every handle fails to open in a test process, so the dispatched set is always empty there. The
+alternative — asserting on counters after driving `op_lookup` — can only ever observe the
+all-held-back case, which is exactly the case that used to count zero.
+
+`on_lookup` carries all three counts in **one** call rather than gaining a second method: split
+across two, a host could implement one and not the other and silently break the identity.
+
+Both T016 tests were **shown to fail** against a mutation restoring the two original holes
+(`errors = 0` instead of `requested - results.len()`, and `Outcome::Error => {}`), then to pass
+without it.
 
 ## Phase 1e: Documentation (FR-030, FR-031)
 
@@ -167,7 +186,7 @@ unanswerable, which it was not before the counter existed.
   definitions in `lib/shmq-dispatcher/src/translate.rs` — it owns no `specs/`, so the site is
   the record (FR-031), following how `check_state` documents its own widening.
 
-- [ ] **T019** [P] Record in this spec which of FR-024..FR-026 Phase 1 satisfies and which
+- [x] **T019** [P] Record in this spec which of FR-024..FR-026 Phase 1 satisfies and which
   await later phases, so a reader is not left inferring it from the task list.
 
 - [x] **T020** Update `research.md` R2 with T001's and T005's actual readings. A research
