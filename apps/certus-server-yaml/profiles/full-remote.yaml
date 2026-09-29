@@ -179,3 +179,5 @@ exports:
     interface: IDispatchMap
   - component: memory_tier
     interface: IMemoryTier
+  - component: remote_lookup
+    interface: IRemoteLookup

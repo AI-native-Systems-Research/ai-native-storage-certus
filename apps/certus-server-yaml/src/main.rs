@@ -250,8 +250,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cli.metrics_port > 0 {
         let mt = Arc::clone(&stack.memory_tier);
         let disp = Arc::clone(&stack.dispatcher);
+        let rl = Arc::clone(&stack.remote_lookup);
         let port = cli.metrics_port;
-        tokio::spawn(metrics::serve_metrics(port, mt, disp, counters.clone()));
+        tokio::spawn(metrics::serve_metrics(port, mt, disp, rl, counters.clone()));
         logger.info(&format!(
             "certus-server-yaml: metrics endpoint on port {port}"
         ));
@@ -266,6 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &cli.otel_service_name,
                 Arc::clone(&stack.memory_tier),
                 Arc::clone(&stack.dispatcher),
+                Arc::clone(&stack.remote_lookup),
                 counters.clone(),
             )
             .map_err(|e| format!("otel init failed: {e}"))?;

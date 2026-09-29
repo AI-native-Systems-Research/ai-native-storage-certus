@@ -4624,6 +4624,11 @@ mod tests {
         fn leave_cluster(&self) -> Result<(), RemoteLookupError> {
             Ok(())
         }
+
+        fn serve_stats(&self) -> interfaces::RemoteServeStats {
+            // This mock is a lookup stub, never a responder, so it serves no peer.
+            interfaces::RemoteServeStats::default()
+        }
     }
 
     struct RemoteFixture {

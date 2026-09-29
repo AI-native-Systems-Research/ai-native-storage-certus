@@ -72,7 +72,7 @@ The crate has two Cargo features:
 **As the** remote lookup component, **I want** interfaces for outbound lookups plus a split RDMA push/accept pair **so that** cache misses can be served from other Certus nodes in a cluster.
 
 **Acceptance Criteria:**
-- `IRemoteLookup` provides `initialize`, `batch_lookup`, `join_cluster`, and `leave_cluster`.
+- `IRemoteLookup` provides `initialize`, `batch_lookup`, `join_cluster`, `leave_cluster`, and `serve_stats` *(the last added 2026-09-29)*.
 - `IRemoteLookupRdmaInitiator` (outbound) RDMA-writes local values into a remote requester's memory; `IRemoteLookupRdmaResponder`/`IRemoteLookupRdmaResponderAdmin` (inbound) accept connections and expose the requester's landing-slot region and control channel. (Supersedes the earlier single `IRemoteRequestHandler` interface and its zero-copy `LookupRef`; see FR-013, FR-030, FR-031.)
 
 ### User Story 6 - Extent Management (Priority: P1)
@@ -261,6 +261,7 @@ The crate has two Cargo features:
 - **Method**: `batch_lookup(&self, entries: &[(CacheKey, u32)]) -> Vec<Result<(), RemoteLookupError>>` - Batch lookup from remote nodes; the `u32` is the expected value size (a size hint used to validate the RDMA-written region), not a GPU IPC handle.
 - **Method**: `join_cluster(&self, endpoint: &str) -> Result<(), RemoteLookupError>` - Join a cluster.
 - **Method**: `leave_cluster(&self) -> Result<(), RemoteLookupError>` - Leave the cluster.
+- **Method**: `serve_stats(&self) -> RemoteServeStats` *(Sync 2026-09-29 — CODE CHANGE)* - Cumulative snapshot of what this node has served **to its peers**: keys served, and of those, keys read from this node's own block tier to serve them. Responder-side, the opposite direction from `TierEventStats::remote_lookup_hits` (which is what this node obtained *from* peers). Readable before `initialize` (zeroes), never reset by reading. Specified in `components/remote-lookup/specs/002-remote-lookup-rdma` FR-035/FR-036.
 
 #### FR-013: Remote Request Handling (RDMA Initiator/Responder Split)
 
@@ -346,6 +347,7 @@ The crate has two Cargo features:
 
 #### FR-023: Supporting Types - Remote
 - `RemoteLookupError`: 2-variant error enum (`NotFound`, `TransportError`).
+- `RemoteServeStats` *(Sync 2026-09-29)*: 2-field `Copy` counter snapshot returned by `IRemoteLookup::serve_stats` — `peer_served_keys`, `peer_triggered_promotions`. Both monotonic since process start; take the delta of two snapshots for a rate. The second is a **first-touch** quantity (promoting the key leaves it warm), so it is meaningful as a rate and misleading as a lifetime ratio against the first.
 - `LookupConfig`: 10-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`.
 - ~~`LookupRef`~~ / ~~`RemoteRequestHandlerError`~~ — **SUPERSEDED**, removed together with `IRemoteRequestHandler` (see FR-013). No replacement type exists: the RDMA split's writes are one-sided (no zero-copy handle is returned to a caller) and its errors are `RemoteLookupRdmaInitiatorError`/`RemoteLookupRdmaResponderError` (FR-033/FR-034).
 

@@ -50,6 +50,7 @@ pub use imemory_tier::MemoryTierTelemetrySnapshot;
 pub use iremote_lookup::IRemoteLookup;
 pub use iremote_lookup::LookupConfig;
 pub use iremote_lookup::RemoteLookupError;
+pub use iremote_lookup::RemoteServeStats;
 pub use iremote_lookup_rdma_initiator::IRemoteLookupRdmaInitiator;
 pub use iremote_lookup_rdma_initiator::PushCompletion;
 pub use iremote_lookup_rdma_initiator::PushStatus;

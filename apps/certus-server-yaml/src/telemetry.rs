@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use interfaces::{IDispatcher, IMemoryTier};
+use interfaces::{IDispatcher, IMemoryTier, IRemoteLookup};
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
@@ -21,6 +21,7 @@ impl OtelMetrics {
         service_name: &str,
         memory_tier: Arc<dyn IMemoryTier + Send + Sync>,
         dispatcher: Arc<dyn IDispatcher + Send + Sync>,
+        remote_lookup: Arc<dyn IRemoteLookup + Send + Sync>,
         counters: ServiceCounters,
     ) -> Result<Self, String> {
         use opentelemetry_otlp::MetricExporter;
@@ -164,6 +165,30 @@ impl OtelMetrics {
             .with_description("Keys forwarded to a peer that no peer held")
             .with_callback(move |counter| {
                 counter.observe(d.tier_event_stats().remote_lookup_misses, &[]);
+            })
+            .build();
+
+        // Responder-side, the opposite direction from the pair above: what peers cause
+        // THIS node to do. `peer_triggered_promotions` is the cold-serve signal -- how
+        // much of this node's own disk work exists only because peers asked. It is the
+        // instrument for the hypothesis that serving peers is what drives local store
+        // declines, and it replaces a per-key REMOTE_SSD attribution that was withdrawn
+        // for naming something it could not deliver (see dispatcher spec 002).
+        let r = Arc::clone(&remote_lookup);
+        meter
+            .u64_observable_counter("certus.peer_served_keys_total")
+            .with_description("Keys this node served to peers' remote lookups")
+            .with_callback(move |counter| {
+                counter.observe(r.serve_stats().peer_served_keys, &[]);
+            })
+            .build();
+
+        let r = Arc::clone(&remote_lookup);
+        meter
+            .u64_observable_counter("certus.peer_triggered_promotions_total")
+            .with_description("Keys this node read from its own disk to serve a peer")
+            .with_callback(move |counter| {
+                counter.observe(r.serve_stats().peer_triggered_promotions, &[]);
             })
             .build();
 
