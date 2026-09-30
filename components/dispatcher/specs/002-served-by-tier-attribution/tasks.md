@@ -485,21 +485,42 @@ step: an accounting identity that fails by a recognisable quantity names its own
   hardware, twice, under load. Plus a usable control baseline on `dispatcher`: 324 328 hits,
   27.12% SSD share paced / 32.03% unpaced, partition exact in every run.
 
-  **Recommended next actions, and they are no longer T116's:**
-  1. **File the p2p hang as its own defect.** Capture a backtrace of both processes at the
-     stall (`gdb -p`, or `SIGQUIT` for the Rust side) — the stall is reproducible in ~10
-     minutes, which makes it cheap to diagnose.
-  2. **Bound the generator's submit-path wait**, since `--read-timeout-ms` demonstrably does
-     not cover it.
-  3. Note that the `full-p2p` profile did not build at all before today, so this hang was
-     previously unreachable through this server and may be long-standing.
+  **BACKTRACES CAPTURED 2026-09-30, and the diagnosis is NOT a deadlock.** Stall
+  reproduced in 240 s at 13 160 hits (counters frozen 100 s), then `gdb -batch "thread
+  apply all bt"` plus `eu-stack` on the generator and **both** servers. Artifacts in
+  `/tmp/stall/` (generator 9 threads, servers 58 and 59).
 
-  **A caveat I raised twice and now RETRACT: there is no GDRCopy in the p2p data path.** The
-  only `gdr_*` calls in the tree are in one self-skipping test
-  (`gpu-services/tests/gpu_nvme_p2p.rs`); `libgdrapi` is linked unconditionally by
-  `gpu-services/build.rs` with no runtime caller. So `gdrdrv` being unloaded is irrelevant,
-  there is no fallback, and no result here was degraded by it. I inferred a confound from a
-  missing module without checking whether anything used it.
+  | side | state at the stall |
+  |---|---|
+  | generator | **all 8 lane threads** in `recv()` via `Client::submit` → `recv_outcome` → `read_frame`; main thread joining the scope |
+  | server | **31 tokio workers parked** (`multi_thread::worker::Context::park_internal` → `park_condvar`), **8 threads in `crossbeam_channel::recv`** on empty work queues, `shmq_dispatcher::serve::serve` joining its workers, NVMe pollers still spinning in `poll_clients` / `spdk_nvme_qpair_process_completions` |
+
+  **Both sides are idle, each waiting on the other. No thread holds a lock and no thread is
+  mid-operation**, so there is no lock cycle and "deadlock" is the wrong word. The server's
+  work channels are **empty** — it believes it has nothing to do — while the generator
+  believes it has submissions outstanding. That is a **lost request or lost completion**,
+  which is a different class of defect from a deadlock and a different investigation:
+  a lock cycle would show a holder, and there is none.
+
+  Two shapes fit and the stacks do not separate them:
+  1. a submission that was written to the socket but never enqueued onto a work channel, or
+  2. a request that was consumed and completed, but whose reply was never written back.
+
+  The NVMe pollers being alive rules out the storage path having wedged; the parked tokio
+  workers rule out CPU starvation. **The generator is exonerated** — it is blocked exactly
+  where it should be, on a socket read for a reply that is not coming.
+
+  **Recommended next actions, and they are no longer T116's:**
+  1. **File the lost-request/lost-completion defect against the shm-queue path under
+     `dispatcher-p2p`.** It reproduces in **4 minutes**, so instrumenting the enqueue and
+     reply-write sites with counters would separate the two shapes above cheaply — if
+     submissions-received exceeds work-items-enqueued, it is (1); if replies-produced
+     exceeds replies-written, it is (2).
+  2. **Bound the generator's submit-path wait.** `Client::submit` calls `recv_outcome` to
+     reclaim window credits, so a missing reply parks the lane indefinitely regardless of
+     `--read-timeout-ms`. FR-084 fixed how a timeout is *reported*; this is a separate gap.
+  3. The `full-p2p` profile did not build before today, so this is very likely
+     long-standing rather than a regression.
 
 ## Out of scope, decided 2026-09-29
 
