@@ -3,14 +3,19 @@
   "proofs": {
     "Coma": {
       "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.03 },
-      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_candidates_listed_in_eviction_order": {
-        "tactic": "split_vc",
+        "tactic": "compute_specified",
         "children": [
-          { "prover": "alt-ergo", "time": 0.024 },
-          { "prover": "alt-ergo", "time": 0.022 },
-          { "prover": "alt-ergo", "time": 0.03 },
-          null
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.027 },
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.034 },
+              null
+            ]
+          }
         ]
       }
     }

@@ -6,11 +6,8 @@
       "vc_verify_epsl_candidates_empty_domain_returns_empty_list": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.044 },
-          {
-            "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 2.2 } ]
-          }
+          { "prover": "alt-ergo", "time": 0.024 },
+          { "prover": "alt-ergo", "time": 2.4 }
         ]
       }
     }

@@ -4,13 +4,8 @@
     "Coma": {
       "vc_pool_register": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_track_does_not_disturb_other_blocks": {
-        "tactic": "compute_specified",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.024 }, null ]
-          }
-        ]
+        "prover": "alt-ergo",
+        "time": 0.082
       }
     }
   }

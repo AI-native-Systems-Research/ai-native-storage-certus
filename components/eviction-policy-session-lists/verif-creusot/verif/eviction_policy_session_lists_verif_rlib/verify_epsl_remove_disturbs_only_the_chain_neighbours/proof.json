@@ -4,16 +4,8 @@
     "Coma": {
       "vc_pool_remove": { "prover": "alt-ergo", "time": 0.016 },
       "vc_verify_epsl_remove_disturbs_only_the_chain_neighbours": {
-        "tactic": "split_vc",
-        "children": [
-          { "prover": "alt-ergo", "time": 0.02 },
-          {
-            "tactic": "split_vc",
-            "children": [
-              null, { "prover": "alt-ergo", "time": 0.035 }, null
-            ]
-          }
-        ]
+        "prover": "alt-ergo",
+        "time": 0.116
       }
     }
   }

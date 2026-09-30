@@ -4,19 +4,8 @@
     "Coma": {
       "vc_state_batch_touch_n": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_batch_touch_empty_succeeds_without_validation": {
-        "tactic": "split_vc",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [
-              { "prover": "alt-ergo", "time": 0.024 },
-              { "prover": "alt-ergo", "time": 0.025 },
-              { "prover": "alt-ergo", "time": 0.025 },
-              null
-            ]
-          },
-          { "prover": "alt-ergo", "time": 0.028 }
-        ]
+        "prover": "alt-ergo",
+        "time": 0.059
       }
     }
   }

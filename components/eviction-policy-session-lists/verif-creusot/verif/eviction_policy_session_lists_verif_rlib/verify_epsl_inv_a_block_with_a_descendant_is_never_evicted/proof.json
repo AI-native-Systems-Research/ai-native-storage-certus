@@ -6,7 +6,7 @@
       "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_inv_a_block_with_a_descendant_is_never_evicted": {
         "prover": "alt-ergo",
-        "time": 0.124
+        "time": 0.189
       }
     }
   }

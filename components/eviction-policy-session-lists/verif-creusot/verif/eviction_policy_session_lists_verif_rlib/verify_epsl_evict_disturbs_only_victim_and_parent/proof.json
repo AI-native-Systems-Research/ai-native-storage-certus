@@ -2,16 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_evict_disturbs_only_victim_and_parent": {
-        "tactic": "split_vc",
-        "children": [
-          { "prover": "alt-ergo", "time": 0.018 },
-          {
-            "tactic": "split_vc",
-            "children": [ null, { "prover": "alt-ergo", "time": 0.036 } ]
-          }
-        ]
+        "prover": "alt-ergo",
+        "time": 0.061
       }
     }
   }

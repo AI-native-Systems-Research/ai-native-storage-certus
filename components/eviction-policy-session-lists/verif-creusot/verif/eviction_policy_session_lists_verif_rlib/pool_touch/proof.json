@@ -9,7 +9,7 @@
       "vc_leaves_remove": { "prover": "alt-ergo", "time": 0.034 },
       "vc_pool_is_active": { "prover": "alt-ergo", "time": 0.015 },
       "vc_pool_tick": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 3.5 }
+      "vc_pool_touch": { "prover": "alt-ergo", "time": 3.7 }
     }
   }
 }

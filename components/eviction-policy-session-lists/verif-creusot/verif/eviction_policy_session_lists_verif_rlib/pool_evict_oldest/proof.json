@@ -4,7 +4,7 @@
     "Coma": {
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.016 },
       "vc_leaves_first": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.171 },
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.232 },
       "vc_pool_unlink": { "prover": "alt-ergo", "time": 0.017 }
     }
   }

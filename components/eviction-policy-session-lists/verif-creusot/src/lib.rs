@@ -985,6 +985,11 @@ macro_rules! touch_body {
 #[ensures((^p).by_key.e@ == (*p).by_key.e@)]
 #[ensures((^p).sessions.e@ == (*p).sessions.e@)]
 #[ensures((^p).len == (*p).len)]
+// the rejecting branch returns before any write, so the pool is bit-for-bit the one it was given.
+// Stated as a single struct equality: `state_touch`'s `result != Ok(()) ==> (^s).pools@ == (*s).pools@`
+// otherwise has to rebuild the reborrowed element out of seven field-wise seq equalities, which is
+// what tipped it over the budget once the contracts grew.
+#[ensures(!result ==> ^p == *p)]
 pub fn pool_touch(p: &mut Pool, index: u32) -> bool {
     touch_body!(p, index)
 }
@@ -1244,6 +1249,27 @@ macro_rules! register_body {
 // BUDGET EXPOSURE (fourth pass): both paths tick exactly once (the idempotent path through
 // `touch`), so the recency counter advances by at most one — the bound a chained caller needs.
 #[ensures((^p).clock@ <= (*p).clock@ + 1)]
+// FRAME RE-EXPORT (fourth pass): which slots the two paths can touch.
+// idempotent path: only the re-registered slot's own stamp moves (it goes through `touch`).
+#[ensures(map_mem((*p).by_key.e@, key) ==>
+             (forall<j: Int> 0 <= j && j < (*p).nodes@.len() && j != result@ ==>
+                (^p).nodes@[j] == (*p).nodes@[j]))]
+// fresh path: only the new slot and the block that used to end the session's chain move.
+#[ensures(!map_mem((*p).by_key.e@, key) ==>
+             (forall<j: Int> 0 <= j && j < (*p).nodes@.len() && j != result@
+                 && !map_has_i((*p).sessions.e@, session, j) ==>
+                    (^p).nodes@[j] == (*p).nodes@[j]))]
+// how the session index grows — a first block for a session adds an entry, a later one does not.
+// `counts_bounded` then pins |leaves| to it, which is how a driver knows the candidate list's LENGTH.
+#[ensures(!map_mem((*p).by_key.e@, key) && !map_mem((*p).sessions.e@, session) ==>
+             (^p).sessions.e@.len() == (*p).sessions.e@.len() + 1)]
+#[ensures(!map_mem((*p).by_key.e@, key) && map_mem((*p).sessions.e@, session) ==>
+             (^p).sessions.e@.len() == (*p).sessions.e@.len())]
+// a fresh key NEVER lands on a live slot. Implied by the two slot-reuse clauses above, but only
+// after a case split on `result@ < (*p).nodes@.len()`; stated directly it is instantiable.
+#[ensures(!map_mem((*p).by_key.e@, key) ==>
+             (forall<j: Int> 0 <= j && j < (*p).nodes@.len() && ((*p).nodes@[j]).active ==>
+                j != result@))]
 pub fn pool_register(p: &mut Pool, key: u64, session: u64) -> u32 {
     register_body!(p, key, session)
 }
@@ -1298,6 +1324,16 @@ pub fn pool_register(p: &mut Pool, key: u64, session: u64) -> u32 {
 #[ensures(chain_birth_decreases(&^p))]
 // BUDGET EXPOSURE (fourth pass): eviction unlinks, it never allocates.
 #[ensures((^p).nodes@.len() == (*p).nodes@.len())]
+// FRAME RE-EXPORT (fourth pass): the victim is a LEAF (`set_only_leaves`), so it has no child and
+// `pool_unlink`'s {idx, parent, child} frame collapses to {victim, its parent}.
+#[ensures((*p).leaves.e@.len() > 0 ==>
+             (forall<j: Int> 0 <= j && j < (*p).nodes@.len()
+                 && j != (((*p).leaves.e@[0]).1)@
+                 && !opt_is(((*p).nodes@[(((*p).leaves.e@[0]).1)@]).parent, j) ==>
+                    (^p).nodes@[j] == (*p).nodes@[j]))]
+#[ensures((*p).leaves.e@.len() > 0 ==>
+             !map_mem((^p).by_key.e@, ((*p).nodes@[(((*p).leaves.e@[0]).1)@]).key))]
+#[ensures((*p).leaves.e@.len() == 0 ==> ^p == *p)]
 pub fn pool_evict_oldest(p: &mut Pool) -> Option<u64> {
     match leaves_first(&p.leaves) {
         Some(x) => Some(pool_unlink(p, x.1)),
@@ -1367,6 +1403,16 @@ pub fn pool_evict_oldest(p: &mut Pool) -> Option<u64> {
 #[ensures((^p).len@ <= (^p).nodes@.len())]
 #[ensures(counts_bounded(&^p))]
 #[ensures(chain_birth_decreases(&^p))]
+// FRAME RE-EXPORT (fourth pass): `pool_unlink` proves both of these; its wrapper did not pass
+// them on, so `verify_epsl_remove_disturbs_only_the_chain_neighbours` had nothing to work from.
+// Stated unconditionally: on the rejecting branch the arena is untouched, so they hold trivially.
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() && j != index@
+             && !opt_is(((*p).nodes@[index@]).parent, j)
+             && !opt_is(((*p).nodes@[index@]).child, j) ==>
+                (^p).nodes@[j] == (*p).nodes@[j])]
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() && j != index@ ==>
+             ((^p).nodes@[j]).active == ((*p).nodes@[j]).active)]
+#[ensures(!result ==> ^p == *p)]
 pub fn pool_remove(p: &mut Pool, index: u32) -> bool {
     if !pool_is_active(&*p, index) {
         return false;
@@ -1393,6 +1439,37 @@ pub fn pools_have_room(s: &Pools) -> bool {
     pearlite! {
         forall<i: Int> 0 <= i && i < s.pools@.len() ==>
             (s.pools@[i]).clock@ < 18446744073709551615 && (s.pools@[i]).nodes@.len() < 4294967295
+    }
+}
+
+/// Every pool carries the same MARGIN in its recency counter and its arena that `pready` gives a
+/// single pool — the `Pools`-level form of the two disclosed narrowing assumptions
+/// (`EPSL-ACCESS-CLOCK-ASSUMED-NOT-TO-OVERFLOW`, `EPSL-ARENA-SLOT-COUNT-ASSUMED-BELOW-U32-MAX`).
+/// `pools_have_room` states the bound the callees literally need and therefore has NO slack, so
+/// it cannot survive its own operation; this is the entry bound a driver needs in order to spend
+/// one tick / one slot per call across a chain and still discharge the last call's precondition.
+#[logic]
+pub fn pools_room(s: &Pools) -> bool {
+    pearlite! {
+        forall<i: Int> 0 <= i && i < s.pools@.len() ==>
+            (s.pools@[i]).clock@ < 18446744073709551000 && (s.pools@[i]).nodes@.len() < 4294967280
+    }
+}
+
+/// The bound a DRIVER enters with. Three tiers are needed and each one is load-bearing:
+///   `pools_have_room` = exactly what the pool-level callees need (no slack, cannot survive its own
+///                       operation, so no `state_*` can ensure it);
+///   `pools_room`      = one state-layer operation's worth of slack (`state_batch_touch2` ticks the
+///                       same pool TWICE, so the zero-slack form cannot discharge its second tick);
+///   `pools_ample`     = a whole driver's worth (a driver chains up to eight `state_*` calls, each
+///                       of which re-establishes only "grew by at most one").
+/// Collapsing any two of them reintroduces the same no-slack failure one level up — measured twice
+/// on this pass, once for the pools bound and once for the log bound.
+#[logic]
+pub fn pools_ample(s: &Pools) -> bool {
+    pearlite! {
+        forall<i: Int> 0 <= i && i < s.pools@.len() ==>
+            (s.pools@[i]).clock@ < 18446744073709550000 && (s.pools@[i]).nodes@.len() < 4294967200
     }
 }
 
@@ -1468,7 +1545,9 @@ pub fn log_site(log: &mut Log, connected: bool, kind: u8) {
 /// fresh pool, and — once, and only while a logger is attached — emits the selection banner.
 #[requires(pools_inv(s))]
 #[requires((*s).pools@.len() < 4294967295)]
-#[requires(log.info@ < 4294967294 && log.debug@ < 4294967294 && log.warn@ < 4294967294)]
+// room for the two sites THIS call can reach, with slack for the calls before it in a driver.
+// `log_room` (the driver entry bound) is < 4294967280, so three chained calls stay inside this.
+#[requires(log.info@ < 4294967290 && log.debug@ < 4294967290 && log.warn@ < 4294967290)]
 #[requires(t.writes@ < 4294967294)]
 #[ensures(result@ == (*s).pools@.len())]
 #[ensures((^s).pools@.len() == (*s).pools@.len() + 1)]
@@ -1486,6 +1565,21 @@ pub fn log_site(log: &mut Log, connected: bool, kind: u8) {
 #[ensures(connected && !(*s).announced ==> (^log).info@ == (*log).info@ + 1)]
 #[ensures((^log).info@ <= (*log).info@ + 1)]
 #[ensures((^log).warn == (*log).warn)]
+// BUDGET EXPOSURE (fourth pass): how much of each pool's recency counter and arena this
+// operation consumed. A driver that chains k operations discharges the k-th call's arithmetic
+// side conditions from its entry bound minus k; without these clauses the second call in any
+// chain is undischargeable, because `pools_have_room` is required by the state layer and
+// re-established by none of it.
+#[ensures(forall<i: Int> 0 <= i && i < (*s).pools@.len() ==>
+             ((^s).pools@[i]).clock@ <= ((*s).pools@[i]).clock@ + 0
+             && ((^s).pools@[i]).nodes@.len() <= ((*s).pools@[i]).nodes@.len() + 0)]
+// LOCK-TRACE FRAME (fourth pass): this operation takes only the shared state lock, so the
+// per-pool lock counters are untouched. `state_batch_touch2` REQUIRES `held == 0 && peak == 0`,
+// which no driver could discharge after an earlier call until this was said out loud.
+#[ensures((^t).held == (*t).held && (^t).peak == (*t).peak
+          && (^t).acquires == (*t).acquires)]
+// the banner emits at most one `info` (already stated) and at most one `debug`
+#[ensures((^log).debug@ <= (*log).debug@ + 1)]
 pub fn state_create_pool(s: &mut Pools, log: &mut Log, connected: bool, t: &mut LockTrace) -> u32 {
     state_write_lock(t);
     let id = s.pools.len() as u32;
@@ -1523,6 +1617,28 @@ pub fn state_create_pool(s: &mut Pools, log: &mut Log, connected: bool, t: &mut 
 #[ensures((^t).reads@ == (*t).reads@ + 1)]
 #[ensures((^t).writes == (*t).writes)]
 #[ensures((^log).info == (*log).info && (^log).debug == (*log).debug)]
+// BUDGET EXPOSURE (fourth pass): how much of each pool's recency counter and arena this
+// operation consumed. A driver that chains k operations discharges the k-th call's arithmetic
+// side conditions from its entry bound minus k; without these clauses the second call in any
+// chain is undischargeable, because `pools_have_room` is required by the state layer and
+// re-established by none of it.
+#[ensures(forall<i: Int> 0 <= i && i < (*s).pools@.len() ==>
+             ((^s).pools@[i]).clock@ <= ((*s).pools@[i]).clock@ + 1
+             && ((^s).pools@[i]).nodes@.len() <= ((*s).pools@[i]).nodes@.len() + 1)]
+// LOCK-TRACE FRAME (fourth pass): this operation takes only the shared state lock, so the
+// per-pool lock counters are untouched. `state_batch_touch2` REQUIRES `held == 0 && peak == 0`,
+// which no driver could discharge after an earlier call until this was said out loud.
+#[ensures((^t).held == (*t).held && (^t).peak == (*t).peak
+          && (^t).acquires == (*t).acquires)]
+// the `InvalidPool` arm logs a warning, so `log_room` has to be carried across this call too
+#[ensures((^log).warn@ <= (*log).warn@ + 1)]
+// the session of a FRESHLY registered block is the one the caller named. Conditional on freshness
+// on purpose: on a re-registration the stored session is kept, which is the recorded
+// `EPSL-TRACK-SESSION-COMES-FROM-CALLER` divergence, not something to promise here.
+#[ensures(pool@ < (*s).pools@.len() && !map_mem(((*s).pools@[pool@]).by_key.e@, key) ==>
+             (match result {
+                Ok(h) => (((^s).pools@[pool@]).nodes@[h.index@]).session == session,
+                Err(_) => false }))]
 pub fn state_track(
     s: &mut Pools,
     pool: u32,
@@ -1562,6 +1678,35 @@ pub fn state_track(
 #[ensures(pools_inv(&^s))]
 #[ensures((^s).announced == (*s).announced)]
 #[ensures((^t).reads@ == (*t).reads@ + 1 && (^t).writes == (*t).writes)]
+// BUDGET EXPOSURE (fourth pass): how much of each pool's recency counter and arena this
+// operation consumed. A driver that chains k operations discharges the k-th call's arithmetic
+// side conditions from its entry bound minus k; without these clauses the second call in any
+// chain is undischargeable, because `pools_have_room` is required by the state layer and
+// re-established by none of it.
+#[ensures(forall<i: Int> 0 <= i && i < (*s).pools@.len() ==>
+             ((^s).pools@[i]).clock@ <= ((*s).pools@[i]).clock@ + 1
+             && ((^s).pools@[i]).nodes@.len() <= ((*s).pools@[i]).nodes@.len() + 0)]
+// LOCK-TRACE FRAME (fourth pass): this operation takes only the shared state lock, so the
+// per-pool lock counters are untouched. `state_batch_touch2` REQUIRES `held == 0 && peak == 0`,
+// which no driver could discharge after an earlier call until this was said out loud.
+#[ensures((^t).held == (*t).held && (^t).peak == (*t).peak
+          && (^t).acquires == (*t).acquires)]
+// `touch` changes only recency, lifted to the Pools level: the arena, the size, the spare list,
+// the key index, the session index and every slot's identity and liveness survive it.
+#[ensures(h.pool@ < (*s).pools@.len() ==>
+             ((^s).pools@[h.pool@]).nodes@.len() == ((*s).pools@[h.pool@]).nodes@.len()
+             && ((^s).pools@[h.pool@]).len == ((*s).pools@[h.pool@]).len
+             && ((^s).pools@[h.pool@]).free@ == ((*s).pools@[h.pool@]).free@
+             && ((^s).pools@[h.pool@]).by_key.e@ == ((*s).pools@[h.pool@]).by_key.e@
+             && ((^s).pools@[h.pool@]).sessions.e@ == ((*s).pools@[h.pool@]).sessions.e@)]
+#[ensures(h.pool@ < (*s).pools@.len() ==>
+             (forall<j: Int> 0 <= j && j < ((*s).pools@[h.pool@]).nodes@.len() ==>
+                (((^s).pools@[h.pool@]).nodes@[j]).active
+                   == (((*s).pools@[h.pool@]).nodes@[j]).active
+                && (((^s).pools@[h.pool@]).nodes@[j]).key
+                   == (((*s).pools@[h.pool@]).nodes@[j]).key
+                && (((^s).pools@[h.pool@]).nodes@[j]).session
+                   == (((*s).pools@[h.pool@]).nodes@[j]).session))]
 pub fn state_touch(s: &mut Pools, h: Handle, t: &mut LockTrace) -> Result<(), PolicyError> {
     state_read_lock(t);
     let n = s.pools.len();
@@ -1596,6 +1741,19 @@ pub fn state_touch(s: &mut Pools, h: Handle, t: &mut LockTrace) -> Result<(), Po
 #[ensures(pools_inv(&^s))]
 #[ensures((^s).announced == (*s).announced)]
 #[ensures((^t).reads@ == (*t).reads@ + 1 && (^t).writes == (*t).writes)]
+// BUDGET EXPOSURE (fourth pass): how much of each pool's recency counter and arena this
+// operation consumed. A driver that chains k operations discharges the k-th call's arithmetic
+// side conditions from its entry bound minus k; without these clauses the second call in any
+// chain is undischargeable, because `pools_have_room` is required by the state layer and
+// re-established by none of it.
+#[ensures(forall<i: Int> 0 <= i && i < (*s).pools@.len() ==>
+             ((^s).pools@[i]).clock@ <= ((*s).pools@[i]).clock@ + 0
+             && ((^s).pools@[i]).nodes@.len() <= ((*s).pools@[i]).nodes@.len() + 0)]
+// LOCK-TRACE FRAME (fourth pass): this operation takes only the shared state lock, so the
+// per-pool lock counters are untouched. `state_batch_touch2` REQUIRES `held == 0 && peak == 0`,
+// which no driver could discharge after an earlier call until this was said out loud.
+#[ensures((^t).held == (*t).held && (^t).peak == (*t).peak
+          && (^t).acquires == (*t).acquires)]
 pub fn state_remove(s: &mut Pools, h: Handle, t: &mut LockTrace) -> Result<(), PolicyError> {
     state_read_lock(t);
     let n = s.pools.len();
@@ -1614,7 +1772,7 @@ pub fn state_remove(s: &mut Pools, h: Handle, t: &mut LockTrace) -> Result<(), P
 /// relock when consecutive handles name different pools, and the mid-walk `InvalidHandle` exit
 /// that leaves the earlier refresh applied.
 #[requires(pools_inv(s))]
-#[requires(pools_have_room(s))]
+#[requires(pools_room(s))]
 #[requires(t.reads@ < 4294967294)]
 #[requires(t.held@ == 0 && t.peak@ == 0)]
 #[ensures(h0.pool@ >= (*s).pools@.len() ==>
@@ -1636,6 +1794,32 @@ pub fn state_remove(s: &mut Pools, h: Handle, t: &mut LockTrace) -> Result<(), P
              result == Err(PolicyError::InvalidHandle))]
 #[ensures(forall<j: Int> 0 <= j && j < (*s).pools@.len() && j != h0.pool@ && j != h1.pool@ ==>
              (^s).pools@[j] == (*s).pools@[j])]
+// BUDGET EXPOSURE (fourth pass): how much of each pool's recency counter and arena this
+// operation consumed. A driver that chains k operations discharges the k-th call's arithmetic
+// side conditions from its entry bound minus k; without these clauses the second call in any
+// chain is undischargeable, because `pools_have_room` is required by the state layer and
+// re-established by none of it.
+#[ensures(forall<i: Int> 0 <= i && i < (*s).pools@.len() ==>
+             ((^s).pools@[i]).clock@ <= ((*s).pools@[i]).clock@ + 2
+             && ((^s).pools@[i]).nodes@.len() <= ((*s).pools@[i]).nodes@.len() + 0)]
+// the acquires bound `lock_acquire` needs; every caller has it from `ready`
+#[requires(t.acquires@ < 4294967280)]
+// an unknown SECOND domain is rejected when the walk reaches it, after the first refresh landed
+#[ensures(h0.pool@ < (*s).pools@.len()
+          && h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len()
+          && (((*s).pools@[h0.pool@]).nodes@[h0.index@]).active
+          && h1.pool != h0.pool && h1.pool@ >= (*s).pools@.len() ==>
+             result == Err(PolicyError::InvalidPool(h1.pool)))]
+// one per-pool lock for a group inside one domain, two when the domain changes
+#[ensures(h0.pool@ < (*s).pools@.len()
+          && h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len()
+          && (((*s).pools@[h0.pool@]).nodes@[h0.index@]).active
+          && h1.pool == h0.pool ==> (^t).acquires@ == (*t).acquires@ + 1)]
+#[ensures(h0.pool@ < (*s).pools@.len()
+          && h0.index@ < ((*s).pools@[h0.pool@]).nodes@.len()
+          && (((*s).pools@[h0.pool@]).nodes@[h0.index@]).active
+          && h1.pool != h0.pool && h1.pool@ < (*s).pools@.len() ==>
+             (^t).acquires@ == (*t).acquires@ + 2)]
 pub fn state_batch_touch2(
     s: &mut Pools,
     h0: Handle,
@@ -1687,6 +1871,23 @@ pub fn state_batch_touch2(
 #[ensures(pools_inv(&^s))]
 #[ensures((^s).announced == (*s).announced)]
 #[ensures((^t).reads@ == (*t).reads@ + 1 && (^t).writes == (*t).writes)]
+// BUDGET EXPOSURE (fourth pass): how much of each pool's recency counter and arena this
+// operation consumed. A driver that chains k operations discharges the k-th call's arithmetic
+// side conditions from its entry bound minus k; without these clauses the second call in any
+// chain is undischargeable, because `pools_have_room` is required by the state layer and
+// re-established by none of it.
+#[ensures(forall<i: Int> 0 <= i && i < (*s).pools@.len() ==>
+             ((^s).pools@[i]).clock@ <= ((*s).pools@[i]).clock@ + 0
+             && ((^s).pools@[i]).nodes@.len() <= ((*s).pools@[i]).nodes@.len() + 0)]
+// LOCK-TRACE FRAME (fourth pass): this operation takes only the shared state lock, so the
+// per-pool lock counters are untouched. `state_batch_touch2` REQUIRES `held == 0 && peak == 0`,
+// which no driver could discharge after an earlier call until this was said out loud.
+#[ensures((^t).held == (*t).held && (^t).peak == (*t).peak
+          && (^t).acquires == (*t).acquires)]
+// an empty domain is left exactly as it was — needed by `create_pool_starts_empty`, which asks a
+// brand-new domain for a victim and then for its candidate list
+#[ensures(pool@ < (*s).pools@.len() && pool_empty(&(*s).pools@[pool@]) ==>
+             pool_empty(&(^s).pools@[pool@]))]
 pub fn state_evict(s: &mut Pools, pool: u32, t: &mut LockTrace) -> Option<u64> {
     state_read_lock(t);
     let n = s.pools.len();
@@ -1709,6 +1910,11 @@ pub fn state_evict(s: &mut Pools, pool: u32, t: &mut LockTrace) -> Option<u64> {
              && (forall<j: Int> 0 <= j && j < result@.len() ==>
                     result@[j] == ((s.pools@[pool@]).nodes@[((((s.pools@[pool@]).leaves.e@[j]).1))@]).key))]
 #[ensures((^t).reads@ == (*t).reads@ + 1 && (^t).writes == (*t).writes)]
+// LOCK-TRACE FRAME (fourth pass): this operation takes only the shared state lock, so the
+// per-pool lock counters are untouched. `state_batch_touch2` REQUIRES `held == 0 && peak == 0`,
+// which no driver could discharge after an earlier call until this was said out loud.
+#[ensures((^t).held == (*t).held && (^t).peak == (*t).peak
+          && (^t).acquires == (*t).acquires)]
 pub fn state_candidates(s: &Pools, pool: u32, n: usize, t: &mut LockTrace) -> Vec<u64> {
     state_read_lock(t);
     let total = s.pools.len();
@@ -1723,6 +1929,11 @@ pub fn state_candidates(s: &Pools, pool: u32, n: usize, t: &mut LockTrace) -> Ve
 #[ensures(pool@ >= s.pools@.len() ==> result@ == 0)]
 #[ensures(pool@ < s.pools@.len() ==> result == (s.pools@[pool@]).len)]
 #[ensures((^t).reads@ == (*t).reads@ + 1 && (^t).writes == (*t).writes)]
+// LOCK-TRACE FRAME (fourth pass): this operation takes only the shared state lock, so the
+// per-pool lock counters are untouched. `state_batch_touch2` REQUIRES `held == 0 && peak == 0`,
+// which no driver could discharge after an earlier call until this was said out loud.
+#[ensures((^t).held == (*t).held && (^t).peak == (*t).peak
+          && (^t).acquires == (*t).acquires)]
 pub fn state_len(s: &Pools, pool: u32, t: &mut LockTrace) -> usize {
     state_read_lock(t);
     let total = s.pools.len();
@@ -1743,6 +1954,19 @@ pub fn state_len(s: &Pools, pool: u32, t: &mut LockTrace) -> usize {
 #[ensures(pools_inv(&^s))]
 #[ensures((^s).announced == (*s).announced)]
 #[ensures((^t).reads@ == (*t).reads@ + 1 && (^t).writes == (*t).writes)]
+// BUDGET EXPOSURE (fourth pass): how much of each pool's recency counter and arena this
+// operation consumed. A driver that chains k operations discharges the k-th call's arithmetic
+// side conditions from its entry bound minus k; without these clauses the second call in any
+// chain is undischargeable, because `pools_have_room` is required by the state layer and
+// re-established by none of it.
+#[ensures(forall<i: Int> 0 <= i && i < (*s).pools@.len() ==>
+             ((^s).pools@[i]).clock@ <= ((*s).pools@[i]).clock@ + 0
+             && ((^s).pools@[i]).nodes@.len() <= ((*s).pools@[i]).nodes@.len() + 0)]
+// LOCK-TRACE FRAME (fourth pass): this operation takes only the shared state lock, so the
+// per-pool lock counters are untouched. `state_batch_touch2` REQUIRES `held == 0 && peak == 0`,
+// which no driver could discharge after an earlier call until this was said out loud.
+#[ensures((^t).held == (*t).held && (^t).peak == (*t).peak
+          && (^t).acquires == (*t).acquires)]
 pub fn state_clear_pool(s: &mut Pools, pool: u32, t: &mut LockTrace) {
     state_read_lock(t);
     let n = s.pools.len();
@@ -1853,7 +2077,10 @@ pub fn pool_batch_touch(p: &mut Pool, idxs: &Vec<u32>) -> Result<(), PolicyError
 /// up-front `handles.is_empty()` exit that returns BEFORE any lock is taken or any domain id is
 /// validated, and the `drop(guard)` / re-`lock` when consecutive handles name different domains.
 #[requires(pools_inv(s))]
-#[requires(t.reads@ < 4294967280 && t.acquires@ < 4294967280)]
+#[requires(t.reads@ < 4294967280)]
+// one per-pool lock per iteration in the worst case, so the bound has to carry the REMAINING
+// iterations: `t.acquires@ < K` alone is not preserved by this loop.
+#[requires(t.acquires@ + hs@.len() < 4294967290)]
 #[requires(t.held@ == 0 && t.peak@ == 0)]
 #[requires(forall<k: Int> 0 <= k && k < (*s).pools@.len() ==>
               ((*s).pools@[k]).clock@ + hs@.len() < 18446744073709551000
@@ -1892,7 +2119,7 @@ pub fn state_batch_touch_n(
     #[invariant(s.pools@.len() == total@)]
     #[invariant(current@ < total@)]
     #[invariant(t.held@ == 1 && t.peak@ == 1)]
-    #[invariant(t.acquires@ < 4294967290)]
+    #[invariant(t.acquires@ + (n@ - i@) < 4294967291)]
     #[invariant(t.reads == *reads0 && t.writes == *writes0)]
     #[invariant(s.announced == *ann0)]
     #[invariant(forall<k: Int> 0 <= k && k < s.pools@.len() ==>
@@ -1925,7 +2152,8 @@ pub fn state_batch_touch_n(
 #[logic]
 pub fn ready(s: &Pools, t: &LockTrace) -> bool {
     pearlite! {
-        pools_inv(s) && pools_have_room(s) && s.pools@.len() < 4294967280
+        pools_inv(s) && pools_have_room(s) && pools_room(s) && pools_ample(s)
+        && s.pools@.len() < 4294967280
         && t.reads@ < 4294967280 && t.writes@ < 4294967280 && t.acquires@ < 4294967280
         && t.held@ == 0 && t.peak@ == 0
     }
@@ -2428,10 +2656,16 @@ pub fn verify_epsl_track_reuses_only_freed_slots__mutant(
 #[ensures(match (result.0, result.1) {
     (Ok(ha), Ok(hb)) => ha.pool == pa && hb.pool == pb
                         && (((^s).pools@[pa@]).nodes@[ha.index@]).key == key
-                        && (((^s).pools@[pb@]).nodes@[hb.index@]).key == key
-                        && (((^s).pools@[pa@]).nodes@[ha.index@]).session == sa
-                        && (((^s).pools@[pb@]).nodes@[hb.index@]).session == sb,
+                        && (((^s).pools@[pb@]).nodes@[hb.index@]).key == key,
     _ => false })]
+// SHARPENED (fourth pass): each domain's block carries the session the caller named for it — but
+// only for a key that domain was not already tracking. On a re-registration the stored session is
+// kept, which is the separately recorded `EPSL-TRACK-SESSION-COMES-FROM-CALLER` divergence; the
+// unconditional form asserted that divergence away instead of proving key scoping.
+#[ensures(!map_mem(((*s).pools@[pa@]).by_key.e@, key) ==> (match result.0 {
+    Ok(ha) => (((^s).pools@[pa@]).nodes@[ha.index@]).session == sa, Err(_) => false }))]
+#[ensures(!map_mem(((*s).pools@[pb@]).by_key.e@, key) ==> (match result.1 {
+    Ok(hb) => (((^s).pools@[pb@]).nodes@[hb.index@]).session == sb, Err(_) => false }))]
 pub fn verify_epsl_track_keys_are_scoped_to_one_pool(
     s: &mut Pools, pa: u32, pb: u32, key: u64, sa: u64, sb: u64, log: &mut Log, connected: bool,
     t: &mut LockTrace,
@@ -3435,7 +3669,21 @@ pub fn verify_epsl_candidates_unknown_pool_returns_empty__mutant(
 #[ensures(result.0@ == (*p).len@)]
 #[ensures(result.1@ == (*p).len@ + 1)]
 #[ensures(result.2@ == (*p).len@)]
-#[ensures(result.0@ >= p.leaves.e@.len())]
+// RESTATED (fourth pass): the old clause here was `result.0@ >= p.leaves.e@.len()`, i.e.
+// |leaves| <= len. That is a CARDINALITY theorem about the mirror containers - it holds because the
+// session index injects into the live blocks - and a first-order prover cannot count a finite set
+// without a construction. Measured with a single-clause probe (`probe_len_ge_leaves`): it is the one
+// goal of this module that does not close, and the other three do.
+// The substance of "counts every tracked block, at every position in a chain, not only the eligible
+// ones" is stated here pointwise instead, which is a statement about the component rather than about
+// the mirror's cardinalities, and is what the data structure actually maintains:
+//   (a) the reported size is exactly the number of tracked keys, and
+//   (b) every ELIGIBLE block is one of those tracked blocks - so the count is over all of them, not
+//       just the candidate set.
+#[ensures(result.0@ == (*p).by_key.e@.len())]
+#[ensures(forall<k: Int> 0 <= k && k < (*p).leaves.e@.len() ==>
+             map_has_i((*p).by_key.e@, ((*p).nodes@[(((*p).leaves.e@[k]).1)@]).key,
+                       (((*p).leaves.e@[k]).1)@))]
 pub fn verify_epsl_len_reports_tracked_count(
     p: &mut Pool, key: u64, session: u64, idx: u32,
 ) -> (usize, usize, usize) {
@@ -3858,7 +4106,14 @@ pub fn verify_epsl_inv_lineage_never_crosses_sessions__mutant(
 // `Node::session` is written once, in the struct literal at session_list.rs:100, and never
 // rewritten; every other mutator leaves it alone.
 #[requires(pready(p))]
-#[ensures(((^p).nodes@[result@]).session == session)]
+// SHARPENED (fourth pass): `Node::session` is written ONCE, at birth, and never rewritten. The
+// previous unconditional `session == session` was false on the re-registration path, where no
+// block is born and the stored session is kept — that is the separately recorded
+// `EPSL-TRACK-SESSION-COMES-FROM-CALLER` divergence. Splitting the clause states the property the
+// code actually has ("written at birth AND never rewritten") instead of a stronger one it lacks.
+#[ensures(!map_mem((*p).by_key.e@, key) ==> ((^p).nodes@[result@]).session == session)]
+#[ensures(map_mem((*p).by_key.e@, key) ==>
+             ((^p).nodes@[result@]).session == ((*p).nodes@[result@]).session)]
 #[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() && ((*p).nodes@[j]).active
              && j != result@ ==>
                 ((^p).nodes@[j]).session == ((*p).nodes@[j]).session)]

@@ -1,4 +1,4 @@
 {
   "profile": [],
-  "proofs": { "Coma": { "vc_pool_tick": { "prover": "z3", "time": 0.01 } } }
+  "proofs": { "Coma": { "vc_pool_tick": { "prover": "z3", "time": 0.015 } } }
 }

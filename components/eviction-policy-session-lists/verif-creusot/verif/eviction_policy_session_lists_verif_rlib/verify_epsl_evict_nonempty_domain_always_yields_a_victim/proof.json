@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_evict_nonempty_domain_always_yields_a_victim": {
         "prover": "alt-ergo",
-        "time": 0.093
+        "time": 0.057
       }
     }
   }

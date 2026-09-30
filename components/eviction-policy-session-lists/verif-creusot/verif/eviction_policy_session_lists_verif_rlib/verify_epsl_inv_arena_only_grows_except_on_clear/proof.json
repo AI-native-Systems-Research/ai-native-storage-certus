@@ -8,7 +8,7 @@
       "vc_pool_touch": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_inv_arena_only_grows_except_on_clear": {
         "prover": "z3",
-        "time": 0.124
+        "time": 0.065
       }
     }
   }

@@ -2,15 +2,15 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.028 },
       "vc_index_Vec_tup2_u64_u32_Global": {
         "prover": "alt-ergo",
-        "time": 0.016
+        "time": 0.02
       },
       "vc_len_tup2_u64_u32": { "prover": "alt-ergo", "time": 0.015 },
       "vc_new_u64": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.061 },
-      "vc_push_u64": { "prover": "alt-ergo", "time": 0.016 }
+      "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.069 },
+      "vc_push_u64": { "prover": "alt-ergo", "time": 0.028 }
     }
   }
 }

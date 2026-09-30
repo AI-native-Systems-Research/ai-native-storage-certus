@@ -5,7 +5,7 @@
       "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.03 },
       "vc_verify_epsl_candidates_never_more_than_asked": {
         "prover": "alt-ergo",
-        "time": 0.04
+        "time": 0.027
       }
     }
   }

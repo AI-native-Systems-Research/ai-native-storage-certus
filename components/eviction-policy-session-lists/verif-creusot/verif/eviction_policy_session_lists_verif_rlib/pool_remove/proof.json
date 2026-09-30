@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_pool_is_active": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.248 },
+      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.283 },
       "vc_pool_unlink": { "prover": "alt-ergo", "time": 0.017 }
     }
   }

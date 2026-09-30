@@ -3,21 +3,12 @@
   "proofs": {
     "Coma": {
       "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_pool_register": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_inv_no_live_link_points_at_an_empty_slot": {
-        "tactic": "split_vc",
-        "children": [
-          { "prover": "alt-ergo", "time": 0.025 },
-          {
-            "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.038 }, null ]
-          },
-          { "prover": "alt-ergo", "time": 0.054 },
-          { "prover": "alt-ergo", "time": 0.071 },
-          { "prover": "alt-ergo", "time": 0.058 }
-        ]
+        "prover": "z3",
+        "time": 0.062
       }
     }
   }

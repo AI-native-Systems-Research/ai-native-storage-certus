@@ -4,9 +4,9 @@
     "Coma": {
       "vc_index_mut_Vec_Pool_Global": { "prover": "alt-ergo", "time": 0.017 },
       "vc_len_Pool": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_pool_touch": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_pool_remove": { "prover": "alt-ergo", "time": 0.017 },
       "vc_state_read_lock": { "prover": "alt-ergo", "time": 0.017 },
-      "vc_state_touch": { "prover": "z3", "time": 7.0 }
+      "vc_state_remove": { "prover": "z3", "time": 0.611 }
     }
   }
 }

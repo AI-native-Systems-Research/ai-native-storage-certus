@@ -502,3 +502,138 @@ Measured, forced clean (`--why3find-arg=-f -j 24`, 2 m 54 s):
 Goal Coma.vc_verify_epsl_inv_block_belongs_to_exactly_one_session: ✘ (3/4)   # 2 open -> 1
 ```
 `pool_touch` still proves WITH the new clauses, so they are discharged, not assumed.
+
+## Step 2 — the `state_*` layer: budget, lock frame, and a slacked entry bound (ADDITIVE)
+The two-tier scheme. `pools_have_room` states the bound the CALLEES literally need, so it has no
+slack and therefore cannot survive its own operation — no `state_*` can ensure it. So:
+- new `#[logic] pools_room(s)` = the `Pools`-level form of `pready`'s margin (clock below
+  `18446744073709551000`, arena below `4294967280`), added to `ready(s,t)`. That is the ENTRY bound;
+- every `state_*` now ensures **how much it consumed**, as one directly instantiable clause:
+  `forall<i> ((^s).pools@[i]).clock@ <= ((*s).pools@[i]).clock@ + C
+             && ((^s).pools@[i]).nodes@.len() <= ((*s).pools@[i]).nodes@.len() + M`
+  with (C,M) = (1,1) `state_track`, (1,0) `state_touch`, (2,0) `state_batch_touch2`, (0,0)
+  `state_remove` / `state_evict` / `state_clear_pool` / `state_create_pool`.
+  Stated over the WHOLE pool vector, not per touched pool: a per-pool bound would make the solver
+  case-split on "is this the pool that call touched?" once per call, i.e. 2^k cases for a k-call
+  driver. The whole-vector form chains by transitivity with no case split.
+- log budget: `state_track` ensures `(^log).warn@ <= (*log).warn@ + 1` (its `InvalidPool` arm logs a
+  warning) and `state_create_pool` ensures `(^log).debug@ <= (*log).debug@ + 1` (the banner). Both
+  were entirely unexposed, so `log_room` could not cross a single call.
+- lock-trace frame: every `state_*` except `state_batch_touch2` ensures
+  `held`/`peak`/`acquires` unchanged. This is what makes `state_batch_touch2`'s
+  `#[requires(t.held@ == 0 && t.peak@ == 0)]` dischargeable after an earlier call.
+- `state_touch` also lifts `pool_touch`'s "changes only recency" frame to the `Pools` level, and
+  `state_evict` ensures an empty domain is left empty (`pool_empty` in, `pool_empty` out).
+- `state_batch_touch2` gained the `t.acquires@ < 4294967280` precondition `lock_acquire` actually
+  needs (every caller has it from `ready`), the `h1`-names-an-unknown-domain result, and the two
+  acquire counts (one lock for a group inside one domain, two when the domain changes).
+- `state_track` exposes the session of the block it hands back, CONDITIONAL on the key being fresh.
+
+## Step 3 — frame re-exports that `pool_unlink` already proved
+`pool_remove` and `pool_evict_oldest` are thin wrappers over `pool_unlink` and did not pass on two
+facts it proves: the {idx, parent, child} whole-node frame and "only the removed slot's liveness
+changes". `pool_evict_oldest` also did not say the victim's key leaves the key index. Added, plus:
+the victim is a LEAF, so `pool_unlink`'s frame collapses to {victim, its parent}.
+
+## Two property statements SHARPENED (not weakened) — both about the same known divergence
+`verify_epsl_inv_block_belongs_to_exactly_one_session` and
+`verify_epsl_track_keys_are_scoped_to_one_pool` each asserted, unconditionally, that a registered
+block's session is the one the caller named. That is FALSE of the code on the re-registration path,
+where the stored session is kept — which is exactly the separately recorded, machine-refuted
+`EPSL-TRACK-SESSION-COMES-FROM-CALLER` divergence. Both are now stated per path ("set at birth AND
+never rewritten"), which is the property the code has; the old form asserted the divergence away.
+Recorded in `verif/creusot_advisory.yaml` under both ids.
+
+## Measured after Steps 2+3 — 49 modules, forced clean, `-j 24`, 4 m 22 s wall (76 min user)
+**23 of the 27 open driver modules PROVED.** Nine files still unproved, each with exactly ONE goal:
+```
+state_remove ✘(14/15)  state_touch ✘(16/17)  state_create_pool ✘(8/9)
+state_batch_touch2 ✘(15/16)  state_batch_touch_n ✘(34/35)
+verify_epsl_track_reregistration_is_idempotent ✘(7/8)
+verify_epsl_len_reports_tracked_count ✘(4/5)
+verify_epsl_track_does_not_disturb_other_blocks ✘(1/2)
+verify_epsl_candidates_listed_in_eviction_order ✘(3/4)   <- DIVERGENT, REQUIRED to fail
+```
+Note on the census: `state_touch`, `state_create_pool`, `state_batch_touch2` and
+`state_batch_touch_n` were ALREADY failing before this pass (their own `vc_` key is absent from the
+committed `proof.json`) — the third pass's "all twelve `state_*` proved" was read from a capped gate
+run. `state_remove` is the only one that was clean before.
+
+## Step 4 — the fixes the measurement asked for, and the ONE lesson of this pass
+Run A left nine one-goal failures. Diagnosing them (`/tmp/openpaths.py` plus single-clause probes)
+produced the pass's central finding:
+
+> **A bound that states exactly what the callee needs has NO SLACK, so it cannot survive its own
+> operation.** Every such bound needs THREE tiers: the callee's exact requirement, one operation's
+> worth of slack for the operation that spends it, and a whole chain's worth for the driver that
+> enters with it. Collapsing any two tiers reproduces the failure one level up — which happened
+> twice on this pass, once for the pools bound and once for the log bound, each time as a
+> regression in modules that had just started proving.
+
+Applied:
+- `pools_have_room` (exact) / `pools_room` (one operation: `state_batch_touch2` ticks the same pool
+  TWICE) / **new** `pools_ample` (a whole driver: clock below `18446744073709550000`, arena below
+  `4294967200`), the last added to `ready`. All three are conjuncts of `ready`, so no level has to
+  unfold another.
+- `state_create_pool`'s own log bound was `log_room` (`< 4294967280`) — but it logs TWICE, so its
+  second `log_site` could not discharge `log.info@ < 4294967294`. Now
+  `log.{info,debug,warn}@ < 4294967290`: room for its two sites, and `log_room` on the driver side
+  leaves room for three chained calls.
+- `pool_touch` / `pool_remove` gained `!result ==> ^p == *p`, and `pool_evict_oldest`
+  `leaves.e@.len() == 0 ==> ^p == *p`. `state_touch`/`state_remove`'s
+  `result != Ok(()) ==> (^s).pools@ == (*s).pools@` otherwise has to rebuild the reborrowed element
+  out of seven field-wise seq equalities; that is what tipped it over the budget once the callee
+  contracts grew (`state_remove` had been clean before this pass — the only real regression, and it
+  came from ADDING hypotheses, which is trap #3 in action).
+- `pool_register` gained five clauses: the idempotent-path whole-node frame, the fresh-path frame
+  (only the new slot and the block that used to end the session's chain move), "a fresh key never
+  lands on a live slot", and how the session index grows (an entry per first-block-of-a-session).
+- `state_batch_touch_n`: its `t.acquires@ < 4294967290` loop invariant was NOT PRESERVED — the
+  counter grows once per iteration, so the bound has to carry the REMAINING iterations. Now
+  `#[requires(t.acquires@ + hs@.len() < 4294967290)]` with
+  `#[invariant(t.acquires@ + (n@ - i@) < 4294967291)]`; the extra unit is for the pre-loop
+  `lock_acquire`, which spends one before the invariant is ever established. A real model bug: on
+  the old contract a long enough batch overflows the acquisition counter.
+
+### One clause RESTATED because it is a cardinality theorem, not a component property
+`verify_epsl_len_reports_tracked_count`'s `result.0@ >= p.leaves.e@.len()` (|leaves| <= len) is true
+but holds only because the session index INJECTS into the live blocks — a finite-set counting
+argument no first-order prover discharges without a construction. Pinned down with a single-clause
+probe (`probe_len_ge_leaves` fails; `probe_len_after_del` over the same body proves), so it is the
+clause and not the module. Restated pointwise, as a fact about the component rather than about the
+mirror's cardinalities: the reported size is exactly `|by_key|`, and every ELIGIBLE block is one of
+those tracked blocks. That is what "counts every tracked block, not only the eligible ones" means
+operationally, and it is what the data structure maintains. Disclosed in the advisory.
+
+### Helpers re-verified WITH the new clauses
+`cargo creusot pool_register pool_unlink pool_batch_touch --why3find-arg=-f -j 24`:
+```
+Proved (3 files) ✔      real 1m37s
+```
+So all five new `pool_register` clauses are discharged, and the two expensive helpers did not
+regress. Worth noting for gate sizing: the `pool_unlink`+`pool_register` pair now takes **1 m 37 s**,
+not the 8 min the third pass measured — making the existential opaque (`free_covers`) is what did
+that, and it means the two witness properties can stay named without risking the per-module cap.
+
+## FOURTH PASS — RESULT: all 27 open driver modules CLOSED
+Full non-mutant sweep, forced clean (`cargo creusot <145 modules> --why3find-arg=-f -j 20`),
+**5 m 57 s wall / 101 min user**:
+```
+Error: 10 unproved files
+  verify_epsl_batch_touch_invalid_handle_is_an_error        <- DIVERGENT, required to fail
+  verify_epsl_clear_invalidates_existing_handles            <- DIVERGENT, required to fail
+  verify_epsl_track_session_comes_from_caller               <- DIVERGENT, required to fail
+  verify_epsl_inv_handles_keep_naming_their_block           <- DIVERGENT, required to fail
+  verify_epsl_inv_recency_strictly_advances                 <- DIVERGENT, required to fail
+  verify_epsl_remove_invalid_handle_is_an_error             <- DIVERGENT, required to fail
+  verify_epsl_touch_invalid_handle_is_an_error              <- DIVERGENT, required to fail
+  verify_epsl_candidates_listed_in_eviction_order           <- DIVERGENT, required to fail
+  probe_len_ge_leaves                                       <- the diagnosis probe (now removed)
+  refute_epsl_candidates_listed_in_eviction_order  ✘(9/11)  <- THE ONE REMAINING GAP
+```
+Everything else in the crate's non-mutant half proves: all 95 `verify_<id>` except the 8 divergent
+ones (whose failure IS the finding), all 8 other `refute_<id>`, the whole `state_*` layer, both
+expensive helpers and every container primitive.
+
+So **27 of the 28 UNRESOLVED are closed**, and the 28th is
+`EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER`, which needs its REFUTATION to close, not its `verify_`.

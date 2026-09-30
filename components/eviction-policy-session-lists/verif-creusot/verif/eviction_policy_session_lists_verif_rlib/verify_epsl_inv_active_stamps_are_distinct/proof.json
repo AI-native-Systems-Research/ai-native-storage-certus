@@ -6,7 +6,7 @@
       "vc_pool_touch": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_inv_active_stamps_are_distinct": {
         "prover": "alt-ergo",
-        "time": 0.113
+        "time": 0.122
       }
     }
   }
