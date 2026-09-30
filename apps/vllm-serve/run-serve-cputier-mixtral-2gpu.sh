@@ -47,8 +47,9 @@
 #                         (default /mnt/certus1/kv-fs-tier). FS_TIER=0 = CPU-only.
 #   The base sizes the container /dev/shm to CPU_BYTES + 4G for the tier mmap.
 #
-# Prereqs: the certus-offload-bench-fix026 image in the DEFAULT podman store
-# (build_026.sh), both A100s free, enough host RAM for the CPU tier, and the
+# Prereqs: the certus-offload-fix026 image in the DEFAULT podman store
+# (build_cputier_container.sh), both A100s free, enough host RAM for the CPU
+# tier, and the
 # Mixtral FP8 checkpoint reachable (HF cache on /mnt/certus1). Unlike the shmq
 # server there is NO external certus-server and NO mailbox — cputier is
 # self-contained. Pair with the text guidellm driver once the server is up.

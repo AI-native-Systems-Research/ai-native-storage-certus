@@ -1,5 +1,5 @@
 #!/bin/bash
-# NoOffload + Prometheus — GPU-only baseline (unified image certus-offload-bench,
+# NoOffload + Prometheus — GPU-only baseline (unified image certus-offload,
 # OFFLOAD_MODE=none) with the bench's vLLM engine exposing Prometheus metrics on
 # port 8000.
 #
@@ -14,7 +14,7 @@
 #   PROM_PORT=9100 NUM_CONVS=100 ./run-docker-none-prom.sh
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
-IMAGE="${IMAGE:-certus-offload-bench}"
+IMAGE="${IMAGE:-certus-offload}"
 LOG="${LOG:-${SCRIPT_DIR}/nooffload_prom_$(stamp).log}"
 DRIVER="${DRIVER:-${SCRIPT_DIR}/run_multiturn_offloading.py}"
 

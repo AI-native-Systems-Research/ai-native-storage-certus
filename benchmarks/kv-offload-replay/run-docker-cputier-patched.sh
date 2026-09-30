@@ -1,6 +1,6 @@
 #!/bin/bash
 # CPU+FS-spill tiered KV-offload — PATCHED arm. SAME as run-docker-cputier.sh,
-# but runs certus-offload-bench-fix026: the image built from Dockerfile.offload
+# but runs certus-offload-fix026: the image built from Dockerfile.offload
 # with --build-arg VLLM_FIX_TIERING=1, which BAKES IN the fork tiering fix
 # (fix/tiering-deferred-finalize-v0.26.0 @5e20aeb5) over vLLM 0.26.0. Used to
 # validate that the fix eliminates the tiering _req_state KeyError /
@@ -10,7 +10,7 @@
 # there is NO runtime bind-mount of the patched sources — the only difference
 # from the as-shipped arm is which image tag is run, so any change in
 # reliability/throughput is attributable to the patch alone. Build both tags
-# with build_026.sh.
+# with build_cputier_container.sh (FIX_TIERING=0 stock, FIX_TIERING=1 patched).
 # Data-parallel fan-out (shared-server DP's cputier counterpart). cputier
 # replicas are fully independent — each is its own vLLM engine + isolated CPU/fs
 # tier — so DP is just N concurrent containers on N GPUs, each replaying a
@@ -43,7 +43,7 @@ fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
-IMAGE="${IMAGE:-certus-offload-bench-fix026}"
+IMAGE="${IMAGE:-certus-offload-fix026}"
 CPU_BYTES="${CPU_BYTES:-$((8 * (1 << 30)))}"
 # Under TP>1 each of the N in-container workers allocates its own CPU-tier region
 # in /dev/shm, so the shm mount must hold N copies (+headroom) or the entrypoint's

@@ -120,8 +120,11 @@ else
     (( CERTUS_HUGEPAGES < 0 )) && CERTUS_HUGEPAGES=0
 fi
 
-# Built native module whose allocation path must include SPDK hugepage support.
-CERTUS_NATIVE_SO="certus-connector/certus_native/certus_native.cpython-312-x86_64-linux-gnu.so"
+# Built certus-server binary whose allocation path must include SPDK hugepage
+# support (it links `memory-tier`, which only emits the hugepage alloc path when
+# built with --features spdk). The SHMQ backend runs this server, not a Python
+# native module. Both binary names are checked; the first present wins.
+CERTUS_SERVER_BINS=("target/release/certus-server-yaml" "target/release/certus-server")
 
 # Memory limiting method:
 #   kernel  — boot-param cap via mem=/memmap= (default on this host; needs reboot
@@ -476,23 +479,27 @@ show_status() {
     # OOMs it; stale SPDK locks / orphaned GPU procs block startup.
     header "Certus build & sizing"
 
-    # 1. Native module built with the SPDK hugepage allocation path.
+    # 1. certus-server binary built with the SPDK hugepage allocation path.
     # NB: use grep -c (not grep -q) — with `set -o pipefail`, grep -q exits on
     # first match and SIGPIPEs `strings`, making the pipeline return nonzero and
     # falsely failing the check.
-    local so_path="$SCRIPT_DIR/../$CERTUS_NATIVE_SO"
-    if [[ -f "$so_path" ]]; then
+    local server_bin=""
+    local rel
+    for rel in "${CERTUS_SERVER_BINS[@]}"; do
+        if [[ -f "$SCRIPT_DIR/../$rel" ]]; then server_bin="$SCRIPT_DIR/../$rel"; break; fi
+    done
+    if [[ -n "$server_bin" ]]; then
         local hp_path_count
-        hp_path_count=$(strings "$so_path" 2>/dev/null | grep -c 'allocated from SPDK hugepages' || true)
+        hp_path_count=$(strings "$server_bin" 2>/dev/null | grep -c 'allocated from SPDK hugepages' || true)
         if [[ "$hp_path_count" -gt 0 ]]; then
-            echo -e "  ${tag_certus} certus_native has SPDK hugepage alloc path"
+            echo -e "  ${tag_certus} certus-server (${server_bin##*/}) has SPDK hugepage alloc path"
         else
-            echo -e "  ${tag_empty} certus_native MISSING SPDK hugepage path — DRAM tier will use cgroup-charged RAM"
-            echo "      fix: add features=[\"spdk\"] to memory-tier dep, rebuild (maturin develop --release)"
-            fail_certus "certus_native built without SPDK hugepage path (memory-tier missing spdk feature)"
+            echo -e "  ${tag_empty} certus-server MISSING SPDK hugepage path — DRAM tier will use cgroup-charged RAM"
+            echo "      fix: build with --features spdk (e.g. cargo build -r -p certus-server-yaml --features spdk)"
+            fail_certus "certus-server built without SPDK hugepage path (memory-tier missing spdk feature)"
         fi
     else
-        echo -e "  ${YELLOW}certus_native .so not found at $CERTUS_NATIVE_SO — cannot verify build${NC}"
+        echo -e "  ${YELLOW}certus-server binary not found (${CERTUS_SERVER_BINS[*]}) — cannot verify build${NC}"
     fi
 
     # 2. A single DRAM-tier spdk_zmalloc is bounded by BOTH the DPDK memseg cap

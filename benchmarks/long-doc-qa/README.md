@@ -30,8 +30,8 @@ checksum in the `Dockerfile` (see the `ADD` there).
 ## Build
 
 ```bash
-docker build -t long-doc-qa-bench benchmarks/long-doc-qa
-# podman: podman build -t long-doc-qa-bench benchmarks/long-doc-qa
+docker build -t long-doc-qa benchmarks/long-doc-qa
+# podman: podman build -t long-doc-qa benchmarks/long-doc-qa
 ```
 
 ## Run
@@ -46,7 +46,7 @@ docker run --rm --network host \
     -e BASE_URL=http://localhost:8000/v1 \
     -e NUM_DOCUMENTS=16 -e REPEAT_COUNT=4 -e JSON_OUTPUT=1 \
     -v "$PWD/results:/workspace/results" \
-    long-doc-qa-bench
+    long-doc-qa
 ```
 
 Without `--network host`, reach a host server via `host.docker.internal`
@@ -56,7 +56,7 @@ Without `--network host`, reach a host server via `host.docker.internal`
 Pass benchmark flags directly to bypass the env layer entirely:
 
 ```bash
-docker run --rm --network host long-doc-qa-bench \
+docker run --rm --network host long-doc-qa \
     --base-url http://localhost:8000/v1 --num-documents 16 \
     --repeat-count 4 --document-length 20000 --json-output
 ```

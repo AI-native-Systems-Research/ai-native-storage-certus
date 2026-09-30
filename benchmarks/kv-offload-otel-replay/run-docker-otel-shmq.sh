@@ -25,7 +25,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common-otel.sh"
 
 # The shmq image lives in the /mnt/certus1 podman store, not the default store
 # (mirrors run-docker-certus-shmq.sh).
-IMAGE="${IMAGE:-localhost/certus-otel-shmq-bench}"
+IMAGE="${IMAGE:-localhost/certus-otel-shmq-connector}"
 PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
 PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
 STORE_FLAGS=(--root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT")

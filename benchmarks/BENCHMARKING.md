@@ -41,8 +41,6 @@ Output: `offloading_mgr_<pid>.jsonl` (manager-level, portable) + `offloading_han
 |---|---|---|
 | `simple-lru` | Pure-Python LRU baseline | None (stdlib only) |
 | `cpu-manager` | vLLM's `CPUOffloadingManager` | vLLM |
-| `certus-connector` (policy-only) | Certus tiered DRAM+NVMe manager, no IO | vLLM + certus_connector |
-| `certus-connector` (native) | Full SPDK DMA to NVMe | vLLM + certus_native + SPDK + NVMe |
 | `fs-backend` | llmd_fs_backend (POSIX filesystem) | vLLM + torch + CUDA + storage_offload |
 | Custom `module:Class` | Any OffloadingManager-shaped object | User-provided |
 
@@ -116,7 +114,7 @@ Offloading Backend (Certus / CPUOffloadingSpec)
 
 | Backend | Configuration | What it proves |
 |---|---|---|
-| **Certus native** | OffloadingConnector + CertusOffloadingSpec (DRAM hot cache + NVMe cold tier) | Full Certus value: larger effective cache means fewer misses |
+| **Certus (SHMQ)** | OffloadingConnector + CertusShmqOffloadingSpec (shared-memory queue to `certus-server`; DRAM hot cache + NVMe cold tier) | Full Certus value: larger effective cache means fewer misses |
 | **CPUOffloadingSpec** (vLLM built-in) | OffloadingConnector + CPUOffloadingSpec (DRAM-only offload tier) | Fair baseline — same scheduler code path, different storage tier |
 | **llm-d FS backend** | OffloadingConnector + SharedStorageOffloadingSpec (POSIX filesystem, e.g. XFS on NVMe) | Proves SPDK advantage over kernel filesystem path |
 | **No offloading** (GPU-only) | No kv_transfer_config — vLLM recomputes on eviction | Worst-case baseline: what happens without any offload tier |
@@ -230,14 +228,18 @@ The live serving benchmark is used for **validation** after evolution converges 
 
 - GPU box with model weights (e.g., Llama-3-8B)
 - vLLM ≥ 0.20 installed
-- For Certus runs: `certus_native` built, SPDK-bound NVMe
+- For Certus runs: `certus-server` running (SPDK-bound NVMe + SHMQ mailbox at `--shm-path`)
 - `inference_perf` library (`pip install inference-perf`)
 - Qwen trace file downloaded
 
 ### Steps
 
 ```bash
-# 1. Start vllm serve with Certus backend
+# 0. Start certus-server first (owns SPDK+NVMe, exposes the SHMQ mailbox).
+#    See the evaluators/ scripts (e.g. run-serve-certus-shmq.sh) for the full
+#    invocation; it must be up before vLLM connects to --shm-path.
+
+# 1. Start vllm serve with the Certus SHMQ backend
 vllm serve NousResearch/Meta-Llama-3-8B \
     --max-model-len 4096 \
     --gpu-memory-utilization 0.85 \
@@ -245,13 +247,10 @@ vllm serve NousResearch/Meta-Llama-3-8B \
         "kv_connector": "OffloadingConnector",
         "kv_role": "kv_both",
         "kv_connector_extra_config": {
-            "spec_name": "CertusOffloadingSpec",
-            "spec_module_path": "certus_connector.spec",
-            "use_native": true,
-            "data_pci_addrs": ["0000:61:00.0"],
-            "metadata_pci_addr": "0000:62:00.0",
-            "slab_size_bytes": 131072,
-            "dram_cache_bytes": 8589934592
+            "spec_name": "CertusShmqOffloadingSpec",
+            "spec_module_path": "certus_shmq_connector.spec",
+            "shm_path": "/dev/shm/certus-shmq",
+            "slab_size_bytes": 131072
         }
     }'
 
