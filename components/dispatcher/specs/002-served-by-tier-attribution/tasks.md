@@ -402,14 +402,22 @@ step: an accounting identity that fails by a recognisable quantity names its own
   control arm got "Connection reset by peer" with zero hits. The partition held in both,
   for what little that proves at these volumes.
 
-  **Two harness faults to fix before the next attempt, both mine and both already
-  recorded as traps elsewhere:**
-  1. The driver script used `|| true` on the server and agent starts, which masked
-     whichever of them actually failed. Never `|| true` a step whose failure has not been
-     diagnosed — the same mistake, in the same session, as the earlier server-start fix.
-  2. Swapping the server binary between arms while agents from the previous arm may still
-     be lingering (they linger-exit ~5 s after the generator disconnects) is a race. Stop
-     agents explicitly and wait, rather than assuming the stop ordering.
+  **Three harness faults, all mine, all the same underlying mistake: suppressing or
+  mangling a non-zero exit status so a failure reads as success.**
+  1. **`|| true` on the server and agent starts** masked whichever actually failed.
+  2. **Swapping the server binary between arms** while the previous arm's agents could
+     still be lingering (~5 s linger-exit) is a race — tear down and *wait*.
+  3. **`|| echo 0` on `pgrep -c` is the same bug in disguise.** `pgrep -c` **prints `0`
+     AND returns exit 1** when nothing matches, so `$(pgrep -c x || echo 0)` evaluates to
+     `"0\n0"`, which never compares equal to `"0"`. My rewritten driver — the one whose
+     whole point was removing `|| true` — died with `FATAL: servers or agents still alive
+     after 40s: 0/0`, reporting the success condition as a failure. Assign on failure
+     (`n=$(pgrep -c x) || n=0`) rather than echoing, and self-test the helper against a
+     name that cannot match.
+
+  The general rule, worth more than the three instances: **a shell guard that rewrites an
+  exit status is a guard that can invent an outcome.** All three faults produced a
+  confident wrong answer rather than an error.
 
   **What is verified**: the taxonomy value on p2p, the three invariants in that component,
   and now the route partition there. **What is not**: that p2p's `Ssd` share exceeds
