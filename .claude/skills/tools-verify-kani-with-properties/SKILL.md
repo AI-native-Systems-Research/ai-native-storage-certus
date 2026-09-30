@@ -279,6 +279,31 @@ necessarily, because the mutant may be dropped the same way.
    symbolic index. If an assume silently dropped, that harness fails and tells you so. This is cheap
    (measured 5.08 s) and it is the only mechanism that catches the failure at all.
 
+### The CAPACITY-SCALING check — a second, independent test that a proof is real
+The mutant twin catches a proof with no content. It does **not** catch a proof whose bound merely
+happened to be generous enough for the states the harness explores. So for any harness over a
+fixed-capacity structure, **re-run it at a larger capacity and require every verdict to hold.**
+
+Measured on a 474-line Pool model, 7 harnesses, capacity 8 → 32 (a 4× arena), same source, same flags:
+
+| | CAP=8 | CAP=32 |
+|---|---|---|
+| 3 base proofs | 19.1 / 25.6 / 23.9 s, all SUCCESSFUL | 139.7 / 130.9 / 74.0 s, **all still SUCCESSFUL** |
+| 3 mutant twins | all FAILED (correct) | **all still FAILED** |
+| assume-binding guard | 5.1 s | 20.9 s |
+| undetermined checks | 0 | **0** |
+
+No verdict flipped and nothing became undetermined at 4× the state space. That is the signature of a
+real proof. A harness leaning on a lucky bound behaves the opposite way: checks start coming back
+undetermined as the space grows, because the solver can no longer reach them.
+
+Cost grew ~CAP^1.5–2.6 — with the **data size**, not with loop trip count, which is exactly the
+property loop contracts are supposed to buy and is the cleanest evidence that they delivered it.
+
+**Use it as a gate-time discipline:** prove at the working capacity, then re-run the property and its
+mutant at 2–4× and require both verdicts unchanged. It costs one extra run per property and it closes
+a hole the mutant twin cannot see.
+
 ### Skolemise instead of quantifying — measured 400× cheaper
 For a scan loop, replace a universally-quantified invariant with a **witness index chosen symbolically
 BEFORE the loop** and referenced only inside the invariant. The proof then holds for an arbitrary
