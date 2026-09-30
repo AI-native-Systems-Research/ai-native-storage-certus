@@ -170,6 +170,12 @@ fn render_metrics(
          # HELP certus_lookup_errors_total Lookups neither served nor shown absent\n\
          # TYPE certus_lookup_errors_total counter\n\
          certus_lookup_errors_total {}\n\
+         # HELP certus_lookup_hits_dram_total Lookups served from the local memory tier\n\
+         # TYPE certus_lookup_hits_dram_total counter\n\
+         certus_lookup_hits_dram_total {}\n\
+         # HELP certus_lookup_hits_ssd_total Lookups served by reading a local data drive\n\
+         # TYPE certus_lookup_hits_ssd_total counter\n\
+         certus_lookup_hits_ssd_total {}\n\
          # HELP certus_remote_lookup_hits_total Lookups a peer served (requester side)\n\
          # TYPE certus_remote_lookup_hits_total counter\n\
          certus_remote_lookup_hits_total {}\n\
@@ -206,6 +212,8 @@ fn render_metrics(
         counters.lookup_hits.load(Ordering::Relaxed),
         counters.lookup_misses.load(Ordering::Relaxed),
         counters.lookup_errors.load(Ordering::Relaxed),
+        tier.lookup_hits_dram,
+        tier.lookup_hits_ssd,
         tier.remote_lookup_hits,
         tier.remote_lookup_misses,
         serve.peer_served_keys,

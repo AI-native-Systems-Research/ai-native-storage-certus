@@ -122,6 +122,8 @@ pub struct TierEventCounters {
     /// Extents freed on SSD by the background extent evictor.
     evictions_from_ssd: AtomicU64,
     /// Keys a peer served, via `IRemoteLookup`. Requester-side.
+    lookup_hits_dram: AtomicU64,
+    lookup_hits_ssd: AtomicU64,
     remote_lookup_hits: AtomicU64,
     /// Keys forwarded to a peer that no peer held.
     remote_lookup_misses: AtomicU64,
@@ -169,6 +171,21 @@ impl TierEventCounters {
     /// batch at a time, and because a per-key call on this path would add an
     /// atomic per key to a loop that already has one.
     #[inline]
+    /// Record the local half of the route partition for one batch.
+    ///
+    /// Counted beside `record_remote_lookup` so that dram + ssd + remote equals the
+    /// served count for the same batch -- a partition, not three loosely related
+    /// numbers. Taken from the attribution the dispatcher just derived, so the
+    /// counters cannot disagree with the per-key `served_by` returned to the caller.
+    pub fn record_local_hits(&self, dram: u64, ssd: u64) {
+        if dram > 0 {
+            self.lookup_hits_dram.fetch_add(dram, Ordering::Relaxed);
+        }
+        if ssd > 0 {
+            self.lookup_hits_ssd.fetch_add(ssd, Ordering::Relaxed);
+        }
+    }
+
     pub fn record_remote_lookup(&self, hits: u64, misses: u64) {
         if hits > 0 {
             self.remote_lookup_hits.fetch_add(hits, Ordering::Relaxed);
@@ -203,6 +220,8 @@ impl TierEventCounters {
             promotions_to_gpu: self.promotions_to_gpu.load(Ordering::Relaxed),
             evictions_from_memory: self.evictions_from_memory.load(Ordering::Relaxed),
             evictions_from_ssd: self.evictions_from_ssd.load(Ordering::Relaxed),
+            lookup_hits_dram: self.lookup_hits_dram.load(Ordering::Relaxed),
+            lookup_hits_ssd: self.lookup_hits_ssd.load(Ordering::Relaxed),
             remote_lookup_hits: self.remote_lookup_hits.load(Ordering::Relaxed),
             remote_lookup_misses: self.remote_lookup_misses.load(Ordering::Relaxed),
             store_backpressure_events: self.store_backpressure_events.load(Ordering::Relaxed),
@@ -2876,6 +2895,13 @@ impl IDispatcher for DispatcherComponent {
         if served > 0 {
             self.tier_counters.record_promotions_to_gpu(served);
         }
+        // The local half of the route partition, taken from the attribution derived
+        // immediately above rather than recomputed, so the counters and the per-key
+        // `served_by` this call returns cannot disagree. Remote is recorded by the
+        // remote pass itself, which is the only place that knows a peer answered.
+        let dram = out.iter().filter(|o| o.served_by == ServedBy::Dram).count() as u64;
+        let ssd = out.iter().filter(|o| o.served_by == ServedBy::Ssd).count() as u64;
+        self.tier_counters.record_local_hits(dram, ssd);
         out
     }
 

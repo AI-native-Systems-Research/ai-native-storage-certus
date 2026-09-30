@@ -267,29 +267,29 @@ boundary note.
 is an argument for removing the *feature* later, not for declining to account for it while it is
 in the tree. `REMOTE` is one value (the `REMOTE_DRAM`/`REMOTE_SSD` split stays withdrawn).
 
-- [ ] **T101** Add `ServedBy` to `components/interfaces`: `Dram | Ssd | Remote | Miss |
+- [x] **T101** Add `ServedBy` to `components/interfaces`: `Dram | Ssd | Remote | Miss |
   SizeMismatch | Error`, with `is_hit()` true for the first three. Defined once here (FR-032);
   no other crate may restate the value space.
 
-- [ ] **T102** Add `LookupOutcome { served_by, result }`. **Not** `Result<ServedBy, E>`: the
+- [x] **T102** Add `LookupOutcome { served_by, result }`. **Not** `Result<ServedBy, E>`: the
   tier-on-`Ok` encoding cannot express `Miss`/`SizeMismatch`/`Error`, which are the `Err` cases,
   and would push a third of the taxonomy into a per-server error→tier mapping — which is how the
   two servers would drift.
 
-- [ ] **T103** Widen `IDispatcher::batch_lookup` to `Vec<LookupOutcome>`. Signature change, so
+- [x] **T103** Widen `IDispatcher::batch_lookup` to `Vec<LookupOutcome>`. Signature change, so
   every implementor is a compile error until updated — all four, per plan.md's boundary note.
 
-- [ ] **T104** `components/dispatcher`: attribute at each resolution site. `MemoryTier` warm hit
+- [x] **T104** `components/dispatcher`: attribute at each resolution site. `MemoryTier` warm hit
   → `Dram`; every cold sub-path (pooled read, inline fallback, staging post-pass, no-drives) →
   `Ssd`; the remote-delivery arm → `Remote`; `KeyNotFound` after the remote attempt → `Miss`;
   everything else → `Error`. The tier is already known at each site — this is propagation, not
   new bookkeeping.
 
-- [ ] **T105** `components/dispatcher-p2p`: its SSD→GPU cold path attributes `Ssd` per FR-014
+- [x] **T105** `components/dispatcher-p2p`: its SSD→GPU cold path attributes `Ssd` per FR-014
   **even though it does not synchronously populate DRAM**. Not a placeholder — FR-014 already
   fixes this value, and FR-027 forbids shipping a value no test can fail against.
 
-- [ ] **T106** The two mock implementors (`remote-lookup/src/seams.rs`,
+- [x] **T106** The two mock implementors (`remote-lookup/src/seams.rs`,
   `lib/shmq-dispatcher`'s test mock). Mocks must return a value consistent with what they
   simulate, not a constant — a mock that always says `Dram` makes every attribution test vacuous
   (FR-028).
@@ -300,19 +300,19 @@ in the tree. `REMOTE` is one value (the `REMOTE_DRAM`/`REMOTE_SSD` split stays w
 
 # Phase 3 — the wire byte
 
-- [ ] **T108** Widen `LOOKUP`'s per-key byte in `lib/shmq-dispatcher`: `0` not served, `1` Dram,
+- [x] **T108** Widen `LOOKUP`'s per-key byte in `lib/shmq-dispatcher`: `0` not served, `1` Dram,
   `2` Ssd, `3` Remote. `0` keeps its exact meaning. `PENDING` MUST NOT appear here — see
   `contracts/served-by.md`; the non-zero range means "delivered", and a pending key was not.
 
-- [ ] **T109** Fix `workload-node-agent::split_by_lookup`: `*served == 1` → `!= 0`, and move its
+- [x] **T109** Fix `workload-node-agent::split_by_lookup`: `*served == 1` → `!= 0`, and move its
   byte-`2`-is-not-a-hit assertion to the unassigned range (`4..=255`), where the original
   reasoning still holds. **This is the only reader that breaks**; the consumer sweep in
   `contracts/served-by.md` records why the connector does not.
 
-- [ ] **T110** Test that a conforming server never emits a value outside `0..=3`, and that an
+- [x] **T110** Test that a conforming server never emits a value outside `0..=3`, and that an
   unknown non-zero value is read as *served, tier unknown* rather than not-served.
 
-- [ ] **T111** Render the per-tier hit counts the byte now permits, on both metrics paths —
+- [x] **T111** Render the per-tier hit counts the byte now permits, on both metrics paths —
   `/metrics` and OTel, in step, per Phase 1's T009 lesson.
 
 # Phase 4 — verification and the component specs

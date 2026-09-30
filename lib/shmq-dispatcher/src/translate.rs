@@ -967,6 +967,46 @@ mod tests {
         Translator::new(disp, rx, Arc::new(AtomicU64::new(0)), Duration::ZERO)
     }
 
+    /// T110: a conforming server emits only `0..=3`, and every served value is non-zero.
+    ///
+    /// Exhaustive over the taxonomy rather than sampled, so a seventh value added later
+    /// cannot slip through unmapped -- the `match` in `wire_tier` would fail to compile,
+    /// and this test states the range that compile-time guarantee is protecting.
+    #[test]
+    fn the_wire_byte_stays_in_range_and_zero_still_means_not_served() {
+        use interfaces::ServedBy as S;
+
+        for served in [S::Dram, S::Ssd, S::Remote] {
+            let b = Translator::wire_tier(served);
+            assert!(
+                (1..=3).contains(&b),
+                "{served:?} must be a non-zero value in 1..=3, got {b}"
+            );
+        }
+        for not_served in [S::Miss, S::SizeMismatch, S::Error] {
+            assert_eq!(
+                Translator::wire_tier(not_served),
+                0,
+                "{not_served:?} was not served, so it must read 0 -- a non-zero value \
+                 here would tell a `!= 0` reader that data arrived which never did"
+            );
+        }
+
+        // The three served values are distinct, or the byte carries no tier at all.
+        let tiers: Vec<u8> = [S::Dram, S::Ssd, S::Remote]
+            .iter()
+            .map(|s| Translator::wire_tier(*s))
+            .collect();
+        let mut sorted = tiers.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            3,
+            "served tiers must be distinguishable: {tiers:?}"
+        );
+    }
+
     /// FR-024: hits + misses + errors accounts for EVERY entry the client asked for.
     ///
     /// Four outcomes in one batch, including the two that used to vanish: an entry held

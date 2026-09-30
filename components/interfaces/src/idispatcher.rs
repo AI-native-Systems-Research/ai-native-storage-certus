@@ -289,6 +289,20 @@ pub struct LookupOutcome {
 pub struct TierEventStats {
     /// Blocks promoted SSD -> DRAM (memory tier), across all promote paths.
     pub promotions_to_memory: u64,
+    /// Lookups served from the local memory tier (`ServedBy::Dram`).
+    ///
+    /// With `lookup_hits_ssd` and `remote_lookup_hits` this partitions every served
+    /// key by route, so the three sum to the served count. They are counted where the
+    /// dispatcher derives its attribution, so they cannot disagree with the per-key
+    /// `served_by` it returns for the same batch.
+    pub lookup_hits_dram: u64,
+    /// Lookups served by reading a local data drive (`ServedBy::Ssd`).
+    ///
+    /// Route, not residency: in `dispatcher` the block is promoted into DRAM as part
+    /// of being served, and this still counts as an SSD hit because that is what the
+    /// request cost. In `dispatcher-p2p` there is no synchronous promotion (FR-014),
+    /// so a repeat read of the same key may count here again.
+    pub lookup_hits_ssd: u64,
     /// Lookups served up to the GPU (one per successfully-served lookup key),
     /// whether the source was the memory tier or SSD.
     pub promotions_to_gpu: u64,

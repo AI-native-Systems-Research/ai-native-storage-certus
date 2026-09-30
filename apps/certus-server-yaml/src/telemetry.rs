@@ -150,6 +150,27 @@ impl OtelMetrics {
         // counts every served key without distinguishing the source, which is why
         // two cluster measurements established remote lookup's cost and neither
         // could establish its benefit.
+        // The local half of the route partition. With remote_lookup_hits these three
+        // sum to the served count, so a dashboard can show where hits come from rather
+        // than only how many there were.
+        let d = Arc::clone(&dispatcher);
+        meter
+            .u64_observable_counter("certus.lookup_hits_dram_total")
+            .with_description("Lookups served from the local memory tier")
+            .with_callback(move |counter| {
+                counter.observe(d.tier_event_stats().lookup_hits_dram, &[]);
+            })
+            .build();
+
+        let d = Arc::clone(&dispatcher);
+        meter
+            .u64_observable_counter("certus.lookup_hits_ssd_total")
+            .with_description("Lookups served by reading a local data drive")
+            .with_callback(move |counter| {
+                counter.observe(d.tier_event_stats().lookup_hits_ssd, &[]);
+            })
+            .build();
+
         let d = Arc::clone(&dispatcher);
         meter
             .u64_observable_counter("certus.remote_lookup_hits_total")

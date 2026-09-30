@@ -2,10 +2,14 @@
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
 spec_sync_synced_at: 2026-09-29T00:00:00Z
-spec_sync_git_commit: 7151fa16
-spec_sync_inputs_sha256: 775b5b6632b4e47172411195e6cfdfebdc16649e7757ff3db7f693237149781f
+spec_sync_git_commit: f052992c
+spec_sync_inputs_sha256: 127cc2e8f652c053e6cbf2c73244ffaaa6807a7c0fee170315dcac0c9b7760b0
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-09-29 (served_by Phases 2-3).** `ServedBy` + `LookupOutcome` in
+> `interfaces`, `batch_lookup` widened, the `LOOKUP` byte carrying the tier, and
+> `TierEventStats` from eight fields to ten (the route partition). Digest 127cc2e8f652….
+
 > **Re-stamp 2026-09-29 (feature 002 Phase 1: counters, FR-058 sync, taxonomy
 > collapse).** Branch `certus-lookup-observability`, layered on the accounting fixes
 > re-stamped above. Adds the two remote-lookup counters to `TierEventStats` (so FR-058
