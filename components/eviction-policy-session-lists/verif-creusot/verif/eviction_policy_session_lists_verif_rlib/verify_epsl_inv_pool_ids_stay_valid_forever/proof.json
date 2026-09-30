@@ -9,26 +9,26 @@
       "vc_verify_epsl_inv_pool_ids_stay_valid_forever": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.053 },
-          { "prover": "alt-ergo", "time": 0.054 },
-          { "prover": "alt-ergo", "time": 0.058 },
+          { "prover": "alt-ergo", "time": 0.027 },
+          { "prover": "alt-ergo", "time": 0.024 },
+          { "prover": "alt-ergo", "time": 0.027 },
           {
             "tactic": "split_vc",
             "children": [
               { "prover": "alt-ergo", "time": 0.03 },
-              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.033 },
               {
                 "tactic": "split_vc",
                 "children": [
-                  { "prover": "alt-ergo", "time": 0.033 },
-                  { "prover": "alt-ergo", "time": 0.028 },
+                  { "prover": "alt-ergo", "time": 0.031 },
+                  { "prover": "alt-ergo", "time": 0.03 },
                   null
                 ]
               },
               { "prover": "alt-ergo", "time": 0.032 }
             ]
           },
-          { "prover": "alt-ergo", "time": 0.03 }
+          { "prover": "alt-ergo", "time": 0.035 }
         ]
       }
     }

@@ -7,7 +7,7 @@
       "vc_pool_remove": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_inv_exactly_one_leaf_per_session": {
         "prover": "alt-ergo",
-        "time": 0.995
+        "time": 0.409
       }
     }
   }

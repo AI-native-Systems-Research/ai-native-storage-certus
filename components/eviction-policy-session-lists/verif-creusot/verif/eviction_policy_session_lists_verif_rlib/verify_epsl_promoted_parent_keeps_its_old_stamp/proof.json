@@ -5,7 +5,7 @@
       "vc_pool_remove": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_promoted_parent_keeps_its_old_stamp": {
         "prover": "alt-ergo",
-        "time": 0.212
+        "time": 0.103
       }
     }
   }

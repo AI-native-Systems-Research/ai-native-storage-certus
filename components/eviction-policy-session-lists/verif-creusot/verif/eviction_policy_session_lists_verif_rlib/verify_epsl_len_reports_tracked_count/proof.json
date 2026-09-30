@@ -8,8 +8,8 @@
       "vc_verify_epsl_len_reports_tracked_count": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.048 },
-          { "prover": "alt-ergo", "time": 0.066 },
+          { "prover": "alt-ergo", "time": 0.023 },
+          { "prover": "alt-ergo", "time": 0.038 },
           {
             "tactic": "split_vc",
             "children": [

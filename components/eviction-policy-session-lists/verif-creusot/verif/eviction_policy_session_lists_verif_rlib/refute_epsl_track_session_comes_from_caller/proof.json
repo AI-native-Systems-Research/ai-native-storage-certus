@@ -5,7 +5,7 @@
       "vc_pool_register": { "prover": "alt-ergo", "time": 0.018 },
       "vc_refute_epsl_track_session_comes_from_caller": {
         "prover": "alt-ergo",
-        "time": 1.1
+        "time": 0.395
       }
     }
   }

@@ -5,7 +5,7 @@
       "vc_pool_register": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_track_first_block_is_head_and_leaf": {
         "prover": "alt-ergo",
-        "time": 0.064
+        "time": 0.032
       }
     }
   }

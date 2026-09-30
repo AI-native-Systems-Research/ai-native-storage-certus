@@ -9,14 +9,14 @@
       "vc_verify_epsl_inv_no_orphaned_blocks": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.04 },
+          { "prover": "alt-ergo", "time": 0.025 },
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.073 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.038 }, null ]
           },
-          { "prover": "alt-ergo", "time": 0.109 },
-          { "prover": "alt-ergo", "time": 0.137 },
-          { "prover": "alt-ergo", "time": 0.056 }
+          { "prover": "alt-ergo", "time": 0.054 },
+          { "prover": "alt-ergo", "time": 0.071 },
+          { "prover": "alt-ergo", "time": 0.054 }
         ]
       }
     }

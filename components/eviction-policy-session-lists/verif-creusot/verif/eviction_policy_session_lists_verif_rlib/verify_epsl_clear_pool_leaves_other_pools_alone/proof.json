@@ -5,7 +5,7 @@
       "vc_state_clear_pool": { "prover": "alt-ergo", "time": 0.033 },
       "vc_verify_epsl_clear_pool_leaves_other_pools_alone": {
         "prover": "alt-ergo",
-        "time": 0.079
+        "time": 0.039
       }
     }
   }

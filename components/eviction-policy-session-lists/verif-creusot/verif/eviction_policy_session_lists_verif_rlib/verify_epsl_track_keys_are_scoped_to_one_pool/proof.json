@@ -6,7 +6,7 @@
       "vc_verify_epsl_track_keys_are_scoped_to_one_pool": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.05 },
+          { "prover": "alt-ergo", "time": 0.026 },
           {
             "tactic": "split_vc",
             "children": [
@@ -26,14 +26,14 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.032 },
-              { "prover": "alt-ergo", "time": 0.032 },
-              { "prover": "alt-ergo", "time": 0.043 },
               { "prover": "alt-ergo", "time": 0.035 },
-              null,
-              null,
               { "prover": "alt-ergo", "time": 0.029 },
-              { "prover": "alt-ergo", "time": 0.032 }
+              { "prover": "alt-ergo", "time": 0.043 },
+              { "prover": "alt-ergo", "time": 0.033 },
+              null,
+              null,
+              { "prover": "alt-ergo", "time": 0.033 },
+              { "prover": "alt-ergo", "time": 0.031 }
             ]
           }
         ]

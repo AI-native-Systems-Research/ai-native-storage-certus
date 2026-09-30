@@ -6,24 +6,24 @@
       "vc_verify_epsl_create_pool_issues_a_fresh_sequential_identifier": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.054 },
+          { "prover": "alt-ergo", "time": 0.026 },
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.05 },
-              { "prover": "alt-ergo", "time": 0.054 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.028 },
               {
                 "tactic": "split_vc",
                 "children": [
-                  { "prover": "alt-ergo", "time": 0.027 },
+                  { "prover": "alt-ergo", "time": 0.026 },
                   null,
-                  { "prover": "alt-ergo", "time": 0.028 }
+                  { "prover": "alt-ergo", "time": 0.03 }
                 ]
               },
-              { "prover": "alt-ergo", "time": 0.055 }
+              { "prover": "alt-ergo", "time": 0.026 }
             ]
           },
-          { "prover": "alt-ergo", "time": 0.03 }
+          { "prover": "alt-ergo", "time": 0.025 }
         ]
       }
     }

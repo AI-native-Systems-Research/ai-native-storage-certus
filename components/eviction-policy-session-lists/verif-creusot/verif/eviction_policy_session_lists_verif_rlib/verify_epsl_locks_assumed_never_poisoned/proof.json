@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_evict": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.015 },
       "vc_state_track": { "prover": "alt-ergo", "time": 0.03 },
       "vc_verify_epsl_locks_assumed_never_poisoned": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.051 },
-          { "prover": "alt-ergo", "time": 0.029 },
+          { "prover": "alt-ergo", "time": 0.025 },
+          { "prover": "alt-ergo", "time": 0.025 },
           {
             "tactic": "split_vc",
             "children": [ { "prover": "alt-ergo", "time": 0.029 }, null ]

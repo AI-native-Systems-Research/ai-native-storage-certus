@@ -5,7 +5,7 @@
       "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_epsl_announce_latch_set_only_with_a_logger": {
         "prover": "alt-ergo",
-        "time": 0.064
+        "time": 0.028
       }
     }
   }

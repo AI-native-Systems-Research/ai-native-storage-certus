@@ -967,6 +967,24 @@ macro_rules! touch_body {
 #[ensures((^p).len@ <= (^p).nodes@.len())]
 #[ensures(counts_bounded(&^p))]
 #[ensures(chain_birth_decreases(&^p))]
+// BUDGET EXPOSURE (fourth pass): a caller that chains operations has to carry the arithmetic
+// side conditions of the NEXT call across this one. `touch` advances the recency counter by at
+// most one and never allocates, so both bounds survive with a margin of one.
+#[ensures((^p).clock@ <= (*p).clock@ + 1)]
+#[ensures((^p).nodes@.len() == (*p).nodes@.len())]
+// ... and it changes NOTHING but stamps, on EITHER branch. Stated unconditionally (not under
+// `result ==>`) so a caller that discards the boolean does not have to case-split on it.
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==>
+             ((^p).nodes@[j]).key == ((*p).nodes@[j]).key
+             && ((^p).nodes@[j]).session == ((*p).nodes@[j]).session
+             && ((^p).nodes@[j]).parent == ((*p).nodes@[j]).parent
+             && ((^p).nodes@[j]).child == ((*p).nodes@[j]).child
+             && ((^p).nodes@[j]).active == ((*p).nodes@[j]).active
+             && ((^p).nodes@[j]).birth == ((*p).nodes@[j]).birth)]
+#[ensures((^p).free@ == (*p).free@)]
+#[ensures((^p).by_key.e@ == (*p).by_key.e@)]
+#[ensures((^p).sessions.e@ == (*p).sessions.e@)]
+#[ensures((^p).len == (*p).len)]
 pub fn pool_touch(p: &mut Pool, index: u32) -> bool {
     touch_body!(p, index)
 }
@@ -1223,6 +1241,9 @@ macro_rules! register_body {
 #[ensures((^p).len@ <= (^p).nodes@.len())]
 #[ensures(counts_bounded(&^p))]
 #[ensures(chain_birth_decreases(&^p))]
+// BUDGET EXPOSURE (fourth pass): both paths tick exactly once (the idempotent path through
+// `touch`), so the recency counter advances by at most one — the bound a chained caller needs.
+#[ensures((^p).clock@ <= (*p).clock@ + 1)]
 pub fn pool_register(p: &mut Pool, key: u64, session: u64) -> u32 {
     register_body!(p, key, session)
 }
@@ -1275,6 +1296,8 @@ pub fn pool_register(p: &mut Pool, key: u64, session: u64) -> u32 {
 #[ensures((^p).len@ <= (^p).nodes@.len())]
 #[ensures(counts_bounded(&^p))]
 #[ensures(chain_birth_decreases(&^p))]
+// BUDGET EXPOSURE (fourth pass): eviction unlinks, it never allocates.
+#[ensures((^p).nodes@.len() == (*p).nodes@.len())]
 pub fn pool_evict_oldest(p: &mut Pool) -> Option<u64> {
     match leaves_first(&p.leaves) {
         Some(x) => Some(pool_unlink(p, x.1)),

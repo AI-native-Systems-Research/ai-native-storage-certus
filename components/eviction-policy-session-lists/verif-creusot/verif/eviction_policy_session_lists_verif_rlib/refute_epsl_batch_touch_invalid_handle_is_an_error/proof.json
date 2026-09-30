@@ -7,7 +7,7 @@
       "vc_pool_touch": { "prover": "alt-ergo", "time": 0.018 },
       "vc_refute_epsl_batch_touch_invalid_handle_is_an_error": {
         "prover": "z3",
-        "time": 0.074
+        "time": 1.5
       }
     }
   }

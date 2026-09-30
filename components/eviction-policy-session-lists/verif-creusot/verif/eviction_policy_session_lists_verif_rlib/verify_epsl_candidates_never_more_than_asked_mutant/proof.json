@@ -5,7 +5,7 @@
       "vc_pool_candidates": { "prover": "alt-ergo", "time": 0.03 },
       "vc_verify_epsl_candidates_never_more_than_asked__mutant": {
         "tactic": "split_vc",
-        "children": [ { "prover": "alt-ergo", "time": 0.043 }, null ]
+        "children": [ { "prover": "alt-ergo", "time": 0.021 }, null ]
       }
     }
   }

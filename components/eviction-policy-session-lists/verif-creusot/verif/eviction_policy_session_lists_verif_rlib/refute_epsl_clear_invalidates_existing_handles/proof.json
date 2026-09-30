@@ -7,7 +7,7 @@
       "vc_pool_touch": { "prover": "alt-ergo", "time": 0.019 },
       "vc_refute_epsl_clear_invalidates_existing_handles": {
         "prover": "alt-ergo",
-        "time": 0.247
+        "time": 0.116
       }
     }
   }

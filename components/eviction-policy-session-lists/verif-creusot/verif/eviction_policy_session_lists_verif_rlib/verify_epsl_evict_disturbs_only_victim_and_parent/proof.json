@@ -6,10 +6,10 @@
       "vc_verify_epsl_evict_disturbs_only_victim_and_parent": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.041 },
+          { "prover": "alt-ergo", "time": 0.018 },
           {
             "tactic": "split_vc",
-            "children": [ null, { "prover": "alt-ergo", "time": 0.032 } ]
+            "children": [ null, { "prover": "alt-ergo", "time": 0.036 } ]
           }
         ]
       }

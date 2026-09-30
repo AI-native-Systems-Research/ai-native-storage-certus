@@ -3,7 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_index_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.016 },
       "vc_index_mut_Vec_Node_Global": { "prover": "alt-ergo", "time": 0.018 },
       "vc_leaves_insert": { "prover": "alt-ergo", "time": 0.019 },
       "vc_leaves_remove": { "prover": "alt-ergo", "time": 0.016 },
@@ -94,7 +94,7 @@
           }
         ]
       },
-      "vc_pool_tick": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_pool_tick": { "prover": "alt-ergo", "time": 0.016 },
       "vc_pool_touch": { "prover": "alt-ergo", "time": 0.02 }
     }
   }

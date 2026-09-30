@@ -450,3 +450,55 @@ no `_scored_by` anywhere.
 2. `refute_epsl_candidates_listed_in_eviction_order` (still `✘ (9/10)`) — unchanged, and the second
    pass's analysis of it still stands.
 3. Only then unname and run the gate.
+
+---
+
+# FOURTH PASS (2026-09-29) — the 28 driver modules
+
+Gate baseline at the start of this pass: **60 proved / 7 refuted / 0 tool-boundary / 0 delegated /
+28 UNRESOLVED**. The 28 were located precisely with a corrected census (`/tmp/census2.py` — the
+old `/tmp/census.py` counted any node carrying a `prover` key as proved, which mis-read the 83
+mutant twins; and a module whose own `vc_<m>` key is ABSENT from `proof.json` also failed, it is
+not "unmeasured"). Result: **28 modules have a recorded `null` under their own `vc_`**, and they
+are exactly the 28 UNRESOLVED. The 7 `refuted` ids are the 7 divergent ids whose `verify_` module
+is ABSENT (expected to fail) and whose `refute_` proves.
+
+## The 28, classified by the FACT that is missing (from `proof.json` open-goal paths)
+`/tmp/openpaths.py <mods>` walks `proofs.Coma.vc_<m>` and prints the path of every `null`. The
+first `split_vc` child index is the CALL index for a driver (one child per call whose `#[requires]`
+must be discharged, then one for the exit VC), and within a call child the second index is that
+callee's `#[requires]` index in source order.
+
+Three classes, all **contract exposure**, none prover tuning:
+
+1. **Budget (arithmetic side conditions).** `pool_touch` / `pool_register` / `pool_evict_oldest`
+   never said how much of the recency counter or the arena they consumed, so the SECOND call in a
+   chain could not discharge `p.clock@ < 18446744073709551615` /
+   `p.nodes@.len() < 4294967295`. Same one level up: no `state_*` re-establishes
+   `pools_have_room`, and none bounds `log.warn` (`state_track`'s `InvalidPool` arm bumps it) or
+   `log.debug` (`state_create_pool`'s banner).
+2. **Lock-trace frame.** `t.held`/`t.peak`/`t.acquires` are preserved by every `state_*` except
+   `state_batch_touch2`, and NONE said so — so `state_batch_touch2`'s
+   `#[requires(t.held@ == 0 && t.peak@ == 0)]` was undischargeable after any earlier call, and
+   `(^t).held@ == 0` / `(^t).peak@ <= 1` were unprovable at a driver exit.
+3. **Missing whole-node frames** on `pool_remove` / `pool_evict_oldest` / `pool_register` — facts
+   that `pool_unlink` already proves but that its wrappers did not re-export.
+
+## Step 1 — pool-level budget + a "touch changes only recency" frame (ADDITIVE)
+- `pool_touch`: `(^p).clock@ <= (*p).clock@ + 1`, `(^p).nodes@.len() == (*p).nodes@.len()`, and one
+  unconditional `forall<j>` frame (key/session/parent/child/active/birth all preserved) plus
+  `free@`/`by_key.e@`/`sessions.e@`/`len` equality. Stated UNCONDITIONALLY, not under
+  `result ==>`: every caller discards the boolean, and a `result ==>` clause makes the solver
+  case-split on a value it has thrown away.
+- `pool_register`: `(^p).clock@ <= (*p).clock@ + 1` (both paths tick exactly once).
+- `pool_evict_oldest`: `(^p).nodes@.len() == (*p).nodes@.len()`.
+
+Measured, forced clean (`--why3find-arg=-f -j 24`, 2 m 54 s):
+```
+5 of 6 Proved: pool_touch, pool_evict_oldest,
+               verify_epsl_inv_active_stamps_are_distinct        (was open)
+               verify_epsl_inv_size_accounting_is_exact          (was open)
+               verify_epsl_inv_arena_only_grows_except_on_clear  (was open, 2 goals)
+Goal Coma.vc_verify_epsl_inv_block_belongs_to_exactly_one_session: ✘ (3/4)   # 2 open -> 1
+```
+`pool_touch` still proves WITH the new clauses, so they are discharged, not assumed.

@@ -7,9 +7,9 @@
       "vc_verify_epsl_candidates_listed_in_eviction_order": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.045 },
-          { "prover": "alt-ergo", "time": 0.047 },
-          { "prover": "alt-ergo", "time": 0.06 },
+          { "prover": "alt-ergo", "time": 0.024 },
+          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.03 },
           null
         ]
       }
