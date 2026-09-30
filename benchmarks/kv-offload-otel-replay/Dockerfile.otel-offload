@@ -24,21 +24,21 @@
 #
 # Build (context = repo root — needs benchmarks/ sources; NO dataset needed):
 #   podman build -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-offload \
-#       -t certus-otel-offload-bench .
+#       -t certus-otel-offload .
 #
 # Run examples (GPU required; --dir/OTEL_DIR points at the mounted corpus):
 #   # CPUOffload, first 8 conversations, saturating (no recorded waits)
 #   podman run --rm --device nvidia.com/gpu=all \
 #       -e NUM_CONVS=8 -e TIME_SCALE=0 \
 #       -v /mnt/certus1/inference-perf-syn-data/otel_1k:/workspace/otel-corpus:ro \
-#       -v /mnt/certus1/hf-cache:/root/.cache/huggingface:z certus-otel-offload-bench
+#       -v /mnt/certus1/hf-cache:/root/.cache/huggingface:z certus-otel-offload
 #   # Tiered CPU+FS (CPU tier is a /dev/shm mmap -> --shm-size >= CPU_BYTES; bind
 #   # a host dir for the fs tier so it hits real disk)
 #   podman run --rm --device nvidia.com/gpu=all --shm-size 36g \
 #       -e SECONDARY_TIER=fs -e CPU_BYTES=34359738368 -e FS_ROOT_DIR=/mnt/fs-tier/kv-tier \
 #       -v /mnt/certus1/inference-perf-syn-data/otel_1k:/workspace/otel-corpus:ro \
 #       -v /mnt/certus1/hf-cache:/root/.cache/huggingface:z \
-#       -v /mnt/certus1/kv-fs-tier:/mnt/fs-tier:z certus-otel-offload-bench
+#       -v /mnt/certus1/kv-fs-tier:/mnt/fs-tier:z certus-otel-offload
 #   # docker equivalent of --device nvidia.com/gpu=all: --gpus all
 
 # Tiering (SECONDARY_TIER=fs) requires vLLM 0.26+; NoOffload / CPUOffload work on

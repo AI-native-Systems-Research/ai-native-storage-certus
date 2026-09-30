@@ -3,13 +3,13 @@
 # 12-turn ShareGPT replay workload and emit a side-by-side throughput table.
 #
 # Variants (run in this order):
-#   NoOffload      GPU-only baseline                 (image certus-offload-bench, OFFLOAD_MODE=none)
-#   Certus-SPDK    shmq client + certus-server-yaml  (image certus-shmq-bench + host server)
-#   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-offload-bench, default mode)
-#   SharedStorage  llmd_fs_backend on RAID0/XFS      (image certus-sharedstorage-bench)
+#   NoOffload      GPU-only baseline                 (image certus-offload, OFFLOAD_MODE=none)
+#   Certus-SPDK    shmq client + certus-server-yaml  (image certus-shmq-connector + host server)
+#   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-offload, default mode)
+#   SharedStorage  llmd_fs_backend on RAID0/XFS      (image certus-sharedstorage)
 #                  vLLM <= 0.23 path (native tiering not yet available)
 #   Tiered-CPU-FS  vLLM TieringOffloadingManager: CPU primary + FS secondary
-#                  vLLM >= 0.23 path (same certus-offload-bench + SECONDARY_TIER=fs; FS tier on RAID0/XFS)
+#                  vLLM >= 0.23 path (same certus-offload + SECONDARY_TIER=fs; FS tier on RAID0/XFS)
 #
 # Certus-SPDK runs first (of the storage backends) on purpose: it consumes the
 # boot-reserved 1G hugepage pool while it is still intact (no runtime realloc, no
@@ -138,11 +138,11 @@ LOGDIR=""
 # Dockerfile.offload (run_multiturn_offloading.py drives all three; the backend is
 # picked per-run by OFFLOAD_MODE / SECONDARY_TIER). IMG_NOOFFLOAD / IMG_CPU are
 # kept as override knobs but default to the same unified image.
-IMG_OFFLOAD="${IMG_OFFLOAD:-certus-offload-bench}"
+IMG_OFFLOAD="${IMG_OFFLOAD:-certus-offload}"
 IMG_NOOFFLOAD="${IMG_NOOFFLOAD:-$IMG_OFFLOAD}"
 IMG_CPU="${IMG_CPU:-$IMG_OFFLOAD}"
-IMG_SHARED="${IMG_SHARED:-certus-sharedstorage-bench}"
-IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-bench}"
+IMG_SHARED="${IMG_SHARED:-certus-sharedstorage}"
+IMG_SHMQ="${IMG_SHMQ:-localhost/certus-shmq-connector}"
 
 # Host copy of the replay dataset, used only for the preflight existence warn
 # (container runs bake their own copy). It lives in data/ but older layouts kept
@@ -268,7 +268,7 @@ Flags (all optional; defaults shown):
                                otherwise reused as-is). Without it, a missing image
                                is SKIPPED. All images build via their Dockerfiles;
                                Tiered-CPU-FS reuses the CPUOffload image;
-                               SharedStorage builds certus-sharedstorage-bench
+                               SharedStorage builds certus-sharedstorage
                                (needs FS_BACKEND_DIR).
   --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL backends
                                (--build-arg VLLM_VERSION). Images are tagged
@@ -734,13 +734,13 @@ fi
 # check below so that check only flags usage we did not just clear.
 reap() {
     local names ids
-    names="$(command podman ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-(nooffload|cpu-offload|sharedstorage|shmq)-bench' | awk '{print $1}')"
+    names="$(command podman ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-(offload|sharedstorage)' | awk '{print $1}')"
     if [[ -n "$names" ]]; then
         warn "reaping stale bench containers: $(echo "$names" | tr '\n' ' ')"
         echo "$names" | xargs -r command podman rm -f >/dev/null 2>&1
     fi
     # Same for the shmq store.
-    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-shmq-bench|shmq-bench' | awk '{print $1}')"
+    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-shmq-connector' | awk '{print $1}')"
     [[ -n "$ids" ]] && echo "$ids" | xargs -r command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" rm -f >/dev/null 2>&1
 }
 reap

@@ -37,7 +37,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ── Text side (synthetic_text -> "prompt"): a shared prefix per group gives the
 #    KV-offload read path something to reuse; the unique question + reply are the
 #    per-request work. Folded into synthetic_text by run-guidellm.sh.
-DATA="${DATA:-prompt_tokens=256,output_tokens=128,prefix_tokens=2048,prefix_count=32,turns=100}"
+#    prefix_tokens=4096 (doubled from 2048): doubles the reusable prefix context
+#    length per request, doubling the KV working set that spills to / is re-read
+#    from the offload tier (working set ~ prefix_count * prefix_tokens). Stays
+#    well under MAX_MODEL_LEN=32768 (4096+256+128=4480 tokens/request).
+DATA="${DATA:-prompt_tokens=256,output_tokens=128,prefix_tokens=4096,prefix_count=32,turns=100}"
 
 PATH="$HOME/venv_guidellm/bin:$PATH"
 HF_HOME=/mnt/certus1/hf-cache

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Entrypoint for the kv-offload-otel-replay OffloadingConnector image
-# (certus-otel-offload-bench).
+# (certus-otel-offload).
 #
 # One image, one driver (run_otel_replay.py), three backends selected by
 # environment — the OTel-corpus counterpart of docker-entrypoint-offload.sh:

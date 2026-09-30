@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import sys
 import types
-from dataclasses import dataclass, make_dataclass
+from dataclasses import dataclass, field, make_dataclass
 from typing import Any
 
 # The even versions we produce fakes for. Mirrors compat.SUPPORTED_VERSIONS, but
@@ -34,6 +34,8 @@ SUPPORTED_VERSIONS: tuple[tuple[int, int], ...] = (
     (0, 23),
     (0, 24),
     (0, 26),
+    (0, 29),
+    (0, 30),
 )
 
 
@@ -52,8 +54,17 @@ def _transfer_result_has_type(version: tuple[int, int]) -> bool:
 def _is_0_26(version: tuple[int, int]) -> bool:
     """Whether this version uses the 0.26 consolidated-``base`` rewrite (single
     OffloadingWorker, OffloadingConfig ctor, LookupResult enum, CanonicalKVCaches).
-    Mirrors the ``worker_split_submit`` / ``spec_config_object`` predicates."""
+    Mirrors the ``worker_split_submit`` / ``spec_config_object`` predicates.
+    0.29/0.30 share this rewrite era."""
     return version >= (0, 26)
+
+
+def _kvcache_layout_field(version: tuple[int, int]) -> bool:
+    """Whether ``OffloadingConfig`` carries the 0.30 ``kv_cache_layout`` field.
+    Mirrors ``compat.FEATURES['kvcache_layout_field']`` (load-order duplication,
+    like the other predicates here) so the fake config exposes exactly the shape
+    ``compat.kv_cache_layout_name`` will read on this version."""
+    return version >= (0, 30)
 
 
 def _module(name: str) -> types.ModuleType:
@@ -180,10 +191,17 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
             tensors: list
             group_data_refs: list
 
-        @dataclass
-        class OffloadingConfig:
-            worker_kv_bytes_per_block: int
-            extra_config: Any
+        # OffloadingConfig's field set is version-varying: 0.30 added
+        # ``kv_cache_layout`` (resolved KVCacheLayout name), read by
+        # compat.kv_cache_layout_name. Match the real shape per version so the
+        # adapter is tested against what it will actually meet.
+        oc_fields = [
+            ("worker_kv_bytes_per_block", int),
+            ("extra_config", Any),
+        ]
+        if _kvcache_layout_field(version):
+            oc_fields.append(("kv_cache_layout", Any, field(default=None)))
+        OffloadingConfig = make_dataclass("OffloadingConfig", oc_fields)
 
         for name, obj in {
             "OffloadKey": OffloadKey,
