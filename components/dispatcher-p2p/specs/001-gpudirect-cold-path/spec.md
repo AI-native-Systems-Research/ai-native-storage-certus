@@ -139,9 +139,50 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
 - **MemoryTierEvictor**: Periodic DRAM→SSD demotion thread driven by memory-tier utilization watermarks (`memory_tier_eviction_*` config), with pressure-scaled batch sizing and dry-run backoff, emitting `Demoted` events.
 - **PinnedKeys**: A crate-local guard owning a batch of dispatch-map read pins, releasing them together on drop so a pin outlives the completion (not merely submission) of an asynchronous GPU copy, preventing an entry from being demoted while a copy is still reading it.
 
+- **FR-024** *(New 2026-09-29 — serving-tier attribution.)* `batch_lookup` MUST return one
+  `LookupOutcome` per requested entry, in order, each carrying a `ServedBy` from the taxonomy
+  defined in `components/interfaces`. This component MUST NOT define its own value space or
+  restate it; the dispatcher's spec 002 owns the feature and `components/interfaces` owns the
+  type.
+
+- **FR-025** *(New 2026-09-29.)* This component MUST attribute its SSD-to-GPU cold path as
+  `Ssd`, **and the value legitimately persists across repeat reads of the same key**, unlike in
+  `components/dispatcher`. The cold path here is SSD → GPU BAR1 ring → D2D with **no
+  synchronous DRAM promotion** (see the GPUDirect requirements above), so a second read of a
+  key may be `Ssd` again where `dispatcher` would report `Dram`.
+
+  This is the one place SC-005 of spec 002 permits the two dispatchers to disagree for
+  identical residency, and it is a difference in *persistence*, not in the value chosen. A test
+  asserting that a repeat read changes tier would be mis-specified against this component.
+
+- **FR-026** *(New 2026-09-29.)* The three invariants of
+  `dispatcher/specs/002-served-by-tier-attribution/contracts/idispatcher.md` MUST hold here
+  and MUST be tested **in this component**, not by borrowing `dispatcher`'s tests: length and
+  order, `served_by.is_hit()` if and only if `result.is_ok()`, and `Miss` if and only if
+  `KeyNotFound` after any remote attempt. A shared test would hide a divergence in either
+  component, which is the failure two separate specs exist to prevent.
+
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
+
+- **SC-007** *(New 2026-09-29, covers FR-024..FR-026)*: For a batch mixing a locally-resident
+  key, a cold key and a key no peer holds, every outcome satisfies the three invariants and the
+  batch produces more than one distinct `ServedBy` — a fixture where every key resolves
+  identically satisfies all three while exercising one path.
+
+- **SC-008** *(New 2026-09-29)*: Reading the same cold key twice reports `Ssd` **both** times,
+  which distinguishes this component from `dispatcher` and is the observable consequence of
+  having no synchronous DRAM promotion.
+
+  **Not yet verified, and the reason is structural rather than an omission.** Dispatcher
+  selection is a build-time `CERTUS_PROFILE` choice, so the two cannot be compared by flipping
+  a runtime flag, and this component's unit tests reach `batch_lookup` only through mocks whose
+  `MockEntryLocation::BlockDevice` variant is currently never constructed. Verifying it needs
+  either a mock that models a real cold path or a `--features p2p-native` hardware run.
+  Recorded as unverified rather than quietly dropped.
+
+
 
 - **SC-001**: Cold lookups complete successfully with correct data under single-client and multi-client (4+) workloads.
 - **SC-002**: Hot-path throughput shows no measurable regression compared to the standard dispatcher.

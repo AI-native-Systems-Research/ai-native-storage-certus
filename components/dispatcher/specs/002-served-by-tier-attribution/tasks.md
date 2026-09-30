@@ -349,23 +349,37 @@ step: an accounting identity that fails by a recognisable quantity names its own
 
 # Phase 4 — verification and the component specs
 
-- [ ] **T112** Feature spec for attribution in `components/dispatcher-p2p/specs/`, covering
+- [x] **T112** Feature spec for attribution in `components/dispatcher-p2p/specs/`, covering
   FR-014's cold-path difference. Verification-bearing, so it is a spec and not a comment.
 
-- [ ] **T113** Feature spec for `components/remote-lookup/specs/` covering what it contributes
+- [x] **T113** Feature spec for `components/remote-lookup/specs/` covering what it contributes
   to attribution. Note it contributes no *tier* — the delta is withdrawn — so this is narrower
   than the original plan assumed.
 
-- [ ] **T114** FR-027/FR-028 tests in both dispatchers: every attribution value has a test that
+- [x] **T114** FR-027/FR-028 tests in both dispatchers: every attribution value has a test that
   fails if that value is mis-assigned, and the mocks are shown to model residency faithfully
   enough that the assertions are not vacuous.
 
-- [ ] **T115** FR-029: run the suites under the `integrity-check` feature as well as default.
+- [x] **T115** FR-029: run the suites under the `integrity-check` feature as well as default.
   Phase 1 never did this and recorded it as unaddressed.
 
-- [ ] **T116** FR-014's cold path **cannot be tested by flipping a flag** — dispatcher selection
-  is a build-time `CERTUS_PROFILE` choice. Build the test construction that actually exercises
-  it, or record precisely why it cannot be done and what that leaves unverified.
+- [~] **T116 — ATTEMPTED, PARTLY BLOCKED, and the blockage is recorded rather than worked
+  around.** FR-014's cold-path difference — that `dispatcher-p2p` reports `Ssd` again on a
+  repeat read where `dispatcher` reports `Dram` — is **not verified**.
+
+  Three facts make it structural rather than an omission:
+  1. Dispatcher selection is a build-time `CERTUS_PROFILE` choice, so the two cannot be
+     compared by flipping a runtime flag in one test process.
+  2. `dispatcher-p2p`'s mock has a `MockEntryLocation::BlockDevice` variant that is **never
+     constructed** (the compiler says so), so its unit tests never reach the cold path at all.
+  3. The hardware runs in this feature used the `full-remote` profile, which builds
+     `dispatcher`, not `dispatcher-p2p`.
+
+  What *is* verified: the taxonomy value itself (`Ssd`) and the three invariants, in this
+  component's own tests (T114). What is not: the persistence claim across a repeat read.
+  Closing it needs either a mock that models a real cold path or a `--features p2p-native`
+  run, and it is spec'd as `SC-008` in that component with the same caveat so the gap is
+  visible where a reader of that component will look.
 
 ## Out of scope, decided 2026-09-29
 

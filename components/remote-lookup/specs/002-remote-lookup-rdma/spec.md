@@ -535,6 +535,20 @@ one-sided write into a reclaimed slot).
   re-lookup MUST still count, because the read was performed either way. Duplicate keys within
   one request MUST count once.
 
+- **FR-037** *(New 2026-09-29 — what this component contributes to serving-tier attribution,
+  which is less than originally planned.)* This component MUST NOT carry a serving tier out of
+  `IRemoteLookup::batch_lookup`. An earlier design required the responding peer's advertised
+  tier so a requester could report `REMOTE_DRAM` versus `REMOTE_SSD`; that split is **withdrawn**
+  (see `dispatcher/specs/002-served-by-tier-attribution/contracts/served-by.md`). A requester
+  attributes `Remote` from the per-key success of the remote pass, which it already has, so
+  `batch_lookup` keeps its signature and this component's contribution to attribution is the
+  responder-side counters of FR-035/FR-036 instead.
+
+  Recorded as an explicit non-requirement because the opposite was specified for eight weeks,
+  and a future reader finding `Avail` on the wire would otherwise reasonably conclude it was
+  meant to be plumbed through.
+
+
 ### Key Entities
 
 - **Operation**: One `batch_lookup` invocation, keyed by `op_id`. Holds the unsatisfied set,

@@ -3,7 +3,7 @@ spec_sync_component: dispatcher
 spec_sync_drift_status: clean
 spec_sync_synced_at: 2026-09-29T00:00:00Z
 spec_sync_git_commit: f052992c
-spec_sync_inputs_sha256: 127cc2e8f652c053e6cbf2c73244ffaaa6807a7c0fee170315dcac0c9b7760b0
+spec_sync_inputs_sha256: 81142d54449831c6a3ec799df1266611f2e8870a8e7f13c103339e54d93bd6d5
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Re-stamp 2026-09-29 (served_by Phases 2-3).** `ServedBy` + `LookupOutcome` in

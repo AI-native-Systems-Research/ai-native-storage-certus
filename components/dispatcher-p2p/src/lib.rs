@@ -4342,6 +4342,52 @@ mod tests {
         (bufs, entries)
     }
 
+    /// T114 / FR-027 for this dispatcher: the same three invariants `dispatcher` asserts.
+    ///
+    /// Stated separately rather than shared, because the two dispatchers are separate
+    /// components with separate specs and a shared test would hide a divergence in either.
+    /// SC-005 requires identical attribution for identical residency *except where FR-014
+    /// permits*, and this is the test that would fail if this component drifted.
+    #[test]
+    fn every_outcome_obeys_the_interface_invariants() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        assert_eq!(
+            results.len(),
+            entries.len(),
+            "one outcome per entry, in order"
+        );
+
+        for (i, o) in results.iter().enumerate() {
+            assert_eq!(
+                o.served_by.is_hit(),
+                o.result.is_ok(),
+                "entry {i}: served_by {:?} disagrees with result {:?}",
+                o.served_by,
+                o.result
+            );
+            assert_eq!(
+                o.served_by == ServedBy::Miss,
+                matches!(o.result, Err(DispatcherError::KeyNotFound(_))),
+                "entry {i}: Miss must mean KeyNotFound and nothing else"
+            );
+        }
+
+        // Not vacuous: a peer holds 1 and 3, nobody holds 2.
+        let distinct: std::collections::BTreeSet<_> = results
+            .iter()
+            .map(|o| format!("{:?}", o.served_by))
+            .collect();
+        assert!(
+            distinct.len() > 1,
+            "one outcome for every key leaves the invariants untested: {distinct:?}"
+        );
+    }
+
     /// The load-bearing invariant: a read pin must still be held when the copy is
     /// *submitted* and when the batched sync runs, because that pin is the only
     /// thing keeping the memory-tier evictor off the DRAM slot the DMA is reading.
