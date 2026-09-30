@@ -1,6 +1,22 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_state_track": { "prover": "alt-ergo", "time": 0.033 } }
+    "Coma": {
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_epsl_locks_assumed_never_poisoned__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.032 },
+              null
+            ]
+          }
+        ]
+      }
+    }
   }
 }

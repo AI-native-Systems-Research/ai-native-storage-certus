@@ -5,7 +5,7 @@
       "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_evict_stops_tracking_the_victim": {
         "prover": "alt-ergo",
-        "time": 0.054
+        "time": 0.058
       }
     }
   }

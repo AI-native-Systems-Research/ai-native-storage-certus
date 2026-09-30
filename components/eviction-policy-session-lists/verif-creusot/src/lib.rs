@@ -1117,6 +1117,13 @@ macro_rules! unlink_body {
 #[ensures((^p).len@ <= (^p).nodes@.len())]
 #[ensures(counts_bounded(&^p))]
 #[ensures(chain_birth_decreases(&^p))]
+// SESSION-INDEX LENGTH (fourth pass): when a leaf with a parent goes, the parent TAKES OVER as the
+// session's leaf, so the session index keeps its entry and its length does not move. `map_insert`
+// already says so (`map_mem ==> len unchanged`) and `leaf_is_session_leaf` supplies the `map_mem`;
+// what was missing was the composition, and `counts_bounded` then pins |leaves| to |sessions| —
+// which is how a caller knows the candidate set still has exactly as many entries as before.
+#[ensures(((*p).nodes@[idx@]).child == None && ((*p).nodes@[idx@]).parent != None ==>
+             (^p).sessions.e@.len() == (*p).sessions.e@.len())]
 pub fn pool_unlink(p: &mut Pool, idx: u32) -> u64 {
     unlink_body!(p, idx)
 }
@@ -1334,6 +1341,22 @@ pub fn pool_register(p: &mut Pool, key: u64, session: u64) -> u32 {
 #[ensures((*p).leaves.e@.len() > 0 ==>
              !map_mem((^p).by_key.e@, ((*p).nodes@[(((*p).leaves.e@[0]).1)@]).key))]
 #[ensures((*p).leaves.e@.len() == 0 ==> ^p == *p)]
+#[ensures((*p).leaves.e@.len() > 0
+          && ((*p).nodes@[(((*p).leaves.e@[0]).1)@]).parent != None ==>
+             (^p).sessions.e@.len() == (*p).sessions.e@.len())]
+// FRAME RE-EXPORT (fourth pass): `pool_unlink` proves both of these and the wrapper dropped them.
+// The victim's PARENT inherits the victim's child — which is `None`, because the victim is a leaf —
+// so the parent becomes childless and therefore eligible; that is the whole mechanism behind
+// `EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER` being false, and the refutation could not see it.
+#[ensures((*p).leaves.e@.len() > 0 ==>
+             (match ((*p).nodes@[(((*p).leaves.e@[0]).1)@]).parent {
+                Some(q) => ((^p).nodes@[q@]).child
+                             == ((*p).nodes@[(((*p).leaves.e@[0]).1)@]).child,
+                None => true }))]
+// eviction never rewrites a surviving block's key or session (only `register` ever writes them).
+#[ensures(forall<j: Int> 0 <= j && j < (*p).nodes@.len() ==>
+             ((^p).nodes@[j]).key == ((*p).nodes@[j]).key
+             && ((^p).nodes@[j]).session == ((*p).nodes@[j]).session)]
 pub fn pool_evict_oldest(p: &mut Pool) -> Option<u64> {
     match leaves_first(&p.leaves) {
         Some(x) => Some(pool_unlink(p, x.1)),
@@ -2960,22 +2983,42 @@ pub fn verify_epsl_batch_touch_touches_nothing_else__mutant(
 }
 
 // ---- EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING (divergent) ------------—
-// Every SINGLE-handle operation validates before mutating, so a rejected one changes nothing —
-// proved here for `touch` and `remove`. The group refresh does NOT: see
-// `refute_epsl_inv_failed_operations_change_nothing`.
+// The specification claims a REJECTED operation changes nothing. That is true of every
+// single-handle operation — they validate before mutating — and FALSE of the group refresh, which
+// refreshes each handle in turn and returns the error the moment it reaches a bad one, with no undo:
+// see `refute_epsl_inv_failed_operations_change_nothing`.
+//
+// As the convention for a divergent id requires, THIS module states the obligation as the
+// specification means it — over EVERY operation, the group refresh included — and is therefore
+// EXPECTED TO FAIL. Fourth pass: it used to state only the single-handle half, which is TRUE, so it
+// PROVED while its own refutation also proved. The gate rejects that pair outright
+// (`scorer_creusot.py`'s CONTRADICTION branch: "both '<verify>' and its negation '<refute>' proved")
+// and files the property UNRESOLVED rather than `refuted` — which is why this id was the 28th
+// UNRESOLVED even though every one of its modules was clean. A divergent `verify_` module that
+// proves is a mis-stated obligation, not a result.
 #[requires(pready(p))]
-#[requires(!(index@ < p.nodes@.len() && (p.nodes@[index@]).active))]
-#[ensures(!result.0 && !result.1)]
+#[requires(!(bad@ < p.nodes@.len() && (p.nodes@[bad@]).active))]
+#[requires(good@ < p.nodes@.len() && (p.nodes@[good@]).active)]
+#[ensures(!result.0 && !result.1 && result.2 != Ok(()))]
 #[ensures((^p).nodes@ == (*p).nodes@)]
 #[ensures((^p).len == (*p).len && (^p).clock == (*p).clock)]
 #[ensures((^p).leaves.e@ == (*p).leaves.e@ && (^p).by_key.e@ == (*p).by_key.e@)]
 #[ensures((^p).sessions.e@ == (*p).sessions.e@ && (^p).free@ == (*p).free@)]
 pub fn verify_epsl_inv_failed_operations_change_nothing(
-    p: &mut Pool, index: u32,
-) -> (bool, bool) {
-    let a = pool_touch(p, index);
-    let b = pool_remove(p, index);
-    (a, b)
+    p: &mut Pool, good: u32, bad: u32,
+) -> (bool, bool, Result<(), PolicyError>) {
+    let a = pool_touch(p, bad);
+    let b = pool_remove(p, bad);
+    // `batch_touch`'s loop body (src/lib.rs:169-182) inlined for a two-handle group: refresh
+    // `good`, then hit `bad` and return the error — with no undo of the refresh already applied.
+    let c = if !pool_touch(p, good) {
+        Err(PolicyError::InvalidHandle)
+    } else if !pool_touch(p, bad) {
+        Err(PolicyError::InvalidHandle)
+    } else {
+        Ok(())
+    };
+    (a, b, c)
 }
 
 // ---- EPSL-BATCH-TOUCH-REJECTS-UNKNOWN-POOL ----------------------------—
@@ -4703,12 +4746,28 @@ pub fn refute_epsl_inv_failed_operations_change_nothing(
 pub fn refute_epsl_candidates_listed_in_eviction_order(
     p: &mut Pool, k1: u64, k2: u64, k3: u64, sa: u64, sb: u64, n: usize,
 ) -> (Vec<u64>, Option<u64>, Option<u64>) {
-    let _a = pool_register(p, k1, sa);
-    let _b = pool_register(p, k2, sa);
-    let _c = pool_register(p, k3, sb);
+    let a = pool_register(p, k1, sa);
+    let b = pool_register(p, k2, sa);
+    let c = pool_register(p, k3, sb);
     let listed = pool_candidates(p, n);
     let first = pool_evict_oldest(p);
+    // After the first eviction the candidate set is `[(stamp(a), a), (stamp(c), c)]` again — the
+    // PARENT `a` has been promoted at its own, older, stamp. Spelled out step by step because the
+    // last step is a pigeonhole ("two distinct members of a sorted length-2 sequence ARE that
+    // sequence, in order") that the solver will not find from the invariants on its own.
+    proof_assert! { p.leaves.e@.len() == 2 };
+    proof_assert! { a != b && a != c && b != c };
+    proof_assert! { (p.nodes@[a@]).active && (p.nodes@[a@]).child == None };
+    proof_assert! { (p.nodes@[c@]).active && (p.nodes@[c@]).child == None };
+    proof_assert! { leaves_mem(p.leaves.e@, ((p.nodes@[a@]).stamp, a)) };
+    proof_assert! { leaves_mem(p.leaves.e@, ((p.nodes@[c@]).stamp, c)) };
+    proof_assert! { pair_lt(((p.nodes@[a@]).stamp, a), ((p.nodes@[c@]).stamp, c)) };
+    proof_assert! { p.leaves.e@[0] == ((p.nodes@[a@]).stamp, a)
+                    || p.leaves.e@[1] == ((p.nodes@[a@]).stamp, a) };
+    proof_assert! { p.leaves.e@[0] == ((p.nodes@[a@]).stamp, a) };
+    proof_assert! { (p.nodes@[a@]).key == k1 };
     let second = pool_evict_oldest(p);
+    let _ = b;
     (listed, first, second)
 }
 

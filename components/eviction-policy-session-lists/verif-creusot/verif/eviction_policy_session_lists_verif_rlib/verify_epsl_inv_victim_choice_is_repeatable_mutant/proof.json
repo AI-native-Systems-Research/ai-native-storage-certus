@@ -6,8 +6,8 @@
       "vc_verify_epsl_inv_victim_choice_is_repeatable__mutant": {
         "tactic": "split_vc",
         "children": [
-          { "prover": "alt-ergo", "time": 0.04 },
-          { "prover": "alt-ergo", "time": 0.044 },
+          { "prover": "alt-ergo", "time": 0.021 },
+          { "prover": "alt-ergo", "time": 0.025 },
           null
         ]
       }

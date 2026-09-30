@@ -5,7 +5,7 @@
       "vc_pool_evict_oldest": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_epsl_evict_empty_domain_reports_nothing": {
         "prover": "alt-ergo",
-        "time": 0.061
+        "time": 0.056
       }
     }
   }

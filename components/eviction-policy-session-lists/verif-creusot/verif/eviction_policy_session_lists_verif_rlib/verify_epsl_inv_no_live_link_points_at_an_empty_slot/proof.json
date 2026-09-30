@@ -8,7 +8,7 @@
       "vc_pool_touch": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_inv_no_live_link_points_at_an_empty_slot": {
         "prover": "z3",
-        "time": 0.062
+        "time": 0.056
       }
     }
   }

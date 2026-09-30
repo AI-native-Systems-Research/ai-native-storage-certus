@@ -1,1 +1,17 @@
-{ "profile": [], "proofs": { "Coma": {} } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epsl_track_reuses_only_freed_slots__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.024 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

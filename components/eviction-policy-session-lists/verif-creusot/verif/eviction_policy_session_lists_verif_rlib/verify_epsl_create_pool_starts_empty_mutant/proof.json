@@ -2,10 +2,25 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.032 },
-      "vc_state_evict": { "prover": "alt-ergo", "time": 0.033 },
-      "vc_state_len": { "prover": "alt-ergo", "time": 0.031 }
+      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_state_create_pool": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_state_len": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epsl_create_pool_starts_empty__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.032 },
+              { "prover": "alt-ergo", "time": 0.034 },
+              { "prover": "alt-ergo", "time": 0.046 },
+              null
+            ]
+          }
+        ]
+      }
     }
   }
 }

@@ -3,7 +3,20 @@
   "proofs": {
     "Coma": {
       "vc_state_remove": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_state_touch": { "prover": "alt-ergo", "time": 0.031 }
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epsl_handle_operations_reject_unknown_domain__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.025 },
+              { "prover": "alt-ergo", "time": 0.03 },
+              null
+            ]
+          }
+        ]
+      }
     }
   }
 }

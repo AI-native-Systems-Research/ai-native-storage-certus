@@ -2,7 +2,16 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.029 }
+      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_epsl_candidates_unknown_pool_returns_empty__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.025 }, null ]
+          }
+        ]
+      }
     }
   }
 }

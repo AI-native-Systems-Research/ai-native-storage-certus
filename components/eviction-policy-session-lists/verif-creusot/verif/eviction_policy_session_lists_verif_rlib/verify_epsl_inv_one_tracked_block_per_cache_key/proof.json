@@ -7,7 +7,7 @@
       "vc_pool_remove": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_epsl_inv_one_tracked_block_per_cache_key": {
         "prover": "alt-ergo",
-        "time": 0.551
+        "time": 0.605
       }
     }
   }

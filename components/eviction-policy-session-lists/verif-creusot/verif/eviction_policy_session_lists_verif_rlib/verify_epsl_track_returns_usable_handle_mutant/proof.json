@@ -1,6 +1,28 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_state_track": { "prover": "alt-ergo", "time": 0.028 } }
+    "Coma": {
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_epsl_track_returns_usable_handle__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.076 },
+              { "prover": "alt-ergo", "time": 0.035 },
+              null,
+              { "prover": "alt-ergo", "time": 0.036 },
+              { "prover": "alt-ergo", "time": 0.033 }
+            ]
+          }
+        ]
+      }
+    }
   }
 }

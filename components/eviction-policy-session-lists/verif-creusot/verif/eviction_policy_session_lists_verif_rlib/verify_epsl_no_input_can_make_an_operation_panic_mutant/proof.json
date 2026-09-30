@@ -1,6 +1,34 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_state_track": { "prover": "alt-ergo", "time": 0.028 } }
+    "Coma": {
+      "vc_state_batch_touch2": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_state_candidates": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_state_clear_pool": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_state_evict": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_state_len": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_state_remove": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_state_touch": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_state_track": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_epsl_no_input_can_make_an_operation_panic__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.079 },
+              { "prover": "alt-ergo", "time": 0.037 },
+              { "prover": "alt-ergo", "time": 0.151 },
+              { "prover": "alt-ergo", "time": 0.04 },
+              { "prover": "alt-ergo", "time": 0.054 },
+              { "prover": "alt-ergo", "time": 0.06 },
+              { "prover": "alt-ergo", "time": 0.059 },
+              null
+            ]
+          }
+        ]
+      }
+    }
   }
 }

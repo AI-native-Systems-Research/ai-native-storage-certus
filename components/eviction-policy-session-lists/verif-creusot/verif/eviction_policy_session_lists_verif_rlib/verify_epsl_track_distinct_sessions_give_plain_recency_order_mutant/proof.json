@@ -1,6 +1,21 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_pool_register": { "prover": "alt-ergo", "time": 0.019 } }
+    "Coma": {
+      "vc_pool_register": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epsl_track_distinct_sessions_give_plain_recency_order__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.023 },
+              { "prover": "alt-ergo", "time": 0.054 },
+              null
+            ]
+          }
+        ]
+      }
+    }
   }
 }

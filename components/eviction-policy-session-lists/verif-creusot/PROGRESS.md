@@ -637,3 +637,102 @@ expensive helpers and every container primitive.
 
 So **27 of the 28 UNRESOLVED are closed**, and the 28th is
 `EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER`, which needs its REFUTATION to close, not its `verify_`.
+
+## Step 5 — the 28th: `refute_epsl_candidates_listed_in_eviction_order` CLOSED
+The prior passes filed this as "sequence-level reasoning about the mirror list". It was not. Two
+`pool_unlink` facts that `pool_evict_oldest` simply did not re-export:
+1. **the relink** — `match victim.parent { Some(q) => nodes[q].child == victim.child }`. The victim
+   is a leaf, so its child is `None`, so its PARENT becomes childless and therefore eligible. That
+   is the entire mechanism by which the candidate list is not the eviction sequence, and the
+   refutation could not see it.
+2. **key/session preservation** — `pool_evict_oldest` re-exported only `stamp` preservation, so
+   `nodes[a].key == k1` was not available two evictions later.
+Plus one `pool_unlink` clause: when a leaf WITH a parent goes, the parent takes over as the
+session's leaf, so the session index keeps its entry and `|sessions|` — and through
+`counts_bounded`, `|leaves|` — does not move.
+
+The body was also decomposed with ten `proof_assert!` steps, which is what localised it: the
+pigeonhole step everyone assumed was the blocker ("two distinct members of a sorted length-2
+sequence ARE that sequence, in order") **proved on the first attempt**; the two goals that stayed
+open were `nodes[a].child == None` and `nodes[a].key == k1`, i.e. the two missing frames above.
+`proof_assert!` works fine in a plain driver body — the third pass's "not usable" finding is
+specific to the `macro_rules!` mutator bodies.
+
+Measured (forced clean, `-j 16`, 1 m 35 s):
+```
+Proved (8 files) ✔   # pool_evict_oldest, refute_epsl_candidates_listed_in_eviction_order,
+                     # + 6 evict-related driver controls, all still clean
+```
+
+## Step 6 — the 28th UNRESOLVED was NOT a missing proof
+A module census accounts for only 27 of the 28 UNRESOLVED. The 28th is
+`EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING`, and **every one of its modules was already clean** —
+which is exactly the problem. Its `verify_` module PROVED *and* its `refute_` module proved, and the
+scorer rejects that pair outright:
+
+> `scorer_creusot.py`: "CONTRADICTION: both '<verify>' and its negation '<refute>' proved. The model
+> is unsound (a vacuous precondition or a mis-stated negation) — fix it before any verdict."
+
+The cause: `verify_epsl_inv_failed_operations_change_nothing` stated only the half of the obligation
+that is TRUE (a rejected SINGLE-handle operation changes nothing, because those validate before
+mutating). The half the specification also claims — that a rejected GROUP refresh changes nothing —
+is false, and that is what the refutation proves. So the module was not stating the obligation as the
+specification means it, which is the whole convention for a divergent id. Restated over every
+operation, the group refresh included, and it now FAILS as it must:
+```
+Goal Coma.vc_verify_epsl_inv_failed_operations_change_nothing: ✘ (10/13)   # was Proved
+refute_epsl_inv_failed_operations_change_nothing:                Proved ✔ (unchanged)
+```
+**Carry this to the next component: a divergent `verify_<id>` module that PROVES is a mis-stated
+obligation, not a result.** It is invisible to a census of open goals — the only way to catch it is
+to cross-check every `refute_<id>` that proves against its `verify_<id>`.
+
+## FOURTH PASS — FINAL CENSUS: all 28 UNRESOLVED closed
+Whole crate, forced clean (`cargo creusot --why3find-arg=-f -j 20`, 231 modules), **8 m 44 s**:
+```
+Error: 94 unproved files
+  86 = every `*_mutant` twin      <- REQUIRED to fail; anti-vacuity is complete
+   8 = the divergent `verify_<id>` <- REQUIRED to fail; each has a PROVING `refute_<id>`
+```
+Nothing else fails. All 86 non-divergent `verify_<id>`, all 9 `refute_<id>`, the whole `state_*`
+layer, `pool_register` / `pool_unlink` / `pool_batch_touch` and every container primitive prove.
+(The 9th divergent `verify_` — `inv_failed_operations_change_nothing` — was fixed after this sweep
+and measured separately; with it the divergent count is 9 and the sweep's 8 becomes 9.)
+
+Expected gate: **86 proved · 9 refuted · 0 tool-boundary · 0 delegated · 0 UNRESOLVED**.
+
+### Regression controls, all clean
+| control | result |
+|---|---|
+| `pool_register`, `pool_unlink`, `pool_batch_touch` with every new clause | `Proved (3 files) ✔` 1 m 37 s |
+| all twelve `state_*` modules | Proved (four of them were failing BEFORE this pass) |
+| all four container primitives + `free_push` + `pool_alloc` | Proved |
+| all 86 mutant twins | all 86 fail — no property became vacuous |
+| the other 8 refutations | all still Proved |
+
+### Cost, for sizing the gate
+`pool_unlink` + `pool_register` together: **1 m 37 s** at `-j 24`, not the 8 min the third pass
+measured. So `--cap-seconds 120 --cap-max 600` is comfortable and the two witness properties can keep
+naming a helper in `evidence.modules`. Whole crate forced from scratch: 8 m 44 s at `-j 20`, of which
+the 86 required-to-fail mutants are most of it (they each burn the full ladder).
+
+## Advisory
+Only `fidelity` / `note` / `evidence` / `delegate_to` — checked programmatically after every edit; no
+`status`, no `symbol`, no `_scored_by`. Both helper WITNESS references were left exactly as they were
+(`EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR` -> `pool_unlink`,
+`EPSL-ARENA-SLOT-COUNT-ASSUMED-BELOW-U32-MAX` -> `pool_register`), so the gate still re-derives each
+helper once from source. Five new disclosures were appended: the three-tier margin (on both
+"assumed" ids), the two sharpened session statements, the restated
+`LEN-REPORTS-TRACKED-COUNT` clause, and the restated divergent module above.
+NOTE: `verif/creusot_advisory.yaml` is in `.git/info/exclude`, so it is NOT tracked in this worktree —
+the edits are on disk only and will not appear in a commit.
+
+## Next work-list
+1. **Run the gate.** `python3 <gate>/scorer_creusot.py ../verif --crate-dir . --cap-seconds 120
+   --cap-max 600`. Nothing is known to block it.
+2. Optional cleanup: `state_batch_touch_n`'s only callers are the two `hs@.len() == 0` drivers, so its
+   loop is proved but never exercised by a property. Either give it a driver with a non-empty group or
+   drop it in favour of `state_batch_touch2`.
+3. Optional: the 66 ids still carry a helper in `creusot.evidence.modules`. Un-naming is now cheap and
+   safe (`python3 /tmp/unname_helper.py pool_register pool_unlink pool_batch_touch`) but buys nothing —
+   the pair costs 1 m 37 s, well inside the cap.

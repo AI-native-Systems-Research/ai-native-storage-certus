@@ -2,7 +2,16 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_state_batch_touch2": { "prover": "alt-ergo", "time": 0.016 }
+      "vc_state_batch_touch2": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_epsl_batch_touch_relocks_when_the_pool_changes__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.027 }, null ]
+          }
+        ]
+      }
     }
   }
 }

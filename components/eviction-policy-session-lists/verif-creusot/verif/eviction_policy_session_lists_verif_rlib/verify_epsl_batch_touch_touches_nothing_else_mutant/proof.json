@@ -1,1 +1,17 @@
-{ "profile": [], "proofs": { "Coma": {} } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pool_batch_touch": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_epsl_batch_touch_touches_nothing_else__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.023 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -12,7 +12,7 @@
             "children": [
               { "prover": "alt-ergo", "time": 0.027 },
               { "prover": "alt-ergo", "time": 0.025 },
-              { "prover": "alt-ergo", "time": 0.034 },
+              { "prover": "alt-ergo", "time": 0.037 },
               null
             ]
           }
