@@ -6,7 +6,6 @@ spec_source: components/eviction-policy-session-lists/specs/001-session-list-evi
 code_source: components/eviction-policy-session-lists/src/**
 tools:
 - creusot
-- kani
 counts:
   methods: 9
   spec_total: 59
@@ -56,7 +55,18 @@ properties:
   statement: A newly created eviction domain tracks no cache blocks at all. Immediately after it is created,
     the reported number of tracked blocks in it is zero, a request for a block to evict from it reports
     that there is nothing to evict, and a request for eviction candidates returns an empty list.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_create_pool_starts_empty
+      result: Proved
+      wall_clock_s: 11.95
+      peak_rss_mb: 344
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CREATE-POOL-ISSUES-A-FRESH-SEQUENTIAL-IDENTIFIER
   subject: create_pool
@@ -84,7 +94,18 @@ properties:
     identifier of every domain created before it, so two domains can never be confused for one another.
     Concretely the identifier handed back is the number of domains that existed before the call, so identifiers
     start at zero and count upwards with no gaps and no reuse.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_create_pool_issues_a_fresh_sequential_identifier
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CREATE-POOL-PRESERVES-EXISTING-POOLS
   subject: create_pool
@@ -106,7 +127,18 @@ properties:
   statement: 'Creating a new eviction domain disturbs no domain that already exists: every identifier
     already handed out still names the same domain, and the blocks tracked in those domains, their parent
     and child links, their recency values and their reported sizes are all unchanged.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_create_pool_preserves_existing_pools
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CREATE-POOL-ANNOUNCES-AT-MOST-ONCE
   subject: create_pool
@@ -131,7 +163,18 @@ properties:
     happens at most once for the whole life of the component, however many eviction domains are created,
     because the component keeps an internal record that the announcement has already been made and checks
     it before announcing again.
-  creusot: {}
+  creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_create_pool_announces_at_most_once
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-ANNOUNCE-LATCH-SET-ONLY-WITH-A-LOGGER
   subject: create_pool
@@ -157,7 +200,18 @@ properties:
     a logging component is actually attached. Domains created before any logger is attached therefore
     do not consume the one-off announcement, and the announcement can still be made later once a logger
     is present.
-  creusot: {}
+  creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_announce_latch_set_only_with_a_logger
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-POOL-COUNT-ASSUMED-BELOW-U32-MAX
   subject: create_pool
@@ -187,7 +241,18 @@ properties:
     because it shortens the count of domains to a 32-bit number when it builds the new domain's identifier.
     If that many domains were ever created the identifiers would start repeating and handles would name
     the wrong domain.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_pool_count_assumed_below_u32_max
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-RETURNS-USABLE-HANDLE
   subject: track
@@ -217,7 +282,18 @@ properties:
     identifies exactly that block: it carries the eviction domain the caller named together with the storage
     position the block occupies, and those two pieces are exactly what a later recency refresh or stop-tracking
     request uses to find the block again.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_returns_usable_handle
+      result: Proved
+      wall_clock_s: 0.53
+      peak_rss_mb: 56
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-FIRST-BLOCK-IS-HEAD-AND-LEAF
   subject: track
@@ -248,7 +324,18 @@ properties:
   statement: When a block is registered for a session that currently holds no blocks, that block becomes
     both the start of the session's chain, having no parent block, and the end of that chain, having no
     child block, and it is immediately eligible for eviction.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_first_block_is_head_and_leaf
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-LINKS-UNDER-CURRENT-LEAF
   subject: track
@@ -279,7 +366,18 @@ properties:
   statement: When a block is registered for a session that already holds blocks, the block that was previously
     the end of that session's chain becomes the new block's parent, and the new block becomes the new
     end of that session's chain.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_links_under_current_leaf
+      result: Proved
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-SESSION-COMES-FROM-CALLER
   subject: track
@@ -315,7 +413,18 @@ properties:
     block in its original session and the caller is given no indication. The specification is authoritative
     on intent; the code''s behaviour is a defect unless the specification is amended to say the session
     is fixed at first registration.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: 'REFUTED — the negation ''refute_epsl_track_session_comes_from_caller'' is machine-proved, so
+      the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    evidence:
+      refutation: refute_epsl_track_session_comes_from_caller
+      result: Proved (negation)
+      wall_clock_s: 0.56
+      peak_rss_mb: 55
+    status: refuted
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-SETS-INITIAL-RECENCY
   subject: track
@@ -347,7 +456,18 @@ properties:
     that block with a recency value strictly newer than every recency value handed out before it in the
     same eviction domain, so a just-registered block counts as more recently used than every other block
     in that domain.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_sets_initial_recency
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-REREGISTRATION-IS-IDEMPOTENT
   subject: track
@@ -379,7 +499,18 @@ properties:
     that key. It is treated as an access to the existing block: the same handle is returned as the first
     time, the existing block''s recency is refreshed, the reported size of the domain is unchanged, and
     no parent or child link anywhere is altered.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_reregistration_is_idempotent
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-DISTINCT-SESSIONS-GIVE-PLAIN-RECENCY-ORDER
   subject: track
@@ -412,7 +543,18 @@ properties:
     a child, every block is a one-block chain that is both the start and the end of its session, every
     block is always eligible for eviction, and the block chosen for eviction is simply the least recently
     used block in the domain. In that case the policy behaves exactly like plain least-recently-used eviction.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_distinct_sessions_give_plain_recency_order
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-UNKNOWN-DOMAIN-IS-AN-ERROR
   subject: track
@@ -437,7 +579,18 @@ properties:
   statement: Registering a block into an eviction domain that does not exist reports an error to the caller,
     naming the offending domain identifier, instead of appearing to succeed, and leaves the tracking state
     of every existing domain exactly as it was.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_unknown_domain_is_an_error
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-DOES-NOT-DISTURB-OTHER-BLOCKS
   subject: track
@@ -465,7 +618,18 @@ properties:
   statement: Registering a block changes only that block's own record and the parent and child link to
     the block that used to end its session's chain. No block of any other session changes its parent,
     its child, its recency or its eligibility for eviction, and no other block stops being tracked.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_does_not_disturb_other_blocks
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-FRESH-KEY-BECOMES-THE-SESSION-LEAF
   subject: track
@@ -492,7 +656,18 @@ properties:
   statement: Registering a key the domain does not yet hold adds exactly one new block. That block has
     no child of its own, it becomes its session's current end-of-chain block, it appears among the eviction
     candidates, and the reported size of the domain goes up by exactly one.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_fresh_key_becomes_the_session_leaf
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-DEMOTES-THE-PREVIOUS-LEAF
   subject: track
@@ -518,7 +693,18 @@ properties:
   statement: The block that was previously the end of a session's chain stops being an eviction candidate
     the moment a new block is attached beneath it, because it now has a child that is still tracked. It
     is removed from the candidate set in the same operation that adds the new block.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_demotes_the_previous_leaf
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-NEVER-REPORTS-INVALID-HANDLE
   subject: track
@@ -541,7 +727,18 @@ properties:
   statement: Registering a block has exactly one way to fail, namely naming an eviction domain that does
     not exist. It never reports the other error the interface defines, the invalid-handle error, so a
     caller that distinguishes the two error kinds never sees an invalid-handle error from a registration.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_never_reports_invalid_handle
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-REUSES-ONLY-FREED-SLOTS
   subject: track
@@ -565,7 +762,18 @@ properties:
   statement: A newly registered block is placed either in a storage position that was previously released
     by a removal or eviction, or in a brand-new position appended at the end of the domain's storage.
     It never overwrites a position that still holds a tracked block.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_reuses_only_freed_slots
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACK-KEYS-ARE-SCOPED-TO-ONE-POOL
   subject: track
@@ -590,7 +798,18 @@ properties:
   statement: The record of which cache keys are already tracked is kept separately for each eviction domain,
     so the same key may be tracked independently in two different domains, and each domain then holds
     its own block for that key with its own session, its own place in a chain and its own recency.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_track_keys_are_scoped_to_one_pool
+      result: Proved
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-ARENA-SLOT-COUNT-ASSUMED-BELOW-U32-MAX
   subject: track
@@ -615,7 +834,19 @@ properties:
   statement: The implementation assumes a single eviction domain never grows beyond about four billion
     storage positions, because it shortens the position number to a 32-bit value when it builds a handle.
     If a domain ever exceeded that, handles would start naming the wrong storage position.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_arena_slot_count_assumed_below_u32_max
+      - pool_register
+      result: Proved
+      wall_clock_s: 1.2
+      peak_rss_mb: 87
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TOUCH-REFRESHES-RECENCY
   subject: touch
@@ -642,7 +873,18 @@ properties:
   statement: Reporting an access to a tracked block sets that block's recency to a value newer than that
     of every other tracked block in its eviction domain, making it the most recently used block there
     and therefore the last block that would be chosen for eviction among the eligible ones.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_touch_refreshes_recency
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TOUCH-INVALID-HANDLE-IS-AN-ERROR
   subject: touch
@@ -679,7 +921,18 @@ properties:
     and refreshes a different block. The specification is authoritative; the code cannot deliver the promised
     error because handles carry no use-generation marker (see EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT
     for the root cause, which the specification itself records as an open gap).
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: 'REFUTED — the negation ''refute_epsl_touch_invalid_handle_is_an_error'' is machine-proved,
+      so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    evidence:
+      refutation: refute_epsl_touch_invalid_handle_is_an_error
+      result: Proved (negation)
+      wall_clock_s: 0.52
+      peak_rss_mb: 56
+    status: refuted
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-HANDLE-OPERATIONS-REJECT-UNKNOWN-DOMAIN
   subject: 'global invariant: handle-taking operations reject a handle naming a domain that does not exist'
@@ -705,7 +958,18 @@ properties:
   statement: If a handle refers to an eviction domain that does not exist, every operation that takes
     a handle reports an error instead of appearing to succeed, and changes nothing. The error reported
     is specifically an invalid-domain error naming the offending domain identifier.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_handle_operations_reject_unknown_domain
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TOUCH-CHANGES-ONLY-RECENCY
   subject: touch
@@ -732,7 +996,18 @@ properties:
   statement: 'Reporting an access to a block changes nothing except that one block''s recency: the block
     keeps the same parent and the same child, it stays in the same session, no block is added or removed,
     which cache keys are tracked is unchanged, and the reported size of the domain is unchanged.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_touch_changes_only_recency
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TOUCH-OF-A-LEAF-MOVES-IT-LAST-IN-THE-CANDIDATE-ORDER
   subject: touch
@@ -759,7 +1034,18 @@ properties:
   statement: Reporting an access to a block that is at the end of its session's chain keeps it among the
     eviction candidates but moves it to the very back of the candidate order, so it becomes the last of
     the current candidates that would be evicted.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_touch_of_a_leaf_moves_it_last_in_the_candidate_order
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TOUCH-OF-AN-INTERIOR-BLOCK-KEEPS-THE-CANDIDATE-SET
   subject: touch
@@ -784,7 +1070,18 @@ properties:
   statement: Reporting an access to a block that still has a tracked child does not add it to the eviction
     candidates and does not change the candidate list at all. Refreshing such a protected block is allowed
     and is reported as a success; only the block's own recency changes.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_touch_of_an_interior_block_keeps_the_candidate_set
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-BATCH-TOUCH-REFRESHES-EVERY-BLOCK
   subject: batch_touch
@@ -806,7 +1103,18 @@ properties:
   statement: When the caller reports a group of accessed blocks in one operation, every block in that
     group has its recency refreshed, not just the first or the last one, so all of them count as recently
     used afterwards.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_batch_touch_refreshes_every_block
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-BATCH-TOUCH-MATCHES-ONE-AT-A-TIME
   subject: batch_touch
@@ -834,7 +1142,18 @@ properties:
     reporting those same accesses one at a time, in the order they appear in the group, would have produced.
     Batching is a performance convenience only, and in particular a block named twice in the group ends
     up with the recency of its last mention.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_batch_touch_matches_one_at_a_time
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-BATCH-TOUCH-INVALID-HANDLE-IS-AN-ERROR
   subject: batch_touch
@@ -863,7 +1182,18 @@ properties:
     the end of its domain's storage and reports an invalid-handle error (src/lib.rs:179-181), but a handle
     to a removed block whose position has since been reused passes that check and silently refreshes the
     block that now occupies the position. Specification authoritative; same root cause as EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: 'REFUTED — the negation ''refute_epsl_batch_touch_invalid_handle_is_an_error'' is machine-proved,
+      so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    evidence:
+      refutation: refute_epsl_batch_touch_invalid_handle_is_an_error
+      result: Proved (negation)
+      wall_clock_s: 0.55
+      peak_rss_mb: 57
+    status: refuted
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-BATCH-TOUCH-TOUCHES-NOTHING-ELSE
   subject: batch_touch
@@ -884,7 +1214,18 @@ properties:
   statement: Reporting a group of accesses changes only the recency of the blocks named in the group.
     A block not named in the group keeps its recency, no parent or child link anywhere changes, no block
     is added or removed, and no domain's reported size changes.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_batch_touch_touches_nothing_else
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-FAILED-OPERATIONS-CHANGE-NOTHING
   subject: 'global invariant: a rejected operation never leaves partial state'
@@ -925,7 +1266,18 @@ properties:
     validates before mutating. The specification is authoritative on intent, but its own not-verifiable
     ledger records that it never explicitly states whether a group refresh is all-or-nothing (spec NV-11),
     so this is at minimum an unresolved conflict that the specification must settle.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: 'REFUTED — the negation ''refute_epsl_inv_failed_operations_change_nothing'' is machine-proved,
+      so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    evidence:
+      refutation: refute_epsl_inv_failed_operations_change_nothing
+      result: Proved (negation)
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+    status: refuted
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-BATCH-TOUCH-REJECTS-UNKNOWN-POOL
   subject: batch_touch
@@ -949,7 +1301,18 @@ properties:
   statement: If any handle in the group names an eviction domain that does not exist, the whole call fails
     with an invalid-domain error naming that identifier. The check happens when the walk through the group
     first reaches a handle for that domain, not up front for the whole group.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_batch_touch_rejects_unknown_pool
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-BATCH-TOUCH-EMPTY-SUCCEEDS-WITHOUT-VALIDATION
   subject: batch_touch
@@ -970,7 +1333,18 @@ properties:
     code: EPSL-BATCH-TOUCH-EMPTY-SUCCEEDS-WITHOUT-VALIDATION
   statement: Reporting an empty group of accesses reports success, changes nothing at all, and does not
     even take a lock or check that any eviction domain exists.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_batch_touch_empty_succeeds_without_validation
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-BATCH-TOUCH-SPANS-POOLS-ONE-LOCK-AT-A-TIME
   subject: batch_touch
@@ -994,7 +1368,18 @@ properties:
   statement: While refreshing a group of blocks that spans several eviction domains, the component always
     releases exclusive access to the domain it currently holds before taking exclusive access to the next
     one, so it never holds exclusive access to two domains at the same time.
-  creusot: {}
+  creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_batch_touch_spans_pools_one_lock_at_a_time
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-BATCH-TOUCH-RELOCKS-WHEN-THE-POOL-CHANGES
   subject: batch_touch
@@ -1020,7 +1405,18 @@ properties:
   statement: A group of handles may mix blocks from different eviction domains, and each block is refreshed
     in its own domain. The component switches domains only when consecutive handles in the group name
     different domains, so a group that alternates between two domains changes domains on every step.
-  creusot: {}
+  creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_batch_touch_relocks_when_the_pool_changes
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-REMOVE-STOPS-TRACKING-THE-BLOCK
   subject: remove
@@ -1054,7 +1450,18 @@ properties:
     afterwards: the reported size of its domain drops by exactly one, the block is never again offered
     as an eviction candidate or chosen as a victim, its cache key stops being tracked so the same key
     can later be registered again as a brand-new block, and its storage position is released for reuse.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_remove_stops_tracking_the_block
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-REMOVE-RELINKS-THE-CHAIN
   subject: remove
@@ -1086,7 +1493,18 @@ properties:
     the two ends back together: the removed block''s child is given the removed block''s parent as its
     new parent, and that parent is given the child as its new child, so the session is still one unbroken
     chain with no gap and no dangling block.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_remove_relinks_the_chain
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-REMOVE-LAST-BLOCK-EMPTIES-THE-SESSION
   subject: remove
@@ -1115,7 +1533,18 @@ properties:
   statement: 'When the block removed was the only block its session still held, that session is left with
     no blocks at all: the policy forgets the session entirely, it contributes no eviction candidate, and
     it starts fresh if a block is later registered for it again.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_remove_last_block_empties_the_session
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-REMOVE-INVALID-HANDLE-IS-AN-ERROR
   subject: remove
@@ -1149,7 +1578,18 @@ properties:
     by a later registration, a stale handle passes the check and removes the block that now occupies that
     position - a silent removal of the wrong block, which is worse than the false success in the refresh
     case. Specification authoritative; same root cause as EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: 'REFUTED — the negation ''refute_epsl_remove_invalid_handle_is_an_error'' is machine-proved,
+      so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    evidence:
+      refutation: refute_epsl_remove_invalid_handle_is_an_error
+      result: Proved (negation)
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+    status: refuted
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-REMOVE-DISTURBS-ONLY-THE-CHAIN-NEIGHBOURS
   subject: remove
@@ -1177,7 +1617,18 @@ properties:
   statement: Removing a block changes only that block's own record and the parent and child links of its
     immediate parent and child. No block's recency changes, no other block stops being tracked, and no
     block of any other session changes its parent, its child, its recency or its eligibility for eviction.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_remove_disturbs_only_the_chain_neighbours
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-PARENT-BECOMES-ELIGIBLE-WHEN-ITS-CHILD-GOES
   subject: 'global invariant: losing a child makes a block eligible for eviction'
@@ -1210,7 +1661,18 @@ properties:
   statement: As soon as a block's only child stops being tracked, whether that child was evicted or explicitly
     removed, the block itself becomes the end of its session's chain and is therefore eligible for a later
     eviction. This is how a session's chain is consumed from the end back towards its start.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_parent_becomes_eligible_when_its_child_goes
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-REMOVE-REJECTS-UNKNOWN-POOL
   subject: remove
@@ -1231,7 +1693,18 @@ properties:
     code: EPSL-REMOVE-REJECTS-UNKNOWN-POOL
   statement: Asking to stop tracking a block through a handle that names an eviction domain that was never
     created fails with an invalid-domain error reporting that identifier, and nothing anywhere changes.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_remove_rejects_unknown_pool
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-REMOVE-OF-AN-INTERIOR-BLOCK-KEEPS-THE-CANDIDATES
   subject: remove
@@ -1255,7 +1728,18 @@ properties:
   statement: Removing a block that still has a tracked child, including the block at the start of a chain,
     does not change which blocks are eviction candidates and does not change which block is the end of
     that session's chain.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_remove_of_an_interior_block_keeps_the_candidates
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-REMOVE-DOES-NOT-REFRESH-RECENCY
   subject: remove
@@ -1279,7 +1763,18 @@ properties:
   statement: 'Removing a block does not count as an access to anything: the domain''s recency counter
     does not advance and no surviving block''s recency changes, so the eviction order among the remaining
     candidates is exactly as it was apart from the removed block''s disappearance.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_remove_does_not_refresh_recency
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-PROMOTED-PARENT-KEEPS-ITS-OLD-STAMP
   subject: 'global invariant: a block promoted to end-of-chain keeps its old recency'
@@ -1307,7 +1802,18 @@ properties:
     the eviction order at the recency it already had, not as a freshly accessed block. A long-untouched
     parent therefore becomes the next victim immediately on promotion rather than going to the back of
     the queue.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_promoted_parent_keeps_its_old_stamp
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-TRACKED-SIZE-NEVER-UNDERFLOWS
   subject: 'global invariant: the tracked-block counter never goes below zero'
@@ -1332,7 +1838,18 @@ properties:
     so the implementation relies on that decrease only ever happening for a block that really was being
     tracked. Every path that decreases it is reached only after the block has been confirmed to occupy
     its storage position.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_tracked_size_never_underflows
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-EVICT-PICKS-OLDEST-ELIGIBLE-LEAF
   subject: identify_next_to_evict
@@ -1364,7 +1881,18 @@ properties:
     child - whose recency is the oldest among all such blocks anywhere in that eviction domain, comparing
     across every session in the domain at once. No eligible block with an older recency is ever passed
     over.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_evict_picks_oldest_eligible_leaf
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-EVICT-STOPS-TRACKING-THE-VICTIM
   subject: identify_next_to_evict
@@ -1397,7 +1925,18 @@ properties:
     exactly the same effect as an explicit request to stop tracking it: the domain''s reported size drops
     by one, its cache key is no longer tracked, its session''s chain is rejoined and its parent promoted,
     and the same block is never returned again by a later victim request or listed as a candidate.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_evict_stops_tracking_the_victim
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-EVICT-EMPTY-DOMAIN-REPORTS-NOTHING
   subject: identify_next_to_evict
@@ -1423,7 +1962,18 @@ properties:
   statement: When an eviction domain currently tracks no blocks at all, a request for a victim reports
     that there is nothing to evict rather than returning some block or failing, and it leaves the domain
     untouched.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_evict_empty_domain_reports_nothing
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-EVICT-DOES-NOT-REFRESH-THE-VICTIM
   subject: identify_next_to_evict
@@ -1451,7 +2001,18 @@ properties:
     the domain''s recency counter does not advance and no recency changes, so the selection can never
     make the block it just selected look recently used, and repeated victim requests walk steadily through
     the candidates from oldest to newest.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_evict_does_not_refresh_the_victim
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-EVICT-NONEMPTY-DOMAIN-ALWAYS-YIELDS-A-VICTIM
   subject: identify_next_to_evict
@@ -1475,7 +2036,18 @@ properties:
   statement: Whenever an eviction domain tracks at least one block, a request for a victim always returns
     one. The policy can never reach a state in which it tracks blocks but reports that none of them may
     be evicted.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_evict_nonempty_domain_always_yields_a_victim
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-EVICT-DISTURBS-ONLY-VICTIM-AND-PARENT
   subject: identify_next_to_evict
@@ -1497,7 +2069,18 @@ properties:
   statement: Evicting a block changes only that block's own record and its parent's end-of-chain status.
     No surviving block's recency changes, no other block stops being tracked, and no other session's chain
     is altered.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_evict_disturbs_only_victim_and_parent
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-READONLY-QUERIES-DEGRADE-SAFELY-ON-UNKNOWN-DOMAIN
   subject: 'global invariant: the operations that cannot report an error degrade safely on an unknown
@@ -1528,7 +2111,18 @@ properties:
     that does not exist: the victim request reports that there is nothing to evict, and nothing anywhere
     in the component changes. A consequence is that the caller cannot tell an unknown domain apart from
     one that is simply empty.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_readonly_queries_degrade_safely_on_unknown_domain
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-A-BLOCK-WITH-A-DESCENDANT-IS-NEVER-EVICTED
   subject: 'global invariant: only end-of-chain blocks may be evicted'
@@ -1561,7 +2155,18 @@ properties:
     has a tracked block descended from it, however long ago that block was last accessed. Blocks at the
     start and in the middle of a chain are therefore protected until everything below them has gone. This
     is the whole point of the policy.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_a_block_with_a_descendant_is_never_evicted
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-VICTIM-CHOICE-IS-REPEATABLE
   subject: 'global invariant: victim selection is deterministic'
@@ -1591,7 +2196,18 @@ properties:
     own recency value and no two tracked blocks in a domain share one, the eligible blocks have a strict
     oldest-to-newest order with a unique oldest. Two domains in identical states always name the same
     victim and produce the same candidate list.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_victim_choice_is_repeatable
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CANDIDATES-NEVER-MORE-THAN-ASKED
   subject: get_eviction_candidates
@@ -1616,7 +2232,18 @@ properties:
   statement: When the caller asks for up to a given number of eviction candidates, the policy returns
     no more than that many and no more than the number of eligible blocks it is actually tracking, returning
     exactly as many as are available when fewer exist. Asking for zero candidates returns an empty list.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_candidates_never_more_than_asked
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CANDIDATES-LISTED-IN-EVICTION-ORDER
   subject: get_eviction_candidates
@@ -1655,7 +2282,18 @@ properties:
     claim is not. Either the specification must be weakened to ''the first candidate is the next victim'',
     or the implementation must simulate successive evictions - the specification is authoritative and
     currently over-promises.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: 'REFUTED — the negation ''refute_epsl_candidates_listed_in_eviction_order'' is machine-proved,
+      so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    evidence:
+      refutation: refute_epsl_candidates_listed_in_eviction_order
+      result: Proved (negation)
+      wall_clock_s: 0.76
+      peak_rss_mb: 70
+    status: refuted
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CANDIDATES-ARE-DISTINCT
   subject: get_eviction_candidates
@@ -1686,7 +2324,18 @@ properties:
     tracked block. Moreover no two entries ever belong to the same session, because a session has exactly
     one block with no tracked child, so the number of candidates available is the number of sessions currently
     holding blocks.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_candidates_are_distinct
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CANDIDATES-EMPTY-DOMAIN-RETURNS-EMPTY-LIST
   subject: get_eviction_candidates
@@ -1706,7 +2355,18 @@ properties:
     code: null
   statement: When an eviction domain currently tracks no blocks, a request for candidates returns an empty
     list rather than failing or inventing entries.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_candidates_empty_domain_returns_empty_list
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CANDIDATES-CHANGE-NOTHING
   subject: get_eviction_candidates
@@ -1731,7 +2391,18 @@ properties:
   statement: 'Asking for eviction candidates is a pure enquiry: none of the listed blocks is removed from
     tracking, the reported size of the domain is unchanged, no recency changes, the recency counter does
     not advance, and no parent or child link is altered. Asking twice in a row returns the same list.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_candidates_change_nothing
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CANDIDATES-ARE-LEAVES-OLDEST-FIRST
   subject: get_eviction_candidates
@@ -1754,7 +2425,18 @@ properties:
     code: EPSL-CANDIDATES-ARE-LEAVES-OLDEST-FIRST
   statement: The candidate list contains only blocks that have no tracked child, and they are listed least
     recently accessed first.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_candidates_are_leaves_oldest_first
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CANDIDATES-FIRST-IS-THE-NEXT-VICTIM
   subject: get_eviction_candidates
@@ -1778,7 +2460,18 @@ properties:
   statement: When at least one candidate exists, the first entry of the candidate list is exactly the
     block that the next victim request would choose, because both operations read the same oldest-first
     ordering of eligible blocks and take its first element.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_candidates_first_is_the_next_victim
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CANDIDATES-UNKNOWN-POOL-RETURNS-EMPTY
   subject: get_eviction_candidates
@@ -1800,7 +2493,18 @@ properties:
   statement: Asking an eviction domain identifier that was never created for eviction candidates returns
     an empty list rather than reporting an error, so the caller cannot tell an unknown domain apart from
     one that currently has no candidates.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_candidates_unknown_pool_returns_empty
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-LEN-REPORTS-TRACKED-COUNT
   subject: len
@@ -1830,7 +2534,18 @@ properties:
     is currently tracking in it, counting blocks in every session and at every position in a chain, not
     only the ones eligible for eviction. It goes up by one for each newly registered block and down by
     one for each block removed or evicted.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_len_reports_tracked_count
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-LEN-CHANGES-NOTHING
   subject: len
@@ -1854,7 +2569,18 @@ properties:
   statement: 'Asking for the size of an eviction domain is a pure enquiry: it removes nothing, adds nothing,
     refreshes no block''s recency, does not advance the recency counter, and changes no parent or child
     link.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_len_changes_nothing
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-LEN-UNKNOWN-POOL-RETURNS-ZERO
   subject: len
@@ -1877,7 +2603,18 @@ properties:
   statement: Asking an eviction domain identifier that was never created for its size reports zero rather
     than an error, so a caller that mistypes an identifier sees what looks like an empty domain instead
     of being told the domain does not exist.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_len_unknown_pool_returns_zero
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 53
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CLEAR-RETURNS-DOMAIN-TO-EMPTY
   subject: clear_pool
@@ -1909,7 +2646,18 @@ properties:
     about and every eviction candidate: afterwards its reported size is zero, a victim request reports
     nothing to evict, and a candidate request returns an empty list. The implementation also resets the
     domain''s recency counter back to its starting value and discards its whole storage area.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_clear_returns_domain_to_empty
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES
   subject: clear_pool
@@ -1949,7 +2697,18 @@ properties:
     on it silently succeeds against the wrong block. The specification is authoritative; the code cannot
     deliver the promised error for the same reason as EPSL-STALE-HANDLE-ALIASES-A-RECYCLED-SLOT - handles
     carry no marker of which use of a position they belong to.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: 'REFUTED — the negation ''refute_epsl_clear_invalidates_existing_handles'' is machine-proved,
+      so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    evidence:
+      refutation: refute_epsl_clear_invalidates_existing_handles
+      result: Proved (negation)
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+    status: refuted
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CLEAR-LEAVES-DOMAIN-USABLE
   subject: clear_pool
@@ -1976,7 +2735,18 @@ properties:
   statement: 'A cleared eviction domain is empty but still usable and keeps its identifier: registering
     a block into it afterwards succeeds, and that block starts a fresh chain for its session, with no
     parent, as if the session had never held any blocks.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_clear_leaves_domain_usable
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CLEAR-POOL-UNKNOWN-POOL-IS-A-SILENT-NO-OP
   subject: clear_pool
@@ -2000,7 +2770,18 @@ properties:
   statement: Clearing an eviction domain identifier that was never created does nothing at all and reports
     nothing at all. The operation returns no result, so the caller has no way to learn that the domain
     it named does not exist.
-  creusot: {}
+  creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_clear_pool_unknown_pool_is_a_silent_no_op
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-CLEAR-POOL-LEAVES-OTHER-POOLS-ALONE
   subject: clear_pool
@@ -2021,7 +2802,18 @@ properties:
     code: EPSL-CLEAR-POOL-LEAVES-OTHER-POOLS-ALONE
   statement: 'Clearing one eviction domain has no effect on any other domain: their blocks, chains, recency
     values, recency counters and reported sizes are all unchanged, and their identifiers stay valid.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_clear_pool_leaves_other_pools_alone
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 54
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-AT-MOST-ONE-CHILD
   subject: 'global invariant: each tracked block has at most one child'
@@ -2057,7 +2849,18 @@ properties:
     whatever sequence of registrations, accesses, evictions and removals has been performed, because a
     new block is only ever attached beneath the session''s current end-of-chain block, which by definition
     has no child.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_at_most_one_child
+      result: Proved
+      wall_clock_s: 0.54
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-EXACTLY-ONE-LEAF-PER-SESSION
   subject: 'global invariant: one eligible end-of-chain block per non-empty session'
@@ -2096,7 +2899,18 @@ properties:
     that is one block with no tracked child, and that is the only block of that session eligible for eviction.
     Consequently the number of eviction candidates always equals the number of sessions currently holding
     at least one block, and a session holding no blocks contributes no candidate.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_exactly_one_leaf_per_session
+      result: Proved
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-NO-CYCLES-IN-LINEAGE
   subject: 'global invariant: lineage has no cycles'
@@ -2129,7 +2943,18 @@ properties:
     session's chain after a finite number of steps, never more steps than the number of blocks the domain
     holds. No block is ever its own ancestor, so the lineage can always be walked to the top without looping
     forever.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_no_cycles_in_lineage
+      result: Proved
+      wall_clock_s: 0.54
+      peak_rss_mb: 56
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-NO-ORPHANED-BLOCKS
   subject: 'global invariant: parent and child links agree and point at live blocks'
@@ -2167,7 +2992,18 @@ properties:
     tracked and records the first block as its child, and whenever it records a child, that child is still
     tracked and records it back as its parent. The two directions of every link always agree, so no tracked
     block is ever left referring to a block that has gone.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_no_orphaned_blocks
+      result: Proved
+      wall_clock_s: 0.54
+      peak_rss_mb: 56
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-ELIGIBLE-SET-IS-EXACTLY-THE-CHILDLESS
   subject: 'global invariant: the eviction-eligible set equals the set of childless tracked blocks'
@@ -2205,7 +3041,18 @@ properties:
     tracked blocks that have no tracked child: never a block that still has one, and never missing a block
     that has none. Each such block is listed once, recorded with its current recency, so the stored candidate
     set never disagrees with the chains themselves.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_eligible_set_is_exactly_the_childless
+      result: Proved
+      wall_clock_s: 0.53
+      peak_rss_mb: 56
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-SESSION-POINTS-AT-ITS-OWN-END-OF-CHAIN
   subject: 'global invariant: each session''s recorded end-of-chain block is live, its own, and childless'
@@ -2236,7 +3083,18 @@ properties:
     code: EPSL-INV-SESSION-MAP-POINTS-AT-A-LEAF
   statement: For every session the policy knows about, the block it remembers as that session's end of
     chain is still tracked, genuinely belongs to that session, and has no tracked child.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_session_points_at_its_own_end_of_chain
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-ONE-TRACKED-BLOCK-PER-CACHE-KEY
   subject: 'global invariant: a cache key is tracked at most once per domain'
@@ -2272,7 +3130,18 @@ properties:
     points at a block that is still tracked and really holds that key, and every tracked block''s key
     is in the table. This is what makes re-registering an existing key an access rather than a second
     registration.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_one_tracked_block_per_cache_key
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-SIZE-ACCOUNTING-IS-EXACT
   subject: 'global invariant: reported size always equals the number of tracked blocks'
@@ -2310,7 +3179,18 @@ properties:
     Equivalently it always equals the number of occupied storage positions, which is the total number
     of positions minus the number on the spare list, so the counter can never drift away from the real
     contents.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_size_accounting_is_exact
+      result: Proved
+      wall_clock_s: 0.54
+      peak_rss_mb: 56
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-LINEAGE-NEVER-CROSSES-SESSIONS
   subject: 'global invariant: parent and child links stay inside one session'
@@ -2345,7 +3225,18 @@ properties:
     child always belong to the same session as the block itself, so every block in one chain names the
     same session and one session''s blocks never appear anywhere in another session''s chain. Rejoining
     a chain after a removal therefore never mixes sessions.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_lineage_never_crosses_sessions
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-BLOCK-BELONGS-TO-EXACTLY-ONE-SESSION
   subject: 'global invariant: every block belongs to exactly one session, fixed at registration'
@@ -2370,7 +3261,18 @@ properties:
   statement: Every tracked block belongs to exactly one session, never to none and never to two, and the
     session it belongs to is the one named when it was registered and never changes for as long as the
     block remains tracked.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_block_belongs_to_exactly_one_session
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-DOMAINS-ARE-INDEPENDENT
   subject: 'global invariant: eviction domains do not affect one another'
@@ -2413,7 +3315,18 @@ properties:
     counter or reported size in any other domain is ever altered, a victim is only ever chosen from the
     blocks of the domain asked about, and a reported size counts only that domain''s blocks. Cache keys,
     session identifiers and handles are meaningful only within the domain they were used in.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_domains_are_independent
+      result: Proved
+      wall_clock_s: 0.55
+      peak_rss_mb: 58
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-RECENCY-STRICTLY-ADVANCES
   subject: 'global invariant: recency values strictly advance'
@@ -2455,7 +3368,18 @@ properties:
     monotonicity claim is literally false across a clear, and it becomes observable if a pre-clear handle
     is reused (see EPSL-CLEAR-INVALIDATES-EXISTING-HANDLES). The specification should be weakened to per-epoch
     monotonicity, or the counter should not be reset.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: 'REFUTED — the negation ''refute_epsl_inv_recency_strictly_advances'' is machine-proved, so
+      the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    evidence:
+      refutation: refute_epsl_inv_recency_strictly_advances
+      result: Proved (negation)
+      wall_clock_s: 0.57
+      peak_rss_mb: 55
+    status: refuted
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-HANDLES-KEEP-NAMING-THEIR-BLOCK
   subject: 'global invariant: a handle keeps identifying its own block and never another'
@@ -2499,7 +3423,18 @@ properties:
     one. The specification is authoritative but its own not-verifiable ledger admits it never required
     a generation marker (spec NV-12); closing the gap needs either a generation counter in the handle
     or an explicit specification change permitting aliasing.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: 'REFUTED — the negation ''refute_epsl_inv_handles_keep_naming_their_block'' is machine-proved,
+      so the code violates this obligation. This is a finding, not a gap: see the spec and code locations
+      on the property record.'
+    evidence:
+      refutation: refute_epsl_inv_handles_keep_naming_their_block
+      result: Proved (negation)
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+    status: refuted
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-NO-INPUT-CAN-MAKE-AN-OPERATION-PANIC
   subject: 'global invariant: every operation is total over its inputs'
@@ -2527,7 +3462,18 @@ properties:
   statement: 'There is no precondition the caller must satisfy beyond supplying correctly typed arguments:
     any domain identifier, any handle, any cache key, any session identifier and any requested candidate
     count is accepted, and the operation either succeeds or reports an error, never aborting the process.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_no_input_can_make_an_operation_panic
+      result: Proved
+      wall_clock_s: 0.56
+      peak_rss_mb: 60
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-HANDLE-VALIDATION-IS-OCCUPANCY-ONLY
   subject: 'global invariant: handle validation checks occupancy only'
@@ -2556,7 +3502,18 @@ properties:
   statement: The only checks made on a handle are that the eviction domain it names exists and that the
     storage position it names is currently occupied by some tracked block. Nothing ties a handle to the
     particular cache key, session or registration it was issued for.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_handle_validation_is_occupancy_only
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 53
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-ACTIVE-STAMPS-ARE-DISTINCT
   subject: 'global invariant: no two tracked blocks share a recency value'
@@ -2586,7 +3543,18 @@ properties:
   statement: No two blocks tracked in the same eviction domain ever share a recency value, because every
     value handed out is larger than all the ones handed out before it in that domain and each block holds
     only the most recent value it was given.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_active_stamps_are_distinct
+      result: Proved
+      wall_clock_s: 0.51
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-FREE-LIST-IS-EXACTLY-THE-EMPTY-SLOTS
   subject: 'global invariant: the spare-position list holds exactly the empty positions'
@@ -2616,7 +3584,18 @@ properties:
   statement: The list of spare storage positions contains every empty position exactly once and no occupied
     position. If a position appeared on that list twice, the next two blocks registered would be placed
     in the same position and one would silently overwrite the other.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_free_list_is_exactly_the_empty_slots
+      result: Proved
+      wall_clock_s: 0.52
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-NO-LIVE-LINK-POINTS-AT-AN-EMPTY-SLOT
   subject: 'global invariant: nothing stored refers to an empty storage position'
@@ -2649,7 +3628,18 @@ properties:
     recorded by a tracked block are themselves tracked blocks, the block recorded as a session''s end
     of chain is a tracked block, and every entry of the candidate set and of the key lookup table names
     a tracked block.'
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_no_live_link_points_at_an_empty_slot
+      result: Proved
+      wall_clock_s: 0.54
+      peak_rss_mb: 56
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-POOL-IDS-STAY-VALID-FOREVER
   subject: 'global invariant: domain identifiers are permanent'
@@ -2681,7 +3671,18 @@ properties:
   statement: Once an eviction domain identifier has been handed out it stays valid for the rest of the
     component's life and always refers to the same domain. There is no operation that destroys a domain,
     so identifiers are never recycled and a handle's domain part never goes stale.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_pool_ids_stay_valid_forever
+      result: Proved
+      wall_clock_s: 0.53
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-INV-ARENA-ONLY-GROWS-EXCEPT-ON-CLEAR
   subject: 'global invariant: a domain''s storage area only grows, except on a clear'
@@ -2710,7 +3711,18 @@ properties:
   statement: An eviction domain's storage area only ever gets bigger, one position at a time, with the
     single exception of clearing the domain, which empties it completely. Removing or evicting a block
     marks its position empty but does not shrink the area, so position numbers already in use never move.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_inv_arena_only_grows_except_on_clear
+      result: Proved
+      wall_clock_s: 0.58
+      peak_rss_mb: 56
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-ACCESS-CLOCK-ASSUMED-NOT-TO-OVERFLOW
   subject: 'global invariant: the recency counter is assumed not to overflow'
@@ -2734,7 +3746,18 @@ properties:
   statement: The implementation assumes the running count of accesses in one eviction domain never exceeds
     the largest 64-bit number. The counter is increased with no overflow guard, so reaching that limit
     would either abort the process or wrap round and corrupt the eviction order.
-  creusot: {}
+  creusot:
+    fidelity: ghost-mirror
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_access_clock_assumed_not_to_overflow
+      result: Proved
+      wall_clock_s: 0.53
+      peak_rss_mb: 53
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-LOCKS-ASSUMED-NEVER-POISONED
   subject: 'global invariant: internal locks are assumed never to have been abandoned by a crashed operation'
@@ -2776,7 +3799,18 @@ properties:
   statement: Every operation assumes no earlier operation crashed while holding one of the component's
     internal locks. The code takes each lock and assumes success unconditionally, so if such a crash ever
     happened every later operation on the component would itself abort.
-  creusot: {}
+  creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_locks_assumed_never_poisoned
+      result: Proved
+      wall_clock_s: 0.5
+      peak_rss_mb: 55
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-ONLY-POOL-CREATION-TAKES-THE-EXCLUSIVE-LOCK
   subject: 'global invariant: concurrency discipline of the internal locks'
@@ -2815,7 +3849,18 @@ properties:
   statement: Creating an eviction domain is the only operation that takes exclusive access to the component's
     shared state. Every other operation takes shared access to that state and then takes exclusive access
     only to the one domain it works on, so operations on different domains never block one another.
-  creusot: {}
+  creusot:
+    fidelity: trusted-boundary
+    note: scorer re-ran `cargo creusot` from source -> Proved
+    evidence:
+      modules:
+      - verify_epsl_only_pool_creation_takes_the_exclusive_lock
+      result: Proved
+      wall_clock_s: 0.56
+      peak_rss_mb: 59
+      lever: null
+    status: proved
+    _scored_by: scorer_creusot
   kani: {}
 - id: EPSL-NV-WORKLOAD-BENEFIT-OVER-PLAIN-LRU
   scope: 'not-verifiable: the claimed workload benefit over plain recency eviction'
@@ -3105,3 +4150,42 @@ properties:
   paired_from:
     spec: null
     code: NV-12
+run:
+  gate_commit: 86719fae
+  gate_branch: skills/kani-loop-contracts
+  creusot:
+    scored_by: scorer_creusot
+    command: scorer_creusot.py /home/cornel/gate-final-session-lists-20260930/verif --crate-dir /home/cornel/cv-eviction-policy-session-lists-20260927/components/eviction-policy-session-lists/verif-creusot
+      --cap-seconds 120 --cap-max 600
+    started: '2026-09-30T01:02:19-07:00'
+    finished: '2026-09-30T01:04:45-07:00'
+    creusot: v0.11.0-169-g9cf662ce6
+    why3: Why3 platform, version 1.8.2+git
+    provers:
+    - Alt-Ergo 2.6.2
+    - CVC4 1.8
+    - CVC5 1.3.1
+    - Coq 8.20.1
+    - Z3 4.16.0
+    cap_seconds: 120
+    cap_max: 600
+    mem_max_mb: 16384
+known_corrections:
+- property: ALL — the Kani column is WITHDRAWN, not absent
+  recorded: '2026-09-30'
+  this_bundle_says: Creusot only (86 proved / 9 refuted of 95)
+  should_read: the same, and a reader should NOT infer Kani was skipped
+  why: 'Kani WAS run: 213 harnesses, and its gate scored 8 proved of 95 with 106 vacuity findings. The
+    harnesses used --unwind 4 --no-unwinding-checks over loops inside std HashMap/BTreeSet. Measured:
+    with unwinding checks ON at that bound, 1 of 4306 checks fails (the unwinding assertion) and 4305
+    are UNDETERMINED; suppressing the check reports those 4305 as PASSING. That is why the column is withheld
+    rather than published. Two routes out were then measured: loop contracts make the proofs sound and
+    unbounded (3 properties, 19-26s, mutants correctly failing, holding at 4x capacity) but require transcribing
+    Pool because the loops belong to std, so fidelity drops to arithmetic-core; and stubbing the std containers
+    to keep real types was tried and FAILED - BTreeSet''s only read path is an iterator, which Kani cannot
+    stub, and a stubbed container silently blinds the code (a harness asserting leaves.len()==2 AND evict_oldest().is_none()
+    PASSES).'
+  not_a_defect: Withholding the column is a statement about our harnesses, NOT about the component. Nothing
+    here implies a Kani-provable property is false.
+  reproduce: gate-kani-session-lists-20260929/drive.log holds the 8/95 run with all 106 vacuity notes
+  correct_counts: 'creusot: 86 proved / 9 refuted / 0 unresolved of 95 — kani: withheld as unsound'
