@@ -1,0 +1,120 @@
+version: 3
+tool: kani
+levers:
+  unwind_sweep:
+    scorer_applied: true
+    desc: Raise --unwind across a range; a too-low bound gives a spurious 'unwinding assertion loop 0'.
+    variants_required: '>=2 distinct unwind values, at least one at the cap'
+    probe: 'cargo kani --harness <h> --unwind <k>   # for each k in the sweep'
+    defeats:
+    - unwinding-assertion
+  nounwindcheck:
+    scorer_applied: true
+    desc: 'Bounded-shallow: --no-unwinding-checks cuts hashbrown''s probe loop at N and verifies the bounded
+      prefix.'
+    probe: cargo kani --harness <h> --unwind 2 --no-unwinding-checks
+    defeats:
+    - unwinding-assertion
+    - sat-timeout
+    fidelity_if_used: bounded-shallow
+  stub:
+    desc: kani::stub expensive/opaque deps (RandomState::new -> fixed [0,0] seed; I/O; crypto) to kill
+      construction walls.
+    variant: 'verify_<ID>__stub   (or #[kani::stub(...)] on the base harness)'
+    probe: cargo kani --harness <h> -Z stubbing
+    defeats:
+    - construction-wall
+    - getrandom-syscall
+  solver_swap:
+    scorer_applied: true
+    desc: Swap the SAT/SMT backend; minisat and cadical have very different timeout profiles.
+    variants_required: both minisat AND cadical attempted
+    probe: cargo kani --harness <h> --solver minisat ; cargo kani --harness <h> --solver cadical
+    defeats:
+    - sat-timeout
+  concrete_inputs:
+    desc: Use concrete representative keys/values instead of symbolic; symbolic CacheKey drives SipHash
+      over symbolic bytes and blows up.
+    variant: verify_<ID>__concrete
+    probe: cargo kani --harness <h>
+    defeats:
+    - symbolic-key-blowup
+    - sat-timeout
+    fidelity_if_used: representative
+  split_harness:
+    desc: Decompose one over-broad harness into per-effect harnesses so each fits the solver budget.
+    variant: verify_<ID>__split_*
+    probe: 'cargo kani --harness <h>   # each split'
+    defeats:
+    - sat-timeout
+    - path-explosion
+  loop_contract:
+    desc: 'Replace unrolling with a Floyd-Hoare loop invariant (-Z loop-contracts): the body executes
+      exactly twice, so cost is decoupled from the iteration count and the claim is UNBOUNDED. Strictly
+      better than nounwindcheck: measured on a 1024-iteration loop, the bounded form ''proved'' in 0.034s
+      while its mutant ALSO passed (vacuous), whereas the contract form proved in 0.20s with the mutant
+      correctly failing.'
+    variant: verify_<ID>__loopcontract
+    probe: cargo kani --harness <h> -Z loop-contracts
+    defeats:
+    - unwinding-assertion
+    - sat-timeout
+    - path-explosion
+    fidelity_if_used: real-type-bounded
+    notes: 'Invariants over STRUCT FIELD PROJECTIONS are known-broken (kani #3168) - hoist to locals.
+      Without loop_decreases the result is PARTIAL correctness (sound only if the loop terminates), so
+      add a decreases measure or record the weaker fidelity.'
+failure_classes:
+  construction-wall:
+    signatures:
+    - getrandom
+    - RandomState
+    - SipHash
+    - std::collections::hash
+    - hashbrown::raw::RawTable::new
+    required_levers:
+    - stub
+    note: Almost always a known defeat — see known_defeats.yaml KD-HASHMAP-RANDOMSTATE.
+  unwinding-assertion:
+    signatures:
+    - unwinding assertion loop
+    - unwind.*assertion.*FAILED
+    required_levers:
+    - unwind_sweep
+    - loop_contract
+    - nounwindcheck
+  sat-timeout:
+    signatures:
+    - Solver.*time
+    - timed out
+    - TIMEOUT
+    - backend.*exceeded
+    - process.*killed
+    required_levers:
+    - loop_contract
+    - nounwindcheck
+    - solver_swap
+    - concrete_inputs
+    - split_harness
+    note: The register_idempotent/touch/remove wall lived here; nounwindcheck defeated it at unwind 2
+      (~7s).
+  symbolic-key-blowup:
+    signatures:
+    - SipHash
+    - symbolic.*key
+    - hash.*symbolic
+    required_levers:
+    - concrete_inputs
+    - nounwindcheck
+    note: Fully-sound symbolic-key invariants ARE a genuine Kani boundary -> route to Creusot FMap induction,
+      but only AFTER concrete_inputs + nounwindcheck variants are shown to run (partial coverage still
+      recorded).
+  path-explosion:
+    signatures:
+    - too many paths
+    - state.*explosion
+    required_levers:
+    - split_harness
+    - concrete_inputs
+    - loop_contract
+    - nounwindcheck

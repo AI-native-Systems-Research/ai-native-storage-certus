@@ -30,7 +30,6 @@ members = [
     "apps/gpu-handle-test-server",
     "apps/gpu-show",
     "apps/gpu-bb-vs-p2p",
-    "certus-connector",
     "components/example-helloworld-dylib",
     "components/eviction-policy-lru",
     "components/eviction-policy-session-lists",
@@ -132,7 +131,6 @@ remote-lookup = { path = "components/remote-lookup" }
 remote-lookup-rdma-initiator = { path = "components/remote-lookup-rdma-initiator" }
 remote-lookup-rdma-responder = { path = "components/remote-lookup-rdma-responder" }
 zyre = { path = "components/zyre" }
-certus-connector = { path = "certus-connector" }
 shm-queue = { path = "lib/shm-queue" }
 shmq-dispatcher = { path = "lib/shmq-dispatcher" }
 workload-model = { path = "apps/workload-generator/crates/workload-model" }

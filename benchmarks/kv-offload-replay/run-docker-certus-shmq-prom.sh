@@ -10,7 +10,7 @@
 #   * PROM_PORT=8000      — the workload calls start_http_server(8000)
 #   * WORKLOAD_SRC=...    — bind-mounts the repo's run_multiturn_shmq_certus.py
 #                           over the image copy, so the exporter works WITHOUT
-#                           rebuilding the certus-shmq-bench image.
+#                           rebuilding the certus-shmq-connector image.
 # Scrape the client from the host at:  http://localhost:8000/metrics
 #
 # NOTE: these are the CLIENT-side vLLM + KV-offload metrics. The SPDK/SSD-side
@@ -26,7 +26,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
 # The shmq image lives in the /mnt/certus1 podman store, not the default store.
-IMAGE="${IMAGE:-localhost/certus-shmq-bench}"
+IMAGE="${IMAGE:-localhost/certus-shmq-connector}"
 PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
 PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
 

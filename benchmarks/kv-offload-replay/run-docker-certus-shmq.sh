@@ -19,7 +19,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/run-docker-common.sh"
 
 # The shmq image lives in the /mnt/certus1 podman store, not the default store.
-IMAGE="${IMAGE:-localhost/certus-shmq-bench}"
+IMAGE="${IMAGE:-localhost/certus-shmq-connector}"
 PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
 PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
 

@@ -11,16 +11,16 @@
 # (Certus, LMCache, CPU-offload, plain vLLM) via BASE_URL.
 #
 # Build (context = this directory):
-#   docker build -t long-doc-qa-bench benchmarks/long-doc-qa
+#   docker build -t long-doc-qa benchmarks/long-doc-qa
 #
 # Run against a server on the host (server bound to 0.0.0.0:8000):
 #   docker run --rm --network host \
 #       -e BASE_URL=http://localhost:8000/v1 \
 #       -e NUM_DOCUMENTS=16 -e REPEAT_COUNT=4 -e JSON_OUTPUT=1 \
 #       -v "$PWD/results:/workspace/results" \
-#       long-doc-qa-bench
+#       long-doc-qa
 #   # or pass flags directly (env assembly is skipped):
-#   docker run --rm --network host long-doc-qa-bench \
+#   docker run --rm --network host long-doc-qa \
 #       --base-url http://localhost:8000/v1 --num-documents 16 --json-output
 #
 # Source (Apache-2.0): LMCache benchmarks/long_doc_qa/long_doc_qa.py, pinned to

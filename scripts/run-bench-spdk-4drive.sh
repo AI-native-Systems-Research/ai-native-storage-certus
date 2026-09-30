@@ -8,6 +8,7 @@
 #   sudo mount -t hugetlbfs nodev /dev/hugepages
 # Usage:
 #   ./run-bench-spdk-4drive.sh [--format] [--mem SIZE] [--server-only] [--bench-only]
+#                              [--profile PROFILE]
 #
 # Options:
 #   --format       Pass --format to the server (DESTROYS existing on-disk data).
@@ -17,6 +18,10 @@
 #                  (assumes a server is already serving the shmq mailbox
 #                   at /dev/shm/certus-shmq).
 #   --no-build     Skip the cargo build step (use existing binary).
+#   --profile P    Certus build profile (default: full). E.g. full-optimized
+#                  for the O(1) LRU + TinyLFU eviction policy. The profile is
+#                  baked in at compile time, so it must be set for the build.
+#                  The build is always --release.
 #
 set -euo pipefail
 
@@ -27,12 +32,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DRIVE_COUNT=4
 NUMA_NODE=0
 SHM_PATH="/dev/shm/certus-shmq"
-CHANNELS=32
+CHANNELS=64
 MEMORY_TIER_SIZE="4G"
 FORMAT_FLAG=""
 SERVER_ONLY=0
 BENCH_ONLY=0
 NO_BUILD=0
+CERTUS_PROFILE="full"
 
 # Benchmark defaults
 NUM_OBJECTS=64
@@ -55,7 +61,8 @@ while [[ $# -gt 0 ]]; do
         --server-only)  SERVER_ONLY=1; shift ;;
         --bench-only)   BENCH_ONLY=1; shift ;;
         --no-build)     NO_BUILD=1; shift ;;
-        -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
+        --profile)      CERTUS_PROFILE="$2"; shift 2 ;;
+        -h|--help)      sed -n '2,24p' "$0"; exit 0 ;;
         *)              echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -74,8 +81,8 @@ cleanup() {
 
 # --- Build -------------------------------------------------------------------
 if [[ "$BENCH_ONLY" -eq 0 && "$NO_BUILD" -eq 0 ]]; then
-    log "Building certus-server-yaml (SPDK profile)..."
-    CERTUS_PROFILE=full cargo build --release \
+    log "Building certus-server-yaml (profile: $CERTUS_PROFILE, release)..."
+    CERTUS_PROFILE="$CERTUS_PROFILE" cargo build --release \
         --manifest-path "$REPO_ROOT/Cargo.toml" \
         -p certus-server-yaml \
         --features spdk

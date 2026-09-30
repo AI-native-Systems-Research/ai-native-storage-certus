@@ -19,7 +19,7 @@ evictions without re-running the model.
 > `docker-entrypoint-certus-shmq.sh`) — the real files stay there because that image's
 > build needs the connector Python package in its context, but building via the symlink
 > works (build context is still the repo root: `podman build -f
-> benchmarks/kv-offload-replay/Dockerfile.certus-shmq -t certus-shmq-bench .`). All four
+> benchmarks/kv-offload-replay/Dockerfile.certus-shmq -t certus-shmq-connector .`). All four
 > Dockerfiles take `--build-arg VLLM_VERSION=<x.y.z>` (default `0.23.0`).
 
 ## Files
@@ -35,7 +35,7 @@ evictions without re-running the model.
 | `run_otel_async.py` | Timestamp-scheduled async execution model behind `run_otel_replay.py` — the OTel analogue of `run_multiturn_async.py`. `run_otel` (one coroutine per conversation, sleeps the recorded inter-turn gaps, per-turn `max_tokens`, sliding-window context) and `run_otel_driver` (engine build, 1 Hz disk+prom sampler, latency percentiles, summary + `[prom]` markers matching the ShareGPT async path). **Containerized:** see [`../kv-offload-otel-replay/`](../kv-offload-otel-replay/) for the offload + shmq images and `run-docker-otel-*.sh` wrappers (the corpus is bind-mounted, not baked in). |
 | `otel_corpus.py` | Shared corpus loader for the OTel replay drivers — `load_otel_convs(trace_dir, num_convs)` parses the `otel_trace_replay` files (one conversation per file, spans = turns) into per-conversation `(human_text, max_tokens, delay_before_sec)` streams, keeping only each span's new user turn (linear ~0.8 GB for the 1000-file corpus, not the ~18 GB quadratic on-disk footprint). Connector-agnostic analogue of `run_multiturn_common.load_convs`; imported by both `run_otel_replay.py` and the shmq OTel driver. |
 | `../../certus-shmq-connector/run_otel_shmq_certus.py` | Driver: **kv-offload-otel-replay on certus-shmq**. The shmq counterpart of `run_otel_replay.py` — same OTel corpus, same timestamp scheduling and `run_otel_async` execution model, but the `CertusShmqOffloadingSpec` connector/compat/session-id/`GetIoStats` setup of `run_multiturn_shmq_certus.py` (imports the `certus_shmq_connector` package, so it lives in the connector dir, not here). Same `--dir`/`OTEL_DIR`, `--num`/`NUM_CONVS`, `--time-scale`/`TIME_SCALE` options plus the shmq env (`SHM_PATH`, `SLAB_SIZE_BYTES`, `ACTIVE_SESSIONS`, `DP_SIZE`/`DP_RANK`). Requires a running `certus-server` on `SHM_PATH`. |
-| `replay_offloading_traces.py` | Replays manager and/or handler traces against a pluggable target. Built-in manager targets: pure-Python LRU (default), vLLM `CPUOffloadingManager`, Certus via `CertusOffloadingSpec` (native or policy-only), and `llmd_fs_backend`. Built-in handler targets: `fs-backend`, Certus via `CertusOffloadingSpec.get_handlers()`. |
+| `replay_offloading_traces.py` | Replays manager and/or handler traces against a pluggable target. Built-in manager targets: pure-Python LRU (default), vLLM `CPUOffloadingManager`, and `llmd_fs_backend`. Built-in handler targets: `fs-backend`. Additional targets can be supplied as `module.path:ClassName`. |
 
 ## Prerequisites
 
@@ -45,7 +45,6 @@ evictions without re-running the model.
 - For replay against optional backends, install what the backend needs (each is lazy-imported):
   - `cpu-manager` → vLLM
   - `fs-backend` → vLLM + `torch` + CUDA + `llmd_fs_backend` + `storage_offload`
-  - `certus-connector` → vLLM ≥ 0.20 + `certus_native` (from `ai-native-storage-certus/certus-connector`, `maturin develop --release`). SPDK-bound NVMe + torch + CUDA only for `use_native: true` runs; policy-only (`use_native: false`) runs on any host.
 
 ## Generating traces
 
@@ -118,42 +117,6 @@ python replay_offloading_traces.py \
 ```
 
 vLLM is imported lazily — only this target pulls it in.
-
-### Against Certus (via `CertusOffloadingSpec`)
-
-One target (`certus-connector`) with two run configurations, toggled by `extra_config.use_native`:
-
-**Native (real SPDK + NVMe IO):**
-
-```bash
-python replay_offloading_traces.py \
-    --manager-trace offloading_mgr_*.jsonl \
-    --target certus-connector \
-    --target-args '{"extra_config": {"use_native": true,
-                                      "data_pci_addrs": ["0000:61:00.0"],
-                                      "metadata_pci_addr": "0000:62:00.0"}}'
-```
-
-Spec returns `NativeCertusOffloadingManager` — thin Python adapter over `certus_native.CertusEngine`. Manager methods delegate to the Rust engine; `store_async` / `load_async` hit SPDK → NVMe.
-
-**Policy-only (no IO):**
-
-```bash
-python replay_offloading_traces.py \
-    --manager-trace offloading_mgr_*.jsonl \
-    --target certus-connector \
-    --target-args '{"extra_config": {"use_native": false,
-                                      "slab_size_bytes": 131072,
-                                      "dram_cache_bytes": 8589934592}}'
-```
-
-Spec returns `CertusOffloadingManager` — the tiered DRAM + NVMe manager implemented in Python. Simulates the same tiering policy (LRU eviction, promotion/demotion thresholds, DRAM-slot / NVMe-slab budgets from `TieringConfig`), but no bytes are moved: `nvme_slab` / `dram_slot` are Python integer IDs, not real addresses.
-
-Use the policy-only config to isolate manager-layer and spec-layer Python cost from real storage cost. Running both configs on the same trace and diffing the wall time and per-method p50 tells you how much of the total was Python vs. SPDK. (On our 442-block sample trace: 6 ms policy-only vs. 12 ms native — Python is not the bottleneck at scale, but the diff grows with trace size.)
-
-Both configs route through the same `CertusOffloadingSpec`, so `extra_config` plumbing (slab/DRAM budgets, tiering thresholds) is identical. The `certus_connector` Python package adapts its vLLM imports to 0.20+ via a small `sys.modules` shim the replay installs on its behalf.
-
-**Requirements**: `certus_native` built from `ai-native-storage-certus/certus-connector` (`maturin develop --release`), vLLM ≥ 0.20, torch + CUDA; SPDK-bound NVMe required only for the `use_native: true` config.
 
 ### Against the llmd_fs_backend (real files on disk)
 
@@ -297,9 +260,7 @@ python replay_offloading_traces.py \
 
 Applies a per-block service time to each `transfer_async` event and reports p50/p95/p99 latency and aggregate throughput. No external deps.
 
-### Real worker (FS backend or Certus)
-
-Two backends:
+### Real worker (FS backend)
 
 ```bash
 # Drive the real llmd_fs_backend worker
@@ -309,19 +270,9 @@ python replay_offloading_traces.py \
     --handler-target-args '{"root_dir": "/tmp/kv-fs-handler",
                              "num_gpu_blocks": 1024,
                              "per_block_bytes": 16384}'
-
-# Drive Certus via CertusOffloadingSpec.get_handlers()
-python replay_offloading_traces.py \
-    --handler-trace offloading_handler_*.jsonl \
-    --handler-target certus-connector \
-    --handler-target-args '{"extra_config": {"use_native": true,
-                                              "data_pci_addrs": ["0000:61:00.0"],
-                                              "metadata_pci_addr": "0000:62:00.0"}}'
 ```
 
-`certus-connector` instantiates `CertusOffloadingSpec`, calls `spec.get_handlers()` to obtain `GpuToCertusHandler` / `CertusToGpuHandler`, and drives them through a `TransferSpec` with `CertusLoadStoreSpec` destinations. With `use_native: true` the handler's `transfer_async` invokes `CertusEngine.store_async` / `load_async`, issuing real CUDA DMA + SPDK NVMe I/O. With `use_native: false` the spec falls back to `MockCertusEngine` — `transfer_async` returns immediately, no bytes moved, useful as a zero-IO baseline for comparing handler-layer overhead.
-
-The replay driver replays every `transfer_async` event against the real worker: it synthesizes a destination (block hashes for FS, u64 `CacheKey`s for Certus) matching the trace's block count and direction, calls the worker's `transfer_async`, then drains completions at each `wait` / `get_finished` event in the trace. For `in`-direction transfers (storage → GPU) it reuses hashes/keys written by earlier `out`-direction transfers so the worker can actually find them.
+The replay driver replays every `transfer_async` event against the real worker: it synthesizes a destination (block hashes) matching the trace's block count and direction, calls the worker's `transfer_async`, then drains completions at each `wait` / `get_finished` event in the trace. For `in`-direction transfers (storage → GPU) it reuses hashes written by earlier `out`-direction transfers so the worker can actually find them.
 
 The reported latency is real wall time (submit → completion drain) and the throughput reflects real disk or NVMe bandwidth. Synthetic destinations mean the content on disk isn't meaningful — only the shape, timing, and direction of transfers are preserved.
 
@@ -329,38 +280,25 @@ Custom handler targets: pass `--handler-target module.path:ClassName`. The class
 
 ## Benchmarking example
 
-Generate a sizeable trace with some reuse and eviction pressure, then replay it through the production Certus stack (both manager and handler):
+Generate a sizeable trace with some reuse and eviction pressure, then replay it through a real backend (both manager and handler):
 
 ```bash
 # 1. Generate: 500 ShareGPT conversations through vLLM + TracingConnector
 PYTHONPATH=. python run_sharegpt_offloading.py --num-conversations 500 --num-prompts 500
 
-# 2a. Native run: manager + handler with real SPDK IO
+# 2. Real backend run: manager + handler against llmd_fs_backend
 python replay_offloading_traces.py \
     --manager-trace offloading_mgr_*.jsonl \
     --handler-trace offloading_handler_*.jsonl \
-    --target certus-connector \
-    --handler-target certus-connector \
-    --target-args '{"extra_config": {"use_native": true,
-                                      "data_pci_addrs": ["0000:61:00.0"],
-                                      "metadata_pci_addr": "0000:62:00.0"}}' \
-    --handler-target-args '{"extra_config": {"use_native": true,
-                                              "data_pci_addrs": ["0000:61:00.0"],
-                                              "metadata_pci_addr": "0000:62:00.0"}}' \
-    --output-json bench_native.json
-
-# 2b. Policy-only run: same trace, no IO — isolates Python overhead
-python replay_offloading_traces.py \
-    --manager-trace offloading_mgr_*.jsonl \
-    --handler-trace offloading_handler_*.jsonl \
-    --target certus-connector \
-    --handler-target certus-connector \
-    --target-args '{"extra_config": {"use_native": false}}' \
-    --handler-target-args '{"extra_config": {"use_native": false}}' \
-    --output-json bench_policy.json
+    --target fs-backend \
+    --handler-target fs-backend \
+    --handler-target-args '{"root_dir": "/mnt/fs-backend-bench/replay",
+                             "num_gpu_blocks": 1024,
+                             "per_block_bytes": 16384}' \
+    --output-json bench_fs.json
 ```
 
-Diff `bench_native.json` and `bench_policy.json` for the "what did SPDK NVMe cost vs. what did Python cost" breakdown. For a backend comparison, run the same trace with `--target fs-backend --handler-target fs-backend` (matching `num_gpu_blocks` / `per_block_bytes`). For a lower-bound replay-driver cost, run with `--target simple-lru --num-blocks <big>` — no eviction, no backend, just the replay loop.
+For a lower-bound replay-driver cost, run with `--target simple-lru --num-blocks <big>` — no eviction, no backend, just the replay loop. Diff that against the `fs-backend` run to separate real storage cost from the replay driver's own overhead.
 
 ## Comparing all backends: `profile_all.sh`
 
@@ -477,7 +415,7 @@ all selected phases including the host reconfiguration.
 `profile_all.sh` above is the automated all-backends sweep. The two stability
 scripts below are the manual path for the **closed-loop** live comparison used
 for the fixed-concurrency head-to-head: **cputier-fixed** (vLLM 0.26.0 native
-CPU+fs tiering with the baked tiering fix — image `certus-offload-bench-fix026`)
+CPU+fs tiering with the baked tiering fix — image `certus-offload-fix026`)
 vs **certus-shmq** (host `certus-server` over SPDK NVMe + shmq client container).
 
 ### Open-loop vs closed-loop
@@ -510,7 +448,7 @@ image is self-consistent (build context is the repo root):
 ```bash
 podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
     build --build-arg VLLM_VERSION=0.26.0 \
-    -f certus-shmq-connector/Dockerfile -t certus-shmq-bench .
+    -f certus-shmq-connector/Dockerfile -t certus-shmq-connector .
 ```
 
 > **After rebuilding, do NOT pass `WORKLOAD_SRC` or `ASYNC_SRC`.** Those single-file

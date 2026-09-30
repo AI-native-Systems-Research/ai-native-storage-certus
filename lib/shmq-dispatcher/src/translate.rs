@@ -49,11 +49,14 @@ pub trait TranslatorObserver: Send + Sync {
 
 // ---- CUDA-IPC open/close cache (lifted from service.rs:35-154) -------------
 
+const IPC_GRACE_PERIOD: Duration = Duration::from_secs(5);
+
 struct IpcCacheEntry {
     dev_ptr: *mut std::ffi::c_void,
     #[allow(dead_code)]
     gpu_device_id: i32,
     refcount: usize,
+    grace_until: Option<Instant>,
 }
 
 // SAFETY: dev_ptr is a CUDA device pointer only used from blocking worker
@@ -70,6 +73,9 @@ fn ipc_cache_open(
 ) -> Result<*mut std::ffi::c_void, String> {
     let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(entry) = map.get_mut(handle_bytes) {
+        if entry.refcount == 0 && entry.grace_until.is_some() {
+            entry.grace_until = None;
+        }
         entry.refcount += 1;
         return Ok(entry.dev_ptr);
     }
@@ -113,6 +119,7 @@ fn ipc_cache_open(
             dev_ptr,
             gpu_device_id,
             refcount: 1,
+            grace_until: None,
         },
     );
     Ok(dev_ptr)
@@ -123,10 +130,30 @@ fn ipc_cache_close(cache: &IpcCache, handle_bytes: &[u8; 64]) {
     if let Some(entry) = map.get_mut(handle_bytes) {
         entry.refcount -= 1;
         if entry.refcount == 0 {
+            entry.grace_until = Some(Instant::now() + IPC_GRACE_PERIOD);
+        }
+    }
+
+    let now = Instant::now();
+    let expired: Vec<[u8; 64]> = map
+        .iter()
+        .filter(|(_, e)| e.refcount == 0 && e.grace_until.map_or(false, |t| now >= t))
+        .map(|(k, _)| *k)
+        .collect();
+    for k in expired {
+        if let Some(entry) = map.remove(&k) {
             unsafe {
                 cuda_ffi::cudaIpcCloseMemHandle(entry.dev_ptr);
             }
-            map.remove(handle_bytes);
+        }
+    }
+}
+
+fn ipc_cache_close_all(cache: &IpcCache) {
+    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
+    for (_, entry) in map.drain() {
+        unsafe {
+            cuda_ffi::cudaIpcCloseMemHandle(entry.dev_ptr);
         }
     }
 }
@@ -235,6 +262,12 @@ pub struct Translator {
     /// Total store-backpressure budget shared across ALL keys in one OP_RESERVE
     /// batch (not per key). See `op_reserve`.
     store_backpressure: Duration,
+}
+
+impl Drop for Translator {
+    fn drop(&mut self) {
+        ipc_cache_close_all(&self.ipc_cache);
+    }
 }
 
 impl Translator {

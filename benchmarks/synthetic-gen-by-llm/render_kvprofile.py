@@ -109,6 +109,14 @@ COUNTERS = [
     ("ssd_read_bytes",                "SSD bytes read (device)",    "bytes"),
     ("ssd_write_bytes",               "SSD bytes written (device)", "bytes"),
     ("num_preemptions",               "Engine preemptions",         "events"),
+    # A GPU→DRAM offload store the scheduler REFUSED because the DRAM tier had no
+    # room (manager.prepare_store returned None → ALLOCATION_FAILURE, one per
+    # request, logged "Request <id>: cannot store chunks"). Emitted on the [prom]
+    # line as a per-round delta like the other vLLM counters, so it rolls up to a
+    # whole-run refusal count. Distinct from a promotion refusal (see PROMO_*): this
+    # is the store path (fresh GPU blocks can't land in DRAM), that is the load path
+    # (an SSD-resident block can't be pulled up into DRAM).
+    ("kv_offload_allocation_failure", "Offload-store refused (DRAM full)", "events"),
 ]
 COUNTER_KEYS = [c[0] for c in COUNTERS]
 
@@ -129,6 +137,55 @@ TIER_RE = re.compile(
     r"tier-events\s+promotions\[->memory\s+(\d+),\s*->gpu\s+(\d+)\]"
     r"\s+evictions\[memory\s+(\d+),\s*ssd\s+(\d+)\]"
 )
+
+# ── vLLM-native SSD→DRAM promotion counters, parsed from the variant's OWN
+# <variant>.log (not [prom], not server.log). manager.py, when run with
+# TIER_DEBUG=1, prints per round and once at end:
+#   [tier-dbg] round|FINAL promotion_attempts=A promotion_ok=K
+#              promotion_blocked_dram_full=B (P%)
+#              lookup_miss_cold=C lookup_miss_evicted=E (Q% evicted)
+# for the Tiered-CPU-FS backend's promotion path (an SSD-resident KV block pulled
+# up into the DRAM tier on a hit). A promotion is REFUSED — promotion_blocked_dram_full
+# — when DRAM is already full, the load-side dual of an offload-store allocation
+# failure (see kv_offload_allocation_failure). lookup_miss_cold/_evicted split a
+# TRUE miss (block resident in no tier) into never-stored (cold) vs stored-then-
+# dropped-by-the-bottom-tier's-LRU (evicted); their sum is the token-conservation
+# "not resident in any tier" slice. Counts are CUMULATIVE (like the TIER_COUNTERS),
+# so their whole-run total is the last/max value, not a sum. Only present when the
+# run set TIER_DEBUG=1; absent → the refusals family drops the bar and the
+# accounting panel keeps cold and evicted merged. The cold/evicted pair is newer
+# than the promotion trio, so an older TIER_DEBUG log has the first three but not
+# the last two (the regex leaves them None → those columns stay empty).
+PROMO_COUNTERS = [
+    ("promotion_attempts",          "SSD→DRAM promotion attempts",            "events"),
+    ("promotion_ok",                "SSD→DRAM promotions succeeded",          "events"),
+    ("promotion_blocked_dram_full", "SSD→DRAM promotion refused (DRAM full)", "events"),
+    ("lookup_miss_cold",            "lookup miss — never stored (cold)",      "events"),
+    ("lookup_miss_evicted",         "lookup miss — evicted from bottom tier", "events"),
+]
+PROMO_KEYS = {c[0] for c in PROMO_COUNTERS}
+# Matches both the periodic "[tier-dbg] round …" line and the "[tier-dbg] FINAL …"
+# summary (an optional "(EngineCore pid=N)" log prefix sits outside the match, and
+# the trailing "(P%)" / "(Q% evicted)" are ignored — the rates are recomputed from
+# the counts). The cold/evicted pair is optional: older logs stop after
+# promotion_blocked_dram_full, so groups 4-5 come back None and are skipped.
+PROMO_RE = re.compile(
+    r"\[tier-dbg\]\s+(?:round|FINAL)\s+promotion_attempts=(\d+)\s+"
+    r"promotion_ok=(\d+)\s+promotion_blocked_dram_full=(\d+)"
+    r"(?:[^\n]*?lookup_miss_cold=(\d+)\s+lookup_miss_evicted=(\d+))?"
+    r"(?:[^\n]*?tier_promotions_to_memory=(\d+)\s+"
+    r"tier_promotions_to_gpu=(\d+)\s+tier_evictions_from_memory=(\d+)\s+"
+    r"tier_evictions_from_ssd=(\d+))?"
+)
+
+# KV block size in tokens — the granularity of the block-denominated tier
+# movement/refusal counters (promotion_blocked_dram_full, tier_*). The KV lookup
+# accounting panel needs this to convert those counts onto the TOKEN axis, so a
+# refused promotion can be compared against a token-denominated miss. vLLM's
+# default V1 block_size is 16 tokens and these runs do not override it (the log's
+# "GPU KV cache size: 24,576 tokens" is 1,536 blocks × 16). Override with the
+# KVPROFILE_BLOCK_TOKENS env var if a run uses a different block size.
+BLOCK_TOKENS = int(os.environ.get("KVPROFILE_BLOCK_TOKENS", "16"))
 
 # ── Run-total families: the per-round panels show movement over time; these
 # roll each counter up to a single whole-run total and group related counters
@@ -159,6 +216,18 @@ FAMILIES = [
         ("tier_promotions_to_gpu",     "→GPU"),
         ("tier_evictions_from_memory", "evict DRAM"),
         ("tier_evictions_from_ssd",    "evict SSD"),
+    ]),
+    # The two ways a KV move is REFUSED under DRAM pressure, side by side: a
+    # GPU→DRAM store the scheduler couldn't place (kv_offload_allocation_failure,
+    # per-request) and an SSD→DRAM promotion blocked because DRAM was full
+    # (promotion_blocked_dram_full, per-block, TIER_DEBUG only). The promotion bar
+    # is annotated with its refusal rate (blocked / attempts) via HIT_DENOM. Both
+    # are "events" so they share the axis; the store count is typically orders below
+    # the promotion count and reads as a small labelled bar (a measured result: the
+    # store path refuses rarely, the promotion path often under sustained pressure).
+    ("KV movement refusals — run total", "events", [
+        ("promotion_blocked_dram_full",  "SSD→DRAM promo"),
+        ("kv_offload_allocation_failure", "offload store"),
     ]),
 ]
 # num_preemptions gets its OWN run-total panel (one column per series, the rate
@@ -214,6 +283,11 @@ HIT_DENOM = {
     "prefix_cache_hits_hbm":      "prompt_tokens",
     "external_prefix_cache_hits": "external_prefix_cache_queries",
     "prompt_tokens_cached":       "prompt_tokens",
+    # Not a hit rate but the same numerator/denominator annotation: the fraction
+    # of SSD→DRAM promotion attempts that were refused for lack of DRAM room. The
+    # denominator (promotion_attempts) is carried in the series' data but never
+    # plotted itself — it exists only to annotate this bar.
+    "promotion_blocked_dram_full": "promotion_attempts",
 }
 
 # Counters that also get a per-second average (total / active seconds) atop their
@@ -347,6 +421,51 @@ def parse_tier_log(path: str) -> dict:
     return {k: v for k, v in cols.items() if v}
 
 
+def parse_tier_debug_log(path: str) -> dict:
+    """Parse a variant's own <variant>.log for the [tier-dbg] promotion counters.
+
+    Returns {promo_key: [cumulative value per tick]} in log order (the per-round
+    ticks plus the FINAL summary), for promotion_attempts / promotion_ok /
+    promotion_blocked_dram_full and, when the log carries them, lookup_miss_cold /
+    lookup_miss_evicted plus the four tier-movement counters (tier_promotions_to_memory,
+    tier_promotions_to_gpu, tier_evictions_from_memory, tier_evictions_from_ssd) —
+    the same names the Certus server.log carries, so the tiered connector populates
+    the same movement bars. Empty if the run had TIER_DEBUG off (no such lines). Two
+    processes can emit these (an idle frontend logging zeros and the EngineCore
+    doing the real work); since the counts are cumulative and rolled up with
+    max(), the idle stream's zeros never displace the real totals."""
+    cols = {k: [] for k in ("promotion_attempts", "promotion_ok",
+                            "promotion_blocked_dram_full",
+                            "lookup_miss_cold", "lookup_miss_evicted",
+                            "tier_promotions_to_memory", "tier_promotions_to_gpu",
+                            "tier_evictions_from_memory", "tier_evictions_from_ssd")}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = PROMO_RE.search(line)
+                if not m:
+                    continue
+                a, k, b, cold, ev, pm, pg, em, es = m.groups()
+                cols["promotion_attempts"].append(int(a))
+                cols["promotion_ok"].append(int(k))
+                cols["promotion_blocked_dram_full"].append(int(b))
+                # cold/evicted are optional (older logs omit them → None).
+                if cold is not None:
+                    cols["lookup_miss_cold"].append(int(cold))
+                    cols["lookup_miss_evicted"].append(int(ev))
+                # tier-movement counters are optional too (added after the
+                # cold/evicted pair → None on logs predating them).
+                if pm is not None:
+                    cols["tier_promotions_to_memory"].append(int(pm))
+                    cols["tier_promotions_to_gpu"].append(int(pg))
+                    cols["tier_evictions_from_memory"].append(int(em))
+                    cols["tier_evictions_from_ssd"].append(int(es))
+    except OSError as e:
+        print(f"warning: cannot read {path}: {e}", file=sys.stderr)
+        return {}
+    return {k: v for k, v in cols.items() if v}
+
+
 def wall_from_log(path: str):
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -470,6 +589,10 @@ def load_run(run_dir: str, tag: str):
             name = e.get("variant") or "?"
             log = resolve_log(run_dir, e.get("log", ""))
             data = rounds_to_series(parse_prom_log(log)) if log else {}
+            if log:
+                # [tier-dbg] promotion counters live in the variant's own log
+                # (TIER_DEBUG runs only); merge them in for the refusals family.
+                data.update(parse_tier_debug_log(log))
             if norm(name) == "certusspdk":
                 data = {**data, **tier}
             wall = e.get("wall_s")
@@ -491,6 +614,7 @@ def load_run(run_dir: str, tag: str):
         found = True
         name = os.path.splitext(fn)[0]
         data = rounds_to_series(rounds)
+        data.update(parse_tier_debug_log(path))
         if norm(name) == "certusspdk":
             data = {**data, **tier}
         yield {"variant": name, "tag": tag,
@@ -683,6 +807,20 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
             "per scheduling attempt and re-count a waiting request's full context "
             "many times under queue pressure (37× here), so they are not "
             "plotted; the derivation uses only once-per-token counters.", width=150)
+    if "prompt_tokens" in active_keys:
+        note_lines += textwrap.wrap(
+            "KV lookup accounting balances prompt tokens as HBM hit + offload-tier "
+            "hit + miss (recomputed) — the only unit in which hits and misses are "
+            "comparable. The miss is split by reason: DRAM-full (load blocked) is "
+            f"promotion_blocked_dram_full × block_size={BLOCK_TOKENS} (a block resident "
+            "in SSD that could not be promoted because DRAM was full; set "
+            "KVPROFILE_BLOCK_TOKENS to override the block size); the remainder missed "
+            "because it was not resident in any tier — never cached (cold) or evicted "
+            "before reuse. When the run's TIER_DEBUG log carries lookup_miss_cold / "
+            "lookup_miss_evicted, that remainder is further split into cold vs evicted "
+            "by the measured ratio; otherwise the two stay merged. offload-store "
+            "refusals (kv_offload_allocation_failure) are per-request and reported as "
+            "a request count, not converted.", width=150)
     if zeroed:
         names = ", ".join(c[1] for c in zeroed)
         note_lines += textwrap.wrap(
@@ -695,8 +833,9 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         if not vals:
             return 0.0
         # vLLM/SSD [prom] values are per-interval deltas → the run total is their
-        # sum; tier counters are parsed cumulative → the total is the last (max).
-        return max(vals) if key in TIER_KEYS else float(sum(vals))
+        # sum; tier counters and [tier-dbg] promotion counters are parsed
+        # cumulative → the total is the last (max).
+        return max(vals) if (key in TIER_KEYS or key in PROMO_KEYS) else float(sum(vals))
 
     def _active_seconds(s, key):
         """Wall seconds from ``key``'s first nonzero round to the run's end.
@@ -753,11 +892,16 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
     has_gpu_ts = any((s.get("gpu") or {}).get("series") for s in series)
     has_preempt = any(any(v for v in (s["data"].get("num_preemptions") or []))
                       for s in series)
+    # KV lookup accounting: shown whenever prompt tokens were captured — the
+    # balance prompt_tokens = HBM hit + offload hit + miss holds for every backend.
+    has_acct = any(_total(s, "prompt_tokens") for s in series)
     left_cells = []
     if has_gpu_ts:
         left_cells.append(("gputs", None))
     if has_preempt:
         left_cells.append(("preempt", None))
+    if has_acct:
+        left_cells.append(("acct", None))
     left_cells += [("fam", f) for f in active_fams]
     # 2 to a row (each panel targets ~2.8" of width); a single cell takes the row.
     if left_cells:
@@ -1038,6 +1182,167 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
         ax.grid(axis="y", color=grid, lw=0.6, zorder=0)
         ax.tick_params(labelsize=8)
 
+    # Segment colours for the accounting stack — mid-tone hues legible on both
+    # themes: hits cool (offload blue, HBM amber), miss warm red. The miss family
+    # reads as a badness-by-cause gradient of deepening red: cold (never cached,
+    # lightest) → evicted (cached then dropped from the bottom tier, mid) → DRAM-
+    # full-blocked (a resource refused the load, darkest + hatched so a ~1% sliver
+    # still reads). ACCT_MISS is the cold shade; when the TIER_DEBUG cold/evicted
+    # counters are absent it also serves the merged cold+evicted slice.
+    ACCT_MISS, ACCT_OFFLOAD, ACCT_HBM = "#cf5c50", "#4c8edb", "#c99a2e"
+    ACCT_EVICTED = "#a23b2e"
+    ACCT_BLOCKED = "#7c241a"
+
+    def _wrap_lbl(s, width=15):
+        # Break long series tags ("Tiered-CPU-FS · 185008_1031298") onto their
+        # own lines — first at the " · " separators, then hard-wrap any long run
+        # — so multi-series category labels stop overlapping under the bars.
+        out = []
+        for part in str(s).split(" · "):
+            out.extend(textwrap.wrap(part, width=width) or [part])
+        return "\n".join(out)
+
+    def _draw_acct(ax):
+        # Token-conservation accounting for KV lookups. Every prompt token is
+        # served from the GPU-HBM prefix cache, from the offload tier (DRAM/SSD),
+        # or MISSED and recomputed — and TOKENS is the only unit in which that
+        # balance closes:  prompt_tokens = HBM hit + offload hit + miss.
+        # prompt_tokens_cached splits into HBM vs offload via the derived
+        # prefix_cache_hits_hbm (= cached − external hits). Beside each stacked
+        # The MISS is split by reason so "simply not cached vs a resource blocking
+        # the load" is answered on the same axis: the only resource-refusal counter
+        # that converts to tokens is promotion_blocked_dram_full (a block resident
+        # in SSD that could not be promoted because DRAM was full) × BLOCK_TOKENS;
+        # the rest missed because it was not resident in any tier — never cached
+        # (cold) or evicted before reuse. Generalises across backends: a non-offload
+        # series has zero external hits and zero refusals, so all hits fall in HBM
+        # and all miss in "not resident" (correct).
+        def _acct(s):
+            # Full token-conservation breakdown for one series. The not-resident
+            # miss is split into cold vs evicted by the MEASURED cold:evicted ratio
+            # from the TIER_DEBUG lookup_miss_* counters; when those are absent
+            # (older/off runs) the two stay merged (split=False, evicted=0).
+            prompt = _total(s, "prompt_tokens")
+            cached = _total(s, "prompt_tokens_cached")
+            ext = max(0.0, _total(s, "external_prefix_cache_hits"))
+            hbm = max(0.0, cached - ext)
+            miss = max(0.0, prompt - cached)
+            blocked = min(miss, _total(s, "promotion_blocked_dram_full") * BLOCK_TOKENS)
+            not_res = max(0.0, miss - blocked)
+            cold_ct = _total(s, "lookup_miss_cold")
+            ev_ct = _total(s, "lookup_miss_evicted")
+            mtot = cold_ct + ev_ct
+            if mtot > 0:
+                evicted = not_res * ev_ct / mtot
+                cold, split = not_res - evicted, True
+            else:
+                cold, evicted, split = not_res, 0.0, False
+            return dict(prompt=prompt, hbm=hbm, ext=ext, miss=miss,
+                        blocked=blocked, not_res=not_res, cold=cold,
+                        evicted=evicted, split=split)
+
+        drawn = [s for s in series if _total(s, "prompt_tokens")]
+        n = len(drawn)
+        single = (n == 1)
+        any_split = any(_acct(s)["split"] for s in drawn)
+        vmax = 0.0
+        pw = 0.5
+        for si, s in enumerate(drawn):
+            a = _acct(s)
+            prompt = a["prompt"]
+            vmax = max(vmax, prompt)
+            # bottom→top: HBM hit, offload hit, then the miss family reddening by
+            # cause — cold, evicted, DRAM-full-blocked. When cold/evicted aren't
+            # split, the cold slice carries the whole not-resident miss.
+            segs = [(ACCT_HBM, a["hbm"], False), (ACCT_OFFLOAD, a["ext"], False),
+                    (ACCT_MISS, a["cold"], False), (ACCT_EVICTED, a["evicted"], False),
+                    (ACCT_BLOCKED, a["blocked"], True)]
+            bottom = 0.0
+            for col, v, hatched in segs:
+                ax.bar(si, v, bottom=bottom, width=pw, color=col,
+                       edgecolor=bg, linewidth=0.6, zorder=3,
+                       hatch=("////" if hatched else None))
+                if v and v / prompt >= 0.08:   # room for an in-bar % label
+                    ax.text(si, bottom + v / 2, f"{v/prompt*100:.0f}%",
+                            ha="center", va="center", fontsize=7.5,
+                            fontweight="bold", color="#ffffff", zorder=5)
+                bottom += v
+        # Single series: a compact "receipt" reconciling the balance in tokens,
+        # with the miss itemised by reason so the cold/evicted-vs-blocked split is
+        # answered numerically, not just visually.
+        if single and vmax:
+            a = _acct(drawn[0])
+            prompt, hbm, ext = a["prompt"], a["hbm"], a["ext"]
+            miss, blocked, not_res = a["miss"], a["blocked"], a["not_res"]
+            store_ref = _total(drawn[0], "kv_offload_allocation_failure")
+            pm = lambda v: f"{v/miss*100:.1f}% of miss" if miss else ""
+            pp = lambda v: f"{v/prompt*100:.2f}%" if prompt else ""
+            # (text, colour, fontsize, bold, gap-before-this-row)
+            rows = [
+                (f"miss: {fmt_compact(miss)} tok  ({miss/prompt*100:.1f}%)",
+                 ACCT_MISS, 7.6, True, 0.0),
+            ]
+            if a["split"]:
+                # cold vs evicted measured (TIER_DEBUG lookup_miss_* counters).
+                rows += [
+                    (f"├ cold (never cached): {fmt_compact(a['cold'])}  ({pm(a['cold'])})",
+                     ACCT_MISS, 6.7, False, 0.060),
+                    (f"├ evicted (dropped from tier): {fmt_compact(a['evicted'])}  ({pm(a['evicted'])})",
+                     ACCT_EVICTED, 6.7, False, 0.053),
+                ]
+            else:
+                rows.append(
+                    (f"├ cold / evicted: {fmt_compact(not_res)}  ({pm(not_res)})",
+                     ACCT_MISS, 6.7, False, 0.060))
+            rows += [
+                (f"└ DRAM-full, load blocked: {fmt_compact(blocked)}  ({pm(blocked)})",
+                 ACCT_BLOCKED, 6.7, False, 0.053),
+                (f"offload hit: {fmt_compact(ext)} tok  ({pp(ext)})",
+                 ACCT_OFFLOAD, 7.6, False, 0.085),
+                (f"HBM hit: {fmt_compact(hbm)} tok  ({pp(hbm)})",
+                 ACCT_HBM, 7.6, False, 0.075),
+                (f"prompt: {fmt_compact(prompt)} tok  (100%)",
+                 fg, 7.6, True, 0.085),
+            ]
+            y = 0.985
+            for txt, col, fs, bold, gap in rows:
+                y -= gap
+                ax.annotate(txt, xy=(0.30, y), xycoords="axes fraction",
+                            ha="left", va="top", fontsize=fs, color=col,
+                            fontweight="bold" if bold else "normal", zorder=6)
+            if store_ref:
+                y -= 0.085
+                ax.annotate(f"+ offload-store refused: {fmt_compact(store_ref)} reqs",
+                            xy=(0.30, y), xycoords="axes fraction", ha="left",
+                            va="top", fontsize=7, color=mut, zorder=6)
+            ax.set_xlim(-0.5, 3.2)
+        else:
+            from matplotlib.patches import Patch
+            handles = [Patch(facecolor=ACCT_HBM, label="HBM hit"),
+                       Patch(facecolor=ACCT_OFFLOAD, label="offload hit")]
+            if any_split:
+                handles += [Patch(facecolor=ACCT_MISS, label="miss: cold"),
+                            Patch(facecolor=ACCT_EVICTED, label="miss: evicted")]
+            else:
+                handles.append(
+                    Patch(facecolor=ACCT_MISS, label="miss: cold / evicted"))
+            handles.append(Patch(facecolor=ACCT_BLOCKED, hatch="////",
+                                  label="miss: DRAM-full blocked"))
+            ax.legend(handles=handles, loc="upper right", frameon=False,
+                      fontsize=7)
+            ax.set_xlim(-0.7, n - 0.2)
+        ax.set_xticks(range(n))
+        ax.set_xticklabels([_wrap_lbl(s["label"]) for s in drawn], fontsize=7.5)
+        ax.set_title("KV lookup accounting — run total", loc="left",
+                     fontsize=10, fontweight="bold", color=fg, pad=6)
+        ax.set_ylabel("tokens", color=mut, fontsize=8)
+        ax.yaxis.set_major_formatter(FuncFormatter(fmt_compact))
+        ax.set_ylim(0, (vmax * 1.12) or 1)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        ax.grid(axis="y", color=grid, lw=0.6, zorder=0)
+        ax.tick_params(axis="y", labelsize=8)   # keep wrapped x labels at 7.5
+
     if left_cells:
         gs_tot = fig.add_gridspec(fam_nrow, fam_ncol, left=L, right=R,
                                   top=pos["totals"][1], bottom=pos["totals"][0],
@@ -1049,6 +1354,8 @@ def render(series, out_path, title, subtitle, dark, dpi, width=24.0):
                 _draw_gputs(cell_ax)
             elif kind == "preempt":
                 _draw_preempt(cell_ax)
+            elif kind == "acct":
+                _draw_acct(cell_ax)
             else:
                 _draw_fam(cell_ax, payload)
 

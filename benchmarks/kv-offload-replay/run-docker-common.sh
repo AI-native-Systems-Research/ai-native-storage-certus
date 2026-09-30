@@ -6,8 +6,11 @@
 #   NUM_CONVS=100 MODEL=meta-llama/Llama-3.1-8B ./run-docker-none.sh
 #
 # The four runners each launch ONE KV-offload solution against the same replay
-# workload, using a prebuilt image. They do NOT build — build the images first
-# with build_026.sh (which pins --build-arg VLLM_VERSION).
+# workload, using a prebuilt image. They do NOT build — build the image first
+# with the matching versioned builder (build_cputier_container.sh for the
+# cputier/offload family; certus-shmq-connector/build_connector_container.sh for
+# shmq; build-sharedstorage.sh for sharedstorage). Each takes a full vLLM patch
+# version and passes it as the --build-arg VLLM_VERSION base tag.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,7 +31,7 @@ GPU="${GPU:-all}"
 HF_CACHE="${HF_CACHE:-/mnt/certus1/hf-cache}"
 
 # Shared podman-run flags for the self-contained images (the unified
-# certus-offload-bench, which covers nooffload/cpu/tiered via OFFLOAD_MODE, plus
+# certus-offload, which covers nooffload/cpu/tiered via OFFLOAD_MODE, plus
 # sharedstorage). Built from the resolved env above.
 COMMON_RUN_ARGS=(
   --device "nvidia.com/gpu=${GPU}"
@@ -91,8 +94,11 @@ require_image() {
   local img="$1"; shift
   if ! command podman "$@" image exists "$img"; then
     echo "error: image '$img' not found${*:+ (store flags: $*)}." >&2
-    echo "       These run scripts do not build. Build the images first:" >&2
-    echo "         bash ${SCRIPT_DIR}/build_026.sh" >&2
+    echo "       These run scripts do not build. Build the image first with the" >&2
+    echo "       matching versioned builder:" >&2
+    echo "         cputier / offload family : ${SCRIPT_DIR}/build_cputier_container.sh <ver>" >&2
+    echo "         certus-shmq              : certus-shmq-connector/build_connector_container.sh <ver>" >&2
+    echo "         sharedstorage            : ${SCRIPT_DIR}/build-sharedstorage.sh" >&2
     exit 1
   fi
 }

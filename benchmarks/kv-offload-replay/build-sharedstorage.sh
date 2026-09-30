@@ -31,7 +31,7 @@ CUDA_BASE_TAG="${CUDA_BASE_TAG:-13.0.0-devel-ubuntu22.04}"
 TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0}"
 
 WHEEL_IMG="${WHEEL_IMG:-llmd-fs-backend-wheel:local}"
-RUNTIME_IMG="${RUNTIME_IMG:-certus-sharedstorage-bench}"
+RUNTIME_IMG="${RUNTIME_IMG:-certus-sharedstorage}"
 WHEELS_DIR="${_here}/wheels"
 
 echo "[build] fs-backend wheel: torch=${TORCH_VERSION} ${TORCH_CUDA_INDEX} cuda-base=${CUDA_BASE_TAG} arch=${TORCH_CUDA_ARCH_LIST}"

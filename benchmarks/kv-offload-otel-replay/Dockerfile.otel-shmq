@@ -16,20 +16,20 @@
 #
 # Build (context = repo root — needs certus-shmq-connector/ + benchmarks/ sources):
 #   podman build -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-shmq \
-#       -t certus-otel-shmq-bench .
+#       -t certus-otel-shmq-connector .
 #
 # Run (server's mailbox reachable via --ipc=host; GPU exposed so the server can
 # open the CUDA IPC handles this container's vLLM process exports):
 #   podman run --rm --device nvidia.com/gpu=all --ipc=host \
 #       -e SHM_PATH=/dev/shm/certus-shmq -e NUM_CONVS=8 -e TIME_SCALE=0 \
 #       -v /mnt/certus1/inference-perf-syn-data/otel_1k:/workspace/otel-corpus:ro \
-#       -v /root/.cache/huggingface:/root/.cache/huggingface certus-otel-shmq-bench
+#       -v /root/.cache/huggingface:/root/.cache/huggingface certus-otel-shmq-connector
 
 # vLLM base-image version. The connector self-adapts at RUN time via
 # certus_shmq_connector.compat (version detection + capability matrix) — this arg
 # only selects the base image. Build another version:
 #   podman build --build-arg VLLM_VERSION=0.26.0 \
-#       -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-shmq -t certus-otel-shmq-bench:vllm0.26 .
+#       -f benchmarks/kv-offload-otel-replay/Dockerfile.otel-shmq -t certus-otel-shmq-connector:vllm0.26 .
 ARG VLLM_VERSION=0.23.0
 FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
 ENTRYPOINT []
@@ -63,7 +63,11 @@ COPY benchmarks/kv-offload-replay/otel_corpus.py /workspace/benchmarks/kv-offloa
 # insert — so the module dir is on PYTHONPATH below.
 COPY benchmarks/kv-offload-replay/tracing_connector.py /workspace/benchmarks/kv-offload-replay/
 
-RUN pip install --no-cache-dir -e /workspace/certus-shmq-connector
+# --no-deps + --no-index + --no-build-isolation: torch/numpy come from the base
+# image (pyproject lists them only as documentation). Without --no-deps, pip
+# re-resolves torch's transitive pins and fails offline on nvidia-nccl-cu13 on
+# CUDA-13 bases (vLLM >= 0.27). Mirrors certus-shmq-connector/Dockerfile.
+RUN pip install --no-build-isolation --no-index --no-deps --no-cache-dir -e /workspace/certus-shmq-connector
 
 COPY benchmarks/kv-offload-otel-replay/docker-entrypoint-otel-shmq.sh /usr/local/bin/certus-otel-entrypoint
 RUN chmod +x /usr/local/bin/certus-otel-entrypoint
