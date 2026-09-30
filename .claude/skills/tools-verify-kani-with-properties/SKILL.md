@@ -228,9 +228,18 @@ Run with `-Z loop-contracts`. Companions: `#[kani::loop_modifies(...)]` when the
 wrong, and `#[kani::loop_decreases(expr)]` for termination.
 
 **Limitations you WILL hit, so design around them:**
-- **Struct field projections in an invariant are known-broken** (kani #3168). Measured here: an
-  invariant over `self.c[0]` failed both establishment and the base proof; hoisting the data to a
-  local made the identical invariant prove. **Write invariants over locals**, not over `self.field`.
+- **An invariant that is not INDUCTIVE fails even though it is true.** This is the trap, and it looks
+  exactly like a tool bug. CBMC havocs the loop's write set, so the invariant must be re-establishable
+  from itself plus the body — not merely true of the final state. Measured: `a[0] <= 127` after
+  `a[i] >>= 1` is inductive for `u8` (halving can never exceed 127) but NOT for `u64`, and the `u64`
+  version fails while being perfectly true.
+  An earlier version of this section blamed **kani #3168** (struct field projections) for that failure.
+  **That was a misdiagnosis and #3168 does NOT reproduce on 0.67.0** — invariants over a struct field
+  (`s.a[0]`), a `&mut` array parameter, a by-value array parameter and a harness-body local all prove.
+  So do **not** hoist state out of structs to appease the tool; check inductiveness first. When an
+  invariant fails, ask "could the body break this from a state satisfying it?" before suspecting Kani.
+- Loop contracts do **not** havoc state the loop only reads, so a read-only scan over an
+  assumed-well-formed structure needs no `loop_modifies`.
 - `while let` loops are unsupported. `while` and `loop` work; `for` works over ranges, slices, Vec,
   Iter and the common adaptors.
 - **Without `loop_decreases` you get PARTIAL correctness** — "if the loop terminates, the result is
@@ -244,6 +253,40 @@ wrong, and `#[kani::loop_decreases(expr)]` for termination.
 - Diagnosing: establishment fails → invariant too strong for the initial state; preservation fails →
   too weak to prove itself, or too strong for the body; post-loop assertion fails → invariant plus
   `!guard` is not enough.
+
+### 🔴🔴 `kani::forall!` SILENTLY DROPS a body containing `&&` — the worst trap found so far
+Under `-Z quantifiers`, measured shape by shape on 0.67.0:
+
+| body | binds? |
+|---|---|
+| `a[i] == 42` · `b[i]` · `b[i] == c[i]` · `a[i] <= d[i]` · `a[i] != s` | ✓ |
+| `(b[i]==false) \|\| (a[i]==42)` · 3-way `\|\|` over struct fields | ✓ |
+| **`(b[i]==true) && (a[i]==42)`** | **SILENTLY IGNORED** |
+
+The assume compiles, runs, and **constrains nothing**. Also silently ignored: a **symbolic** upper
+bound (only constant bounds bind). Related: `\|i: T in ..\|` is a parse error, and a body indexing
+through a reference can fail type inference — wrap it in `fn pred(p: &Pool, i: usize) -> bool`.
+
+**Know which direction is dangerous.** A dropped `forall!` inside an **assume** only weakens the
+precondition, so the proof gets harder and never vacuous. A dropped conjunct inside an **assertion**
+or a **loop invariant** is straight vacuity, and **no tool flags it** — not Kani, not our mutant twins
+necessarily, because the mutant may be dropped the same way.
+
+**Rules, mandatory wherever `-Z quantifiers` is used:**
+1. **Never put `&&` inside `forall!`.** One `forall!` per conjunct.
+2. Only constant upper bounds.
+3. **Carry a `check_assumes_actually_bind` harness** that re-asserts every assumed predicate at a
+   symbolic index. If an assume silently dropped, that harness fails and tells you so. This is cheap
+   (measured 5.08 s) and it is the only mechanism that catches the failure at all.
+
+### Skolemise instead of quantifying — measured 400× cheaper
+For a scan loop, replace a universally-quantified invariant with a **witness index chosen symbolically
+BEFORE the loop** and referenced only inside the invariant. The proof then holds for an arbitrary
+witness, hence for all of them, and stays quantifier-free. Measured on the same obligation: **1120 s
+with a real `forall!` vs 2.81 s Skolemised.**
+It does **not** work for permutation loops (a shift-insert moves values between cells, so a single
+witness is not inductive). Those need a real `forall!` at ~1120 s per harness — not viable at scale, so
+prefer a model that avoids permutation loops entirely.
 
 ### The escalation order for a loop-bound failure — strongest claim first
 1. **`#[kani::unwind(n)]` / `--unwind n` sweep with unwinding checks ON.** Anything that proves here is

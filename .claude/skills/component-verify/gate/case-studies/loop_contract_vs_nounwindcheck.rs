@@ -41,7 +41,12 @@ fn verify_halve_contract__mutant() {
 // obligation is about. This file is the minimal reproduction of the unsoundness that made
 // 52 of 90 harnesses vacuous on eviction-policy-session-lists.
 //
-// Note the invariant is written over a LOCAL array, not over a struct field: an invariant
-// containing a struct field projection fails even when correct (kani #3168). That was measured
-// here too — the identical invariant over `self.c[0]` failed, and proved once hoisted.
+// CORRECTION (measured later, 2026-09-29): an earlier version of this note blamed kani #3168
+// (struct field projections) for a failure seen while writing this file. That was a MISDIAGNOSIS.
+// #3168 does not reproduce on 0.67.0 — invariants over a struct field, a `&mut` array parameter,
+// a by-value array parameter and a harness-body local all prove. The real cause was a
+// NON-INDUCTIVE invariant: CBMC havocs the loop's write set, so the invariant must be
+// re-establishable from itself plus the body, not merely true at the end. `a[0] <= 127` after
+// `a[i] >>= 1` is inductive for u8 (halving cannot exceed 127) but NOT for u64. Check
+// inductiveness before suspecting the tool, and do not hoist state out of structs to appease it.
 // ---------------------------------------------------------------------------------------------
