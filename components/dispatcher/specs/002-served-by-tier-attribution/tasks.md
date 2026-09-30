@@ -453,12 +453,53 @@ step: an accounting identity that fails by a recognisable quantity names its own
   partition — the last confirmed on hardware, twice, under load. What is not: the `Ssd` share
   comparison, because p2p cannot complete a run.
 
-  **Next steps, in order:**
-  1. Instrument or trace the p2p agent path for a latency tail — the `--read-timeout`
-     the generator lacks would also make this diagnosable instead of inferable.
-  2. Fix the generator's timeout-vs-unreachable misattribution. It has now misdirected this
-     task four times and is the reason the throughput hypothesis survived as long as it did.
-  3. Only then retry the share comparison.
+  **RESOLVED 2026-09-30 with a longer deadline: `dispatcher-p2p` STALLS, it is not slow.**
+  Retried at `--read-timeout-ms 600000` (up from 30 000) after adding
+  `ClientError::TimedOut` and the flag. Observed state after **84 minutes**:
+
+  | | |
+  |---|---|
+  | server | **alive and idle** — tier-events logged every 2 s, current to the second, `promotions 0, evictions 0` |
+  | generator | **alive, `Sl`** (sleeping, not spinning), 1h24m elapsed |
+  | agents | still listening on both ports |
+  | counters | **frozen** at 4908 + 6955 hits, unchanged across repeated samples |
+
+  **Raising the deadline is what proved the diagnosis.** At 30 s the failure looked like
+  slowness; at 600 s it became an 84-minute hang with everything healthy and nothing
+  moving. A latency tail cannot produce that — a slow operation still completes. This is a
+  deadlock, reached after roughly 12 000 served keys, and the earlier
+  4 617 / 4 795 / 12 246 / 13 011 cluster was the 30 s deadline cutting across it rather
+  than a throughput ceiling.
+
+  **A second defect this exposed in the generator**: it blocked **past its own 600 s read
+  deadline**, so whatever it waits on is not covered by `--read-timeout-ms`. FR-084 fixed
+  the *reporting* of a read timeout; it did not put a bound on every wait. There is an
+  unbounded wait somewhere in the submit path.
+
+  **T116 is therefore BLOCKED ON A `dispatcher-p2p` DEFECT, not on attribution**, and it
+  should stay blocked rather than be worked around — a share comparison over 12 000 keys
+  before a hang would be measuring the pre-hang prefix, not the workload.
+
+  **What T116 verified anyway**, and it is not nothing: on `dispatcher-p2p`, the taxonomy
+  value, the three interface invariants, and the route partition — the last confirmed on
+  hardware, twice, under load. Plus a usable control baseline on `dispatcher`: 324 328 hits,
+  27.12% SSD share paced / 32.03% unpaced, partition exact in every run.
+
+  **Recommended next actions, and they are no longer T116's:**
+  1. **File the p2p hang as its own defect.** Capture a backtrace of both processes at the
+     stall (`gdb -p`, or `SIGQUIT` for the Rust side) — the stall is reproducible in ~10
+     minutes, which makes it cheap to diagnose.
+  2. **Bound the generator's submit-path wait**, since `--read-timeout-ms` demonstrably does
+     not cover it.
+  3. Note that the `full-p2p` profile did not build at all before today, so this hang was
+     previously unreachable through this server and may be long-standing.
+
+  **A caveat I raised twice and now RETRACT: there is no GDRCopy in the p2p data path.** The
+  only `gdr_*` calls in the tree are in one self-skipping test
+  (`gpu-services/tests/gpu_nvme_p2p.rs`); `libgdrapi` is linked unconditionally by
+  `gpu-services/build.rs` with no runtime caller. So `gdrdrv` being unloaded is irrelevant,
+  there is no fallback, and no result here was degraded by it. I inferred a confound from a
+  missing module without checking whether anything used it.
 
 ## Out of scope, decided 2026-09-29
 
