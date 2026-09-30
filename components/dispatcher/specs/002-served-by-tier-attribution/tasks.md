@@ -294,7 +294,7 @@ in the tree. `REMOTE` is one value (the `REMOTE_DRAM`/`REMOTE_SSD` split stays w
   simulate, not a constant — a mock that always says `Dram` makes every attribution test vacuous
   (FR-028).
 
-- [ ] **T107** Test the invariants of `contracts/idispatcher.md`: length and order,
+- [x] **T107** Test the invariants of `contracts/idispatcher.md`: length and order,
   `served_by.is_hit() ⇔ result.is_ok()`, and `Miss ⇔ Err(KeyNotFound)` after any remote attempt.
   **Each must be shown to fail** against a deliberately wrong attribution.
 

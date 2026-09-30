@@ -5648,6 +5648,95 @@ mod tests {
     /// looks like from this side — and note it is *not* discriminated by whether peers
     /// exist: the `full-remote` profile wires remote lookup either way, so a solo RDMA
     /// group takes this same path. That is why the cluster measurement read zero in both
+    /// T107 / FR-027: the three invariants `contracts/idispatcher.md` states.
+    ///
+    /// **`served_by.is_hit()` if and only if `result.is_ok()`** is the load-bearing one,
+    /// and it is what makes the "unmarked tier" design safe: a serving path that forgets
+    /// to record its tier yields `Error` on an `Ok` result, which fails here rather than
+    /// reporting a plausible `Dram` that nobody would question. Without this test that
+    /// design is worse than a default, not better.
+    ///
+    /// Also checks length-and-order and `Miss` ⇔ `KeyNotFound`, over a batch that mixes a
+    /// remote hit, a remote miss and a not-found key, so the assertions run against more
+    /// than one taxonomy value.
+    #[test]
+    fn every_outcome_obeys_the_interface_invariants() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        // 1. Length and order.
+        assert_eq!(
+            results.len(),
+            entries.len(),
+            "one outcome per requested entry, in order"
+        );
+
+        // 2. Hit agreement, per key. Stated as an iff, because either direction failing
+        //    is a different defect: a hit with an error means we reported data we did not
+        //    deliver, and an error with a hit means we hid a delivery.
+        for (i, o) in results.iter().enumerate() {
+            assert_eq!(
+                o.served_by.is_hit(),
+                o.result.is_ok(),
+                "entry {i}: served_by {:?} disagrees with result {:?}",
+                o.served_by,
+                o.result
+            );
+        }
+
+        // 3. Miss ⇔ KeyNotFound, after the remote attempt has been made.
+        for (i, o) in results.iter().enumerate() {
+            assert_eq!(
+                o.served_by == ServedBy::Miss,
+                matches!(o.result, Err(DispatcherError::KeyNotFound(_))),
+                "entry {i}: Miss must mean KeyNotFound and nothing else, got {:?} / {:?}",
+                o.served_by,
+                o.result
+            );
+        }
+
+        // And the batch was not vacuous: a peer held 1 and 3, nobody held 2, so the
+        // outcomes must not be uniform. A test where every entry has the same outcome
+        // would satisfy all three invariants while exercising one path (FR-028).
+        let distinct: std::collections::BTreeSet<_> = results
+            .iter()
+            .map(|o| format!("{:?}", o.served_by))
+            .collect();
+        assert!(
+            distinct.len() > 1,
+            "fixture produced one outcome for every key, so the invariants above are \
+             untested against variation: {distinct:?}"
+        );
+    }
+
+    /// The route partition: dram + ssd + remote equals the served count.
+    ///
+    /// Checkable without knowing anything about the workload, which is why SC-017 states
+    /// it — a hit *rate* needs a reference to argue about, a partition does not.
+    #[test]
+    fn the_route_counters_partition_the_served_keys() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+        let served = results.iter().filter(|o| o.result.is_ok()).count() as u64;
+
+        let t = d.tier_event_stats();
+        assert_eq!(
+            t.lookup_hits_dram + t.lookup_hits_ssd + t.remote_lookup_hits,
+            served,
+            "route counters must partition the served keys, not merely correlate with \
+             them: dram {} + ssd {} + remote {} != served {served}",
+            t.lookup_hits_dram,
+            t.lookup_hits_ssd,
+            t.remote_lookup_hits
+        );
+    }
+
     /// arms and could not isolate this, and why the check lives here instead.
     #[test]
     fn a_key_no_peer_holds_is_a_miss_not_an_io_error() {
