@@ -388,41 +388,49 @@ step: an accounting identity that fails by a recognisable quantity names its own
   on one workload. **My first experiment design tested the wrong thing** and would have
   produced a false refutation.
 
-  **Still open: the share comparison itself, and the last attempt failed for a reason
-  unrelated to attribution.** Two arms at `--until 10`, single instance:
+  **RESULT 2026-09-30: the control arm is established, the p2p arm CANNOT COMPLETE A RUN,
+  and that is now the blocker rather than the harness.** Two instances on node2, `--until
+  10 --rate inf --seed 1`, identical workload, binaries swapped between arms:
 
-  | arm | exit | hits | ssd share |
-  |---|---|---|---|
-  | p2p | 3 (invalid) | 4 795 | 0.00% |
-  | dispatcher | 4 | **0** | n/a |
+  | arm | generator exit | hits | dram | ssd | **ssd share** |
+  |---|---|---|---|---|---|
+  | **dispatcher** | 0 (valid) | 329 171 | 223 708 | 105 463 | **32.03%** |
+  | **p2p** | 3 (INVALID) | 12 246 | 12 246 | 0 | 0% |
 
-  Both died on the **agent connection**, not in either dispatcher: p2p reported "became
-  unreachable while submitting a turn ... Resource temporarily unavailable", which is the
-  known read-timeout misattribution (`ClientError` has no `TimedOut` variant), and the
-  control arm got "Connection reset by peer" with zero hits. The partition held in both,
-  for what little that proves at these volumes.
+  **The comparison is not valid, because p2p aborted at 3.7% of the work.** Its 0% is
+  therefore vacuous, not a refutation: at 12 246 hits the tier had not begun to overflow,
+  and the control arm shows SSD traffic only appears well beyond that point. The partition
+  held exactly in both arms, which is the one thing this run does confirm on both
+  dispatchers under load.
 
-  **Three harness faults, all mine, all the same underlying mistake: suppressing or
-  mangling a non-zero exit status so a failure reads as success.**
-  1. **`|| true` on the server and agent starts** masked whichever actually failed.
-  2. **Swapping the server binary between arms** while the previous arm's agents could
-     still be lingering (~5 s linger-exit) is a race — tear down and *wait*.
-  3. **`|| echo 0` on `pgrep -c` is the same bug in disguise.** `pgrep -c` **prints `0`
-     AND returns exit 1** when nothing matches, so `$(pgrep -c x || echo 0)` evaluates to
-     `"0\n0"`, which never compares equal to `"0"`. My rewritten driver — the one whose
-     whole point was removing `|| true` — died with `FATAL: servers or agents still alive
-     after 40s: 0/0`, reporting the success condition as a failure. Assign on failure
-     (`n=$(pgrep -c x) || n=0`) rather than echoing, and self-test the helper against a
-     name that cannot match.
+  **p2p fails the same way every time — three attempts — and the cause is a client-side
+  timeout, not a crash.** The servers were verified alive *after* each run (`9400=y
+  9401=y`), and the generator reported "instance became unreachable ... Resource
+  temporarily unavailable (os error 11)". That wording is the **known read-timeout
+  misattribution**: `ClientError` has no `TimedOut` variant, so a timeout is rendered as
+  unreachability. It cost three attempts to see past, and it is exactly the follow-up
+  already recorded against the generator.
 
-  The general rule, worth more than the three instances: **a shell guard that rewrites an
-  exit status is a guard that can invent an outcome.** All three faults produced a
-  confident wrong answer rather than an error.
+  So the working hypothesis is that **`dispatcher-p2p` cannot sustain this workload at
+  `--rate inf`** — roughly 27x less work completed before the client's deadline expired.
+  Whether that is a performance characteristic of the BAR1/D2D cold path or a defect is
+  not established here and must not be asserted.
 
-  **What is verified**: the taxonomy value on p2p, the three invariants in that component,
-  and now the route partition there. **What is not**: that p2p's `Ssd` share exceeds
-  `dispatcher`'s on one workload. A four-instance run would also give the span a realistic
-  footprint — at single-instance `--until 10` the tier still absorbed everything.
+  **What T116 needs next, in order:**
+  1. A **paced** p2p run (`--rate 0.02` was valid for four instances on the other
+     dispatcher) so the client deadline is not the binding constraint. This is the cheap
+     next step and may close T116 outright.
+  2. If pacing does not help, the timeout itself is the finding, and T116 becomes blocked
+     on a p2p performance question rather than on attribution.
+  3. Independently: fix the generator's timeout-versus-unreachable misattribution, which
+     has now misled this task three times.
+
+  **Also worth noting for interpretation**: `gdrdrv` is unloaded and `/dev/gdrdrv` absent
+  on *both* hosts, yet the p2p server runs — so `libgdrapi.so.2` is only a load-time link
+  dependency here and the GPUDirect path may be taking a fallback. If so, FR-014's
+  no-synchronous-promotion behaviour may not be exercised as the spec describes, which
+  would make even a completed share comparison weaker than it looks. Check this before
+  trusting a positive result.
 
 ## Out of scope, decided 2026-09-29
 
