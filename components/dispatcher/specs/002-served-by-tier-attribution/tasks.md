@@ -388,10 +388,33 @@ step: an accounting identity that fails by a recognisable quantity names its own
   on one workload. **My first experiment design tested the wrong thing** and would have
   produced a false refutation.
 
-  **Still open**: the share comparison itself. The p2p arm runs and its partition holds;
-  what remains is the `dispatcher` control arm on the same workload and seed, and a span
-  long enough to overflow the memory tier — at `--until 3` the tier absorbed everything and
-  `ssd` stayed 0, which makes the comparison vacuous rather than negative.
+  **Still open: the share comparison itself, and the last attempt failed for a reason
+  unrelated to attribution.** Two arms at `--until 10`, single instance:
+
+  | arm | exit | hits | ssd share |
+  |---|---|---|---|
+  | p2p | 3 (invalid) | 4 795 | 0.00% |
+  | dispatcher | 4 | **0** | n/a |
+
+  Both died on the **agent connection**, not in either dispatcher: p2p reported "became
+  unreachable while submitting a turn ... Resource temporarily unavailable", which is the
+  known read-timeout misattribution (`ClientError` has no `TimedOut` variant), and the
+  control arm got "Connection reset by peer" with zero hits. The partition held in both,
+  for what little that proves at these volumes.
+
+  **Two harness faults to fix before the next attempt, both mine and both already
+  recorded as traps elsewhere:**
+  1. The driver script used `|| true` on the server and agent starts, which masked
+     whichever of them actually failed. Never `|| true` a step whose failure has not been
+     diagnosed — the same mistake, in the same session, as the earlier server-start fix.
+  2. Swapping the server binary between arms while agents from the previous arm may still
+     be lingering (they linger-exit ~5 s after the generator disconnects) is a race. Stop
+     agents explicitly and wait, rather than assuming the stop ordering.
+
+  **What is verified**: the taxonomy value on p2p, the three invariants in that component,
+  and now the route partition there. **What is not**: that p2p's `Ssd` share exceeds
+  `dispatcher`'s on one workload. A four-instance run would also give the span a realistic
+  footprint — at single-instance `--until 10` the tier still absorbed everything.
 
 ## Out of scope, decided 2026-09-29
 
